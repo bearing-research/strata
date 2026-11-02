@@ -142,6 +142,57 @@ async def test_annotation_only_mount_reads_via_credentials_kwarg(
     assert result.outputs["content"]["preview"] == "hello from minio"
 
 
+# Scope: one instance per object
+
+
+@pytest.mark.asyncio
+async def test_each_over_a_bucket_runs_a_changed_object_alone(
+    tmp_path: Path,
+    minio_container,
+    s3_credentials: MountCredentials,
+    fresh_bucket: str,
+) -> None:
+    """The items of a remote mount are its objects, digested by content and listed once a run."""
+    _put(minio_container, fresh_bucket, "data/one.txt", b"a")
+    _put(minio_container, fresh_bucket, "data/sub/two.txt", b"bb")
+    log = tmp_path / "ran.log"
+    source = textwrap.dedent(
+        f"""
+        # @mount data s3://{fresh_bucket}/data ro
+        # @each path in data
+        with open({str(log)!r}, "a") as f:
+            f.write(path.name + "\\n")
+        out = path.read_text()
+        """
+    ).strip()
+    session = _make_session(tmp_path, [("c1", source), ("c2", "print(sorted(out.items()))\n")])
+    executor = CellExecutor(session, mount_credentials=s3_credentials)
+
+    def ran() -> list[str]:
+        lines = sorted(log.read_text().splitlines()) if log.exists() else []
+        log.unlink(missing_ok=True)
+        return lines
+
+    assert (await executor.execute_cell("c1", source)).success
+    assert ran() == ["one.txt", "two.txt"]
+
+    _put(minio_container, fresh_bucket, "data/one.txt", b"changed")
+    prepared = []
+    prepare_mounts = executor._prepare_mounts
+
+    async def counted(specs, cell_id=None):
+        prepared.extend(spec.name for spec in specs)
+        return await prepare_mounts(specs, cell_id)
+
+    executor._prepare_mounts = counted
+    assert (await executor.execute_cell("c1", source)).success
+    assert ran() == ["one.txt"]
+    assert prepared.count("data") <= 2  # the key's own listing is not this path's
+
+    downstream = await executor.execute_cell("c2", "print(sorted(out.items()))\n")
+    assert "[('one.txt', 'changed'), ('sub/two.txt', 'bb')]" in downstream.stdout
+
+
 # Scope B: read-write mount, write in one cell and read in another
 
 

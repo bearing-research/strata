@@ -16,6 +16,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   as an `overwrite` would leave it, but data files with no changed row stay, so
   readers' cached row groups stay valid. Nothing is committed when nothing
   differs. (#1371)
+- **`@each` runs a cell once per file or row, and caches each item on its own.**
+  `# @each <name> in <source> [key=<col>] [glob=<pattern>]` takes a mount, or a
+  dict, list or table from another cell. A changed item runs alone, a removed
+  one leaves, and a later cell reads `{item: value}`. With `@write_table ... sync`
+  the table is written once per run over every item's rows, so a removed file's
+  rows are deleted. (#1372)
 
 ### Changed
 - **A cell's keys come from cellgraph.** A cell's provenance hash is now

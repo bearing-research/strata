@@ -46,7 +46,7 @@ from vestigo.provenance import derive_subkey, run_output_key
 # image). Batch frames are small dicts.
 from vestigo.store import ArtifactVersion, StagedVersion, get_artifact_store
 
-from strata.notebook import console_relay, output_dirs, output_file_relay
+from strata.notebook import console_relay, each, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotation_validation import blocking_diagnostic
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
@@ -443,12 +443,12 @@ class _CellProvenance:
     input_weights: list[InputWeight] = field(default_factory=list)
     # Whether a large read was confirmed (Amber item 90); ``None`` with no threshold set.
     read_confirmation: ReadConfirmation | None = None
-    # The fan-out instance this keys, whose key carries its ``variant=`` subkey.
-    instance: str | None = None
+    # The fan-out instance this keys, whose key carries its ``variant=`` or ``each=`` subkey.
+    instance: str | cg.Item | None = None
 
-    def for_instance(self, variant: str) -> _CellProvenance:
+    def for_instance(self, instance: str | cg.Item) -> _CellProvenance:
         """The same provenance for one fan-out instance, over the inputs it reads."""
-        return self._rehashed(instance=variant)
+        return self._rehashed(instance=instance)
 
     def rekeyed(self) -> _CellProvenance:
         """The same provenance over what the upstreams publish now."""
@@ -830,6 +830,10 @@ class CellExecutor:
         # Each ``# @output_dir`` folder's listing from a cell's run, by cell then folder,
         # shown ahead of the run's displays when it succeeds.
         self._folder_listings: dict[str, dict[str, str]] = {}
+        # The items of a running ``# @each`` cell, by cell then instance name.
+        self._each_items: dict[str, dict[str, each.EachItem]] = {}
+        # The mounts its listing came from, held for the run: its items' files are in them.
+        self._each_listed: dict[str, dict[str, ResolvedMount]] = {}
         # What each variant of a running ``# @per_variant`` cell wrote through its mounts,
         # recorded together once every variant has succeeded.
         self._variant_writes: dict[str, list[MountWrite]] = {}
@@ -947,6 +951,8 @@ class CellExecutor:
             cell_id, source, annotations=annotations, mount_specs=mount_specs
         )
         problem = prov.fetch_error or prov.dataset_error
+        if annotations.each is not None:
+            problem = "Tests of an @each cell are not supported yet."
         tables: dict[str, dict[str, Any]] = {}
         if problem is None:
             try:
@@ -1605,6 +1611,16 @@ class CellExecutor:
         if cell is not None:
             cell.cache_hit = False
             language_executor = get_language_executor(cell.language)
+            # Only the Python loader expands a manifest; another reader would see its bytes.
+            read = _each_output_read(self.session.dag, cell)
+            if read is not None and cell.language != CellLanguage.PYTHON:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=f"`{read}` is the output of an @each cell, which only a Python cell "
+                    "can read yet",
+                    execution_method="error",
+                )
         else:
             language_executor = get_language_executor(CellLanguage.PYTHON)
 
@@ -1653,6 +1669,15 @@ class CellExecutor:
             # A @per_variant cell fans out: the orchestrator re-enters this pipeline once per
             # variant with fanout_variant set.
             if fanout_variant is None:
+                if self.session.dag is not None and cell_id in self.session.dag.each_cells:
+                    return await self._execute_each_cell(
+                        cell_id,
+                        source,
+                        timeout_seconds,
+                        start_time,
+                        materialize_upstreams=materialize_upstreams,
+                        use_cache=use_cache,
+                    )
                 variant_names = self._fanout_variants(cell_id)
                 if variant_names is not None:
                     return await self._execute_fanout_cell(
@@ -1675,8 +1700,9 @@ class CellExecutor:
             # A fan-out computes the cell's provenance once (``cell_provenance``); each
             # instance keys on the inputs it reads.
             prov = cell_provenance or await self._compute_cell_provenance(cell_id, source)
+            each_item = self._each_items.get(cell_id, {}).get(fanout_variant or "")
             if fanout_variant is not None:
-                prov = prov.for_instance(fanout_variant)
+                prov = prov.for_instance(each_item.instance if each_item else fanout_variant)
             source_hash = prov.source_hash
             runtime_env = prov.runtime_env
             effective_worker = prov.effective_worker
@@ -1834,7 +1860,8 @@ class CellExecutor:
                     cell_id,
                     provenance_hash,
                     consumed_vars,
-                    prov.annotations.table_writes,
+                    # An @each instance writes no table: its cell writes once, over them all.
+                    [] if each_item else prov.annotations.table_writes,
                     len(current_display_outputs),
                     fanout_variant,
                 )
@@ -1994,9 +2021,25 @@ class CellExecutor:
                     worker_spec.backend == WorkerBackendType.LOCAL
                     or is_embedded_executor_worker(worker_spec)
                 ):
-                    prepared_mounts = await self._prepare_mounts(mount_specs, cell_id)
+                    # An item's mount was listed for the run, not again per instance.
+                    listed = self._each_listed.get(cell_id, {}) if each_item else {}
+                    prepared_mounts = {
+                        **listed,
+                        **await self._prepare_mounts(
+                            [m for m in mount_specs if m.name not in listed], cell_id
+                        ),
+                    }
                     prov = prov.over_mounts(prepared_mounts)
                     provenance_hash = run_key(prov)
+                    if each_item is not None and each_item.path is not None:
+                        # A file binds as a one-file mount: a Path, read-only, in every harness.
+                        each_spec = parse_annotations(source).each
+                        assert each_spec is not None  # it has an item
+                        prepared_mounts[each_spec["name"]] = ResolvedMount(
+                            spec=MountSpec(name=each_spec["name"], uri=each_item.path.as_uri()),
+                            local_path=each_item.path,
+                            fingerprint=each_item.digest,
+                        )
 
                 # A local run is an execution of the ledger: a build with an attempt whose
                 # lease this process renews, open until its outputs are stored.
@@ -2484,10 +2527,33 @@ class CellExecutor:
         # so every instance sees the same snapshot and a mount is listed once.
         base = await self._compute_cell_provenance(cell_id, source)
 
+        results = await self._run_fanout_instances(
+            cell_id,
+            source,
+            timeout_seconds,
+            start_time,
+            use_cache=use_cache,
+            base=base,
+            instances=[(name, name) for name in variant_names],
+        )
+        return self._finish_fanout(cell_id, results, base, start_time)
+
+    async def _run_fanout_instances(
+        self,
+        cell_id: str,
+        source: str,
+        timeout_seconds: float,
+        start_time: float,
+        *,
+        use_cache: bool,
+        base: _CellProvenance,
+        instances: list[tuple[str, str]],
+    ) -> list[tuple[str, CellExecutionResult]]:
+        """Run each ``(instance name, what to call it)`` in sequence; report as each completes."""
         results: list[tuple[str, CellExecutionResult]] = []
         self._variant_writes[cell_id] = []
-        total = len(variant_names)
-        for index, name in enumerate(variant_names):
+        total = len(instances)
+        for index, (name, label) in enumerate(instances):
             variant_start = time.time()
             res = await self._execute_python_cell(
                 cell_id,
@@ -2499,13 +2565,13 @@ class CellExecutor:
                 fanout_variant=name,
                 cell_provenance=base,
             )
-            results.append((name, res))
+            results.append((label, res))
             if self.on_variant_complete is not None:
                 try:
                     await self.on_variant_complete(
                         {
                             "cell_id": cell_id,
-                            "variant": name,
+                            "variant": label,
                             "index": index,
                             "total": total,
                             "success": res.success,
@@ -2517,9 +2583,20 @@ class CellExecutor:
                     logger.exception(
                         "on_variant_complete callback failed for cell %s variant %s",
                         cell_id,
-                        name,
+                        label,
                     )
+        return results
 
+    def _finish_fanout(
+        self,
+        cell_id: str,
+        results: list[tuple[str, CellExecutionResult]],
+        base: _CellProvenance,
+        start_time: float,
+        *,
+        error: str | None = None,
+    ) -> CellExecutionResult:
+        """The cell's result from its instances' (or *error*); record a good run's base key."""
         writes = _merge_variant_writes(self._variant_writes.pop(cell_id, []))
         duration_ms = (time.time() - start_time) * 1000
         failures = [(name, r) for name, r in results if not r.success]
@@ -2527,13 +2604,15 @@ class CellExecutor:
         stderr = "\n".join(f"[variant={name}]\n{r.stderr}" for name, r in results if r.stderr)
         if failures:
             first_name, first = failures[0]
+            error = f"Fan-out variant '{first_name}' failed: {first.error}"
+        if error is not None:
             aggregate = CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
                 stdout=stdout,
                 stderr=stderr,
                 duration_ms=duration_ms,
-                error=f"Fan-out variant '{first_name}' failed: {first.error}",
+                error=error,
                 execution_method="fanout",
             )
         else:
@@ -2564,6 +2643,259 @@ class CellExecutor:
                 logger.exception("Failed to record fan-out base provenance for cell %s", cell_id)
         self.session.apply_execution_result_metadata(cell_id, aggregate)
         return aggregate
+
+    async def _execute_each_cell(
+        self,
+        cell_id: str,
+        source: str,
+        timeout_seconds: float,
+        start_time: float,
+        *,
+        materialize_upstreams: bool,
+        use_cache: bool,
+    ) -> CellExecutionResult:
+        """Run a ``# @each`` cell once per item, then store one manifest per output.
+
+        Nothing changed is one probe of the cell's key: no item is listed. Otherwise each
+        item keys on itself, so only changed and new ones run, and a removed one leaves
+        by not being in the manifest. A failed instance stores no manifest.
+        """
+
+        def refused(error: str) -> CellExecutionResult:
+            return CellExecutionResult(
+                cell_id=cell_id, success=False, error=error, execution_method="fanout"
+            )
+
+        if materialize_upstreams:
+            await self._materialize_upstreams(cell_id)
+        annotations = parse_annotations(source)
+        assert annotations.each is not None  # the cell is in the DAG's each_cells
+        base = await self._compute_cell_provenance(cell_id, source)
+        worker = resolve_worker_spec(self.session.notebook_state, base.effective_worker)
+        if worker is None or worker.backend != WorkerBackendType.LOCAL:
+            return refused("@each runs on the local worker only")
+        if base.has_rw_mount or annotations.nocache:
+            use_cache = False
+
+        assert self.session.dag is not None
+        consumed = self.session.dag.consumed_variables.get(cell_id, set())
+        if (
+            use_cache
+            and consumed
+            and self._promote_reverted_outputs(
+                cell_id, base.provenance_hash, consumed, annotations.table_writes, 0
+            )
+            is not None
+        ):
+            return self._each_cached(cell_id, consumed, base, start_time)
+
+        with output_dirs.assembling():
+            try:
+                try:
+                    items, base = await self._list_each_items(cell_id, annotations.each, base)
+                except each.EachError as exc:
+                    return refused(str(exc))
+                if not items and any(w.mode == "sync" for w in annotations.table_writes):
+                    return refused(
+                        f"@each over `{annotations.each['source']}` found no items, and syncing "
+                        "that would delete every row; nothing was written"
+                    )
+                self._each_items[cell_id] = {each.instance_name(item.key): item for item in items}
+                results = await self._run_fanout_instances(
+                    cell_id,
+                    source,
+                    timeout_seconds,
+                    start_time,
+                    use_cache=use_cache,
+                    base=base,
+                    instances=[(each.instance_name(item.key), item.key) for item in items],
+                )
+            finally:
+                self._each_items.pop(cell_id, None)
+                self._each_listed.pop(cell_id, None)
+            error = None
+            if all(result.success for _, result in results):
+                try:
+                    await anyio.to_thread.run_sync(
+                        self._store_each_manifests,
+                        cell_id,
+                        source,
+                        items,
+                        base,
+                        sorted(consumed),
+                        annotations.table_writes,
+                    )
+                except (TableWriteError, each.EachError) as exc:
+                    error = str(exc)
+        return self._finish_fanout(cell_id, results, base, start_time, error=error)
+
+    def _each_cached(
+        self,
+        cell_id: str,
+        consumed: set[str],
+        base: _CellProvenance,
+        start_time: float,
+    ) -> CellExecutionResult:
+        """A ``# @each`` cell whose key found its manifests: nothing to do."""
+        manager = self.session.get_artifact_manager()
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is not None:
+            cell.cache_hit = True
+            for var_name in sorted(consumed):
+                manifest = manager.artifact_store.get_latest_version(
+                    manager.cell_artifact_id(cell_id, var_name)
+                )
+                if manifest is not None:
+                    uri = f"strata://artifact/{manifest.id}@v={manifest.version}"
+                    cell.artifact_uris[var_name] = uri
+                    cell.artifact_uri = uri
+        self.session.record_successful_execution_provenance(
+            cell_id,
+            base.provenance_hash,
+            base.source_hash,
+            base.env_hash,
+            table_reads=base.table_reads,
+            reads=base.reads(*self._moved(cell_id)),
+            key_parts=base.key_parts,
+        )
+        result = CellExecutionResult(
+            cell_id=cell_id,
+            success=True,
+            duration_ms=(time.time() - start_time) * 1000,
+            cache_hit=True,
+            execution_method="cached",
+        )
+        self.session.apply_execution_result_metadata(cell_id, result)
+        return result
+
+    async def _list_each_items(
+        self, cell_id: str, spec: dict[str, str], base: _CellProvenance
+    ) -> tuple[list[each.EachItem], _CellProvenance]:
+        """The items of *spec*'s source now, and *base* over the listing they came from.
+
+        Raises:
+            each.EachError: the source cannot be iterated.
+        """
+        source = spec["source"]
+        mount = next((m for m in base.mount_specs if m.name == source), None)
+        if mount is not None:
+            if "key" in spec:
+                raise each.EachError(f"@each over the mount `{source}` takes glob=, not key=")
+            if mount.mode != MountMode.READ_ONLY:
+                raise each.EachError(f"@each over `{source}`: the mount must be read-only")
+            prepared = await self._prepare_mounts(base.mount_specs, cell_id)
+            self._each_listed[cell_id] = {source: prepared[source]}
+            scheme, _ = parse_mount_uri(mount.uri)
+            items = await anyio.to_thread.run_sync(
+                functools.partial(
+                    each.items_of_mount,
+                    prepared[source].local_path,
+                    spec.get("glob"),
+                    by_content=scheme != "file",
+                )
+            )
+            return items, base.over_mounts(prepared)
+
+        if "glob" in spec:
+            raise each.EachError(f"@each over the variable `{source}` takes key=, not glob=")
+        assert self.session.dag is not None
+        producer = self.session.dag.read_producer(cell_id, source)
+        if not isinstance(producer, str):
+            raise each.EachError(f"@each over `{source}`: it is not a mount or a variable")
+        items = await anyio.to_thread.run_sync(self._each_items_of_variable, producer, spec)
+        return items, base
+
+    def _each_items_of_variable(self, producer: str, spec: dict[str, str]) -> list[each.EachItem]:
+        """The items of the variable *producer* stored, without unpickling anything."""
+        source = spec["source"]
+        manager = self.session.get_artifact_manager()
+        artifact = manager.artifact_store.get_latest_version(
+            manager.cell_artifact_id(producer, source)
+        )
+        if artifact is None:
+            raise each.EachError(f"@each over `{source}`: its cell has not stored it")
+        blob = manager.load_artifact_data(artifact.id, artifact.version)
+        content_type = artifact.params.get("content_type")
+        if content_type == "json/object":
+            return each.items_of_json(json.loads(blob), source)
+        if content_type == "arrow/ipc":
+            from strata.artifact.table_export import arrow_table_from_ipc
+
+            try:
+                table = arrow_table_from_ipc(blob, f"{artifact.id}@v={artifact.version}")
+            except ValueError as exc:
+                raise each.EachError(f"@each over `{source}`: {exc}") from exc
+            return each.items_of_table(table, spec.get("key"), source)
+        raise each.EachError(
+            f"@each over `{source}`: it is {content_type}; expected a dict, a list or a table"
+        )
+
+    def _store_each_manifests(
+        self,
+        cell_id: str,
+        source: str,
+        items: list[each.EachItem],
+        base: _CellProvenance,
+        variables: list[str],
+        table_writes: list[TableWriteSpec],
+    ) -> None:
+        """One manifest per output naming each item's version, then the table writes, then
+        all of them current: a write that fails keeps none, as for any other run."""
+        manager = self.session.get_artifact_manager()
+        store = manager.artifact_store
+        input_versions = self._input_refs(cell_id)
+        written = {write.variable for write in table_writes}
+        staged: list[StagedVersion] = []
+        outputs: dict[str, StagedOutput] = {}
+        try:
+            for var_name in variables:
+                versions = []
+                for item in items:
+                    version = store.get_latest_version(
+                        manager.cell_artifact_id(
+                            cell_id, var_name, variant=each.instance_name(item.key)
+                        )
+                    )
+                    if version is None:
+                        raise each.EachError(
+                            f"@each item {item.key!r} did not produce `{var_name}`"
+                        )
+                    versions.append((item.key, version))
+                provenance = derive_subkey(base.provenance_hash, var_name)
+                staged.append(
+                    manager.stage_cell_output(
+                        cell_id=cell_id,
+                        variable_name=var_name,
+                        blob_data=each.encode_manifest([(k, v.id, v.version) for k, v in versions]),
+                        content_type=each.CONTENT_TYPE,
+                        provenance_hash=provenance,
+                        input_versions=input_versions,
+                        source_hash=base.source_hash,
+                        source=source,
+                        env_hash=base.env_hash,
+                        computation_key=base.provenance_hash,
+                    )
+                )
+                if var_name in written:
+                    # One commit over every item's rows, cached items' too.
+                    outputs[var_name] = StagedOutput(
+                        staged=staged[-1],
+                        blob=each.rows_of(manager, var_name, [v for _, v in versions]),
+                        content_type="arrow/ipc",
+                        provenance_hash=provenance,
+                    )
+            if table_writes:
+                self._write_cell_tables(table_writes, outputs)
+            stored = manager.finalize_cell_outputs(staged)
+        except Exception:
+            manager.discard_cell_outputs(staged)
+            raise
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is not None:
+            for version in stored:
+                uri = f"strata://artifact/{version.id}@v={version.version}"
+                cell.artifact_uris[version.params["variable_name"]] = uri
+                cell.artifact_uri = uri
 
     async def _execute_r_cell(
         self,
@@ -5513,6 +5845,13 @@ class CellExecutor:
 
         analysis = self.session.analysis
         assert analysis is not None  # set with the DAG
+        # An @each instance reads its item, and not the collection it came from.
+        each_spec = analysis.cells[cell_id].annotations.get("each") if fanout_variant else None
+        each_item = self._each_items.get(cell_id, {}).get(fanout_variant or "")
+        if each_spec is not None and each_item is not None and each_item.value is not None:
+            item_file = f"__each_{safe_filename_stem(each_spec['name'])}.json"
+            (output_dir / item_file).write_bytes(each_item.value)
+            input_specs[each_spec["name"]] = {"content_type": "json/object", "file": item_file}
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
@@ -5527,6 +5866,8 @@ class CellExecutor:
             ]
 
             for var_name in referenced_vars:
+                if each_spec is not None and var_name == each_spec["source"]:
+                    continue
                 artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"
                 try:
                     read = analysis.variant_read(cell_id, upstream_id, var_name, fanout_variant)
@@ -5559,6 +5900,25 @@ class CellExecutor:
                                 input_specs.setdefault(
                                     var_name, {"kind": "sweep_dict", "variants": {}}
                                 )["variants"][name] = spec
+                        continue
+
+                    latest = artifact_mgr.artifact_store.get_latest_version(artifact_id)
+                    if (
+                        latest is not None
+                        and latest.params.get("content_type") == each.CONTENT_TYPE
+                    ):
+                        # An @each cell's output: the {key: value} dict of its manifest's items.
+                        blob = artifact_mgr.load_artifact_data(artifact_id, latest.version)
+                        input_specs[var_name] = {
+                            "kind": "sweep_dict",
+                            "variants": {
+                                key: _load_versioned_spec(
+                                    f"strata://artifact/{instance_id}@v={version}",
+                                    f"{var_name}__{each.instance_name(key)}",
+                                )
+                                for key, instance_id, version in each.manifest_refs(blob)
+                            },
+                        }
                         continue
 
                     spec = _load_artifact_spec(artifact_id, var_name)
@@ -5807,6 +6167,9 @@ class CellExecutor:
         # One run's outputs become current together or not at all: a downstream cell
         # must never read one variable from this run and another from an earlier one.
         table_writes = parse_annotations(source or cell.source).table_writes
+        # An @each cell writes once, over every item, with its manifest.
+        if variant in self._each_items.get(cell_id, {}):
+            table_writes = []
         if all_stored and table_writes:
             # Before the outputs become current: a failed write keeps none of them, so the
             # next run is not a cache hit and writes again.
@@ -8540,6 +8903,17 @@ async def _drain_stream(stream: asyncio.StreamReader) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _each_output_read(dag: Any, cell: Any) -> str | None:
+    """The first variable *cell* reads from a ``# @each`` cell, if it reads one."""
+    if dag is None:
+        return None
+    for ref in (*cell.references, *cell.builtin_references):
+        producer = dag.read_producer(cell.id, ref)
+        if isinstance(producer, str) and producer in dag.each_cells:
+            return ref
+    return None
+
+
 def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     """Return whether ``cell`` is eligible for run-all batching.
 
@@ -8553,7 +8927,7 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     # A batch never sees a fetch's bytes; a fetching cell runs single-cell, where the
     # fetch is checked and injected.
     annotations = parse_annotations(cell.source)
-    if annotations.fetches or annotations.datasets:
+    if annotations.fetches or annotations.datasets or annotations.each is not None:
         return False
 
     dag = executor.session.dag
@@ -8571,6 +8945,9 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
             isinstance(dag.read_producer(cell.id, ref), SweepProducer)
             for ref in (*cell.references, *cell.builtin_references)
         ):
+            return False
+        # An @each output is a manifest the single-cell loader expands.
+        if _each_output_read(dag, cell) is not None:
             return False
 
     return get_language_executor(cell.language).is_batchable(cell, executor)

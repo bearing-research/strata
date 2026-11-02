@@ -373,7 +373,7 @@ def copy_chain(
     Raises:
         ValueError: A folder in the chain names a file the source does not hold.
     """
-    from strata.notebook import output_dirs
+    from strata.notebook import each, output_dirs
     from strata.services.artifact import ArtifactService
 
     lineage = ArtifactService().build_lineage(
@@ -401,6 +401,8 @@ def copy_chain(
         manifest = None
         if record.params.get("content_type") == output_dirs.CONTENT_TYPE:
             manifest = _copy_folder_files(source, target, record, written)
+        elif record.params.get("content_type") == each.CONTENT_TYPE:
+            manifest = _copy_each_instances(source, target, record, written, remap)
         imported = _copy_record(source, target, record, manifest)
         if imported.written:
             written.append(imported.ref)
@@ -487,6 +489,36 @@ def _copy_folder_files(
     # Under the id it is sent with: a remap only suffixes that, which keeps the base its
     # files' ids are read from.
     return output_dirs.relocate(manifest, manifest_record.id, landed)
+
+
+def _copy_each_instances(
+    source: ArtifactStore,
+    target: PublicationTarget,
+    manifest_record: ArtifactVersion,
+    written: list[str],
+    remap: dict[str, str],
+) -> bytes:
+    """Copy each value an ``# @each`` manifest names; return the manifest naming where they
+    landed. Its inputs were copied before it, and they are the instances' too."""
+    from strata.notebook import each
+
+    ref = f"{manifest_record.id}@v={manifest_record.version}"
+    manifest = source.read_blob(manifest_record.id, manifest_record.version)
+    if manifest is None:
+        raise ValueError(f"{ref} is an @each manifest with no stored bytes")
+    records = []
+    for _key, artifact_id, version in each.manifest_refs(manifest):
+        record = source.get_artifact(artifact_id, version)
+        if record is None or not source.blob_exists(artifact_id, version):
+            raise ValueError(f"{ref} names {artifact_id}@v={version}, which is gone")
+        records.append(record)
+    landed: dict[tuple[str, int], tuple[str, int]] = {}
+    for record in records:
+        imported = _copy_record(source, target, remap_input_versions(record, remap))
+        if imported.written:
+            written.append(imported.ref)
+        landed[(record.id, record.version)] = (imported.id, imported.version)
+    return each.relocate(manifest, landed)
 
 
 def _ancestors_first(lineage: ArtifactLineageResponse) -> list[LineageNode]:

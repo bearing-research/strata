@@ -308,6 +308,12 @@ dispatch via `llm.chat_completion` (Anthropic native tool-use when
 `@output_schema` is set, otherwise OpenAI-compat), validate against schema with
 retry, store response as artifact. Provenance includes a schema fingerprint.
 
+`@each` cells (`each.py`): one instance per file or row, listed at run time, each keyed
+on its own content (`cg.Item`) with `@variant=each-<sha16>` artifacts. Nothing changed is
+one probe of the cell's key. When all succeed, a manifest per output (`each/manifest`,
+at the plain id) names the instance versions and requires them; consumers load it as
+`{key: value}`, and `@write_table sync` writes once over every instance's rows.
+
 Loop cells (`@loop max_iter=N carry=var`): one harness subprocess per iteration,
 `carry` threaded between iterations, `…@iter=k` artifacts per step, final state
 becomes the cell's canonical artifact. WebSocket emits `cell_iteration_progress`.
@@ -396,6 +402,7 @@ configuration surface.
 Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
 `mount <name> <uri> [ro|rw]`, `table`, `fetch`, `dataset`,
 `write_table <var> <table> append|overwrite|merge|sync`, `output_dir <name>`,
+`each <name> in <source> [key=] [glob=]`,
 `nocache`, `stochastic`, `after`, `loop max_iter= carry= [start_from=]`,
 `loop_until <expr>`.
 

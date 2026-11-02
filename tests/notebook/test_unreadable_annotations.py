@@ -35,6 +35,7 @@ MALFORMED = {
     "nocache": ("# @nocache maybe", "nocache_unreadable"),
     "output": ("# @output yaml", "output_unreadable"),
     "output_dir": ("# @output_dir 1bad", "output_dir_unreadable"),
+    "each": ("# @each path in", "each_malformed"),
     "output_schema": ("# @output_schema", "output_schema_unreadable"),
     "per_variant": ("# @per_variant a b", "per_variant_unreadable"),
     "sql": ("# @sql connection", "sql_unreadable"),

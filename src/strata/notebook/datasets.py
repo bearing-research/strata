@@ -28,7 +28,7 @@ from vestigo.store import ArtifactImportConflict, ArtifactStore, ArtifactVersion
 
 from strata.artifact.retention import requirements
 from strata.artifact.transfer import remap_input_versions
-from strata.notebook import nonce, output_dirs
+from strata.notebook import each, nonce, output_dirs
 from strata.notebook.models import DatasetSpec
 
 STALE_CHECK_SECONDS = 60.0
@@ -94,6 +94,11 @@ def content_type_of(record: ArtifactVersion) -> str:
     keeps its own, so the executor rebuilds it beside its manifest.
     """
     content_type = record.params.get("content_type") or "arrow/ipc"
+    if content_type == each.CONTENT_TYPE:
+        raise DatasetError(
+            f"{record.id}@v={record.version} is the output of an @each cell, which @dataset "
+            "cannot read yet: publish a cell that reads it"
+        )
     if content_type in VALUE_CONTENT_TYPES or content_type == output_dirs.CONTENT_TYPE:
         return content_type
     return "file/path"
@@ -320,8 +325,9 @@ def copy_into(registry: Registry, resolved: ResolvedDataset, store: ArtifactStor
     if fetched is None:
         raise DatasetError(f"@dataset {resolved.spec.name}: {resolved.ref} has no stored bytes")
     record, blob = fetched
+    content_type = content_type_of(record)
     landed = _land(registry, store, record, blob, depth=0, landed={})
-    return DatasetInput(resolved=resolved, local_ref=landed, content_type=content_type_of(record))
+    return DatasetInput(resolved=resolved, local_ref=landed, content_type=content_type)
 
 
 def _already_here(

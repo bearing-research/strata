@@ -205,6 +205,11 @@ _assembling = 0  # runs in this process whose stored files may not be in a manif
 _assembling_lock = threading.Lock()
 
 
+def is_assembling() -> bool:
+    """Whether a run in this process has stored versions its manifest does not name yet."""
+    return _assembling > 0
+
+
 @contextmanager
 def assembling() -> Generator[None]:
     """Hold off the file sweep while a run stores files ahead of its manifest.

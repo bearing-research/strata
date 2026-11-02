@@ -102,9 +102,9 @@ class NotebookArtifactManager:
         anything used in the last *min_idle_seconds*, and each ``# @output_dir`` version
         a failed run left, until a later run stores a good one and the good one it
         follows is pruned (it goes in the sweep after that one's). Then drops each
-        ``# @output_dir`` file no manifest version still names. Values a crash left
-        half-written are failed first, so they no longer hold their inputs, and so is
-        each interrupted run not resumed within a week, so its checkpoints go.
+        ``# @output_dir`` file and ``# @each`` instance no manifest version still names. Values
+        a crash left half-written are failed first, so they no longer hold their inputs, and so
+        is each interrupted run not resumed within a week, so its checkpoints go.
 
         Raises:
             NotebookQuiesced: the notebook is held still for a copy, which
@@ -113,6 +113,7 @@ class NotebookArtifactManager:
         from strata.notebook.quiesce import assert_writable
 
         assert_writable(self.artifact_dir)
+        from strata.notebook.each import collectable_instances
         from strata.notebook.output_dirs import (
             failed_since_ready,
             is_file_id,
@@ -132,7 +133,8 @@ class NotebookArtifactManager:
             collectable=self.release_store.collectable_checkpoints(),
         )
         # After the values: a folder file goes once no manifest version left names it.
-        files = unreferenced_files(self)
+        # An @each instance likewise, once no manifest left requires it.
+        files = [*(unreferenced_files(self) or ()), *collectable_instances(self)]
         if files:
             swept = self.artifact_store.garbage_collect(
                 collectable=files, min_idle_seconds=min_idle_seconds

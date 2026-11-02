@@ -20,17 +20,24 @@ FOLDER_EDGES_UPGRADE = "folder_manifests_require_their_files"
 def requirements(
     artifact_id: str, content_type: str | None, blob: bytes | Path | None
 ) -> list[tuple[str, int]]:
-    """The versions a blob stored as *artifact_id* requires: a folder's files.
+    """The versions a blob stored as *artifact_id* requires: a folder's files, or the
+    instances of an ``# @each`` manifest.
 
     Empty for any other content type, and for a manifest that cannot be read: an import
     can hold any bytes under the folder type, and such a manifest names nothing, so it
     holds nothing.
     """
-    from strata.notebook import output_dirs
+    from strata.notebook import each, output_dirs
 
-    if content_type != output_dirs.CONTENT_TYPE or blob is None:
+    if content_type not in (output_dirs.CONTENT_TYPE, each.CONTENT_TYPE) or blob is None:
         return []
     data = blob.read_bytes() if isinstance(blob, Path) else blob
+    if content_type == each.CONTENT_TYPE:
+        try:
+            return [(instance_id, v) for _, instance_id, v in each.manifest_refs(data)]
+        except ValueError:
+            logger.warning("%s is not a readable @each manifest; it keeps nothing", artifact_id)
+            return []
     try:
         return [(file_id, v) for file_id, v, _ in output_dirs.file_refs(artifact_id, data)]
     except ValueError:
