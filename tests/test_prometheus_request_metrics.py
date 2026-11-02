@@ -108,6 +108,37 @@ def test_a_request_answered_before_routing_is_labelled_unmatched(client):
     assert "path-7f3a" not in after
 
 
+def test_a_request_answered_before_routing_is_unmatched_under_the_frontend(client, tmp_path):
+    """The frontend's catch-all matches every path, but a refused request never reached it."""
+    from strata.server import _mount_frontend, app
+
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html>")
+    original_routes = list(app.router.routes)
+    # A built frontend mounted at import has its own catch-all; this dist's replaces it.
+    app.router.routes[:] = [
+        route
+        for route in original_routes
+        if getattr(route, "name", None) not in ("frontend-assets", "spa_fallback")
+    ]
+    _mount_frontend(app, dist)
+    try:
+        before = _scrape(client)
+        refused = TestClient(app, base_url="http://rebound.example").get("/some/page")
+        assert refused.status_code == 400
+        assert client.get("/some/page").status_code == 200
+        after = _scrape(client)
+    finally:
+        app.router.routes[:] = original_routes
+
+    for series in (_requests("GET", "unmatched", "4xx"), _requests("GET", "/{full_path}", "2xx")):
+        assert _value(after, series) - _value(before, series) == 1, series
+    assert _value(after, _requests("GET", "/{full_path}", "4xx")) == _value(
+        before, _requests("GET", "/{full_path}", "4xx")
+    )
+
+
 def test_a_route_outside_the_api_routers_keeps_its_template(client):
     """FastAPI's own docs page is a plain Starlette route, which leaves no route in the scope."""
     before = _scrape(client)
