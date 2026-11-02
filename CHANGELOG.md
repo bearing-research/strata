@@ -125,6 +125,10 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A cell after a prompt cell reads the answer it just gave.** Under
+  `strata run`, the cell was keyed without the prompt's answer, so after the
+  notebook's `[ai]` model changed it was a cache hit and printed the old
+  model's answer. It now runs again on the new one. (#1363)
 - **A SQL cell's connection problem points at the line in force.** With
   more than one `# @sql` line, the later connection wins, but its
   diagnostics pointed at the first `@sql` line. They now point at the last
