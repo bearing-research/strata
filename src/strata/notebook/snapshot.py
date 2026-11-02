@@ -228,6 +228,7 @@ def write_snapshot(
             "provenance_hash": cell_runtime.last_provenance_hash if cell_runtime else None,
             "source_hash": cell_runtime.last_source_hash if cell_runtime else None,
             "env_hash": cell_runtime.last_env_hash if cell_runtime else None,
+            "key_parts": cell_runtime.last_key_parts if cell_runtime else None,
             # A SQL or prompt cell's own cache identity: without it a carried one opens idle.
             "reopen_identity": cell_runtime.last_reopen_identity if cell_runtime else None,
             "execution_samples": list(cell_runtime.execution_samples) if cell_runtime else [],

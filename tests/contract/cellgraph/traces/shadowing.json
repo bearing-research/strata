@@ -564,24 +564,21 @@
       {
        "cell_id": "p1",
        "cell_name": "other",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       },
       {
        "cell_id": "p2",
        "cell_name": "state",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     },
     "p1": {
@@ -589,14 +586,13 @@
       {
        "cell_id": "p1",
        "cell_name": "other",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "source_changed"
       }
      ],
+     "incomplete": null,
      "reason": "self"
     },
     "p2": {
@@ -604,14 +600,13 @@
       {
        "cell_id": "p1",
        "cell_name": "other",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -1182,14 +1177,13 @@
       {
        "cell_id": "b4",
        "cell_name": "input",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "source_changed"
       }
      ],
+     "incomplete": null,
      "reason": "self"
     }
    },

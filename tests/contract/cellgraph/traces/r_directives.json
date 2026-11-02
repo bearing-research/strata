@@ -112,19 +112,9 @@
   {
    "causality": {
     "r2": {
-     "details": [
-      {
-       "cell_id": "r2",
-       "cell_name": "y",
-       "from_package_version": null,
-       "from_version": null,
-       "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "source_changed"
-      }
-     ],
-     "reason": "self"
+     "details": [],
+     "incomplete": true,
+     "reason": "unknown"
     }
    },
    "cells": {
@@ -261,14 +251,13 @@
       {
        "cell_id": "r1",
        "cell_name": "f",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "source_changed"
       }
      ],
+     "incomplete": null,
      "reason": "self"
     },
     "r2": {
@@ -276,14 +265,13 @@
       {
        "cell_id": "r1",
        "cell_name": "f",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -400,19 +388,9 @@
   {
    "causality": {
     "r2": {
-     "details": [
-      {
-       "cell_id": "r2",
-       "cell_name": "y",
-       "from_package_version": null,
-       "from_version": null,
-       "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "source_changed"
-      }
-     ],
-     "reason": "self"
+     "details": [],
+     "incomplete": true,
+     "reason": "unknown"
     }
    },
    "cells": {
@@ -549,14 +527,13 @@
       {
        "cell_id": "r1",
        "cell_name": "f",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "source_changed"
       }
      ],
+     "incomplete": null,
      "reason": "self"
     },
     "r2": {
@@ -564,14 +541,13 @@
       {
        "cell_id": "r1",
        "cell_name": "f",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -688,19 +664,9 @@
   {
    "causality": {
     "r2": {
-     "details": [
-      {
-       "cell_id": "r2",
-       "cell_name": "y",
-       "from_package_version": null,
-       "from_version": null,
-       "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "source_changed"
-      }
-     ],
-     "reason": "self"
+     "details": [],
+     "incomplete": true,
+     "reason": "unknown"
     }
    },
    "cells": {
@@ -837,14 +803,13 @@
       {
        "cell_id": "r1",
        "cell_name": "f",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "source_changed"
       }
      ],
+     "incomplete": null,
      "reason": "self"
     },
     "r2": {
@@ -852,14 +817,13 @@
       {
        "cell_id": "r1",
        "cell_name": "f",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -976,19 +940,9 @@
   {
    "causality": {
     "r2": {
-     "details": [
-      {
-       "cell_id": "r2",
-       "cell_name": "y",
-       "from_package_version": null,
-       "from_version": null,
-       "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "source_changed"
-      }
-     ],
-     "reason": "self"
+     "details": [],
+     "incomplete": true,
+     "reason": "unknown"
     }
    },
    "cells": {

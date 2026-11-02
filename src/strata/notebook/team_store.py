@@ -355,10 +355,10 @@ async def pull_cell_outputs(
     ]
 
     # The publisher's env_hash, kept rather than restamped. Provenance folds in env_hash,
-    # so an honest pull cannot disagree. If it does, importing it would make
-    # `causality._get_stored_hash` report "the environment changed" forever with no
-    # visible cause, so keep the local value and warn. Check every variable, not just the
-    # first, or a bad env_hash on a later one is silently laundered.
+    # so an honest pull cannot disagree. If it does, importing it would make the session's
+    # `_upstream_moved_under` never recognize this cell's result, so keep the local value and
+    # warn. Check every variable, not just the first, or a bad env_hash on a later one is
+    # silently laundered.
     disputed = sorted(
         {
             artifact.env_hash

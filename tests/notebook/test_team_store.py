@@ -1035,8 +1035,8 @@ async def test_a_store_that_disagrees_about_the_environment_is_not_believed(
 ):
     """An honest pull cannot disagree: ``env_hash`` is part of the provenance key.
 
-    If one does, importing it would make ``causality._get_stored_hash`` report "the environment
-    changed" forever with no cause shown, so the local value is kept and a warning logged.
+    If one does, importing it would leave a record whose environment no run had, so the local
+    value is kept and a warning logged.
     """
     import json as json_module
 

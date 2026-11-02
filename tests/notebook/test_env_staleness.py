@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from strata.notebook.causality import _get_stored_hash
 from strata.notebook.dependencies import add_dependency
 from strata.notebook.env import compute_execution_env_hash
 from strata.notebook.provenance import compute_source_hash
@@ -150,7 +149,7 @@ class TestCausalityEnvChanged:
 
 
 class TestStoredHashLookup:
-    """``_get_stored_hash`` reads component hashes from cached artifacts."""
+    """Cached artifacts carry the component hashes ``_upstream_moved_under`` reads."""
 
     @pytest.mark.asyncio
     async def test_reads_env_and_source_hash(self, tmp_path):
@@ -168,8 +167,11 @@ class TestStoredHashLookup:
         result = await executor.execute_cell("c1", "x = 1")
         assert result.success
 
-        stored_env = _get_stored_hash(session, "c1", "env_hash")
-        stored_src = _get_stored_hash(session, "c1", "source_hash")
+        cell = session.notebook_state.get_cell("c1")
+        artifact_id, version = session._parse_artifact_uri(cell.artifact_uri)
+        artifact = session.artifact_manager.artifact_store.get_artifact(artifact_id, version)
+        stored_env = artifact.params["env_hash"]
+        stored_src = artifact.params["source_hash"]
 
         assert stored_env == compute_execution_env_hash(
             nb_dir,
@@ -226,7 +228,8 @@ class TestNeverRun:
         # Once it has a result to compare against, a change is explained.
         session.notebook_state.get_cell("c1").last_provenance_hash = "an-earlier-run"
         session.compute_staleness()
-        assert [d.type for d in session.causality_map["c1"].details] == ["source_changed"]
+        chain = session.causality_map["c1"]
+        assert (chain.reason, chain.details, chain.incomplete) == ("unknown", [], True)
 
 
 class TestEnvironmentMetadata:

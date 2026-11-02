@@ -84,7 +84,7 @@ snapshot holds:
 - **run:** on run steps, per cell: status (ok, error, skipped), cache hit, error
   code, skip reason, the provenance hash the run recorded, and stdout;
 - **staleness:** status and reasons per cell;
-- **causality:** the causality map, outside the exact gate (design 13.1 replaces it).
+- **causality:** why each stale cell is stale (`staleness_explanations.py`).
 
 ## Determinism
 

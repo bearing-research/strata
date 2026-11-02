@@ -27,7 +27,6 @@ from strata.notebook import console_relay, prewarm
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.authorship import resolve_author
 from strata.notebook.cascade import CascadePlanner
-from strata.notebook.causality import skip_none
 from strata.notebook.executor import (
     BatchCellResult,
     CellExecutionResult,
@@ -56,6 +55,7 @@ from strata.notebook.scopes import (
     session_visible_to_caller,
 )
 from strata.notebook.session import CellStateSnapshot, SessionManager
+from strata.notebook.staleness_explanations import skip_none
 from strata.notebook.workers import (
     WorkerPolicy,
     one_policy_read,
