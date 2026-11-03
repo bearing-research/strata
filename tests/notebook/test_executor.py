@@ -2201,7 +2201,7 @@ class Person:
             )
         ]
 
-        result = await CellExecutor(sample_notebook).execute_cell("cell1", "x = 1")
+        result = await CellExecutor(sample_notebook).execute_cell("cell1", "x = raw_data")
 
         assert result.success is False
         assert result.error == (

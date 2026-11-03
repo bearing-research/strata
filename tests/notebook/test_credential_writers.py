@@ -182,7 +182,7 @@ class TestARunOnTheServer:
             name="out", uri="s3://lab/out", mode=MountMode.READ_WRITE, credential="org"
         )
 
-        result = await self._run(tmp_path, "x = 1", "user_ana", toml_mount=mount)
+        result = await self._run(tmp_path, "x = out", "user_ana", toml_mount=mount)
 
         assert "'org' is read-only" in (result.error or "")
         assert fetched == []

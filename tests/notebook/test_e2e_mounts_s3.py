@@ -223,6 +223,31 @@ async def test_each_over_a_bucket_downloads_only_what_its_glob_names(
     assert "[('one.csv', 'a')]" in downstream.stdout
 
 
+@pytest.mark.asyncio
+async def test_a_notebook_mount_is_downloaded_only_for_the_cell_naming_it(
+    tmp_path: Path,
+    minio_container,
+    s3_credentials: MountCredentials,
+    fresh_bucket: str,
+) -> None:
+    _put(minio_container, fresh_bucket, "data/one.csv", b"a")
+    reads = "text = (data / 'one.csv').read_text()\n"
+    session = _make_session(tmp_path, [("c1", reads), ("c2", "unrelated = 1\n")])
+    update_notebook_mounts(
+        session.path,
+        [MountSpec(name="data", uri=f"s3://{fresh_bucket}/data", mode=MountMode.READ_ONLY)],
+    )
+    session = NotebookSession(parse_notebook(session.path), session.path)
+    session.refresh_environment_runtime()
+    executor = CellExecutor(session, mount_credentials=s3_credentials)
+
+    assert (await executor.execute_cell("c2", "unrelated = 1\n")).success
+    assert "data" not in executor._mounts_moved.get("c2", {})
+
+    assert (await executor.execute_cell("c1", reads)).success
+    assert executor._mounts_moved["c1"]["data"] == 1
+
+
 # Scope B: read-write mount, write in one cell and read in another
 
 
