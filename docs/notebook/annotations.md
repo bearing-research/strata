@@ -670,7 +670,8 @@ to one item in each instance. What `<source>` is decides what an item is:
 | a list from another cell    | value        | the value itself | an edit is a new item   |
 | a table from another cell, with `key=` | row | the `key=` column | the row changes       |
 
-With `glob=`, a remote mount downloads only the files the pattern names.
+With `glob=`, a remote mount downloads only the files the pattern names, and the
+input weights and the large-read prompt count only those.
 
 A file is bound as a `pathlib.Path`, and a link to a file counts as a file. A mount
 that is itself one file is refused. A row is bound as a dict of JSON-safe values, with

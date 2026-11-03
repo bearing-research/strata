@@ -894,10 +894,13 @@ def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | N
 
 
 def weigh_mount_sync(
-    resolver: MountResolver, mount: MountSpec, cache: MountCache | None
+    resolver: MountResolver, mount: MountSpec, cache: MountCache | None, glob: str | None = None
 ) -> tuple[str | None, MountWeight | None, str | None]:
     """:func:`mount_fingerprint_sync`'s component, with the mount's weight from the same
     listing: its share already in *cache*, the one the cell runs against.
+
+    *glob* is the files a run reads of the mount (``@each``). It narrows the weight and
+    the third, not the component, which is over everything listed.
 
     The weight is ``None`` for a mount that moves nothing to read (``file://``) or that a
     run does not read through a view (``rw``). The third is what a yes to a large read
@@ -923,12 +926,14 @@ def weigh_mount_sync(
         fingerprint, listing = MountFingerprinter.remote_listing_sync(
             scheme, path, storage_options or None
         )
-        weight = _weigh_listing(scheme, path, storage_options, fingerprint, listing, cache)
+        weight = _weigh_listing(scheme, path, storage_options, fingerprint, listing, cache, glob)
         unlisted = listing is None
     if fingerprint is None:
         return None, weight, None
     component = mount_component(mount, fingerprint)
-    return component, weight, f"{_component_prefix(mount)}:unlisted" if unlisted else component
+    approval = f"{_component_prefix(mount)}:unlisted" if unlisted else component
+    # A yes to some of a mount is not one to the rest of it.
+    return component, weight, approval if glob is None else f"{approval}:{glob}"
 
 
 def mount_component(mount: MountSpec, fingerprint: str) -> str:
@@ -948,20 +953,29 @@ def _weigh_listing(
     fingerprint: str,
     listing: dict[str, dict[str, Any]] | None,
     cache: MountCache | None,
+    glob: str | None = None,
 ) -> MountWeight:
     if listing is None:
         return MountWeight(bytes=None, cached_bytes=None)
+    protocol = _scheme_to_fsspec_protocol(scheme)
+    if glob is not None:
+        listing = {
+            name: info
+            for name, info in listing.items()
+            if glob_matches(_relative_remote_path(name, protocol, path).as_posix(), glob)
+        }
     sizes = {name: int(info.get("size") or 0) for name, info in listing.items()}
     if cache is None:
         return MountWeight(bytes=sum(sizes.values()), cached_bytes=None, listing=listing)
-    protocol = _scheme_to_fsspec_protocol(scheme)
     digest = _options_digest(storage_options)
     objects = [
         (object_key(protocol, digest, name, info), sizes[name]) for name, info in listing.items()
     ]
     return MountWeight(
         bytes=sum(sizes.values()),
-        cached_bytes=cache.cached_bytes(_view_key(protocol, path, digest, fingerprint), objects),
+        cached_bytes=cache.cached_bytes(
+            _view_key(protocol, path, digest, fingerprint, glob), objects
+        ),
     )
 
 

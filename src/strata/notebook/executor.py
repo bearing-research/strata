@@ -302,6 +302,13 @@ def _artifact_content_type(artifact: Any) -> str:
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
 
 
+def _each_files(spec: dict[str, str] | None) -> dict[str, str] | None:
+    """What of its mount an ``@each`` reads, as ``only``: the source's glob by its name."""
+    if spec is None or not spec.get("glob"):
+        return None
+    return {spec["source"]: spec["glob"]}
+
+
 @contextmanager
 def _loop_folders(names: list[str]) -> Generator[Path | None]:
     """Where a loop's ``# @output_dir`` folders live, outside every iteration's run directory.
@@ -1467,6 +1474,7 @@ class CellExecutor:
                 cache=machine_cache,
                 listings=listings,
                 approvals=mount_approvals,
+                only=_each_files(annotations.each),
             )
         else:
             mount_approvals = list(mount_fingerprints)
@@ -2801,10 +2809,7 @@ class CellExecutor:
                 raise each.EachError(f"@each over the mount `{source}` takes glob=, not key=")
             if mount.mode != MountMode.READ_ONLY:
                 raise each.EachError(f"@each over `{source}`: the mount must be read-only")
-            glob = spec.get("glob")
-            prepared = await self._prepare_mounts(
-                base.mount_specs, cell_id, only={source: glob} if glob else None
-            )
+            prepared = await self._prepare_mounts(base.mount_specs, cell_id, only=_each_files(spec))
             # A read-write mount gets its own staging per instance.
             self._each_listed[cell_id] = {
                 m.name: prepared[m.name] for m in base.mount_specs if m.mode == MountMode.READ_ONLY
@@ -4779,13 +4784,15 @@ class CellExecutor:
         cache: MountCache | None = None,
         listings: dict[str, dict[str, dict[str, Any]]] | None = None,
         approvals: list[str] | None = None,
+        only: Mapping[str, str] | None = None,
     ) -> tuple[list[str], bool]:
         """Compute mount fingerprints without preparing local materializations.
 
         *weights*, when given, gets each remote read-only mount's weight from the same
         listing, its cached share counted in *cache* (``None``: unknown). *listings* gets
         the listing of each mount whose share is unknown, for the machine to be asked.
-        *approvals* gets what a yes to reading each mount is kept for.
+        *approvals* gets what a yes to reading each mount is kept for. *only* gives, by
+        mount name, the glob of the files a run reads, the rest of the mount weighing nothing.
         """
         self._mount_resolver.credential_resolver = self._credential_resolver()
         mount_fingerprints: list[str] = []
@@ -4793,7 +4800,11 @@ class CellExecutor:
         for mount in sorted(mount_specs, key=lambda item: item.name):
             # Listing an object store blocks: keep it off the event loop.
             fingerprint, weight, approval = await asyncio.to_thread(
-                weigh_mount_sync, self._mount_resolver, mount, cache
+                weigh_mount_sync,
+                self._mount_resolver,
+                mount,
+                cache,
+                (only or {}).get(mount.name),
             )
             if approvals is not None and approval is not None:
                 approvals.append(approval)
@@ -5083,7 +5094,12 @@ class CellExecutor:
         listings: dict[str, dict[str, dict[str, Any]]] = {}
         mount_approvals: list[str] = []
         await self._fingerprint_mounts(
-            mount_specs, weights=weights, cache=cache, listings=listings, approvals=mount_approvals
+            mount_specs,
+            weights=weights,
+            cache=cache,
+            listings=listings,
+            approvals=mount_approvals,
+            only=_each_files(annotations.each),
         )
         if cache is None and listings:
             weights = await self._ask_worker_cache(machine, mount_specs, weights, listings)

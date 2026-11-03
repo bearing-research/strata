@@ -508,6 +508,26 @@ async def test_an_edit_to_what_a_cell_reads_weighs_it_again(tmp_path, big_mount)
 
 
 @windows
+async def test_an_each_cell_is_asked_about_what_its_glob_names(tmp_path, big_mount):
+    def over(glob: str) -> str:
+        return f"# @mount data s3://bucket/data ro\n# @each p in data glob={glob}\nout = p.name\n"
+
+    session = _session(tmp_path, {"c1": over("z*")})
+    # None of the mount's 250 bytes is named, and no run would move them.
+    assert await _asked(session) == []
+
+    session.notebook_state.get_cell("c1").source = over("a")
+    moved = [read.bytes_to_move for read in await reads_to_confirm(session, ["c1"])]
+    assert moved == [100]
+    await _approve(session)
+    assert await _asked(session) == []
+
+    # A yes to one file does not stretch to the rest of the mount.
+    session.notebook_state.get_cell("c1").source = over("*")
+    assert await _asked(session) == ["c1"]
+
+
+@windows
 async def test_a_ready_cell_whose_result_was_collected_is_asked_about(tmp_path, threshold):
     """Its run is no longer a cache hit: it reads its inputs again."""
     _, uri = _warehouse(tmp_path)

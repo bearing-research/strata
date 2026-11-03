@@ -21,7 +21,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   dict, list or table from another cell. A changed item runs alone, a removed
   one leaves, and a later cell reads `{item: value}`. With `@write_table ... sync`
   the table is written once per run over every item's rows, so a removed file's
-  rows are deleted. A remote mount downloads only what `glob=` names. (#1372, #1374)
+  rows are deleted. A remote mount downloads only what `glob=` names, and is
+  weighed by that before a large read is asked about. (#1372, #1374, #1379)
 
 ### Changed
 - **DuckDB 2.0.** Strata now needs `duckdb>=2.0`. DuckDB 2.0 also applies its
