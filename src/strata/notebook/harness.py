@@ -237,6 +237,12 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
     return client
 
 
+def _error_text(exc: Exception) -> str:
+    """A cell's failure as one reads it: ``str(KeyError("MAX"))`` alone says only ``'MAX'``."""
+    text = str(exc)
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
 def close_client(client: Any) -> None:
     """Close an injected ambient client, swallowing teardown errors."""
     if client is None:
@@ -525,7 +531,7 @@ def _run_one_batched_cell(
                         "cell_error",
                         {
                             "cell_id": cell_id,
-                            "error": f"{exc}\n{hint}" if hint else str(exc),
+                            "error": f"{_error_text(exc)}\n{hint}" if hint else _error_text(exc),
                             "traceback": traceback.format_exc(),
                             "stdout": stdout_capture.getvalue(),
                             "stderr": stderr_capture.getvalue(),
@@ -919,7 +925,7 @@ def main():
         hint = _work_dir.hint(e, manifest) or no_client_hint(e, manifest)
         result = {
             "success": False,
-            "error": f"{e}\n{hint}" if hint else str(e),
+            "error": f"{_error_text(e)}\n{hint}" if hint else _error_text(e),
             "traceback": traceback.format_exc(),
             "variables": {},
             "stdout": stdout_buffer.getvalue() or stdout_text,
