@@ -26,6 +26,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   runs this over 287 real files into a REST catalog. (#1372, #1374, #1378, #1379)
 
 ### Changed
+- **A cell's inputs no longer pass through server memory.** An upstream value streams
+  from the store into the run in 1 MiB chunks, so a 1 GB frame adds about 1 MB to the
+  server's memory instead of 1 GB, per consuming cell per run. (#1383)
 - **DuckDB 2.0.** Strata now needs `duckdb>=2.0`. DuckDB 2.0 also applies its
   file-access lockdown to a catalog's HTTP requests, so a confined SQL cell in
   service mode may now reach its catalog's endpoint, and no other URL. SQL cells,
