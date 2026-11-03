@@ -155,6 +155,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Run All records what each cell cost, and a cache hit says what it saved.** Run
+  All recorded 0 for every cell, so the profiler read "0ms" and later hits were
+  priced at nothing. A hit's badge now reads `cached · saved 2.1s`, with the load
+  time in its tooltip, or plain `cached` when no earlier run priced it. A team hit
+  in Run All keeps the publisher's cost, as a single-cell hit does. (#1393)
 - **An R cell restored to an earlier source is served from cache.** Going back to
   source that already ran finds its variables and displays again instead of running
   the cell, as a Python cell does. (#1384)
