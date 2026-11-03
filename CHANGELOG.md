@@ -146,6 +146,9 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **An R cell restored to an earlier source is served from cache.** Going back to
+  source that already ran finds its variables and displays again instead of running
+  the cell, as a Python cell does. (#1384)
 - **A `:memory:` database stays in memory.** A DuckDB or SQLite connection with
   `path = ":memory:"` opened a real file of that name in the notebook folder, so
   a cell's tables outlived the run and the file could be committed. If a notebook
