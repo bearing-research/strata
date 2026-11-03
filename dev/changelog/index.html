@@ -3985,6 +3985,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>strata run</code> says where a long <code>@each</code> is.</strong> It reports progress at most every
+  5 seconds and prints a line per failed item, and labels a cell by its <code>@name</code>. A
+  failed cell's error now names the exception: <code>KeyError: 'MAX'</code>, not <code>'MAX'</code>.
+  (#1375)</li>
 <li><strong>A <code>@per_variant</code> cell ending in a displayed value no longer reruns every
   variant.</strong> The cache check looked for its displays where they are not stored,
   so every variant missed. (#1372)</li>
