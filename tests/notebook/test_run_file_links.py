@@ -296,18 +296,18 @@ x = 1
 
         So the server must stage the test run's files before handing their directory over.
         """
-        from strata.notebook import executor as executor_module
+        from strata.notebook.cell_paths import cell_tests
         from strata.notebook.executor import CellExecutor
 
         victim = tmp_path / "victim"
         victim.mkdir()
-        real_hand_over = executor_module.hand_over
+        real_hand_over = cell_tests.hand_over
 
         def _hand_over_and_plant(path: Path, user) -> None:
             real_hand_over(path, user)
             (path / "run").symlink_to(victim, target_is_directory=True)
 
-        monkeypatch.setattr(executor_module, "hand_over", _hand_over_and_plant)
+        monkeypatch.setattr(cell_tests, "hand_over", _hand_over_and_plant)
         session = _session(tmp_path, [("a", "def f():\n    return 1\n")])
         session.venv_python = Path(sys.executable)
 

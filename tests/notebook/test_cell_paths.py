@@ -11,6 +11,8 @@ import pytest
 from vestigo.provenance import derive_subkey
 
 import strata.notebook.cell_paths
+from strata.notebook.cell_paths import cell_tests
+from strata.notebook.cell_paths.cell_tests import CellTestsContext, run_cell_tests
 from strata.notebook.cell_paths.context import PathContext
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.cell_paths.prompt import run_prompt_cell
@@ -653,3 +655,148 @@ class TestModuleExport:
 
         assert "a value it closes over (`root`)" in error
         assert stored == []
+
+
+class TestCellTests:
+    """The path on its own: a fake host and context, a stubbed pytest run."""
+
+    RAW = {"passed": 1, "failed": 0, "errored": 0, "skipped": 0, "tests": []}
+
+    @staticmethod
+    def _provenance(**overrides):
+        fields = {
+            "fetch_error": None,
+            "dataset_error": None,
+            "fetched": {},
+            "datasets": [],
+            "table_snapshots": {},
+            "input_hashes": ["input"],
+            "mount_fingerprints": ["mount"],
+            "table_fingerprints": ["table"],
+            "fetch_fingerprints": ["fetch"],
+            "dataset_fingerprints": ["dataset"],
+        }
+        fields.update(overrides)
+
+        def listed(listing):
+            return SimpleNamespace(
+                **fields,
+                over_mounts=lambda mounts: listed("as read"),
+                reads=lambda mounts, tables: {"listing": listing, "mounts": mounts},
+            )
+
+        return listed("as keyed")
+
+    @pytest.fixture
+    def path(self, tmp_path, monkeypatch):
+        calls = SimpleNamespace(order=[], handed=[], recorded=[], fingerprint=[], ran=[])
+
+        def build(prov):
+            cell = SimpleNamespace(id="c1", source="x = 1\n", mounts=[])
+            host = SimpleNamespace(
+                notebook_state=SimpleNamespace(
+                    get_cell=lambda cell_id: cell if cell_id == "c1" else None, cells=[cell]
+                ),
+                venv_python=Path("python"),
+                path=tmp_path,
+                record_cell_test_inputs=lambda cell_id, inputs, env: (
+                    calls.fingerprint.append(inputs) or "fingerprint"
+                ),
+                cell_env_hash=lambda cell: "env",
+                cell_test_fingerprint=lambda *args: ("source", "tests", None),
+            )
+
+            async def materialize_upstreams(cell_id):
+                calls.order.append("upstreams")
+
+            async def compute_provenance(cell_id, source, **kwargs):
+                calls.order.append("provenance")
+                return prov
+
+            async def prepare_mounts(specs, cell_id):
+                return {}
+
+            context = CellTestsContext(
+                materialize_upstreams=materialize_upstreams,
+                forget_moved=lambda cell_id: calls.order.append("forget"),
+                compute_provenance=compute_provenance,
+                moved=lambda cell_id: ({"data": 3}, {}),
+                manifest_tables=lambda tables, snapshots: {},
+                prepare_mounts=prepare_mounts,
+                resolve_runtime_env=lambda cell_id, env: {},
+                fanout_variants=lambda cell_id: (),
+                load_input_blobs=lambda cell_id, directory, fanout_variant: {},
+                add_dataset_inputs=lambda specs, datasets, directory: None,
+                harness_env=lambda env: {},
+            )
+
+            def stub(**kwargs):
+                calls.ran.append(kwargs)
+                return self.RAW
+
+            monkeypatch.setattr(cell_tests, "resolve_harness_user", lambda: None)
+            monkeypatch.setattr(cell_tests, "prepare_work_dir", lambda path, user: None)
+            monkeypatch.setattr(cell_tests, "let_through", lambda path, user: None)
+            monkeypatch.setattr(
+                cell_tests, "hand_over", lambda path, user: calls.handed.append(path.name)
+            )
+            monkeypatch.setattr("strata.notebook.cell_test_runner.run_cell_tests_in_dir", stub)
+            monkeypatch.setattr(
+                "strata.notebook.runtime_state.persist_cell_test_result", lambda *args: None
+            )
+            monkeypatch.setattr(
+                "strata.notebook.reads_index.record",
+                lambda path, cell_id, reads, live: calls.recorded.append((cell_id, reads, live)),
+            )
+
+            async def run(cell_id="c1"):
+                return await run_cell_tests(host, context, cell_id, "def test_x(cell): ...\n")
+
+            return run
+
+        build.calls = calls
+        return build
+
+    async def test_an_unknown_cell_is_not_found(self, path):
+        with pytest.raises(FileNotFoundError, match="Cell gone not found"):
+            await path(self._provenance())("gone")
+
+    async def test_the_last_runs_moved_bytes_go_before_the_inputs_are_read(self, path):
+        await path(self._provenance())()
+
+        assert path.calls.order == ["upstreams", "forget", "provenance"]
+
+    async def test_a_run_records_what_it_read_from_the_listing_it_read(self, path):
+        result = await path(self._provenance())()
+
+        assert result.passed == 1
+        assert path.calls.recorded == [
+            ("c1", {"listing": "as read", "mounts": {"data": 3}}, ["c1"])
+        ]
+
+    async def test_the_fingerprint_counts_every_input(self, path):
+        result = await path(self._provenance())()
+
+        assert path.calls.fingerprint == [["input", "mount", "table", "fetch", "dataset"]]
+        assert result.input_fingerprint == "fingerprint"
+
+    async def test_the_inputs_are_handed_to_the_harness_user(self, path):
+        await path(self._provenance())()
+
+        assert path.calls.handed == ["inputs-0"]
+
+    @pytest.mark.parametrize(
+        "problem",
+        [
+            pytest.param({"fetch_error": "no fetch"}, id="fetch"),
+            pytest.param({"dataset_error": "no dataset"}, id="dataset"),
+        ],
+    )
+    async def test_an_input_it_cannot_read_is_refused_without_recording_reads(self, path, problem):
+        result = await path(self._provenance(**problem))()
+
+        assert path.calls.ran == []
+        assert path.calls.recorded == []
+        assert result.errored == 1
+        assert result.tests[0].name == "<refused>"
+        assert result.tests[0].message == next(iter(problem.values()))

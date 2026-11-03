@@ -50,7 +50,18 @@ from strata.notebook import console_relay, each, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotation_validation import blocking_diagnostic
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
+from strata.notebook.cell_paths.cell_tests import (
+    CellTestsContext,
+    run_cell_tests,
+)
+from strata.notebook.cell_paths.cell_tests import (
+    _merged_test_runs as _merged_test_runs,
+)
+from strata.notebook.cell_paths.cell_tests import (
+    _variant_test_run as _variant_test_run,
+)
 from strata.notebook.cell_paths.context import PathContext
+from strata.notebook.cell_paths.context import no_interpreter_message as _no_interpreter_message
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.cell_paths.prompt import run_prompt_cell
 from strata.notebook.cell_paths.sql import run_sql_cell
@@ -91,7 +102,6 @@ from strata.notebook.models import (
     CellLanguage,
     CellOutput,
     CellStatus,
-    CellTestCase,
     CellTestResult,
     DatasetSpec,
     FetchSpec,
@@ -349,32 +359,6 @@ def _add_harness_params(
         params["mutation_defines"] = list(mutation_defines)
     if tables:
         params["tables"] = tables
-
-
-def _variant_test_run(raw: dict[str, Any], variant: str) -> dict[str, Any]:
-    """*raw* with each case named as pytest names a parametrized one: ``test_x[variant]``."""
-    return {
-        **raw,
-        "tests": [
-            {
-                **case,
-                "name": f"{case['name']}[{variant}]",
-                "nodeid": f"{case['nodeid']}[{variant}]" if case.get("nodeid") else "",
-            }
-            for case in raw["tests"]
-        ],
-    }
-
-
-def _merged_test_runs(raws: list[dict[str, Any]]) -> dict[str, Any]:
-    """One result over a cell's test runs: totals summed, cases in run order."""
-    if len(raws) == 1:
-        return raws[0]
-    totals = {
-        key: sum(raw.get(key, 0) for raw in raws)
-        for key in ("passed", "failed", "errored", "skipped")
-    }
-    return {**totals, "tests": [case for raw in raws for case in raw["tests"]]}
 
 
 def _add_fetch_inputs(
@@ -850,195 +834,25 @@ class CellExecutor:
             await self._local_runs().close(opened[0], opened[1])
 
     async def run_cell_tests(self, cell_id: str, test_source: str) -> CellTestResult:
-        """Run a Python cell's unit tests and persist the result.
-
-        Tests target the functions/classes the cell defines, which are never
-        stored as artifacts, so this re-executes the source with its upstream
-        inputs injected and runs ``pytest`` in the notebook venv. It does not go
-        through the harness and never touches the artifact cache or cell status.
-        """
-        # cell_test_runner is stdlib-only, kept beside its single caller.
-        from strata.notebook.cell_test_runner import (
-            PytestUnavailableError,
-            run_cell_tests_in_dir,
-        )
-        from strata.notebook.runtime_state import persist_cell_test_result
-
-        cell = self.session.notebook_state.get_cell(cell_id)
-        if cell is None:
-            raise FileNotFoundError(f"Cell {cell_id} not found")
-        venv_python = self.session.venv_python
-        if venv_python is None:
-            raise RuntimeError(_no_interpreter_message(self.session))
-
-        source = cell.source
-        await self._materialize_upstreams(cell_id)
-        self.forget_moved(cell_id)
-
-        # The same fetch, mount, dataset, table and env inputs a run of the cell gets.
-        annotations = parse_annotations(source)
-        # Every mount: a test reads ``cell.<name>``, which no source analysis sees.
-        mount_specs = resolve_cell_mounts([], cell.mounts, annotations.mounts)
-        prov = await self._compute_cell_provenance(
-            cell_id, source, annotations=annotations, mount_specs=mount_specs
-        )
-        problem = prov.fetch_error or prov.dataset_error
-        if annotations.each is not None:
-            problem = "Tests of an @each cell are not supported yet."
-        tables: dict[str, dict[str, Any]] = {}
-        if problem is None:
-            try:
-                tables = self._manifest_tables(annotations.tables, prov.table_snapshots)
-            except RuntimeError as exc:
-                problem = str(exc)
-        mount_specs = [
-            *mount_specs,
-            *(
-                MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
-                for name, path in prov.fetched.items()
+        """Run a Python cell's unit tests and persist the result."""
+        return await run_cell_tests(
+            self.session,
+            CellTestsContext(
+                materialize_upstreams=self._materialize_upstreams,
+                forget_moved=self.forget_moved,
+                compute_provenance=self._compute_cell_provenance,
+                moved=self._moved,
+                manifest_tables=self._manifest_tables,
+                prepare_mounts=self._prepare_mounts,
+                resolve_runtime_env=self._resolve_effective_runtime_env,
+                fanout_variants=self._fanout_variants,
+                load_input_blobs=self._load_input_blobs,
+                add_dataset_inputs=self._add_dataset_inputs,
+                harness_env=self._harness_env,
             ),
-        ]
-        resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
-        # The tests read this listing, which the provenance's may predate.
-        prov = prov.over_mounts(resolved_mounts)
-        runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
-
-        # Tests run the cell's source, so they are refused or dropped to the harness user
-        # like any harness.
-        refused: dict[str, Any] | None = None
-        harness_user = None
-        try:
-            harness_user = resolve_harness_user()
-            # The cell runs where a run of it does, its notebook's work/.
-            prepare_work_dir(self.session.path, harness_user)
-        except (LocalExecutionRefused, UnsafeRunFile) as exc:
-            problem = str(exc)
-        if problem is not None:
-            refused = {
-                "passed": 0,
-                "failed": 0,
-                "errored": 1,
-                "skipped": 0,
-                "tests": [
-                    {"name": "<refused>", "nodeid": "", "outcome": "error", "message": problem}
-                ],
-            }
-
-        pytest_unavailable = False
-        auto_installed: list[str] = []
-        with tempfile.TemporaryDirectory(prefix="strata_celltest_") as tmp:
-            # A fan-out cell is tested once per variant, binding what that instance reads.
-            runs: list[tuple[str | None, Path, dict[str, dict[str, Any]]]] = []
-            for index, variant in enumerate(self._fanout_variants(cell_id) or (None,)):
-                blob_dir = Path(tmp) / f"inputs-{index}"
-                blob_dir.mkdir()
-                input_specs = self._load_input_blobs(cell_id, blob_dir, fanout_variant=variant)
-                self._add_dataset_inputs(input_specs, prov.datasets, blob_dir)
-                runs.append((variant, blob_dir, input_specs))
-
-            # The harness user gets the inputs and, once staged, the run directory, never tmp
-            # itself: a process an earlier cell left running could plant links in it.
-            let_through(Path(tmp), harness_user)
-            for _, blob_dir, _ in runs:
-                hand_over(blob_dir, harness_user)
-
-            def _run(index: int) -> dict[str, Any]:
-                variant, blob_dir, input_specs = runs[index]
-                rundir = Path(tmp) / f"run-{index}"
-                # Each ``# @output_dir`` is a fresh folder; nothing a test writes is stored.
-                folders = output_dirs.mount_entries(source, rundir)
-                raw = run_cell_tests_in_dir(
-                    rundir=rundir,
-                    venv_python=venv_python,
-                    cell_source=source,
-                    test_source=test_source,
-                    inputs=input_specs,
-                    input_dir=blob_dir,
-                    mounts={
-                        **{name: str(rm.local_path) for name, rm in resolved_mounts.items()},
-                        **{name: entry["local_path"] for name, entry in folders.items()},
-                    },
-                    tables=tables,
-                    notebook_dir=self.session.path,
-                    work_dir=WORK_DIR,
-                    env=identity_env(self._harness_env(runtime_env), harness_user),
-                    run_as=harness_user,
-                )
-                return raw if variant is None else _variant_test_run(raw, variant)
-
-            def _run_all() -> dict[str, Any]:
-                return _merged_test_runs([_run(index) for index in range(len(runs))])
-
-            empty_raw: dict[str, Any] = {
-                "passed": 0,
-                "failed": 0,
-                "errored": 0,
-                "skipped": 0,
-                "tests": [],
-            }
-            raw: dict[str, Any]
-            try:
-                raw = refused if refused is not None else await asyncio.to_thread(_run_all)
-            except PytestUnavailableError:
-                # Auto-provision pytest into the dev group and retry once. Dev tools are excluded
-                # from the env hash, so cell caches survive. On failure, fall back to the actionable
-                # pytest_unavailable flag.
-                from strata.notebook.dependencies import ensure_dev_tool
-
-                install = await asyncio.to_thread(ensure_dev_tool, self.session.path, "pytest")
-                if install.success:
-                    auto_installed = ["pytest"]
-                    try:
-                        raw = await asyncio.to_thread(_run_all)
-                    except PytestUnavailableError:
-                        pytest_unavailable = True
-                        raw = empty_raw
-                else:
-                    logger.warning(
-                        "Auto-install of pytest failed for notebook %s: %s",
-                        self.session.path,
-                        install.error,
-                    )
-                    pytest_unavailable = True
-                    raw = empty_raw
-
-        # The env hash after the run: a pytest auto-install can change the lockfile.
-        input_fingerprint = self.session.record_cell_test_inputs(
             cell_id,
-            prov.input_hashes
-            + prov.mount_fingerprints
-            + prov.table_fingerprints
-            + prov.fetch_fingerprints
-            + prov.dataset_fingerprints,
-            self.session.cell_env_hash(cell),
+            test_source,
         )
-        source_hash, test_source_hash, _ = self.session.cell_test_fingerprint(
-            cell_id, source, test_source
-        )
-        result = CellTestResult(
-            passed=raw["passed"],
-            failed=raw["failed"],
-            errored=raw["errored"],
-            skipped=raw.get("skipped", 0),
-            tests=[CellTestCase(**t) for t in raw["tests"]],
-            cell_source_hash=source_hash,
-            test_source_hash=test_source_hash,
-            input_fingerprint=input_fingerprint,
-            ran_at=int(time.time() * 1000),
-            pytest_unavailable=pytest_unavailable,
-            auto_installed=auto_installed,
-        )
-
-        persist_cell_test_result(self.session.path, cell_id, result.model_dump())
-        cell.test_result = result
-        cell.test_source = test_source
-        if refused is None:
-            # The tests read the cell's inputs onto this machine, as a run of it does.
-            from strata.notebook import reads_index
-
-            live = [c.id for c in self.session.notebook_state.cells]
-            reads_index.record(self.session.path, cell_id, prov.reads(*self._moved(cell_id)), live)
-        return result
 
     async def execute_batch(
         self,
@@ -8575,17 +8389,6 @@ def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecuti
         completed=False,
         failed_cell_id=cell_specs[0]["cell_id"] if cell_specs else None,
         end_reason="cell_error",
-    )
-
-
-def _no_interpreter_message(session: ExecutorHost) -> str:
-    """Why cell code did not run: the session has no interpreter.
-
-    PATH ``python`` is never used instead: its result would be stored under
-    this notebook's provenance.
-    """
-    return session.environment_execution_block_message() or (
-        "Notebook environment is not ready: it has no Python interpreter."
     )
 
 
