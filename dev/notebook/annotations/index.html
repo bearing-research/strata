@@ -3616,7 +3616,8 @@ to one item in each instance. What <code>&lt;source&gt;</code> is decides what a
 </tr>
 </tbody>
 </table>
-<p>With <code>glob=</code>, a remote mount downloads only the files the pattern names.
+<p>With <code>glob=</code>, a remote mount downloads only the files the pattern names, and the
+input weights and the large-read prompt count only those.
 The <a href="../../examples/each_pipeline/"><code>each_pipeline</code></a> example runs over 287 files from a
 public bucket and syncs a table in a REST catalog.</p>
 <p>A file is bound as a <code>pathlib.Path</code>, and a link to a file counts as a file. A mount
