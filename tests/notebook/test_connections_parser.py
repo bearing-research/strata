@@ -6,6 +6,7 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+import pytest
 import tomli_w
 
 from strata.notebook.models import ConnectionSpec
@@ -398,6 +399,16 @@ def test_relative_path_resolves_at_adapter_open_time(tmp_path):
     assert runtime.path == str((tmp_path / "analytics.db").resolve())
     # The original is unchanged, so it round-trips through the writer.
     assert spec.path == "analytics.db"
+
+
+@pytest.mark.parametrize("driver", ["duckdb", "sqlite"])
+def test_a_memory_path_is_not_a_file_in_the_notebook(tmp_path, driver):
+    from strata.notebook.models import ConnectionSpec
+    from strata.notebook.sql.cell_executor import _resolve_runtime_spec
+
+    spec = ConnectionSpec(name="db", driver=driver, path=":memory:")
+
+    assert _resolve_runtime_spec(spec, tmp_path).path == ":memory:"
 
 
 def test_absolute_path_unchanged_at_adapter_open_time(tmp_path):

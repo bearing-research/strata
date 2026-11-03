@@ -49,6 +49,7 @@ jobs:
         titanic_ml
         sql_orders_report
         s3_mount
+        each_pipeline
         r_mtcars_analysis
         r_lm_vs_sklearn
 
@@ -86,6 +87,9 @@ jobs:
       - name: Install Strata
         run: uv sync --all-extras
 
+      - name: Start the warehouse each_pipeline writes to
+        run: docker compose -f examples/each_pipeline/docker-compose.yml up -d --wait catalog
+
       # Every example runs even after one fails (a flaky public S3 read must
       # not hide a real failure elsewhere). uv sync installs the interpreter
       # each example's requires-python names; --force ignores the cache so a
@@ -96,6 +100,7 @@ jobs:
         env:
           UV_PYTHON: ""
         run: |
+          source examples/each_pipeline/lake.env
           failed=()
           for example in $EXAMPLES; do
             echo "::group::$example"

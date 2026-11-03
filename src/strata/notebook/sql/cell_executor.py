@@ -967,7 +967,8 @@ def _resolve_runtime_spec(
     nb_dir = Path(str(notebook_dir))
 
     def _rebase(value: Any) -> Any:
-        if not isinstance(value, str) or not value:
+        # Rebased, the driver would open a real file named ``:memory:``.
+        if not isinstance(value, str) or not value or value == ":memory:":
             return value
         p = Path(value)
         if p.is_absolute():
