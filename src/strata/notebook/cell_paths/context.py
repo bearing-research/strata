@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from strata.notebook.execution_result import CellExecutionResult
     from strata.notebook.executor import _CellProvenance
     from strata.notebook.executor_host import ExecutorHost
+    from strata.notebook.models import NotebookState
 
 
 @dataclass(frozen=True)
@@ -38,3 +39,21 @@ def no_interpreter_message(session: ExecutorHost) -> str:
     return session.environment_execution_block_message() or (
         "Notebook environment is not ready: it has no Python interpreter."
     )
+
+
+def effective_worker_name(
+    notebook_state: NotebookState, cell_id: str, annotation_worker: str | None
+) -> str:
+    """The worker a run of the cell targets: annotation, then cell, then notebook, then local."""
+    if annotation_worker:
+        return annotation_worker
+    cell = notebook_state.get_cell(cell_id)
+    if cell and cell.worker:
+        return cell.worker
+    return notebook_state.worker or "local"
+
+
+def artifact_content_type(artifact: Any) -> str:
+    """Read an artifact's stored content_type from its transform_spec params."""
+    ct = artifact.params.get("content_type")
+    return str(ct) if isinstance(ct, str) and ct else "pickle/object"
