@@ -670,6 +670,11 @@ to one item in each instance. What `<source>` is decides what an item is:
 | a list from another cell    | value        | the value itself | an edit is a new item   |
 | a table from another cell, with `key=` | row | the `key=` column | the row changes       |
 
+With `glob=`, a remote mount downloads only the files the pattern names. A mount in
+`notebook.toml`'s top-level `[[mounts]]` applies to every cell, and a cell with no glob
+downloads all of it, so for a large prefix declare the mount on the `@each` cell, with
+`# @mount` or `[[cells.mounts]]`.
+
 A file is bound as a `pathlib.Path`, and a link to a file counts as a file. A mount
 that is itself one file is refused. A row is bound as a dict of JSON-safe values, with
 a null as `None`. A list

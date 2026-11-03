@@ -693,6 +693,52 @@ class TestSharedMountCache:
         assert (first / "b").stat().st_ino == (second / "b").stat().st_ino
 
     @pytest.mark.asyncio
+    async def test_a_glob_downloads_only_the_files_it_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(
+            self._files("bucket/data", {"a.csv": b"aa", "sub/b.csv": b"bb", "skip.txt": b"cc"})
+        )
+        _install_fake_fsspec(monkeypatch, fs)
+        fetched = self._count_gets(monkeypatch, fs)
+        resolver = MountResolver(cache_dir=tmp_path / "nb", mount_cache=MountCache(tmp_path / "m"))
+
+        narrowed = (await resolver.prepare_mounts([self._spec()], only={"data": "*.csv"}))["data"]
+
+        assert sorted(fetched) == ["s3://bucket/data/a.csv", "s3://bucket/data/sub/b.csv"]
+        assert narrowed.bytes_moved == 4
+        files = {
+            p.relative_to(narrowed.local_path).as_posix() for p in narrowed.local_path.rglob("*")
+        }
+        assert files - {"sub"} == {"a.csv", "sub/b.csv"}
+
+        # The same listing, so the same fingerprint, and not the same view: a run with no
+        # glob still sees every file, and fetches only what the first did not.
+        fetched.clear()
+        whole = (await resolver.prepare_mounts([self._spec()]))["data"]
+        assert whole.fingerprint == narrowed.fingerprint
+        assert fetched == ["s3://bucket/data/skip.txt"]
+        assert (whole.local_path / "skip.txt").read_bytes() == b"cc"
+
+    @pytest.mark.asyncio
+    async def test_a_glob_naming_nothing_downloads_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a.csv": b"aa"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        fetched = self._count_gets(monkeypatch, fs)
+        resolver = MountResolver(cache_dir=tmp_path / "nb", mount_cache=MountCache(tmp_path / "m"))
+
+        narrowed = (await resolver.prepare_mounts([self._spec()], only={"data": "*.json"}))["data"]
+
+        assert fetched == []
+        assert list(narrowed.local_path.iterdir()) == []
+
+    @pytest.mark.asyncio
     async def test_two_notebooks_share_one_copy(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

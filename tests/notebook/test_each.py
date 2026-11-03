@@ -176,15 +176,37 @@ class TestFiles:
         prepared = []
         prepare_mounts = executor._prepare_mounts
 
-        async def counted(specs, cell_id=None):
+        async def counted(specs, cell_id=None, **kwargs):
             prepared.extend(spec.name for spec in specs)
-            return await prepare_mounts(specs, cell_id)
+            return await prepare_mounts(specs, cell_id, **kwargs)
 
         executor._prepare_mounts = counted
         assert (await executor.execute_cell("a", source)).success
 
         assert len(nb.ran()) == 3
         assert prepared.count("raw") == 1
+
+    async def test_another_read_only_mount_is_listed_once_a_run_too(self, tmp_path):
+        raw, source = _over_files(tmp_path)
+        for name in ("one", "two", "three"):
+            _touch(raw / f"{name}.txt", "a")
+        other = tmp_path / "other"
+        other.mkdir()
+        source = f"# @mount other {other.as_uri()} ro\n{source}"
+        nb = Notebook(tmp_path, source, READER)
+        executor = CellExecutor(nb.session)
+        prepared = []
+        prepare_mounts = executor._prepare_mounts
+
+        async def counted(specs, cell_id=None, **kwargs):
+            prepared.extend(spec.name for spec in specs)
+            return await prepare_mounts(specs, cell_id, **kwargs)
+
+        executor._prepare_mounts = counted
+        assert (await executor.execute_cell("a", source)).success
+
+        assert len(nb.ran()) == 3
+        assert prepared.count("other") == 1
 
     @pytest.mark.parametrize("reader", [READER, None])
     async def test_a_cell_ending_in_a_display_still_runs_a_changed_file_alone(
