@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import MountListEditor from './MountListEditor.vue'
 
+const props = defineProps<{ attention?: boolean }>()
+
 const { notebook, connected, updateNotebookMountsAction } = useNotebook()
 const showPanel = ref(false)
+watch(
+  () => props.attention,
+  (needed) => {
+    if (needed) showPanel.value = true
+  },
+  { immediate: true },
+)
 
 const mountCount = computed(() => notebook.mounts.length)
 </script>

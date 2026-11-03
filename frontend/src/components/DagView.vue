@@ -2,6 +2,7 @@
 import * as dagre from '@dagrejs/dagre'
 import { computed, reactive, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
+import { LABEL_HEIGHT, placeEdgeLabels } from '../utils/dagLabels'
 import type { Cell, CellId } from '../types/notebook'
 
 const { notebook, orderedCells, dagEdges } = useNotebook()
@@ -26,9 +27,11 @@ interface EdgeLayout {
   to: NodeLayout
   variable: string
   points: { x: number; y: number }[]
+  /** Top-left of the variable label, or null when no free spot was found. */
+  label: { x: number; y: number } | null
 }
 
-// Node width follows the label (JetBrains Mono 11px is ~6.6px/char) but is
+// Node width follows the label (estimated at ~6.6px/char at 11px) but is
 // capped and ellipsized: unbounded widths make dagre lay out lopsided.
 const nodeHeight = 36
 const charWidthPx = 6.6
@@ -147,8 +150,25 @@ const layout = computed(() => {
       to: group.to,
       variable: group.vars.join(', '),
       points,
+      label: null,
     })
   }
+
+  const labelSpots = placeEdgeLabels(
+    edges.map((e) => {
+      const mid = e.points[Math.floor(e.points.length / 2)]
+      return { x: mid.x + 6, y: mid.y - 6, text: e.variable }
+    }),
+    nodes.map((n) => ({
+      x: n.x - n.width / 2,
+      y: n.y - nodeHeight / 2,
+      width: n.width,
+      height: nodeHeight,
+    })),
+  )
+  edges.forEach((e, i) => {
+    e.label = labelSpots[i]
+  })
 
   return { nodes, edges }
 })
@@ -319,20 +339,23 @@ function edgePath(points: { x: number; y: number }[]): string {
           stroke="var(--text-muted)"
           stroke-width="1.5"
           marker-end="url(#arrow)"
-        />
-
-        <!-- Edge variable labels (at midpoint of edge) -->
-        <text
-          v-for="(e, i) in edges"
-          :key="'el' + i"
-          :x="e.points[Math.floor(e.points.length / 2)]?.x + 6"
-          :y="e.points[Math.floor(e.points.length / 2)]?.y + 3"
-          fill="var(--cat-surface2)"
-          font-size="9"
-          font-family="JetBrains Mono, Fira Code, monospace"
         >
-          {{ e.variable }}
-        </text>
+          <title>{{ e.variable }}</title>
+        </path>
+
+        <!-- Edge variable labels (by the edge's midpoint, clear of nodes and each other) -->
+        <template v-for="(e, i) in edges" :key="'el' + i">
+          <text
+            v-if="e.label"
+            :x="e.label.x"
+            :y="e.label.y + LABEL_HEIGHT - 2"
+            fill="var(--cat-surface2)"
+            font-size="9"
+            font-family="JetBrains Mono, Fira Code, monospace"
+          >
+            {{ e.variable }}
+          </text>
+        </template>
 
         <!-- Nodes -->
         <g v-for="n in nodes" :key="n.id" class="dag-node" @dblclick.stop="scrollToCell(n.id)">
@@ -377,7 +400,6 @@ function edgePath(points: { x: number; y: number }[]): string {
             text-anchor="middle"
             fill="var(--text-primary)"
             font-size="11"
-            font-family="JetBrains Mono, Fira Code, monospace"
           >
             <title>
               {{

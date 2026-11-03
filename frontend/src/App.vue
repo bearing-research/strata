@@ -22,11 +22,15 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
 }
 .header-right {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
+  margin-left: 16px;
+  white-space: nowrap;
 }
 
 .logo {
@@ -34,6 +38,7 @@
   font-size: 16px;
   color: var(--accent-primary);
   letter-spacing: -0.5px;
+  white-space: nowrap;
   cursor: pointer;
 }
 .logo:hover {
@@ -45,6 +50,10 @@
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .notebook-name:hover {
   background: var(--bg-hover);
@@ -60,11 +69,18 @@
 }
 
 .connection {
-  font-size: 12px;
-  color: var(--text-muted);
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-muted);
 }
 .connection.connected {
-  color: var(--accent-success);
+  background: var(--accent-success);
+  border-color: var(--accent-success);
+}
+.connection.connecting {
+  border-style: dashed;
 }
 
 .error-banner {

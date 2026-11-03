@@ -12,9 +12,9 @@
  * matching one via the `#only-light` / `#only-dark` URL suffix, so a page
  * never shows a dark screenshot on a light background.
  *
- * Waits are on *conditions*, never on timers: the mode badge fails closed to
- * "Service mode" until the worker catalog syncs, so a shot taken on a sleep
- * can label a personal-mode server as a service deployment.
+ * Waits are on *conditions*, never on timers: the header's mode fails closed to
+ * service until the worker catalog syncs, so a shot taken on a sleep can show a
+ * personal-mode server as a service deployment.
  */
 import process from 'node:process'
 import { chromium } from 'playwright'
@@ -50,19 +50,21 @@ async function loadNotebook(browser, baseUrl, sessionId, theme, viewport = VIEWP
   await context.addInitScript((value) => {
     try {
       localStorage.setItem('strata.theme', value)
+      // These shots show the drawer, which a fresh profile opens collapsed.
+      localStorage.setItem('strata:dagDrawerCollapsed', '0')
     } catch {
       // Storage disabled: the page falls back to the system preference.
     }
   }, theme)
   const page = await context.newPage()
 
-  // The header's deployment-mode badge fails closed: if GET
+  // The header's deployment mode fails closed: if GET
   // /v1/notebooks/{id}/workers fails (a 429 from the client rate limiter is
-  // the easy way to get one), the UI labels a personal server "Service mode"
-  // and never re-syncs. Waiting for the right label is both the settle signal
+  // the easy way to get one), the UI treats a personal server as service mode
+  // and never re-syncs. Waiting for the right mode is both the settle signal
   // and the guard against photographing that wrong state; a reload is enough
   // to recover, since the next request is not rate limited.
-  const badge = page.locator('.mode-badge', { hasText: 'Personal mode' })
+  const personal = page.locator('.header[data-mode="personal"]')
   let lastError = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
     // reload() on retries, not goto(): the app is hash-routed, so navigating to
@@ -74,7 +76,7 @@ async function loadNotebook(browser, baseUrl, sessionId, theme, viewport = VIEWP
       await page.reload({ waitUntil: 'networkidle' })
     }
     try {
-      await badge.waitFor({ timeout: TIMEOUT_MS })
+      await personal.waitFor({ timeout: TIMEOUT_MS })
       lastError = null
       break
     } catch (err) {
@@ -84,7 +86,7 @@ async function loadNotebook(browser, baseUrl, sessionId, theme, viewport = VIEWP
   if (lastError) {
     throw new Error(
       `notebook ${sessionId} never reported personal mode (a failed /workers ` +
-        `request leaves the badge reading "Service mode"): ${lastError.message}`,
+        `request leaves the header in service mode): ${lastError.message}`,
     )
   }
   await page.locator('.cell').first().waitFor({ timeout: TIMEOUT_MS })
@@ -285,6 +287,7 @@ async function main() {
         // an element shot of an overflowing panel spills into the drawer.
         await page.setViewportSize({ width: VIEWPORT.width, height: 2000 })
         await page.locator('.dag-drawer').getByText('collapse').click()
+        await page.getByTestId('notebook-settings-toggle').click()
         await page.locator('.workers-toggle').click()
         // Wait for the health check the panel ran against the real worker, not
         // just the panel: before it lands the worker reads "unknown".

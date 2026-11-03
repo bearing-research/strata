@@ -139,8 +139,8 @@ Library, mount, and worker shapes are annotation-driven too. See
 Three cells, one real DAG. We'll load the iris dataset, summarize
 by species, and plot a scatter.
 
-**Before typing**, open the **Environment** panel in the sidebar and
-add `scikit-learn`, `pandas`, and `matplotlib`. Each `uv add` runs
+**Before typing**, open **Notebook settings** in the sidebar, then the
+**Environment** panel, and add `scikit-learn`, `pandas`, and `matplotlib`. Each `uv add` runs
 in the background and the notebook surfaces a sync banner while it's
 working. Wait for the banner to clear before running the first cell.
 
@@ -202,7 +202,7 @@ virginica                6.59              2.97               5.55              
 
 Strata reads this cell's AST, sees it references `df` and `feature_names`
 from the loader, and wires an edge. The DAG view in the bottom
-drawer shows the dependency.
+drawer (click **expand**) shows the dependency.
 
 ### Plot
 

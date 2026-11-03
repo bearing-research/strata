@@ -7,12 +7,20 @@ import AddCellMenu from '../components/AddCellMenu.vue'
 import CellEditor from '../components/CellEditor.vue'
 import ExportMenu from '../components/ExportMenu.vue'
 import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal.vue'
+import OverflowMenu from '../components/OverflowMenu.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useStrata } from '../composables/useStrata'
 import { embedSnippet } from '../utils/embedSnippet'
 import { editorChrome, editorQuery, isFramed } from '../utils/framed'
 import { BASE_PATH } from '../utils/strataBase'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
+import {
+  connectionStatus,
+  dagDrawerStartsCollapsed,
+  NARROW_HEADER_QUERY,
+  overflowActions,
+  settingsAttention,
+} from '../utils/notebookChrome'
 
 const DagView = defineAsyncComponent(() => import('../components/DagView.vue'))
 const NotesPanel = defineAsyncComponent(() => import('../components/NotesPanel.vue'))
@@ -58,6 +66,7 @@ const {
   hasUnsentEdits,
   flushDirtyCells,
   environmentMutationActive,
+  environmentError,
   workerDefinitionsEditable,
   workerModeKnown,
   serviceMode,
@@ -164,9 +173,9 @@ const dagDrawerHeight = ref(readNumber(DAG_DRAWER_HEIGHT_KEY, DAG_DRAWER_DEFAULT
 const dagDrawerCollapsed = ref(
   (() => {
     try {
-      return localStorage.getItem(DAG_DRAWER_COLLAPSED_KEY) === '1'
+      return dagDrawerStartsCollapsed(localStorage.getItem(DAG_DRAWER_COLLAPSED_KEY))
     } catch {
-      return false
+      return dagDrawerStartsCollapsed(null)
     }
   })(),
 )
@@ -227,6 +236,29 @@ function isServiceModeSessionRestriction(message: string | null | undefined): bo
     normalized.includes('session apis are only available in personal mode')
   )
 }
+
+const narrowHeaderMedia = window.matchMedia(NARROW_HEADER_QUERY)
+const narrowHeader = ref(narrowHeaderMedia.matches)
+function onNarrowHeaderChange(event: MediaQueryListEvent) {
+  narrowHeader.value = event.matches
+}
+narrowHeaderMedia.addEventListener('change', onNarrowHeaderChange)
+
+const overflow = computed(() => overflowActions(chrome.value, narrowHeader.value))
+const connection = computed(() => connectionStatus(loading.value, connected.value))
+
+const settingsOpen = ref(false)
+const attention = computed(() =>
+  settingsAttention({
+    mounts: notebook.mounts.length,
+    worker: notebook.worker,
+    environmentBusy: environmentMutationActive.value,
+    environmentFailed:
+      Boolean(environmentError.value) ||
+      notebook.environment.syncState === 'failed' ||
+      notebook.rEnvironment.syncState === 'failed',
+  }),
+)
 
 const notebookModeLabel = computed(() => (serviceMode.value ? 'Service mode' : 'Personal mode'))
 const notebookModeTitle = computed(() =>
@@ -488,6 +520,7 @@ function startSidebarResize(event: PointerEvent) {
 }
 
 onUnmounted(() => {
+  narrowHeaderMedia.removeEventListener('change', onNarrowHeaderChange)
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('beforeunload', warnUnsentEdits)
   stopSidebarResize()
@@ -590,10 +623,18 @@ function goHome() {
     <InspectSwapConfirm />
     <ReadConfirm />
     <!-- Header -->
-    <header class="header">
+    <header
+      class="header"
+      :data-mode="workerModeKnown ? (serviceMode ? 'service' : 'personal') : undefined"
+    >
       <div v-if="chrome.brand" class="header-left">
         <span class="logo" role="button" tabindex="0" title="Home" @click="goHome">◆ strata</span>
-        <span v-if="!editingName" class="notebook-name" @dblclick="startEditName">
+        <span
+          v-if="!editingName"
+          class="notebook-name"
+          :title="notebook.name"
+          @dblclick="startEditName"
+        >
           {{ notebook.name }}
         </span>
         <input
@@ -608,35 +649,18 @@ function goHome() {
         />
       </div>
       <div class="header-right">
-        <template v-if="chrome.pageLinks">
-          <router-link
-            :to="`/app/${sessionId}`"
-            class="header-logs-link"
-            data-testid="nav-app"
-            title="Open as read-only app (widgets + outputs)"
-          >
-            App
-          </router-link>
-          <router-link
-            to="/artifacts"
-            class="header-logs-link"
-            data-testid="nav-artifacts"
-            title="Artifact store"
-          >
-            Artifacts
-          </router-link>
-          <router-link
-            to="/logs"
-            class="header-logs-link"
-            data-testid="nav-logs"
-            title="Server logs"
-          >
-            Logs
-          </router-link>
-        </template>
+        <router-link
+          v-if="chrome.pageLinks && !overflow.includes('app')"
+          :to="`/app/${sessionId}`"
+          class="header-logs-link"
+          data-testid="nav-app"
+          title="Open as read-only app (widgets + outputs)"
+        >
+          App
+        </router-link>
         <ThemeToggle />
         <span
-          v-if="chrome.modeBadge && !loading && notebook.id && workerModeKnown"
+          v-if="chrome.modeBadge && !loading && notebook.id && workerModeKnown && serviceMode"
           class="mode-badge"
           :class="{
             service: !workerDefinitionsEditable,
@@ -646,9 +670,14 @@ function goHome() {
         >
           {{ notebookModeLabel }}
         </span>
-        <span class="connection" :class="{ connected: connected }">
-          {{ loading ? '◌ Connecting…' : connected ? '● Live' : '○ Not connected' }}
-        </span>
+        <span
+          class="connection"
+          :class="connection.state"
+          role="status"
+          data-testid="notebook-connection"
+          :aria-label="connection.label"
+          :title="connection.label"
+        ></span>
         <button
           class="btn"
           data-testid="notebook-run-all"
@@ -658,7 +687,8 @@ function goHome() {
           ▶ Run All
         </button>
         <button
-          class="btn"
+          v-if="!overflow.includes('rerunAll')"
+          class="btn btn-secondary"
           data-testid="notebook-rerun-all"
           title="Force re-execute every cell, bypassing cache"
           :disabled="!connected || environmentMutationActive"
@@ -678,26 +708,80 @@ function goHome() {
           @select="onExportSelect"
         />
         <button
-          v-if="chrome.deleteNotebook"
-          class="btn btn-danger"
-          data-testid="notebook-delete"
-          :disabled="deleteButtonDisabled"
-          :title="
-            environmentMutationActive
-              ? 'Finish the environment update before deleting the notebook.'
-              : ''
-          "
-          @click="deleteNotebook"
-        >
-          {{ deletingNotebook ? 'Deleting…' : 'Delete Notebook' }}
-        </button>
-        <button
+          v-if="!overflow.includes('shortcuts')"
           class="btn btn-secondary btn-shortcuts"
           title="Keyboard shortcuts (?)"
           @click="showShortcuts = true"
         >
           ?
         </button>
+        <OverflowMenu v-if="overflow.length">
+          <button
+            v-if="overflow.includes('rerunAll')"
+            class="overflow-item"
+            role="menuitem"
+            data-testid="notebook-rerun-all"
+            title="Force re-execute every cell, bypassing cache"
+            :disabled="!connected || environmentMutationActive"
+            @click="rerunAll"
+          >
+            ↻ Rerun All
+          </button>
+          <router-link
+            v-if="overflow.includes('app')"
+            :to="`/app/${sessionId}`"
+            class="overflow-item"
+            role="menuitem"
+            data-testid="nav-app"
+            title="Open as read-only app (widgets + outputs)"
+          >
+            App
+          </router-link>
+          <button
+            v-if="overflow.includes('shortcuts')"
+            class="overflow-item"
+            role="menuitem"
+            title="Keyboard shortcuts (?)"
+            @click="showShortcuts = true"
+          >
+            Keyboard shortcuts
+          </button>
+          <router-link
+            v-if="overflow.includes('artifacts')"
+            to="/artifacts"
+            class="overflow-item"
+            role="menuitem"
+            data-testid="nav-artifacts"
+            title="Artifact store"
+          >
+            Artifacts
+          </router-link>
+          <router-link
+            v-if="overflow.includes('logs')"
+            to="/logs"
+            class="overflow-item"
+            role="menuitem"
+            data-testid="nav-logs"
+            title="Server logs"
+          >
+            Logs
+          </router-link>
+          <button
+            v-if="overflow.includes('delete')"
+            class="overflow-item overflow-item-danger"
+            role="menuitem"
+            data-testid="notebook-delete"
+            :disabled="deleteButtonDisabled"
+            :title="
+              environmentMutationActive
+                ? 'Finish the environment update before deleting the notebook.'
+                : ''
+            "
+            @click="deleteNotebook"
+          >
+            {{ deletingNotebook ? 'Deleting…' : 'Delete Notebook' }}
+          </button>
+        </OverflowMenu>
       </div>
     </header>
 
@@ -821,12 +905,38 @@ function goHome() {
 
         <!-- Runtime / config panels (ProfilingPanel is in the DAG drawer) -->
         <aside class="sidebar">
-          <MountsPanel />
-          <ConnectionsPanel />
-          <SchemaPanel />
-          <WorkersPanel v-if="workersPanelShown" />
-          <RuntimePanel />
-          <EnvironmentPanel />
+          <!-- Panels stay mounted in one list, so moving in or out of the group keeps their state. -->
+          <button
+            class="settings-toggle"
+            data-testid="notebook-settings-toggle"
+            :aria-expanded="settingsOpen"
+            @click="settingsOpen = !settingsOpen"
+          >
+            Notebook settings
+            <span class="toggle-icon">{{ settingsOpen ? '&#9650;' : '&#9660;' }}</span>
+          </button>
+          <div
+            v-show="settingsOpen || attention.mounts"
+            :class="attention.mounts ? 'panel-attention' : 'panel-grouped'"
+          >
+            <MountsPanel :attention="attention.mounts" />
+          </div>
+          <div v-show="settingsOpen" class="panel-grouped"><ConnectionsPanel /></div>
+          <div v-show="settingsOpen" class="panel-grouped"><SchemaPanel /></div>
+          <div
+            v-if="workersPanelShown"
+            v-show="settingsOpen || attention.worker"
+            :class="attention.worker ? 'panel-attention' : 'panel-grouped'"
+          >
+            <WorkersPanel :attention="attention.worker" />
+          </div>
+          <div v-show="settingsOpen" class="panel-grouped"><RuntimePanel /></div>
+          <div
+            v-show="settingsOpen || attention.environment"
+            :class="attention.environment ? 'panel-attention' : 'panel-grouped'"
+          >
+            <EnvironmentPanel :attention="attention.environment" />
+          </div>
         </aside>
       </div>
 
@@ -988,6 +1098,45 @@ function goHome() {
   color: var(--accent-success);
 }
 
+.sidebar {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-attention {
+  order: 0;
+}
+
+.settings-toggle {
+  order: 1;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-top: 12px;
+  padding: 4px 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.settings-toggle:hover {
+  color: var(--text-primary);
+}
+
+.settings-toggle .toggle-icon {
+  margin-left: auto;
+  font-size: 10px;
+}
+
+.panel-grouped {
+  order: 2;
+}
+
 .reconnect-state {
   max-width: 720px;
   margin: 48px auto;
@@ -1022,16 +1171,6 @@ function goHome() {
 .reconnect-actions {
   display: flex;
   gap: 12px;
-}
-
-.btn-danger {
-  border-color: var(--accent-danger);
-  background: var(--tint-danger);
-  color: var(--accent-danger);
-}
-
-.btn-danger:disabled {
-  opacity: 0.6;
 }
 
 /* Flash highlight when jumping to a cell from the DAG view */

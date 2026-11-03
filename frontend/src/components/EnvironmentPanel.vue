@@ -101,6 +101,7 @@ async function confirmPythonChange(version: string) {
 }
 
 const newPackage = ref('')
+const props = defineProps<{ attention?: boolean }>()
 const showPanel = ref(false)
 const packageView = ref<'declared' | 'resolved'>('declared')
 const packageFilter = ref('')
@@ -439,6 +440,13 @@ watch(
     }
   },
   { flush: 'post' },
+)
+watch(
+  () => props.attention,
+  (needed) => {
+    if (needed) showPanel.value = true
+  },
+  { immediate: true },
 )
 
 async function addPackage() {

@@ -952,7 +952,7 @@ Key/value parameters:
 
 - `connection=<name>`, required. Must reference an entry under
   `[connections.<name>]` in `notebook.toml`. Manage these via the
-  **Connections panel** in the sidebar; you don't need to edit the file
+  **Connections panel**, under **Notebook settings** in the sidebar; you don't need to edit the file
   directly.
 - `write=true`, opt the cell into writable execution. Without this flag the
   cell may only read: `SELECT`, set operations, `VALUES`, `TABLE`,

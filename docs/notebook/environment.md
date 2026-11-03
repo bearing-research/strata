@@ -33,7 +33,7 @@ To change it later, click **Requested Python** in the Environment panel. Strata 
 
 ### From the UI
 
-Open the **Environment** panel in the sidebar. Type a package name and click **Add**.
+Open **Notebook settings** in the sidebar, then the **Environment** panel. Type a package name and click **Add**.
 
 ```
 pandas>=2.0

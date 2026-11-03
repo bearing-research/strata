@@ -52,7 +52,7 @@ The credentials only live in the server process, never in `notebook.toml`, `.str
 
 ### 3. Wire up the notebook
 
-Open the notebook and use the **Secret manager** section in the Runtime panel:
+Open the notebook, open **Notebook settings** in the sidebar, and use the **Secret manager** section in the Runtime panel:
 
 1. Pick the provider (`infisical`).
 2. Fill in `project_id`, `environment` (`dev` / `staging` / `prod`), and `path` (defaults to `/`). Base URL is optional: the server accepts only its own `INFISICAL_HOST` there (or the public default when that is unset), so a self-hosted deployment is set with `INFISICAL_HOST` where the server starts.
