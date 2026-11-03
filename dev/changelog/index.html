@@ -3985,6 +3985,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A <code>:memory:</code> database stays in memory.</strong> A DuckDB or SQLite connection with
+  <code>path = ":memory:"</code> opened a real file of that name in the notebook folder, so
+  a cell's tables outlived the run and the file could be committed. If a notebook
+  relied on that, name a file in <code>path</code>. (#1377)</li>
 <li><strong>A notebook-level mount reaches only the cells that read it.</strong> Every
   cell used to list it, download all of it, and run again when it changed: a
   rollup cell spent 35 minutes downloading a bucket it never read. Those cells
