@@ -768,6 +768,68 @@ async def test_a_team_hit_is_priced_by_the_run_it_replaced(
     assert summary["team_cache_hits"] == 1
 
 
+async def test_a_team_hit_in_run_all_is_priced_by_the_publisher(
+    tmp_path, team_store_server, monkeypatch
+):
+    """Run All pulls from the team store too, and its hit must carry the publisher's cost."""
+    from strata.config import StrataConfig
+    from strata.notebook import ws
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    source = "value = sum(range(4100))"
+
+    def build(name: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", source)
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", "doubled = value * 2")
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.ensure_venv_synced()
+        return session
+
+    monkeypatch.setattr(
+        CellExecutor,
+        "_lake_config",
+        lambda self: StrataConfig(
+            cache_dir=tmp_path / "cache",
+            notebook_remote_store_url=team_store_server["base_url"],
+            notebook_team_cache_enabled=True,
+        ),
+    )
+    sent: list[dict] = []
+
+    async def record(notebook_id: str, message: dict, **kwargs) -> None:
+        sent.append(message)
+
+    monkeypatch.setattr(ws, "_broadcast_message", record)
+
+    alice = build("alice")
+    alice_run = await CellExecutor(alice).execute_cell("up", source)
+    assert alice_run.success, alice_run.error
+
+    bob = build("bob")
+
+    class _Manager:
+        def get_session(self, notebook_id: str):
+            return bob
+
+    monkeypatch.setattr(ws, "_get_session_manager", lambda: _Manager())
+    await ws._execute_run_all(None, bob, ["up", "down"], ws.NotebookExecutionState(), bob.id)
+
+    sample = bob.execution_history["up"][-1]
+    assert sample.cache_hit and sample.from_team
+    assert sample.team_saved_ms == int(alice_run.duration_ms)
+    assert bob.get_profiling_summary()["team_cache_savings_ms"] == int(alice_run.duration_ms)
+    frame = next(
+        m["payload"] for m in sent if m["type"] == "cell_output" and m["payload"]["cell_id"] == "up"
+    )
+    assert frame["saved_ms"] == int(alice_run.duration_ms)
+
+
 async def test_a_failed_environment_sync_does_not_publish(tmp_path, team_store_server, monkeypatch):
     """A failed ``uv sync`` keeps the old venv and leaves sync state ``ready``, while provenance
     follows the new ``uv.lock``.

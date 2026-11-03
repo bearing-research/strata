@@ -83,7 +83,7 @@ export interface CellProfileModel {
   cell_id: string
   cell_name: string
   status: string
-  duration_ms: number
+  duration_ms?: number | null
   cache_hit: boolean
   artifact_uri?: string | null
   execution_count: number

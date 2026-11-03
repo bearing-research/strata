@@ -41,7 +41,11 @@ function refresh() {
         <div class="stat-row">
           <span class="stat-label">Cache savings</span>
           <span class="stat-value cache-savings">
-            ~{{ formatMs(profilingSummary.cacheSavingsMs) }}
+            {{
+              profilingSummary.cacheSavingsMs
+                ? `~${formatMs(profilingSummary.cacheSavingsMs)}`
+                : '-'
+            }}
             <span class="stat-detail">({{ profilingSummary.cacheHits }} hits)</span>
           </span>
         </div>

@@ -16,6 +16,7 @@ import {
 } from '../utils/notebookWorkers'
 import { inputWeightBadge } from '../utils/inputWeights'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
+import { cacheBadgeLabel, cacheBadgeTitle } from '../utils/cacheBadge'
 import { renderMarkdownToHtml } from '../utils/markdown'
 import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
 
@@ -1011,13 +1012,9 @@ function outputKey(output: CellOutput, index: number): string {
           <span
             v-if="cell.output?.cacheHit"
             class="cache-badge"
-            :title="
-              cell.output?.cacheLoadMs
-                ? `Result loaded from cache in ${cell.output.cacheLoadMs}ms`
-                : 'Result loaded from cache'
-            "
+            :title="cacheBadgeTitle(cell.output?.cacheLoadMs)"
           >
-            &#x26A1; cached{{ cell.output?.cacheLoadMs ? ` · ${cell.output.cacheLoadMs}ms` : '' }}
+            &#x26A1; {{ cacheBadgeLabel(cell.output?.cacheSavedMs, cell.output?.cacheLoadMs) }}
           </span>
           <span
             v-if="executionMethodLabel && !cell.output?.cacheHit"

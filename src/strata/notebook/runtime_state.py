@@ -258,7 +258,7 @@ def persist_cell_execution_sample(
     notebook_dir: Path,
     cell_id: str,
     *,
-    duration_ms: float,
+    duration_ms: float | None,
     cache_hit: bool,
     from_team: bool = False,
     team_principal: str | None = None,
@@ -275,7 +275,10 @@ def persist_cell_execution_sample(
     """
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
-    sample: dict[str, Any] = {"duration_ms": float(duration_ms), "cache_hit": bool(cache_hit)}
+    sample: dict[str, Any] = {
+        "duration_ms": None if duration_ms is None else float(duration_ms),
+        "cache_hit": bool(cache_hit),
+    }
     # Only for a team hit, so ordinary runs do not grow dead keys.
     if from_team:
         sample["from_team"] = True

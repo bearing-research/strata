@@ -189,7 +189,8 @@ class _OutsideWorld:
 class ExecutionSample:
     """One execution timing sample for profiling and estimates."""
 
-    duration_ms: float
+    # None when the time is unknown; totals and savings skip it.
+    duration_ms: float | None
     cache_hit: bool
     # Set only for a shared team store hit: who computed it and what their run cost.
     # The estimator prices a hit against the last local uncached run, which a
@@ -2235,7 +2236,9 @@ class NotebookSession:
         for cell_id, entry in load_runtime_state(self.path).cells.items():
             samples = [
                 ExecutionSample(
-                    duration_ms=float(sample["duration_ms"]),
+                    duration_ms=(
+                        None if sample["duration_ms"] is None else float(sample["duration_ms"])
+                    ),
                     cache_hit=bool(sample["cache_hit"]),
                     from_team=bool(sample.get("from_team")),
                     team_principal=sample.get("team_principal"),
@@ -2251,7 +2254,7 @@ class NotebookSession:
     def record_execution(
         self,
         cell_id: str,
-        duration_ms: float,
+        duration_ms: float | None,
         cache_hit: bool,
         *,
         from_team: bool = False,
@@ -2299,9 +2302,24 @@ class NotebookSession:
         """Estimated execution duration in ms from history, or 0 without history."""
         history = self.execution_history.get(cell_id, [])
         for sample in reversed(history):
-            if not sample.cache_hit:
+            if not sample.cache_hit and sample.duration_ms is not None:
                 return int(sample.duration_ms)
         return 0
+
+    def last_hit_saved_ms(self, cell_id: str) -> int:
+        """What the cell's latest cache hit saved; 0 when that is unknown.
+
+        The profiling summary's rule for one hit, so the badge and the panel agree.
+        A run after the hit reprices it: an upstream hit a cascade replays is not recorded.
+        """
+        last_run_ms = 0
+        saved_ms = 0
+        for sample in self.execution_history.get(cell_id, []):
+            if sample.cache_hit:
+                saved_ms = sample.team_saved_ms or last_run_ms
+            elif sample.duration_ms is not None:
+                saved_ms = last_run_ms = int(sample.duration_ms)
+        return saved_ms
 
     def get_profiling_summary(self) -> dict:
         """Notebook-level profiling: total time, cache savings, artifact sizes, per-cell data."""
@@ -2313,10 +2331,10 @@ class NotebookSession:
         cell_profiles = []
         for cell in self.notebook_state.cells:
             history = self.execution_history.get(cell.id, [])
-            last_duration = history[-1].duration_ms if history else 0
+            last_duration = history[-1].duration_ms if history else None
             is_cached = history[-1].cache_hit if history else cell.cache_hit
 
-            total_execution_ms += int(sum(sample.duration_ms for sample in history))
+            total_execution_ms += int(sum(sample.duration_ms or 0 for sample in history))
             cache_hits += sum(1 for sample in history if sample.cache_hit)
             cache_misses += sum(1 for sample in history if not sample.cache_hit)
 
@@ -2326,7 +2344,7 @@ class NotebookSession:
                     "cell_id": cell.id,
                     "cell_name": cell_name,
                     "status": cell.status,
-                    "duration_ms": int(last_duration),
+                    "duration_ms": None if last_duration is None else int(last_duration),
                     "cache_hit": is_cached,
                     "artifact_uri": cell.artifact_uri,
                     "execution_count": len(history),
@@ -2356,7 +2374,7 @@ class NotebookSession:
                             team_contributors.add(sample.team_principal)
                         if sample.team_promotion:
                             team_promotions.add(sample.team_promotion)
-                else:
+                elif sample.duration_ms is not None:
                     last_non_cached_duration = int(sample.duration_ms)
 
         return {

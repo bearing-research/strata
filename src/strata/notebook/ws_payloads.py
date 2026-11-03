@@ -310,7 +310,7 @@ class CellProfileModel(WsPayload):
     cell_id: str
     cell_name: str
     status: str
-    duration_ms: int
+    duration_ms: int | None = None
     cache_hit: bool
     artifact_uri: str | None = None
     execution_count: int

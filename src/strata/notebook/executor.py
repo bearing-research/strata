@@ -498,6 +498,11 @@ class BatchCellResult:
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     cache_hit: bool = False
     mutation_warnings: list[MutationWarning] = field(default_factory=list)
+    # None when the cell's time is unknown (it never started, or was killed): not 0,
+    # which would price its later cache hits at nothing.
+    duration_ms: float | None = None
+    # Set on a hit the team store served; ws prices the hit from it.
+    team_pull: TeamPull | None = None
 
 
 @dataclass(kw_only=True)
@@ -6931,6 +6936,7 @@ class CellExecutor:
         active_cell_id: str | None = None
         end_reason = "subprocess_died"
         failed_cell_id: str | None = None
+        team_pulls: dict[str, TeamPull] = {}
 
         async def _record(cell_id: str, result: BatchCellResult) -> None:
             cell_results[cell_id] = result
@@ -7031,6 +7037,10 @@ class CellExecutor:
                         use_cache=use_cache,
                     )
                 )
+                # Parent-side only: the harness has no use for it and it isn't JSON.
+                team_pull = response.pop("team_pull", None)
+                if team_pull is not None:
+                    team_pulls[payload.get("cell_id", "")] = team_pull
                 # Answered once here instead of at each cache-check return; the cell's ambient
                 # client needs it to name what it promotes.
                 response["input_uris"] = self._upstream_artifact_uris(payload.get("cell_id", ""))
@@ -7061,6 +7071,7 @@ class CellExecutor:
                             outputs=payload.get("outputs") or {},
                             display_outputs=display_outputs,
                             mutation_warnings=payload.get("mutation_warnings") or [],
+                            duration_ms=payload.get("duration_ms"),
                         ),
                     )
                 else:
@@ -7074,6 +7085,7 @@ class CellExecutor:
                             error=response.get("error"),
                             stdout=payload.get("stdout", ""),
                             stderr=payload.get("stderr", ""),
+                            duration_ms=payload.get("duration_ms"),
                         ),
                     )
                 send_response(response)
@@ -7093,6 +7105,8 @@ class CellExecutor:
                             stderr=payload.get("stderr", ""),
                             outputs=payload.get("outputs") or {},
                             display_outputs=payload.get("display_outputs") or [],
+                            duration_ms=payload.get("duration_ms"),
+                            team_pull=team_pulls.get(active_cell_id),
                         ),
                     )
                 if watchdog_state is not None:
@@ -7109,6 +7123,7 @@ class CellExecutor:
                         traceback=payload.get("traceback"),
                         stdout=payload.get("stdout", ""),
                         stderr=payload.get("stderr", ""),
+                        duration_ms=payload.get("duration_ms"),
                     ),
                 )
                 if watchdog_state is not None:
@@ -7344,6 +7359,7 @@ class CellExecutor:
         cached_outputs = self._materialize_batch_cache_hit(
             cell, cell_id, provenance_hash, consumed_vars, cell_output_dir
         )
+        team_pull: TeamPull | None = None
         if cached_outputs is None and consumed_vars:
             # Team cache tier, in single-run order: only after a local miss. A pull writes each
             # variable under its canonical local id, so the same probe decides afterwards.
@@ -7385,6 +7401,7 @@ class CellExecutor:
             "cached_displays": cached_displays,
             "stdout": cached_console[0] if cached_console else "",
             "stderr": cached_console[1] if cached_console else "",
+            "team_pull": team_pull,
         }
 
     async def _batch_service_persist(
