@@ -41,27 +41,27 @@
   },
   {
     "op": "run_cell",
-    "cell": "con",
+    "cell": "leaf",
     "outputs": true
   },
   {
     "op": "edit_cell",
-    "cell": "con",
+    "cell": "leaf",
     "source": "print(\"console leaf two\")\n"
   },
   {
     "op": "run_cell",
-    "cell": "con",
+    "cell": "leaf",
     "outputs": true
   },
   {
     "op": "edit_cell",
-    "cell": "con",
+    "cell": "leaf",
     "source": "print(\"console leaf\")\n"
   },
   {
     "op": "run_cell",
-    "cell": "con",
+    "cell": "leaf",
     "outputs": true
   },
   {

@@ -5,7 +5,7 @@ mounts = []
 cells = [
     { id = "base", file = "base.py", language = "python", order = 0 },
     { id = "double", file = "double.py", language = "python", order = 1 },
-    { id = "con", file = "con.py", language = "python", order = 2 },
+    { id = "leaf", file = "leaf.py", language = "python", order = 2 },
     { id = "show", file = "show.py", language = "python", order = 3 },
     { id = "tbl", file = "tbl.py", language = "python", order = 4 },
     { id = "seen", file = "seen.py", language = "python", order = 5 },

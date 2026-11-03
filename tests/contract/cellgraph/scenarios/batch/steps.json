@@ -43,7 +43,7 @@
   },
   {
     "op": "edit_cell",
-    "cell": "con",
+    "cell": "leaf",
     "source": "print(\"console leaf two\")\n"
   },
   {
@@ -51,7 +51,7 @@
   },
   {
     "op": "edit_cell",
-    "cell": "con",
+    "cell": "leaf",
     "source": "print(\"console leaf\")\n"
   },
   {

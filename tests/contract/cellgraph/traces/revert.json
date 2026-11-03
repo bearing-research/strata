@@ -4,7 +4,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -251,7 +251,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -278,7 +278,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -296,7 +296,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -543,7 +543,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -570,7 +570,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -617,7 +617,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -849,7 +849,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -876,7 +876,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -909,7 +909,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -1158,7 +1158,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -1185,7 +1185,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -1203,7 +1203,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -1450,7 +1450,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -1477,7 +1477,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -1524,7 +1524,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -1756,7 +1756,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -1783,7 +1783,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -1816,7 +1816,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -2065,7 +2065,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -2092,7 +2092,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -2110,7 +2110,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -2357,7 +2357,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -2384,7 +2384,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -2402,7 +2402,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -2650,7 +2650,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -2677,7 +2677,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -2687,18 +2687,18 @@
    },
    "dag_error": null,
    "step": {
-    "cell": "con",
+    "cell": "leaf",
     "op": "run_cell",
     "outputs": true
    }
   },
   {
    "causality": {
-    "con": {
+    "leaf": {
      "details": [
       {
-       "cell_id": "con",
-       "cell_name": "con",
+       "cell_id": "leaf",
+       "cell_name": "leaf",
        "input_kind": null,
        "input_name": null,
        "package": null,
@@ -2710,7 +2710,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -2950,7 +2950,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -2977,7 +2977,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -2987,7 +2987,7 @@
    },
    "dag_error": null,
    "step": {
-    "cell": "con",
+    "cell": "leaf",
     "op": "edit_cell",
     "source": "print(\"console leaf two\")\n"
    }
@@ -2995,7 +2995,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -3243,7 +3243,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -3270,7 +3270,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -3280,18 +3280,18 @@
    },
    "dag_error": null,
    "step": {
-    "cell": "con",
+    "cell": "leaf",
     "op": "run_cell",
     "outputs": true
    }
   },
   {
    "causality": {
-    "con": {
+    "leaf": {
      "details": [
       {
-       "cell_id": "con",
-       "cell_name": "con",
+       "cell_id": "leaf",
+       "cell_name": "leaf",
        "input_kind": null,
        "input_name": null,
        "package": null,
@@ -3303,7 +3303,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -3543,7 +3543,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -3570,7 +3570,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -3580,7 +3580,7 @@
    },
    "dag_error": null,
    "step": {
-    "cell": "con",
+    "cell": "leaf",
     "op": "edit_cell",
     "source": "print(\"console leaf\")\n"
    }
@@ -3588,7 +3588,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -3836,7 +3836,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -3863,7 +3863,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -3873,7 +3873,7 @@
    },
    "dag_error": null,
    "step": {
-    "cell": "con",
+    "cell": "leaf",
     "op": "run_cell",
     "outputs": true
    }
@@ -3881,7 +3881,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -4134,7 +4134,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -4161,7 +4161,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -4194,7 +4194,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -4434,7 +4434,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -4461,7 +4461,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -4479,7 +4479,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -4737,7 +4737,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -4764,7 +4764,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -4797,7 +4797,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -5037,7 +5037,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -5064,7 +5064,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -5082,7 +5082,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -5335,7 +5335,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -5362,7 +5362,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -5380,7 +5380,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -5638,7 +5638,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -5665,7 +5665,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -5683,7 +5683,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -5940,7 +5940,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -5967,7 +5967,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -6014,7 +6014,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -6256,7 +6256,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -6283,7 +6283,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -6316,7 +6316,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -6576,7 +6576,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -6603,7 +6603,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -6621,7 +6621,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -6878,7 +6878,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -6905,7 +6905,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -6952,7 +6952,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -7194,7 +7194,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -7221,7 +7221,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -7254,7 +7254,7 @@
     }
    },
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -7513,7 +7513,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -7540,7 +7540,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
@@ -7558,7 +7558,7 @@
   {
    "causality": {},
    "cells": {
-    "con": {
+    "leaf": {
      "analysis": {
       "builtin_references": [
        "print"
@@ -7815,7 +7815,7 @@
    },
    "dag": {
     "consumed_variables": {
-     "con": [],
+     "leaf": [],
      "printed": [
       "printed"
      ],
@@ -7842,7 +7842,7 @@
     "inactive_cells": [],
     "topological_order": [
      "value",
-     "con",
+     "leaf",
      "show",
      "printed",
      "read",
