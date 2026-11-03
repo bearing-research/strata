@@ -78,6 +78,7 @@ carries both.
 
 | Notebook | What you'll see |
 | --- | --- |
+| [`each_pipeline`](../examples/each_pipeline.md) | `# @each` over 287 real files from a public bucket, each cached on its own, and `# @write_table ... sync` keeping a table in a REST catalog in step. Needs Docker. |
 | [`s3_mount`](../examples/s3_mount.md) | `# @mount` annotation makes an S3 prefix available as a local `pathlib.Path` inside the cell. |
 
 ## Markdown rendering

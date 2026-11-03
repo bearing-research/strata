@@ -73,6 +73,23 @@ async def _run(nb_dir: Path, session: NotebookSession, cell_id: str) -> Any:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("options", ['mounts = ["raw"]', ""])
+async def test_a_memory_connection_leaves_no_file_in_the_notebook(tmp_path, options):
+    _write_parquet(tmp_path / "raw" / "a.parquet", [1])
+    nb_dir = _notebook(
+        tmp_path,
+        {"c1": "# @sql connection=lake\nSELECT 1 AS one\n"},
+        f'driver = "duckdb"\npath = ":memory:"\n{options}',
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    result = await _run(nb_dir, session, "c1")
+
+    assert result.success, result.error
+    assert not (nb_dir / ":memory:").exists()
+
+
+@pytest.mark.asyncio
 async def test_a_mount_is_a_view_and_a_new_file_makes_the_cell_stale(tmp_path):
     _write_parquet(tmp_path / "raw" / "2026" / "a.parquet", [1, 2])
     nb_dir = _notebook(

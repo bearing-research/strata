@@ -1,0 +1,28 @@
+notebook_id = "each-pipeline-example-001"
+name = "Pipeline over Files (@each + sync)"
+created_at = 2026-11-02T00:00:00Z
+updated_at = 2026-11-02T00:00:00Z
+
+# NOAA's daily weather, one file per station. Public: anon needs no AWS account.
+[[mounts]]
+name = "gsod"
+uri = "s3://noaa-gsod-pds/2024"
+mode = "ro"
+options = { anon = true }
+
+[connections.lake]
+driver = "duckdb"
+path = ":memory:"
+catalog = "lake"
+
+[[cells]]
+id = "summarize"
+file = "summarize.py"
+language = "python"
+order = 0
+
+[[cells]]
+id = "hottest"
+file = "hottest.py"
+language = "sql"
+order = 1

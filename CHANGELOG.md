@@ -19,7 +19,9 @@ exhaustive commit history.
   dict, list or table from another cell. A changed item runs alone, a removed
   one leaves, and a later cell reads `{item: value}`. With `@write_table ... sync`
   the table is written once per run over every item's rows, so a removed file's
-  rows are deleted. A remote mount downloads only what `glob=` names. (#1372, #1374)
+  rows are deleted. A remote mount downloads only what `glob=` names. The
+  `each_pipeline` example runs this over 287 real files into a REST catalog.
+  (#1372, #1374, #1378)
 
 ### Changed
 - **DuckDB 2.0.** Strata now needs `duckdb>=2.0`. DuckDB 2.0 also applies its
@@ -144,6 +146,10 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A `:memory:` database stays in memory.** A DuckDB or SQLite connection with
+  `path = ":memory:"` opened a real file of that name in the notebook folder, so
+  a cell's tables outlived the run and the file could be committed. If a notebook
+  relied on that, name a file in `path`. (#1377)
 - **A notebook-level mount reaches only the cells that read it.** Every
   cell used to list it, download all of it, and run again when it changed: a
   rollup cell spent 35 minutes downloading a bucket it never read. Those cells
