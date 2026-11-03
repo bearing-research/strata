@@ -2590,7 +2590,7 @@ parent still holds the token.</p>
 <a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="w">  </span><span class="nt">"hardware"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"cpus"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="nt">"memory_mb"</span><span class="p">:</span><span class="w"> </span><span class="mi">32768</span><span class="p">}</span>
 <a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a><span class="p">}</span>
 </code></pre></div>
-<p><strong>3. Register it in your notebook.</strong> Either through the <strong>Workers panel</strong> in the sidebar, or by editing <code>notebook.toml</code>:</p>
+<p><strong>3. Register it in your notebook.</strong> Either through the <strong>Workers panel</strong> under <strong>Notebook settings</strong> in the sidebar, or by editing <code>notebook.toml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[[workers]]</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"local-dev"</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"executor"</span>
@@ -2897,7 +2897,7 @@ machine, and you set it yourself to run the image by hand.</p>
 <p>See <a href="../worker-pool/">Worker Pool</a> for machine types, dispatch, the HTTP
 service, and the isolation model.</p>
 <h2 id="registering-workers">Registering workers<a class="headerlink" href="#registering-workers" title="Permanent link">&para;</a></h2>
-<p>Workers live in <code>notebook.toml</code> under <code>[[workers]]</code>. You can add them through the <strong>Workers panel</strong> sidebar (which writes the same TOML) or edit the file directly:</p>
+<p>Workers live in <code>notebook.toml</code> under <code>[[workers]]</code>. You can add them through the <strong>Workers panel</strong> under <strong>Notebook settings</strong> in the sidebar (which writes the same TOML) or edit the file directly:</p>
 <p><img alt="The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes." src="../../assets/workers-panel-light.png#only-light" />
 <img alt="The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes." src="../../assets/workers-panel-dark.png#only-dark" /></p>
 <table>
