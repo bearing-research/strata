@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from '@lucide/vue'
 /**
  * Post-Jupyter-import dialog: shows the conversion report (server Markdown,
  * sanitized by renderMarkdownToHtml) and offers to open the new notebook.
@@ -31,7 +32,7 @@ const hasDropped = computed(
       <header class="import-report-header">
         <h2 id="import-report-title">Imported {{ notebookName }}</h2>
         <button class="import-report-close" type="button" aria-label="Close" @click="emit('close')">
-          ×
+          <X />
         </button>
       </header>
 

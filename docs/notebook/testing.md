@@ -59,7 +59,7 @@ and write your tests. They're saved as a committed sibling file,
 `cells/<cell-id>.test.py`, so they version and review alongside the cell source.
 A cell with no tests carries no `.test.py` file.
 
-Running them (the `▶` in the panel, or see [over WebSocket](#over-websocket)
+Running them (**Run tests** in the panel, or see [over WebSocket](#over-websocket)
 below) shells out to `pytest` against a temporary run directory holding a copy
 of the cell source, the upstream inputs, and your test file staged under a
 `test_*.py` name (which is what gives you native collection **and** assertion

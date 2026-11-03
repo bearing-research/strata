@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Database, Hexagon, X } from '@lucide/vue'
 import { onBeforeUnmount, onMounted } from 'vue'
 import { useNotebook } from '../stores/notebook'
 
@@ -28,7 +29,7 @@ function formatMs(ms: number): string {
     <div class="lineage-modal">
       <header class="lineage-header">
         <span class="lineage-title">Lineage · {{ lineageTitle }}</span>
-        <button class="lineage-close" @click="closeLineage">✕</button>
+        <button class="lineage-close" aria-label="Close" @click="closeLineage"><X /></button>
       </header>
       <div class="lineage-body">
         <div v-if="lineageLoading" class="lineage-muted">Loading…</div>
@@ -42,7 +43,9 @@ function formatMs(ms: number): string {
             :style="{ paddingLeft: row.depth * 18 + 'px' }"
           >
             <span class="branch">{{ row.depth === 0 ? '' : '└─' }}</span>
-            <span class="ltype" :class="row.type">{{ row.type === 'table' ? '⛁' : '⬡' }}</span>
+            <span class="ltype" :class="row.type"
+              ><Database v-if="row.type === 'table'" /><Hexagon v-else
+            /></span>
             <span class="llabel">{{ row.label }}</span>
             <span v-if="row.version != null" class="lver">v{{ row.version }}</span>
             <!-- Only when recorded; solo notebooks would show a column of dashes. -->

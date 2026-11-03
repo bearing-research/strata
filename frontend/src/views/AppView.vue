@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowLeft } from '@lucide/vue'
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useNotebook } from '../stores/notebook'
@@ -90,7 +91,7 @@ function outputRows(output: CellOutput): unknown[][] {
   <div ref="rootEl" class="app-view" :class="{ embed: isEmbed }">
     <header v-if="!isEmbed" class="app-header">
       <h1>{{ notebookName }}</h1>
-      <router-link class="edit-link" :to="`/notebook/${sessionId}`">← Edit</router-link>
+      <router-link class="edit-link" :to="`/notebook/${sessionId}`"><ArrowLeft /> Edit</router-link>
     </header>
 
     <div v-if="loading" class="app-status">Loading…</div>

@@ -35,24 +35,24 @@ and ++alt+arrow-up++ / ++alt+arrow-down++ move the current line.
 
 ## Cell Actions (Buttons)
 
-These are in the cell gutter, visible on hover. The glyphs are the buttons'
-actual labels:
+These are icons in the cell gutter, visible on hover. Each one's tooltip gives
+its name:
 
 | Button | Action |
 |--------|--------|
-| ▶ | Run cell |
-| ↻ | Rerun cell, bypassing the cache |
-| ■ | Cancel the running cell (replaces ▶ and ↻ while it runs) |
-| ▲ / ▼ | Move cell up / down |
-| + | Add cell below |
-| ⎘ | Duplicate cell |
-| × | Delete cell |
-| ▽ / ▷ | Collapse / expand cell |
-| 🔍 | Inspect cell inputs (REPL) |
-| 🧪 | Unit tests (Python cells) |
+| **Run** | Run cell |
+| **Rerun** | Rerun cell, bypassing the cache |
+| **Cancel running cell** | Cancel the running cell (replaces **Run** and **Rerun** while it runs) |
+| **Move up** / **Move down** | Move cell up / down |
+| **Add cell below** | Add cell below |
+| **Duplicate cell** | Duplicate cell |
+| **Delete cell** | Delete cell |
+| **Collapse cell** / **Expand cell** | Collapse / expand cell |
+| **Inspect inputs** | Inspect cell inputs (REPL) |
+| **Unit tests** | Unit tests (Python cells) |
 
 !!! tip
-    The status glyph at the top of the gutter shows the cell's current state
+    The status icon at the top of the gutter shows the cell's current state
     (idle, queued, running, ready, stale, error); hover it for details.
 
 ## Not yet bound to keyboard

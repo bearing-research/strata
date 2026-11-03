@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronUp, Diamond, Play, RotateCw } from '@lucide/vue'
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useNotebook } from '../stores/notebook'
@@ -631,7 +632,9 @@ function goHome() {
       :data-mode="workerModeKnown ? (serviceMode ? 'service' : 'personal') : undefined"
     >
       <div v-if="chrome.brand" class="header-left">
-        <span class="logo" role="button" tabindex="0" title="Home" @click="goHome">◆ strata</span>
+        <span class="logo" role="button" tabindex="0" title="Home" @click="goHome"
+          ><Diamond fill="currentColor" /> strata</span
+        >
         <span
           v-if="!editingName"
           class="notebook-name"
@@ -687,7 +690,7 @@ function goHome() {
           :disabled="!connected || environmentMutationActive"
           @click="runAll"
         >
-          ▶ Run All
+          <Play fill="currentColor" /> Run All
         </button>
         <button
           v-if="!overflow.includes('rerunAll')"
@@ -697,7 +700,7 @@ function goHome() {
           :disabled="!connected || environmentMutationActive"
           @click="rerunAll"
         >
-          ↻ Rerun All
+          <RotateCw /> Rerun All
         </button>
         <AddCellMenu
           variant="header"
@@ -728,7 +731,7 @@ function goHome() {
             :disabled="!connected || environmentMutationActive"
             @click="rerunAll"
           >
-            ↻ Rerun All
+            <RotateCw /> Rerun All
           </button>
           <router-link
             v-if="overflow.includes('app')"
@@ -917,7 +920,7 @@ function goHome() {
             @click="settingsOpen = !settingsOpen"
           >
             Notebook settings
-            <span class="toggle-icon">{{ settingsOpen ? '&#9650;' : '&#9660;' }}</span>
+            <span class="toggle-icon"><ChevronUp v-if="settingsOpen" /><ChevronDown v-else /></span>
           </button>
           <div
             v-show="settingsOpen || attention.mounts"
@@ -973,7 +976,8 @@ function goHome() {
             </button>
           </div>
           <span class="dag-drawer-hint" @click="toggleDagDrawer">
-            {{ dagDrawerCollapsed ? '▲ expand' : '▼ collapse' }}
+            <template v-if="dagDrawerCollapsed"><ChevronUp /> expand</template>
+            <template v-else><ChevronDown /> collapse</template>
           </span>
         </header>
         <div v-if="!dagDrawerCollapsed" class="dag-drawer-body">

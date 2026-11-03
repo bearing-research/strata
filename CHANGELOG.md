@@ -37,6 +37,9 @@ exhaustive commit history.
   shrinks to a thin rail and the cells take its width. A typical cell header is
   one row, with `leaf` and the execution method in the status dot's tooltip. DAG edge
   labels no longer overlap. (#1395)
+- **One icon set.** The UI's icons are SVGs from Lucide, not emoji and Unicode glyphs
+  that render differently per OS, and every icon-only button has an accessible name.
+  (#PRNUM)
 - **A cell's inputs no longer pass through server memory.** An upstream value streams
   from the store into the run in 1 MiB chunks, so a 1 GB frame adds about 1 MB to the
   server's memory instead of 1 GB, per consuming cell per run. (#1383)

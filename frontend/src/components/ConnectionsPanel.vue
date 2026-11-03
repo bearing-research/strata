@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronUp } from '@lucide/vue'
 import { computed, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import ConnectionListEditor from './ConnectionListEditor.vue'
@@ -25,7 +26,7 @@ async function save(connections: typeof notebook.connections) {
     <button class="connections-toggle" @click="showPanel = !showPanel">
       Connections
       <span class="connection-count">{{ connectionCount }}</span>
-      <span class="toggle-icon">{{ showPanel ? '&#9650;' : '&#9660;' }}</span>
+      <span class="toggle-icon"><ChevronUp v-if="showPanel" /><ChevronDown v-else /></span>
     </button>
 
     <div v-if="showPanel" class="connections-content">

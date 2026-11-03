@@ -205,7 +205,7 @@ it**, so it shows up right under that cell.
 
 **Per-cell strip.** Below a cell that published, a compact strip shows what it
 put into the registry - `⬡ taxi/tip-model v3  ★champion  mae=1.98` - with a
-`[Promote▾]` menu (champion / candidate) and a `⎘` lineage button. Promote
+`[Promote▾]` menu (champion / candidate) and a **View lineage** button. Promote
 where you trained the model, without leaving the cell.
 
 **Registry tab.** The bottom drawer has a **Registry** tab:
@@ -221,7 +221,7 @@ champion` when it applies, or `⏳ champion change pending approval` when the
 alias is protected - at which point the pending banner appears for someone to
 approve. Unprotected aliases (candidate) apply immediately.
 
-**Lineage.** The `⎘` button (strip or names table) opens the provenance chain -
+**Lineage.** The **View lineage** button (strip or names table) opens the provenance chain -
 `model ← features ← scan ← table @ snapshot` - the same lineage the CLI prints,
 as an interactive view.
 

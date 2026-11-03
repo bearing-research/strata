@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowDown, ArrowLeft, ArrowUp, Diamond } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -105,10 +106,7 @@ function setSort(key: SortKey) {
   }
 }
 
-function sortIndicator(key: SortKey): string {
-  if (sort.value !== key) return ''
-  return order.value === 'asc' ? '▲' : '▼'
-}
+const sortIcon = computed(() => (order.value === 'asc' ? ArrowUp : ArrowDown))
 
 function shortId(id: string): string {
   return id.length > 20 ? `${id.slice(0, 17)}…` : id
@@ -147,9 +145,11 @@ onMounted(() => {
     <div class="artifacts-header">
       <div class="artifacts-title">
         <button type="button" class="nav-link back-btn" data-testid="page-back" @click="goBack">
-          ← Back
+          <ArrowLeft /> Back
         </button>
-        <router-link to="/" class="back-link" title="Back to notebooks">◆ strata</router-link>
+        <router-link to="/" class="back-link" title="Back to notebooks"
+          ><Diamond fill="currentColor" /> strata</router-link
+        >
         <span class="crumb">/</span>
         <span class="page-name">artifacts</span>
       </div>
@@ -231,13 +231,18 @@ onMounted(() => {
             <th>Ver</th>
             <th>State</th>
             <th class="sortable num" @click="setSort('row_count')">
-              Rows <span class="sort-ind">{{ sortIndicator('row_count') }}</span>
+              Rows
+              <span v-if="sort === 'row_count'" class="sort-ind"><component :is="sortIcon" /></span>
             </th>
             <th class="sortable num" @click="setSort('byte_size')">
-              Size <span class="sort-ind">{{ sortIndicator('byte_size') }}</span>
+              Size
+              <span v-if="sort === 'byte_size'" class="sort-ind"><component :is="sortIcon" /></span>
             </th>
             <th class="sortable" @click="setSort('created_at')">
-              Created <span class="sort-ind">{{ sortIndicator('created_at') }}</span>
+              Created
+              <span v-if="sort === 'created_at'" class="sort-ind"
+                ><component :is="sortIcon"
+              /></span>
             </th>
           </tr>
         </thead>

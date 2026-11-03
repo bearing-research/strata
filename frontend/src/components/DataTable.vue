@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowDown, ArrowUp, X } from '@lucide/vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useStrata } from '../composables/useStrata'
 
@@ -138,11 +139,6 @@ function sortByColumn(col: string) {
     sortBy.value = null // third click clears the sort
   }
   applyQuery()
-}
-
-function sortIndicator(col: string): string {
-  if (sortBy.value !== col) return ''
-  return sortDir.value === 'asc' ? ' ▲' : ' ▼'
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
@@ -293,7 +289,7 @@ onMounted(() => {
     <div v-if="filters.length" class="filter-chips">
       <span v-for="(f, i) in filters" :key="i" class="chip">
         {{ filterLabel(f) }}
-        <button class="chip-x" @click="removeFilter(i)">✕</button>
+        <button class="chip-x" aria-label="Remove filter" @click="removeFilter(i)"><X /></button>
       </span>
     </div>
 
@@ -307,7 +303,10 @@ onMounted(() => {
               :class="{ sortable: canQuery, active: sortBy === col }"
               @click="sortByColumn(col)"
             >
-              {{ col }}<span class="sort-caret">{{ sortIndicator(col) }}</span>
+              {{ col
+              }}<span v-if="sortBy === col" class="sort-caret"
+                ><ArrowUp v-if="sortDir === 'asc'" /><ArrowDown v-else
+              /></span>
             </th>
           </tr>
           <tr v-if="showStats" class="stats-row">
@@ -523,6 +522,7 @@ onMounted(() => {
 }
 .sort-caret {
   font-size: 10px;
+  margin-left: 3px;
 }
 .stats-row th {
   top: 26px;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronRight, ChevronUp, RotateCw } from '@lucide/vue'
 import { computed, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
 
@@ -102,7 +103,7 @@ function nullabilityLabel(col: SchemaColumn): string {
     <button class="schema-toggle" @click="showPanel = !showPanel">
       Schema
       <span class="schema-count">{{ connectionCount }}</span>
-      <span class="toggle-icon">{{ showPanel ? '&#9650;' : '&#9660;' }}</span>
+      <span class="toggle-icon"><ChevronUp v-if="showPanel" /><ChevronDown v-else /></span>
     </button>
 
     <div v-if="showPanel" class="schema-content">
@@ -113,7 +114,9 @@ function nullabilityLabel(col: SchemaColumn): string {
       <div v-for="conn in notebook.connections" :key="conn.name" class="conn-block">
         <div class="conn-header">
           <button class="conn-toggle" :disabled="!connected" @click="toggleConnection(conn.name)">
-            <span class="caret">{{ getState(conn.name).expanded ? '▾' : '▸' }}</span>
+            <span class="caret"
+              ><ChevronDown v-if="getState(conn.name).expanded" /><ChevronRight v-else
+            /></span>
             <span class="conn-name">{{ conn.name }}</span>
             <span class="conn-driver">{{ conn.driver }}</span>
           </button>
@@ -122,9 +125,10 @@ function nullabilityLabel(col: SchemaColumn): string {
             class="conn-refresh"
             :disabled="!connected || getState(conn.name).status === 'loading'"
             title="Re-fetch schema"
+            aria-label="Re-fetch schema"
             @click="loadSchema(conn.name, true)"
           >
-            ↻
+            <RotateCw />
           </button>
         </div>
 
@@ -145,7 +149,9 @@ function nullabilityLabel(col: SchemaColumn): string {
             <li v-for="t in getState(conn.name).tables" :key="tableKey(t)" class="table-item">
               <button class="table-toggle" @click="toggleTable(conn.name, tableKey(t))">
                 <span class="caret">
-                  {{ getState(conn.name).expandedTables.has(tableKey(t)) ? '▾' : '▸' }}
+                  <ChevronDown
+                    v-if="getState(conn.name).expandedTables.has(tableKey(t))"
+                  /><ChevronRight v-else />
                 </span>
                 <span class="table-name">{{ t.name }}</span>
                 <span v-if="t.schema" class="table-qualifier">{{ t.schema }}</span>

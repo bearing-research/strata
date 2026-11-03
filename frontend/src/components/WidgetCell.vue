@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Zap } from '@lucide/vue'
 import { computed } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { Cell, WidgetDescriptor } from '../types/notebook'
@@ -80,7 +81,7 @@ function onCheckbox(d: WidgetDescriptor, e: Event) {
         "
         @click="toggleLive"
       >
-        ⚡ Live{{ isLive ? ' on' : ' off' }}
+        <Zap /> Live{{ isLive ? ' on' : ' off' }}
       </button>
     </div>
     <div v-if="!descriptors.length" class="widget-empty">

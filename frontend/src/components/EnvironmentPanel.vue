@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronUp, Hourglass } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import { useStrata } from '../composables/useStrata'
@@ -543,7 +544,7 @@ function downloadRequirements() {
     <button class="env-toggle" @click="showPanel = !showPanel">
       Environment
       <span class="dep-count">{{ notebook.environment.declaredPackageCount }}</span>
-      <span class="toggle-icon">{{ showPanel ? '&#9650;' : '&#9660;' }}</span>
+      <span class="toggle-icon"><ChevronUp v-if="showPanel" /><ChevronDown v-else /></span>
     </button>
 
     <div v-if="showPanel" class="env-content">
@@ -872,7 +873,7 @@ function downloadRequirements() {
         <!-- An ``r_init`` / ``r_add`` job is running -->
         <div v-if="rOperationRunning" class="env-r-live">
           <div class="env-r-live-headline">
-            <span class="env-r-live-spinner" aria-hidden="true">⏳</span>
+            <span class="env-r-live-spinner" aria-hidden="true"><Hourglass /></span>
             {{ rOperationIsInit ? 'Setting up renv…' : 'Installing R package…' }}
           </div>
           <div v-if="environmentOperation" class="env-r-live-command">

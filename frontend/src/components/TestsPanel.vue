@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Check, Circle, TriangleAlert, X } from '@lucide/vue'
 import { computed } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { CellId } from '../types/notebook'
@@ -47,11 +48,11 @@ const ranAtLabel = computed(() => {
   return new Date(r.ranAt).toLocaleTimeString()
 })
 
-function outcomeMark(outcome: string): string {
-  if (outcome === 'passed') return '✓'
-  if (outcome === 'failed') return '✗'
-  if (outcome === 'skipped') return '○'
-  return '!'
+function outcomeIcon(outcome: string) {
+  if (outcome === 'passed') return Check
+  if (outcome === 'failed') return X
+  if (outcome === 'skipped') return Circle
+  return TriangleAlert
 }
 
 function run() {
@@ -73,8 +74,13 @@ function handleKeydown(e: KeyboardEvent) {
         Tests for <code>{{ cellLabel }}</code>
       </span>
       <span v-if="running" class="tests-running">running…</span>
-      <button class="tests-close-btn" title="Close tests panel" @click="closeTests(cellId)">
-        &times;
+      <button
+        class="tests-close-btn"
+        title="Close tests panel"
+        aria-label="Close tests panel"
+        @click="closeTests(cellId)"
+      >
+        <X />
       </button>
     </div>
 
@@ -121,7 +127,7 @@ function handleKeydown(e: KeyboardEvent) {
             :class="`tests-row--${t.outcome}`"
           >
             <div class="tests-row-head">
-              <span class="tests-mark">{{ outcomeMark(t.outcome) }}</span>
+              <span class="tests-mark"><component :is="outcomeIcon(t.outcome)" /></span>
               <span class="tests-name">{{ t.name }}</span>
             </div>
             <pre

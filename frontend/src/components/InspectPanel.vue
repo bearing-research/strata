@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from '@lucide/vue'
 import { ref, nextTick, watch, computed, onMounted } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { CellId } from '../types/notebook'
@@ -143,7 +144,14 @@ function close() {
         Inspect inputs of <code>{{ cellLabel }}</code>
       </span>
       <span v-if="!ready" class="inspect-loading">loading...</span>
-      <button class="inspect-close-btn" title="Close inspect REPL" @click="close">&times;</button>
+      <button
+        class="inspect-close-btn"
+        title="Close inspect REPL"
+        aria-label="Close inspect REPL"
+        @click="close"
+      >
+        <X />
+      </button>
     </div>
 
     <div v-if="carryVariable" class="iteration-picker">

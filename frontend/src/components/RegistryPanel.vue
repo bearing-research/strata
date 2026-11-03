@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronRight, GitFork, Hourglass, Star } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { RegistryName } from '../composables/useStrata'
@@ -39,11 +40,11 @@ async function promote(
   try {
     const result = await setAliasAction(name, alias, artifactId, version)
     if (result.status === 'pending') {
-      pushToast(`⏳ ${alias} change pending approval`, 'info')
+      pushToast(`${alias} change pending approval`, 'info')
     } else if (result.status === 'unchanged') {
       pushToast(`${name} → ${alias} (no change)`, 'info')
     } else {
-      pushToast(`✓ ${name} → ${alias}`, 'success')
+      pushToast(`${name} → ${alias}`, 'success')
     }
   } catch (err) {
     pushToast(err instanceof Error ? err.message : `Failed to set ${alias}`, 'error')
@@ -56,7 +57,7 @@ async function approve(name: string, alias: string) {
   busy.value = `pending:${name}:${alias}`
   try {
     await approvePendingAction(name, alias)
-    pushToast(`✓ approved ${name}@${alias}`, 'success')
+    pushToast(`approved ${name}@${alias}`, 'success')
   } catch (err) {
     pushToast(err instanceof Error ? err.message : 'Approve failed', 'error')
   } finally {
@@ -106,7 +107,7 @@ function tagList(tags: Record<string, string>): string {
 
     <!-- Pending approvals (action items) -->
     <section v-if="registryPending.length" class="pending">
-      <div class="section-label">⏳ Pending</div>
+      <div class="section-label"><Hourglass /> Pending</div>
       <div v-for="p in registryPending" :key="`${p.name}:${p.alias}`" class="pending-row">
         <span class="pending-target"
           >{{ p.name }} <span class="chip alias">@{{ p.alias }}</span> → v{{ p.version }}</span
@@ -156,7 +157,9 @@ function tagList(tags: Record<string, string>): string {
                 :key="alias"
                 class="chip"
                 :class="{ champ: alias === 'champion' }"
-                >{{ alias === 'champion' ? '★' : '' }}{{ alias }}=v{{ ver }}</span
+                ><Star v-if="alias === 'champion'" fill="currentColor" />{{ alias }}=v{{
+                  ver
+                }}</span
               >
               <span v-if="!Object.keys(n.aliases).length" class="muted">none</span>
             </td>
@@ -178,7 +181,7 @@ function tagList(tags: Record<string, string>): string {
                   :disabled="busy?.startsWith(`${n.name}:`)"
                   @click="openMenu = openMenu === n.name ? null : n.name"
                 >
-                  Promote ▾
+                  Promote <ChevronDown />
                 </button>
                 <div v-if="openMenu === n.name" class="promote-menu">
                   <button @click="promote(n.name, 'champion', n.artifact_id, n.version)">
@@ -191,9 +194,10 @@ function tagList(tags: Record<string, string>): string {
                 <button
                   class="lineage-btn"
                   title="View lineage"
+                  aria-label="View lineage"
                   @click="openLineageAction(n.artifact_id, n.version, n.name)"
                 >
-                  ⎘
+                  <GitFork />
                 </button>
               </div>
             </td>
@@ -205,7 +209,7 @@ function tagList(tags: Record<string, string>): string {
     <!-- Audit (collapsed) -->
     <section class="audit">
       <button class="section-label toggle" @click="auditOpen = !auditOpen">
-        {{ auditOpen ? '▾' : '▸' }} Audit ({{ registryAudit.length }})
+        <ChevronDown v-if="auditOpen" /><ChevronRight v-else /> Audit ({{ registryAudit.length }})
       </button>
       <div v-if="auditOpen" class="audit-rows">
         <div v-for="(e, i) in registryAudit" :key="i" class="audit-row">

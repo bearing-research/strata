@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronUp } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import EnvVarsEditor from './EnvVarsEditor.vue'
@@ -124,7 +125,7 @@ async function disconnectSecretManager() {
       Runtime
       <span class="runtime-label">{{ timeoutLabel }}</span>
       <span class="runtime-label">{{ envCount }} env</span>
-      <span class="toggle-icon">{{ showPanel ? '&#9650;' : '&#9660;' }}</span>
+      <span class="toggle-icon"><ChevronUp v-if="showPanel" /><ChevronDown v-else /></span>
     </button>
 
     <div v-if="showPanel" class="runtime-content">

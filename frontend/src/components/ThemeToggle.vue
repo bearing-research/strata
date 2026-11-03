@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Moon, Sun, SunMoon } from '@lucide/vue'
 import { computed } from 'vue'
 import { useTheme } from '../composables/useTheme'
 
@@ -6,9 +7,9 @@ const { mode, cycleMode } = useTheme()
 
 // The icon shows the current mode; the title names the next one.
 const icon = computed(() => {
-  if (mode.value === 'system') return '◐'
-  if (mode.value === 'light') return '☀'
-  return '☾'
+  if (mode.value === 'system') return SunMoon
+  if (mode.value === 'light') return Sun
+  return Moon
 })
 
 const label = computed(() => {
@@ -32,7 +33,7 @@ const nextLabel = computed(() => {
     :aria-label="nextLabel"
     @click="cycleMode"
   >
-    <span class="theme-toggle-icon" aria-hidden="true">{{ icon }}</span>
+    <span class="theme-toggle-icon" aria-hidden="true"><component :is="icon" /></span>
   </button>
 </template>
 

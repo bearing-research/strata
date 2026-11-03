@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown } from '@lucide/vue'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 interface CellTypeOption {
@@ -74,7 +75,7 @@ onBeforeUnmount(() => {
       @click="toggle"
     >
       <span class="trigger-label">+ Add cell</span>
-      <span class="trigger-caret" aria-hidden="true">▾</span>
+      <span class="trigger-caret" aria-hidden="true"><ChevronDown /></span>
     </button>
 
     <div v-if="open" class="add-cell-dropdown" role="menu" data-testid="add-cell-menu-dropdown">

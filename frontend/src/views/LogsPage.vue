@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowLeft, Circle, Diamond } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -164,9 +165,11 @@ onBeforeUnmount(() => {
     <div class="logs-header">
       <div class="logs-title">
         <button type="button" class="nav-link back-btn" data-testid="page-back" @click="goBack">
-          ← Back
+          <ArrowLeft /> Back
         </button>
-        <router-link to="/" class="back-link" title="Back to notebooks">◆ strata</router-link>
+        <router-link to="/" class="back-link" title="Back to notebooks"
+          ><Diamond fill="currentColor" /> strata</router-link
+        >
         <span class="crumb">/</span>
         <span class="page-name">logs</span>
       </div>
@@ -248,7 +251,7 @@ onBeforeUnmount(() => {
 
     <div class="status-bar">
       <span>{{ entries.length }} shown</span>
-      <span v-if="liveTail" class="tailing">● tailing</span>
+      <span v-if="liveTail" class="tailing"><Circle fill="currentColor" /> tailing</span>
       <span v-else-if="loading">loading…</span>
     </div>
   </div>

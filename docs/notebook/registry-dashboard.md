@@ -69,12 +69,12 @@ cell that produced it**.
 A compact strip appears **right below the cell** that published:
 
 ```
-⬡ taxi/tip-model  v1   [Promote ▾]   ⎘
+⬡ taxi/tip-model  v1   [Promote ▾]   [View lineage]
 ```
 
 - `⬡ taxi/tip-model v1` - the name and version your cell put.
 - `[Promote ▾]` - promote this artifact (next step).
-- `⎘` - open its lineage.
+- **View lineage** - open its lineage.
 
 Promote where you trained the model, without scrolling anywhere.
 
@@ -114,8 +114,8 @@ top to bottom:
    queued, with **Approve / Reject** buttons (the human gate, in the UI).
 2. **Names table** - every registry name, each row showing its **alias chips**
    (`★champion=v1`, `candidate=v2`), latest version, **tags**, the cells
-   that read it (**Read by**), a **`[Promote ▾]`** menu, and a **`⎘`**
-   lineage button. This is the same data on the per-cell strip, but for
+   that read it (**Read by**), a **`[Promote ▾]`** menu, and a **View lineage**
+   button. This is the same data on the per-cell strip, but for
    *all* names - not just what the current notebook published.
 3. **Audit timeline** (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.
@@ -153,7 +153,7 @@ Unprotected aliases (`candidate`) still apply immediately.
 
 ## 7. View lineage
 
-Click the **`⎘`** button on the strip or any names-table row. The **lineage
+Click the **View lineage** button on the strip or any names-table row. The **lineage
 view** renders the provenance chain:
 
 ```

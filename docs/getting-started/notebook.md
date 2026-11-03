@@ -351,11 +351,11 @@ grouped by feature.
 
 | Action | How |
 | --- | --- |
-| Run cell | ++shift+enter++ or ▶ button |
-| Add cell | **+** button in gutter or header |
-| Delete cell | **×** button in gutter |
-| Duplicate cell | **⎘** button in gutter |
-| Move cell | **▲** / **▼** buttons in gutter |
+| Run cell | ++shift+enter++ or **Run** button in gutter |
+| Add cell | **Add cell below** button in gutter, or **Add cell** in the header |
+| Delete cell | **Delete cell** button in gutter |
+| Duplicate cell | **Duplicate cell** button in gutter |
+| Move cell | **Move up** / **Move down** buttons in gutter |
 | Change cell kind | Not editable - delete and re-add with the new kind |
 | Keyboard help | Press ++question++ |
 
