@@ -10,7 +10,9 @@ import pytest
 
 import strata.notebook.cell_paths
 from strata.notebook.cell_paths.context import PathContext
+from strata.notebook.cell_paths.prompt import run_prompt_cell
 from strata.notebook.cell_paths.widget import run_widget_cell
+from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
@@ -69,6 +71,49 @@ def test_a_path_does_not_get_the_executor(path):
     assert executor_uses(path.read_text()) == []
 
 
+PROVENANCE = SimpleNamespace(
+    provenance_hash="prov",
+    source_hash="source",
+    env_hash="env",
+    table_reads=[{"table": "t"}],
+    key_parts={"key": "parts"},
+    reads=lambda mounts, tables: {"mounts": mounts, "tables": tables},
+)
+RECORDED = (
+    ("c1", "prov", "source", "env"),
+    {
+        "table_reads": [{"table": "t"}],
+        "reads": {"mounts": {"data": 3}, "tables": {"file:///t": 4}},
+        "key_parts": {"key": "parts"},
+    },
+)
+
+
+def _fakes(cell: SimpleNamespace, failure: CellExecutionResult | None = None):
+    """A host and a context with nothing behind them, and a record of what they were asked."""
+    calls = SimpleNamespace(recorded=[], materialized=[], cell=cell)
+
+    async def compute_provenance(cell_id, source):
+        return PROVENANCE
+
+    async def materialize_upstreams_or_failure(cell_id, start_time, method):
+        calls.materialized.append((cell_id, start_time, method))
+        return failure
+
+    host = SimpleNamespace(
+        notebook_state=SimpleNamespace(get_cell=lambda cell_id: cell, env={}),
+        record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
+            (args, kwargs)
+        ),
+    )
+    context = PathContext(
+        compute_provenance=compute_provenance,
+        moved=lambda cell_id: ({"data": 3}, {"file:///t": 4}),
+        materialize_upstreams_or_failure=materialize_upstreams_or_failure,
+    )
+    return host, context, calls
+
+
 class TestTheExecutorsContext:
     @pytest.fixture
     def executor(self, tmp_path) -> CellExecutor:
@@ -82,6 +127,13 @@ class TestTheExecutorsContext:
 
         assert executor._path_context().moved("c1") == ({"data": 3}, {"file:///t": 4})
 
+    def test_upstream_materialization_is_the_executors(self, executor):
+        context = executor._path_context()
+
+        assert (
+            context.materialize_upstreams_or_failure == executor._materialize_upstreams_or_failure
+        )
+
     def test_a_replaced_method_still_holds(self, executor, monkeypatch):
         async def replaced(cell_id, source):
             return "replaced"
@@ -94,34 +146,11 @@ class TestTheExecutorsContext:
 class TestWidget:
     """The path on its own: a fake host, a fake context, a stubbed widget executor."""
 
-    PROVENANCE = SimpleNamespace(
-        provenance_hash="prov",
-        source_hash="source",
-        env_hash="env",
-        table_reads=[{"table": "t"}],
-        key_parts={"key": "parts"},
-        reads=lambda mounts, tables: {"mounts": mounts, "tables": tables},
-    )
-
     @pytest.fixture
     def path(self, monkeypatch):
         """Runs the path with the widget executor answering *answer*; ``calls`` holds the rest."""
-        cell = SimpleNamespace(artifact_uris={"old": "uri"})
-        calls = SimpleNamespace(recorded=[], use_cache=[], cell=cell)
-        host = SimpleNamespace(
-            notebook_state=SimpleNamespace(get_cell=lambda cell_id: cell),
-            record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
-                (args, kwargs)
-            ),
-        )
-
-        async def compute_provenance(cell_id, source):
-            return self.PROVENANCE
-
-        context = PathContext(
-            compute_provenance=compute_provenance,
-            moved=lambda cell_id: ({"data": 3}, {"file:///t": 4}),
-        )
+        host, context, calls = _fakes(SimpleNamespace(artifact_uris={"old": "uri"}))
+        calls.use_cache = []
 
         async def run(answer, *, use_cache=True):
             def stub(session, cell_id, source, *, use_cache):
@@ -147,16 +176,7 @@ class TestWidget:
         )
 
         assert path.calls.cell.artifact_uris == {"a": "strata://a"}
-        assert path.calls.recorded == [
-            (
-                ("c1", "prov", "source", "env"),
-                {
-                    "table_reads": [{"table": "t"}],
-                    "reads": {"mounts": {"data": 3}, "tables": {"file:///t": 4}},
-                    "key_parts": {"key": "parts"},
-                },
-            )
-        ]
+        assert path.calls.recorded == [RECORDED]
         assert result.success is True
         assert result.outputs["a"] == {"artifact_uri": "strata://a"}
         assert result.display_outputs == [{"markdown": "shown"}]
@@ -180,3 +200,155 @@ class TestWidget:
         await path({"success": False}, use_cache=use_cache)
 
         assert path.calls.use_cache == [use_cache]
+
+
+class TestPrompt:
+    """The path on its own: a fake host and context, a stubbed LLM config and prompt executor."""
+
+    @pytest.fixture
+    def path(self, monkeypatch):
+        def build(*, failure=None, config="llm", answer=None):
+            host, context, calls = _fakes(SimpleNamespace(), failure)
+            calls.asked = []
+
+            async def stub(session, cell_id, source, llm_config, *, use_cache, on_delta):
+                calls.asked.append((session, cell_id, source, llm_config, use_cache, on_delta))
+                return answer
+
+            monkeypatch.setattr(
+                "strata.notebook.llm.config.llm_config_for_session", lambda session: config
+            )
+            monkeypatch.setattr("strata.notebook.prompt_executor.execute_prompt_cell", stub)
+
+            async def run(*, materialize_upstreams=False, use_cache=True, on_delta=None):
+                return await run_prompt_cell(
+                    host,
+                    context,
+                    "c1",
+                    "src",
+                    0.0,
+                    materialize_upstreams=materialize_upstreams,
+                    use_cache=use_cache,
+                    on_delta=on_delta,
+                )
+
+            return run, host, calls
+
+        return build
+
+    async def test_an_answer_is_recorded_under_the_standard_key(self, path):
+        answer = {
+            "success": True,
+            "outputs": {"reply": {"preview": "hi"}},
+            "display_outputs": [{"markdown": "hi"}],
+            "display_output": {"markdown": "hi"},
+            "stdout": "out",
+            "stderr": "err",
+            "cache_hit": True,
+            "duration_ms": 7,
+            "execution_method": "cached",
+            "artifact_uri": "strata://reply",
+            "mutation_warnings": [{"variable": "x"}],
+            "validation_retries": 2,
+        }
+        run, _, calls = path(answer=answer)
+
+        result = await run()
+
+        assert calls.recorded == [RECORDED]
+        assert result.success is True
+        for field in (
+            "outputs",
+            "display_outputs",
+            "display_output",
+            "stdout",
+            "stderr",
+            "cache_hit",
+            "duration_ms",
+            "execution_method",
+            "artifact_uri",
+            "mutation_warnings",
+            "validation_retries",
+        ):
+            assert getattr(result, field) == answer[field], field
+
+    async def test_a_failure_records_nothing(self, path):
+        run, _, calls = path(answer={"success": False, "outputs": {}, "error": "no reply"})
+
+        result = await run()
+
+        assert calls.recorded == []
+        assert result.error == "no reply"
+        assert result.execution_method == "llm"
+        assert (result.stdout, result.stderr, result.duration_ms) == ("", "", 0)
+
+    async def test_it_is_asked_with_what_it_was_given(self, path):
+        run, host, calls = path(answer={"success": False, "outputs": {}})
+
+        async def on_delta(payload):
+            return None
+
+        await run(use_cache=False, on_delta=on_delta)
+
+        assert calls.asked == [(host, "c1", "src", "llm", False, on_delta)]
+
+    async def test_no_llm_config_says_so_without_asking(self, path):
+        run, _, calls = path(config=None)
+
+        result = await run()
+
+        assert calls.asked == []
+        assert result.success is False
+        assert result.error.startswith("LLM not configured.")
+        assert result.execution_method == "llm"
+        assert result.duration_ms > 0
+
+    async def test_upstreams_run_first_when_asked(self, path):
+        run, _, calls = path(answer={"success": False, "outputs": {}})
+
+        await run(materialize_upstreams=True)
+
+        assert calls.materialized == [("c1", 0.0, "prompt")]
+
+    async def test_upstreams_do_not_run_when_not_asked(self, path):
+        run, _, calls = path(answer={"success": False, "outputs": {}})
+
+        await run(materialize_upstreams=False)
+
+        assert calls.materialized == []
+
+    async def test_an_upstream_failure_is_the_result(self, path):
+        failure = CellExecutionResult(cell_id="c1", success=False, error="upstream")
+        run, _, calls = path(failure=failure)
+
+        assert await run(materialize_upstreams=True) is failure
+        assert calls.asked == []
+
+
+async def test_the_executor_hands_its_delta_callback_to_the_prompt_path(tmp_path, monkeypatch):
+    nb = create_notebook(tmp_path / "nb", "Delta")
+    add_cell_to_notebook(nb, "c1", None)
+    executor = CellExecutor(NotebookSession(parse_notebook(nb), nb))
+    seen = {}
+
+    async def stub(host, context, cell_id, source, start_time, **kwargs):
+        seen.update(kwargs, host=host)
+        return "ran"
+
+    async def on_delta(payload):
+        return None
+
+    executor.on_prompt_delta = on_delta
+    monkeypatch.setattr("strata.notebook.executor.run_prompt_cell", stub)
+
+    ran = await executor._execute_prompt_cell(
+        "c1", "src", 0.0, materialize_upstreams=True, use_cache=False
+    )
+
+    assert ran == "ran"
+    assert seen == {
+        "host": executor.session,
+        "materialize_upstreams": True,
+        "use_cache": False,
+        "on_delta": on_delta,
+    }

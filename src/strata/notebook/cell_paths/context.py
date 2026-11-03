@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from strata.notebook.execution_result import CellExecutionResult
     from strata.notebook.executor import _CellProvenance
 
 
@@ -18,3 +19,8 @@ class PathContext:
     compute_provenance: Callable[[str, str], Awaitable[_CellProvenance]]
     # What the cell's run moved: by mount name, and by table URI.
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
+    # Run the cell's upstreams, from its id, start time and execution method: their failure
+    # as this cell's result, or ``None``.
+    materialize_upstreams_or_failure: Callable[
+        [str, float, str], Awaitable[CellExecutionResult | None]
+    ]
