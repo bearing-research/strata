@@ -129,6 +129,82 @@ class TestExecutionFlow:
         assert "c2" in captured.out
         assert "2 ran" in captured.out or "ran" in captured.out
 
+    def test_a_cell_is_labelled_by_its_name(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(
+            tmp_path, cells=[("c1", "# @name stations\nimport math\n", None)]
+        )
+        _mk_fake_venv(notebook_dir)
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            return _make_result(cell_id)
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            assert run_main([str(notebook_dir), "--no-sync"]) == 0
+
+        out = capsys.readouterr().out
+        assert "stations" in out
+        assert "import math" not in out
+
+    @staticmethod
+    def _fan_out(*progress: dict):
+        """An ``execute_cell`` reporting *progress* the way a fan-out does."""
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            if cell_id == "c1" and self.on_variant_complete is not None:
+                for item in progress:
+                    await self.on_variant_complete({"cell_id": cell_id, "total": 2, **item})
+            return _make_result(cell_id)
+
+        return fake_execute_cell
+
+    def test_a_long_fan_out_says_where_it_is(self, notebook_with_chain, capsys, monkeypatch):
+        monkeypatch.setattr("strata.notebook.cli._PROGRESS_INTERVAL_SECONDS", 0.0)
+        fake = self._fan_out(
+            {"index": 0, "variant": "a.csv", "success": True, "error": None},
+            {"index": 1, "variant": "b.csv", "success": True, "error": None},
+        )
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake):
+            assert run_main([str(notebook_with_chain), "--no-sync"]) == 0
+
+        out = capsys.readouterr().out
+        assert "1/2 a.csv" in out
+        assert "2/2 b.csv" in out
+
+    def test_progress_waits_for_its_interval_but_a_failure_does_not(
+        self, notebook_with_chain, capsys, monkeypatch
+    ):
+        monkeypatch.setattr("strata.notebook.cli._PROGRESS_INTERVAL_SECONDS", 3600.0)
+        fake = self._fan_out(
+            {"index": 0, "variant": "a.csv", "success": True, "error": None},
+            {
+                "index": 1,
+                "variant": "b.csv",
+                "success": False,
+                "error": "KeyError: 'MAX'\nhint on a second line",
+            },
+        )
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake):
+            run_main([str(notebook_with_chain), "--no-sync"])
+
+        out = capsys.readouterr().out
+        assert "a.csv" not in out
+        assert "b.csv: KeyError: 'MAX'" in out
+        assert "hint on a second line" not in out
+
+    @pytest.mark.parametrize("flag", [["--format", "json"], ["--quiet"]])
+    def test_progress_stays_out_of_json_and_quiet(
+        self, notebook_with_chain, capsys, monkeypatch, flag
+    ):
+        monkeypatch.setattr("strata.notebook.cli._PROGRESS_INTERVAL_SECONDS", 0.0)
+        fake = self._fan_out({"index": 0, "variant": "a.csv", "success": True, "error": None})
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake):
+            assert run_main([str(notebook_with_chain), "--no-sync", *flag]) == 0
+
+        assert "a.csv" not in capsys.readouterr().out
+
     def test_json_output_shape(self, notebook_with_chain, capsys):
         async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
             return _make_result(cell_id, success=True, cache_hit=(cell_id == "c2"))

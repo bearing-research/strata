@@ -464,7 +464,8 @@ class TestFailure:
         result = await nb.run("b")
 
         assert not result.success
-        assert "bad" in result.error or "no" in result.error
+        assert result.error == "Item 'bad' failed: ValueError: no"
+        assert "ValueError: no" in result.traceback
         assert nb.ran() == ["bad", "good"]
         manager = nb.session.get_artifact_manager()
         artifact_id = manager.cell_artifact_id("b", "out")
