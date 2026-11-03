@@ -3987,6 +3987,9 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An R cell restored to an earlier source is served from cache.</strong> Going back to
+  source that already ran finds its variables and displays again instead of running
+  the cell, as a Python cell does. (#1384)</li>
 <li><strong>A <code>:memory:</code> database stays in memory.</strong> A DuckDB or SQLite connection with
   <code>path = ":memory:"</code> opened a real file of that name in the notebook folder, so
   a cell's tables outlived the run and the file could be committed. If a notebook
