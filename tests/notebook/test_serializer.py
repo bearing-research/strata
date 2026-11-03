@@ -24,7 +24,9 @@ from strata.notebook.serializer import (
     StrataRArtifactError,
     deserialize_value,
     read_table_page,
+    read_table_summary,
     serialize_value,
+    write_table_export,
 )
 
 _MINIMAL_PNG_BYTES = (
@@ -1870,3 +1872,130 @@ class TestWriteTableExport:
         from strata.notebook.serializer import write_table_export
 
         assert write_table_export(_arrow_blob(pd.DataFrame({"a": [1]})), "xlsx") is None
+
+
+class TestPandasIndexDisplay:
+    """A pandas index is stored as a column for the reader, and shown as pandas shows it."""
+
+    @staticmethod
+    def _filtered():
+        # Irregular positions: pyarrow stores this as a column, where an evenly spaced
+        # result collapses to a range with none.
+        df = pd.DataFrame({"a": [1, 2, 3, 4], "b": ["w", "x", "y", "z"]})
+        return df[df["a"].isin([1, 2, 4])]
+
+    def _preview(self, value):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            return serialize_value(value, Path(tmpdir), "v")
+
+    def test_the_stored_table_keeps_the_column_this_hides(self):
+        """Without this the test below would pass against a serializer that dropped the data."""
+        table = pa.ipc.open_stream(pa.BufferReader(_arrow_blob(self._filtered()))).read_all()
+        assert "__index_level_0__" in table.column_names
+
+    def test_an_unnamed_index_is_hidden_from_the_preview(self):
+        meta = self._preview(self._filtered())
+        assert meta["columns"] == ["a", "b"]
+        # Positional: consumers zip preview rows with columns.
+        assert meta["preview"] == [[1, "w"], [2, "x"], [4, "z"]]
+        assert meta["rows"] == 3
+
+    def test_an_unnamed_index_is_hidden_from_the_viewer(self):
+        blob = _arrow_blob(self._filtered())
+        page = read_table_page(blob)
+        assert page["columns"] == ["a", "b"]
+        assert page["rows"] == [[1, "w"], [2, "x"], [4, "z"]]
+        assert [c["name"] for c in read_table_summary(blob)["columns"]] == ["a", "b"]
+
+    def test_a_named_index_leads_as_pandas_prints_it(self):
+        df = pd.DataFrame({"region": ["n", "s"], "units": [1, 2], "price": [3.0, 4.0]})
+        indexed = df.set_index("region")
+
+        meta = self._preview(indexed)
+        assert meta["columns"] == ["region", "units", "price"]
+        assert meta["preview"] == [["n", 1, 3.0], ["s", 2, 4.0]]
+
+        blob = _arrow_blob(indexed)
+        assert read_table_page(blob)["columns"] == ["region", "units", "price"]
+        assert [c["name"] for c in read_table_summary(blob)["columns"]] == [
+            "region",
+            "units",
+            "price",
+        ]
+
+    def test_a_multiindex_keeps_its_named_levels_in_order(self):
+        df = pd.DataFrame({"x": ["a", "b"], "y": ["c", "d"], "v": [1, 2]}).set_index(["x", "y"])
+        assert self._preview(df)["columns"] == ["x", "y", "v"]
+        # A level with no name is hidden on its own.
+        df.index = df.index.set_names(["x", None])
+        assert self._preview(df)["columns"] == ["x", "v"]
+
+    def test_a_default_index_has_nothing_to_hide(self):
+        df = pd.DataFrame({"a": [1, 2]})
+        assert self._preview(df)["columns"] == ["a"]
+        # Evenly spaced after a filter, so pyarrow stores it as a range with no column.
+        trimmed = pd.DataFrame({"a": [1, 2, 3]})
+        assert self._preview(trimmed[trimmed["a"] > 1])["columns"] == ["a"]
+
+    def test_the_decision_reads_the_metadata_not_the_name(self):
+        """A user's column can be called this; only the metadata says it is an index."""
+        df = pd.DataFrame({"__index_level_0__": [1, 2], "a": [3, 4]})
+        assert self._preview(df)["columns"] == ["__index_level_0__", "a"]
+        assert read_table_page(_arrow_blob(df))["columns"] == ["__index_level_0__", "a"]
+
+    def test_a_table_with_no_pandas_metadata_is_left_alone(self):
+        table = pa.table({"__index_level_0__": [1], "a": [2]})
+        assert self._preview(table)["columns"] == ["__index_level_0__", "a"]
+
+    def test_a_pyarrow_table_from_pandas_gets_the_same_view(self):
+        table = pa.Table.from_pandas(self._filtered())
+        assert self._preview(table)["columns"] == ["a", "b"]
+
+    def test_a_series_index_is_hidden_too(self):
+        series = self._filtered()["a"]
+        assert self._preview(series)["columns"] == ["a"]
+
+    def test_search_and_sort_see_only_what_is_shown(self):
+        df = pd.DataFrame({"a": [1, 2, 3]}, index=[77, 10, 20])
+        blob = _arrow_blob(df)
+        # 77 is only in the hidden index: a match would show a row with no visible reason.
+        assert read_table_page(blob, search="77")["total"] == 0
+        assert read_table_page(blob, search="2")["rows"] == [[2]]
+        # A stale request sorting by the hidden name still returns the shown columns.
+        assert read_table_page(blob, sort_by="__index_level_0__")["columns"] == ["a"]
+
+    def test_csv_matches_the_screen_and_parquet_keeps_the_data(self):
+        import pyarrow.parquet as papq
+
+        filtered = self._filtered()
+        blob = _arrow_blob(filtered)
+
+        csv = write_table_export(blob, "csv").decode()
+        assert csv.splitlines()[0] == '"a","b"'
+        assert write_table_export(blob, "csv", search="w").decode().count("\n") == 2
+
+        parquet = papq.read_table(pa.BufferReader(write_table_export(blob, "parquet")))
+        assert "__index_level_0__" in parquet.column_names
+        pd.testing.assert_frame_equal(parquet.to_pandas(), filtered)
+        # The same rows the screen shows: search does not reach the hidden index.
+        # Position 3 is only in the index of the row whose value is 4.
+        searched = write_table_export(blob, "parquet", search="3")
+        assert papq.read_table(pa.BufferReader(searched)).num_rows == 0
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pd.DataFrame({"a": [1, 2, 3]}, index=[7, 3, 9]),
+            pd.DataFrame({"a": [1, 2]}, index=pd.Index(["x", "y"], name="key")),
+            pd.DataFrame(
+                {"a": [1, 2]},
+                index=pd.MultiIndex.from_tuples([(1, "p"), (2, "q")], names=["i", None]),
+            ),
+        ],
+        ids=["unnamed", "named", "multi"],
+    )
+    def test_the_original_index_round_trips(self, value):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meta = serialize_value(value, Path(tmpdir), "v")
+            restored = deserialize_value(meta["content_type"], Path(tmpdir) / meta["file"])
+        pd.testing.assert_frame_equal(restored, value)
