@@ -88,6 +88,15 @@ class TestHarness:
         assert "checkpoint A" in result["stdout"]
         assert "checkpoint B" in result["stdout"]
 
+    @pytest.mark.parametrize(
+        ("raised", "error"),
+        [('KeyError("MAX")', "KeyError: 'MAX'"), ("ValueError()", "ValueError")],
+    )
+    def test_harness_names_the_exception_a_cell_raised(self, harness_script, raised, error):
+        result = run_harness(harness_script, {"source": f"raise {raised}", "inputs": {}})
+
+        assert result["error"] == error
+
     def test_harness_dataframe(self, harness_script):
         manifest = {
             "source": 'import pandas as pd\ndf = pd.DataFrame({"a": [1, 2, 3]})',

@@ -2597,6 +2597,7 @@ class CellExecutor:
         start_time: float,
         *,
         error: str | None = None,
+        instance_noun: str = "Fan-out variant",
     ) -> CellExecutionResult:
         """The cell's result from its instances' (or *error*); record a good run's base key."""
         writes = _merge_variant_writes(self._variant_writes.pop(cell_id, []))
@@ -2604,9 +2605,11 @@ class CellExecutor:
         failures = [(name, r) for name, r in results if not r.success]
         stdout = "\n".join(f"[variant={name}]\n{r.stdout}" for name, r in results if r.stdout)
         stderr = "\n".join(f"[variant={name}]\n{r.stderr}" for name, r in results if r.stderr)
+        failure_traceback = None
         if failures:
             first_name, first = failures[0]
-            error = f"Fan-out variant '{first_name}' failed: {first.error}"
+            error = f"{instance_noun} '{first_name}' failed: {first.error}"
+            failure_traceback = first.traceback
         if error is not None:
             aggregate = CellExecutionResult(
                 cell_id=cell_id,
@@ -2615,6 +2618,7 @@ class CellExecutor:
                 stderr=stderr,
                 duration_ms=duration_ms,
                 error=error,
+                traceback=failure_traceback,
                 execution_method="fanout",
             )
         else:
@@ -2739,7 +2743,9 @@ class CellExecutor:
                 error = "an item failed"
         if error is not None and cell is not None and last_good is not None:
             cell.artifact_uris, cell.artifact_uri = last_good
-        return self._finish_fanout(cell_id, results, base, start_time, error=error)
+        return self._finish_fanout(
+            cell_id, results, base, start_time, error=error, instance_noun="Item"
+        )
 
     def _each_cached(
         self,
