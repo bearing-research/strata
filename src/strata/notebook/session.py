@@ -985,15 +985,15 @@ class NotebookSession:
                     # A leaf still needs READY: its structural comparison on reload (mounts,
                     # worker, env) catches what its hash does not.
                     allowed_status = (
-                        (CellStatus.READY, CellStatus.IDLE)
+                        (CellStatus.READY, CellStatus.STALE, CellStatus.IDLE)
                         if keyed_elsewhere
                         else (CellStatus.READY,)
                     )
                     # The generic hash isn't all these cells cache on (a SQL cell's connection and
                     # cache policy, a prompt's model), so the cell's own identity must match what it
                     # recorded; None means it can't be settled without a probe. Only needed when
-                    # resurrecting from IDLE (a cold open); a READY cell ran in this session.
-                    identity_required = keyed_elsewhere and cell.status == CellStatus.IDLE
+                    # the cell is not READY; a READY cell ran in this session as it stands.
+                    identity_required = keyed_elsewhere and cell.status != CellStatus.READY
                     identity = self.reopen_identity(cell) if identity_required else None
                     identity_holds = not identity_required or (
                         identity is not None and identity == (cell.last_reopen_identity or "")
@@ -1014,6 +1014,12 @@ class NotebookSession:
                         # and env unchanged: stale, not idle (which would read as "never ran").
                         staleness_map[cell_id] = CellStaleness(
                             status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
+                        )
+                        stale_cells.add(cell_id)
+                    elif cell.last_source_hash not in (None, source_hash):
+                        # Edited since it ran: its result is still shown, and no longer matches.
+                        staleness_map[cell_id] = CellStaleness(
+                            status=CellStatus.STALE, reasons=[StalenessReason.SELF]
                         )
                         stale_cells.add(cell_id)
                     else:
@@ -1142,6 +1148,9 @@ class NotebookSession:
                 cell.staleness = CellStaleness(status=CellStatus.ERROR, reasons=staleness.reasons)
                 staleness_map[cell.id] = cell.staleness
                 continue
+            if staleness.status == CellStatus.READY and cell.status == CellStatus.STALE:
+                # Nothing ran: what it showed is current again, as a cache hit would make it.
+                cell.cache_hit = True
             cell.status = staleness.status
             if staleness.status != CellStatus.READY:
                 cell.cache_hit = False

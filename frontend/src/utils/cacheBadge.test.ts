@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { cacheBadgeLabel, cacheBadgeTitle, formatDuration } from './cacheBadge.ts'
+import {
+  cacheBadgeLabel,
+  cacheBadgeTitle,
+  cachedAgainFields,
+  formatDuration,
+  isCachedAgain,
+} from './cacheBadge.ts'
 
 test('a hit with a known cost says what it saved', () => {
   assert.equal(cacheBadgeLabel(2100, 11), 'cached · saved 2.1s')
@@ -28,4 +34,27 @@ test('the tooltip keeps the load time', () => {
 test('durations switch to seconds at one second', () => {
   assert.equal(formatDuration(999), '999ms')
   assert.equal(formatDuration(1000), '1.0s')
+})
+
+test('only stale to ready with no run in between is cached again', () => {
+  assert.equal(isCachedAgain('stale', 'ready'), true)
+  assert.equal(isCachedAgain('running', 'ready'), false)
+  assert.equal(isCachedAgain('idle', 'ready'), false)
+  assert.equal(isCachedAgain('ready', 'ready'), false)
+  assert.equal(isCachedAgain('stale', 'idle'), false)
+  assert.equal(isCachedAgain(undefined, 'ready'), false)
+})
+
+test('a computed result that is current again saved what its run cost', () => {
+  assert.deepEqual(cachedAgainFields({ cacheHit: false }, 2100), {
+    cacheHit: true,
+    cacheSavedMs: 2100,
+  })
+})
+
+test('a hit that is current again keeps its saving, not its load time', () => {
+  assert.deepEqual(cachedAgainFields({ cacheHit: true, cacheSavedMs: 2100 }, 11), {
+    cacheHit: true,
+    cacheSavedMs: 2100,
+  })
 })

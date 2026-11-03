@@ -399,13 +399,13 @@ class TestUpstreamInvalidationE2E:
                 )
                 assert resp.status_code == 200
                 data = resp.json()
-                # Cell 1 should now be idle/stale
+                # Cell 1 ran, so the edit leaves it stale.
                 c1_status = None
                 for c in data.get("cells", []):
                     if c["id"] == "c1":
                         c1_status = c["status"]
-                assert c1_status == "idle", (
-                    f"After editing c1, expected status='idle' but got '{c1_status}'"
+                assert c1_status == "stale", (
+                    f"After editing c1, expected status='stale' but got '{c1_status}'"
                 )
 
                 ws.clear()
@@ -440,3 +440,142 @@ class TestUpstreamInvalidationE2E:
                 assert r2_new["payload"].get("cache_hit") is not True
                 y_value = r2_new["payload"]["outputs"]["y"]["preview"]
                 assert y_value == 101, f"Expected y=101 but got {y_value}"
+
+
+class TestEditedCellReadsStale:
+    """A cell that ran and was edited still shows that run, which no longer matches."""
+
+    @staticmethod
+    def _edit(session, cell_id, source):
+        session.notebook_state.get_cell(cell_id).source = source
+        write_cell(session.path, cell_id, source)
+        session.re_analyze_cell(cell_id)
+        return session.compute_staleness()
+
+    @staticmethod
+    async def _run_pipeline(session):
+        executor = CellExecutor(session)
+        for cell_id, source in (("c1", "x = 1"), ("c2", "y = x + 1"), ("c3", "print(y)")):
+            result = await executor.execute_cell(cell_id, source)
+            assert result.success, result.error
+
+    @pytest.mark.asyncio
+    async def test_it_is_stale_because_of_its_source(self, pipeline_notebook):
+        session = pipeline_notebook
+        await self._run_pipeline(session)
+
+        staleness = self._edit(session, "c1", "x = 2")
+
+        assert staleness["c1"].status == "stale"
+        assert staleness["c1"].reasons == [StalenessReason.SELF]
+        assert session.notebook_state.get_cell("c1").status == "stale"
+        assert staleness["c2"].status == "stale"
+        assert staleness["c2"].reasons == [StalenessReason.UPSTREAM]
+
+    def test_a_cell_that_never_ran_stays_idle(self, pipeline_notebook):
+        session = pipeline_notebook
+
+        staleness = self._edit(session, "c1", "x = 2")
+
+        assert staleness["c1"].status == "idle"
+        assert staleness["c2"].status == "idle"
+
+    @pytest.mark.asyncio
+    async def test_a_comment_changes_nothing(self, pipeline_notebook):
+        session = pipeline_notebook
+        await self._run_pipeline(session)
+
+        staleness = self._edit(session, "c1", "x = 1  # the same value")
+
+        assert staleness["c1"].status == "ready"
+        assert staleness["c2"].status == "ready"
+
+    @pytest.mark.asyncio
+    async def test_undoing_the_edit_makes_it_a_hit_again(self, pipeline_notebook):
+        session = pipeline_notebook
+        await self._run_pipeline(session)
+        cells = session.notebook_state
+        assert cells.get_cell("c3").cache_hit is False
+
+        self._edit(session, "c1", "x = 2")
+        for cell_id in ("c1", "c2", "c3"):
+            assert cells.get_cell(cell_id).cache_hit is False, cell_id
+        staleness = self._edit(session, "c1", "x = 1")
+
+        for cell_id in ("c1", "c2", "c3"):
+            assert staleness[cell_id].status == "ready", cell_id
+            assert staleness[cell_id].reasons == [], cell_id
+            assert cells.get_cell(cell_id).cache_hit is True, cell_id
+
+    @pytest.mark.asyncio
+    async def test_undoing_an_edit_to_a_leaf_that_only_prints(self, pipeline_notebook):
+        session = pipeline_notebook
+        await self._run_pipeline(session)
+
+        assert self._edit(session, "c3", "print(y, y)")["c3"].status == "stale"
+        assert self._edit(session, "c3", "print(y)")["c3"].status == "ready"
+
+    @pytest.mark.asyncio
+    async def test_undoing_an_edit_to_a_leaf_that_stored_nothing(self, pipeline_notebook):
+        session = pipeline_notebook
+        executor = CellExecutor(session)
+        write_cell(session.path, "c3", "z = y")
+        session.notebook_state.get_cell("c3").source = "z = y"
+        session.re_analyze_cell("c3")
+        assert (await executor.execute_cell("c1", "x = 1")).success
+        assert (await executor.execute_cell("c2", "y = x + 1")).success
+        assert (await executor.execute_cell("c3", "z = y")).success
+        assert session.compute_staleness()["c3"].status == "ready"
+
+        assert self._edit(session, "c3", "z = y + 1")["c3"].status == "stale"
+        assert self._edit(session, "c3", "z = y")["c3"].status == "ready"
+
+    @pytest.mark.asyncio
+    async def test_undoing_an_edit_to_a_nocache_leaf_is_not_a_hit(self, pipeline_notebook):
+        """It keeps no record of its run, so nothing says the shown result is the undone one's."""
+        session = pipeline_notebook
+        executor = CellExecutor(session)
+        source = "# @nocache\nprint(y)"
+        self._edit(session, "c3", source)
+        assert (await executor.execute_cell("c1", "x = 1")).success
+        assert (await executor.execute_cell("c2", "y = x + 1")).success
+        assert (await executor.execute_cell("c3", source)).success
+        session.compute_staleness()
+        session.mark_executed_ready("c3")
+
+        assert self._edit(session, "c3", "# @nocache\nprint(y, y)")["c3"].status == "stale"
+        assert self._edit(session, "c3", source)["c3"].status == "idle"
+        assert session.notebook_state.get_cell("c3").cache_hit is False
+
+    @pytest.mark.asyncio
+    async def test_a_cell_left_ready_is_not_called_a_hit(self, pipeline_notebook):
+        session = pipeline_notebook
+        result = await CellExecutor(session).execute_cell("c1", "x = 1")
+        assert result.success and result.cache_hit is False
+
+        staleness = self._edit(session, "c2", "y = x + 2")
+
+        assert staleness["c1"].status == "ready"
+        assert session.notebook_state.get_cell("c1").cache_hit is False
+
+    @pytest.mark.asyncio
+    async def test_a_new_run_of_the_edit_is_ready_and_computed(self, pipeline_notebook):
+        session = pipeline_notebook
+        await self._run_pipeline(session)
+        self._edit(session, "c1", "x = 2")
+
+        result = await CellExecutor(session).execute_cell("c1", "x = 2")
+
+        assert result.success and result.cache_hit is False
+        assert session.compute_staleness()["c1"].status == "ready"
+
+    @pytest.mark.asyncio
+    async def test_a_change_of_environment_is_not_an_edit(self, pipeline_notebook, monkeypatch):
+        session = pipeline_notebook
+        await self._run_pipeline(session)
+
+        monkeypatch.setattr(session, "cell_env_hash", lambda cell: "another-environment")
+        staleness = session.compute_staleness()
+
+        assert staleness["c1"].status == "idle"
+        assert staleness["c1"].reasons == []

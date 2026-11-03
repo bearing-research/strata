@@ -472,6 +472,38 @@ async def test_sql_cell_stays_ready_after_staleness_recompute(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_undoing_an_edit_to_a_sql_cell_still_checks_its_connection(tmp_path, monkeypatch):
+    """The generic hash doesn't cover the connection, so a matching source isn't enough."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.models import CellStatus, StalenessReason
+    from strata.notebook.writer import write_cell
+
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    original = "# @sql connection=db\n# @cache forever\nSELECT * FROM events\n"
+    nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=original)
+    session = _make_session(nb_dir)
+    result = await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
+    assert result.success, result.error
+
+    def edit(source):
+        session.notebook_state.get_cell("c1").source = source
+        write_cell(nb_dir, "c1", source)
+        session.re_analyze_cell("c1")
+        return session.compute_staleness()["c1"]
+
+    edited = original.replace("SELECT *", "SELECT id")
+    staleness = edit(edited)
+    assert staleness.status == CellStatus.STALE
+    assert staleness.reasons == [StalenessReason.SELF]
+    assert edit(original).status == CellStatus.READY
+
+    assert edit(edited).status == CellStatus.STALE
+    monkeypatch.setattr(session, "reopen_identity", lambda cell: "another-connection")
+    assert edit(original).status == CellStatus.IDLE
+
+
+@pytest.mark.asyncio
 async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
     """``cell.artifact_uris`` is set after a SQL run so downstream provenance includes it.
 

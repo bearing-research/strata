@@ -3159,11 +3159,11 @@ class TestLoopCellExecution:
         assert session.notebook_state.get_cell("loop").status == "ready"
         assert session.notebook_state.get_cell("out").status == "ready"
 
-        # As after a body edit: the loop has no result under its new hash, its reader is stale.
+        # As after a body edit: the loop and its reader both show a run that no longer matches.
         one = three.replace("max_iter=3", "max_iter=1")
         self._edit(session, "loop", one)
         session.compute_staleness()
-        assert session.notebook_state.get_cell("loop").status == "idle"
+        assert session.notebook_state.get_cell("loop").status == "stale"
         assert session.notebook_state.get_cell("out").status == "stale"
 
         rerun = await executor.execute_cell("loop", one)
