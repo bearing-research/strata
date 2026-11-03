@@ -767,8 +767,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "p2": {
@@ -1220,8 +1222,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "c3": {

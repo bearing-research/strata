@@ -1170,8 +1170,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "v2": {
