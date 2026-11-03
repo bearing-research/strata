@@ -190,6 +190,8 @@ export interface CellOutput {
   cacheHit?: boolean
   /** Cache load time in ms (for displaying "⚡ cached · 5ms") */
   cacheLoadMs?: number
+  // What this hit saved; 0 or absent when no earlier run priced it.
+  cacheSavedMs?: number
   /** Error message if failed */
   error?: string
 }
@@ -723,7 +725,7 @@ export interface CellProfile {
   cellId: CellId
   cellName: string
   status: CellStatus
-  durationMs: number
+  durationMs: number | null
   cacheHit: boolean
   artifactUri?: string
   executionCount: number

@@ -13,6 +13,7 @@ import io
 import os
 import platform
 import sys
+import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
@@ -414,6 +415,10 @@ def _recv_response(stream: Any) -> dict:
     return orjson.loads(line)
 
 
+def _elapsed_ms(started: float) -> float:
+    return (time.perf_counter() - started) * 1000
+
+
 def _run_one_batched_cell(
     cell: dict,
     namespace: dict,
@@ -441,6 +446,7 @@ def _run_one_batched_cell(
     cell_output_dir.mkdir(parents=True, exist_ok=True)
 
     _send_frame(frame_out, "cell_start", {"cell_id": cell_id})
+    started = time.perf_counter()
 
     # Saved so a user variable named like a mount is restored on exit.
     mount_names = list(mount_manifest.keys())
@@ -495,6 +501,7 @@ def _run_one_batched_cell(
                     {
                         "cell_id": cell_id,
                         "cache_hit": True,
+                        "duration_ms": _elapsed_ms(started),
                         "outputs": cached_outputs,
                         "display_outputs": response.get("cached_displays") or [],
                         # A leaf's replayed console, as single-cell returns it on a hit.
@@ -520,6 +527,9 @@ def _run_one_batched_cell(
             # Batch can't recapture in-place input mutations (the DAG is static), so
             # this is warn-only.
             input_snapshots = _immut.snapshot_inputs(namespace, references)
+            # What a later hit saves: the body and its serialization, not the cell's
+            # share of the batch's setup or the parent's persist.
+            started = time.perf_counter()
             try:
                 try:
                     with display_capture.capture_side_effects():
@@ -533,6 +543,7 @@ def _run_one_batched_cell(
                             "cell_id": cell_id,
                             "error": f"{_error_text(exc)}\n{hint}" if hint else _error_text(exc),
                             "traceback": traceback.format_exc(),
+                            "duration_ms": _elapsed_ms(started),
                             "stdout": stdout_capture.getvalue(),
                             "stderr": stderr_capture.getvalue(),
                         },
@@ -583,6 +594,7 @@ def _run_one_batched_cell(
                     except Exception:
                         # Display serialization errors don't abort the cell, as in single-cell.
                         pass
+                duration_ms = _elapsed_ms(started)
             finally:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
@@ -592,6 +604,7 @@ def _run_one_batched_cell(
                 "persist",
                 {
                     "cell_id": cell_id,
+                    "duration_ms": duration_ms,
                     "outputs": outputs,
                     "display_outputs": serialized_displays,
                     "stdout": stdout_capture.getvalue(),

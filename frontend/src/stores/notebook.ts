@@ -2032,6 +2032,7 @@ function initializeWebSocket() {
       }
       output.cacheHit = p.cache_hit || false
       output.cacheLoadMs = p.duration_ms
+      output.cacheSavedMs = p.saved_ms
 
       const cell = cellMap.value.get(cellId)
       if (cell) {
@@ -2344,7 +2345,7 @@ function initializeWebSocket() {
           cellId: cp.cell_id,
           cellName: cp.cell_name,
           status: cp.status,
-          durationMs: cp.duration_ms,
+          durationMs: cp.duration_ms ?? null,
           cacheHit: cp.cache_hit,
           artifactUri: cp.artifact_uri,
           executionCount: cp.execution_count,

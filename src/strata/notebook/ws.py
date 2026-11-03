@@ -2785,14 +2785,30 @@ async def _run_partition_batch(
             stderr=result.stderr,
             outputs=dict(result.outputs),
             display_outputs=list(result.display_outputs),
-            duration_ms=0.0,  # not tracked per cell inside batches
+            # Only failures can lack a time, and their frame carries none.
+            duration_ms=result.duration_ms or 0.0,
             cache_hit=result.cache_hit,
             error=result.error,
             execution_method="batch" if not result.cache_hit else "cached",
             mutation_warnings=result.mutation_warnings,
         )
+        team_pull = result.team_pull
+        if team_pull is not None:
+            synthetic.from_team_cache = True
+            synthetic.team_cache_principal = team_pull.principal
+            synthetic.team_cache_build_env = team_pull.build_env
+            synthetic.team_cache_saved_ms = team_pull.saved_ms
+            synthetic.team_cache_promotion = team_pull.promotion
 
-        session.record_execution(result.cell_id, 0.0, result.cache_hit)
+        session.record_execution(
+            result.cell_id,
+            result.duration_ms,
+            result.cache_hit,
+            from_team=synthetic.from_team_cache,
+            team_principal=synthetic.team_cache_principal,
+            team_promotion=synthetic.team_cache_promotion,
+            team_saved_ms=synthetic.team_cache_saved_ms,
+        )
         session.apply_execution_result_metadata(result.cell_id, synthetic)
         await _broadcast_execution_result(notebook_id, result.cell_id, synthetic)
 
@@ -3515,6 +3531,8 @@ async def _broadcast_output_or_error(
         cell = session.notebook_state.get_cell(cell_id) if session else None
         if cell is not None:
             payload["artifact_uris"] = dict(cell.artifact_uris)
+            if result.cache_hit and session is not None:
+                payload["saved_ms"] = session.last_hit_saved_ms(cell_id)
             # A hit that replays no console keeps the cell's last one, so the
             # frame says what a resync or reopen shows.
             if result.cache_hit and not (result.stdout or result.stderr):
@@ -3681,7 +3699,7 @@ async def _run_live_cascade(
             blocked.add(cid)  # a stale input can't be produced
             continue
         samples = session.execution_history.get(cid) or []
-        if samples and samples[-1].duration_ms > _LIVE_COST_THRESHOLD_MS:
+        if samples and (samples[-1].duration_ms or 0) > _LIVE_COST_THRESHOLD_MS:
             blocked.add(cid)  # too expensive to auto-run; leave it stale
             continue
         result = await execute_cell_and_broadcast(
