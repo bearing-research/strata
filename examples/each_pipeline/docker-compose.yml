@@ -1,0 +1,41 @@
+# A warehouse to write to: an Iceberg REST catalog over an object store, on this
+# machine. The credentials are local-only, not secrets.
+services:
+  storage:
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: strata
+      MINIO_ROOT_PASSWORD: strata-example
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  make-bucket:
+    image: cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
+    depends_on:
+      storage:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "mc alias set local http://storage:9000 strata strata-example
+      && mc mb --ignore-existing local/warehouse"
+
+  catalog:
+    image: apache/iceberg-rest-fixture:1.9.2
+    depends_on:
+      make-bucket:
+        condition: service_completed_successfully
+    environment:
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://storage:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_ACCESS_KEY_ID: strata
+      AWS_SECRET_ACCESS_KEY: strata-example
+      AWS_REGION: us-east-1
+    ports:
+      - "8181:8181"
