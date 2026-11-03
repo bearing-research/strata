@@ -88,15 +88,17 @@ async function main() {
       await context.addInitScript((value) => {
         try {
           localStorage.setItem('strata.theme', value)
+          localStorage.setItem('strata:dagDrawerCollapsed', '0')
         } catch {
           // Storage disabled: the page falls back to the system preference.
         }
       }, theme)
       const page = await context.newPage()
       await page.goto(`${baseUrl}/#/notebook/${sessionId}`, { waitUntil: 'networkidle' })
-      // The mode badge fails closed to "Service mode" until the worker catalog
-      // syncs, so it doubles as the settle signal.
-      await page.locator('.mode-badge', { hasText: 'Personal mode' }).waitFor({
+      // The mode fails closed to service until the worker catalog syncs, so it
+      // doubles as the settle signal.
+      await page.locator('.header[data-mode="personal"]').waitFor({
+        state: 'attached',
         timeout: TIMEOUT_MS,
       })
       pages[theme] = page

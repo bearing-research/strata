@@ -94,7 +94,7 @@ Expected response (`locked_environments` is `false` if `uv` is not on the worker
 }
 ```
 
-**3. Register it in your notebook.** Either through the **Workers panel** in the sidebar, or by editing `notebook.toml`:
+**3. Register it in your notebook.** Either through the **Workers panel** under **Notebook settings** in the sidebar, or by editing `notebook.toml`:
 
 ```toml
 [[workers]]
@@ -453,7 +453,7 @@ service, and the isolation model.
 
 ## Registering workers
 
-Workers live in `notebook.toml` under `[[workers]]`. You can add them through the **Workers panel** sidebar (which writes the same TOML) or edit the file directly:
+Workers live in `notebook.toml` under `[[workers]]`. You can add them through the **Workers panel** under **Notebook settings** in the sidebar (which writes the same TOML) or edit the file directly:
 
 
 ![The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes.](../assets/workers-panel-light.png#only-light)

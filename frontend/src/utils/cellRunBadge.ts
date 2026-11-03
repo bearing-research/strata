@@ -5,9 +5,20 @@
 export function cellRunBadge(
   status: string,
   cacheHit: boolean | undefined,
-  executionMethod: string,
-): 'stale' | 'cached' | 'method' | null {
+): 'stale' | 'cached' | null {
   if (status === 'stale') return 'stale'
-  if (cacheHit) return 'cached'
-  return executionMethod ? 'method' : null
+  return cacheHit ? 'cached' : null
+}
+
+/** The status dot's tooltip: its status, then the details the cell header leaves out. */
+export function cellDotTitle(
+  statusTitle: string,
+  details: { isLeaf: boolean; executionMethod: string; hasRunBadge: boolean },
+): string {
+  const lines = [statusTitle]
+  if (details.isLeaf) lines.push('Leaf: no downstream consumers')
+  if (details.executionMethod && !details.hasRunBadge) {
+    lines.push(`Executed via ${details.executionMethod} process`)
+  }
+  return lines.join('\n')
 }

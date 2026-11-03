@@ -36,6 +36,7 @@ const {
   refreshServerWorkerAction,
   isServerWorkerActionLoading,
 } = useNotebook()
+const props = defineProps<{ attention?: boolean }>()
 const showPanel = ref(false)
 
 const workerLabel = computed(() => notebook.worker || 'local')
@@ -131,6 +132,13 @@ watch(showPanel, (open) => {
     void ensureWorkersLoaded()
   }
 })
+watch(
+  () => props.attention,
+  (needed) => {
+    if (needed) showPanel.value = true
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

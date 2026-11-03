@@ -17,7 +17,7 @@ import {
 import { inputWeightBadge } from '../utils/inputWeights'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
 import { cacheBadgeLabel, cacheBadgeTitle } from '../utils/cacheBadge'
-import { cellRunBadge } from '../utils/cellRunBadge'
+import { cellDotTitle, cellRunBadge } from '../utils/cellRunBadge'
 import { renderMarkdownToHtml } from '../utils/markdown'
 import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
 
@@ -301,8 +301,14 @@ const executionMethodLabel = computed(() => {
   }
 })
 
-const runBadge = computed(() =>
-  cellRunBadge(props.cell.status, props.cell.output?.cacheHit, executionMethodLabel.value),
+const runBadge = computed(() => cellRunBadge(props.cell.status, props.cell.output?.cacheHit))
+
+const statusDotTitle = computed(() =>
+  cellDotTitle(statusTitle.value, {
+    isLeaf: Boolean(props.cell.isLeaf),
+    executionMethod: executionMethodLabel.value,
+    hasRunBadge: runBadge.value !== null,
+  }),
 )
 
 const isStale = computed(() => props.cell.status === 'stale')
@@ -733,7 +739,7 @@ function outputKey(output: CellOutput, index: number): string {
   >
     <!-- Left gutter -->
     <div class="cell-gutter">
-      <span class="status-dot" :title="statusTitle">{{ statusLabel }}</span>
+      <span class="status-dot" :title="statusDotTitle">{{ statusLabel }}</span>
       <div class="cell-actions">
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"
@@ -850,7 +856,7 @@ function outputKey(output: CellOutput, index: number): string {
         </template>
       </div>
       <div class="cell-meta">
-        <!-- Line 1: identity (name, defines, reads) -->
+        <!-- One row for a typical cell: identity (name, defines, reads), then runtime. -->
         <div class="cell-meta-row">
           <div class="cell-meta-main">
             <span class="cell-lang">{{ cell.language }}</span>
@@ -861,12 +867,6 @@ function outputKey(output: CellOutput, index: number): string {
             >
               {{ cell.annotations.name }}
             </span>
-            <span
-              v-if="cell.isLeaf"
-              class="leaf-badge"
-              title="This cell is a leaf (no downstream consumers)"
-              >leaf</span
-            >
             <span v-if="cell.defines.length" class="cell-vars">
               defines: <code>{{ cell.defines.join(', ') }}</code>
             </span>
@@ -880,6 +880,144 @@ function outputKey(output: CellOutput, index: number): string {
             <span v-if="cell.upstreamIds.length" class="cell-vars">
               reads: <code>{{ cell.references.join(', ') }}</code>
             </span>
+            <!-- Runtime: worker, mounts, timeout, env, annotations, cache. -->
+            <div class="cell-meta-runtime">
+              <span class="worker-badge" :title="`Worker: ${effectiveWorkerLabel}`">
+                worker: {{ effectiveWorkerLabel }}
+              </span>
+              <span v-if="authorBadge" class="author-badge" :title="authorTooltip">
+                {{ authorBadge }}
+              </span>
+              <span
+                v-for="who in othersHere"
+                :key="who"
+                class="presence-badge"
+                data-testid="presence-badge"
+                :title="`${who} is on this cell`"
+              >
+                {{ who }}
+              </span>
+              <span v-if="dispatchBadge" class="dispatch-badge" :title="dispatchBadge.title">
+                {{ dispatchBadge.label }}
+              </span>
+              <span v-if="inputsBadge" class="inputs-badge" :title="inputsBadge.title">
+                {{ inputsBadge.label }}
+              </span>
+              <span
+                v-if="effectiveWorkerTransportLabel"
+                class="worker-transport-badge"
+                :title="`Remote worker transport: ${effectiveWorkerTransportLabel}`"
+              >
+                {{ effectiveWorkerTransportLabel }}
+              </span>
+              <span
+                v-if="effectiveWorkerHealthLabel"
+                class="worker-health-badge"
+                :class="{ warning: workerWarning }"
+                :title="workerWarning || `Worker health: ${effectiveWorkerHealthLabel}`"
+              >
+                {{ workerWarning ? 'attention' : effectiveWorkerHealthLabel }}
+              </span>
+              <span v-if="cell.mounts.length" class="mount-badge" :title="mountSummary">
+                mounts: {{ cell.mounts.length }}
+              </span>
+              <span
+                v-if="effectiveTimeoutLabel"
+                class="timeout-badge"
+                :title="`Timeout: ${effectiveTimeoutLabel}`"
+              >
+                timeout: {{ effectiveTimeoutLabel }}
+              </span>
+              <span
+                v-if="effectiveEnvCount"
+                class="env-badge"
+                :title="`${effectiveEnvCount} env vars`"
+              >
+                env: {{ effectiveEnvCount }}
+              </span>
+              <span
+                v-if="hasAnnotationOverrides"
+                class="annotation-badge"
+                :title="annotationSummaryTitle"
+              >
+                source overrides
+              </span>
+              <span
+                v-for="chip in visibleAnnotationSummaryChips"
+                :key="chip"
+                class="annotation-summary-chip"
+                :title="annotationSummaryTitle"
+              >
+                {{ chip }}
+              </span>
+              <span
+                v-if="hiddenAnnotationSummaryCount"
+                class="annotation-summary-chip"
+                :title="annotationSummaryTitle"
+              >
+                +{{ hiddenAnnotationSummaryCount }}
+              </span>
+              <span
+                v-if="annotationDiagnosticsLabel"
+                class="annotation-diagnostic-badge"
+                :title="annotationDiagnosticsTitle"
+              >
+                &#x26A0; {{ annotationDiagnosticsLabel }}
+              </span>
+              <span v-if="cell.isModuleCell" class="module-cell-badge" :title="moduleExportsTitle">
+                module
+              </span>
+              <span
+                v-if="loopProgressLabel"
+                class="loop-progress-badge"
+                :class="{
+                  running: cell.status === 'running',
+                  done: loopProgressDone,
+                }"
+                :title="loopProgressTitle"
+              >
+                <span
+                  v-if="cell.status === 'running' && !loopProgressDone"
+                  class="loop-spinner"
+                  aria-hidden="true"
+                ></span>
+                &#x21BB; {{ loopProgressLabel }}
+              </span>
+              <span
+                v-for="v in cell.variantProgress"
+                :key="v.variant"
+                class="variant-progress-chip"
+                :class="{ failed: !v.success }"
+                :title="
+                  v.error
+                    ? `${v.variant} failed: ${v.error}`
+                    : `variant ${v.variant} (${v.index + 1}/${v.total})` +
+                      (typeof v.durationMs === 'number' ? ` · ${Math.round(v.durationMs)}ms` : '')
+                "
+                data-testid="variant-progress-chip"
+              >
+                {{ v.success ? '✓' : '✗' }} {{ v.variant }}
+              </span>
+              <span
+                v-if="cell.status === 'running' && !loopProgressLabel"
+                class="running-badge"
+                data-testid="running-elapsed"
+                :title="runningElapsedTitle"
+              >
+                <span class="running-spinner" aria-hidden="true"></span>
+                running · {{ runningElapsedLabel }}
+              </span>
+              <span v-if="runBadge === 'stale'" class="stale-badge" :title="statusTitle"
+                >stale</span
+              >
+              <span
+                v-else-if="runBadge === 'cached'"
+                class="cache-badge"
+                :title="cacheBadgeTitle(cell.output?.cacheLoadMs)"
+              >
+                &#x26A1; {{ cacheBadgeLabel(cell.output?.cacheSavedMs, cell.output?.cacheLoadMs) }}
+              </span>
+            </div>
           </div>
           <div class="cell-meta-actions">
             <span v-if="durationLabel" class="duration">{{ durationLabel }}</span>
@@ -892,145 +1030,6 @@ function outputKey(output: CellOutput, index: number): string {
               Why stale?
             </button>
           </div>
-        </div>
-        <!-- Line 2: runtime (worker, mounts, timeout, env, annotations, cache) -->
-        <div class="cell-meta-row cell-meta-runtime">
-          <span class="worker-badge" :title="`Worker: ${effectiveWorkerLabel}`">
-            worker: {{ effectiveWorkerLabel }}
-          </span>
-          <span v-if="authorBadge" class="author-badge" :title="authorTooltip">
-            {{ authorBadge }}
-          </span>
-          <span
-            v-for="who in othersHere"
-            :key="who"
-            class="presence-badge"
-            data-testid="presence-badge"
-            :title="`${who} is on this cell`"
-          >
-            {{ who }}
-          </span>
-          <span v-if="dispatchBadge" class="dispatch-badge" :title="dispatchBadge.title">
-            {{ dispatchBadge.label }}
-          </span>
-          <span v-if="inputsBadge" class="inputs-badge" :title="inputsBadge.title">
-            {{ inputsBadge.label }}
-          </span>
-          <span
-            v-if="effectiveWorkerTransportLabel"
-            class="worker-transport-badge"
-            :title="`Remote worker transport: ${effectiveWorkerTransportLabel}`"
-          >
-            {{ effectiveWorkerTransportLabel }}
-          </span>
-          <span
-            v-if="effectiveWorkerHealthLabel"
-            class="worker-health-badge"
-            :class="{ warning: workerWarning }"
-            :title="workerWarning || `Worker health: ${effectiveWorkerHealthLabel}`"
-          >
-            {{ workerWarning ? 'attention' : effectiveWorkerHealthLabel }}
-          </span>
-          <span v-if="cell.mounts.length" class="mount-badge" :title="mountSummary">
-            mounts: {{ cell.mounts.length }}
-          </span>
-          <span
-            v-if="effectiveTimeoutLabel"
-            class="timeout-badge"
-            :title="`Timeout: ${effectiveTimeoutLabel}`"
-          >
-            timeout: {{ effectiveTimeoutLabel }}
-          </span>
-          <span v-if="effectiveEnvCount" class="env-badge" :title="`${effectiveEnvCount} env vars`">
-            env: {{ effectiveEnvCount }}
-          </span>
-          <span
-            v-if="hasAnnotationOverrides"
-            class="annotation-badge"
-            :title="annotationSummaryTitle"
-          >
-            source overrides
-          </span>
-          <span
-            v-for="chip in visibleAnnotationSummaryChips"
-            :key="chip"
-            class="annotation-summary-chip"
-            :title="annotationSummaryTitle"
-          >
-            {{ chip }}
-          </span>
-          <span
-            v-if="hiddenAnnotationSummaryCount"
-            class="annotation-summary-chip"
-            :title="annotationSummaryTitle"
-          >
-            +{{ hiddenAnnotationSummaryCount }}
-          </span>
-          <span
-            v-if="annotationDiagnosticsLabel"
-            class="annotation-diagnostic-badge"
-            :title="annotationDiagnosticsTitle"
-          >
-            &#x26A0; {{ annotationDiagnosticsLabel }}
-          </span>
-          <span v-if="cell.isModuleCell" class="module-cell-badge" :title="moduleExportsTitle">
-            module
-          </span>
-          <span
-            v-if="loopProgressLabel"
-            class="loop-progress-badge"
-            :class="{
-              running: cell.status === 'running',
-              done: loopProgressDone,
-            }"
-            :title="loopProgressTitle"
-          >
-            <span
-              v-if="cell.status === 'running' && !loopProgressDone"
-              class="loop-spinner"
-              aria-hidden="true"
-            ></span>
-            &#x21BB; {{ loopProgressLabel }}
-          </span>
-          <span
-            v-for="v in cell.variantProgress"
-            :key="v.variant"
-            class="variant-progress-chip"
-            :class="{ failed: !v.success }"
-            :title="
-              v.error
-                ? `${v.variant} failed: ${v.error}`
-                : `variant ${v.variant} (${v.index + 1}/${v.total})` +
-                  (typeof v.durationMs === 'number' ? ` · ${Math.round(v.durationMs)}ms` : '')
-            "
-            data-testid="variant-progress-chip"
-          >
-            {{ v.success ? '✓' : '✗' }} {{ v.variant }}
-          </span>
-          <span
-            v-if="cell.status === 'running' && !loopProgressLabel"
-            class="running-badge"
-            data-testid="running-elapsed"
-            :title="runningElapsedTitle"
-          >
-            <span class="running-spinner" aria-hidden="true"></span>
-            running · {{ runningElapsedLabel }}
-          </span>
-          <span v-if="runBadge === 'stale'" class="stale-badge" :title="statusTitle">stale</span>
-          <span
-            v-else-if="runBadge === 'cached'"
-            class="cache-badge"
-            :title="cacheBadgeTitle(cell.output?.cacheLoadMs)"
-          >
-            &#x26A1; {{ cacheBadgeLabel(cell.output?.cacheSavedMs, cell.output?.cacheLoadMs) }}
-          </span>
-          <span
-            v-else-if="runBadge === 'method'"
-            class="exec-method-badge"
-            :title="`Executed via ${executionMethodLabel} process`"
-          >
-            {{ executionMethodLabel }}
-          </span>
         </div>
       </div>
 
@@ -1713,8 +1712,7 @@ function outputKey(output: CellOutput, index: number): string {
   gap: 12px;
 }
 .cell-meta-runtime {
-  flex-wrap: wrap;
-  gap: 8px;
+  display: contents;
 }
 .cell-meta-actions {
   display: flex;
@@ -1938,20 +1936,6 @@ function outputKey(output: CellOutput, index: number): string {
   padding: 1px 6px;
   border-radius: 3px;
   font-size: 10px;
-}
-.exec-method-badge {
-  background: var(--tint-primary);
-  color: var(--accent-primary);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-}
-.leaf-badge {
-  background: var(--tint-primary-strong);
-  color: var(--accent-primary);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-weight: 600;
 }
 .duration {
   white-space: nowrap;

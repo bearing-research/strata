@@ -490,7 +490,7 @@ With `temperature=0.0` the model is deterministic: same inputs → same output, 
 
 ### Provider configuration
 
-Set an API key in the **Runtime panel** under Environment Variables. The key determines which provider is used:
+Set an API key in the **Runtime panel**, under **Notebook settings** in the sidebar, in Environment Variables. The key determines which provider is used:
 
 | Environment Variable | Provider                        | Default Model        |
 | -------------------- | ------------------------------- | -------------------- |
@@ -551,7 +551,7 @@ The cell above pulls `min_amount` from an upstream Python cell, sends a paramete
 
 ### Connections
 
-A SQL cell references a **named connection**. Connections live in `notebook.toml` under `[connections.<name>]`, but you don't need to edit that file by hand. Open the **Connections panel** in the right sidebar, click `+ Add connection`, and fill in the form. The driver dropdown switches the field layout per backend (path for DuckDB and SQLite; URI + auth + role + search path for PostgreSQL; account / warehouse / database / schema for Snowflake; project / dataset / credentials for BigQuery).
+A SQL cell references a **named connection**. Connections live in `notebook.toml` under `[connections.<name>]`, but you don't need to edit that file by hand. Open **Notebook settings** in the right sidebar, then the **Connections panel**, click `+ Add connection`, and fill in the form. The driver dropdown switches the field layout per backend (path for DuckDB and SQLite; URI + auth + role + search path for PostgreSQL; account / warehouse / database / schema for Snowflake; project / dataset / credentials for BigQuery).
 
 ```toml
 [connections.warehouse]
@@ -599,7 +599,7 @@ A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`
 
 ### Schema discovery
 
-The **Schema panel** in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The `↻` button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this: the panel talks directly to each driver's catalog query surface (`sqlite_master` for SQLite, `information_schema.tables JOIN columns` for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).
+The **Schema panel**, under **Notebook settings** in the sidebar, shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The `↻` button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this: the panel talks directly to each driver's catalog query surface (`sqlite_master` for SQLite, `information_schema.tables JOIN columns` for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).
 
 ### Bind parameters
 

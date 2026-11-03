@@ -28,6 +28,15 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **A quieter notebook chrome.** Artifacts, Logs and Delete Notebook move to a `⋯`
+  menu, and below 1280px wide Rerun All, App and shortcuts join them, so the top bar
+  stays on one row. The personal-mode chip is gone, and a dot with a tooltip replaces
+  "Live". The DAG drawer opens collapsed unless you left it open. The sidebar panels
+  sit under a collapsed "Notebook settings", and a mount, a remote worker or an
+  environment job in progress or failed brings its panel out. With neither, the sidebar
+  shrinks to a thin rail and the cells take its width. A typical cell header is
+  one row, with `leaf` and the execution method in the status dot's tooltip. DAG edge
+  labels no longer overlap. (#1395)
 - **A cell's inputs no longer pass through server memory.** An upstream value streams
   from the store into the run in 1 MiB chunks, so a 1 GB frame adds about 1 MB to the
   server's memory instead of 1 GB, per consuming cell per run. (#1383)
