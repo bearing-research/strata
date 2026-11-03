@@ -1835,62 +1835,29 @@ class CellExecutor:
             )
             team_pull: TeamPull | None = None
             if use_cache:
-                if consumed_vars:
-                    first_var = sorted(consumed_vars)[0]
-                    var_prov = derive_subkey(provenance_hash, first_var)
-                    cached_artifact = artifact_mgr.find_cached(var_prov)
-                else:
-                    cached_artifact = artifact_mgr.find_cached(provenance_hash)
+                cached_artifact, team_pull = await self._find_or_pull_outputs(
+                    cell_id,
+                    provenance_hash,
+                    consumed_vars,
+                    source_hash=source_hash,
+                    source=source,
+                    env_hash=env_hash,
+                    variant=fanout_variant,
+                )
 
-                # Team cache tier, only after a local miss so an ordinary hit pays nothing. A pull
-                # writes each variable under its canonical local id, so the re-probe and validation
-                # below run against real local artifacts.
-                if cached_artifact is None and consumed_vars:
-                    team_pull = await self._pull_from_team_store(
-                        cell_id=cell_id,
-                        provenance_hash=provenance_hash,
-                        consumed_vars=consumed_vars,
-                        source_hash=source_hash,
-                        source=source,
-                        env_hash=env_hash,
-                        input_versions=self._input_refs(cell_id, fanout_variant),
-                        variant=fanout_variant,
-                    )
-                    if team_pull is not None:
-                        cached_artifact = artifact_mgr.find_cached(
-                            derive_subkey(provenance_hash, sorted(consumed_vars)[0])
-                        )
-
-            # Validate the hit: find_by_provenance can return artifacts from other notebooks in
-            # the same DB, so each consumed variable's LOCAL canonical artifact must exist AND
-            # carry the expected provenance hash.
             if use_cache and cached_artifact is not None and consumed_vars:
-                promoted_count = self._promote_reverted_outputs(
+                cached_artifact, cached_display_outputs = self._validate_output_hit(
+                    cell,
                     cell_id,
                     provenance_hash,
                     consumed_vars,
                     # An @each instance writes no table: its cell writes once, over them all.
                     [] if each_item else prov.annotations.table_writes,
-                    len(current_display_outputs),
+                    cached_artifact,
+                    current_display_outputs,
+                    cached_display_outputs,
                     fanout_variant,
                 )
-                if promoted_count is None:
-                    cached_artifact = None
-                elif promoted_count and cell is not None:
-                    # The display resolver saw pre-promotion state; re-resolve.
-                    cached_display_outputs = self.session._resolve_cached_display_outputs(
-                        cell_id,
-                        provenance_hash,
-                        current_display_outputs,
-                    )
-                    # Likewise cached_artifact names the superseded version, which would
-                    # disagree with cell.artifact_uris re-read from latest below.
-                    first_var = sorted(consumed_vars)[0]
-                    refreshed = artifact_mgr.artifact_store.get_latest_version(
-                        artifact_mgr.cell_artifact_id(cell_id, first_var, variant=fanout_variant)
-                    )
-                    if refreshed is not None:
-                        cached_artifact = refreshed
 
             # A leaf's record is its console and displays; a revert finds them under an older
             # version, promoted like a consumed variable's above.
@@ -2328,6 +2295,98 @@ class CellExecutor:
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
+
+    def _canonical_output(
+        self, cell_id: str, var_name: str, provenance_hash: str
+    ) -> ArtifactVersion | None:
+        """The cell's latest output *var_name*, if it is the one under ``provenance_hash``.
+
+        find_by_provenance can return a row from another notebook in the same store; only
+        this says the cell's own output is that result.
+        """
+        artifact_mgr = self.session.get_artifact_manager()
+        latest = artifact_mgr.artifact_store.get_latest_version(
+            artifact_mgr.cell_artifact_id(cell_id, var_name)
+        )
+        if latest is None or latest.provenance_hash != derive_subkey(provenance_hash, var_name):
+            return None
+        return latest
+
+    async def _find_or_pull_outputs(
+        self,
+        cell_id: str,
+        provenance_hash: str,
+        consumed_vars: set[str],
+        *,
+        source_hash: str,
+        source: str,
+        env_hash: str,
+        variant: str | None = None,
+    ) -> tuple[ArtifactVersion | None, TeamPull | None]:
+        """A row under the cell's key, asking the team store only if the store has none.
+
+        A row that turns out not to be this cell's own output is a miss with no pull (batch
+        differs: it pulls whenever its canonical outputs are missing). A pull writes each
+        variable under its canonical local id, so validation runs against real artifacts.
+        """
+        artifact_mgr = self.session.get_artifact_manager()
+        if not consumed_vars:
+            return artifact_mgr.find_cached(provenance_hash), None
+        first_key = derive_subkey(provenance_hash, sorted(consumed_vars)[0])
+        cached = artifact_mgr.find_cached(first_key)
+        if cached is not None:
+            return cached, None
+        team_pull = await self._pull_from_team_store(
+            cell_id=cell_id,
+            provenance_hash=provenance_hash,
+            consumed_vars=consumed_vars,
+            source_hash=source_hash,
+            source=source,
+            env_hash=env_hash,
+            input_versions=self._input_refs(cell_id, variant),
+            variant=variant,
+        )
+        return (artifact_mgr.find_cached(first_key) if team_pull is not None else None), team_pull
+
+    def _validate_output_hit(
+        self,
+        cell: Any,
+        cell_id: str,
+        provenance_hash: str,
+        consumed_vars: set[str],
+        table_writes: list[TableWriteSpec],
+        cached_artifact: ArtifactVersion,
+        current_displays: list[Any],
+        cached_displays: list[Any],
+        variant: str | None = None,
+    ) -> tuple[ArtifactVersion | None, list[Any]]:
+        """A row under the cell's key as the cell's own: each consumed variable's canonical
+        output, promoted by a revert. The artifact is None for a miss.
+        """
+        promoted_count = self._promote_reverted_outputs(
+            cell_id,
+            provenance_hash,
+            consumed_vars,
+            table_writes,
+            len(current_displays),
+            variant,
+        )
+        if promoted_count is None:
+            return None, cached_displays
+        if not promoted_count or cell is None:
+            return cached_artifact, cached_displays
+        artifact_mgr = self.session.get_artifact_manager()
+        # The display resolver saw pre-promotion state, and cached_artifact names the superseded
+        # version, which would disagree with cell.artifact_uris re-read from latest.
+        refreshed = artifact_mgr.artifact_store.get_latest_version(
+            artifact_mgr.cell_artifact_id(cell_id, sorted(consumed_vars)[0], variant=variant)
+        )
+        return (
+            refreshed if refreshed is not None else cached_artifact,
+            self.session._resolve_cached_display_outputs(
+                cell_id, provenance_hash, current_displays
+            ),
+        )
 
     def _recorded_display_count(
         self, cell_id: str, provenance_hash: str, variant: str | None
@@ -3064,41 +3123,41 @@ class CellExecutor:
             )
             team_pull: TeamPull | None = None
             if use_cache:
-                if consumed_vars:
-                    first_var = sorted(consumed_vars)[0]
-                    var_prov = derive_subkey(provenance_hash, first_var)
-                    cached_artifact = artifact_mgr.find_cached(var_prov)
-                else:
-                    cached_artifact = artifact_mgr.find_cached(provenance_hash)
-
-                # Same team-cache tier as Python: the store keys off provenance and blobs, both
-                # language-agnostic, and the two paths must not drift.
-                if cached_artifact is None and consumed_vars:
-                    team_pull = await self._pull_from_team_store(
-                        cell_id=cell_id,
-                        provenance_hash=provenance_hash,
-                        consumed_vars=consumed_vars,
-                        source_hash=source_hash,
-                        source=source,
-                        env_hash=env_hash,
-                        input_versions=self._input_refs(cell_id),
-                    )
-                    if team_pull is not None:
-                        cached_artifact = artifact_mgr.find_cached(
-                            derive_subkey(provenance_hash, sorted(consumed_vars)[0])
-                        )
+                cached_artifact, team_pull = await self._find_or_pull_outputs(
+                    cell_id,
+                    provenance_hash,
+                    consumed_vars,
+                    source_hash=source_hash,
+                    source=source,
+                    env_hash=env_hash,
+                )
 
             notebook_id = self.session.notebook_state.id
             if use_cache and cached_artifact is not None and consumed_vars:
-                for var_name in consumed_vars:
-                    canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
-                    var_prov = derive_subkey(provenance_hash, var_name)
-                    canonical_art = artifact_mgr.artifact_store.get_latest_version(
-                        canonical_id,
-                    )
-                    if canonical_art is None or canonical_art.provenance_hash != var_prov:
-                        cached_artifact = None
-                        break
+                cached_artifact, cached_display_outputs = self._validate_output_hit(
+                    cell,
+                    cell_id,
+                    provenance_hash,
+                    consumed_vars,
+                    prov.annotations.table_writes,
+                    cached_artifact,
+                    current_display_outputs,
+                    cached_display_outputs,
+                )
+            # A leaf's displays, promoted as a variable's above. No console: an R leaf with only
+            # a console is not cached, so it has nothing to promote.
+            elif (
+                use_cache
+                and cell is not None
+                and not consumed_vars
+                and not cached_display_outputs
+                and self._promote_reverted_outputs(
+                    cell_id, provenance_hash, [], [], len(current_display_outputs)
+                )
+            ):
+                cached_display_outputs = self.session._resolve_cached_display_outputs(
+                    cell_id, provenance_hash, current_display_outputs
+                )
 
             if cached_artifact is not None or (not consumed_vars and cached_display_outputs):
                 duration_ms = (time.time() - start_time) * 1000
@@ -3109,7 +3168,7 @@ class CellExecutor:
                         cached_display_outputs[-1] if cached_display_outputs else None
                     )
                     for var_name in consumed_vars:
-                        canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+                        canonical_id = artifact_mgr.cell_artifact_id(cell_id, var_name)
                         canonical_art = artifact_mgr.artifact_store.get_latest_version(
                             canonical_id,
                         )
@@ -6616,7 +6675,6 @@ class CellExecutor:
             return []
 
         artifact_mgr = self.session.get_artifact_manager()
-        notebook_id = self.session.notebook_state.id
         input_versions = self._input_refs(cell_id)
         stored: list[dict[str, Any]] = []
 
@@ -6631,7 +6689,7 @@ class CellExecutor:
             # size, not 0.
             entry = {**display_output, "bytes": len(blob)}
             display_provenance = derive_subkey(provenance_hash, f"__display__{index}")
-            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var___display__{index}"
+            canonical_id = artifact_mgr.cell_artifact_id(cell_id, f"__display__{index}")
             # A cache hit comes through here too; reuse the stored version instead of writing an
             # identical blob under a new one each time.
             canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
@@ -7174,14 +7232,10 @@ class CellExecutor:
             is None
         ):
             return None
-        notebook_id = self.session.notebook_state.id
         uris: dict[str, str] = {}
         for var_name in sorted({loop.carry, *consumed_vars}):
-            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
-            canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
-            if canonical is None or canonical.provenance_hash != derive_subkey(
-                cell_provenance, var_name
-            ):
+            canonical = self._canonical_output(cell_id, var_name, cell_provenance)
+            if canonical is None:
                 return None
             uris[var_name] = f"strata://artifact/{canonical.id}@v={canonical.version}"
         uri = uris[loop.carry]
@@ -8560,13 +8614,10 @@ class CellExecutor:
         partial hit is a miss. Separate so it can be retried after a team pull.
         """
         artifact_mgr = self.session.get_artifact_manager()
-        notebook_id = self.session.notebook_state.id
         cached_outputs: dict[str, dict[str, str]] = {}
         for var_name in consumed_vars:
-            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
-            var_prov = derive_subkey(provenance_hash, var_name)
-            canonical_art = artifact_mgr.artifact_store.get_latest_version(canonical_id)
-            if canonical_art is None or canonical_art.provenance_hash != var_prov:
+            canonical_art = self._canonical_output(cell_id, var_name, provenance_hash)
+            if canonical_art is None:
                 return None
             blob = artifact_mgr.artifact_store.read_blob(canonical_art.id, canonical_art.version)
             if blob is None:
@@ -8628,7 +8679,6 @@ class CellExecutor:
 
         cell_output_dir = batch_tmpdir / cell_id
         cell_output_dir.mkdir(parents=True, exist_ok=True)
-        notebook_id = self.session.notebook_state.id
         artifact_mgr = self.session.get_artifact_manager()
         consumed_vars = (
             self.session.dag.consumed_variables.get(cell_id, set())
@@ -8659,7 +8709,7 @@ class CellExecutor:
         )
         cached_displays: list[dict[str, Any]] = []
         for index, cached in enumerate(cached_display_models):
-            display_artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___display__{index}"
+            display_artifact_id = artifact_mgr.cell_artifact_id(cell_id, f"__display__{index}")
             display_art = artifact_mgr.artifact_store.get_latest_version(display_artifact_id)
             if display_art is None:
                 continue  # Should not happen: the helper validated existence.

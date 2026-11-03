@@ -3075,7 +3075,7 @@
       "tables": []
      },
      "run": {
-      "cache_hit": false,
+      "cache_hit": true,
       "console": "",
       "displays": [],
       "provenance_hash": "100475742bc0bb03dd9547ca13ed01ce9713befa32aa3d0b6baccfba2c92c485",
@@ -6771,7 +6771,7 @@
       "tables": []
      },
      "run": {
-      "cache_hit": false,
+      "cache_hit": true,
       "console": "",
       "displays": [
        [
