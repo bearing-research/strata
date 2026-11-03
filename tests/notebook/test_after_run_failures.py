@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from strata.notebook.cell_paths import fanout
 from strata.notebook.executor import (
     CellExecutionResult,
     CellExecutor,
@@ -50,6 +51,11 @@ STEPS = (
 STORE_FAILED = "Cell executed successfully but failed to store output artifacts. Check server logs."
 
 
+def _owner(name: str):
+    """Where a step lives: the executor, or the moved path it is a function of."""
+    return fanout if name == "_store_each_manifests" else CellExecutor
+
+
 def _session(tmp_path: Path, *cells: tuple[str, str, str]) -> NotebookSession:
     """A notebook of ``(cell id, language, source)``."""
     nb = create_notebook(tmp_path / "nb", "After")
@@ -80,7 +86,7 @@ def steps(monkeypatch) -> list[str]:
     calls: list[str] = []
 
     def spy(name: str):
-        original = getattr(CellExecutor, name)
+        original = getattr(_owner(name), name)
         if inspect.iscoroutinefunction(original):
 
             async def recorded(self, *args, **kwargs):
@@ -95,13 +101,13 @@ def steps(monkeypatch) -> list[str]:
         return recorded
 
     for name in STEPS:
-        monkeypatch.setattr(CellExecutor, name, spy(name))
+        monkeypatch.setattr(_owner(name), name, spy(name))
     return calls
 
 
 def _fail(monkeypatch, name: str, outcome: Exception | bool, calls: list[str]) -> None:
     """*name* records its call, then raises *outcome* or returns it."""
-    if inspect.iscoroutinefunction(getattr(CellExecutor, name)):
+    if inspect.iscoroutinefunction(getattr(_owner(name), name)):
 
         async def failing(self, *args, **kwargs):
             calls.append(name)
@@ -116,7 +122,7 @@ def _fail(monkeypatch, name: str, outcome: Exception | bool, calls: list[str]) -
                 raise outcome
             return outcome
 
-    monkeypatch.setattr(CellExecutor, name, failing)
+    monkeypatch.setattr(_owner(name), name, failing)
 
 
 class TestAFinishedRunThatFails:

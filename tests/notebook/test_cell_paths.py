@@ -12,10 +12,12 @@ import pytest
 from vestigo.provenance import derive_subkey
 
 import strata.notebook.cell_paths
+from strata.notebook import each
 from strata.notebook.annotations import LoopAnnotation
-from strata.notebook.cell_paths import cell_tests, loop
+from strata.notebook.cell_paths import cell_tests, fanout, loop
 from strata.notebook.cell_paths.cell_tests import CellTestsContext, run_cell_tests
 from strata.notebook.cell_paths.context import PathContext, artifact_content_type
+from strata.notebook.cell_paths.fanout import FanoutContext, run_each_cell, run_fanout_cell
 from strata.notebook.cell_paths.loop import LoopContext, run_loop_cell
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.cell_paths.prompt import run_prompt_cell
@@ -24,8 +26,11 @@ from strata.notebook.cell_paths.widget import run_widget_cell
 from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.executor import CellExecutor
 from strata.notebook.harness_user import LocalExecutionRefused
+from strata.notebook.models import MountMode, WorkerBackendType
+from strata.notebook.mounts import MountWrite
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
+from strata.notebook.table_writes import TableWriteError
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
 PATHS = sorted(Path(strata.notebook.cell_paths.__file__).parent.glob("*.py"))
@@ -1042,3 +1047,365 @@ class TestLoop:
         result = await executor.execute_cell("lp", source)
         assert result.success, result.error
         assert len(calls) == stored
+
+
+@pytest.mark.parametrize(
+    ("method", "runner", "extra"),
+    [
+        ("_execute_fanout_cell", "run_fanout_cell", {"variant_names": ("a",)}),
+        ("_execute_each_cell", "run_each_cell", {}),
+    ],
+)
+async def test_the_executor_hands_the_fanout_paths_what_it_was_asked(
+    tmp_path, monkeypatch, method, runner, extra
+):
+    nb = create_notebook(tmp_path / "nb", "Fanout")
+    add_cell_to_notebook(nb, "c1", None)
+    executor = CellExecutor(NotebookSession(parse_notebook(nb), nb))
+    seen = {}
+
+    async def stub(host, context, cell_id, source, timeout, start_time, **kwargs):
+        seen.update(kwargs, host=host)
+        return "ran"
+
+    monkeypatch.setattr(f"strata.notebook.executor.{runner}", stub)
+
+    ran = await getattr(executor, method)(
+        "c1", "src", 1.0, 0.0, materialize_upstreams=True, use_cache=False, **extra
+    )
+
+    assert ran == "ran"
+    assert seen == {
+        "host": executor.session,
+        "materialize_upstreams": True,
+        "use_cache": False,
+        **extra,
+    }
+
+
+class TestFanout:
+    """The moved path against fakes; the harness-backed behavior is in ``test_each.py``."""
+
+    @staticmethod
+    def _base(**overrides):
+        fields = {
+            "provenance_hash": "prov",
+            "source_hash": "source",
+            "env_hash": "env",
+            "table_reads": [],
+            "key_parts": {},
+            "effective_worker": None,
+            "has_rw_mount": False,
+            "mount_specs": [],
+            "reads": lambda *_args: {},
+            "over_mounts": lambda _prepared: pytest.fail("not over a mount"),
+        }
+        return SimpleNamespace(**{**fields, **overrides})
+
+    @staticmethod
+    def _fakes(base, *, consumed=(), latest=None, finalized=(), **overrides):
+        """A host and a context with nothing behind them, and a record of what they were asked."""
+        calls = SimpleNamespace(recorded=[], applied=[], instances=[], staged=[], discarded=[])
+        cell = SimpleNamespace(artifact_uris={}, artifact_uri=None, cache_hit=False)
+        calls.cell = cell
+
+        def stage_cell_output(**kwargs):
+            calls.staged.append(kwargs)
+            return f"staged-{kwargs['variable_name']}"
+
+        manager = SimpleNamespace(
+            artifact_store=SimpleNamespace(get_latest_version=lambda _id: latest),
+            cell_artifact_id=lambda cell_id, var, variant=None: f"{cell_id}.{var}.{variant}",
+            stage_cell_output=stage_cell_output,
+            finalize_cell_outputs=lambda _staged: list(finalized),
+            discard_cell_outputs=calls.discarded.append,
+        )
+        host = SimpleNamespace(
+            notebook_state=SimpleNamespace(get_cell=lambda _id: cell),
+            dag=SimpleNamespace(
+                consumed_variables={"c": set(consumed)},
+                read_producer=lambda _cell_id, _source: None,
+            ),
+            get_artifact_manager=lambda: manager,
+            record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
+                (args, kwargs)
+            ),
+            apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
+                (cell_id, result)
+            ),
+        )
+
+        async def compute_provenance(*_args, **_kwargs):
+            return base
+
+        async def execute_python_cell(cell_id, *_args, **kwargs):
+            calls.instances.append(kwargs)
+            return CellExecutionResult(cell_id=cell_id, success=True)
+
+        async def nothing(*_args, **_kwargs):
+            return None
+
+        fields = {
+            "materialize_upstreams": nothing,
+            "compute_provenance": compute_provenance,
+            "execute_python_cell": execute_python_cell,
+            "moved": lambda _cell_id: ({}, {}),
+            "promote_reverted_outputs": lambda *_args: None,
+            "prepare_mounts": nothing,
+            "input_refs": lambda _cell_id: {"in": "strata://artifact/in@v=1"},
+            "write_cell_tables": lambda *_args: None,
+            "variant_writes": {},
+            "each_items": {},
+            "each_listed": {},
+            "branch_inits": {},
+            "on_variant_complete": None,
+        }
+        return host, FanoutContext(**{**fields, **overrides}), calls
+
+    @staticmethod
+    async def _run_fanout(host, context, source="", variants=("a",), use_cache=True):
+        return await run_fanout_cell(
+            host,
+            context,
+            "c",
+            source,
+            1.0,
+            0.0,
+            materialize_upstreams=False,
+            use_cache=use_cache,
+            variant_names=variants,
+        )
+
+    @pytest.fixture
+    def local_worker(self, monkeypatch):
+        monkeypatch.setattr(
+            fanout,
+            "resolve_worker_spec",
+            lambda *_args: SimpleNamespace(backend=WorkerBackendType.LOCAL),
+        )
+
+    @staticmethod
+    def _over_data(tmp_path, uri="file:///data", versions=None):
+        """A provenance over a read-only ``data`` mount and a read-write ``out`` one."""
+        specs = [
+            SimpleNamespace(name="data", uri=uri, mode=MountMode.READ_ONLY),
+            SimpleNamespace(name="out", uri="file:///out", mode=MountMode.READ_WRITE),
+        ]
+        prepared = {
+            "data": SimpleNamespace(local_path=tmp_path, file_versions=versions),
+            "out": SimpleNamespace(local_path=tmp_path, file_versions=None),
+        }
+
+        async def prepare_mounts(_specs, _cell_id, only=None):
+            prepare_mounts.only = only
+            return prepared
+
+        return specs, prepared, prepare_mounts
+
+    @pytest.mark.parametrize(("mode", "tail"), [("overwrite", ""), ("sync", " on=id")])
+    async def test_a_write_that_replaces_runs_no_variant(self, mode, tail):
+        async def not_asked(*_args, **_kwargs):
+            pytest.fail("a refused cell runs nothing")
+
+        host, context, _calls = self._fakes(self._base(), execute_python_cell=not_asked)
+
+        result = await self._run_fanout(host, context, f"# @write_table out t {mode}{tail}\n")
+
+        assert result.success is False
+        assert f"@write_table t {mode} is not supported" in result.error
+
+    async def test_an_instance_runs_under_the_cells_key_with_its_upstreams_done(self):
+        base = self._base()
+        host, context, calls = self._fakes(base)
+
+        await self._run_fanout(host, context, variants=("a", "b"), use_cache=False)
+
+        assert calls.instances == [
+            {
+                "materialize_upstreams": False,
+                "use_cache": False,
+                "fanout_variant": name,
+                "cell_provenance": base,
+            }
+            for name in ("a", "b")
+        ]
+
+    async def test_writes_of_an_earlier_run_are_not_this_ones(self):
+        stale = MountWrite(mount="out", uri="file:///out", files=[])
+        host, context, calls = self._fakes(self._base(), variant_writes={"c": [stale]})
+
+        await self._run_fanout(host, context)
+
+        assert calls.recorded[0][1]["writes"] is None
+
+    async def test_a_callback_that_raises_does_not_fail_the_cell(self):
+        async def raises(_payload):
+            raise RuntimeError("the socket went away")
+
+        host, context, _calls = self._fakes(self._base(), on_variant_complete=raises)
+
+        result = await self._run_fanout(host, context)
+
+        assert result.success is True
+
+    async def test_no_instances_is_not_a_hit(self):
+        host, context, _calls = self._fakes(self._base())
+
+        result = await self._run_fanout(host, context, variants=())
+
+        assert result.success is True
+        assert result.cache_hit is False
+
+    async def test_the_cells_result_is_applied(self):
+        host, context, calls = self._fakes(self._base())
+
+        result = await self._run_fanout(host, context)
+
+        assert calls.applied == [("c", result)]
+
+    @staticmethod
+    async def _run_each(host, context, source="# @each path in data\n"):
+        return await run_each_cell(
+            host, context, "c", source, 1.0, 0.0, materialize_upstreams=False, use_cache=True
+        )
+
+    @pytest.mark.usefixtures("local_worker")
+    async def test_the_key_finding_its_manifests_is_a_hit(self):
+        manifest = SimpleNamespace(id="m", version=3)
+        host, context, calls = self._fakes(
+            self._base(), consumed=["out"], latest=manifest, promote_reverted_outputs=lambda *_: 1
+        )
+
+        result = await self._run_each(host, context)
+
+        assert result.execution_method == "cached"
+        assert calls.cell.cache_hit is True
+        assert calls.cell.artifact_uris == {"out": "strata://artifact/m@v=3"}
+        assert calls.cell.artifact_uri == "strata://artifact/m@v=3"
+
+    @pytest.mark.usefixtures("local_worker")
+    async def test_a_source_it_cannot_list_is_the_result(self):
+        host, context, _calls = self._fakes(self._base())
+
+        result = await self._run_each(host, context)
+
+        assert result.success is False
+        assert "not a mount or a variable" in result.error
+        assert result.execution_method == "fanout"
+
+    @pytest.mark.usefixtures("local_worker")
+    async def test_what_instances_read_lasts_as_long_as_they_do(self, tmp_path, monkeypatch):
+        specs, _prepared, prepare_mounts = self._over_data(tmp_path)
+        base = self._base(mount_specs=specs, over_mounts=lambda _prepared: base)
+        during = {}
+
+        async def execute_python_cell(cell_id, *_args, **_kwargs):
+            during["items"] = set(context.each_items[cell_id])
+            during["listed"] = set(context.each_listed[cell_id])
+            raise RuntimeError("the instance died")
+
+        host, context, _calls = self._fakes(
+            base, prepare_mounts=prepare_mounts, execute_python_cell=execute_python_cell
+        )
+        monkeypatch.setattr(
+            each, "items_of_mount", lambda *_args, **_kwargs: [each.EachItem("a.csv", "digest")]
+        )
+
+        with pytest.raises(RuntimeError, match="the instance died"):
+            await self._run_each(host, context)
+
+        assert during == {"items": {each.instance_name("a.csv")}, "listed": {"data"}}
+        assert context.each_items == {}
+        assert context.each_listed == {}
+
+    @pytest.mark.parametrize(
+        ("uri", "by_content"), [("s3://bucket/data", True), ("file:///data", False)]
+    )
+    async def test_a_listing_reads_only_the_glob_and_keys_a_remote_mount_on_content(
+        self, tmp_path, monkeypatch, uri, by_content
+    ):
+        specs, prepared, prepare_mounts = self._over_data(tmp_path, uri, versions={"a.csv": "v1"})
+        over = self._base()
+        over_mounts = []
+        base = self._base(
+            mount_specs=specs, over_mounts=lambda mounts: over_mounts.append(mounts) or over
+        )
+        listed = {}
+
+        def items_of_mount(root, glob, **kwargs):
+            listed.update(kwargs, root=root, glob=glob)
+            return []
+
+        host, context, _calls = self._fakes(base, prepare_mounts=prepare_mounts)
+        monkeypatch.setattr(each, "items_of_mount", items_of_mount)
+
+        items, keyed = await fanout._list_each_items(
+            host, context, "c", {"source": "data", "glob": "*.csv"}, base
+        )
+
+        assert items == []
+        assert prepare_mounts.only == {"data": "*.csv"}
+        assert listed == {
+            "root": tmp_path,
+            "glob": "*.csv",
+            "by_content": by_content,
+            "versions": {"a.csv": "v1"},
+        }
+        # A read-write mount gets its own staging per instance, so it is not handed on.
+        assert context.each_listed == {"c": {"data": prepared["data"]}}
+        assert over_mounts == [prepared]
+        assert keyed is over
+
+    def test_a_variable_nothing_stored_says_so(self):
+        host, _context, _calls = self._fakes(self._base())
+
+        with pytest.raises(each.EachError, match="its cell has not stored it"):
+            fanout._each_items_of_variable(host, "producer", {"source": "rows"})
+
+    def test_a_manifest_carries_the_cells_lineage(self):
+        version = SimpleNamespace(id="v", version=2)
+        finalized = SimpleNamespace(id="m", version=1, params={"variable_name": "out"})
+        host, context, calls = self._fakes(self._base(), latest=version, finalized=[finalized])
+
+        fanout._store_each_manifests(
+            host, context, "c", "src", [each.EachItem("a", "digest")], self._base(), ["out"], []
+        )
+
+        stage = calls.staged[0]
+        assert stage["content_type"] == each.CONTENT_TYPE
+        assert stage["provenance_hash"] == derive_subkey("prov", "out")
+        assert stage["computation_key"] == "prov"
+        assert stage["input_versions"] == {"in": "strata://artifact/in@v=1"}
+        assert calls.cell.artifact_uris == {"out": "strata://artifact/m@v=1"}
+
+    def test_an_item_without_the_output_stores_no_manifest(self):
+        host, context, calls = self._fakes(self._base(), latest=None)
+
+        with pytest.raises(each.EachError, match="'a' did not produce `out`"):
+            fanout._store_each_manifests(
+                host, context, "c", "src", [each.EachItem("a", "digest")], self._base(), ["out"], []
+            )
+
+        assert calls.staged == []
+        assert calls.discarded == [[]]
+
+    def test_a_write_that_fails_keeps_no_manifest(self):
+        def fails(*_args):
+            raise TableWriteError("the catalog is gone")
+
+        version = SimpleNamespace(id="v", version=2)
+        host, context, calls = self._fakes(self._base(), latest=version, write_cell_tables=fails)
+
+        with pytest.raises(TableWriteError, match="the catalog is gone"):
+            fanout._store_each_manifests(
+                host,
+                context,
+                "c",
+                "src",
+                [each.EachItem("a", "digest")],
+                self._base(),
+                ["out"],
+                [SimpleNamespace(variable="other")],
+            )
+
+        assert calls.discarded == [["staged-out"]]
