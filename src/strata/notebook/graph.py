@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import re
 
 import cellgraph as cg
 
@@ -44,6 +45,38 @@ def _analyzers() -> dict[str, cg.LanguageAnalyzer]:
 
 # Read a cell's namespace without naming what they read.
 _DYNAMIC_LOOKUPS = frozenset({"dir", "eval", "exec", "globals", "locals", "vars"})
+_R_DYNAMIC_LOOKUPS = frozenset(
+    {
+        ".GlobalEnv",
+        "as.environment",
+        "caller_env",
+        "current_env",
+        "dynGet",
+        "environment",
+        "eval",
+        "evalq",
+        "exists",
+        "get",
+        "get0",
+        "global_env",
+        "globalenv",
+        "ls",
+        "mget",
+        "objects",
+        "parent.env",
+        "parent.frame",
+        "parse",
+        "source",
+        "str2expression",
+        "str2lang",
+        "sys.frame",
+        "sys.frames",
+        "sys.source",
+        "topenv",
+    }
+)
+# Over comments and strings too: glue("{data}") reads by name, and @each is a comment.
+_R_WORD = re.compile(r"[A-Za-z.][\w.]*")
 
 
 def mounts_of(state: NotebookState, cell: CellState, source: str) -> list[MountSpec]:
@@ -53,10 +86,13 @@ def mounts_of(state: NotebookState, cell: CellState, source: str) -> list[MountS
     A cell can only read one by name: code from an upstream cell is refused if it reads a
     global, and a function nested in a value holds the upstream cell's path.
     """
-    if cell.language == CellLanguage.R:
-        return list(cell.mounts)
     names = {mount.name for mount in cell.mount_overrides}
-    if cell.language == CellLanguage.PYTHON:
+    if cell.language == CellLanguage.R:
+        words = set(_R_WORD.findall(source))
+        if words & _R_DYNAMIC_LOOKUPS:
+            return list(cell.mounts)
+        names |= words
+    elif cell.language == CellLanguage.PYTHON:
         analyzed = cg.get_language_analyzer("python").analyze(
             cg.Cell(id=cell.id, source=source, language="python", meta={})
         )

@@ -21,9 +21,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   dict, list or table from another cell. A changed item runs alone, a removed
   one leaves, and a later cell reads `{item: value}`. With `@write_table ... sync`
   the table is written once per run over every item's rows, so a removed file's
-  rows are deleted. A remote mount downloads only what `glob=` names. The
-  `each_pipeline` example runs this over 287 real files into a REST catalog.
-  (#1372, #1374, #1378)
+  rows are deleted. A remote mount downloads only what `glob=` names, and is
+  weighed by that before a large read is asked about. The `each_pipeline` example
+  runs this over 287 real files into a REST catalog. (#1372, #1374, #1378, #1379)
 - **A notebook can keep a warehouse in its own folder.** `@table` and `@write_table`
   take `./warehouse#<namespace>.<table>`, resolved from the notebook's directory
   wherever the server was started, so a committed notebook names no absolute path.
@@ -160,7 +160,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   cell used to list it, download all of it, and run again when it changed: a
   rollup cell spent 35 minutes downloading a bucket it never read. Those cells
   run once more after this upgrade, as their keys no longer hold the mount.
-  (#1376)
+  (#1376, #1380)
 - **`strata run` says where a long `@each` is.** It reports progress at most every
   5 seconds and prints a line per failed item, and labels a cell by its `@name`. A
   failed cell's error now names the exception: `KeyError: 'MAX'`, not `'MAX'`.

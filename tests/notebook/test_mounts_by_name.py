@@ -26,6 +26,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
+from tests.notebook.conftest import skip_if_no_r
 
 DATA = MountSpec(name="data", uri="file:///d", mode=MountMode.READ_ONLY)
 OTHER = MountSpec(name="other", uri="file:///o", mode=MountMode.READ_ONLY)
@@ -71,8 +72,42 @@ class TestWhatACellGets:
         cell = CellState(id="c", source="x = 1\n", mounts=[DATA, OTHER], mount_overrides=[OTHER])
         assert mounts_of(_state(), cell, cell.source) == [OTHER]
 
-    def test_an_r_cell_keeps_them_all(self):
-        assert _names("x <- 1\n", language=CellLanguage.R) == ["data"]
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("x <- 1\n", []),
+            ("x <- data\n", ["data"]),
+            ("x <- file.path(data, 'f')\n", ["data"]),
+            ("f <- function() data\n", ["data"]),
+            ("x <- glue('{data}')\n", ["data"]),
+            ("# @each path in data\nout <- path\n", ["data"]),
+            # A longer R name is another name.
+            ("my.data <- 1\ndata.frame(x = 1)\ndata_2 <- 2\n", []),
+            # Reads by a name the source does not spell.
+            ("x <- get(paste0('da', 'ta'))\n", ["data"]),
+            ("x <- base::mget(name)[[1]]\n", ["data"]),
+            ("x <- eval(code)\n", ["data"]),
+            ("x <- parse(text = code)\n", ["data"]),
+            ("x <- as.list(environment())\n", ["data"]),
+            ("x <- .GlobalEnv\n", ["data"]),
+            ("source('more.R')\n", ["data"]),
+            ("x <- ls()\n", ["data"]),
+            # Not a read: words that only contain one.
+            ("widget <- 1\nforget <- 2\nparsed <- 3\nls.str <- 4\n", []),
+        ],
+    )
+    def test_an_r_cell_gets_what_its_source_names(self, source, expected):
+        assert _names(source, language=CellLanguage.R) == expected
+
+    def test_an_r_cell_keeps_its_own_mounts(self):
+        cell = CellState(
+            id="c",
+            source="x <- 1\n",
+            language=CellLanguage.R,
+            mounts=[DATA, OTHER],
+            mount_overrides=[OTHER],
+        )
+        assert mounts_of(_state(), cell, cell.source) == [OTHER]
 
     @pytest.mark.parametrize("language", [CellLanguage.PROMPT, CellLanguage.WIDGET])
     def test_a_cell_binding_no_variable_keeps_only_its_own(self, language):
@@ -193,3 +228,53 @@ class TestARun:
         )
 
         assert (result.passed, result.failed, result.errored) == (1, 0, 0), result
+
+
+@skip_if_no_r
+class TestAnRRun:
+    def _r_session(self, tmp_path: Path, *sources: str) -> tuple[NotebookSession, Path]:
+        folder = tmp_path / "folder"
+        folder.mkdir()
+        _write(folder / "f.txt", "one", tick=0)
+        path = create_notebook(tmp_path / "nb", "Mounts")
+        update_notebook_mounts(
+            path, [MountSpec(name="data", uri=folder.as_uri(), mode=MountMode.READ_ONLY)]
+        )
+        after = None
+        for cell_id, source in zip("abcd", sources, strict=False):
+            add_cell_to_notebook(path, cell_id, after, language="r")
+            write_cell(path, cell_id, source)
+            after = cell_id
+        session = NotebookSession(parse_notebook(path), path)
+        session.refresh_environment_runtime()
+        return session, folder
+
+    async def test_a_changed_mount_leaves_an_r_cell_that_never_names_it_alone(self, tmp_path):
+        session, folder = self._r_session(
+            tmp_path,
+            'text <- readLines(file.path(data, "f.txt"))\n',
+            "unrelated <- 1\n",
+            "seen <- list(text, unrelated)\n",
+        )
+        for cell_id in "abc":
+            assert not (await _run(session, cell_id)).cache_hit
+        assert (await _run(session, "b")).cache_hit
+
+        _write(folder / "f.txt", "two", tick=1)
+
+        assert not (await _run(session, "a")).cache_hit
+        assert (await _run(session, "b")).cache_hit
+
+    async def test_a_function_passed_down_still_reads_the_mount(self, tmp_path):
+        """A closure carries the upstream cell's environment, and the path in it."""
+        session, _ = self._r_session(
+            tmp_path,
+            # An environment: a function on its own, or in a list, is not stored.
+            'box <- new.env()\nbox$read <- function() readLines(file.path(data, "f.txt"))\n',
+            "reader <- box$read\nseen <- reader()\n",
+            "out <- paste0(seen, '!')\n",
+        )
+        for cell_id in "abc":
+            result = await _run(session, cell_id)
+
+        assert result.outputs["out"]["preview"] == "one!"

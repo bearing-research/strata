@@ -105,7 +105,10 @@ download it, or run again when it changes, and a read-write one doesn't stop the
 cached. A Python cell calling `eval`, `exec`, `globals`, `locals`, `vars` or `dir` gets
 every mount, since its reads can't be told from its source, and so does a cell's test
 run, which reads `cell.<name>`. A mount declared on a cell is always bound. An R cell
-gets every mount. A SQL cell reads the mounts its [connection](#connections) names.
+gets the mounts whose names appear anywhere in its source, comments and strings
+included, and every mount if it uses a way of reading a variable by a computed name,
+such as `get`, `eval`, `source`, `ls` or `environment`. A SQL cell reads the mounts its
+[connection](#connections) names.
 
 ### Mount options on a shared server
 
