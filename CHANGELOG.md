@@ -144,6 +144,10 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **`strata run` says where a long `@each` is.** It reports progress at most every
+  5 seconds and prints a line per failed item, and labels a cell by its `@name`. A
+  failed cell's error now names the exception: `KeyError: 'MAX'`, not `'MAX'`.
+  (#1375)
 - **A `@per_variant` cell ending in a displayed value no longer reruns every
   variant.** The cache check looked for its displays where they are not stored,
   so every variant missed. (#1372)

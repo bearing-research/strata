@@ -271,6 +271,7 @@ def test_batch_ends_on_cell_error(batch_pipes):
     cell_errors = [f for f in frames if f["type"] == "cell_error"]
     assert len(cell_errors) == 1
     assert cell_errors[0]["payload"]["cell_id"] == "c2"
+    assert cell_errors[0]["payload"]["error"] == "RuntimeError: boom"
     assert "RuntimeError" in cell_errors[0]["payload"]["traceback"]
 
     end_frame = frames[-1]

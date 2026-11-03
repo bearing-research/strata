@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from strata.notebook.ops import CellView, WorkerListView
 
+from strata.notebook.annotations import parse_annotations
 from strata.notebook.models import CellLanguage
 
 # Disabled when stdout isn't a tty so pipes and CI logs stay clean.
@@ -50,7 +52,10 @@ def _yellow(text: str) -> str:
 
 
 def _cell_label(source: str, max_len: int = 32) -> str:
-    """Short display label for a cell: its first non-blank, non-comment line, or "(empty)"."""
+    """Short display label for a cell: its ``@name``, or first code line, or "(empty)"."""
+    name = parse_annotations(source).name
+    if name:
+        return name[:max_len] + ("…" if len(name) > max_len else "")
     for raw in source.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -75,6 +80,28 @@ def _truncate_console(text: str) -> str:
         return text
     omitted = len(text) - _MAX_JSON_CONSOLE_CHARS
     return text[:_MAX_JSON_CONSOLE_CHARS] + f"… [+{omitted} chars truncated]"
+
+
+# A long fan-out says where it is this often: a line per item would flood a big run.
+_PROGRESS_INTERVAL_SECONDS = 5.0
+
+
+def _variant_progress_printer() -> Callable[[dict[str, Any]], Awaitable[None]]:
+    """Report a fan-out's instances as they finish; each failure gets a line."""
+    last_report = time.monotonic()
+
+    async def report(progress: dict[str, Any]) -> None:
+        nonlocal last_report
+        if not progress["success"]:
+            reason = (progress["error"] or "failed").splitlines()[0]
+            print(f"      {_red('✗')} {progress['variant']}: {_red(reason)}", flush=True)
+        now = time.monotonic()
+        if now - last_report >= _PROGRESS_INTERVAL_SECONDS:
+            last_report = now
+            where = f"{progress['index'] + 1}/{progress['total']} {progress['variant']}"
+            print(_dim(f"  {progress['cell_id'][:8]} {where}"), flush=True)
+
+    return report
 
 
 def _print_cell_line(entry: dict[str, Any]) -> None:
@@ -278,6 +305,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
     # The report gives every cell a digest, so a leaf keeps what it defines.
     executor.store_leaf_outputs = True
     executor.origin = "run"
+    if args.format == "human" and not args.quiet:
+        executor.on_variant_complete = _variant_progress_printer()
     cell_by_id = {c.id: c for c in session.notebook_state.cells}
     results: list[dict[str, Any]] = []
     failed_cells: set[str] = set()
