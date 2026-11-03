@@ -19,9 +19,9 @@ exhaustive commit history.
   dict, list or table from another cell. A changed item runs alone, a removed
   one leaves, and a later cell reads `{item: value}`. With `@write_table ... sync`
   the table is written once per run over every item's rows, so a removed file's
-  rows are deleted. A remote mount downloads only what `glob=` names. The
-  `each_pipeline` example runs this over 287 real files into a REST catalog.
-  (#1372, #1374, #1378)
+  rows are deleted. A remote mount downloads only what `glob=` names, and is
+  weighed by that before a large read is asked about. The `each_pipeline` example
+  runs this over 287 real files into a REST catalog. (#1372, #1374, #1378, #1379)
 
 ### Changed
 - **DuckDB 2.0.** Strata now needs `duckdb>=2.0`. DuckDB 2.0 also applies its

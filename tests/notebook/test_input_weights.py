@@ -67,6 +67,27 @@ async def test_files_with_no_version_are_cached_once_their_view_is_built(tmp_pat
     ]
 
 
+async def test_a_glob_weighs_only_the_files_it_names(tmp_path, monkeypatch):
+    """The key still answers for all of the mount, and only the named view counts as built."""
+    files = _files("bucket/data", {"a": b"aa", "b": b"bbb"})
+    for info in files.values():
+        del info["etag"], info["mtime"]
+    _install_fake_fsspec(monkeypatch, _FakeRemoteFS(files))
+    cache = MountCache(tmp_path / "mc")
+    resolver = MountResolver(cache_dir=tmp_path / "nb", mount_cache=cache)
+
+    whole, _, approved_whole = weigh_mount_sync(resolver, _mount(), cache)
+    named, cold, approved_named = weigh_mount_sync(resolver, _mount(), cache, "a")
+    await resolver.prepare_mounts([_mount()], only={"data": "a"})
+
+    assert named == whole
+    assert approved_named != approved_whole
+    assert cold == MountWeight(bytes=2, cached_bytes=0)
+    assert weigh_mount_sync(resolver, _mount(), cache, "a")[1] == MountWeight(2, 2)
+    assert weigh_mount_sync(resolver, _mount(), cache, "b")[1] == MountWeight(3, 0)
+    assert weigh_mount_sync(resolver, _mount(), cache)[1] == MountWeight(5, 0)
+
+
 def test_weighing_gives_the_fingerprint_staleness_computes(tmp_path, remote):
     from strata.notebook.mounts import mount_fingerprint_sync
 
@@ -161,6 +182,17 @@ async def test_a_run_tells_the_notebook_what_its_inputs_weigh(tmp_path, remote, 
     }
     assert frames == [[{"cell_id": "c1", "machine": "local", "inputs": [expected]}]]
     assert [w.cached_bytes for w in prov.input_weights] == [3]
+
+
+async def test_an_each_cell_tells_the_notebook_what_its_glob_names(tmp_path, remote, monkeypatch):
+    frames, prov = await _run_inputs_frames(
+        tmp_path,
+        monkeypatch,
+        "# @mount data s3://bucket/data ro\n# @each path in data glob=b\nout = path.name",
+    )
+
+    assert [p["inputs"][0]["bytes"] for sent in frames for p in sent] == [3]
+    assert [w.bytes for w in prov.input_weights] == [3]
 
 
 async def test_only_a_change_is_sent_and_reading_nothing_is_one(tmp_path, remote, monkeypatch):
