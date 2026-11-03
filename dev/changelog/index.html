@@ -3858,7 +3858,9 @@ exhaustive commit history.</p>
   dict, list or table from another cell. A changed item runs alone, a removed
   one leaves, and a later cell reads <code>{item: value}</code>. With <code>@write_table ... sync</code>
   the table is written once per run over every item's rows, so a removed file's
-  rows are deleted. A remote mount downloads only what <code>glob=</code> names. (#1372, #1374)</li>
+  rows are deleted. A remote mount downloads only what <code>glob=</code> names. The
+  <code>each_pipeline</code> example runs this over 287 real files into a REST catalog.
+  (#1372, #1374, #1378)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
