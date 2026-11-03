@@ -2888,7 +2888,7 @@
 <tr>
 <td><code>cell_output</code></td>
 <td><code>{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...] }</code></td>
-<td>Execution result, including rich visible outputs. <code>outputs</code> maps each stored variable to its preview; <code>_</code> is the last displayed value. <code>artifact_uris</code> maps each stored variable to its artifact. <code>stdout</code> / <code>stderr</code> are the run's whole console and replace what <code>cell_console</code> built (see <a href="#console">Console</a>). A remote run adds <code>remote_worker</code>, <code>remote_transport</code>, <code>remote_build_id</code> and <code>remote_build_state</code></td>
+<td>Execution result, including rich visible outputs. <code>outputs</code> maps each stored variable to its preview; <code>_</code> is the last displayed value. On a cache hit <code>duration_ms</code> is the load time, and <code>saved_ms</code> is what the hit saved (0 when no earlier run priced it). <code>artifact_uris</code> maps each stored variable to its artifact. <code>stdout</code> / <code>stderr</code> are the run's whole console and replace what <code>cell_console</code> built (see <a href="#console">Console</a>). A remote run adds <code>remote_worker</code>, <code>remote_transport</code>, <code>remote_build_id</code> and <code>remote_build_state</code></td>
 </tr>
 <tr>
 <td><code>cell_output_delta</code></td>
@@ -3007,7 +3007,7 @@
 <tr>
 <td><code>profiling_summary</code></td>
 <td><code>{ "total_execution_ms": ..., "cache_hits": ..., "cache_misses": ..., "cache_savings_ms": ..., "team_cache_savings_ms": ..., "team_cache_hits": ..., "team_contributors": [...], "team_promotions": [...], "total_artifact_bytes": ..., "cell_profiles": [...] }</code></td>
-<td>Profiling metrics. <code>cell_profiles</code> entries carry <code>cell_id</code>, <code>cell_name</code>, <code>status</code>, <code>duration_ms</code>, <code>cache_hit</code>, <code>artifact_uri</code>, <code>execution_count</code></td>
+<td>Profiling metrics. <code>cell_profiles</code> entries carry <code>cell_id</code>, <code>cell_name</code>, <code>status</code>, <code>duration_ms</code> (null when the last run's time is unknown), <code>cache_hit</code>, <code>artifact_uri</code>, <code>execution_count</code></td>
 </tr>
 </tbody>
 </table>
