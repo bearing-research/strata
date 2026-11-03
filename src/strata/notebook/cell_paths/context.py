@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -11,6 +12,7 @@ if TYPE_CHECKING:
     from strata.notebook.executor import _CellProvenance
     from strata.notebook.executor_host import ExecutorHost
     from strata.notebook.models import NotebookState
+    from strata.notebook.mounts import MountWrite
 
 
 @dataclass(frozen=True)
@@ -57,3 +59,16 @@ def artifact_content_type(artifact: Any) -> str:
     """Read an artifact's stored content_type from its transform_spec params."""
     ct = artifact.params.get("content_type")
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
+
+
+def _writes_entry(writes: list[MountWrite]) -> dict[str, Any] | None:
+    """The writes index entry for a good run that wrote *writes*; None when it wrote nothing."""
+    from strata.notebook.artifact_integration import caller_principal_id
+
+    if not writes:
+        return None
+    return {
+        "ran_at": int(time.time() * 1000),
+        "principal": caller_principal_id(),
+        "mounts": [write.model_dump() for write in writes],
+    }

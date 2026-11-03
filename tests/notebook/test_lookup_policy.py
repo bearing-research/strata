@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from vestigo.provenance import TransformSpec, derive_subkey
 
+from strata.notebook.cell_paths import fanout
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
@@ -458,13 +459,13 @@ class TestEach:
         await _run(session, "e")
         pulls.clear()
         listed: list[str] = []
-        real = CellExecutor._list_each_items
+        real = fanout._list_each_items
 
-        async def list_items(self, cell_id, spec, base):
+        async def list_items(host, context, cell_id, spec, base):
             listed.append(cell_id)
-            return await real(self, cell_id, spec, base)
+            return await real(host, context, cell_id, spec, base)
 
-        monkeypatch.setattr(CellExecutor, "_list_each_items", list_items)
+        monkeypatch.setattr(fanout, "_list_each_items", list_items)
 
         result = await _run(session, "e")
 
