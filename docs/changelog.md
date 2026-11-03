@@ -146,6 +146,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A notebook-level mount reaches only the Python cells that name it.** Every
+  cell used to list it, download all of it, and run again when it changed: a
+  rollup cell spent 35 minutes downloading a bucket it never read. Those cells
+  run once more after this upgrade, as their keys no longer hold the mount.
+  (#1376)
 - **A `@per_variant` cell ending in a displayed value no longer reruns every
   variant.** The cache check looked for its displays where they are not stored,
   so every variant missed. (#1372)

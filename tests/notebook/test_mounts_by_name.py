@@ -1,0 +1,165 @@
+"""A notebook-level mount reaches only the cells that name it."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+from strata.notebook.executor import CellExecutor
+from strata.notebook.graph import mounts_of
+from strata.notebook.models import CellLanguage, CellState, CellStatus, MountMode, MountSpec
+from strata.notebook.parser import parse_notebook
+from strata.notebook.session import NotebookSession
+from strata.notebook.writer import (
+    add_cell_to_notebook,
+    create_notebook,
+    update_notebook_mounts,
+    write_cell,
+)
+
+DATA = MountSpec(name="data", uri="file:///d", mode=MountMode.READ_ONLY)
+OTHER = MountSpec(name="other", uri="file:///o", mode=MountMode.READ_ONLY)
+
+
+def _names(source: str, **fields) -> list[str]:
+    cell = CellState(id="c", source=source, mounts=[DATA], **fields)
+    return [mount.name for mount in mounts_of(cell, source)]
+
+
+class TestWhatACellGets:
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "x = data / 'f'\n",
+            "def f():\n    return data\n",
+            "x = f'{data}'\n",
+            "# @each path in data\nout = path\n",
+        ],
+    )
+    def test_a_cell_naming_it_gets_it(self, source):
+        assert _names(source) == ["data"]
+
+    @pytest.mark.parametrize("source", ["x = 1\n", "data = 1\n", "# data\nx = 'data'\n"])
+    def test_a_cell_not_reading_that_name_does_not(self, source):
+        assert _names(source) == []
+
+    @pytest.mark.parametrize(
+        "lookup",
+        ["globals()['data']", "locals()['data']", "vars()['data']", "eval('data')", "dir()"],
+    )
+    def test_a_lookup_by_string_keeps_every_mount(self, lookup):
+        assert _names(f"x = {lookup}\n") == ["data"]
+
+    def test_exec_keeps_every_mount(self):
+        assert _names("exec('x = data')\n") == ["data"]
+
+    def test_a_mount_declared_on_the_cell_stays_unnamed(self):
+        cell = CellState(id="c", source="x = 1\n", mounts=[DATA, OTHER], mount_overrides=[OTHER])
+        assert mounts_of(cell, cell.source) == [OTHER]
+
+    @pytest.mark.parametrize("language", [CellLanguage.SQL, CellLanguage.R, CellLanguage.PROMPT])
+    def test_another_language_keeps_them_all(self, language):
+        assert _names("SELECT 1\n", language=language) == ["data"]
+
+    def test_the_source_given_decides_not_the_saved_one(self):
+        cell = CellState(id="c", source="x = 1\n", mounts=[DATA])
+        assert mounts_of(cell, "x = data\n") == [DATA]
+
+
+def _session(tmp_path: Path, mode: MountMode, *sources: str) -> tuple[NotebookSession, Path]:
+    folder = tmp_path / "folder"
+    folder.mkdir()
+    _write(folder / "f.txt", "one", tick=0)
+    path = create_notebook(tmp_path / "nb", "Mounts")
+    update_notebook_mounts(path, [MountSpec(name="data", uri=folder.as_uri(), mode=mode)])
+    after = None
+    for cell_id, source in zip("abcd", sources, strict=False):
+        add_cell_to_notebook(path, cell_id, after)
+        write_cell(path, cell_id, source)
+        after = cell_id
+    session = NotebookSession(parse_notebook(path), path)
+    session.refresh_environment_runtime()
+    return session, folder
+
+
+def _write(path: Path, text: str, *, tick: int) -> None:
+    path.write_text(text)
+    # A fingerprint reads the mtime; a test does not wait for the clock to move.
+    stamp = 1_700_000_000 + tick
+    os.utime(path, (stamp, stamp))
+
+
+async def _run(session: NotebookSession, cell_id: str):
+    cell = session.notebook_state.get_cell(cell_id)
+    result = await CellExecutor(session).execute_cell(cell_id, cell.source)
+    assert result.success, result.error
+    return result
+
+
+READS = "text = (data / 'f.txt').read_text()\n"
+
+
+class TestARun:
+    async def test_a_changed_mount_leaves_a_cell_that_never_names_it_alone(self, tmp_path):
+        session, folder = _session(
+            tmp_path, MountMode.READ_ONLY, READS, "unrelated = 1\n", "seen = text + 'x'\n"
+        )
+        for cell_id in "abc":
+            await _run(session, cell_id)
+
+        _write(folder / "f.txt", "two", tick=1)
+
+        assert not (await _run(session, "a")).cache_hit
+        assert (await _run(session, "b")).cache_hit
+        # Through the upstream that read it, not through the mount itself.
+        assert not (await _run(session, "c")).cache_hit
+
+    async def test_a_reopened_notebook_keys_a_cell_as_its_run_did(self, tmp_path):
+        session, _ = _session(
+            tmp_path,
+            MountMode.READ_ONLY,
+            READS,
+            "unrelated = 1\n",
+            "seen = text + str(unrelated)\n",
+        )
+        await _run(session, "a")
+        await _run(session, "b")
+
+        reopened = NotebookSession(parse_notebook(session.path), session.path)
+        reopened.refresh_environment_runtime()
+
+        status = reopened.compute_staleness()
+        assert status["a"].status == CellStatus.READY
+        assert status["b"].status == CellStatus.READY
+
+    async def test_a_read_write_mount_only_stops_caching_the_cells_naming_it(self, tmp_path):
+        session, _ = _session(
+            tmp_path, MountMode.READ_WRITE, "n = len(list(data.iterdir()))\n", "unrelated = 1\n"
+        )
+        await _run(session, "a")
+        await _run(session, "b")
+
+        assert not (await _run(session, "a")).cache_hit
+        assert (await _run(session, "b")).cache_hit
+
+    async def test_code_passed_downstream_still_reads_the_mount(self, tmp_path):
+        session, _ = _session(
+            tmp_path,
+            MountMode.READ_ONLY,
+            "fns = {'read': lambda: (data / 'f.txt').read_text()}\n",
+            "got = fns['read']()\nprint(got)\n",
+        )
+        await _run(session, "a")
+
+        assert "one" in (await _run(session, "b")).stdout
+
+    async def test_a_cell_test_can_read_a_mount_its_cell_never_names(self, tmp_path):
+        session, _ = _session(tmp_path, MountMode.READ_ONLY, "unrelated = 1\n")
+
+        result = await CellExecutor(session).run_cell_tests(
+            "a", "def test_reads(cell):\n    assert (cell.data / 'f.txt').read_text() == 'one'\n"
+        )
+
+        assert (result.passed, result.failed, result.errored) == (1, 0, 0), result
