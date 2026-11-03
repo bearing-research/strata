@@ -853,7 +853,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
 
 
 def cmd_pull(args: argparse.Namespace) -> int:
-    from strata.notebook import output_dirs
+    from strata.notebook import each, output_dirs
 
     store = _open_store(args.artifact_dir)
     if store is None:
@@ -872,6 +872,13 @@ def cmd_pull(args: argparse.Namespace) -> int:
     safe_ref = args.ref.replace("/", "_").replace("@", "_")
     if artifact.params.get("content_type") == output_dirs.CONTENT_TYPE:
         return _pull_folder(store, artifact, blob, Path(args.to or safe_ref))
+    if artifact.params.get("content_type") == each.CONTENT_TYPE:
+        print(
+            f"{artifact.id}@v={artifact.version} is the output of an @each cell, which cannot "
+            "be pulled yet: pull a cell that reads it",
+            file=sys.stderr,
+        )
+        return 1
 
     out_path = Path(args.to) if args.to else Path(f"{safe_ref}.arrow")
     out_path.parent.mkdir(parents=True, exist_ok=True)

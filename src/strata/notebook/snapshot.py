@@ -71,9 +71,9 @@ def build_artifact_index(session: NotebookSession) -> dict[str, Any]:
 
     Digests let two snapshots be compared output by output without reading blobs. A
     ``# @output_dir`` folder brings the file versions its manifest names, which need
-    not be each file's latest.
+    not be each file's latest, and an ``# @each`` manifest the instance versions.
     """
-    from strata.notebook import output_dirs
+    from strata.notebook import each, output_dirs
 
     manager = session.get_artifact_manager()
     store = manager.artifact_store
@@ -82,13 +82,26 @@ def build_artifact_index(session: NotebookSession) -> dict[str, Any]:
     for cell in session.notebook_state.cells:
         artifacts = sorted(manager.list_cell_artifacts(cell.id))
         listed = {(artifact.id, artifact.version) for _, artifact in artifacts}
-        for _, artifact in list(artifacts):
-            if artifact.params.get("content_type") != output_dirs.CONTENT_TYPE:
+        # Grows as it is walked: an @each instance can itself hold a folder.
+        for _, artifact in artifacts:
+            content_type = artifact.params.get("content_type")
+            if content_type not in (output_dirs.CONTENT_TYPE, each.CONTENT_TYPE):
                 continue
             manifest = store.read_blob(artifact.id, artifact.version)
             if manifest is None:
                 continue
-            for file_id, version, _ in output_dirs.file_refs(artifact.id, manifest):
+            refs = (
+                [
+                    (ref_id, version)
+                    for ref_id, version, _ in output_dirs.file_refs(artifact.id, manifest)
+                ]
+                if content_type == output_dirs.CONTENT_TYPE
+                else [
+                    (ref_id, version)
+                    for _, ref_id, version in each.manifest_refs(artifact.id, manifest)
+                ]
+            )
+            for file_id, version in refs:
                 named = store.get_artifact(file_id, version)
                 if named is not None and (file_id, version) not in listed:
                     listed.add((file_id, version))

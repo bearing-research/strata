@@ -373,7 +373,7 @@ def copy_chain(
     Raises:
         ValueError: A folder in the chain names a file the source does not hold.
     """
-    from strata.notebook import output_dirs
+    from strata.notebook import each, output_dirs
     from strata.services.artifact import ArtifactService
 
     lineage = ArtifactService().build_lineage(
@@ -401,6 +401,8 @@ def copy_chain(
         manifest = None
         if record.params.get("content_type") == output_dirs.CONTENT_TYPE:
             manifest = _copy_folder_files(source, target, record, written)
+        elif record.params.get("content_type") == each.CONTENT_TYPE:
+            manifest = _copy_each_instances(source, target, record, written, max_depth)
         imported = _copy_record(source, target, record, manifest)
         if imported.written:
             written.append(imported.ref)
@@ -487,6 +489,44 @@ def _copy_folder_files(
     # Under the id it is sent with: a remap only suffixes that, which keeps the base its
     # files' ids are read from.
     return output_dirs.relocate(manifest, manifest_record.id, landed)
+
+
+def _copy_each_instances(
+    source: ArtifactStore,
+    target: PublicationTarget,
+    manifest_record: ArtifactVersion,
+    written: list[str],
+    max_depth: int,
+) -> bytes:
+    """Copy each value an ``# @each`` manifest names; return the manifest naming where they
+    landed.
+
+    Each with its own chain: a cached instance read an older version of the collection
+    than the manifest did, and it may hold a folder.
+    """
+    from strata.notebook import each, output_dirs
+
+    ref = f"{manifest_record.id}@v={manifest_record.version}"
+    manifest = source.read_blob(manifest_record.id, manifest_record.version)
+    if manifest is None:
+        raise ValueError(f"{ref} is an @each manifest with no stored bytes")
+    records = []
+    for _key, artifact_id, version in each.manifest_refs(manifest_record.id, manifest):
+        record = output_dirs.held_file(source, manifest_record.tenant, artifact_id, version)
+        if (
+            record is None
+            or record.state not in ("ready", "superseded")
+            or not source.blob_exists(artifact_id, version)
+        ):
+            raise ValueError(f"{ref} names {artifact_id}@v={version}, which is gone")
+        records.append(record)
+    landed: dict[tuple[str, int], tuple[str, int]] = {}
+    for record in records:
+        sent, landed_ref = copy_chain(source, target, record, max_depth)
+        written.extend(sent)
+        landed_id, _, landed_version = landed_ref.rpartition("@v=")
+        landed[(record.id, record.version)] = (landed_id, int(landed_version))
+    return each.relocate(manifest, manifest_record.id, landed)
 
 
 def _ancestors_first(lineage: ArtifactLineageResponse) -> list[LineageNode]:

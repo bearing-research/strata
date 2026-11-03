@@ -53,6 +53,8 @@ class ResolvedMount:
     baseline: dict[str, tuple[int, int]] | None = None
     # Remote RO only: the bytes downloaded to build the view (0 when it was cached).
     bytes_moved: int | None = None
+    # Remote RO only: what the listing says of each file's version, by relative path.
+    file_versions: dict[str, str] | None = None
 
 
 class WrittenFile(BaseModel):
@@ -316,7 +318,7 @@ class MountResolver:
         protocol = _scheme_to_fsspec_protocol(scheme)
         storage_options = self.storage_options(mount)
         try:
-            fingerprint, local_path, moved = await asyncio.to_thread(
+            fingerprint, local_path, moved, versions = await asyncio.to_thread(
                 self._prepare_view, mount, protocol, remote_path, storage_options
             )
         except Exception as e:
@@ -324,7 +326,11 @@ class MountResolver:
                 f"Failed to materialize remote mount '{mount.name}' from {mount.uri}: {e}"
             ) from e
         resolved = ResolvedMount(
-            spec=mount, local_path=local_path, fingerprint=fingerprint, bytes_moved=moved
+            spec=mount,
+            local_path=local_path,
+            fingerprint=fingerprint,
+            bytes_moved=moved,
+            file_versions=versions,
         )
         # Held as long as the run keeps its resolved mounts, however long it runs.
         self.mount_cache.hold(resolved, local_path)
@@ -336,8 +342,9 @@ class MountResolver:
         protocol: str,
         remote_path: str,
         storage_options: dict[str, Any],
-    ) -> tuple[str, Path, int]:
-        """The mount's fingerprint, its view and the bytes downloaded for it, from one listing."""
+    ) -> tuple[str, Path, int, dict[str, str] | None]:
+        """The mount's fingerprint, its view, the bytes downloaded for it and each file's
+        version, from one listing."""
         fs = _mount_filesystem(protocol, storage_options)
         options_digest = _options_digest(storage_options)
         listing: dict[str, dict[str, Any]] | None = None
@@ -348,9 +355,19 @@ class MountResolver:
             fingerprint = _fingerprint_listing(listing)
         key = _view_key(protocol, remote_path, options_digest, fingerprint)
 
+        def versions_of(listed: dict[str, dict[str, Any]]) -> dict[str, str]:
+            # No scope: rotating a credential changes no file.
+            keys = {
+                _relative_remote_path(name, protocol, remote_path).as_posix(): object_key(
+                    protocol, "", name, info
+                )
+                for name, info in listed.items()
+            }
+            return {rel: version for rel, version in keys.items() if version is not None}
+
         found = self.mount_cache.find_view(key)
         if found is not None:
-            return fingerprint, found, 0
+            return fingerprint, found, 0, None if listing is None else versions_of(listing)
         if listing is None:
             listing = _list_remote_file_info(fs, protocol, remote_path)
         files = []
@@ -363,7 +380,7 @@ class MountResolver:
         view, moved = self.mount_cache.build_view(
             key, files, lambda name, dest: fs.get(f"{protocol}://{name}", str(dest))
         )
-        return fingerprint, view, moved
+        return fingerprint, view, moved, versions_of(listing)
 
     async def _resolve_remote_rw(
         self,

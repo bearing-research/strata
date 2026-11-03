@@ -543,6 +543,50 @@ def _validate_per_variant(group: Any, context: cg.ValidationContext) -> list[cg.
     ]
 
 
+def _validate_each(each: Any, context: cg.ValidationContext) -> list[cg.Diagnostic]:
+    """What Strata does not run per item: other languages, a loop, and most table writes."""
+    cell = context.cell
+    source = cell.source
+    if cell.language != CellLanguage.PYTHON.value:
+        return [
+            cg.Diagnostic(
+                "each_not_python",
+                cg.Severity.ERROR,
+                "`@each` runs Python cells only.",
+                cell.id,
+                "each",
+                _find_annotation_line(source, "each", each["source"]),
+            )
+        ]
+    annotations = parse_annotations(source)
+    diagnostics = []
+    if annotations.loop is not None:
+        diagnostics.append(
+            cg.Diagnostic(
+                "each_with_loop",
+                cg.Severity.ERROR,
+                "`@each` can't be combined with `@loop`.",
+                cell.id,
+                "each",
+                _find_annotation_line(source, "each", each["source"]),
+            )
+        )
+    mode = next((w.mode for w in annotations.table_writes if w.mode != "sync"), None)
+    if mode is not None:
+        diagnostics.append(
+            cg.Diagnostic(
+                "each_write_table_mode",
+                cg.Severity.ERROR,
+                f"`@write_table ... {mode}` can't be combined with `@each`: use `sync`, which "
+                "commits once per run over every item's rows.",
+                cell.id,
+                "each",
+                _find_annotation_line(source, "write_table", mode),
+            )
+        )
+    return diagnostics
+
+
 def cell_effects(meta: Mapping[str, Any], parsed: Mapping[str, Any]) -> list[cg.Effect]:
     """The effects of the three mount layers and of the inputs a cell binds."""
     language = meta.get("language")
@@ -679,8 +723,10 @@ def strata_vocabulary() -> cg.Vocabulary:
         .replace("per_variant", parse=_lenient(_first_token))
         .replace("variant", parse=_parse_variant)
     )
-    core = core.replace("name", validate=_validate_name).replace(
-        "per_variant", validate=_validate_per_variant
+    core = (
+        core.replace("name", validate=_validate_name)
+        .replace("per_variant", validate=_validate_per_variant)
+        .replace("each", validate=_validate_each)
     )
     return core | cg.Vocabulary(_strata_annotations(), cell_effects=cell_effects)
 
@@ -760,6 +806,7 @@ def annotations_from(values: dict[str, Any], directives: list[cg.Directive]) -> 
         variant=VariantAnnotation(group=variant[0], name=variant[1]) if variant else None,
         per_variant="per_variant" in values,
         per_variant_group=values.get("per_variant"),
+        each=values.get("each"),
         after=values.get("after", []),
     )
 

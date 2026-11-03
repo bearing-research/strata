@@ -500,11 +500,11 @@ wheels = [
 
 [[package]]
 name = "cellgraph"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/60/81/7e71808b7915e5129ac441a49aafdef912f91a68bc5cf6ee39b000eab133/cellgraph-0.2.0.tar.gz", hash = "sha256:b17a262c34fbc02f0c0e82e2da9e2b5a1f936d911255b499321cb31731272997", size = 36787, upload-time = "2026-11-02T03:47:51.694Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/02/e2236afc72bb780a44647962345e2577eecbb16537722c6a9ac34fa43768/cellgraph-0.3.0.tar.gz", hash = "sha256:26641f7f74eae57882c889b3ddee6e84b30346f3d01ec1ce5c97205fba079230", size = 38046, upload-time = "2026-11-03T00:48:50.82Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/8a/76b1d2591cc9232fded4a0fbb776a8087866a0b3df0a97e00b845b534080/cellgraph-0.2.0-py3-none-any.whl", hash = "sha256:42e73fc149b37f18f4de694858db12cbd372a11861eeb51fdde6a2f34742d430", size = 40918, upload-time = "2026-11-02T03:47:50.368Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/b4/6e381c3c0232e97644631b6a656612247a01c710e030a12c6d6422558f85/cellgraph-0.3.0-py3-none-any.whl", hash = "sha256:7bb523fee9f0948bc36d9a7d59cf3c2fa97777191e8a4af6a2dd8e956b4ca17e", size = 42172, upload-time = "2026-11-03T00:48:49.482Z" },
 ]
 
 [[package]]
@@ -4140,7 +4140,7 @@ requires-dist = [
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.35.0" },
-    { name = "cellgraph", specifier = ">=0.2,<0.3" },
+    { name = "cellgraph", specifier = ">=0.3,<0.4" },
     { name = "cloudpickle", marker = "extra == 'notebook'", specifier = ">=3.0.0" },
     { name = "duckdb", specifier = ">=1.5.0" },
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.5.0" },

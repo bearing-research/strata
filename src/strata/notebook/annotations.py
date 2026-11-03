@@ -121,6 +121,7 @@ ANNOTATION_KEYS = frozenset(
         "app",
         "cache",
         "dataset",
+        "each",
         "env",
         "fetch",
         "live",
@@ -330,6 +331,9 @@ class CellAnnotations:
     # single sweep group the cell reads.
     per_variant: bool = False
     per_variant_group: str | None = None
+
+    # ``# @each <name> in <source>``: run once per item; cellgraph's parsed value.
+    each: dict[str, str] | None = None
 
     # ``# @after <cell-id>`` adds a DAG edge without a shared variable (e.g. a SQL cell
     # reading a file a setup cell wrote). Lines stack; each adds edges.

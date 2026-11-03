@@ -16,6 +16,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   as an `overwrite` would leave it, but data files with no changed row stay, so
   readers' cached row groups stay valid. Nothing is committed when nothing
   differs. (#1371)
+- **`@each` runs a cell once per file or row, and caches each item on its own.**
+  `# @each <name> in <source> [key=<col>] [glob=<pattern>]` takes a mount, or a
+  dict, list or table from another cell. A changed item runs alone, a removed
+  one leaves, and a later cell reads `{item: value}`. With `@write_table ... sync`
+  the table is written once per run over every item's rows, so a removed file's
+  rows are deleted. (#1372)
 
 ### Changed
 - **A cell's keys come from cellgraph.** A cell's provenance hash is now
@@ -25,7 +31,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **The notebook's analysis runs on cellgraph.** Annotations, the names each
   cell defines and reads, the DAG and annotation validation now come from
   [cellgraph](https://github.com/bearing-research/cellgraph), a new runtime
-  dependency (`cellgraph>=0.2,<0.3`). The diagnostics, the DAG and every cell
+  dependency (`cellgraph>=0.3,<0.4`). The diagnostics, the DAG and every cell
   key are the same as before. (#1358)
 - **Staleness is faster outside the server.** The CLI, the TUI and the MCP
   server read the config from disk, and a staleness pass read it twice for
@@ -134,6 +140,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A `@per_variant` cell ending in a displayed value no longer reruns every
+  variant.** The cache check looked for its displays where they are not stored,
+  so every variant missed. (#1372)
 - **A `merge` on two key columns no longer kills the server.** `@write_table
   ... merge on=a,b` with about 2,000 rows or more crashed the process in Arrow.
   A merge now also refuses a null or missing key column before writing. (#1371)

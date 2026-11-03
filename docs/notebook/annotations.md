@@ -528,7 +528,7 @@ A `# @loop` cell writes its final values once, after the last iteration, and
 not each iteration's. A `# @per_variant` cell writes once per variant into the
 same table, so `overwrite` and `sync` are refused there (each variant would
 remove the rows of the one before it); append, or merge on a column that tells
-the variants apart.
+the variants apart. A [`# @each`](#each) cell takes only `sync`, and writes once.
 
 A cell should not also read the table it writes with `@table`: its own write
 changes the snapshot it read, so it would show out of date at once.
@@ -645,6 +645,74 @@ under their notebook's own ids before the manifest, or nothing.
 For now run-all runs a cell with a folder on its own rather than in a batch.
 An R cell gets the folder as a path string and its folder is kept, but cannot
 read another cell's folder yet.
+
+## @each
+
+Runs a cell once per file or row, and caches each item on its own: change one file
+and one instance runs.
+
+```python
+# @mount raw s3://lab/incoming ro
+# @each path in raw glob=*.csv
+import pandas as pd
+
+frame = pd.read_csv(path)
+summary = frame.describe()
+```
+
+Format: `# @each <name> in <source> [key=<col>] [glob=<pattern>]`. `<name>` is bound
+to one item in each instance. What `<source>` is decides what an item is:
+
+| Source                      | One item per | Named by         | Runs again when         |
+| --------------------------- | ------------ | ---------------- | ----------------------- |
+| a mount, with an optional `glob=` | file   | its relative path | its size or mtime changes (a remote file: its listed version) |
+| a dict from another cell    | entry        | its key          | its value changes       |
+| a list from another cell    | value        | the value itself | an edit is a new item   |
+| a table from another cell, with `key=` | row | the `key=` column | the row changes       |
+
+A file is bound as a `pathlib.Path`, and a link to a file counts as a file. A mount
+that is itself one file is refused. A row is bound as a dict of JSON-safe values, with
+a null as `None`. A list
+item is named by its content, so inserting one does not run the ones after it, and a
+repeated value runs once. A table's key must not be null or repeat. The collection
+has to be a dict, a list or a table as stored: a pickled one is refused, because the
+server does not unpickle.
+
+**What a cell downstream sees.** Each output variable reads as a `{item: value}` dict
+of the items now in the source:
+
+```python
+# In a later cell: {"a.csv": <DataFrame>, "b.csv": <DataFrame>}
+report = {name: s.loc["mean"] for name, s in summary.items()}
+```
+
+An item removed from the source leaves the dict. When every instance has succeeded,
+the cell stores one manifest per output, naming the value each item produced; a run
+with a failed item stores none, so downstream cells keep reading the last good one,
+and the items that succeeded stay cached for the next run.
+
+**What runs again.** Nothing changed is one lookup of the cell's key: no item is
+listed. A new or changed item runs alone. Any other input of the cell, or its source,
+runs every item. Going back to earlier inputs finds the values already stored. Rerun
+(↻) runs every item.
+
+**Writing a table.** `# @write_table ... sync on=<col>` is the only mode an `@each`
+cell takes. The table is written once per run, in one commit, over the rows of every
+item, the cached ones too, so a removed file's rows are deleted though nothing ran. A
+failed item writes nothing, since its missing rows would read as deletions. A source
+with no items refuses the run rather than delete every row. `append`, `merge` and
+`overwrite` are refused: one commit per item, or only the last item's rows.
+
+**Limits.** Python cells on the local worker, read by Python cells. Instances run one at a time, a harness
+each, about half a second before the cell's own work, so plan on that for a first run
+of thousands of items. An `@each` cell cannot also be a `@loop`, `@per_variant` or
+`@variant` cell, or fan out over a sweep. Cell tests, branching from a release,
+`@dataset`, `strata artifact pull` and a publication bundle over its output are not
+supported yet and are refused; a cell that reads the output can do the last three.
+A snapshot carries the output and every item it names.
+
+A prune keeps each instance a kept manifest names and drops the rest, so a removed
+item's value goes once no manifest left names it.
 
 ## @nocache
 

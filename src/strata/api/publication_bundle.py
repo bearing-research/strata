@@ -329,8 +329,13 @@ def _write_folder_files(
         ValueError: If the manifest cannot be read, or a file it names is missing or not
             the bytes it names.
     """
-    from strata.notebook import output_dirs
+    from strata.notebook import each, output_dirs
 
+    if content_type == each.CONTENT_TYPE:
+        raise ValueError(
+            f"{artifact.id}@v={artifact.version} is the output of an @each cell, which cannot "
+            "be archived yet: publish a cell that reads it"
+        )
     if content_type != output_dirs.CONTENT_TYPE:
         return []
     manifest = store.read_blob(artifact.id, artifact.version)

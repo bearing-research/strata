@@ -146,7 +146,7 @@ def cell_key(
     fetches: list[str],
     datasets: list[str],
     env_hash: str,
-    instance: str | None = None,
+    instance: str | cg.Item | None = None,
 ) -> CellKey:
     """*cell_id*'s provenance hash (one fan-out *instance*'s, when given) over these
     input fingerprints."""
@@ -159,7 +159,9 @@ def cell_key(
             definition_key,
             env_hash,
         )
-        if instance is not None:
+        if isinstance(instance, cg.Item):
+            digest = cg.derive_subkey(digest, f"each={instance.key}={instance.digest}")
+        elif instance is not None:
             digest = cg.derive_subkey(digest, f"variant={instance}")
         return CellKey(digest, [])
     result = analysis.execution_key(
