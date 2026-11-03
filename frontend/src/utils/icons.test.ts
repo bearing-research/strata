@@ -21,8 +21,9 @@ function sources(dir: string): string[] {
 
 function withoutComments(text: string): string {
   return text
+    .split(/<!--[\s\S]*?-->/)
+    .join('')
     .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/^\s*\/\/.*$/gm, '')
     .replace(/\s\/\/ .*$/gm, '')
 }
@@ -52,7 +53,8 @@ test('a button with only an icon has a name', () => {
       /<button\b((?:[^>"]|"[^"]*")*)>([\s\S]*?)<\/button>/g,
     )) {
       const withoutTags = body
-        .replace(/<[^>]*>/g, '')
+        .split(/<[^>]*>/)
+        .join('')
         .replace(/\{\{[\s\S]*?\}\}/g, 'text')
         .trim()
       if (!withoutTags && !/aria-label/.test(attrs)) {
