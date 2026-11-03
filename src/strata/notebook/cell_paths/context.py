@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from strata.notebook.execution_result import CellExecutionResult
     from strata.notebook.executor import _CellProvenance
+    from strata.notebook.executor_host import ExecutorHost
 
 
 @dataclass(frozen=True)
@@ -26,3 +27,14 @@ class PathContext:
     ]
     # Store displays that came as text, not files; what was stored, with its artifact URIs.
     store_inline_display_outputs: Callable[..., list[dict[str, Any]]]
+
+
+def no_interpreter_message(session: ExecutorHost) -> str:
+    """Why cell code did not run: the session has no interpreter.
+
+    PATH ``python`` is never used instead: its result would be stored under
+    this notebook's provenance.
+    """
+    return session.environment_execution_block_message() or (
+        "Notebook environment is not ready: it has no Python interpreter."
+    )
