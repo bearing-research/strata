@@ -146,6 +146,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A `:memory:` database stays in memory.** A DuckDB or SQLite connection with
+  `path = ":memory:"` opened a real file of that name in the notebook folder, so
+  a cell's tables outlived the run and the file could be committed. If a notebook
+  relied on that, name a file in `path`. (#1377)
 - **A notebook-level mount reaches only the cells that read it.** Every
   cell used to list it, download all of it, and run again when it changed: a
   rollup cell spent 35 minutes downloading a bucket it never read. Those cells
