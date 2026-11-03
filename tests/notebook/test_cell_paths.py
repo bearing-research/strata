@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from vestigo.provenance import derive_subkey
 
 import strata.notebook.cell_paths
 from strata.notebook.cell_paths.context import PathContext
+from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.cell_paths.prompt import run_prompt_cell
 from strata.notebook.cell_paths.sql import run_sql_cell
 from strata.notebook.cell_paths.widget import run_widget_cell
@@ -527,3 +530,126 @@ class TestSql:
         assert await run(materialize_upstreams=True) is failure
         assert calls.asked == []
         assert calls.applied == []
+
+
+class TestModuleExport:
+    """The step on its own: a fake host, a real export plan, files in a temp directory."""
+
+    DEFS = "def f():\n    return 1\n\n\ndef g():\n    return 2\n"
+    CLOSES_OVER_UPSTREAM = "def f():\n    return base + 1\n"
+    CLOSES_OVER_RUNTIME = "import os\nroot = os.getcwd()\n\n\ndef f():\n    return root\n"
+
+    @staticmethod
+    def _host(consumed, *, references=(), producer=None, cells=(), stored=None):
+        cell = SimpleNamespace(id="c1", references=list(references), builtin_references=[])
+
+        def store_cell_output(**kwargs):
+            stored.append(kwargs)
+            return SimpleNamespace(id="stored", version=3)
+
+        return SimpleNamespace(
+            dag=SimpleNamespace(
+                consumed_variables={"c1": set(consumed)}, variable_producer=producer or {}
+            ),
+            notebook_state=SimpleNamespace(id="nb", cells=[cell, *cells]),
+            get_artifact_manager=lambda: SimpleNamespace(store_cell_output=store_cell_output),
+        )
+
+    def test_no_dag_writes_nothing(self, tmp_path):
+        outputs = {}
+        host = SimpleNamespace(dag=None)
+
+        assert write_module_export_outputs(host, "c1", self.DEFS, tmp_path, "p", outputs) is None
+        assert outputs == {}
+
+    def test_nothing_consumed_writes_nothing(self, tmp_path):
+        outputs = {}
+        host = self._host([])
+
+        assert write_module_export_outputs(host, "c1", self.DEFS, tmp_path, "p", outputs) is None
+        assert outputs == {}
+        assert list(tmp_path.iterdir()) == []
+
+    def test_only_what_is_consumed_is_exported(self, tmp_path):
+        outputs = {}
+        host = self._host(["f"])
+
+        assert write_module_export_outputs(host, "c1", self.DEFS, tmp_path, "p", outputs) is None
+
+        assert set(outputs) == {"f"}
+        descriptor = json.loads((tmp_path / outputs["f"]["file"]).read_text())
+        assert descriptor["symbol_name"] == "f"
+        assert descriptor["provenance_hash"] == derive_subkey("p", "f")
+        assert descriptor["injected"] == {}
+
+    def test_an_upstream_value_with_no_artifact_blocks_the_export(self, tmp_path):
+        producer_cell = SimpleNamespace(id="up", artifact_uris={})
+        host = self._host(
+            ["f"], references=["base"], producer={"base": "up"}, cells=[producer_cell]
+        )
+        outputs = {}
+
+        error = write_module_export_outputs(
+            host, "c1", self.CLOSES_OVER_UPSTREAM, tmp_path, "p", outputs
+        )
+
+        assert "a value it closes over (`base`)" in error
+        assert outputs == {}
+
+    def test_the_injected_reference_names_the_module(self, tmp_path):
+        names = []
+        for uri in ("strata://artifact/a@v=1", "strata://artifact/a@v=2"):
+            producer_cell = SimpleNamespace(id="up", artifact_uris={"base": uri})
+            host = self._host(
+                ["f"], references=["base"], producer={"base": "up"}, cells=[producer_cell]
+            )
+            outputs = {}
+            assert (
+                write_module_export_outputs(
+                    host, "c1", self.CLOSES_OVER_UPSTREAM, tmp_path, "p", outputs
+                )
+                is None
+            )
+            descriptor = json.loads((tmp_path / outputs["f"]["file"]).read_text())
+            assert descriptor["injected"] == {"base": uri}
+            names.append(descriptor["module_name"])
+
+        assert names[0] != names[1]
+
+    def test_a_same_cell_value_is_stored_and_pinned(self, tmp_path):
+        (tmp_path / "root.json").write_bytes(b'"here"')
+        outputs = {"root": {"file": "root.json", "content_type": "json/object"}}
+        stored = []
+        host = self._host(["f"], stored=stored)
+
+        assert (
+            write_module_export_outputs(
+                host, "c1", self.CLOSES_OVER_RUNTIME, tmp_path, "p", outputs
+            )
+            is None
+        )
+
+        assert stored[0]["provenance_hash"] == derive_subkey("p", "root")
+        assert stored[0]["blob_data"] == b'"here"'
+        descriptor = json.loads((tmp_path / outputs["f"]["file"]).read_text())
+        assert descriptor["injected"] == {"root": "strata://artifact/stored@v=3"}
+
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            pytest.param({"file": "root.json", "error": "too big"}, id="errored"),
+            pytest.param({"file": "gone.json"}, id="gone"),
+            pytest.param({"error": "no file"}, id="no-file"),
+        ],
+    )
+    def test_a_same_cell_value_that_cannot_be_stored_blocks_the_export(self, tmp_path, spec):
+        (tmp_path / "root.json").write_bytes(b'"here"')
+        stored = []
+        host = self._host(["f"], stored=stored)
+
+        error = write_module_export_outputs(
+            host, "c1", self.CLOSES_OVER_RUNTIME, tmp_path, "p", {"root": spec}
+        )
+
+        assert "a value it closes over (`root`)" in error
+        assert stored == []
