@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,18 +12,21 @@ import pytest
 from vestigo.provenance import derive_subkey
 
 import strata.notebook.cell_paths
-from strata.notebook.cell_paths import cell_tests
+from strata.notebook.annotations import LoopAnnotation
+from strata.notebook.cell_paths import cell_tests, loop
 from strata.notebook.cell_paths.cell_tests import CellTestsContext, run_cell_tests
-from strata.notebook.cell_paths.context import PathContext
+from strata.notebook.cell_paths.context import PathContext, artifact_content_type
+from strata.notebook.cell_paths.loop import LoopContext, run_loop_cell
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.cell_paths.prompt import run_prompt_cell
 from strata.notebook.cell_paths.sql import run_sql_cell
 from strata.notebook.cell_paths.widget import run_widget_cell
 from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.executor import CellExecutor
+from strata.notebook.harness_user import LocalExecutionRefused
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
-from strata.notebook.writer import add_cell_to_notebook, create_notebook
+from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
 PATHS = sorted(Path(strata.notebook.cell_paths.__file__).parent.glob("*.py"))
 
@@ -800,3 +804,241 @@ class TestCellTests:
         assert result.errored == 1
         assert result.tests[0].name == "<refused>"
         assert result.tests[0].message == next(iter(problem.values()))
+
+
+class TestLoop:
+    """The moved path against fakes; the harness-backed behavior is in ``test_executor.py``."""
+
+    LOOP = LoopAnnotation(max_iter=2, carry="state")
+
+    @staticmethod
+    def _host(tmp_path):
+        cell = SimpleNamespace(worker=None, mutation_defines=[], display_outputs=[])
+        return SimpleNamespace(
+            notebook_state=SimpleNamespace(worker=None, get_cell=lambda _id: cell),
+            path=tmp_path,
+            dag=None,
+            venv_python=None,
+            get_artifact_manager=lambda: None,
+        )
+
+    @staticmethod
+    def _context(**overrides):
+        """A context whose run reaches the first iteration's harness, which times out."""
+
+        async def nothing(*_args, **_kwargs):
+            return None
+
+        async def no_rw_mount(_specs):
+            return [], False
+
+        async def no_mounts(*_args, **_kwargs):
+            return {}
+
+        prov = SimpleNamespace(
+            provenance_hash="p",
+            env_hash="e",
+            source_hash="s",
+            table_snapshots={},
+        )
+        prov.over_mounts = lambda _mounts: prov
+
+        async def provenance(*_args, **_kwargs):
+            return prov
+
+        async def harness_times_out(*_args, **_kwargs):
+            raise TimeoutError
+
+        @contextmanager
+        def run_token(_timeout):
+            yield "token"
+
+        unused = lambda *_args, **_kwargs: pytest.fail("not reached")  # noqa: E731
+        fields = {
+            "materialize_upstreams_or_failure": nothing,
+            "resolve_cell_mount_specs": lambda *_args: [],
+            "fingerprint_mounts": no_rw_mount,
+            "resolve_runtime_env": lambda *_args: {},
+            "compute_provenance": provenance,
+            "manifest_tables": lambda *_args: {},
+            "moved": unused,
+            "promote_reverted_outputs": unused,
+            "canonical_output": unused,
+            "table_write_refusal": lambda _source: None,
+            "prepare_mounts": no_mounts,
+            "load_input_blobs": lambda *_args: {},
+            "keep_failed_output_dirs": lambda *_args: None,
+            "write_manifest": lambda *_args, **_kwargs: Path("manifest.json"),
+            "run_token": run_token,
+            "run_harness": harness_times_out,
+            "input_refs": unused,
+            "write_cell_tables": unused,
+            "store_display_outputs": unused,
+            "store_console_outputs": unused,
+            "folder_listings": {},
+            "on_iteration_complete": None,
+        }
+        return LoopContext(**{**fields, **overrides})
+
+    @staticmethod
+    def _reach_the_harness(monkeypatch):
+        monkeypatch.setattr(loop, "_resolve_loop_seed", lambda *_args: (b"{}", "json/object"))
+        monkeypatch.setattr(
+            "strata.notebook.runtime_state.persist_cell_loop_run", lambda *_args: None
+        )
+
+    async def _run(
+        self, tmp_path, context, source="# @loop max_iter=2 carry=state\n", folders=None
+    ):
+        return await run_loop_cell(
+            self._host(tmp_path),
+            context,
+            "c",
+            source,
+            self.LOOP,
+            1.0,
+            0.0,
+            materialize_upstreams=False,
+            use_cache=False,
+            folders=folders,
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_rw_mount_is_refused_before_anything_is_keyed(self, tmp_path):
+        async def rw_mount(_specs):
+            return [], True
+
+        async def not_asked(*_args, **_kwargs):
+            pytest.fail("a refused loop computes no provenance")
+
+        result = await self._run(
+            tmp_path, self._context(fingerprint_mounts=rw_mount, compute_provenance=not_asked)
+        )
+        assert result.success is False
+        assert "rw mounts" in result.error
+        assert result.execution_method == "loop"
+
+    @pytest.mark.asyncio
+    async def test_a_refused_table_write_runs_nothing(self, tmp_path):
+        async def not_run(*_args, **_kwargs):
+            pytest.fail("a refused write runs no iteration")
+
+        result = await self._run(
+            tmp_path,
+            self._context(table_write_refusal=lambda _source: "no writes", run_harness=not_run),
+        )
+        assert result.success is False
+        assert result.error == "no writes"
+        assert result.execution_method == "loop"
+
+    @pytest.mark.asyncio
+    async def test_a_run_drops_the_folder_listings_of_the_last(self, tmp_path, monkeypatch):
+        self._reach_the_harness(monkeypatch)
+        listings = {"c": {"old": []}, "other": {"kept": []}}
+        await self._run(tmp_path, self._context(folder_listings=listings))
+        assert listings == {"other": {"kept": []}}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("refused", [False, True])
+    async def test_folders_go_to_the_user_cells_run_as(self, tmp_path, monkeypatch, refused):
+        self._reach_the_harness(monkeypatch)
+        user = object()
+
+        def resolve_user():
+            if refused:
+                raise LocalExecutionRefused("no user")
+            return user
+
+        handed = []
+        monkeypatch.setattr(loop, "resolve_harness_user", resolve_user)
+        monkeypatch.setattr(loop, "hand_over", lambda path, to: handed.append((path, to)))
+        folders = tmp_path / "folders"
+        folders.mkdir()
+        await self._run(
+            tmp_path,
+            self._context(),
+            source="# @loop max_iter=2 carry=state\n# @output_dir out\n",
+            folders=folders,
+        )
+        # A refused run still hands over; the refusal is reported where the cell would start.
+        assert handed == [(folders, None if refused else user)]
+
+    @pytest.mark.parametrize(
+        ("params", "expected"),
+        [
+            ({"content_type": "arrow/ipc"}, "arrow/ipc"),
+            ({"content_type": ""}, "pickle/object"),
+            ({}, "pickle/object"),
+        ],
+    )
+    def test_an_artifact_without_a_content_type_reads_as_pickle(self, params, expected):
+        assert artifact_content_type(SimpleNamespace(params=params)) == expected
+
+    def test_the_seed_comes_from_the_upstream_wired_for_the_carry(self):
+        """An upstream that once defined the carry keeps a row; the wiring names the definer."""
+        cells = {
+            "c": SimpleNamespace(upstream_ids=["shadowed", "definer"]),
+            "shadowed": SimpleNamespace(),
+            "definer": SimpleNamespace(),
+        }
+        store = SimpleNamespace(
+            get_latest_version=lambda artifact_id: SimpleNamespace(
+                state="ready", version=1, params={"content_type": "json/object"}
+            )
+        )
+        manager = SimpleNamespace(
+            artifact_store=store,
+            load_artifact_data=lambda artifact_id, _version: artifact_id.encode(),
+        )
+        host = SimpleNamespace(
+            notebook_state=SimpleNamespace(id="n", get_cell=cells.get),
+            get_artifact_manager=lambda: manager,
+            wired_variables=lambda _cell, upstream: {"state"} if upstream == "definer" else set(),
+        )
+        blob, content_type = loop._resolve_loop_seed(host, "c", self.LOOP)
+        assert blob == b"nb_n_cell_definer_var_state"
+        assert content_type == "json/object"
+
+    @pytest.fixture
+    def seeded(self, tmp_path):
+        def make(loop_source):
+            notebook = create_notebook(tmp_path, "loop")
+            add_cell_to_notebook(notebook, "seed", None)
+            write_cell(notebook, "seed", "state = {'n': 0}\n")
+            add_cell_to_notebook(notebook, "lp", after_cell_id="seed")
+            write_cell(notebook, "lp", loop_source)
+            session = NotebookSession(parse_notebook(notebook), notebook)
+            session.refresh_environment_runtime()
+            return session
+
+        return make
+
+    @pytest.mark.asyncio
+    async def test_the_final_carry_records_what_it_read(self, seeded):
+        source = "# @loop max_iter=2 carry=state\nstate = {'n': state['n'] + 1}\n"
+        session = seeded(source)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("lp", source)).success
+        manager = session.get_artifact_manager()
+        final = manager.artifact_store.get_latest_version(manager.cell_artifact_id("lp", "state"))
+        read = json.loads(final.input_versions)
+        assert [uri for uri in read if "_cell_seed_var_state@" in uri] == list(read)
+        assert read
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("annotation", "stored"), [("", 1), ("# @nocache\n", 0)])
+    async def test_a_leaf_keeps_its_console_unless_nocache(self, seeded, annotation, stored):
+        source = f"{annotation}# @loop max_iter=1 carry=state\nstate = dict(state)\nprint('hi')\n"
+        session = seeded(source)
+        executor = CellExecutor(session)
+        calls = []
+        real = executor._store_console_outputs
+
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        executor._store_console_outputs = spy
+        result = await executor.execute_cell("lp", source)
+        assert result.success, result.error
+        assert len(calls) == stored

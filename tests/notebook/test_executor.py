@@ -3323,6 +3323,7 @@ class TestLoopCellExecution:
         from vestigo.provenance import TransformSpec
 
         from strata.notebook.annotations import LoopAnnotation
+        from strata.notebook.cell_paths.loop import _resolve_loop_seed
 
         _, session = loop_notebook
         artifact_mgr = session.get_artifact_manager()
@@ -3338,7 +3339,7 @@ class TestLoopCellExecution:
             store.finalize_artifact(artifact_id, version, "", 0, 10)
 
         loop = LoopAnnotation(max_iter=2, carry="state", start_from_cell="donor", start_from_iter=1)
-        blob, _ = CellExecutor(session)._resolve_loop_seed("loop", loop)
+        blob, _ = _resolve_loop_seed(session, "loop", loop)
         assert blob == b"seed-bytes"
 
     @pytest.mark.asyncio
