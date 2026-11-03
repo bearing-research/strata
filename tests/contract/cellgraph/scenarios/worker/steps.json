@@ -1,0 +1,20 @@
+[
+  {
+    "op": "run_cell",
+    "cell": "far",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "near",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "far",
+    "source": "# @worker w\nfar = 2\n"
+  },
+  {
+    "op": "run_all"
+  }
+]

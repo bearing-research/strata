@@ -1,0 +1,8 @@
+notebook_id = "cellgraph-worker"
+name = "worker"
+workers = [{ name = "w", backend = "executor", runtime_id = "cellgraph-w", config = { url = "http://127.0.0.1:47614/v1/execute" } }]
+mounts = []
+cells = [
+    { id = "far", file = "far.py", language = "python", order = 0 },
+    { id = "near", file = "near.py", language = "python", order = 1 },
+]

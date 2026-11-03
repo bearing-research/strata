@@ -22,7 +22,14 @@ from tests.contract.cellgraph import record, replay  # noqa: E402
 
 # What a trace records that is a Strata bug, as (scenario, step, cell, part): the replay
 # may differ there. Fixing the bug re-records the trace and removes its entry.
-KNOWN_RECORDED_BUGS: set[tuple[str, int, str, str]] = set()
+KNOWN_RECORDED_BUGS: set[tuple[str, int, str, str]] = {
+    # An R cell restored to an earlier source runs again: R has no revert promotion.
+    ("r_directives", 16, "rv", "cache decision"),
+    ("r_directives", 17, "rr", "cache decision"),
+    ("r_directives", 29, "rp", "cache decision"),
+    # An R cell with only a console is never cached, so it has nothing to find.
+    ("r_directives", 23, "rc", "cache decision"),
+}
 
 
 def assert_replays(name, tmp_path):

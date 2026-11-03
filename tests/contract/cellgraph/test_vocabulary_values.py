@@ -104,7 +104,10 @@ def test_every_edge_and_case_reads_as_parse_annotations():
         _check(language, source)
 
 
-@pytest.mark.parametrize("name", [n for n in record.scenario_names() if n not in record.REQUIRES])
+# ``each`` came after the legacy parser these compare against.
+@pytest.mark.parametrize(
+    "name", [n for n in record.scenario_names() if n not in record.REQUIRES and n != "each"]
+)
 def test_every_scenario_cell_reads_as_parse_annotations(name, tmp_path):
     for _index, _step, state in replay.notebooks(name, tmp_path):
         for cell in state.cells:

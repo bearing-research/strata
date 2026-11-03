@@ -1,0 +1,108 @@
+[
+  {
+    "op": "write_file",
+    "path": "warehouse/.keep",
+    "text": ""
+  },
+  {
+    "op": "iceberg_create",
+    "catalog": "lake",
+    "table": "db.events",
+    "rows": [1, 2]
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "base",
+    "source": "base = 2\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "iceberg_append",
+    "catalog": "lake",
+    "table": "db.events",
+    "rows": [3]
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "base",
+    "source": "base = 1\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "leaf",
+    "source": "print(\"console leaf two\")\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "leaf",
+    "source": "print(\"console leaf\")\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "show",
+    "source": "display(Markdown(\"two\"))\ndisplay(Markdown(\"three\"))\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "show",
+    "source": "display(Markdown(\"one\"))\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "double",
+    "source": "double = base * 2\nraise ValueError(\"no\")\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "double",
+    "source": "double = base * 2\nprint(\"double\", double)\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "single",
+    "source": "# @timeout 30\nslow = double + 1\nraise ValueError(\"no\")\n"
+  },
+  {
+    "op": "run_all_batch"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "single",
+    "source": "# @timeout 30\nslow = double + 1\n"
+  },
+  {
+    "op": "run_all_batch"
+  }
+]

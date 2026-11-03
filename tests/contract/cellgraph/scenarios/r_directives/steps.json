@@ -28,5 +28,123 @@
   },
   {
     "op": "run_all"
+  },
+  {
+    "op": "add_cell",
+    "cell": "rv",
+    "after": "r2",
+    "language": "r",
+    "source": "rv <- 1\n"
+  },
+  {
+    "op": "add_cell",
+    "cell": "rr",
+    "after": "rv",
+    "language": "r",
+    "source": "rs <- rv + 1\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rv",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "rr",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "rv",
+    "source": "rv <- 2\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rv",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "rr",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "rv",
+    "source": "rv <- 1\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rv",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "rr",
+    "outputs": true
+  },
+  {
+    "op": "add_cell",
+    "cell": "rc",
+    "after": "rr",
+    "language": "r",
+    "source": "cat(\"console leaf\\n\")\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rc",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "rc",
+    "source": "cat(\"console leaf two\\n\")\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rc",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "rc",
+    "source": "cat(\"console leaf\\n\")\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rc",
+    "outputs": true
+  },
+  {
+    "op": "add_cell",
+    "cell": "rp",
+    "after": "rc",
+    "language": "r",
+    "source": "plot(1)\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rp",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "rp",
+    "source": "plot(1)\nplot(2)\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rp",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "rp",
+    "source": "plot(1)\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "rp",
+    "outputs": true
   }
 ]

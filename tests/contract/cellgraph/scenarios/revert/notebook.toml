@@ -1,0 +1,12 @@
+notebook_id = "cellgraph-revert"
+name = "revert"
+workers = []
+mounts = []
+cells = [
+    { id = "value", file = "value.py", language = "python", order = 0 },
+    { id = "read", file = "read.py", language = "python", order = 1 },
+    { id = "leaf", file = "leaf.py", language = "python", order = 2 },
+    { id = "show", file = "show.py", language = "python", order = 3 },
+    { id = "printed", file = "printed.py", language = "python", order = 4 },
+    { id = "usesp", file = "usesp.py", language = "python", order = 5 },
+]

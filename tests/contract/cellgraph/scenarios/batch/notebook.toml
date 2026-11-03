@@ -1,0 +1,15 @@
+notebook_id = "cellgraph-batch"
+name = "batch"
+workers = []
+mounts = []
+cells = [
+    { id = "base", file = "base.py", language = "python", order = 0 },
+    { id = "double", file = "double.py", language = "python", order = 1 },
+    { id = "leaf", file = "leaf.py", language = "python", order = 2 },
+    { id = "show", file = "show.py", language = "python", order = 3 },
+    { id = "tbl", file = "tbl.py", language = "python", order = 4 },
+    { id = "seen", file = "seen.py", language = "python", order = 5 },
+    { id = "single", file = "single.py", language = "python", order = 6 },
+    { id = "last", file = "last.py", language = "python", order = 7 },
+    { id = "tail", file = "tail.py", language = "python", order = 8 },
+]

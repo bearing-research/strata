@@ -1,0 +1,132 @@
+[
+  {
+    "op": "run_cell",
+    "cell": "value",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "read",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "value",
+    "source": "value = 2\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "value",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "read",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "value",
+    "source": "value = 1\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "value",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "read",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "leaf",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "leaf",
+    "source": "print(\"console leaf two\")\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "leaf",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "leaf",
+    "source": "print(\"console leaf\")\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "leaf",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "show",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "show",
+    "source": "display(Markdown(\"two\"))\ndisplay(Markdown(\"three\"))\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "show",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "show",
+    "source": "display(Markdown(\"one\"))\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "show",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "printed",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "usesp",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "printed",
+    "source": "printed = 2\nprint(\"printed\", printed)\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "printed",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "usesp",
+    "outputs": true
+  },
+  {
+    "op": "edit_cell",
+    "cell": "printed",
+    "source": "printed = 1\nprint(\"printed\", printed)\n"
+  },
+  {
+    "op": "run_cell",
+    "cell": "printed",
+    "outputs": true
+  },
+  {
+    "op": "run_cell",
+    "cell": "usesp",
+    "outputs": true
+  }
+]
