@@ -27,7 +27,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Mapping
 from contextlib import ExitStack, contextmanager, nullcontext
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
@@ -50,10 +50,13 @@ from strata.notebook import console_relay, each, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotation_validation import blocking_diagnostic
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
+from strata.notebook.cell_paths.context import PathContext
+from strata.notebook.cell_paths.widget import run_widget_cell
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
+from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.graph import analysis_with, mounts_of
 from strata.notebook.harness_user import (
     HarnessUser,
@@ -524,119 +527,6 @@ class _CellProvenance:
         if self.read_confirmation is not None:
             entry["confirmation"] = self.read_confirmation
         return entry
-
-
-@dataclass(kw_only=True)
-class CellExecutionResult:
-    """Result from executing a cell.
-
-    ``display_output`` is a legacy shim for the last of ``display_outputs``;
-    the two are kept consistent. ``execution_method`` is ``cold``, ``warm`` or ``cached``.
-    """
-
-    cell_id: str
-    success: bool
-    stdout: str = ""
-    stderr: str = ""
-    outputs: dict[str, Any] = field(default_factory=dict)
-    display_outputs: list[dict[str, Any]] = field(default_factory=list)
-    display_output: dict[str, Any] | None = None
-    duration_ms: float = 0
-    error: str | None = None
-    # A stable name for the failure a client can match on (e.g. ``fetch_pin_mismatch``);
-    # ``None`` for failures that have none.
-    error_code: str | None = None
-    # The harness's formatted traceback, kept apart from ``error`` so the UI's one-line
-    # pill stays one line.
-    traceback: str | None = None
-    cache_hit: bool = False
-    artifact_uri: str | None = None
-    execution_method: str = "cold"  # cold, warm, cached
-    mutation_warnings: list[MutationWarning] = field(default_factory=list)
-    # Retries the prompt-cell validate-and-retry loop used; 0 on first-try pass or for
-    # non-schema cells.
-    validation_retries: int = 0
-    suggest_install: str | None = None  # e.g. "requests" (Python) or "arrow" (R)
-    # Frontend dispatches ``uv add`` for ``"python"``, ``install.packages()`` for ``"r"``.
-    # ``None`` when ``suggest_install`` is ``None``.
-    suggest_install_language: str | None = None
-    remote_worker: str | None = None
-    remote_transport: str | None = None
-    remote_build_id: str | None = None
-    remote_build_state: str | None = None
-    remote_error_code: str | None = None
-    # Explicit: none of the fields below reliably implies a team hit (an unauthenticated
-    # store publishes anonymously; a publisher may record no duration).
-    from_team_cache: bool = False
-    # Who computed a team-store hit. ``None`` for a local hit or a real run; otherwise a
-    # team hit with no author reads as a bug, not a saving.
-    team_cache_principal: str | None = None
-    # Platform the team hit was built on, e.g. ``cpython-3.14-linux-x86_64``. Provenance
-    # covers the lockfile, not the platform, so a hit can cross machines; this discloses
-    # which. Empty unless a team hit recorded one.
-    team_cache_build_env: str = ""
-    # The publisher's run cost, i.e. what this hit saved. Carried, not inferred: savings
-    # are priced against the last local run, which a teammate-served cell never had.
-    team_cache_saved_ms: int = 0
-    # The promotion the team hit came from, when one put it in the store.
-    team_cache_promotion: str | None = None
-
-    def __post_init__(self) -> None:
-        # Legacy shim: accept either `display_outputs` or `display_output` and keep both
-        # consistent.
-        if not self.display_outputs and self.display_output is not None:
-            self.display_outputs = [self.display_output]
-        elif self.display_output is None and self.display_outputs:
-            self.display_output = self.display_outputs[-1]
-
-    def apply_remote_metadata(
-        self,
-        *,
-        remote_worker: str | None = None,
-        remote_transport: str | None = None,
-        remote_build_id: str | None = None,
-        remote_build_state: str | None = None,
-        remote_error_code: str | None = None,
-    ) -> CellExecutionResult:
-        """Attach remote execution metadata to this result."""
-        if remote_worker:
-            self.remote_worker = remote_worker
-        if remote_transport:
-            self.remote_transport = remote_transport
-        if remote_build_id:
-            self.remote_build_id = remote_build_id
-        if remote_build_state:
-            self.remote_build_state = remote_build_state
-        if remote_error_code:
-            self.remote_error_code = remote_error_code
-        return self
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to the REST ``/agent`` execution-result wire shape.
-
-        The WebSocket frame uses a different, slimmer shape
-        (``_execution_result_payload`` in ws.py).
-        """
-        payload = asdict(self)
-        # Wire rename: success: bool -> status: "ready" | "error".
-        payload["status"] = "ready" if payload.pop("success") else "error"
-        payload["displays"] = payload.pop("display_outputs")
-        payload["display"] = payload.pop("display_output")
-        # Optional metadata fields are omitted from the wire when falsy.
-        for opt_field in (
-            "error_code",
-            "validation_retries",
-            "suggest_install",
-            "suggest_install_language",
-            "remote_worker",
-            "remote_transport",
-            "remote_build_id",
-            "remote_build_state",
-            "remote_error_code",
-        ):
-            if not payload[opt_field]:
-                payload.pop(opt_field)
-        return payload
 
 
 @dataclass(kw_only=True)
@@ -5711,52 +5601,16 @@ class CellExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
-        """Execute a widget cell: materialize each control's value artifact.
-
-        No upstreams and no subprocess. Like prompt/SQL it persists the generic
-        provenance triplet so ``compute_staleness`` keeps it READY when values
-        are unchanged.
-        """
+        """Execute a widget cell. It has no upstream inputs and no subprocess."""
         del materialize_upstreams  # widgets have no upstream inputs
 
-        from strata.notebook.widget_executor import execute_widget_cell
-
-        result_dict = execute_widget_cell(self.session, cell_id, source, use_cache=use_cache)
-
-        if result_dict.get("success"):
-            # Publish each control's value artifact onto ``artifact_uris``, as a Python cell does
-            # for its outputs. Otherwise a downstream key sees no upstream
-            # artifact and cache-hits the old output: dragging a slider never updates downstream.
-            cell = self.session.notebook_state.get_cell(cell_id)
-            if cell is not None:
-                cell.artifact_uris = {
-                    name: out["artifact_uri"]
-                    for name, out in (result_dict.get("outputs") or {}).items()
-                    if isinstance(out, dict) and out.get("artifact_uri")
-                }
-
-            prov = await self._compute_cell_provenance(cell_id, source)
-            self.session.record_successful_execution_provenance(
-                cell_id,
-                prov.provenance_hash,
-                prov.source_hash,
-                prov.env_hash,
-                table_reads=prov.table_reads,
-                reads=prov.reads(*self._moved(cell_id)),
-                key_parts=prov.key_parts,
-            )
-
-        return CellExecutionResult(
-            cell_id=cell_id,
-            success=result_dict["success"],
-            outputs=result_dict.get("outputs", {}),
-            display_outputs=result_dict.get("display_outputs") or [],
-            error=result_dict.get("error"),
-            cache_hit=result_dict.get("cache_hit", False),
-            duration_ms=int((time.time() - start_time) * 1000),
-            execution_method=result_dict.get("execution_method", "widget"),
-            artifact_uri=result_dict.get("artifact_uri"),
+        return await run_widget_cell(
+            self.session, self._path_context(), cell_id, source, start_time, use_cache=use_cache
         )
+
+    def _path_context(self) -> PathContext:
+        """What an extracted path shares. Built per call, so a replaced method still holds."""
+        return PathContext(compute_provenance=self._compute_cell_provenance, moved=self._moved)
 
     # ------------------------------------------------------------------
     # ① Materialise upstream cells

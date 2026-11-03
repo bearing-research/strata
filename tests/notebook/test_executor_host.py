@@ -40,11 +40,11 @@ USERS = (
 
 
 def _session_uses(source: str) -> set[str]:
-    """Each ``self.session.x`` and ``session.x``, and each ``getattr`` of them."""
+    """Each ``self.session.x``, ``session.x`` and ``host.x``, and each ``getattr`` of them."""
 
     def is_session(node: ast.expr) -> bool:
         if isinstance(node, ast.Name):
-            return node.id == "session"
+            return node.id in {"session", "host"}
         return isinstance(node, ast.Attribute) and node.attr == "session"
 
     uses = set()
@@ -63,17 +63,15 @@ def _session_uses(source: str) -> set[str]:
 
 
 def test_the_protocol_lists_exactly_what_the_code_uses():
-    uses = set().union(*(_session_uses((NOTEBOOK / name).read_text()) for name in USERS))
+    files = [NOTEBOOK / name for name in USERS] + list((NOTEBOOK / "cell_paths").glob("*.py"))
+    uses = set().union(*(_session_uses(path.read_text()) for path in files))
 
     assert uses == host_members()
 
 
-def test_a_getattr_of_the_session_counts_as_a_use():
-    assert _session_uses("getattr(self.session, 'x', None)\nself.session.y\nsession.z\n") == {
-        "x",
-        "y",
-        "z",
-    }
+def test_each_way_of_reaching_the_session_counts_as_a_use():
+    source = "getattr(self.session, 'x', None)\nself.session.y\nsession.z\nhost.w\n"
+    assert _session_uses(source) == {"x", "y", "z", "w"}
 
 
 class TestRecordingHost:
