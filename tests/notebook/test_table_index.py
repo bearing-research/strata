@@ -267,7 +267,7 @@ class TestASqlCellsCatalogTables:
         )
         session = NotebookSession(parse_notebook(nb), nb)
         config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         monkeypatch.setattr(
             tables,
             "fingerprint_tables",

@@ -167,7 +167,7 @@ async def test_a_catalog_the_server_does_not_configure_fails_naming_it(tmp_path,
         {"c1": "# @sql connection=lake\nSELECT * FROM lake.taxi.trips\n"},
         'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"',
     )
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: StrataConfig())
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: StrataConfig())
     monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: StrataConfig())
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
 
@@ -284,7 +284,7 @@ def test_a_table_the_first_resolution_missed_reads_what_the_retry_found(tmp_path
     nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     monkeypatch.setattr(
         tables,
         "fingerprint_tables",
@@ -316,7 +316,7 @@ def test_a_table_never_written_is_read_unpinned_and_never_cached(tmp_path, monke
     nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     name = _lake_name("lake:taxi.trips")
     monkeypatch.setattr(
         tables,
@@ -358,7 +358,7 @@ class TestACatalogCredential:
             },
             notebook_credentials=credentials,
         )
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         monkeypatch.setattr(
             tables,
             "fingerprint_tables",
@@ -423,7 +423,7 @@ async def test_a_catalog_credential_set_only_in_the_notebook_env_resolves_its_sn
         },
         notebook_credentials={"db": {"uri": "${LAKE_DB}"}},
     )
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
 
     lake = resolve_lake(
@@ -768,7 +768,7 @@ class TestARestCatalogThatVendsNothing:
         config = StrataConfig(
             catalogs={"lake": self._LAKE}, deployment_mode=mode, **service_auth(mode)
         )
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         return session
 
     @staticmethod
@@ -824,7 +824,7 @@ class TestARestCatalogThatVendsNothing:
         session = self._session(tmp_path, monkeypatch)
         vending = {k: v for k, v in self._LAKE.items() if not k.startswith("header.")}
         config = StrataConfig(catalogs={"lake": vending})
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         self._catalog(monkeypatch)
 
         assert getattr(self._resolve(session).spec, "catalog_locations", None) is None
@@ -861,7 +861,7 @@ class TestARestCatalogThatVendsNothing:
         config = StrataConfig(
             catalogs={"lake": vending}, deployment_mode="service", **service_auth()
         )
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         loads, _ = self._catalog(monkeypatch)
 
         lake = self._resolve(session, pinned={("taxi", "trips"): 3})
@@ -1098,7 +1098,7 @@ class TestNotebookCatalogs:
             toml.read_text() + '\n[catalogs.lake]\ntype = "rest"\nuri = "http://notebook-catalog"\n'
         )
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         seen: list[dict] = []
 
         def fingerprint(specs, cfg, env=None, notebook=None, locations=None):

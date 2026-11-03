@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from strata.notebook.executor_host import ExecutorHost
 
 _PROVIDER_DEFAULTS: dict[str, tuple[str, str]] = {
     "ANTHROPIC_API_KEY": ("https://api.anthropic.com/v1", "claude-sonnet-4-6"),
@@ -218,7 +221,7 @@ def infer_provider_name(base_url: str) -> str:
     return "custom"
 
 
-def read_notebook_ai_config(session: Any) -> dict | None:
+def read_notebook_ai_config(session: ExecutorHost) -> dict | None:
     """The ``[ai]`` table of the session's notebook.toml, if it has one."""
     notebook_toml = session.path / "notebook.toml"
     if not notebook_toml.exists():
@@ -232,7 +235,7 @@ def read_notebook_ai_config(session: Any) -> dict | None:
         return None
 
 
-def llm_config_for_session(session: Any) -> LlmConfig | None:
+def llm_config_for_session(session: ExecutorHost) -> LlmConfig | None:
     """Resolve the LLM config a prompt cell in *session* runs with, if any is set."""
     server_config = None
     try:

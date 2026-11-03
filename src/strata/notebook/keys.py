@@ -18,7 +18,7 @@ import cellgraph as cg
 from strata.notebook.provenance import cell_provenance_inputs, compute_provenance_hash
 
 if TYPE_CHECKING:
-    from strata.notebook.session import NotebookSession
+    from strata.notebook.executor_host import ExecutorHost
 
 
 class InputNotFingerprinted(RuntimeError):
@@ -57,9 +57,9 @@ class _Lookups(Mapping[Any, Any]):
         return len(self._keys)
 
 
-def published(session: NotebookSession, analysis: cg.Analysis) -> Callable[[str], cg.Published]:
+def published(session: ExecutorHost, analysis: cg.Analysis) -> Callable[[str], cg.Published]:
     """What each cell published, as cellgraph reads it: its artifacts in the store."""
-    manager = session.artifact_manager
+    manager = session.get_artifact_manager()
     store = manager.artifact_store
 
     def ref(artifact: Any, by_content: bool) -> cg.OutputRef:
@@ -71,7 +71,7 @@ def published(session: NotebookSession, analysis: cg.Analysis) -> Callable[[str]
 
     def from_uri(uri: str, by_content: bool) -> cg.OutputRef | cg.Unavailable:
         try:
-            artifact_id, version = session._parse_artifact_uri(uri)
+            artifact_id, version = session.parse_artifact_uri(uri)
         except ValueError:
             return cg.Unavailable(f"not an artifact URI: {uri}")
         artifact = store.get_artifact(artifact_id, version)
@@ -137,7 +137,7 @@ def input_parts(fingerprints: Mapping[str, list[str]]) -> list[list[str]]:
 
 
 def cell_key(
-    session: NotebookSession,
+    session: ExecutorHost,
     analysis: cg.Analysis,
     cell_id: str,
     *,

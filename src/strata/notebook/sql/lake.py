@@ -33,6 +33,7 @@ from strata.notebook.sql.adapter import QualifiedTable
 from strata.notebook.sql.time_travel import splice_after_tables
 
 if TYPE_CHECKING:
+    from strata.notebook.executor_host import ExecutorHost
     from strata.notebook.models import ConnectionSpec, NotebookState
 
 
@@ -148,7 +149,7 @@ def lake_tables(notebook_state: NotebookState, source: str) -> list[TableSpec]:
 
 
 def resolve_lake(
-    session: Any,
+    session: ExecutorHost,
     cell_id: str,
     source: str,
     spec: ConnectionSpec,
@@ -166,7 +167,7 @@ def resolve_lake(
     catalog, mount_names = lake_options(spec)
     lake = Lake(spec=spec)
     update: dict[str, Any] = {}
-    config = with_notebook_catalogs(session._lake_config(), session.notebook_state)
+    config = with_notebook_catalogs(session.lake_config(), session.notebook_state)
     confined = getattr(config, "deployment_mode", "personal") == "service"
     env = dict(session.notebook_state.env)
     if catalog:
@@ -269,7 +270,7 @@ def resolve_lake(
     return lake
 
 
-def locate_tables(session: Any, lake: Lake, spec: ConnectionSpec) -> ConnectionSpec:
+def locate_tables(session: ExecutorHost, lake: Lake, spec: ConnectionSpec) -> ConnectionSpec:
     """*spec* with the locations of the tables ``resolve_lake`` left unlocated.
 
     For just before the query runs, once the cache has missed. In service mode they
@@ -280,7 +281,7 @@ def locate_tables(session: Any, lake: Lake, spec: ConnectionSpec) -> ConnectionS
     """
     if not lake.unlocated:
         return spec
-    config = with_notebook_catalogs(session._lake_config(), session.notebook_state)
+    config = with_notebook_catalogs(session.lake_config(), session.notebook_state)
     env = dict(session.notebook_state.env)
     found = [_table_location(t, config, env, notebook=session.path) for t in lake.unlocated]
     lake.unlocated = []
@@ -429,7 +430,7 @@ def local_database_problem(path: str, notebook_dir: Any, config: Any) -> str | N
 
 
 def _mount_sources(
-    session: Any,
+    session: ExecutorHost,
     cell_id: str,
     source: str,
     names: list[str],
@@ -449,7 +450,7 @@ def _mount_sources(
     resolver = MountResolver(
         cache_dir=session.path / ".strata" / "mount_cache",
         credential_resolver=CredentialResolver.from_config(
-            session._lake_config(), env=dict(session.notebook_state.env), notebook=session.path
+            session.lake_config(), env=dict(session.notebook_state.env), notebook=session.path
         ),
     )
     sources: list[dict[str, Any]] = []

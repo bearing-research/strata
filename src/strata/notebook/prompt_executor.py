@@ -31,7 +31,7 @@ from strata.notebook.serializer import _META_SHAPE, _SHAPE_SCALAR, _extract_scal
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from strata.notebook.session import NotebookSession
+    from strata.notebook.executor_host import ExecutorHost
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,7 @@ def compute_prompt_provenance_hash(
 
 
 async def execute_prompt_cell(
-    session: NotebookSession,
+    session: ExecutorHost,
     cell_id: str,
     source: str,
     llm_config: LlmConfig,
@@ -511,7 +511,7 @@ async def execute_prompt_cell(
     }
 
 
-def _publish(session: NotebookSession, cell_id: str, output_name: str, uri: str) -> None:
+def _publish(session: ExecutorHost, cell_id: str, output_name: str, uri: str) -> None:
     """Put the answer on the cell, as other cells' outputs are, before anything downstream
     is keyed: a cell run next in the same run reads its upstreams from there."""
     cell = session.notebook_state.get_cell(cell_id)
@@ -608,7 +608,7 @@ async def _stream_completion(
 
 
 def _load_upstream_variables(
-    session: NotebookSession,
+    session: ExecutorHost,
     cell_id: str,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Load upstream values and their provenance hashes as ``(variables, input_hashes)``.

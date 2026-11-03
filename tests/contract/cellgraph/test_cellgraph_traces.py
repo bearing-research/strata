@@ -23,6 +23,7 @@ from tests.contract.cellgraph import record  # noqa: E402
 
 # A scenario that needs more than the dev environment has its own test file, so the
 # CI job that has the tool runs only that one.
+@pytest.mark.usefixtures("executor_host_only")
 @pytest.mark.parametrize("name", [n for n in record.scenario_names() if n not in record.REQUIRES])
 def test_the_trace_is_reproduced(name):
     difference = record.difference_from_trace(name)

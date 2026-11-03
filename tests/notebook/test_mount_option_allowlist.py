@@ -158,7 +158,7 @@ class TestThroughACellRun:
         from strata.notebook.session import NotebookSession
 
         config = _config(tmp_path, "service")
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
         return fetched
 
