@@ -56,7 +56,8 @@ itself uses:
 | `iceberg_create`, `iceberg_append` | pyiceberg, on the catalog the scenario's `pyproject.toml` declares |
 | `seed_dataset` | a named version in the store `@dataset` reads |
 | `run_all` | `strata run --no-sync --format json` |
-| `run_cell` | `LocalNotebookOps.run_cell` (`strata cell run`) |
+| `run_cell` | `LocalNotebookOps.run_cell` (`strata cell run`); with `"outputs": true` the run entry also holds the cell's console and displays, as the session shows them |
+| `run_all_batch` | `ws._execute_run_all`, what the UI's Run All calls, with no socket: batches, the singleton fallback, snapshots pinned once and results applied per cell |
 | `validate` | nothing; the snapshot only |
 
 After every step the recorder takes a snapshot. A run step's snapshot is taken in
@@ -79,10 +80,14 @@ snapshot holds:
 - **resolved:** every mount, table, fetch and dataset component as computed,
   unresolved ones included, and whether the cell has a read-write mount;
 - **published:** `artifact_uris` (artifact, version, provenance hash,
-  `content_sha256`), the cell-level `artifact_uri`, and fan-out instances
-  (`<var>@variant=<name>`);
+  `content_sha256`), the cell-level `artifact_uri`, fan-out instances
+  (`<var>@variant=<name>`), and for an `@each` cell the version of each item its
+  manifest names (an item that did not run again keeps its version);
 - **run:** on run steps, per cell: status (ok, error, skipped), cache hit, error
-  code, skip reason, the provenance hash the run recorded, and stdout;
+  code, skip reason, the provenance hash the run recorded, and stdout. `run_all_batch`
+  adds the execution method (`batch`, `cold` for the singleton fallback, `cached`) and,
+  in `then`, what later results said of the same cell, since a later cell's run finding
+  this one ready applies a result to it again;
 - **staleness:** status and reasons per cell;
 - **causality:** why each stale cell is stale (`staleness_explanations.py`).
 
@@ -112,6 +117,9 @@ snapshot holds:
   no stale check reads the clock.
 - **Fetch.** The `fetch_dataset` scenario serves its `serve/` folder on
   `127.0.0.1:47613`, a fixed port, because the URL is in the key.
+- **Worker.** The `worker` scenario runs the notebook HTTP executor in the recorder's
+  process on `127.0.0.1:47614`. The worker names a `runtime_id`, so its URL is not in
+  the keys.
 
 ## Scenarios
 
@@ -134,7 +142,21 @@ snapshot holds:
 | `sql` | A SQLite cell reading an upstream variable through `:n`; edit the query; edit the upstream |
 | `prompt` | A prompt cell with a stubbed model; change the notebook-level `[ai]` model |
 | `markdown` | Markdown cells with `# @after`, `# @variant` and `# @app hide` before a Python cell; only `@app` is read there, so the first two add no edge and no group; move the `@after` |
-| `r_directives` | An R cell whose source does not parse as Python; edit `@timeout`, add `@name`, add a plain comment (each rekeys it today) |
+| `r_directives` | An R cell whose source does not parse as Python; edit `@timeout`, add `@name`, add a plain comment (each rekeys it today); revert (run P1, run P2, restore P1, run) of a consumed variable, a console-only leaf and a cell whose plots change in number |
+| `batch` | Run All as the UI runs it: cold, warm, an edit with mixed hits and misses, a new table snapshot, the singleton fallback; revert of a consumed variable, a console-only leaf and a display; a failed cell, its blocked dependents and the fix |
+| `revert` | Revert through single-cell runs: a consumed variable, a console-only leaf, a display, and a cell with both a consumed variable and a printed line |
+| `each` | `@each` over a local mount: cold, nothing changed, one item changed, a source edit and its revert, an item removed, then Run All |
+| `worker` | A cell sent to an in-process HTTP worker, and a local cell reading it |
+
+## Recorded as they are today
+
+These look wrong and are recorded unchanged; a fix is its own PR with its own trace
+change.
+
+- **A reverted cell's console.** In `revert` and `batch`, a cell that has a consumed
+  variable and prints shows the reverted-from version's console on a revert hit
+  (`printed 2` for the source that prints `printed 1`); after a failed run in between,
+  it shows nothing. A console-only leaf gets its own console back.
 
 ## Left out or reduced
 

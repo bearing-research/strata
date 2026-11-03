@@ -26,7 +26,7 @@ from tests.contract.cellgraph import record
 # Structural errors are compared through ``dag_error``, not per cell.
 STRUCTURAL = cg.analysis.STRUCTURAL_CODES
 
-_RUN_OPS = {"run_all", "run_cell"}
+_RUN_OPS = {"run_all", "run_all_batch", "run_cell"}
 _KIND_PREFIX = {"mount": "", "table": "table:", "fetch": "fetch:", "dataset": "dataset:"}
 _KIND_RESOLVED = {"mount": "mounts", "table": "tables", "fetch": "fetches", "dataset": "datasets"}
 
@@ -427,7 +427,9 @@ def replay(name: str, workdir: Path) -> Report:
                 and isinstance(result, cg.Keyed)
             ):
                 seen_before = previously_published.get(cell_id, set())
-                if run["cache_hit"] and result.digest not in seen_before:
+                # An @each hit says no item ran; a new listing's manifest has a new key.
+                is_each = "each" in expected["published"]
+                if run["cache_hit"] and result.digest not in seen_before and not is_each:
                     miss(index, cell_id, "cache decision", "hit", "a key never published before")
                 if not run["cache_hit"] and result.digest in seen_before and not ca.nocache:
                     miss(index, cell_id, "cache decision", "miss", "a key published before")

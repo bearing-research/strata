@@ -32,6 +32,7 @@ import shlex
 import shutil
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,8 @@ _TEXT_SUFFIXES = {".py", ".r", ".R", ".sql", ".prompt", ".toml"}
 _FIXED_MTIME_NS = 1_700_000_000 * 10**9
 # The fetch scenario's URLs are in its keys, so its server listens on a fixed port.
 FETCH_PORT = 47613
+# The worker scenario's URL is in its notebook.toml, so its worker also has a fixed port.
+WORKER_PORT = 47614
 _SKIP_DIRS = {".strata", ".venv", "work"}
 
 # What a scenario needs from the machine beyond the dev environment.
@@ -178,6 +181,35 @@ class _FetchServer:
         self.server.server_close()
 
 
+class _WorkerServer:
+    """The notebook HTTP executor on :data:`WORKER_PORT`, in this process."""
+
+    def __init__(self) -> None:
+        import uvicorn
+
+        from strata.notebook.remote_executor import create_notebook_executor_app
+
+        self.server = uvicorn.Server(
+            uvicorn.Config(
+                create_notebook_executor_app(),
+                host="127.0.0.1",
+                port=WORKER_PORT,
+                log_level="error",
+                ws="websockets-sansio",
+            )
+        )
+        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread.start()
+        while not self.server.started:
+            if not self.thread.is_alive():
+                raise RuntimeError(f"no worker on port {WORKER_PORT}")
+            time.sleep(0.01)
+
+    def close(self) -> None:
+        self.server.should_exit = True
+        self.thread.join()
+
+
 @contextlib.contextmanager
 def _recording(scenario: str, notebook_dir: Path, registry: Path) -> Iterator[_Spy]:
     """The process state every step of one scenario runs in."""
@@ -240,6 +272,9 @@ def _recording(scenario: str, notebook_dir: Path, registry: Path) -> Iterator[_S
         # Inside the try: a busy port must still restore the environment.
         if (notebook_dir / "serve").is_dir():
             server = _FetchServer(notebook_dir / "serve")
+        elif scenario == "worker":
+            os.environ["STRATA_WORKER_ALLOW_LOCAL_HOSTS"] = "1"
+            server = _WorkerServer()
         os.chdir(notebook_dir)
         with contextlib.ExitStack() as stack:
             for patch in patches:
@@ -387,6 +422,65 @@ async def _run_cell(notebook_dir: Path, cell_id: str) -> tuple[dict[str, Any], A
     return {cell_id: entry}, ops._session
 
 
+async def _run_all_batch(notebook_dir: Path) -> tuple[dict[str, Any], Any]:
+    """Run All as the UI runs it, with no socket: what each cell's result said, and the session."""
+    from strata.notebook import ws
+    from strata.notebook.ops import LocalNotebookOps
+
+    ops = LocalNotebookOps(notebook_dir)
+    session = ops._session
+    results: dict[str, list[Any]] = {}
+    real_apply = session.apply_execution_result_metadata
+
+    def apply(cell_id: str, result: Any) -> None:
+        results.setdefault(cell_id, []).append(result)
+        real_apply(cell_id, result)
+
+    try:
+        ops.use_existing_environment()
+        with mock.patch.object(session, "apply_execution_result_metadata", apply):
+            await ws._execute_run_all(
+                None,
+                session,
+                [cell.id for cell in session.notebook_state.cells],
+                ws._ensure_execution_state(session.id),
+                session.id,
+            )
+    finally:
+        ws.forget_notebook_execution_state(session.id)
+        await ops.aclose()
+    run = {}
+    for cell_id, (result, *later) in results.items():
+        run[cell_id] = {
+            "status": "ok" if result.success else "error",
+            "cache_hit": result.cache_hit,
+            "execution_method": result.execution_method,
+        }
+        if result.stdout:
+            run[cell_id]["stdout"] = result.stdout
+        # A later cell's run finding this one ready says so again.
+        if later:
+            run[cell_id]["then"] = [[r.execution_method, r.cache_hit] for r in later]
+    return _with_outputs(run, session), session
+
+
+def _with_outputs(run: dict[str, Any], session: Any) -> dict[str, Any]:
+    """*run* with what each cell's console and displays now show, as a client would see them."""
+    for cell_id, entry in run.items():
+        cell = session.notebook_state.get_cell(cell_id)
+        if entry["status"] == "ok" and cell.last_provenance_hash:
+            entry["provenance_hash"] = cell.last_provenance_hash
+        entry["console"] = cell.console_stdout
+        # An R plot's bytes follow the R build; which artifact holds it does not.
+        entry["displays"] = [
+            [display.content_type, display.artifact_uri, display.markdown_text]
+            for display in cell.display_outputs
+        ]
+        if cell.remote_worker:
+            entry["remote_worker"] = cell.remote_worker
+    return run
+
+
 def apply_file_op(step: dict[str, Any], notebook_dir: Path) -> bool:
     """Apply a step that edits the notebook's files; False for any other step."""
     from strata.notebook import writer
@@ -450,7 +544,10 @@ def _apply(
     elif op == "run_all":
         return asyncio.run(_run_all(notebook_dir))
     elif op == "run_cell":
-        return asyncio.run(_run_cell(notebook_dir, step["cell"]))
+        run, session = asyncio.run(_run_cell(notebook_dir, step["cell"]))
+        return (_with_outputs(run, session) if step.get("outputs") else run), session
+    elif op == "run_all_batch":
+        return asyncio.run(_run_all_batch(notebook_dir))
     else:
         raise ValueError(f"unknown step op {op!r}")
     return None
@@ -471,6 +568,8 @@ def _artifact(store: Any, artifact_id: str, version: int) -> dict[str, Any] | No
 
 
 def _published(session: Any, cell: Any, variants: list[str]) -> dict[str, Any]:
+    from strata.notebook.annotations import parse_annotations
+
     manager = session.get_artifact_manager()
     store = manager.artifact_store
     outputs = {}
@@ -485,7 +584,30 @@ def _published(session: Any, cell: Any, variants: list[str]) -> dict[str, Any]:
             )
             if latest is not None:
                 instances[f"{var}@variant={variant}"] = _artifact(store, latest.id, latest.version)
-    return {"artifact_uris": outputs, "artifact_uri": cell.artifact_uri, "instances": instances}
+    published = {
+        "artifact_uris": outputs,
+        "artifact_uri": cell.artifact_uri,
+        "instances": instances,
+    }
+    if parse_annotations(cell.source).each is not None:
+        published["each"] = _each_items(store, cell, outputs)
+    return published
+
+
+def _each_items(store: Any, cell: Any, outputs: dict[str, Any]) -> dict[str, list[Any]]:
+    """Per output, the items its manifest names: an item not run again keeps its version."""
+    from strata.notebook import each
+
+    items = {}
+    for var, entry in outputs.items():
+        if entry is None:
+            continue
+        artifact_id, _, version = entry["artifact"].partition("@v=")
+        blob = store.read_blob(artifact_id, int(version))
+        items[var] = sorted(
+            [key, version] for key, _, version in each.manifest_refs(artifact_id, blob)
+        )
+    return items
 
 
 def _keys(

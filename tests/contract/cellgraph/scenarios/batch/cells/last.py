@@ -1,0 +1,1 @@
+last = slow + 1

@@ -1,0 +1,8 @@
+notebook_id = "cellgraph-each"
+name = "each"
+workers = []
+mounts = [{ name = "data", uri = "file://@NB@/data", mode = "ro" }]
+cells = [
+    { id = "items", file = "items.py", language = "python", order = 0 },
+    { id = "join", file = "join.py", language = "python", order = 1 },
+]
