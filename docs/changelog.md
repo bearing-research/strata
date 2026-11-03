@@ -35,7 +35,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   stays on one row. The personal-mode chip is gone, and a dot with a tooltip replaces
   "Live". The DAG drawer opens collapsed unless you left it open. The sidebar panels
   sit under a collapsed "Notebook settings", and a mount, a remote worker or an
-  environment job in progress or failed brings its panel out. A typical cell header is
+  environment job in progress or failed brings its panel out. With neither, the sidebar
+  shrinks to a thin rail and the cells take its width. A typical cell header is
   one row, with `leaf` and the execution method in the status dot's tooltip. DAG edge
   labels no longer overlap. (#1395)
 - **A cell's inputs no longer pass through server memory.** An upstream value streams

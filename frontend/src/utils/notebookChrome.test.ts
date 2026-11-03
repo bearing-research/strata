@@ -7,6 +7,7 @@ import {
   dagDrawerStartsCollapsed,
   overflowActions,
   settingsAttention,
+  sidebarIsRail,
 } from './notebookChrome.ts'
 
 const standalone = editorChrome({})
@@ -61,4 +62,13 @@ test('a mount, a remote worker or an environment in trouble leaves the group', (
   assert.equal(settingsAttention({ ...quiet, worker: 'gpu-a' }).worker, true)
   assert.equal(settingsAttention({ ...quiet, environmentBusy: true }).environment, true)
   assert.equal(settingsAttention({ ...quiet, environmentFailed: true }).environment, true)
+})
+
+test('the sidebar is a rail only with settings closed and nothing needing attention', () => {
+  const calm = settingsAttention(quiet)
+  assert.equal(sidebarIsRail(false, calm), true)
+  assert.equal(sidebarIsRail(true, calm), false)
+  assert.equal(sidebarIsRail(false, { ...calm, mounts: true }), false)
+  assert.equal(sidebarIsRail(false, { ...calm, worker: true }), false)
+  assert.equal(sidebarIsRail(false, { ...calm, environment: true }), false)
 })

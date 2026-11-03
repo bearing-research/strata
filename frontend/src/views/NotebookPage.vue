@@ -20,6 +20,7 @@ import {
   NARROW_HEADER_QUERY,
   overflowActions,
   settingsAttention,
+  sidebarIsRail,
 } from '../utils/notebookChrome'
 
 const DagView = defineAsyncComponent(() => import('../components/DagView.vue'))
@@ -259,6 +260,8 @@ const attention = computed(() =>
       notebook.rEnvironment.syncState === 'failed',
   }),
 )
+
+const sidebarRail = computed(() => sidebarIsRail(settingsOpen.value, attention.value))
 
 const notebookModeLabel = computed(() => (serviceMode.value ? 'Service mode' : 'Personal mode'))
 const notebookModeTitle = computed(() =>
@@ -896,6 +899,7 @@ function goHome() {
         </div>
 
         <div
+          v-if="!sidebarRail"
           class="sidebar-resizer"
           role="separator"
           aria-label="Resize sidebar"
@@ -904,7 +908,7 @@ function goHome() {
         ></div>
 
         <!-- Runtime / config panels (ProfilingPanel is in the DAG drawer) -->
-        <aside class="sidebar">
+        <aside class="sidebar" :class="{ 'sidebar-rail': sidebarRail }">
           <!-- Panels stay mounted in one list, so moving in or out of the group keeps their state. -->
           <button
             class="settings-toggle"
@@ -1135,6 +1139,27 @@ function goHome() {
 
 .panel-grouped {
   order: 2;
+}
+
+@media (min-width: 981px) {
+  .sidebar-rail {
+    width: 40px;
+    min-width: 40px;
+    padding: 16px 8px;
+    border-left: 1px solid var(--border-subtle);
+    overflow: hidden;
+  }
+
+  .sidebar-rail .settings-toggle {
+    margin-top: 0;
+    gap: 8px;
+    white-space: nowrap;
+    writing-mode: vertical-rl;
+  }
+
+  .sidebar-rail .settings-toggle .toggle-icon {
+    display: none;
+  }
 }
 
 .reconnect-state {

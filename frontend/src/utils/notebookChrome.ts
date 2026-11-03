@@ -35,15 +35,22 @@ export function dagDrawerStartsCollapsed(saved: string | null): boolean {
 }
 
 /** Which settings panels leave the collapsed group, because they need the user's eye. */
+export type SettingsAttention = { mounts: boolean; worker: boolean; environment: boolean }
+
 export function settingsAttention(state: {
   mounts: number
   worker: string | null | undefined
   environmentBusy: boolean
   environmentFailed: boolean
-}): { mounts: boolean; worker: boolean; environment: boolean } {
+}): SettingsAttention {
   return {
     mounts: state.mounts > 0,
     worker: Boolean(state.worker) && state.worker !== 'local',
     environment: state.environmentBusy || state.environmentFailed,
   }
+}
+
+/** With nothing to show, the sidebar's width goes to the cells. */
+export function sidebarIsRail(settingsOpen: boolean, attention: SettingsAttention): boolean {
+  return !settingsOpen && !Object.values(attention).some(Boolean)
 }
