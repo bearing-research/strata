@@ -45,7 +45,7 @@ from strata.notebook.env import (
     compute_lockfile_hash,
     narrow_env_for_provenance,
 )
-from strata.notebook.graph import analysis_with, analyze_notebook
+from strata.notebook.graph import analysis_with, analyze_notebook, mounts_of
 from strata.notebook.keys import CellKey, InputNotFingerprinted, cell_key, input_parts
 from strata.notebook.models import (
     AnnotationDiagnostic,
@@ -2073,7 +2073,9 @@ class NotebookSession:
         so this merges both layers exactly as the executor does.
         """
         annotations = parse_annotations(cell.source)
-        merged_mounts = resolve_cell_mounts([], cell.mounts, annotations.mounts)
+        merged_mounts = resolve_cell_mounts(
+            [], mounts_of(self.notebook_state, cell, cell.source), annotations.mounts
+        )
         if not merged_mounts:
             # Outside the server the config is loaded from disk, too slow for every cell.
             return [], False

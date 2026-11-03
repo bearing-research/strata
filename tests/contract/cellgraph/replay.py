@@ -20,6 +20,7 @@ from typing import Any
 import cellgraph as cg
 
 from strata.notebook import vocabulary
+from strata.notebook.graph import mounts_of
 from tests.contract.cellgraph import record
 
 # Structural errors are compared through ``dag_error``, not per cell.
@@ -77,7 +78,7 @@ def analyze(state: Any) -> cg.Analysis:
             language=cell.language.value,
             meta={
                 "language": cell.language.value,
-                "mounts": list(cell.mounts),
+                "mounts": mounts_of(state, cell, cell.source),
                 "notebook_mounts": list(state.mounts),
                 "connections": list(state.connections),
                 "malformed_connections": list(state.malformed_connections),

@@ -54,7 +54,7 @@ from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
-from strata.notebook.graph import analysis_with
+from strata.notebook.graph import analysis_with, mounts_of
 from strata.notebook.harness_user import (
     HarnessUser,
     LocalExecutionRefused,
@@ -946,7 +946,8 @@ class CellExecutor:
 
         # The same fetch, mount, dataset, table and env inputs a run of the cell gets.
         annotations = parse_annotations(source)
-        mount_specs = self._resolve_cell_mount_specs(cell_id, source)
+        # Every mount: a test reads ``cell.<name>``, which no source analysis sees.
+        mount_specs = resolve_cell_mounts([], cell.mounts, annotations.mounts)
         prov = await self._compute_cell_provenance(
             cell_id, source, annotations=annotations, mount_specs=mount_specs
         )
@@ -4757,8 +4758,7 @@ class CellExecutor:
         """Resolve a cell's mount declarations: annotation, then cell meta, then notebook."""
         cell = self.session.notebook_state.get_cell(cell_id)
 
-        # Cell-level mounts already include notebook defaults from parser.py.
-        cell_mounts_spec = cell.mounts if cell else []
+        cell_mounts_spec = mounts_of(self.session.notebook_state, cell, source) if cell else []
 
         annotations = parse_annotations(source)
         annotation_mounts = annotations.mounts

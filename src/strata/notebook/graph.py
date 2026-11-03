@@ -13,7 +13,8 @@ import functools
 import cellgraph as cg
 
 from strata.notebook import vocabulary
-from strata.notebook.models import CellLanguage, CellState, NotebookState
+from strata.notebook.annotations import parse_annotations
+from strata.notebook.models import CellLanguage, CellState, MountSpec, NotebookState
 
 
 class _RunsWithSyntaxErrors:
@@ -41,6 +42,38 @@ def _analyzers() -> dict[str, cg.LanguageAnalyzer]:
     return table
 
 
+# Read a cell's namespace without naming what they read.
+_DYNAMIC_LOOKUPS = frozenset({"dir", "eval", "exec", "globals", "locals", "vars"})
+
+
+def mounts_of(state: NotebookState, cell: CellState, source: str) -> list[MountSpec]:
+    """The mounts *cell* gets: its own, and the notebook's that *source* reads.
+
+    A notebook-level mount costs every cell a listing, a download and a place in its key.
+    A cell can only read one by name: code from an upstream cell is refused if it reads a
+    global, and a function nested in a value holds the upstream cell's path.
+    """
+    if cell.language == CellLanguage.R:
+        return list(cell.mounts)
+    names = {mount.name for mount in cell.mount_overrides}
+    if cell.language == CellLanguage.PYTHON:
+        analyzed = cg.get_language_analyzer("python").analyze(
+            cg.Cell(id=cell.id, source=source, language="python", meta={})
+        )
+        names |= {*analyzed.references, *analyzed.builtin_references}
+        if names & _DYNAMIC_LOOKUPS:
+            return list(cell.mounts)
+        each = parse_annotations(source).each
+        if each is not None:
+            names.add(each["source"])
+    elif cell.language == CellLanguage.SQL:
+        sql = parse_annotations(source).sql
+        for connection in state.connections:
+            if sql is not None and connection.name == sql.connection:
+                names.update(getattr(connection, "mounts", None) or [])
+    return [mount for mount in cell.mounts if mount.name in names]
+
+
 def analyze_notebook(state: NotebookState, cells: list[CellState] | None = None) -> cg.Analysis:
     """Analyze *state*'s notebook, or *cells* in its place."""
     cg_cells = [
@@ -50,7 +83,7 @@ def analyze_notebook(state: NotebookState, cells: list[CellState] | None = None)
             language=cell.language.value,
             meta={
                 "language": cell.language.value,
-                "mounts": list(cell.mounts),
+                "mounts": mounts_of(state, cell, cell.source),
                 "notebook_mounts": list(state.mounts),
                 "connections": list(state.connections),
                 "malformed_connections": list(state.malformed_connections),

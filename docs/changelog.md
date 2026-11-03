@@ -150,6 +150,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `path = ":memory:"` opened a real file of that name in the notebook folder, so
   a cell's tables outlived the run and the file could be committed. If a notebook
   relied on that, name a file in `path`. (#1377)
+- **A notebook-level mount reaches only the cells that read it.** Every
+  cell used to list it, download all of it, and run again when it changed: a
+  rollup cell spent 35 minutes downloading a bucket it never read. Those cells
+  run once more after this upgrade, as their keys no longer hold the mount.
+  (#1376)
 - **`strata run` says where a long `@each` is.** It reports progress at most every
   5 seconds and prints a line per failed item, and labels a cell by its `@name`. A
   failed cell's error now names the exception: `KeyError: 'MAX'`, not `'MAX'`.
