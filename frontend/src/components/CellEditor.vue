@@ -1014,7 +1014,7 @@ function outputKey(output: CellOutput, index: number): string {
             class="cache-badge"
             :title="cacheBadgeTitle(cell.output?.cacheLoadMs)"
           >
-            &#x26A1; {{ cacheBadgeLabel(cell.output?.cacheSavedMs) }}
+            &#x26A1; {{ cacheBadgeLabel(cell.output?.cacheSavedMs, cell.output?.cacheLoadMs) }}
           </span>
           <span
             v-if="executionMethodLabel && !cell.output?.cacheHit"
