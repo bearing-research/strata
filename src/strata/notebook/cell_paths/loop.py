@@ -263,7 +263,6 @@ async def run_loop_cell(
     cell_provenance = prov.provenance_hash
     env_hash = prov.env_hash
     source_hash = prov.source_hash
-    carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
     # Every iteration reads the snapshots the provenance names, as a single run does.
     try:
         loop_tables = context.manifest_tables(annotations.tables, prov.table_snapshots)
@@ -598,7 +597,7 @@ async def run_loop_cell(
     # it via _load_input_blobs. Its provenance must use the non-loop per-variable scheme
     # ``sha256(prov:var_name)`` that ``compute_staleness`` recomputes on re-open, or the
     # loop cell always looks stale. ``cell_provenance``, ``env_hash`` and
-    # ``carry_var_provenance`` were computed before the loop for the cache check.
+    # ``carry_var_provenance`` were computed before the loop.
 
     # Environment identity for lineage and the team cache; the cost is the whole loop,
     # which is what a teammate skipping it saves.
