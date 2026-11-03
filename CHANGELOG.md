@@ -148,7 +148,7 @@ exhaustive commit history.
   cell used to list it, download all of it, and run again when it changed: a
   rollup cell spent 35 minutes downloading a bucket it never read. Those cells
   run once more after this upgrade, as their keys no longer hold the mount.
-  (#1376)
+  (#1376, #1380)
 - **`strata run` says where a long `@each` is.** It reports progress at most every
   5 seconds and prints a line per failed item, and labels a cell by its `@name`. A
   failed cell's error now names the exception: `KeyError: 'MAX'`, not `'MAX'`.
