@@ -81,6 +81,14 @@ def named_catalog(table_uri: str, config: StrataConfig) -> tuple[str | None, str
     return match.group(1), match.group(2)
 
 
+def in_notebook(table_uri: str, notebook: Path | None) -> str:
+    """*table_uri* with a ``./`` or ``../`` warehouse as a path from *notebook*'s directory."""
+    if notebook is None or not table_uri.startswith(("./", "../")) or "#" not in table_uri:
+        return table_uri
+    warehouse, table_id = table_uri.rsplit("#", 1)
+    return f"{(notebook / warehouse).resolve()}#{table_id}"
+
+
 def table_identity_for(table_uri: str, config: StrataConfig) -> TableIdentity:
     """Return the canonical identity of *table_uri*, a named catalog's table included.
 
@@ -213,7 +221,8 @@ class PyIcebergCatalog:
 
         *env* is a notebook's environment: a named catalog's credential resolves
         against it before the server's, as the notebook's DuckDB attach does.
-        *notebook* is that notebook's directory, for a credential restricted to some.
+        *notebook* is that notebook's directory, for a credential restricted to some and
+        a warehouse named from it.
         """
         self.config = config
         self._env = env
@@ -397,7 +406,8 @@ class PyIcebergCatalog:
         """Split a table URI into ``(warehouse_path, table_id)``.
 
         Accepts ``file:///wh#ns.table``, ``/wh#ns.table``, ``s3://bucket/wh#ns.table``,
-        or ``ns.table`` (default catalog; warehouse ``None``). ``s3://`` is kept and
+        or ``ns.table`` (default catalog; warehouse ``None``). A notebook's ``./wh#ns.table``
+        reaches here through :func:`in_notebook`. ``s3://`` is kept and
         ``file://`` stripped. Named-catalog URIs are resolved by :func:`named_catalog` first.
         """
         if "#" in table_uri:
@@ -415,7 +425,7 @@ class PyIcebergCatalog:
         name, named_table_id = named_catalog(table_uri, self.config)
         if name is not None:
             return self._get_named_catalog(name).load_table(named_table_id)
-        warehouse_path, table_id = self.parse_table_uri(table_uri)
+        warehouse_path, table_id = self.parse_table_uri(in_notebook(table_uri, self._notebook))
         if (
             warehouse_path
             and "://" not in warehouse_path
@@ -620,7 +630,9 @@ class IcebergWriter:
             if "." not in named_table_id:
                 raise ValueError(f"{table_uri!r} names no namespace; expected <namespace>.<table>")
             return self._catalogs._get_named_catalog(named), named_table_id
-        warehouse_path, table_id = self._catalogs.parse_table_uri(table_uri)
+        warehouse_path, table_id = self._catalogs.parse_table_uri(
+            in_notebook(table_uri, self._catalogs._notebook)
+        )
         if "." not in table_id:
             raise ValueError(f"{table_uri!r} names no namespace; expected <namespace>.<table>")
         if warehouse_path and "://" not in warehouse_path:

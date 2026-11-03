@@ -20,6 +20,10 @@ exhaustive commit history.
   one leaves, and a later cell reads `{item: value}`. With `@write_table ... sync`
   the table is written once per run over every item's rows, so a removed file's
   rows are deleted. A remote mount downloads only what `glob=` names. (#1372, #1374)
+- **A notebook can keep a warehouse in its own folder.** `@table` and `@write_table`
+  take `./warehouse#<namespace>.<table>`, resolved from the notebook's directory
+  wherever the server was started, so a committed notebook names no absolute path.
+  (#1381)
 
 ### Changed
 - **DuckDB 2.0.** Strata now needs `duckdb>=2.0`. DuckDB 2.0 also applies its

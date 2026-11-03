@@ -435,7 +435,8 @@ Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is one of the forms
   `STRATA_CATALOGS` (REST, Glue, SQL or any other PyIceberg catalog type), e.g.
   `# @table orders lake:sales.orders`;
 - `<warehouse>#<namespace>.<table>`, a table in a SQL catalog kept in that
-  warehouse;
+  warehouse; a warehouse starting `./` or `../` is a folder from the notebook's
+  directory, as in `# @table orders ./warehouse#sales.orders`;
 - `<namespace>.<table>`, a table in the server's default catalog.
 
 The warehouse may be local or on S3, GCS (`gs://`) or Azure (`abfs://`,
@@ -445,6 +446,13 @@ Azure table's metadata is read with `adlfs`, or with PyArrow only when the table
 locations have no `@<account>` host
 ([Azure Storage](../reference/configuration.md#azure-storage)). The name must be a
 valid Python identifier.
+
+A warehouse in the notebook's folder suits a notebook that builds its own tables: a
+`@write_table` creates it on first write, and a fresh clone builds its own. Add it
+to the notebook's `.gitignore`: its catalog records where its files are as absolute
+paths, so it does not survive being moved or cloned. Delete it and rerun the cells
+that write it (`strata run --force`): they stay cached otherwise, and a cached cell
+writes nothing.
 
 Catalogs are named on the server, not in `notebook.toml`, because the scan the
 cell runs happens in the server and has to resolve the same name. (A DuckDB
