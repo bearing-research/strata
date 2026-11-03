@@ -3616,6 +3616,10 @@ to one item in each instance. What <code>&lt;source&gt;</code> is decides what a
 </tr>
 </tbody>
 </table>
+<p>With <code>glob=</code>, a remote mount downloads only the files the pattern names. A mount in
+<code>notebook.toml</code>'s top-level <code>[[mounts]]</code> applies to every cell, and a cell with no glob
+downloads all of it, so for a large prefix declare the mount on the <code>@each</code> cell, with
+<code># @mount</code> or <code>[[cells.mounts]]</code>.</p>
 <p>A file is bound as a <code>pathlib.Path</code>, and a link to a file counts as a file. A mount
 that is itself one file is refused. A row is bound as a dict of JSON-safe values, with
 a null as <code>None</code>. A list
