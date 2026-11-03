@@ -182,9 +182,9 @@ async def test_each_over_a_bucket_runs_a_changed_object_alone(
     prepared = []
     prepare_mounts = executor._prepare_mounts
 
-    async def counted(specs, cell_id=None):
+    async def counted(specs, cell_id=None, **kwargs):
         prepared.extend(spec.name for spec in specs)
-        return await prepare_mounts(specs, cell_id)
+        return await prepare_mounts(specs, cell_id, **kwargs)
 
     executor._prepare_mounts = counted
     # The listing says what changed: no object's bytes are read to find out.
@@ -195,6 +195,32 @@ async def test_each_over_a_bucket_runs_a_changed_object_alone(
 
     downstream = await executor.execute_cell("c2", "print(sorted(out.items()))\n")
     assert "[('one.txt', 'changed'), ('sub/two.txt', 'bb')]" in downstream.stdout
+
+
+@pytest.mark.asyncio
+async def test_each_over_a_bucket_downloads_only_what_its_glob_names(
+    tmp_path: Path,
+    minio_container,
+    s3_credentials: MountCredentials,
+    fresh_bucket: str,
+) -> None:
+    _put(minio_container, fresh_bucket, "data/one.csv", b"a")
+    _put(minio_container, fresh_bucket, "data/other.txt", b"not this")
+    source = textwrap.dedent(
+        f"""
+        # @mount data s3://{fresh_bucket}/data ro
+        # @each path in data glob=*.csv
+        out = path.read_text()
+        """
+    ).strip()
+    session = _make_session(tmp_path, [("c1", source), ("c2", "print(sorted(out.items()))\n")])
+    executor = CellExecutor(session, mount_credentials=s3_credentials)
+
+    assert (await executor.execute_cell("c1", source)).success
+
+    assert executor._mounts_moved["c1"]["data"] == 1
+    downstream = await executor.execute_cell("c2", "print(sorted(out.items()))\n")
+    assert "[('one.csv', 'a')]" in downstream.stdout
 
 
 # Scope B: read-write mount, write in one cell and read in another

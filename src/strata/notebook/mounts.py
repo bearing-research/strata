@@ -13,12 +13,14 @@ changed, with sizes and digests.
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import hashlib
 import json
 import logging
 import os
 import shutil
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -231,8 +233,13 @@ class MountResolver:
     async def prepare_mounts(
         self,
         mounts: list[MountSpec],
+        *,
+        only: Mapping[str, str] | None = None,
     ) -> dict[str, ResolvedMount]:
         """Resolve all mounts to local paths, keyed by mount name.
+
+        *only* gives, by mount name, the glob of the files a run reads: a remote mount
+        downloads no others. Its fingerprint still covers the whole listing.
 
         Raises:
             ValueError: If a local mount path doesn't exist.
@@ -251,6 +258,7 @@ class MountResolver:
                     mount,
                     scheme,
                     path,
+                    glob=(only or {}).get(mount.name),
                 )
                 cached = cached or mount.mode == MountMode.READ_ONLY
 
@@ -289,6 +297,8 @@ class MountResolver:
         mount: MountSpec,
         scheme: str,
         remote_path: str,
+        *,
+        glob: str | None = None,
     ) -> ResolvedMount:
         """Resolve a remote mount (S3, GCS, Azure) via fsspec."""
         if not self._check_fsspec():
@@ -298,7 +308,7 @@ class MountResolver:
             )
 
         if mount.mode == MountMode.READ_ONLY:
-            return await self._resolve_remote_ro(mount, scheme, remote_path)
+            return await self._resolve_remote_ro(mount, scheme, remote_path, glob)
         # RW: stage locally, sync back after execution.
         mount_hash = hashlib.sha256(mount.uri.encode()).hexdigest()[:12]
         return await self._resolve_remote_rw(
@@ -313,13 +323,14 @@ class MountResolver:
         mount: MountSpec,
         scheme: str,
         remote_path: str,
+        glob: str | None = None,
     ) -> ResolvedMount:
         """Resolve a read-only remote mount to a view in the shared mount cache."""
         protocol = _scheme_to_fsspec_protocol(scheme)
         storage_options = self.storage_options(mount)
         try:
             fingerprint, local_path, moved, versions = await asyncio.to_thread(
-                self._prepare_view, mount, protocol, remote_path, storage_options
+                self._prepare_view, mount, protocol, remote_path, storage_options, glob
             )
         except Exception as e:
             raise RuntimeError(
@@ -342,6 +353,7 @@ class MountResolver:
         protocol: str,
         remote_path: str,
         storage_options: dict[str, Any],
+        glob: str | None = None,
     ) -> tuple[str, Path, int, dict[str, str] | None]:
         """The mount's fingerprint, its view, the bytes downloaded for it and each file's
         version, from one listing."""
@@ -353,7 +365,7 @@ class MountResolver:
         else:
             listing = _list_remote_file_info(fs, protocol, remote_path)
             fingerprint = _fingerprint_listing(listing)
-        key = _view_key(protocol, remote_path, options_digest, fingerprint)
+        key = _view_key(protocol, remote_path, options_digest, fingerprint, glob)
 
         def versions_of(listed: dict[str, dict[str, Any]]) -> dict[str, str]:
             # No scope: rotating a credential changes no file.
@@ -373,6 +385,8 @@ class MountResolver:
         files = []
         for remote_name, info in sorted(listing.items()):
             rel = _relative_remote_path(remote_name, protocol, remote_path)
+            if glob is not None and not glob_matches(rel.as_posix(), glob):
+                continue
             _check_relative(rel, mount.name, remote_name)
             files.append(
                 (rel, object_key(protocol, options_digest, remote_name, info), remote_name)
@@ -616,10 +630,18 @@ def _options_digest(storage_options: dict[str, Any]) -> str:
     ).hexdigest()
 
 
-def _view_key(protocol: str, remote_path: str, options_digest: str, fingerprint: str) -> str:
-    return hashlib.sha256(
-        "\0".join([protocol, remote_path, options_digest, fingerprint]).encode()
-    ).hexdigest()
+def glob_matches(relative: str, glob: str) -> bool:
+    """Whether the file at *relative* in a mount is one an ``@each`` *glob* names."""
+    return fnmatch.fnmatch(relative, glob)
+
+
+def _view_key(
+    protocol: str, remote_path: str, options_digest: str, fingerprint: str, glob: str | None = None
+) -> str:
+    parts = [protocol, remote_path, options_digest, fingerprint]
+    if glob is not None:
+        parts.append(glob)
+    return hashlib.sha256("\0".join(parts).encode()).hexdigest()
 
 
 def _fingerprint_listing(listing: dict[str, dict[str, Any]]) -> str:
