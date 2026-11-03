@@ -146,6 +146,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A `:memory:` database stays in memory.** A DuckDB or SQLite connection with
+  `path = ":memory:"` opened a real file of that name in the notebook folder, so
+  a cell's tables outlived the run and the file could be committed. If a notebook
+  relied on that, name a file in `path`. (#1377)
 - **A `@per_variant` cell ending in a displayed value no longer reruns every
   variant.** The cache check looked for its displays where they are not stored,
   so every variant missed. (#1372)
