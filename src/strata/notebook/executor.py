@@ -2800,8 +2800,14 @@ class CellExecutor:
                 raise each.EachError(f"@each over the mount `{source}` takes glob=, not key=")
             if mount.mode != MountMode.READ_ONLY:
                 raise each.EachError(f"@each over `{source}`: the mount must be read-only")
-            prepared = await self._prepare_mounts(base.mount_specs, cell_id)
-            self._each_listed[cell_id] = {source: prepared[source]}
+            glob = spec.get("glob")
+            prepared = await self._prepare_mounts(
+                base.mount_specs, cell_id, only={source: glob} if glob else None
+            )
+            # A read-write mount gets its own staging per instance.
+            self._each_listed[cell_id] = {
+                m.name: prepared[m.name] for m in base.mount_specs if m.mode == MountMode.READ_ONLY
+            }
             scheme, _ = parse_mount_uri(mount.uri)
             items = await anyio.to_thread.run_sync(
                 functools.partial(
@@ -4849,17 +4855,20 @@ class CellExecutor:
         self,
         mount_specs: list[MountSpec],
         cell_id: str | None = None,
+        *,
+        only: Mapping[str, str] | None = None,
     ) -> dict[str, ResolvedMount]:
         """Prepare local mount materializations for local execution paths.
 
-        With *cell_id*, what each view downloaded is added to the cell's moved bytes.
+        With *cell_id*, what each view downloaded is added to the cell's moved bytes. *only*
+        limits what a remote mount downloads (``MountResolver.prepare_mounts``).
         """
         if not mount_specs:
             return {}
         self._mount_resolver.credential_resolver = self._credential_resolver()
         ensure_writable(self._mount_resolver.credential_resolver, mount_specs)
         self._mount_resolver.mount_cache = MountCache.from_config(self._lake_config())
-        resolved = await self._mount_resolver.prepare_mounts(mount_specs)
+        resolved = await self._mount_resolver.prepare_mounts(mount_specs, only=only)
         if cell_id is not None:
             moved = self._mounts_moved.setdefault(cell_id, {})
             for name, mount in resolved.items():

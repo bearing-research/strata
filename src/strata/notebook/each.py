@@ -10,7 +10,6 @@ versions it names, and an instance goes once no manifest left names it.
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import os
@@ -21,7 +20,7 @@ from typing import Any
 
 import cellgraph as cg
 
-from strata.notebook.mounts import _sha256
+from strata.notebook.mounts import _sha256, glob_matches
 from strata.notebook.output_dirs import is_assembling
 from strata.notebook.serializer import to_serialization_safe
 
@@ -139,7 +138,7 @@ def items_of_mount(
     """
     items = []
     for relative, path, size, mtime_ns in _listed_files(root):
-        if glob is not None and not fnmatch.fnmatch(relative, glob):
+        if glob is not None and not glob_matches(relative, glob):
             continue
         if not by_content:
             digest = hashlib.sha256(f"{size}:{mtime_ns}".encode()).hexdigest()
