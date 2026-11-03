@@ -203,7 +203,7 @@ def _pinned_versions(sql: str) -> dict[tuple[str, str], int]:
         if isinstance(node, dict):
             at = node.get("at_clause")
             if node.get("type") == "BASE_TABLE" and at:
-                versions[(node["table_name"], node["alias"])] = at["expr"]["value"]["value"]
+                versions[(node["table_name"], node["alias"])] = int(at["expr"]["literal"]["text"])
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -523,6 +523,24 @@ class TestAGlueCatalog:
             "(TYPE s3, PROVIDER credential_chain, PROFILE 'lab', REGION 'eu-west-1')"
         )
 
+    @pytest.mark.parametrize(
+        ("properties", "endpoint"),
+        [
+            ({"type": "rest", "uri": "http://catalog:8181"}, "http://catalog:8181/"),
+            ({"uri": "http://catalog/api/"}, "http://catalog/api/"),
+            (
+                {"type": "glue", "s3.region": "eu-west-1"},
+                "https://glue.eu-west-1.amazonaws.com/iceberg/",
+            ),
+            ({"type": "rest"}, None),
+            ({"type": "glue"}, None),
+        ],
+    )
+    def test_a_confined_connection_reaches_the_catalogs_endpoint(self, properties, endpoint):
+        from strata.notebook.sql.drivers.duckdb import catalog_endpoint
+
+        assert catalog_endpoint(properties) == endpoint
+
     def test_client_and_s3_keys_stand_in_for_glue_ones(self):
         (secret, _) = self._attach(
             {
@@ -805,13 +823,15 @@ class TestARestCatalogThatVendsNothing:
         lake = self._resolve(session, pinned={("taxi", "trips"): 3})
         assert loads == ["lake:taxi.zones"]
         assert lake.spec.catalog_locations == ["s3://lake/taxi.zones/"]
-        assert lake.locations == (["s3://lake/taxi.zones/"] if confined else [])
+        assert lake.locations == (["http://catalog/", "s3://lake/taxi.zones/"] if confined else [])
 
         spec = locate_tables(session, lake, lake.spec)
         assert loads == ["lake:taxi.zones", "lake:taxi.trips"]
         assert spec.catalog_locations == ["s3://lake/taxi.zones/", "s3://lake/taxi.trips/"]
         assert lake.locations == (
-            ["s3://lake/taxi.zones/", "s3://lake/taxi.trips/"] if confined else []
+            ["http://catalog/", "s3://lake/taxi.zones/", "s3://lake/taxi.trips/"]
+            if confined
+            else []
         )
 
     def test_a_vending_catalogs_pinned_table_is_located_in_service_mode_for_confinement_only(
@@ -832,7 +852,11 @@ class TestARestCatalogThatVendsNothing:
 
         spec = locate_tables(session, lake, lake.spec)
         assert loads == ["lake:taxi.zones", "lake:taxi.trips"]
-        assert lake.locations == ["s3://lake/taxi.zones/", "s3://lake/taxi.trips/"]
+        assert lake.locations == [
+            "http://catalog/",
+            "s3://lake/taxi.zones/",
+            "s3://lake/taxi.trips/",
+        ]
         # The catalog vends its own keys, so its secret stays unscoped.
         assert getattr(spec, "catalog_locations", None) is None
 
@@ -920,7 +944,7 @@ class TestARestCatalogThatVendsNothing:
 
         first = await cell_executor.execute_sql_cell(session, "c1", source)
         assert first["success"], first["error"]
-        assert confined == [["s3://lake/taxi.trips/"]]
+        assert confined == [["http://catalog/", "s3://lake/taxi.trips/"]]
         assert loads == ["lake:taxi.trips"]
 
         down.append(True)
@@ -960,7 +984,7 @@ class TestARestCatalogThatVendsNothing:
             conn = duckdb.connect(":memory:")
             _confine(conn, spec.confine_to)
             inside = f"{warehouse}/taxi.trips/data/0.parquet"
-            table = conn.execute(f"SELECT k AS id FROM read_parquet('{inside}')").to_arrow_table()
+            table = conn.sql(f"SELECT k AS id FROM read_parquet('{inside}')").to_arrow_table()
             with pytest.raises(duckdb.PermissionException):
                 conn.execute(f"SELECT * FROM read_parquet('{outside}')").fetchall()
             return table
@@ -976,7 +1000,7 @@ class TestARestCatalogThatVendsNothing:
         assert miss["success"], miss["error"]
         assert miss["cache_hit"] is False
         assert loads == ["lake:taxi.trips", "lake:taxi.trips"]
-        assert confined == [[f"{warehouse}/taxi.trips/"]] * 2
+        assert confined == [["http://catalog/", f"{warehouse}/taxi.trips/"]] * 2
 
 
 class TestAGcsOrAzureMount:

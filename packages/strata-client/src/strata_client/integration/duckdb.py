@@ -150,7 +150,7 @@ def strata_query(
             )
             _table_refs.append(arrow_table)
 
-        result = conn.execute(sql).to_arrow_table()
+        result = conn.sql(sql).to_arrow_table()
         return result
 
     finally:
@@ -253,7 +253,7 @@ class StrataScanner:
 
     def query(self, sql: str) -> pa.Table:
         """Execute a SQL query and return Arrow Table."""
-        return self.conn.execute(sql).to_arrow_table()
+        return self.conn.sql(sql).to_arrow_table()
 
     def query_df(self, sql: str):
         """Execute a SQL query and return a pandas DataFrame."""

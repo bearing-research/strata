@@ -57,8 +57,8 @@ class Lake:
     reads: list[dict[str, Any]] = field(default_factory=list)
     # Where each read that was loaded found its table, by URI (for the output's leaf).
     table_locations: dict[str, str] = field(default_factory=dict)
-    # Service mode only (see duckdb._confine): each mount's root and each catalog
-    # table's location, readable once confined.
+    # Service mode only (see duckdb._confine): each mount's root, the catalog's endpoint
+    # and each catalog table's location, readable once confined.
     locations: list[str] = field(default_factory=list)
     # Tables the scoped catalog secret or confinement needs that no load located (pinned
     # ones): found by locate_tables only once the cache misses, so a cache hit needs no
@@ -191,7 +191,7 @@ def resolve_lake(
             )
         except CredentialError as exc:
             raise LakeError(f"catalog {catalog!r}: {exc}") from exc
-        from strata.notebook.sql.drivers.duckdb import secret_scoped_to_tables
+        from strata.notebook.sql.drivers.duckdb import catalog_endpoint, secret_scoped_to_tables
         from strata.notebook.table_index import table_read
         from strata.notebook.tables import (
             fingerprint_tables,
@@ -199,6 +199,9 @@ def resolve_lake(
             resolve_table_snapshot,
         )
 
+        endpoint = catalog_endpoint(update["catalog_properties"])
+        if confined and endpoint is not None:
+            lake.locations.append(endpoint)
         # The catalog's S3 secret answers only for these (duckdb._attach_catalog).
         catalog_locations: list[str] | None = (
             [] if secret_scoped_to_tables(update["catalog_properties"]) else None

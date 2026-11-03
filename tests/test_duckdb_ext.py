@@ -102,7 +102,7 @@ class TestRegisterStrataScan:
 
             result1 = conn.execute(
                 "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'events'"
-            ).fetchone()
+            ).fetchall()[0]
 
             register_strata_scan(
                 conn=conn,
@@ -114,7 +114,7 @@ class TestRegisterStrataScan:
 
             result2 = conn.execute(
                 "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'events'"
-            ).fetchone()
+            ).fetchall()[0]
             assert result1 is not None
             assert result2 is not None
 

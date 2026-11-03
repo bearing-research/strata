@@ -562,15 +562,18 @@ async def _execute_write_cell(
     }
 
 
-def _fetch_arrow_table(cursor: Any) -> Any:
-    """The result as an Arrow table, from a DuckDB or an ADBC cursor.
+def _query_arrow(cursor: Any, query: str, params: tuple[Any, ...]) -> Any:
+    """Run *query* for an Arrow table, on a DuckDB or an ADBC cursor.
 
-    DuckDB 1.5+ deprecates ``fetch_arrow_table`` for ``to_arrow_table``; ADBC
-    has only ``fetch_arrow_table``.
+    DuckDB's ``execute`` holds the rows twice on the way to Arrow; ADBC has only that way.
     """
-    to_arrow_table = getattr(cursor, "to_arrow_table", None)
-    if to_arrow_table is not None:
-        return to_arrow_table()
+    sql = getattr(cursor, "sql", None)
+    if sql is not None:
+        return sql(query, params=params or None).to_arrow_table()
+    if params:
+        cursor.execute(query, parameters=params)
+    else:
+        cursor.execute(query)
     return cursor.fetch_arrow_table()
 
 
@@ -717,7 +720,7 @@ def _sqlite_last_changes(conn: Any) -> int | None:
         cur = conn.cursor()
         try:
             cur.execute("SELECT changes()")
-            tbl = _fetch_arrow_table(cur)
+            tbl = cur.fetch_arrow_table()
             rows = tbl.to_pylist()
             if rows:
                 # Column is named "changes()"; read by value in case that changes.
@@ -1234,11 +1237,7 @@ def _execute_query(
     try:
         cursor = conn.cursor()
         try:
-            if params:
-                cursor.execute(rewritten, parameters=params)
-            else:
-                cursor.execute(rewritten)
-            return _fetch_arrow_table(cursor)
+            return _query_arrow(cursor, rewritten, params)
         finally:
             _safely_close(cursor)
     finally:

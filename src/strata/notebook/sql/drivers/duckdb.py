@@ -499,6 +499,27 @@ def secret_scoped_to_tables(properties: dict[str, str]) -> bool:
     )
 
 
+def _glue_region(properties: dict[str, str]) -> str | None:
+    keys = ("glue.region", "client.region", "s3.region")
+    return next((str(properties[key]) for key in keys if properties.get(key)), None)
+
+
+def _glue_endpoint(region: str) -> str:
+    return f"glue.{region}.amazonaws.com/iceberg"
+
+
+def catalog_endpoint(properties: dict[str, str]) -> str | None:
+    """Where a confined connection reaches its catalog: DuckDB gates those requests too.
+
+    ``None`` when the properties name none, which attaching reports.
+    """
+    if properties.get("type") == "glue":
+        region = _glue_region(properties)
+        return f"https://{_glue_endpoint(region)}/" if region else None
+    uri = properties.get("uri")
+    return f"{uri.rstrip('/')}/" if uri else None
+
+
 def _attach_catalog(
     conn: Any, name: str, properties: dict[str, str], locations: list[str] | None = None
 ) -> None:
@@ -567,7 +588,7 @@ def _attach_glue(conn: Any, name: str, properties: dict[str, str]) -> None:
     account = first("glue.id")
     if not account:
         raise RuntimeError(f"Glue catalog {name!r} needs glue.id, the AWS account it belongs to")
-    region = first("glue.region", "client.region", "s3.region")
+    region = _glue_region(properties)
     if not region:
         raise RuntimeError(f"Glue catalog {name!r} needs glue.region")
     key_id = first("glue.access-key-id", "client.access-key-id", "s3.access-key-id")
@@ -595,7 +616,7 @@ def _attach_glue(conn: Any, name: str, properties: dict[str, str]) -> None:
     conn.execute(f"CREATE OR REPLACE SECRET {_ident(secret)} (TYPE s3, {', '.join(options)})")
     conn.execute(
         f"ATTACH {_literal(account)} AS {_ident(name)} (TYPE iceberg, "
-        f"ENDPOINT {_literal(f'glue.{region}.amazonaws.com/iceberg')}, "
+        f"ENDPOINT {_literal(_glue_endpoint(region))}, "
         f"AUTHORIZATION_TYPE 'sigv4', SECRET {_ident(secret)}, READ_ONLY)"
     )
 
