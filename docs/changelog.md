@@ -24,6 +24,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   rows are deleted. A remote mount downloads only what `glob=` names, and is
   weighed by that before a large read is asked about. The `each_pipeline` example
   runs this over 287 real files into a REST catalog. (#1372, #1374, #1378, #1379)
+- **A notebook can keep a warehouse in its own folder.** `@table` and `@write_table`
+  take `./warehouse#<namespace>.<table>`, resolved from the notebook's directory
+  wherever the server was started, so a committed notebook names no absolute path.
+  (#1381)
 
 ### Changed
 - **A cell's inputs no longer pass through server memory.** An upstream value streams

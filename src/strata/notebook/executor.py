@@ -5447,6 +5447,8 @@ class CellExecutor:
                 + "; each @table must have a unique name within the cell"
             )
 
+        from strata.iceberg.catalog import in_notebook
+
         tables: dict[str, dict[str, Any]] = {}
         for spec in table_specs:
             if spec.name not in table_snapshots:
@@ -5454,7 +5456,11 @@ class CellExecutor:
                     f"@table {spec.name}: could not resolve a snapshot for "
                     f"{spec.uri!r}; is the catalog reachable?"
                 )
-            tables[spec.name] = {"uri": spec.uri, "snapshot_id": table_snapshots[spec.name]}
+            # The cell asks the server, whose directory is not the notebook's.
+            tables[spec.name] = {
+                "uri": in_notebook(spec.uri, self.session.path),
+                "snapshot_id": table_snapshots[spec.name],
+            }
         return tables
 
     def _write_manifest(
