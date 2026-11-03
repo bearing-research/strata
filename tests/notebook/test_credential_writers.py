@@ -100,7 +100,7 @@ class TestARunOnTheServer:
             notebook_credentials={"lab": {"key": "lab-key"}, "org": {"key": "org-key"}},
             notebook_credential_writers={"lab": ["user_*"]},
         )
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
         seen: list[dict] = []
 
@@ -242,7 +242,7 @@ class TestASqlWriteCell:
             notebook_credentials={"lab": {}},
             notebook_credential_writers={"lab": ["user_*"]},
         )
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         db = tmp_path / "out.db"
         source = "# @sql connection=db write=true\nCREATE TABLE t (n INTEGER);\n"
         nb = create_notebook(tmp_path, "nb")

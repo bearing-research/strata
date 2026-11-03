@@ -172,7 +172,7 @@ async def test_the_key_unchanged_says_it_cannot_tell(tmp_path):
     session = _open(_notebook(tmp_path, c1="x = 1", c2="y = x + 1"))
     await _run(session, "c1")
     store = session.artifact_manager.artifact_store
-    artifact_id, version = session._parse_artifact_uri(
+    artifact_id, version = session.parse_artifact_uri(
         session.notebook_state.get_cell("c1").artifact_uri
     )
     assert store.delete_artifact(artifact_id, version)

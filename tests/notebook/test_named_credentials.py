@@ -466,7 +466,7 @@ class TestTwoNotebooksOneServer:
         )
         from strata.notebook.executor import CellExecutor
 
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
         fetched: list[dict] = []
 

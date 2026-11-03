@@ -16,6 +16,7 @@ from tests.contract.cellgraph import record  # noqa: E402
 from tests.contract.cellgraph.test_replay import assert_replays  # noqa: E402
 
 
+@pytest.mark.usefixtures("executor_host_only")
 def test_the_r_trace_is_reproduced():
     reason = record.missing_requirement("r_directives")
     if reason is not None:

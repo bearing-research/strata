@@ -2219,7 +2219,7 @@ async def update_notebook_connections_endpoint(
             )
         seen.add(conn.name)
     # Cells refuse these too; saying so here spares a member the broken connection.
-    config = session._lake_config()
+    config = session.lake_config()
     for conn in req.connections:
         problem = database_problem(conn, session.path, config)
         if problem is not None:
@@ -2284,7 +2284,7 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
         adapter = get_adapter(spec.driver)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    problem = database_problem(spec, session.path, session._lake_config())
+    problem = database_problem(spec, session.path, session.lake_config())
     if problem is not None:
         raise HTTPException(status_code=400, detail=f"connection {name!r}: {problem}")
 

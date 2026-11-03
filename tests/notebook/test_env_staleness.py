@@ -168,7 +168,7 @@ class TestStoredHashLookup:
         assert result.success
 
         cell = session.notebook_state.get_cell("c1")
-        artifact_id, version = session._parse_artifact_uri(cell.artifact_uri)
+        artifact_id, version = session.parse_artifact_uri(cell.artifact_uri)
         artifact = session.artifact_manager.artifact_store.get_artifact(artifact_id, version)
         stored_env = artifact.params["env_hash"]
         stored_src = artifact.params["source_hash"]

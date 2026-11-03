@@ -102,7 +102,7 @@ def _notebook(tmp_path: Path, source: str, connection: str) -> Path:
 
 
 def _configure(monkeypatch, config: StrataConfig) -> None:
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
 
 

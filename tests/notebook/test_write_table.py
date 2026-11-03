@@ -805,7 +805,7 @@ class TestWhoMayWrite:
             notebook_credential_writers=writers,
         )
         monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         return warehouse
 
     @windows

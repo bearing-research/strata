@@ -114,7 +114,7 @@ async def test_only_service_mode_confines_a_sql_cell(
     tmp_path, monkeypatch, outside, mode, readable
 ):
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     source = f"# @sql connection=db\nSELECT content FROM read_text('{outside}')\n"
     nb_dir = _notebook(tmp_path, source)
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -160,7 +160,7 @@ async def test_only_service_mode_refuses_a_sqlite_write_cell_attaching_another_f
     with sqlite3.connect(other) as conn:
         conn.execute("CREATE TABLE secret(x)")
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     nb_dir = create_notebook(tmp_path, "confine_sqlite")
     add_cell_to_notebook(nb_dir, "c1", language="sql")
     source = f"# @sql connection=db write=true\nATTACH '{other}' AS o\n"
@@ -205,7 +205,7 @@ async def test_a_mount_whose_root_holds_server_state_is_refused(
         **service_auth(mode),
         artifact_dir=secret.parent,
     )
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     source = f"# @sql connection=db\nSELECT content FROM read_text('{secret}')\n"
     nb_dir = create_notebook(tmp_path, "mount_root")
     add_cell_to_notebook(nb_dir, "c1", language="sql")
@@ -309,7 +309,7 @@ async def test_a_service_mount_inside_server_state_is_refused(tmp_path, monkeypa
         deployment_mode="service",
         **service_auth(),
     )
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     nb_dir = create_notebook(tmp_path / "notebooks", "inside")
     root = (
         tmp_path / "state" / "artifacts" / "blobs" if where == "artifact-store" else nb_dir / "data"
@@ -404,7 +404,7 @@ class TestDatabaseFile:
         import sqlite3
 
         config = self._config(tmp_path, mode)
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         nb_dir, source = self._notebook(
             tmp_path, connection.format(metadata=server["metadata"]), write=write
         )
@@ -429,7 +429,7 @@ class TestDatabaseFile:
         import sqlite3
 
         config = self._config(tmp_path, "service")
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         path = "own.sqlite" if where == "own" else str(server["shared"])
         nb_dir, source = self._notebook(tmp_path, f'path = "{path}"')
         if where == "own":
@@ -476,7 +476,7 @@ class TestDatabaseFile:
         import os
 
         config = self._config(tmp_path, "service")
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         opened = self._recording_connects(monkeypatch)
         nb_dir, source, _ = self._linked_notebook(tmp_path)
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -493,7 +493,7 @@ class TestDatabaseFile:
         from strata.notebook.sql import cell_executor
 
         config = self._config(tmp_path, "service")
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         opened = self._recording_connects(monkeypatch)
         nb_dir, source, link = self._linked_notebook(tmp_path)
         real_resolve = cell_executor._resolve_runtime_spec
@@ -533,7 +533,7 @@ async def test_a_service_mode_cell_reads_auth_vars_from_the_notebook_env(
     from strata.notebook.sql.drivers.postgresql import PostgresAdapter
 
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode="service", **service_auth())
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     monkeypatch.setenv("SERVER_ONLY_TOKEN", "server-secret")
     dialed: list[str] = []
 
@@ -577,7 +577,7 @@ async def test_a_service_mode_bigquery_key_file_is_the_notebooks_own(
     from strata.notebook.sql.drivers.bigquery import BigQueryAdapter
 
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     opened: list[str] = []
 
     def record(self, kwargs):
@@ -622,7 +622,7 @@ def test_reopen_identity_reads_only_a_key_file_the_cell_may_use(
     from strata.notebook.sql.drivers import bigquery
 
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     read: list[str] = []
     monkeypatch.setattr(bigquery, "_credentials_principal", lambda path: read.append(path))
     nb_dir = create_notebook(tmp_path, "bq_reopen")
@@ -654,7 +654,7 @@ async def test_a_service_mode_bigquery_connection_without_a_key_file_is_refused(
     from strata.notebook.sql.drivers.bigquery import BigQueryAdapter
 
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     dialed: list[dict] = []
 
     def record(self, kwargs):

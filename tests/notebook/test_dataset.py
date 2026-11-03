@@ -557,7 +557,7 @@ class TestTenant:
         write_cell(nb, "c1", "# @dataset m acme/model\nx = m")
         session = NotebookSession(parse_notebook(nb), nb)
         session.opened_by = ("alice", "acme")
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: None)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: None)
         monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: None)
         cell = session.notebook_state.get_cell("c1")
 
@@ -613,7 +613,7 @@ class TestARemoteRegistry:
 
         config = types.SimpleNamespace(notebook_remote_store_url=url)
         monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
-        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
 
     async def test_the_version_is_resolved_and_copied_over_http(
         self, notebook, notebook_personal_server, monkeypatch

@@ -200,8 +200,8 @@ def test_an_artifact_uri_is_parsed_at_its_last_version_marker():
     would ignore the fan-out.
     """
     uri = "strata://artifact/nb_x_cell_ev_var_score@variant=triple@v=3"
-    assert NotebookSession._parse_artifact_uri(uri) == ("nb_x_cell_ev_var_score@variant=triple", 3)
-    assert NotebookSession._parse_artifact_uri("strata://artifact/nb_x_cell_a_var_y@v=12") == (
+    assert NotebookSession.parse_artifact_uri(uri) == ("nb_x_cell_ev_var_score@variant=triple", 3)
+    assert NotebookSession.parse_artifact_uri("strata://artifact/nb_x_cell_a_var_y@v=12") == (
         "nb_x_cell_a_var_y",
         12,
     )

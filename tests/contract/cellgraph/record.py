@@ -574,7 +574,7 @@ def _published(session: Any, cell: Any, variants: list[str]) -> dict[str, Any]:
     store = manager.artifact_store
     outputs = {}
     for var, uri in sorted(cell.artifact_uris.items()):
-        artifact_id, version = session._parse_artifact_uri(uri)
+        artifact_id, version = session.parse_artifact_uri(uri)
         outputs[var] = _artifact(store, artifact_id, version)
     instances = {}
     for var in sorted(set(cell.defines) | set(cell.artifact_uris)):

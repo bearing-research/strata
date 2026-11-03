@@ -65,15 +65,15 @@ from strata.notebook.sql.time_travel import (
 )
 
 if TYPE_CHECKING:
+    from strata.notebook.executor_host import ExecutorHost
     from strata.notebook.models import ConnectionSpec
-    from strata.notebook.session import NotebookSession
     from strata.notebook.sql.adapter import DriverAdapter
 
 logger = logging.getLogger(__name__)
 
 
 async def execute_sql_cell(
-    session: NotebookSession,
+    session: ExecutorHost,
     cell_id: str,
     source: str,
     *,
@@ -108,7 +108,7 @@ async def execute_sql_cell(
         adapter = get_adapter(spec.driver)
     except KeyError as exc:
         return _error_result(str(exc), start_time)
-    problem = database_problem(spec, session.path, session._lake_config())
+    problem = database_problem(spec, session.path, session.lake_config())
     if problem is not None:
         return _error_result(f"connection {spec.name!r}: {problem}", start_time)
 
@@ -390,7 +390,7 @@ async def execute_sql_cell(
 # --- helpers --------------------------------------------------------------
 
 
-def _find_connection(session: NotebookSession, name: str) -> ConnectionSpec | None:
+def _find_connection(session: ExecutorHost, name: str) -> ConnectionSpec | None:
     for spec in session.notebook_state.connections:
         if spec.name == name:
             return spec
@@ -399,7 +399,7 @@ def _find_connection(session: NotebookSession, name: str) -> ConnectionSpec | No
 
 async def _execute_write_cell(
     *,
-    session: NotebookSession,
+    session: ExecutorHost,
     cell_id: str,
     source: str,
     adapter: DriverAdapter,
@@ -786,14 +786,14 @@ def _synthesize_write_result_table(stats: dict[str, Any]) -> Any:
     )
 
 
-def _credentials(session: NotebookSession) -> CredentialResolver:
+def _credentials(session: ExecutorHost) -> CredentialResolver:
     """Named credentials as this notebook, run by this principal, sees them, secret-manager
     values included."""
     from strata.auth.principal import get_principal
 
     principal = get_principal()
     return CredentialResolver.from_config(
-        session._lake_config(),
+        session.lake_config(),
         env=dict(session.notebook_state.env),
         notebook=session.path,
         principal=principal.id if principal is not None else None,
@@ -819,7 +819,7 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
     except KeyError:
         return None
     # The identity reads a BigQuery key file, so a refused one is never opened.
-    if database_problem(spec, session.path, session._lake_config()) is not None:
+    if database_problem(spec, session.path, session.lake_config()) is not None:
         return None
     analysis = analyze_sql_cell(cell.source, dialect=adapter.sqlglot_dialect)
     try:
@@ -852,7 +852,7 @@ _OPENED_FILES = {
 }
 
 
-def _confined(session: Any, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
+def _confined(session: ExecutorHost, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
     """In service mode, a connection confined to its own database and lake.
 
     SQL cells run in the server process. DuckDB is confined by
@@ -864,7 +864,7 @@ def _confined(session: Any, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
     Raises:
         LakeError: a file it opens is not one the notebook may read.
     """
-    config = session._lake_config()
+    config = session.lake_config()
     if getattr(config, "deployment_mode", "personal") != "service":
         return spec
     update: dict[str, Any] = {}
@@ -1010,19 +1010,19 @@ def _resolve_runtime_spec(
     return spec.model_copy(update=update)
 
 
-def _auth_env(session: Any) -> dict[str, str] | None:
+def _auth_env(session: ExecutorHost) -> dict[str, str] | None:
     """What ``${VAR}`` in connection auth reads in service mode: the notebook's env.
 
     ``None`` (personal mode) leaves it to the driver, which reads the server's
     environment; on a shared server that would send it to a member-chosen host.
     """
-    if getattr(session._lake_config(), "deployment_mode", "personal") != "service":
+    if getattr(session.lake_config(), "deployment_mode", "personal") != "service":
         return None
     return dict(session.notebook_state.env)
 
 
 def _load_upstream_variables(
-    session: NotebookSession,
+    session: ExecutorHost,
     cell_id: str,
     references: list[str],
 ) -> tuple[dict[str, Any], dict[str, str], dict[str, str]]:
@@ -1339,7 +1339,7 @@ def _cache_hit_result(
     output_name: str,
     start_time: float,
     *,
-    session: NotebookSession | None = None,
+    session: ExecutorHost | None = None,
     cell_id: str | None = None,
 ) -> dict[str, Any]:
     blob = artifact_mgr.load_artifact_data(canonical.id, canonical.version)

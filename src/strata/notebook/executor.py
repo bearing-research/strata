@@ -173,8 +173,8 @@ if TYPE_CHECKING:
     import cellgraph as cg
 
     from strata.notebook.datasets import DatasetInput
+    from strata.notebook.executor_host import ExecutorHost
     from strata.notebook.pool import WarmProcessPool
-    from strata.notebook.session import NotebookSession
 
 logger = logging.getLogger(__name__)
 
@@ -416,7 +416,7 @@ class _CellProvenance:
     """
 
     # What it is keyed by: the cell (an instance of it, for a fan-out) in an analysis.
-    session: NotebookSession
+    session: ExecutorHost
     analysis: cg.Analysis
     cell_id: str
     annotations: CellAnnotations
@@ -819,7 +819,7 @@ class CellExecutor:
 
     def __init__(
         self,
-        session: NotebookSession,
+        session: ExecutorHost,
         pool: WarmProcessPool | None = None,
         mount_credentials: MountCredentials | None = None,
     ):
@@ -1850,7 +1850,7 @@ class CellExecutor:
             # cache hit, so ``# @nocache``, rw mounts, force and rerun would otherwise skip the
             # effect they exist to re-trigger.
             cached_display_outputs = (
-                self.session._resolve_cached_display_outputs(
+                self.session.resolve_cached_display_outputs(
                     cell_id,
                     provenance_hash,
                     current_display_outputs,
@@ -1861,7 +1861,7 @@ class CellExecutor:
             # A leaf cell has no artifact, but its stdout/stderr are stored by provenance; replay
             # them so an unchanged re-run is instant.
             cached_console = (
-                self.session._resolve_cached_console(cell_id, provenance_hash)
+                self.session.resolve_cached_console(cell_id, provenance_hash)
                 if (cell is not None and use_cache and not consumed_vars)
                 else None
             )
@@ -1903,10 +1903,10 @@ class CellExecutor:
                     cell_id, provenance_hash, len(current_display_outputs)
                 )
             ):
-                cached_display_outputs = self.session._resolve_cached_display_outputs(
+                cached_display_outputs = self.session.resolve_cached_display_outputs(
                     cell_id, provenance_hash, current_display_outputs
                 )
-                cached_console = self.session._resolve_cached_console(cell_id, provenance_hash)
+                cached_console = self.session.resolve_cached_console(cell_id, provenance_hash)
 
             logger.info(
                 "execute_cell %s: consumed_vars=%s use_cache=%s cache_hit=%s",
@@ -2276,7 +2276,7 @@ class CellExecutor:
                 remote_build_state=e.remote_build_state,
                 remote_error_code=e.remote_error_code,
             )
-            self.session.persist_display_output(cell_id, None)
+            self.session.persist_display_outputs(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
         except TimeoutError:
@@ -2287,7 +2287,7 @@ class CellExecutor:
                 duration_ms=duration_ms,
                 error=self._timeout_message(cell_id, timeout_seconds),
             ).apply_remote_metadata(**remote_metadata)
-            self.session.persist_display_output(cell_id, None)
+            self.session.persist_display_outputs(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, timeout_result)
             return timeout_result
         except Exception as e:
@@ -2298,7 +2298,7 @@ class CellExecutor:
                 duration_ms=duration_ms,
                 error=f"Execution failed: {e}",
             ).apply_remote_metadata(**remote_metadata)
-            self.session.persist_display_output(cell_id, None)
+            self.session.persist_display_outputs(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
 
@@ -2389,9 +2389,7 @@ class CellExecutor:
         )
         return (
             refreshed if refreshed is not None else cached_artifact,
-            self.session._resolve_cached_display_outputs(
-                cell_id, provenance_hash, current_displays
-            ),
+            self.session.resolve_cached_display_outputs(cell_id, provenance_hash, current_displays),
         )
 
     def _recorded_display_count(
@@ -3119,7 +3117,7 @@ class CellExecutor:
             # Same gate as Python: ungated replay makes ``# @nocache`` and force/rerun no-ops
             # for a leaf cell.
             cached_display_outputs = (
-                self.session._resolve_cached_display_outputs(
+                self.session.resolve_cached_display_outputs(
                     cell_id,
                     provenance_hash,
                     current_display_outputs,
@@ -3161,7 +3159,7 @@ class CellExecutor:
                     cell_id, provenance_hash, [], [], len(current_display_outputs)
                 )
             ):
-                cached_display_outputs = self.session._resolve_cached_display_outputs(
+                cached_display_outputs = self.session.resolve_cached_display_outputs(
                     cell_id, provenance_hash, current_display_outputs
                 )
 
@@ -3285,7 +3283,7 @@ class CellExecutor:
                     # fallback; mirrors _dispatch_local.
                     result = None
                     execution_method = "cold"
-                    r_pool = getattr(self.session, "r_warm_pool", None)
+                    r_pool = self.session.r_warm_pool
                     if r_pool is not None:
                         from strata.notebook.pool import PooledCellExecutor
 
@@ -3403,7 +3401,7 @@ class CellExecutor:
                 remote_build_state=e.remote_build_state,
                 remote_error_code=e.remote_error_code,
             )
-            self.session.persist_display_output(cell_id, None)
+            self.session.persist_display_outputs(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
         except TimeoutError:
@@ -3414,7 +3412,7 @@ class CellExecutor:
                 duration_ms=duration_ms,
                 error=f"R cell execution timed out after {timeout_seconds}s",
             ).apply_remote_metadata(**remote_metadata)
-            self.session.persist_display_output(cell_id, None)
+            self.session.persist_display_outputs(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, timeout_result)
             return timeout_result
         except Exception as e:
@@ -3425,7 +3423,7 @@ class CellExecutor:
                 duration_ms=duration_ms,
                 error=f"R execution failed: {e}",
             )
-            self.session.persist_display_output(cell_id, None)
+            self.session.persist_display_outputs(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
 
@@ -5060,7 +5058,7 @@ class CellExecutor:
         upstream instance it zipped to.
         """
         return {
-            **self.session._collect_input_refs(cell_id, variant=variant),
+            **self.session.collect_input_refs(cell_id, variant=variant),
             **self._fetch_refs.get(cell_id, {}),
             **self._dataset_refs.get(cell_id, {}),
             **self._table_refs.get(cell_id, {}),
@@ -7260,7 +7258,7 @@ class CellExecutor:
         if cell is not None:
             cell.cache_hit = True
         self._set_loop_artifact_uris(cell_id, uri, consumed_vars, uris)
-        cached_displays = self.session._resolve_cached_display_outputs(
+        cached_displays = self.session.resolve_cached_display_outputs(
             cell_id, cell_provenance, cell.display_outputs if cell is not None else []
         )
         result = CellExecutionResult(
@@ -8703,7 +8701,7 @@ class CellExecutor:
         )
 
         # Hydrate cached displays the way single-cell does
-        # (session._resolve_cached_display_outputs): rich models when every artifact exists
+        # (session.resolve_cached_display_outputs): rich models when every artifact exists
         # with matching provenance, else []. Their blobs then go to the per-cell tmpdir.
         existing_display_outputs = cell.display_outputs or (
             [cell.display_output] if cell.display_output is not None else []
@@ -8718,9 +8716,9 @@ class CellExecutor:
                 prov.annotations.table_writes,
                 len(existing_display_outputs),
             )
-        elif self.session._resolve_cached_console(cell_id, provenance_hash) is None:
+        elif self.session.resolve_cached_console(cell_id, provenance_hash) is None:
             self._promote_reverted_leaf(cell_id, provenance_hash, len(existing_display_outputs))
-        cached_display_models = self.session._resolve_cached_display_outputs(
+        cached_display_models = self.session.resolve_cached_display_outputs(
             cell_id, provenance_hash, existing_display_outputs
         )
         cached_displays: list[dict[str, Any]] = []
@@ -8743,7 +8741,7 @@ class CellExecutor:
         # A leaf's record is its console (empty when it printed nothing), as in single-cell;
         # without one, or any cached display, there is nothing to serve, so run it.
         cached_console = (
-            self.session._resolve_cached_console(cell_id, provenance_hash)
+            self.session.resolve_cached_console(cell_id, provenance_hash)
             if not consumed_vars
             else None
         )
@@ -8996,7 +8994,7 @@ def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecuti
     )
 
 
-def _no_interpreter_message(session: NotebookSession) -> str:
+def _no_interpreter_message(session: ExecutorHost) -> str:
     """Why cell code did not run: the session has no interpreter.
 
     PATH ``python`` is never used instead: its result would be stored under

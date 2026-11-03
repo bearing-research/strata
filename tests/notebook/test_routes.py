@@ -2200,7 +2200,7 @@ def _service_mode_sessions(monkeypatch, tmp_path):
         deployment_mode="service",
         **service_auth(),
     )
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     return store
 
 
@@ -2287,7 +2287,7 @@ def test_connection_auth_vars_read_the_notebook_env_in_service_mode(
     from strata.notebook.sql.drivers.postgresql import PostgresAdapter
 
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     monkeypatch.setenv("SERVER_ONLY_TOKEN", "server-secret")
     dialed: list[str] = []
 

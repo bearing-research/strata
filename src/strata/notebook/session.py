@@ -954,7 +954,7 @@ class NotebookSession:
 
             # Per-variable hashes: sha256(f"{provenance_hash}:{var_name}").
             cached_outputs = self._resolve_cached_outputs(cell_id, provenance_hash)
-            cached_display_outputs = self._resolve_cached_display_outputs(
+            cached_display_outputs = self.resolve_cached_display_outputs(
                 cell_id,
                 provenance_hash,
                 cell.display_outputs,
@@ -1079,7 +1079,7 @@ class NotebookSession:
         )
         if uri:
             try:
-                artifact_id, version = self._parse_artifact_uri(uri)
+                artifact_id, version = self.parse_artifact_uri(uri)
             except (IndexError, ValueError):
                 return False
             artifact = store.get_artifact(artifact_id, version)
@@ -1102,14 +1102,14 @@ class NotebookSession:
                 if not ref.startswith("strata://artifact/"):
                     continue  # a fetch or a dataset, not an upstream cell
                 try:
-                    ref_id, ref_version = self._parse_artifact_uri(ref)
+                    ref_id, ref_version = self.parse_artifact_uri(ref)
                 except (IndexError, ValueError):
                     continue
                 out[ref_id] = ref_version
             return out
 
         recorded = _versions(json.loads(artifact.input_versions))
-        current = _versions(self._collect_input_refs(cell.id))
+        current = _versions(self.collect_input_refs(cell.id))
         return (
             bool(recorded)
             and recorded.keys() == current.keys()
@@ -1441,11 +1441,7 @@ class NotebookSession:
         """Persist display metadata to ``.strata/runtime.json`` for restoration on reopen."""
         update_cell_display_outputs(self.path, cell_id, display_outputs)
 
-    def persist_display_output(self, cell_id: str, display_output: dict[str, Any] | None) -> None:
-        """Persist a single display output (``None`` clears)."""
-        self.persist_display_outputs(cell_id, [display_output] if display_output else None)
-
-    def _resolve_cached_display_outputs(
+    def resolve_cached_display_outputs(
         self,
         cell_id: str,
         provenance_hash: str,
@@ -1498,7 +1494,7 @@ class NotebookSession:
             resolved.append(CellOutput(**hydrated) if hydrated is not None else output)
         return resolved
 
-    def _resolve_cached_console(self, cell_id: str, provenance_hash: str) -> tuple[str, str] | None:
+    def resolve_cached_console(self, cell_id: str, provenance_hash: str) -> tuple[str, str] | None:
         """Return cached ``(stdout, stderr)`` for a leaf cell's identical provenance, else ``None``.
 
         Keyed by ``derive_subkey(provenance_hash, "__console__")``, so it replays only
@@ -1536,7 +1532,7 @@ class NotebookSession:
                 return raw
 
             try:
-                artifact_id, version = self._parse_artifact_uri(artifact_uri)
+                artifact_id, version = self.parse_artifact_uri(artifact_uri)
                 blob = self.artifact_manager.load_artifact_data(artifact_id, version)
             except Exception:
                 return raw
@@ -1555,7 +1551,7 @@ class NotebookSession:
             return raw
 
         try:
-            artifact_id, version = self._parse_artifact_uri(artifact_uri)
+            artifact_id, version = self.parse_artifact_uri(artifact_uri)
             blob = self.artifact_manager.load_artifact_data(artifact_id, version)
         except Exception:
             return raw
@@ -1572,11 +1568,11 @@ class NotebookSession:
         artifact_uri = output.artifact_uri
         if not artifact_uri:
             raise ValueError("display output is not backed by an artifact")
-        artifact_id, version = self._parse_artifact_uri(artifact_uri)
+        artifact_id, version = self.parse_artifact_uri(artifact_uri)
         return self.artifact_manager.load_artifact_data(artifact_id, version)
 
     @staticmethod
-    def _parse_artifact_uri(artifact_uri: str) -> tuple[str, int]:
+    def parse_artifact_uri(artifact_uri: str) -> tuple[str, int]:
         """Parse a canonical artifact URI into ``(artifact_id, version)``.
 
         Splits on the *last* ``@v=``, since a fan-out id carries its own ``@``
@@ -2004,7 +2000,7 @@ class NotebookSession:
         """The variables ``cell_id`` reads from ``upstream_id``, as the DAG wired them."""
         return self.dag.wired_variables(cell_id, upstream_id) if self.dag is not None else set()
 
-    def _collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]:
+    def collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]:
         """Upstream artifact refs in the form the lineage walk resolves.
 
         Returns ``{strata://artifact/<id>@v=<n>: <id>@v=<n>}``, the shape
@@ -2088,7 +2084,7 @@ class NotebookSession:
         resolver = MountResolver(
             cache_dir=self.path / ".strata" / "mount_cache",
             credential_resolver=CredentialResolver.from_config(
-                self._lake_config(), env=dict(self.notebook_state.env), notebook=self.path
+                self.lake_config(), env=dict(self.notebook_state.env), notebook=self.path
             ),
         )
         mount_fingerprints: list[str] = []
@@ -2114,7 +2110,7 @@ class NotebookSession:
         tables = list(annotations.tables)
         if not tables and annotations.sql is None:
             return []
-        config = self._lake_config()
+        config = self.lake_config()
         if annotations.sql is not None:
             # Only a SQL cell: the SQL package needs the [sql] extra.
             from strata.notebook.sql.lake import lake_tables, with_notebook_catalogs
@@ -2141,7 +2137,7 @@ class NotebookSession:
             return []
         from strata.notebook.fetch import FetchCache, guard_settings
 
-        allowed_hosts, allow_local = guard_settings(self._lake_config())
+        allowed_hosts, allow_local = guard_settings(self.lake_config())
         cache = FetchCache(self.path, allowed_hosts=allowed_hosts, allow_local=allow_local)
         return [
             cache.fingerprint(spec) for spec in sorted(annotations.fetches, key=lambda s: s.name)
@@ -2170,7 +2166,7 @@ class NotebookSession:
                 fingerprints.append(checked[1])
                 continue
             try:
-                registry = datasets.registry_for(self._lake_config(), tenant)
+                registry = datasets.registry_for(self.lake_config(), tenant)
                 fingerprint = registry.resolve(spec).fingerprint
             except datasets.DatasetError:
                 fingerprint = datasets.unresolved_fingerprint(spec)
@@ -2182,7 +2178,7 @@ class NotebookSession:
         """Record what *spec* resolved to now, for staleness to reuse."""
         self._dataset_checks[(spec.name, spec.reference)] = (_time.monotonic(), fingerprint)
 
-    def _lake_config(self):
+    def lake_config(self):
         """Server config when running inside the server, else loaded fresh."""
         try:
             from strata.server import get_state

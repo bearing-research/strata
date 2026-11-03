@@ -144,7 +144,7 @@ def test_a_fanout_consumer_records_every_instance_it_read(tmp_path):
         )
     )
 
-    refs = session._collect_input_refs("report")
+    refs = session.collect_input_refs("report")
 
     variants = sorted(ref.split("@variant=")[1].split("@v=")[0] for ref in refs.values())
     assert variants == ["double", "triple"]
@@ -228,12 +228,12 @@ def test_a_chained_instance_records_the_variant_it_zipped_to(tmp_path):
 
     # Each instance of the chained cell records only its own upstream instance.
     for variant in ("double", "triple"):
-        refs = session._collect_input_refs("ev2", variant=variant)
+        refs = session.collect_input_refs("ev2", variant=variant)
         named = sorted(r.split("@variant=")[1].split("@v=")[0] for r in refs.values())
         assert named == [variant], (variant, named)
 
     # The collapse consumer below it still records every instance it read.
-    collapsed = session._collect_input_refs("report")
+    collapsed = session.collect_input_refs("report")
     assert sorted(r.split("@variant=")[1].split("@v=")[0] for r in collapsed.values()) == [
         "double",
         "triple",

@@ -466,7 +466,7 @@ async def test_a_cell_appends_twice_and_merges_into_a_rest_catalog_table(
         (warehouse / directory).chmod(0o777)
     config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
     monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
-    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
 
     def writer(rows: str, mode: str = "append") -> str:
         on = " on=id" if mode == "merge" else ""

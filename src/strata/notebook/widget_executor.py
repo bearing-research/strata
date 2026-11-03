@@ -9,14 +9,17 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vestigo.provenance import derive_subkey
 
 from strata.notebook.widget_analyzer import analyze_widget_cell, descriptor_provenance
 
+if TYPE_CHECKING:
+    from strata.notebook.executor_host import ExecutorHost
 
-def _current_values(session: Any, cell_id: str) -> dict[str, Any]:
+
+def _current_values(session: ExecutorHost, cell_id: str) -> dict[str, Any]:
     """The cell's user-set control values from ``runtime.json``."""
     from strata.notebook.runtime_state import load_runtime_state
 
@@ -26,7 +29,7 @@ def _current_values(session: Any, cell_id: str) -> dict[str, Any]:
 
 
 def execute_widget_cell(
-    session: Any,
+    session: ExecutorHost,
     cell_id: str,
     source: str,
     *,
