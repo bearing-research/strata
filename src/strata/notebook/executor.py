@@ -667,6 +667,38 @@ class BatchExecutionResult:
     end_reason: str = "complete"  # "complete" | "cell_error" | "persist_failed" | "subprocess_died"
 
 
+def _store_failure_result(
+    result: CellExecutionResult, store_error: str | None
+) -> CellExecutionResult:
+    """A single run that succeeded and could not store its outputs."""
+    return CellExecutionResult(
+        cell_id=result.cell_id,
+        success=False,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        outputs=result.outputs,
+        duration_ms=result.duration_ms,
+        error=store_error
+        or "Cell executed successfully but failed to store output artifacts. Check server logs.",
+        execution_method=result.execution_method,
+    )
+
+
+def _mount_sync_failure_result(result: CellExecutionResult, exc: Exception) -> CellExecutionResult:
+    """A single run that succeeded and could not sync its read-write mounts back."""
+    return CellExecutionResult(
+        cell_id=result.cell_id,
+        success=False,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        outputs=result.outputs,
+        duration_ms=result.duration_ms,
+        error=f"Cell executed successfully but failed to sync read-write mounts: {exc}",
+        execution_method=result.execution_method,
+        mutation_warnings=result.mutation_warnings,
+    )
+
+
 # Module-level so a test can make polling immediate.
 _JOB_POLL_SECONDS = 1.0
 
@@ -2149,19 +2181,8 @@ class CellExecutor:
                             "Cell %s executed OK but artifact storage failed.",
                             cell_id,
                         )
-                        exec_result = CellExecutionResult(
-                            cell_id=cell_id,
-                            success=False,
-                            stdout=exec_result.stdout,
-                            stderr=exec_result.stderr,
-                            outputs=exec_result.outputs,
-                            duration_ms=exec_result.duration_ms,
-                            error=store_error
-                            or (
-                                "Cell executed successfully but failed to "
-                                "store output artifacts. Check server logs."
-                            ),
-                            execution_method=exec_result.execution_method,
+                        exec_result = _store_failure_result(
+                            exec_result, store_error
                         ).apply_remote_metadata(**remote_metadata)
 
                     if stored_ok:
@@ -2170,18 +2191,14 @@ class CellExecutor:
                         await self._push_to_team_store(cell_id=cell_id, variant=fanout_variant)
 
                     if exec_result.success:
-                        exec_result.display_outputs = self._store_display_outputs(
-                            cell_id,
+                        self._store_result_displays(
+                            exec_result,
                             result_output_dir,
                             provenance_hash,
                             input_hashes,
-                            exec_result.display_outputs,
                             source_hash=source_hash,
                             source=source,
                             env_hash=env_hash,
-                        )
-                        exec_result.display_output = (
-                            exec_result.display_outputs[-1] if exec_result.display_outputs else None
                         )
                         # Cache a leaf cell's console by provenance so a re-run replays it.
                         if cacheable and not consumed_vars:
@@ -2208,19 +2225,8 @@ class CellExecutor:
                                 "Failed to sync-back RW mounts for cell %s",
                                 cell_id,
                             )
-                            exec_result = CellExecutionResult(
-                                cell_id=cell_id,
-                                success=False,
-                                stdout=exec_result.stdout,
-                                stderr=exec_result.stderr,
-                                outputs=exec_result.outputs,
-                                duration_ms=exec_result.duration_ms,
-                                error=(
-                                    "Cell executed successfully but failed to sync "
-                                    f"read-write mounts: {exc}"
-                                ),
-                                execution_method=exec_result.execution_method,
-                                mutation_warnings=exec_result.mutation_warnings,
+                            exec_result = _mount_sync_failure_result(
+                                exec_result, exc
                             ).apply_remote_metadata(**remote_metadata)
                     if exec_result.success:
                         self._store_mount_writes(
@@ -3330,37 +3336,20 @@ class CellExecutor:
                             "R cell %s executed OK but artifact storage failed.",
                             cell_id,
                         )
-                        exec_result = CellExecutionResult(
-                            cell_id=cell_id,
-                            success=False,
-                            stdout=exec_result.stdout,
-                            stderr=exec_result.stderr,
-                            outputs=exec_result.outputs,
-                            duration_ms=exec_result.duration_ms,
-                            error=store_error
-                            or (
-                                "Cell executed successfully but failed to "
-                                "store output artifacts. Check server logs."
-                            ),
-                            execution_method=exec_result.execution_method,
-                        )
+                        exec_result = _store_failure_result(exec_result, store_error)
 
                     if stored_ok:
                         await self._push_to_team_store(cell_id=cell_id)
 
                     if exec_result.success:
-                        exec_result.display_outputs = self._store_display_outputs(
-                            cell_id,
+                        self._store_result_displays(
+                            exec_result,
                             result_output_dir,
                             provenance_hash,
                             input_hashes,
-                            exec_result.display_outputs,
                             source_hash=source_hash,
                             source=source,
                             env_hash=env_hash,
-                        )
-                        exec_result.display_output = (
-                            exec_result.display_outputs[-1] if exec_result.display_outputs else None
                         )
 
                     # A worker syncs its own and reports what was written in its result.
@@ -3373,20 +3362,7 @@ class CellExecutor:
                                 "Failed to sync-back RW mounts for R cell %s",
                                 cell_id,
                             )
-                            exec_result = CellExecutionResult(
-                                cell_id=cell_id,
-                                success=False,
-                                stdout=exec_result.stdout,
-                                stderr=exec_result.stderr,
-                                outputs=exec_result.outputs,
-                                duration_ms=exec_result.duration_ms,
-                                error=(
-                                    "Cell executed successfully but failed to sync "
-                                    f"read-write mounts: {exc}"
-                                ),
-                                execution_method=exec_result.execution_method,
-                                mutation_warnings=exec_result.mutation_warnings,
-                            )
+                            exec_result = _mount_sync_failure_result(exec_result, exc)
                     if exec_result.success:
                         self._store_mount_writes(
                             cell_id,
@@ -6672,6 +6648,30 @@ class CellExecutor:
             # The outputs are stored and the files synced; losing the record is not a
             # reason to fail the run.
             logger.exception("Failed to record the run of cell %s", cell_id)
+
+    def _store_result_displays(
+        self,
+        result: CellExecutionResult,
+        output_dir: Path,
+        provenance_hash: str,
+        input_hashes: list[str],
+        *,
+        source_hash: str,
+        source: str,
+        env_hash: str,
+    ) -> None:
+        """Store a single run's displays and put what was stored on its *result*."""
+        result.display_outputs = self._store_display_outputs(
+            result.cell_id,
+            output_dir,
+            provenance_hash,
+            input_hashes,
+            result.display_outputs,
+            source_hash=source_hash,
+            source=source,
+            env_hash=env_hash,
+        )
+        result.display_output = result.display_outputs[-1] if result.display_outputs else None
 
     def _store_inline_display_outputs(
         self,
