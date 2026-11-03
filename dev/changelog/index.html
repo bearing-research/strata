@@ -3853,6 +3853,12 @@ exhaustive commit history.</p>
   as an <code>overwrite</code> would leave it, but data files with no changed row stay, so
   readers' cached row groups stay valid. Nothing is committed when nothing
   differs. (#1371)</li>
+<li><strong><code>@each</code> runs a cell once per file or row, and caches each item on its own.</strong>
+  <code># @each &lt;name&gt; in &lt;source&gt; [key=&lt;col&gt;] [glob=&lt;pattern&gt;]</code> takes a mount, or a
+  dict, list or table from another cell. A changed item runs alone, a removed
+  one leaves, and a later cell reads <code>{item: value}</code>. With <code>@write_table ... sync</code>
+  the table is written once per run over every item's rows, so a removed file's
+  rows are deleted. (#1372)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3863,7 +3869,7 @@ exhaustive commit history.</p>
 <li><strong>The notebook's analysis runs on cellgraph.</strong> Annotations, the names each
   cell defines and reads, the DAG and annotation validation now come from
   <a href="https://github.com/bearing-research/cellgraph">cellgraph</a>, a new runtime
-  dependency (<code>cellgraph&gt;=0.2,&lt;0.3</code>). The diagnostics, the DAG and every cell
+  dependency (<code>cellgraph&gt;=0.3,&lt;0.4</code>). The diagnostics, the DAG and every cell
   key are the same as before. (#1358)</li>
 <li><strong>Staleness is faster outside the server.</strong> The CLI, the TUI and the MCP
   server read the config from disk, and a staleness pass read it twice for
@@ -3973,6 +3979,9 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A <code>@per_variant</code> cell ending in a displayed value no longer reruns every
+  variant.</strong> The cache check looked for its displays where they are not stored,
+  so every variant missed. (#1372)</li>
 <li>
 <p><strong>A <code>merge</code> on two key columns no longer kills the server.</strong> <code>@write_table
   ... merge on=a,b</code> with about 2,000 rows or more crashed the process in Arrow.
