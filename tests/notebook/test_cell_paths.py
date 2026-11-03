@@ -11,6 +11,7 @@ import pytest
 import strata.notebook.cell_paths
 from strata.notebook.cell_paths.context import PathContext
 from strata.notebook.cell_paths.prompt import run_prompt_cell
+from strata.notebook.cell_paths.sql import run_sql_cell
 from strata.notebook.cell_paths.widget import run_widget_cell
 from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.executor import CellExecutor
@@ -91,7 +92,13 @@ RECORDED = (
 
 def _fakes(cell: SimpleNamespace, failure: CellExecutionResult | None = None):
     """A host and a context with nothing behind them, and a record of what they were asked."""
-    calls = SimpleNamespace(recorded=[], materialized=[], cell=cell)
+    calls = SimpleNamespace(recorded=[], materialized=[], cell=cell, persisted=[], applied=[])
+    calls.stored_displays = []
+    calls.store_inline = []
+
+    def store_inline_display_outputs(cell_id, provenance_hash, displays, **kwargs):
+        calls.store_inline.append((cell_id, provenance_hash, displays, kwargs))
+        return calls.stored_displays
 
     async def compute_provenance(cell_id, source):
         return PROVENANCE
@@ -105,11 +112,18 @@ def _fakes(cell: SimpleNamespace, failure: CellExecutionResult | None = None):
         record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
             (args, kwargs)
         ),
+        persist_display_outputs=lambda cell_id, displays: calls.persisted.append(
+            (cell_id, displays)
+        ),
+        apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
+            (cell_id, result)
+        ),
     )
     context = PathContext(
         compute_provenance=compute_provenance,
         moved=lambda cell_id: ({"data": 3}, {"file:///t": 4}),
         materialize_upstreams_or_failure=materialize_upstreams_or_failure,
+        store_inline_display_outputs=store_inline_display_outputs,
     )
     return host, context, calls
 
@@ -133,6 +147,11 @@ class TestTheExecutorsContext:
         assert (
             context.materialize_upstreams_or_failure == executor._materialize_upstreams_or_failure
         )
+
+    def test_inline_displays_are_the_executors(self, executor):
+        context = executor._path_context()
+
+        assert context.store_inline_display_outputs == executor._store_inline_display_outputs
 
     def test_a_replaced_method_still_holds(self, executor, monkeypatch):
         async def replaced(cell_id, source):
@@ -325,6 +344,26 @@ class TestPrompt:
         assert calls.asked == []
 
 
+async def test_the_executor_hands_the_sql_path_what_it_was_asked(tmp_path, monkeypatch):
+    nb = create_notebook(tmp_path / "nb", "Sql")
+    add_cell_to_notebook(nb, "c1", None)
+    executor = CellExecutor(NotebookSession(parse_notebook(nb), nb))
+    seen = {}
+
+    async def stub(host, context, cell_id, source, start_time, **kwargs):
+        seen.update(kwargs, host=host)
+        return "ran"
+
+    monkeypatch.setattr("strata.notebook.executor.run_sql_cell", stub)
+
+    ran = await executor._execute_sql_cell(
+        "c1", "src", 0.0, materialize_upstreams=True, use_cache=False
+    )
+
+    assert ran == "ran"
+    assert seen == {"host": executor.session, "materialize_upstreams": True, "use_cache": False}
+
+
 async def test_the_executor_hands_its_delta_callback_to_the_prompt_path(tmp_path, monkeypatch):
     nb = create_notebook(tmp_path / "nb", "Delta")
     add_cell_to_notebook(nb, "c1", None)
@@ -352,3 +391,139 @@ async def test_the_executor_hands_its_delta_callback_to_the_prompt_path(tmp_path
         "use_cache": False,
         "on_delta": on_delta,
     }
+
+
+class TestSql:
+    """The path on its own: a fake host and context, a stubbed SQL executor."""
+
+    DISPLAY = {"markdown": "| a |"}
+    STORED = {"markdown": "| a |", "artifact_uri": "strata://display"}
+
+    @pytest.fixture
+    def path(self, monkeypatch):
+        def build(answer=None, *, failure=None):
+            host, context, calls = _fakes(SimpleNamespace(cache_hit=None), failure)
+            calls.asked = []
+
+            async def stub(session, cell_id, source, *, use_cache):
+                calls.asked.append((session, cell_id, source, use_cache))
+                return answer
+
+            monkeypatch.setattr("strata.notebook.sql.cell_executor.execute_sql_cell", stub)
+
+            async def run(*, materialize_upstreams=False, use_cache=True):
+                return await run_sql_cell(
+                    host,
+                    context,
+                    "c1",
+                    "src",
+                    0.0,
+                    materialize_upstreams=materialize_upstreams,
+                    use_cache=use_cache,
+                )
+
+            return run, host, calls
+
+        return build
+
+    async def test_a_success_records_the_generic_key_and_its_lake_reads(self, path):
+        answer = {
+            "success": True,
+            "outputs": {"t": {"preview": 1}},
+            "table_reads": [{"table": "lake"}],
+            "display_outputs": [self.DISPLAY],
+            "stdout": "out",
+            "stderr": "err",
+            "cache_hit": True,
+            "execution_method": "cached",
+            "artifact_uri": "strata://t",
+            "mutation_warnings": [{"variable": "x"}],
+        }
+        run, _, calls = path(answer)
+        calls.stored_displays = [self.STORED]
+
+        result = await run()
+
+        args, kwargs = RECORDED
+        assert calls.recorded == [
+            (args, {**kwargs, "table_reads": [{"table": "t"}, {"table": "lake"}]})
+        ]
+        assert calls.cell.cache_hit is True
+        assert calls.store_inline == [
+            (
+                "c1",
+                "prov",
+                [self.DISPLAY],
+                {"source_hash": "source", "source": "src", "env_hash": "env"},
+            )
+        ]
+        assert calls.persisted == [("c1", [self.STORED])]
+        assert calls.applied == [("c1", result)]
+        assert result.display_outputs == [self.STORED]
+        assert result.display_output == self.STORED
+        assert result.outputs == answer["outputs"]
+        assert (result.stdout, result.stderr) == ("out", "err")
+        assert result.cache_hit is True
+        assert result.execution_method == "cached"
+        assert result.artifact_uri == "strata://t"
+        assert result.mutation_warnings == [{"variable": "x"}]
+        assert result.duration_ms > 0
+        assert isinstance(result.duration_ms, int)
+
+    async def test_nothing_stored_keeps_what_the_run_showed(self, path):
+        run, _, calls = path({"success": True, "outputs": {}, "display_outputs": [self.DISPLAY]})
+
+        result = await run()
+
+        assert result.display_outputs == [self.DISPLAY]
+        assert calls.persisted == [("c1", [self.DISPLAY])]
+
+    async def test_no_displays_persist_as_none(self, path):
+        run, _, calls = path({"success": True, "outputs": {}})
+
+        await run()
+
+        assert calls.persisted == [("c1", None)]
+
+    async def test_a_failure_clears_what_it_showed_and_is_applied(self, path):
+        run, _, calls = path({"success": False, "outputs": {}, "error": "bad query"})
+
+        result = await run()
+
+        assert calls.recorded == []
+        assert calls.store_inline == []
+        assert calls.cell.cache_hit is None
+        assert calls.persisted == [("c1", None)]
+        assert calls.applied == [("c1", result)]
+        assert result.error == "bad query"
+        assert result.execution_method == "sql"
+
+    @pytest.mark.parametrize("use_cache", [True, False])
+    async def test_it_is_asked_with_what_it_was_given(self, path, use_cache):
+        run, host, calls = path({"success": False, "outputs": {}})
+
+        await run(use_cache=use_cache)
+
+        assert calls.asked == [(host, "c1", "src", use_cache)]
+
+    async def test_upstreams_run_first_when_asked(self, path):
+        run, _, calls = path({"success": False, "outputs": {}})
+
+        await run(materialize_upstreams=True)
+
+        assert calls.materialized == [("c1", 0.0, "sql")]
+
+    async def test_upstreams_do_not_run_when_not_asked(self, path):
+        run, _, calls = path({"success": False, "outputs": {}})
+
+        await run(materialize_upstreams=False)
+
+        assert calls.materialized == []
+
+    async def test_an_upstream_failure_is_the_result(self, path):
+        failure = CellExecutionResult(cell_id="c1", success=False, error="upstream")
+        run, _, calls = path(failure=failure)
+
+        assert await run(materialize_upstreams=True) is failure
+        assert calls.asked == []
+        assert calls.applied == []
