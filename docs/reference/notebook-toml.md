@@ -100,12 +100,12 @@ Each mount becomes a `pathlib.Path` variable in the cell namespace. Cells access
 
 Cell-level mounts (under `[[cells.mounts]]`) supplement notebook-level ones.
 
-A notebook-level mount reaches only the Python cells that name it. Other cells don't
-list it, download it, or run again when it changes, and a read-write one doesn't stop
-them being cached. A cell calling `eval`, `exec`, `globals`, `locals`, `vars` or `dir`
-gets every mount, since its reads can't be told from its source, and so does a cell's
-test run, which reads `cell.<name>`. A mount declared on a cell is always bound. SQL,
-R, prompt and widget cells keep every mount.
+A notebook-level mount reaches only the cells that name it. Other cells don't list it,
+download it, or run again when it changes, and a read-write one doesn't stop them being
+cached. A Python cell calling `eval`, `exec`, `globals`, `locals`, `vars` or `dir` gets
+every mount, since its reads can't be told from its source, and so does a cell's test
+run, which reads `cell.<name>`. A mount declared on a cell is always bound. An R cell
+gets every mount. A SQL cell reads the mounts its [connection](#connections) names.
 
 ### Mount options on a shared server
 

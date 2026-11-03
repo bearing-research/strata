@@ -9,7 +9,15 @@ import pytest
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.graph import mounts_of
-from strata.notebook.models import CellLanguage, CellState, CellStatus, MountMode, MountSpec
+from strata.notebook.models import (
+    CellLanguage,
+    CellState,
+    CellStatus,
+    ConnectionSpec,
+    MountMode,
+    MountSpec,
+    NotebookState,
+)
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import (
@@ -23,9 +31,13 @@ DATA = MountSpec(name="data", uri="file:///d", mode=MountMode.READ_ONLY)
 OTHER = MountSpec(name="other", uri="file:///o", mode=MountMode.READ_ONLY)
 
 
+def _state(*connections: ConnectionSpec) -> NotebookState:
+    return NotebookState(id="n", name="n", connections=list(connections))
+
+
 def _names(source: str, **fields) -> list[str]:
     cell = CellState(id="c", source=source, mounts=[DATA], **fields)
-    return [mount.name for mount in mounts_of(cell, source)]
+    return [mount.name for mount in mounts_of(_state(), cell, source)]
 
 
 class TestWhatACellGets:
@@ -57,15 +69,33 @@ class TestWhatACellGets:
 
     def test_a_mount_declared_on_the_cell_stays_unnamed(self):
         cell = CellState(id="c", source="x = 1\n", mounts=[DATA, OTHER], mount_overrides=[OTHER])
-        assert mounts_of(cell, cell.source) == [OTHER]
+        assert mounts_of(_state(), cell, cell.source) == [OTHER]
 
-    @pytest.mark.parametrize("language", [CellLanguage.SQL, CellLanguage.R, CellLanguage.PROMPT])
-    def test_another_language_keeps_them_all(self, language):
-        assert _names("SELECT 1\n", language=language) == ["data"]
+    def test_an_r_cell_keeps_them_all(self):
+        assert _names("x <- 1\n", language=CellLanguage.R) == ["data"]
+
+    @pytest.mark.parametrize("language", [CellLanguage.PROMPT, CellLanguage.WIDGET])
+    def test_a_cell_binding_no_variable_keeps_only_its_own(self, language):
+        cell = CellState(
+            id="c", source="data", language=language, mounts=[DATA, OTHER], mount_overrides=[OTHER]
+        )
+        assert mounts_of(_state(), cell, cell.source) == [OTHER]
+
+    @pytest.mark.parametrize(
+        ("connection", "expected"), [("reads", [DATA]), ("plain", []), ("absent", [])]
+    )
+    def test_a_sql_cell_gets_what_its_connection_names(self, connection, expected):
+        state = _state(
+            ConnectionSpec(name="reads", driver="duckdb", mounts=["data"]),
+            ConnectionSpec(name="plain", driver="duckdb"),
+        )
+        source = f"# @sql connection={connection}\nSELECT 1\n"
+        cell = CellState(id="c", source=source, language=CellLanguage.SQL, mounts=[DATA, OTHER])
+        assert mounts_of(state, cell, source) == expected
 
     def test_the_source_given_decides_not_the_saved_one(self):
         cell = CellState(id="c", source="x = 1\n", mounts=[DATA])
-        assert mounts_of(cell, "x = data\n") == [DATA]
+        assert mounts_of(_state(), cell, "x = data\n") == [DATA]
 
 
 def _session(tmp_path: Path, mode: MountMode, *sources: str) -> tuple[NotebookSession, Path]:

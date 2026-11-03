@@ -2073,7 +2073,9 @@ class NotebookSession:
         so this merges both layers exactly as the executor does.
         """
         annotations = parse_annotations(cell.source)
-        merged_mounts = resolve_cell_mounts([], mounts_of(cell, cell.source), annotations.mounts)
+        merged_mounts = resolve_cell_mounts(
+            [], mounts_of(self.notebook_state, cell, cell.source), annotations.mounts
+        )
         if not merged_mounts:
             # Outside the server the config is loaded from disk, too slow for every cell.
             return [], False

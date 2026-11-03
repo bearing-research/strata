@@ -78,7 +78,7 @@ def analyze(state: Any) -> cg.Analysis:
             language=cell.language.value,
             meta={
                 "language": cell.language.value,
-                "mounts": mounts_of(cell, cell.source),
+                "mounts": mounts_of(state, cell, cell.source),
                 "notebook_mounts": list(state.mounts),
                 "connections": list(state.connections),
                 "malformed_connections": list(state.malformed_connections),

@@ -4752,7 +4752,7 @@ class CellExecutor:
         """Resolve a cell's mount declarations: annotation, then cell meta, then notebook."""
         cell = self.session.notebook_state.get_cell(cell_id)
 
-        cell_mounts_spec = mounts_of(cell, source) if cell else []
+        cell_mounts_spec = mounts_of(self.session.notebook_state, cell, source) if cell else []
 
         annotations = parse_annotations(source)
         annotation_mounts = annotations.mounts

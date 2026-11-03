@@ -41,14 +41,15 @@ def _mount(tmp_path: Path) -> str:
     return f'\n[[mounts]]\nname = "d"\nuri = "file://{data}"\nmode = "ro"\n'
 
 
-def test_a_widget_key_covers_the_notebook_mounts(tmp_path):
+def test_a_widget_key_covers_a_mount_declared_on_it(tmp_path):
     """A widget is keyed by the generic hash over every fingerprint staleness draws."""
     session = _session(
         tmp_path, [("w", "widget", "a = slider(0, 1, default=0.5)\n")], _mount(tmp_path)
     )
     cell = session.notebook_state.get_cell("w")
+    cell.mount_overrides = list(cell.mounts)
     outside = session._outside_world_for(cell)
-    assert outside.mount_fingerprints, "the notebook's mount reaches the widget"
+    assert outside.mount_fingerprints, "the mount reaches the widget"
     env_hash = session.cell_env_hash(cell)
     fingerprints = [
         outside.mount_fingerprints,
