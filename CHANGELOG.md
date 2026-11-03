@@ -144,7 +144,7 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
-- **A notebook-level mount reaches only the Python cells that name it.** Every
+- **A notebook-level mount reaches only the cells that read it.** Every
   cell used to list it, download all of it, and run again when it changed: a
   rollup cell spent 35 minutes downloading a bucket it never read. Those cells
   run once more after this upgrade, as their keys no longer hold the mount.
