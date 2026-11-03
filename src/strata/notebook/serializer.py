@@ -587,14 +587,15 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> Serial
         }
 
     # shape == table
+    view = _display_table(table)
     preview = []
-    for i in range(min(20, table.num_rows)):
-        preview.append([to_serialization_safe(col[i].as_py()) for col in table.columns])
+    for i in range(min(20, view.num_rows)):
+        preview.append([to_serialization_safe(col[i].as_py()) for col in view.columns])
     return {
         "content_type": ContentType.ARROW_IPC,
         "file": filename,
-        "rows": table.num_rows,
-        "columns": table.column_names,
+        "rows": view.num_rows,
+        "columns": view.column_names,
         "bytes": filepath.stat().st_size,
         "preview": preview,
     }
@@ -1281,6 +1282,25 @@ def deserialize_value(
     return handler.deserialize(Path(file_path))
 
 
+def _display_table(table: Any) -> Any:
+    """*table* as a viewer shows it, by its ``pandas`` schema metadata.
+
+    An unnamed index is hidden and a named one leads, as pandas prints them. Only for
+    showing: the stored table keeps every column, which the reader rebuilds the index from.
+    """
+    metadata = table.schema.pandas_metadata
+    if not metadata:
+        return table
+    # A RangeIndex is stored as a dict, with no column to hide.
+    index_columns = [name for name in metadata.get("index_columns", []) if isinstance(name, str)]
+    if not index_columns:
+        return table
+    labels = {entry.get("field_name"): entry.get("name") for entry in metadata.get("columns", [])}
+    named = [name for name in index_columns if labels.get(name) is not None]
+    others = [name for name in table.column_names if name not in index_columns]
+    return table.select([name for name in named if name in table.column_names] + others)
+
+
 def _load_arrow_table(blob: bytes) -> Any | None:
     """Open a table-shaped Arrow IPC *blob* as a chunk-consolidated Table.
 
@@ -1413,7 +1433,8 @@ def _apply_search(table: Any, search: str | None) -> Any:
         return table
 
     mask = None
-    for col in table.column_names:
+    # What the viewer shows: a hidden index must not explain why a row matched.
+    for col in _display_table(table).column_names:
         try:
             as_str = pc.cast(table[col], pa.string())
         except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
@@ -1463,7 +1484,7 @@ def read_table_page(
     if table is None:
         return None
 
-    table = _filter_search_sort(table, filters, search, sort_by, sort_dir)
+    table = _display_table(_filter_search_sort(table, filters, search, sort_by, sort_dir))
     total = table.num_rows
 
     page = table.slice(max(0, offset), max(0, limit))
@@ -1489,6 +1510,7 @@ def read_table_summary(blob: bytes) -> dict[str, Any] | None:
     table = _load_arrow_table(blob)
     if table is None:
         return None
+    table = _display_table(table)
 
     columns: list[dict[str, Any]] = []
     for name in table.column_names:
@@ -1528,7 +1550,8 @@ def write_table_export(
     """Serialize a table-shaped Arrow *blob* to CSV or Parquet bytes.
 
     Applies the viewer's filters, search and sort, so a download matches the
-    screen. ``None`` for non-table blobs or an unsupported *fmt*.
+    screen. CSV has the screen's columns too; Parquet is the data, and keeps a hidden
+    index so pandas can restore it. ``None`` for non-table blobs or an unsupported *fmt*.
     """
     table = _load_arrow_table(blob)
     if table is None:
@@ -1539,7 +1562,7 @@ def write_table_export(
     if fmt == "csv":
         import pyarrow.csv as pacsv
 
-        pacsv.write_csv(table, buffer)
+        pacsv.write_csv(_display_table(table), buffer)
     elif fmt == "parquet":
         import pyarrow.parquet as papq
 

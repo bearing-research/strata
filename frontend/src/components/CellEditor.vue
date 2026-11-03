@@ -17,6 +17,7 @@ import {
 import { inputWeightBadge } from '../utils/inputWeights'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
 import { cacheBadgeLabel, cacheBadgeTitle } from '../utils/cacheBadge'
+import { cellRunBadge } from '../utils/cellRunBadge'
 import { renderMarkdownToHtml } from '../utils/markdown'
 import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
 
@@ -299,6 +300,12 @@ const executionMethodLabel = computed(() => {
       return props.cell.executorName
   }
 })
+
+const runBadge = computed(() =>
+  cellRunBadge(props.cell.status, props.cell.output?.cacheHit, executionMethodLabel.value),
+)
+
+const isStale = computed(() => props.cell.status === 'stale')
 
 // --- Streamed prompt output ----------------------------------------------
 // Free text renders raw. JSON streams pretty-print the structurally complete
@@ -1009,15 +1016,16 @@ function outputKey(output: CellOutput, index: number): string {
             <span class="running-spinner" aria-hidden="true"></span>
             running · {{ runningElapsedLabel }}
           </span>
+          <span v-if="runBadge === 'stale'" class="stale-badge" :title="statusTitle">stale</span>
           <span
-            v-if="cell.output?.cacheHit"
+            v-else-if="runBadge === 'cached'"
             class="cache-badge"
             :title="cacheBadgeTitle(cell.output?.cacheLoadMs)"
           >
             &#x26A1; {{ cacheBadgeLabel(cell.output?.cacheSavedMs, cell.output?.cacheLoadMs) }}
           </span>
           <span
-            v-if="executionMethodLabel && !cell.output?.cacheHit"
+            v-else-if="runBadge === 'method'"
             class="exec-method-badge"
             :title="`Executed via ${executionMethodLabel} process`"
           >
@@ -1160,8 +1168,19 @@ function outputKey(output: CellOutput, index: number): string {
         <pre v-else>{{ cell.streamBuffer }}</pre>
       </div>
 
+      <div
+        v-if="!folded && isStale && (cell.output || cellConsoleText(cell))"
+        class="previous-run-note"
+      >
+        Output from the previous run
+      </div>
+
       <!-- Console output (stdout/stderr) -->
-      <div v-if="!folded && cellConsoleText(cell)" class="cell-console">
+      <div
+        v-if="!folded && cellConsoleText(cell)"
+        class="cell-console"
+        :class="{ 'previous-run': isStale }"
+      >
         <pre>{{
           outputExpanded || !isLongText(cellConsoleText(cell))
             ? cellConsoleText(cell)
@@ -1179,7 +1198,7 @@ function outputKey(output: CellOutput, index: number): string {
       </div>
 
       <!-- Output -->
-      <div v-if="!folded && cell.output" class="cell-output">
+      <div v-if="!folded && cell.output" class="cell-output" :class="{ 'previous-run': isStale }">
         <div v-if="cell.output.error" class="output-error">
           <div v-if="remoteExecutionIssueSummary" class="remote-error-summary">
             <span class="remote-error-label">Remote</span>
@@ -1725,6 +1744,13 @@ function outputKey(output: CellOutput, index: number): string {
   border-radius: 3px;
   font-weight: 600;
 }
+.stale-badge {
+  background: var(--tint-warning);
+  color: var(--accent-warning);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
 .loop-progress-badge {
   display: inline-flex;
   align-items: center;
@@ -2151,6 +2177,15 @@ function outputKey(output: CellOutput, index: number): string {
   border-top: 1px solid var(--border-subtle);
   padding: 8px 12px;
   font-size: 13px;
+}
+.previous-run {
+  opacity: 0.55;
+}
+.previous-run-note {
+  border-top: 1px solid var(--border-subtle);
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .output-block + .output-block {
   margin-top: 12px;

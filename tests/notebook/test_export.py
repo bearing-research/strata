@@ -866,3 +866,21 @@ def test_app_view_snapshot_excludes_prompt_cells(tmp_path: Path) -> None:
 
     assert "leaked response" not in rendered
     assert "Summarize" not in rendered
+
+
+def test_export_hides_an_unnamed_pandas_index(tmp_path: Path) -> None:
+    """The real path: serialize a filtered frame, then shape what it stored into rows."""
+    import pandas as pd
+
+    from strata.notebook.export import _normalize_table_preview
+    from strata.notebook.serializer import serialize_value
+
+    df = pd.DataFrame({"region": ["n", "s", "e", "w"], "units": [1, 2, 3, 4]})
+    meta = serialize_value(df[df["units"] != 2], tmp_path, "v")
+
+    assert meta["columns"] == ["region", "units"]
+    assert _normalize_table_preview(meta["preview"], meta["columns"]) == [
+        {"region": "n", "units": 1},
+        {"region": "e", "units": 3},
+        {"region": "w", "units": 4},
+    ]
