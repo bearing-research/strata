@@ -56,6 +56,11 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
+def _elsewhere(properties: dict[str, str]) -> str:
+    """A URL on the catalog's host, on another port."""
+    return f"{properties['uri']}0/v1/config"
+
+
 @pytest.fixture
 def rest_catalog(tmp_path):
     """A REST catalog with ``taxi.trips`` (ids 1 and 2), and its properties."""
@@ -423,6 +428,13 @@ async def test_a_confined_cell_reads_its_catalog_and_nothing_outside_it(
     outside = tmp_path / "secret.txt"
     outside.write_text("do not read")
     source = f"# @sql connection=lake\nSELECT content FROM read_text('{outside}')\n"
+    write_cell(nb_dir, "c1", source)
+    result = await CellExecutor(session).execute_cell("c1", source)
+    assert result.success is False
+    assert "Permission" in (result.error or "")
+
+    # The catalog's endpoint is the only URL it opens up.
+    source = f"# @sql connection=lake\nSELECT content FROM read_text('{_elsewhere(properties)}')\n"
     write_cell(nb_dir, "c1", source)
     result = await CellExecutor(session).execute_cell("c1", source)
     assert result.success is False

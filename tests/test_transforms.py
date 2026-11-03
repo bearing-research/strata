@@ -258,3 +258,15 @@ class TestRunTransform:
         )
 
         assert result.num_rows == 1
+
+
+def test_run_sql_fetches_arrow_without_duckdbs_extra_copy():
+    """DuckDB warns on the way that holds the rows twice."""
+    import warnings
+
+    from strata.transforms.duckdb_sql import run_sql
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        table = run_sql("SELECT sum(x) AS total FROM input0", {"input0": pa.table({"x": [1, 2]})})
+    assert table.to_pylist() == [{"total": 3}]

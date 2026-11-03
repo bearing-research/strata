@@ -24,6 +24,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   rows are deleted. (#1372)
 
 ### Changed
+- **DuckDB 2.0.** Strata now needs `duckdb>=2.0`. DuckDB 2.0 also applies its
+  file-access lockdown to a catalog's HTTP requests, so a confined SQL cell in
+  service mode may now reach its catalog's endpoint, and no other URL. SQL cells,
+  `duckdb_sql@v1` and the client's DuckDB integration fetch Arrow through
+  `sql()`, which holds the rows once. With 2.0, `register_strata_scan` refuses a
+  connection with an unfinished result, as DuckDB does. (#1373)
 - **A cell's keys come from cellgraph.** A cell's provenance hash is now
   computed by cellgraph, over the same inputs as before, so a cell that was
   ready stays ready. One exception: a cell whose `@table` lines name the same

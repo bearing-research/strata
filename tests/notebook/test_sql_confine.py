@@ -50,13 +50,24 @@ def test_a_confined_read_connection_reads_its_own_tables_and_nothing_else(databa
     conn = _open(database, [])
 
     assert conn.execute("SELECT x FROM t").fetchall() == [(1,)]
-    with pytest.raises(duckdb.PermissionException):
-        conn.execute(f"SELECT content FROM read_text('{outside}')").fetchall()
     with pytest.raises(duckdb.InvalidInputException):
         conn.execute("SET enable_external_access = true")
+    with pytest.raises(duckdb.PermissionException):
+        conn.execute(f"SELECT content FROM read_text('{outside}')").fetchall()
     # A cursor, which the executor runs statements on, is confined too.
     with pytest.raises(duckdb.PermissionException):
         conn.cursor().execute(f"SELECT content FROM read_text('{outside}')").fetchall()
+
+
+def test_a_url_it_is_confined_to_admits_only_what_is_under_it(database):
+    conn = _open(database, ["http://catalog.invalid/"])
+
+    with pytest.raises(duckdb.Error) as admitted:
+        conn.execute("SELECT content FROM read_text('http://catalog.invalid/x')").fetchall()
+    assert not isinstance(admitted.value, duckdb.PermissionException)
+    for url in ("http://other.invalid/x", "http://catalog.invalid.example/x"):
+        with pytest.raises(duckdb.PermissionException):
+            conn.cursor().execute(f"SELECT content FROM read_text('{url}')").fetchall()
 
 
 def test_a_confined_write_connection_writes_its_database_and_no_other_file(

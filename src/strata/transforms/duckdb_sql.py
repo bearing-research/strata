@@ -75,7 +75,7 @@ def run_sql(
     for name, table in tables.items():
         conn.register(name, table)
     lock_down(conn)
-    return conn.execute(sql).to_arrow_table()
+    return conn.sql(sql).to_arrow_table()
 
 
 def lock_down(conn: Any) -> None:

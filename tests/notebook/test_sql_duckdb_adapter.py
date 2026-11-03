@@ -377,3 +377,16 @@ def test_duckdb_adapter_is_auto_registered():
     a = get_adapter("duckdb")
     assert a.name == "duckdb"
     assert a.sqlglot_dialect == "duckdb"
+
+
+def test_a_query_fetches_arrow_without_duckdbs_extra_copy():
+    """DuckDB warns on the way that holds the rows twice."""
+    import warnings
+
+    from strata.notebook.sql.cell_executor import _query_arrow
+
+    cursor = duckdb.connect().cursor()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        table = _query_arrow(cursor, "SELECT ? AS a", (7,))
+    assert table.to_pylist() == [{"a": 7}]
