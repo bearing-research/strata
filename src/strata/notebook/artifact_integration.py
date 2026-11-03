@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import time
 from collections.abc import Mapping
 from enum import Enum
@@ -35,6 +36,9 @@ from strata.notebook.quiesce import assert_writable
 if TYPE_CHECKING:
     from vestigo.store import ArtifactVersion
 
+
+# What a copy holds of a blob at once, whatever the blob's size.
+BLOB_COPY_CHUNK_BYTES = 1024 * 1024
 
 # A cell run creates and finalizes its outputs in one pass, and no build runner writes
 # here, so a ``building`` row this old was left by a crash.
@@ -402,14 +406,33 @@ class NotebookArtifactManager:
         Raises:
             ValueError: If the artifact is not found or not ready.
         """
-        artifact = self.artifact_store.get_artifact(artifact_id, version)
-        if artifact is None or artifact.state not in ("ready", "superseded"):
-            raise ValueError(f"Artifact {artifact_id}@v={version} not found or not ready")
-
+        self.ensure_readable(artifact_id, version)
         blob_data = self.artifact_store.read_blob(artifact_id, version)
         if blob_data is None:
             raise ValueError(f"Blob data not found for {artifact_id}@v={version}")
         return blob_data
+
+    def ensure_readable(self, artifact_id: str, version: int) -> None:
+        """Raise ``ValueError`` unless an artifact version is there and ready."""
+        artifact = self.artifact_store.get_artifact(artifact_id, version)
+        if artifact is None or artifact.state not in ("ready", "superseded"):
+            raise ValueError(f"Artifact {artifact_id}@v={version} not found or not ready")
+
+    def copy_blob(self, artifact_id: str, version: int, path: Path) -> bool:
+        """Copy a version's blob to *path* in bounded chunks; ``False`` if it has none.
+
+        A copy that fails leaves no file.
+        """
+        reader = self.artifact_store.open_blob_reader(artifact_id, version)
+        if reader is None:
+            return False
+        try:
+            with reader as source, path.open("wb") as target:
+                shutil.copyfileobj(source, target, BLOB_COPY_CHUNK_BYTES)
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        return True
 
     def get_artifact_preview(self, artifact_id: str, version: int) -> dict[str, Any]:
         """Get artifact metadata and a data preview.

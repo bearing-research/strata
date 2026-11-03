@@ -5003,15 +5003,14 @@ class CellExecutor:
         output_dir: Path,
     ) -> None:
         """Write each dataset's bytes from the notebook's store into *output_dir* as an input."""
-        store = self.session.get_artifact_manager().artifact_store
         for name, dataset in sorted(datasets.items()):
             artifact_id, _, version = dataset.local_ref.partition("@v=")
-            blob = store.read_blob(artifact_id, int(version))
-            if blob is None:
-                continue
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(dataset.content_type, "")
             file_name = f"__dataset_{name}{ext}"
-            self._write_input_file(output_dir / file_name, blob, dataset.content_type, artifact_id)
+            if not self._write_input_file(
+                output_dir / file_name, artifact_id, int(version), dataset.content_type
+            ):
+                continue
             input_specs[name] = {
                 "content_type": dataset.content_type,
                 "file": file_name,
@@ -5833,11 +5832,10 @@ class CellExecutor:
             artifact = artifact_mgr.artifact_store.get_latest_version(artifact_id)
             if artifact is None:
                 return None
-            blob_data = artifact_mgr.load_artifact_data(artifact_id, artifact.version)
             content_type = artifact.params.get("content_type") or "pickle/object"
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
-            self._write_input_file(input_file, blob_data, content_type, artifact_id)
+            self._write_ready_input_file(input_file, artifact_id, artifact.version, content_type)
             return {
                 "content_type": content_type,
                 "file": f"{safe_filename_stem(file_stem)}{ext}",
@@ -5860,9 +5858,7 @@ class CellExecutor:
             content_type = artifact.params.get("content_type") or "pickle/object"
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
-            self._write_input_file(
-                input_file, artifact_mgr.load_artifact_data(art_id, version), content_type, art_id
-            )
+            self._write_ready_input_file(input_file, art_id, version, content_type)
             return {"content_type": content_type, "file": f"{safe_filename_stem(file_stem)}{ext}"}
 
         def _attach_injected(var_name: str, spec: dict[str, Any]) -> None:
@@ -6264,15 +6260,30 @@ class CellExecutor:
         return True
 
     def _write_input_file(
-        self, path: Path, blob: bytes, content_type: str, artifact_id: str
-    ) -> None:
-        """Write an input's bytes for the harness; an output folder is rebuilt beside them."""
-        path.write_bytes(blob)
+        self, path: Path, artifact_id: str, version: int, content_type: str
+    ) -> bool:
+        """Copy an input's bytes for the harness; ``False`` if its blob is gone.
+
+        An output folder is rebuilt beside them, from its manifest, which is parsed whole.
+        """
+        artifact_mgr = self.session.get_artifact_manager()
+        if not artifact_mgr.copy_blob(artifact_id, version, path):
+            return False
         if content_type == output_dirs.CONTENT_TYPE:
             folder = path.with_name(path.name.removesuffix(output_dirs.EXTENSION) + ".dir")
-            store = self.session.get_artifact_manager().artifact_store
             # The notebook's store is untenanted.
-            output_dirs.materialize(store, artifact_id, blob, folder, tenant=None)
+            output_dirs.materialize(
+                artifact_mgr.artifact_store, artifact_id, path.read_bytes(), folder, tenant=None
+            )
+        return True
+
+    def _write_ready_input_file(
+        self, path: Path, artifact_id: str, version: int, content_type: str
+    ) -> None:
+        """As ``_write_input_file``; raises ``ValueError`` if the version is not ready or gone."""
+        self.session.get_artifact_manager().ensure_readable(artifact_id, version)
+        if not self._write_input_file(path, artifact_id, version, content_type):
+            raise ValueError(f"Blob data not found for {artifact_id}@v={version}")
 
     def _collect_output_dir(self, cell_id: str, name: str, output_dir: Path | None) -> bytes:
         """Store a ``# @output_dir`` folder's files and return its manifest.
@@ -6404,8 +6415,9 @@ class CellExecutor:
             content_type = version.params.get("content_type") or "pickle/object"
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             file_name = f"{RESTORE_DIR}/{safe_filename_stem(name)}{ext}"
-            blob = artifact_mgr.load_artifact_data(version.id, version.version)
-            self._write_input_file(output_dir / file_name, blob, content_type, version.id)
+            self._write_ready_input_file(
+                output_dir / file_name, version.id, version.version, content_type
+            )
             parts[name] = {
                 "content_type": content_type,
                 "file": file_name,
@@ -8516,13 +8528,11 @@ class CellExecutor:
         art = artifact_mgr.artifact_store.get_artifact(artifact_id, version)
         if art is None:
             return None
-        blob = artifact_mgr.artifact_store.read_blob(artifact_id, version)
-        if blob is None:
-            return None
         content_type = _artifact_content_type(art)
         ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
         file_name = f"{safe_filename_stem(var_name)}{ext}"
-        self._write_input_file(target_dir / file_name, blob, content_type, artifact_id)
+        if not self._write_input_file(target_dir / file_name, artifact_id, version, content_type):
+            return None
         return {"content_type": content_type, "file": file_name}
 
     def _upstream_artifact_uris(self, cell_id: str) -> dict[str, dict[str, str]]:
