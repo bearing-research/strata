@@ -671,6 +671,8 @@ to one item in each instance. What `<source>` is decides what an item is:
 | a table from another cell, with `key=` | row | the `key=` column | the row changes       |
 
 With `glob=`, a remote mount downloads only the files the pattern names.
+The [`each_pipeline`](../examples/each_pipeline.md) example runs over 287 files from a
+public bucket and syncs a table in a REST catalog.
 
 A file is bound as a `pathlib.Path`, and a link to a file counts as a file. A mount
 that is itself one file is refused. A row is bound as a dict of JSON-safe values, with

@@ -49,6 +49,7 @@ strata run examples/iris_classification
 | [`model_variants/`](model_variants/) | `# @variant` annotation: three classifiers sharing one DAG slot. |
 | [`model_variants_sweep/`](model_variants_sweep/) | Sweep mode: every variant runs and one downstream cell compares them, plus a `# @per_variant` fan-out. |
 | [`loop_hill_climb/`](loop_hill_climb/) | `# @loop` annotation: iterative refinement with carried state. |
+| [`each_pipeline/`](each_pipeline/) | `# @each` and `# @write_table ... sync`: run once per file and keep a table in a REST catalog in step. Needs Docker. |
 | [`s3_mount/`](s3_mount/) | `# @mount` annotation: read data from an S3 bucket as a local `Path`. |
 | [`sql_orders_report/`](sql_orders_report/) | SQL cells over a local SQLite file; SQL and Python interleave through the same DAG. Needs the `sql` and `sql-sqlite` extras. |
 | [`review_triage/`](review_triage/) | Prompt cell with `@output_schema`: structured LLM output validated against JSON Schema. |

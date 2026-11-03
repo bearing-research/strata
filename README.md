@@ -277,6 +277,7 @@ new or changed files. The copy runs in Strata's own environment, so install the 
 | [iris_classification](https://bearing-research.github.io/strata/latest/examples/iris_classification/) | End-to-end ML, DAG branching, mixed output types                                    |
 | [titanic_ml](https://bearing-research.github.io/strata/latest/examples/titanic_ml/)                   | Feature engineering + model comparison                                              |
 | [s3_mount](https://bearing-research.github.io/strata/latest/examples/s3_mount/)                       | Reading a public S3 bucket via a mount                                              |
+| [each_pipeline](https://bearing-research.github.io/strata/latest/examples/each_pipeline/)             | Run once per file, keep a table in a REST catalog in step                           |
 | [arxiv_classifier](https://bearing-research.github.io/strata/latest/examples/arxiv_classifier/)       | Distributed execution via `@worker` + Modal GPU + Fly cluster                       |
 | [markdown_showcase](https://bearing-research.github.io/strata/latest/examples/markdown_showcase/)     | Markdown cells, dynamic `Markdown(...)` outputs, security cases                     |
 | [library_cells](https://bearing-research.github.io/strata/latest/examples/library_cells/)             | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
