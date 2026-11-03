@@ -159,6 +159,11 @@ exhaustive commit history.
   time in its tooltip, or plain `cached` when no earlier run priced it or the load
   took longer than the run. A team hit in Run All keeps the publisher's cost, as a
   single-cell hit does. (#1393)
+- **A stale cell says it is stale.** It keeps no `cached` pill, and its previous
+  output stays, dimmed, under "Output from the previous run". (#1394)
+- **A pandas index no longer shows as a column.** `__index_level_0__` is hidden in the
+  notebook, the app view, exports and CSV downloads, and a named index leads as pandas
+  prints it. Parquet downloads keep it so pandas can restore the index. (#1394)
 - **An R cell restored to an earlier source is served from cache.** Going back to
   source that already ran finds its variables and displays again instead of running
   the cell, as a Python cell does. (#1384)
