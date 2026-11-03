@@ -3861,9 +3861,16 @@ exhaustive commit history.</p>
   rows are deleted. A remote mount downloads only what <code>glob=</code> names, and is
   weighed by that before a large read is asked about. The <code>each_pipeline</code> example
   runs this over 287 real files into a REST catalog. (#1372, #1374, #1378, #1379)</li>
+<li><strong>A notebook can keep a warehouse in its own folder.</strong> <code>@table</code> and <code>@write_table</code>
+  take <code>./warehouse#&lt;namespace&gt;.&lt;table&gt;</code>, resolved from the notebook's directory
+  wherever the server was started, so a committed notebook names no absolute path.
+  (#1381)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell's inputs no longer pass through server memory.</strong> An upstream value streams
+  from the store into the run in 1 MiB chunks, so a 1 GB frame adds about 1 MB to the
+  server's memory instead of 1 GB, per consuming cell per run. (#1383)</li>
 <li><strong>DuckDB 2.0.</strong> Strata now needs <code>duckdb&gt;=2.0</code>. DuckDB 2.0 also applies its
   file-access lockdown to a catalog's HTTP requests, so a confined SQL cell in
   service mode may now reach its catalog's endpoint, and no other URL. SQL cells,
