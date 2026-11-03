@@ -2579,6 +2579,12 @@
 </tbody>
 </table>
 <p>Cell-level mounts (under <code>[[cells.mounts]]</code>) supplement notebook-level ones.</p>
+<p>A notebook-level mount reaches only the cells that name it. Other cells don't list it,
+download it, or run again when it changes, and a read-write one doesn't stop them being
+cached. A Python cell calling <code>eval</code>, <code>exec</code>, <code>globals</code>, <code>locals</code>, <code>vars</code> or <code>dir</code> gets
+every mount, since its reads can't be told from its source, and so does a cell's test
+run, which reads <code>cell.&lt;name&gt;</code>. A mount declared on a cell is always bound. An R cell
+gets every mount. A SQL cell reads the mounts its <a href="#connections">connection</a> names.</p>
 <h3 id="mount-options-on-a-shared-server">Mount options on a shared server<a class="headerlink" href="#mount-options-on-a-shared-server" title="Permanent link">&para;</a></h3>
 <p>On a server in service mode, a mount's <code>options</code> may set only these keys, whether or not the mount names a credential:</p>
 <ul>
