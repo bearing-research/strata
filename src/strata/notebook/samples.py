@@ -40,12 +40,6 @@ SAMPLES = (
         description="Create, filter, group and merge DataFrames.",
         warm_imports=("pyarrow", "pandas"),
     ),
-    Sample(
-        name="review_triage",
-        title="Review Triage (Structured Prompt)",
-        description="A prompt cell returning validated JSON. Needs an LLM API key to run.",
-        warm_imports=("pyarrow", "pandas"),
-    ),
 )
 
 

@@ -52,9 +52,11 @@ def test_a_copy_of_each_sample_reads_as_a_notebook_with_its_cells(sample, tmp_pa
     assert all(cell.source.strip() for cell in notebook.cells)
 
 
-def test_the_prompt_sample_keeps_its_language_under_its_own_extension(tmp_path):
-    notebook = parse_notebook(copy_sample(get_sample("review_triage"), tmp_path))
-    assert notebook.get_cell("triage").language == "prompt"
+def test_every_sample_runs_without_a_key():
+    """A first run should not stop at a missing API key, and a prompt cell needs one."""
+    for sample in SAMPLES:
+        toml = tomllib.loads((SAMPLES_DIR / sample.name / "notebook.toml").read_text())
+        assert all(cell["language"] != "prompt" for cell in toml["cells"]), sample.name
 
 
 def test_the_samples_directory_holds_only_listed_samples():

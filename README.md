@@ -105,8 +105,8 @@ interactive data viewer and a read-only app view.
 [Notebook quickstart →](https://bearingresearch.com/strata/latest/getting-started/notebook/)
 
 New here? `strata tutorial caching` opens a two-minute tour of what the cache saves.
-`strata tutorial` lists the other samples that ship with Strata, and **Open a sample**
-on the home page does the same.
+`strata tutorial` lists the samples that ship with Strata, and **Open a sample** on the
+home page does the same.
 
 Coming from Jupyter? `strata import notebook.ipynb` converts a notebook.
 Like marimo and Pluto, Strata builds the graph from variable references; unlike
