@@ -23,6 +23,7 @@ from strata.notebook.tui.app import (
     _single_table_uri,
     _source_preview,
     _source_renderable,
+    _state_cell,
     _time_str,
 )
 from strata.notebook.tui.client import TuiClient, TuiClientError, _json_or_error
@@ -62,10 +63,18 @@ def test_glyph_known_and_unknown():
         (CellView(id="a", status="ready", blocked=True), "blocked"),
         (CellView(id="a", status="error", blocked=True), "blocked"),
         (CellView(id="a", status="running", blocked=True), "running"),
+        (CellView(id="a", status="ready", language="markdown"), "idle"),
     ],
 )
 def test_a_cell_reads_as_its_state(cell, state):
     assert cell_state(cell) == state
+
+
+def test_a_markdown_cell_shows_no_state():
+    cell = CellView(id="a", status="ready", language="markdown")
+    assert _state_cell(cell).plain == ""
+    assert _time_str(cell) == ""
+    assert _state_cell(CellView(id="b", status="ready")).plain == "✓"
 
 
 def test_the_terminal_keeps_to_the_state_table():

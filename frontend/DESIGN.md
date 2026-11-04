@@ -28,6 +28,9 @@ A cell that is both takes the first of: a run in flight (`running`, `dispatching
 result because it is what stops the next run. A run in flight outranks it because that run is on
 the source from before the error.
 
+A markdown cell has no state. It never runs, so it shows no icon and no color, even though the
+server keeps it `ready` so that nothing waits on it.
+
 ## Tokens
 
 Each state has a pair: `--state-<name>` for the icon, border and DAG node stroke, and

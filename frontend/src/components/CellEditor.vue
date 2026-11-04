@@ -752,7 +752,12 @@ function outputKey(output: CellOutput, index: number): string {
   >
     <!-- Left gutter -->
     <div class="cell-gutter">
-      <span class="status-dot" role="img" :aria-label="stateInfo.label" :title="statusDotTitle"
+      <span
+        v-if="cell.language !== 'markdown'"
+        class="status-dot"
+        role="img"
+        :aria-label="stateInfo.label"
+        :title="statusDotTitle"
         ><component :is="stateInfo.icon" :fill="state === 'ready' ? 'currentColor' : 'none'"
       /></span>
       <div class="cell-actions">
