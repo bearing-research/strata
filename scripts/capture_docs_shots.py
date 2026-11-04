@@ -40,8 +40,7 @@ QUICKSTART_DOC = REPO_ROOT / "docs" / "getting-started" / "notebook.md"
 # TUI shots (SVG, no server)
 # --------------------------------------------------------------------------
 
-# Wide enough to keep the cell list's "time" column on screen, short enough
-# not to dwarf the surrounding prose.
+# A common terminal size, short enough not to dwarf the surrounding prose.
 TUI_SIZE = (132, 28)
 
 # The loader's tabular output in the shape the server sends, so the TUI renders
@@ -143,9 +142,6 @@ async def _capture_tui(name: str, title: str, script) -> Path:
         async with app.run_test(size=TUI_SIZE) as pilot:
             app._set_connection("connected")
             await script(app, pilot)
-            # At the default split the source preview pushes timing off screen.
-            for _ in range(3):
-                await pilot.press("ctrl+right")
             await pilot.pause()
             svg = app.export_screenshot(title=title)
     finally:
@@ -206,8 +202,6 @@ async def _capture_tui_frames(title: str, script) -> list[str]:
         app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="docs")
         async with app.run_test(size=TUI_SIZE) as pilot:
             app._set_connection("connected")
-            for _ in range(3):
-                await pilot.press("ctrl+right")
 
             async def snap() -> None:
                 await pilot.pause()
