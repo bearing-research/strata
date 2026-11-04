@@ -157,6 +157,7 @@ const showShortcuts = ref(false)
 // Large DAGs don't fit a narrow sidebar. Height and collapsed state persist.
 const DAG_DRAWER_HEIGHT_KEY = 'strata:dagDrawerHeight'
 const DAG_DRAWER_COLLAPSED_KEY = 'strata:dagDrawerCollapsed'
+const DAG_DOCKED_KEY = 'strata:dagDocked'
 const DAG_DRAWER_DEFAULT_HEIGHT = 320
 const DAG_DRAWER_MIN_HEIGHT = 120
 const DAG_DRAWER_MAX_HEIGHT_FRACTION = 0.8
@@ -181,6 +182,28 @@ const dagDrawerCollapsed = ref(
     }
   })(),
 )
+
+const dagDocked = ref(
+  (() => {
+    try {
+      return localStorage.getItem(DAG_DOCKED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })(),
+)
+const dagSelected = ref<string | null>(null)
+
+function toggleDagDock() {
+  dagDocked.value = !dagDocked.value
+  // Back in the drawer, the graph is only visible with the drawer open on its tab.
+  if (!dagDocked.value) selectBottomTab('execution')
+  try {
+    localStorage.setItem(DAG_DOCKED_KEY, dagDocked.value ? '1' : '0')
+  } catch {
+    // Storage blocked: the choice lasts for this page.
+  }
+}
 
 function clampDagDrawerHeight(h: number): number {
   const maxH = Math.round(window.innerHeight * DAG_DRAWER_MAX_HEIGHT_FRACTION)
@@ -754,11 +777,11 @@ function goHome() {
           </button>
           <router-link
             v-if="overflow.includes('artifacts')"
-            to="/artifacts"
+            :to="`/notebook/${sessionId}/artifacts`"
             class="overflow-item"
             role="menuitem"
             data-testid="nav-artifacts"
-            title="Artifact store"
+            title="What this notebook has stored"
           >
             Artifacts
           </router-link>
@@ -901,6 +924,10 @@ function goHome() {
           </div>
         </div>
 
+        <aside v-if="dagDocked" class="dag-dock" data-testid="dag-dock">
+          <DagView v-model:selected="dagSelected" docked @toggle-dock="toggleDagDock" />
+        </aside>
+
         <div
           v-if="!sidebarRail"
           class="sidebar-resizer"
@@ -982,11 +1009,11 @@ function goHome() {
         </header>
         <div v-if="!dagDrawerCollapsed" class="dag-drawer-body">
           <template v-if="bottomTab === 'execution'">
-            <div class="dag-drawer-graph">
-              <DagView />
+            <div v-if="!dagDocked" class="dag-drawer-graph">
+              <DagView v-model:selected="dagSelected" @toggle-dock="toggleDagDock" />
             </div>
             <NotesPanel />
-            <div class="dag-drawer-profiling">
+            <div class="dag-drawer-profiling" :class="{ 'graph-docked': dagDocked }">
               <ProfilingPanel />
             </div>
           </template>

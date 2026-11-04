@@ -3,6 +3,7 @@
 // children are the from_uris of edges pointing at it.
 
 import type { LineageGraph } from '../composables/useStrata'
+import { outputLabel } from './storeRows.ts'
 
 export interface LineageTreeNode {
   uri: string
@@ -44,9 +45,7 @@ function cellOutputLabel(uri: string, cellName?: (cellId: string) => string | un
   const match = CELL_OUTPUT.exec(uri)
   if (!match) return null
   const [, cellId, output] = match
-  const display = /^__display__(\d+)/.exec(output)
-  const shown = display ? `display ${display[1]}` : output
-  return `${cellName?.(cellId) || cellId} · ${shown}`
+  return `${cellName?.(cellId) || cellId} · ${outputLabel(output, uri)}`
 }
 
 export function lineageToTree(

@@ -14,7 +14,7 @@ import tomllib
 import uuid
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import anyio.to_thread
 import httpx
@@ -3032,6 +3032,54 @@ async def get_notebook_dag(notebook_id: str, session: SessionDep) -> dict:
     """Get the notebook's DAG: edges, topological order, leaves, roots, per-cell metadata."""
 
     return _format_dag(session)
+
+
+@router.get("/{notebook_id}/store/stats")
+def get_notebook_store_stats(notebook_id: str, session: SessionDep) -> dict:
+    """``GET /v1/artifacts/stats`` over this notebook's own store."""
+    return session.get_artifact_manager().artifact_store.stats()
+
+
+@router.get("/{notebook_id}/store/artifacts")
+def list_notebook_store_artifacts(
+    notebook_id: str,
+    session: SessionDep,
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    state: Literal["ready", "building", "failed", "superseded"] | None = None,
+    sort: Literal["created_at", "byte_size", "row_count"] = "created_at",
+    order: Literal["asc", "desc"] = "desc",
+) -> dict:
+    """``GET /v1/artifacts`` over this notebook's own store, each row with the cell behind it."""
+    from strata.notebook.annotations import parse_annotations
+
+    manager = session.get_artifact_manager()
+    rows = []
+    for artifact in manager.artifact_store.list_artifacts(
+        limit=limit, offset=offset, state=state, sort=sort, order=order
+    ):
+        cell_id, output = manager.cell_output_of(artifact.id) or (None, None)
+        cell = session.notebook_state.get_cell(cell_id) if cell_id else None
+        rows.append(
+            {
+                "artifact_uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
+                "artifact_id": artifact.id,
+                "version": artifact.version,
+                "state": artifact.state,
+                "row_count": artifact.row_count,
+                "byte_size": artifact.byte_size,
+                "created_at": artifact.created_at,
+                "cell_id": cell_id,
+                "cell_name": parse_annotations(cell.source).name if cell else None,
+                "output": output,
+            }
+        )
+    return {
+        "artifacts": rows,
+        "limit": limit,
+        "offset": offset,
+        "notebook_name": session.notebook_state.name,
+    }
 
 
 @router.get("/{notebook_id}/artifacts")

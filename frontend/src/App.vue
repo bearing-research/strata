@@ -210,6 +210,18 @@
   display: flex;
   flex-direction: column;
 }
+.dag-dock {
+  width: clamp(320px, 33vw, 560px);
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+}
+.dag-drawer-profiling.graph-docked {
+  flex: 1;
+  width: auto;
+  border-left: none;
+}
 .dag-drawer-profiling {
   width: 360px;
   flex-shrink: 0;
@@ -334,6 +346,13 @@ body.resizing-sidebar {
 
   .sidebar-resizer {
     display: none;
+  }
+
+  .dag-dock {
+    width: auto;
+    height: 320px;
+    border-left: none;
+    border-top: 1px solid var(--border);
   }
 
   .sidebar {

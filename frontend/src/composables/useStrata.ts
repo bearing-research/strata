@@ -1538,6 +1538,10 @@ export interface ArtifactRow {
   row_count: number | null
   byte_size: number | null
   created_at: number | null
+  /** Set by a notebook's store, for a row a cell produced. */
+  cell_id?: string | null
+  cell_name?: string | null
+  output?: string | null
 }
 
 export interface ArtifactQuery {
@@ -1554,6 +1558,7 @@ export interface ArtifactListResponse {
   artifacts: ArtifactRow[]
   limit: number
   offset: number
+  notebook_name?: string
 }
 
 async function getArtifactStats(): Promise<ArtifactStats> {
@@ -1584,6 +1589,33 @@ async function getArtifacts(query: ArtifactQuery = {}): Promise<ArtifactListResp
     limit: data.limit ?? query.limit ?? 100,
     offset: data.offset ?? query.offset ?? 0,
   }
+}
+
+async function getNotebookStoreStats(sessionId: string): Promise<ArtifactStats> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${sessionId}/store/stats`)
+  if (!resp.ok) {
+    await throwApiError(resp, "Failed to fetch this notebook's store")
+  }
+  return readJson<ArtifactStats>(resp)
+}
+
+async function getNotebookStoreArtifacts(
+  sessionId: string,
+  query: ArtifactQuery = {},
+): Promise<ArtifactListResponse> {
+  const params = new URLSearchParams()
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset !== undefined) params.set('offset', String(query.offset))
+  if (query.state) params.set('state', query.state)
+  if (query.sort) params.set('sort', query.sort)
+  if (query.order) params.set('order', query.order)
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${sessionId}/store/artifacts?${params.toString()}`,
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, "Failed to fetch this notebook's store")
+  }
+  return readJson<ArtifactListResponse>(resp)
 }
 
 // --- Public API -----------------------------------------------------------
@@ -1659,5 +1691,7 @@ export function useStrata() {
     getLogs,
     getArtifactStats,
     getArtifacts,
+    getNotebookStoreStats,
+    getNotebookStoreArtifacts,
   }
 }
