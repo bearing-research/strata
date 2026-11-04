@@ -180,6 +180,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **The browser tab shows Strata's diamond.** The app never linked a tab icon, and the
+  file it shipped was the Vite template's logo. (#1406)
 - **The table viewer no longer shows NaN and infinity as `null`.** JSON cannot carry
   them, so a column holding `inf` read `null` and a range ending there read `1.5 – null`.
   Pages, previews and min/max now send `"NaN"`, `"inf"` and `"-inf"`. A pandas NaN is
