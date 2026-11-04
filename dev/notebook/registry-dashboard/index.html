@@ -2278,12 +2278,12 @@ works the same way. The artifact lands in the registry and is <strong>stamped wi
 cell that produced it</strong>.</p>
 <h2 id="3-the-per-cell-promote-strip">3. The per-cell promote strip<a class="headerlink" href="#3-the-per-cell-promote-strip" title="Permanent link">&para;</a></h2>
 <p>A compact strip appears <strong>right below the cell</strong> that published:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>⬡ taxi/tip-model  v1   [Promote ▾]   ⎘
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>⬡ taxi/tip-model  v1   [Promote ▾]   [View lineage]
 </code></pre></div>
 <ul>
 <li><code>⬡ taxi/tip-model v1</code> - the name and version your cell put.</li>
 <li><code>[Promote ▾]</code> - promote this artifact (next step).</li>
-<li><code>⎘</code> - open its lineage.</li>
+<li><strong>View lineage</strong> - open its lineage.</li>
 </ul>
 <p>Promote where you trained the model, without scrolling anywhere.</p>
 <p>A cell does not have to publish with a name to share a result. With a team
@@ -2317,8 +2317,8 @@ top to bottom:</p>
    queued, with <strong>Approve / Reject</strong> buttons (the human gate, in the UI).</li>
 <li><strong>Names table</strong> - every registry name, each row showing its <strong>alias chips</strong>
    (<code>★champion=v1</code>, <code>candidate=v2</code>), latest version, <strong>tags</strong>, the cells
-   that read it (<strong>Read by</strong>), a <strong><code>[Promote ▾]</code></strong> menu, and a <strong><code>⎘</code></strong>
-   lineage button. This is the same data on the per-cell strip, but for
+   that read it (<strong>Read by</strong>), a <strong><code>[Promote ▾]</code></strong> menu, and a <strong>View lineage</strong>
+   button. This is the same data on the per-cell strip, but for
    <em>all</em> names - not just what the current notebook published.</li>
 <li><strong>Audit timeline</strong> (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.</li>
@@ -2347,7 +2347,7 @@ The <strong>pending banner</strong> appears at the top of the Registry tab; clic
 to apply it (the approver becomes the audit actor) or <strong>Reject</strong> to discard it.
 Unprotected aliases (<code>candidate</code>) still apply immediately.</p>
 <h2 id="7-view-lineage">7. View lineage<a class="headerlink" href="#7-view-lineage" title="Permanent link">&para;</a></h2>
-<p>Click the <strong><code>⎘</code></strong> button on the strip or any names-table row. The <strong>lineage
+<p>Click the <strong>View lineage</strong> button on the strip or any names-table row. The <strong>lineage
 view</strong> renders the provenance chain:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>model ← features ← scan ← table @ snapshot
 </code></pre></div>

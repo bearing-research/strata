@@ -3881,6 +3881,9 @@ exhaustive commit history.</p>
   that ran and was then edited read <code>idle</code> while it went on showing that run's
   output. It now reads <code>stale · source changed</code>, and reverting the edit returns
   it and the cells below it to <code>ready</code>, shown as cached. (#1397)</li>
+<li><strong>One icon set.</strong> The UI's icons are SVGs from Lucide, not emoji and Unicode glyphs
+  that render differently per OS, and every icon-only button has an accessible name.
+  (#1398)</li>
 <li><strong>A cell's inputs no longer pass through server memory.</strong> An upstream value streams
   from the store into the run in 1 MiB chunks, so a 1 GB frame adds about 1 MB to the
   server's memory instead of 1 GB, per consuming cell per run. (#1383)</li>
