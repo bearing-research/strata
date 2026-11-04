@@ -181,7 +181,12 @@ class TestPythonAndR:
         _, result = await self._run(tmp_path, language, source, reader)
 
         assert result.success, result.error
-        expected = ["_store_outputs", "_push_to_team_store", "_store_display_outputs"]
+        expected = [
+            "_store_outputs",
+            "_push_to_team_store",
+            "_store_display_outputs",
+            "_store_console_outputs",
+        ]
         if language == "python":
             # Its run closes after the store. The one at the end is the dispatcher's, for all.
             expected.insert(1, "_close_open_run")
@@ -373,9 +378,14 @@ class TestBatch:
         result = await running
 
         assert result.completed
-        assert steps[:3] == ["_store_outputs", "_store_display_outputs", "_push_to_team_store"]
-        # w is a leaf: a console, and no displays to store.
-        assert steps[3:] == ["_store_outputs", "_store_console_outputs", "_push_to_team_store"]
+        assert steps[:4] == [
+            "_store_outputs",
+            "_store_display_outputs",
+            "_store_console_outputs",
+            "_push_to_team_store",
+        ]
+        # w has no displays to store.
+        assert steps[4:] == ["_store_outputs", "_store_console_outputs", "_push_to_team_store"]
         assert _latest(session, "v", "__display__0") == 1
 
     async def test_a_false_store_is_rejected_after_the_displays(self, tmp_path, monkeypatch, steps):
@@ -455,13 +465,13 @@ class TestLoop:
         assert result.success, result.error
         assert _after_run(steps) == ["_store_display_outputs", "_store_console_outputs"]
 
-    async def test_a_consumed_carry_stores_no_console(self, tmp_path, steps):
+    async def test_a_consumed_carry_stores_its_console_too(self, tmp_path, steps):
         session = await self._session(tmp_path, ("w", "python", "seen = state\n"))
         steps.clear()
 
         await CellExecutor(session).execute_cell("l", self.LOOP)
 
-        assert _after_run(steps) == ["_store_display_outputs"]
+        assert _after_run(steps) == ["_store_display_outputs", "_store_console_outputs"]
 
     async def test_a_display_failure_leaves_execute_cell_as_an_exception(
         self, tmp_path, monkeypatch, steps
@@ -518,8 +528,18 @@ class TestEach:
         result = await CellExecutor(session).execute_cell("e", self.SOURCE)
 
         assert result.success, result.error
-        instance = ["_store_outputs", "_push_to_team_store", "_store_display_outputs"]
-        assert _after_run(steps) == [*instance, *instance, "_store_each_manifests"]
+        instance = [
+            "_store_outputs",
+            "_push_to_team_store",
+            "_store_display_outputs",
+            "_store_console_outputs",
+        ]
+        assert _after_run(steps) == [
+            *instance,
+            *instance,
+            "_store_each_manifests",
+            "_store_console_outputs",
+        ]
 
     @pytest.mark.parametrize(
         ("step", "outcome", "error"),

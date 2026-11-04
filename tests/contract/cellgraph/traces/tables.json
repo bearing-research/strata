@@ -1260,7 +1260,8 @@
      "run": {
       "cache_hit": true,
       "provenance_hash": "c2c1347e97c8f4fa8cf5244747f5ff96961c5b370c0e0ce2429b19e7d86f0545",
-      "status": "ok"
+      "status": "ok",
+      "stdout": "1003\n"
      },
      "staleness": {
       "reasons": [],

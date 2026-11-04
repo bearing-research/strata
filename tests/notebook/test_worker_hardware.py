@@ -32,6 +32,11 @@ EOT
 A100 = {"name": "NVIDIA A100-SXM4-80GB", "memory_mb": 81920, "driver": "535.104.05"}
 
 
+def _outputs(manager, cell_id):
+    """A cell's stored variables, without the record of what its run printed."""
+    return [item for item in manager.list_cell_artifacts(cell_id) if item[0] != "__console__"]
+
+
 def _on_path(tmp_path: Path, monkeypatch, script: str) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -129,6 +134,6 @@ def test_health_and_a_cell_run_report_the_same_hardware(
     assert result.success, result.error
     assert result.execution_method == "executor"
     manager = session.get_artifact_manager()
-    ((_, artifact),) = manager.list_cell_artifacts("up")
+    ((_, artifact),) = _outputs(manager, "up")
     params = json.loads(artifact.transform_spec)["params"]
     assert json.loads(params["hardware"]) == health["hardware"]

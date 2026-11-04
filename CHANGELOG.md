@@ -169,6 +169,12 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A cache hit shows the console of the run it stands for.** Edit a cell, run the
+  edit and undo the edit, and the cell read `ready` with the edit's value and
+  console. It now reads `stale` until it runs, and running it brings back the first
+  run's console, displays and variables without executing anything. Hits on cells
+  with downstream readers replay their console too, where they used to show nothing
+  new, and a hit's saved time is the cost of the run it replays. (#1400)
 - **A table's columns line up, and a null reads as a null.** A numeric column's
   header, stats and cells now right-align together, a null among them. Nulls reach
   the viewer as nulls, not as empty strings, and the Stats row no longer goes blank

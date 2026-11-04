@@ -115,7 +115,7 @@ A cell's console follows three rules, in this order of frames:
 
 1. `cell_status` with `status: "running"` starts a run: clear the cell's stdout and stderr. A `running` frame that carries `remote_build_state` only moves a remote cell's badge between `starting` and `running` during the run; leave the console as it is.
 2. `cell_console` appends `text` to its `stream`; a frame with `chunk_seq: 0` first clears that stream.
-3. `cell_output` and `cell_error` that carry `stdout` / `stderr` strings replace the console with them. The `cell_output` of a cache hit that replays no console carries the cell's last console, as `notebook_state` does.
+3. `cell_output` and `cell_error` that carry `stdout` / `stderr` strings replace the console with them. A cache hit carries the console of the run behind it. A hit with no such record, such as one pulled from a team store, carries the cell's console as `notebook_state` holds it: kept if it came from this same key, otherwise empty.
 
 A cell run as an upstream inside another cell's run may get its console and result without a `running` frame; rule 3 still leaves the right console. In `notebook_state`, a running cell's `console_stdout` / `console_stderr` hold what this run has shown so far (empty until it prints); any other cell's hold its last run's console.
 

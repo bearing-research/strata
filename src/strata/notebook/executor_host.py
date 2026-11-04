@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.dag import NotebookDag
+    from strata.notebook.execution_result import CachedConsole
     from strata.notebook.models import CellOutput, DatasetSpec, InputWeight, NotebookState
     from strata.notebook.pool import WarmProcessPool
     from strata.notebook.session import NotebookSession
@@ -68,8 +69,8 @@ class ExecutorHost(Protocol):
     def collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]: ...
 
     def resolve_cached_console(
-        self, cell_id: str, provenance_hash: str
-    ) -> tuple[str, str] | None: ...
+        self, cell_id: str, provenance_hash: str, *, variant: str | None = None
+    ) -> CachedConsole | None: ...
 
     def resolve_cached_display_outputs(
         self,

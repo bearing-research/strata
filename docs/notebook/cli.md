@@ -45,11 +45,10 @@ finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
 entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
 `cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
 `error` / `reason` where applicable, `traceback` when the cell raised, and
-`error_code` when the failure has a stable name, such as `fetch_pin_mismatch`). For a cell that produces an output
-artifact, a cache hit replays that artifact without re-emitting console
-output, so `stdout` can be absent on warm runs (`--force` re-executes). A
-leaf cell that only `print`s is different: its stdout/stderr are cached by
-provenance and replayed on a warm hit. Errors and pre-flight diagnostics go to
+`error_code` when the failure has a stable name, such as `fetch_pin_mismatch`). A
+cache hit replays the stdout/stderr of the run behind it, cached by provenance
+along with its outputs (`--force` re-executes). A result pulled from a team store
+brings no console, so `stdout` is absent there. Errors and pre-flight diagnostics go to
 stderr regardless of format. The executor's per-cell INFO logs are held back
 during a run; set `STRATA_LOG_LEVEL=INFO` to see them. Pipe stdout to `jq`:
 `strata run ... --format json | jq '.cells[] | select(.status == "error")'`.
@@ -62,7 +61,7 @@ reads, which the notebook otherwise keeps no artifact for), so the notebook's
 final results have digests to compare; a leaf that is a cache hit from a run
 outside `strata run` (the UI, `cell run`, MCP) lists only what that run stored,
 so pass `--force` once before comparing; a value that cannot be serialized is
-skipped. Display outputs appear as `__display__N`; a leaf's cached console is
+skipped. Display outputs appear as `__display__N`; a cell's cached console is
 not listed. An output stored before digests were recorded gets its
 digest computed from its bytes when the report is written. The ZIP export's
 `provenance.json` lists the same `outputs` per cell.

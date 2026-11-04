@@ -15,6 +15,11 @@ from strata.notebook import datasets as datasets_module
 from strata.notebook.annotations import parse_annotations
 
 
+def _outputs(manager, cell_id):
+    """A cell's stored variables, without the record of what its run printed."""
+    return [item for item in manager.list_cell_artifacts(cell_id) if item[0] != "__console__"]
+
+
 def _store_version(
     store,
     blob: bytes,
@@ -314,7 +319,7 @@ class TestLineage:
         assert downstream.success, downstream.error
 
         manager = session.get_artifact_manager()
-        ((_, scored),) = manager.list_cell_artifacts("c1")
+        ((_, scored),) = _outputs(manager, "c1")
         graph = ArtifactService().build_lineage(
             manager.artifact_store,
             artifact=scored,
@@ -326,7 +331,7 @@ class TestLineage:
         assert graph.direct_inputs == ["strata://name/taxi/model@champion"]
         assert ("taxi-model", 2) in {(n.artifact_id, n.version) for n in graph.nodes}
 
-        ((_, doubled),) = manager.list_cell_artifacts("c2")
+        ((_, doubled),) = _outputs(manager, "c2")
         tree = _walk_lineage(manager.artifact_store, doubled, max_depth=5)
         (score_node,) = tree["inputs"]
         (model_node,) = score_node["inputs"]
@@ -349,7 +354,7 @@ class TestLineage:
         assert downstream.success, downstream.error
 
         manager = session.get_artifact_manager()
-        ((_, scored),) = manager.list_cell_artifacts("c1")
+        ((_, scored),) = _outputs(manager, "c1")
         graph = ArtifactService().build_lineage(
             manager.artifact_store,
             artifact=scored,
@@ -361,7 +366,7 @@ class TestLineage:
         steps = {(n.artifact_id, n.version) for n in graph.nodes if n.transform_ref}
         assert {("taxi-model", 1), ("features", 1), ("raw", 1)} <= steps
 
-        ((_, doubled),) = manager.list_cell_artifacts("c2")
+        ((_, doubled),) = _outputs(manager, "c2")
         tree = _walk_lineage(manager.artifact_store, doubled, max_depth=5)
         assert _chain(tree)[1:] == [
             f"{scored.id}@v={scored.version}",
@@ -596,7 +601,7 @@ class TestReaders:
 
         # Once a result reaches the registry's store, every notebook sees the read.
         manager = session.get_artifact_manager()
-        ((_, scored),) = manager.list_cell_artifacts("c1")
+        ((_, scored),) = _outputs(manager, "c1")
         copy_chain(manager.artifact_store, registry, scored, max_depth=5)
         response = httpx.get(f"{notebook_personal_server['base_url']}/v1/registry/summary")
         rows = {row["name"]: row for row in response.json()["names"]}
@@ -652,7 +657,7 @@ class TestARemoteRegistry:
 
         assert result.success, result.error
         store = session.get_artifact_manager().artifact_store
-        ((_, scored),) = session.get_artifact_manager().list_cell_artifacts("c1")
+        ((_, scored),) = _outputs(session.get_artifact_manager(), "c1")
         assert _chain(_walk_lineage(store, scored, max_depth=5))[1:] == [
             "taxi-model@v=1",
             "features@v=1",

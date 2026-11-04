@@ -241,9 +241,9 @@ what produced it the first time. The notebook keeps each cell's
 current value plus its last 3 earlier ones
 ([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](../reference/configuration.md#notebook)),
 so reverting a recent edit is a hit too and an older value is
-computed again. Even a cell that only `print`s and
-feeds nothing downstream is cached: its console output is keyed by
-the same hash and replayed on a warm re-run. A cell that must always
+computed again. A cell's console output is keyed by the same hash and
+replayed with it, so even a cell that only `print`s and feeds nothing
+downstream is cached. A cell that must always
 run (a side effect, a live API call, a fresh random draw) opts out
 with [`# @nocache`](../notebook/annotations.md#nocache).
 
