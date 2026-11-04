@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,7 +17,7 @@ from vestigo.provenance import derive_subkey
 import strata.notebook.cell_paths
 from strata.notebook import each
 from strata.notebook.annotations import LoopAnnotation
-from strata.notebook.cell_paths import batch, cell_tests, fanout, loop, r
+from strata.notebook.cell_paths import batch, cell_tests, fanout, loop, python, r
 from strata.notebook.cell_paths.cell_tests import CellTestsContext, run_cell_tests
 from strata.notebook.cell_paths.context import (
     PathContext,
@@ -27,14 +28,21 @@ from strata.notebook.cell_paths.fanout import FanoutContext, run_each_cell, run_
 from strata.notebook.cell_paths.loop import LoopContext, run_loop_cell
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.cell_paths.prompt import run_prompt_cell
+from strata.notebook.cell_paths.python import (
+    LocalDispatchContext,
+    PythonContext,
+    dispatch_local,
+    run_python_cell,
+)
 from strata.notebook.cell_paths.r import RContext, run_r_cell
 from strata.notebook.cell_paths.sql import run_sql_cell
 from strata.notebook.cell_paths.widget import run_widget_cell
 from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.executor import CellExecutor
-from strata.notebook.harness_user import LocalExecutionRefused
-from strata.notebook.models import CellOutput, MountMode, WorkerBackendType
-from strata.notebook.mounts import MountWrite
+from strata.notebook.harness_user import LocalExecutionRefused, UnsafeRunFile
+from strata.notebook.local_runs import RunFenced, RunRefused
+from strata.notebook.models import CellOutput, MountMode, MountSpec, WorkerBackendType
+from strata.notebook.mounts import MountWrite, ResolvedMount
 from strata.notebook.parser import parse_notebook
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.session import NotebookSession
@@ -2775,3 +2783,1232 @@ class TestRunBatch:
         assert events == [ran.cell_results[0]]
         assert events[0].status == "cell_error"
         assert events[0].error == batch.cell_timeout_message(0.01)
+
+
+async def test_the_executor_shares_its_run_state_with_the_python_path(tmp_path):
+    nb = create_notebook(tmp_path / "nb", "Python")
+    add_cell_to_notebook(nb, "c1", None)
+    executor = CellExecutor(NotebookSession(parse_notebook(nb), nb))
+
+    context = executor._python_context()
+
+    assert context.received_output_files is executor._received_output_files
+    assert context.folder_listings is executor._folder_listings
+    assert context.each_items is executor._each_items
+    assert context.each_listed is executor._each_listed
+    assert context.branch_inits is executor._branch_inits
+    assert context.open_runs is executor._open_runs
+    assert context.variant_writes is executor._variant_writes
+
+
+class TestPythonInputs:
+    """What goes to a harness besides the source: fetched bytes and a restored release."""
+
+    def test_two_fetches_of_one_file_name_stay_two_files(self, tmp_path):
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        (tmp_path / "out").mkdir()
+        (tmp_path / "a" / "data.csv").write_text("first")
+        (tmp_path / "b" / "data.csv").write_text("second")
+        specs = {}
+
+        python._add_fetch_inputs(
+            specs,
+            {"a": tmp_path / "a" / "data.csv", "b": tmp_path / "b" / "data.csv"},
+            tmp_path / "out",
+        )
+
+        assert (tmp_path / "out" / specs["a"]["file"]).read_text() == "first"
+        assert (tmp_path / "out" / specs["b"]["file"]).read_text() == "second"
+        assert specs["a"]["content_type"] == "file/path"
+
+    def test_a_fetch_is_copied_where_it_cannot_be_linked(self, tmp_path, monkeypatch):
+        (tmp_path / "out").mkdir()
+        (tmp_path / "data.csv").write_text("bytes")
+
+        def no_link(*_args):
+            raise OSError("cross-device link")
+
+        monkeypatch.setattr(python.os, "link", no_link)
+        specs = {}
+
+        python._add_fetch_inputs(specs, {"a": tmp_path / "data.csv"}, tmp_path / "out")
+
+        assert (tmp_path / "out" / specs["a"]["file"]).read_text() == "bytes"
+
+    def test_the_harness_user_skips_uv(self, monkeypatch):
+        monkeypatch.setattr(python, "resolve_uv", lambda: "/bin/uv")
+
+        command = python.python_harness_command(
+            Path("harness.py"), Path("nb"), Path("m.json"), Path("venv/python"), object()
+        )
+
+        assert command == ["venv/python", "harness.py", "m.json"]
+
+    def test_uv_runs_in_the_notebook(self, monkeypatch):
+        monkeypatch.setattr(python, "resolve_uv", lambda: "/bin/uv")
+
+        command = python.python_harness_command(
+            Path("harness.py"), Path("nb"), Path("m.json"), Path("venv/python"), None
+        )
+
+        assert command == ["/bin/uv", "run", "--directory", "nb", "python", "harness.py", "m.json"]
+
+    def test_without_uv_there_is_no_command(self, monkeypatch):
+        monkeypatch.setattr(python, "resolve_uv", lambda: None)
+
+        assert (
+            python.python_harness_command(
+                Path("harness.py"), Path("nb"), Path("m.json"), Path("venv/python"), None
+            )
+            is None
+        )
+
+    @staticmethod
+    def _restore_host(state):
+        version = SimpleNamespace(
+            id="nb_n_cell_c_var_x", version=2, params={"content_type": "json/object"}
+        )
+        bundle = SimpleNamespace(
+            release=SimpleNamespace(state=state, sequence=4), outputs=[version]
+        )
+        return SimpleNamespace(
+            get_artifact_manager=lambda: SimpleNamespace(
+                release_store=SimpleNamespace(bundle=lambda _id: bundle)
+            )
+        )
+
+    def test_a_restore_names_where_each_part_came_from(self, tmp_path):
+        run = SimpleNamespace(restores_from="r1", resumed_from="r1")
+
+        restore = python.restore_manifest(
+            self._restore_host("accepted"), lambda *_args: None, run, tmp_path
+        )
+
+        assert restore["parts"]["x"]["uri"] == "strata://artifact/nb_n_cell_c_var_x@v=2"
+        assert restore["sequence"] == 4
+
+    def test_a_release_that_was_not_accepted_is_not_restored(self, tmp_path):
+        run = SimpleNamespace(restores_from="r1", resumed_from="r1")
+
+        with pytest.raises(RuntimeError, match="not an accepted release"):
+            python.restore_manifest(
+                self._restore_host("rejected"), lambda *_args: None, run, tmp_path
+            )
+
+
+class TestPython:
+    """The moved path against fakes; the harness-backed behavior is in ``test_executor.py``."""
+
+    SOURCE = "x = 1\n"
+    DISPLAY = SimpleNamespace(
+        artifact_uri="strata://artifact/display@v=1",
+        model_dump=lambda: {"kind": "display"},
+    )
+    CONSOLE = SimpleNamespace(stdout="old out", stderr="old err", run_ms=9)
+    LOCAL = SimpleNamespace(
+        name="local", backend=WorkerBackendType.LOCAL, config=SimpleNamespace(url="", transport="")
+    )
+    HTTP = SimpleNamespace(
+        name="w",
+        backend=WorkerBackendType.EXECUTOR,
+        config=SimpleNamespace(url="http://w", transport="direct"),
+    )
+    SIGNED = SimpleNamespace(
+        name="w",
+        backend=WorkerBackendType.EXECUTOR,
+        config=SimpleNamespace(url="http://w", transport="signed"),
+    )
+    EMBEDDED = SimpleNamespace(
+        name="e",
+        backend=WorkerBackendType.EXECUTOR,
+        config=SimpleNamespace(url="embedded://local", transport="direct"),
+    )
+
+    @staticmethod
+    def _prov(annotations=None, **overrides):
+        fields = {"nocache": False, "tables": [], "table_writes": [], "stochastic": False}
+        prov = SimpleNamespace(
+            source_hash="source",
+            runtime_env={"K": "V"},
+            effective_worker=None,
+            env_hash="env",
+            input_hashes=["input"],
+            mount_specs=[],
+            mount_fingerprints=[],
+            table_fingerprints=[],
+            provenance_hash="prov",
+            has_rw_mount=False,
+            annotations=SimpleNamespace(**{**fields, **(annotations or {})}),
+            fetch_error=None,
+            fetch_error_code=None,
+            dataset_error=None,
+            fetched={},
+            datasets=[],
+            table_snapshots={},
+            table_reads=[],
+            key_parts={},
+            reads=lambda *_args: {},
+        )
+        prov.over_mounts = lambda _mounts: prov
+        prov.for_instance = lambda _instance: prov
+        for name, value in overrides.items():
+            setattr(prov, name, value)
+        return prov
+
+    def _fakes(
+        self,
+        monkeypatch,
+        prov=None,
+        *,
+        worker=None,
+        consumed=(),
+        hit=None,
+        displays=(),
+        console=None,
+        result=None,
+        **overrides,
+    ):
+        """A host and a context with nothing behind them, and a record of what they were asked."""
+        worker = worker or self.LOCAL
+        prov = prov or self._prov()
+        calls = SimpleNamespace(
+            materialized=[],
+            promoted=[],
+            recorded=[],
+            applied=[],
+            persisted=[],
+            kept=[],
+            stored=[],
+            pushed=[],
+            consoles=[],
+            writes=[],
+            good=[],
+            dispatched=[],
+            prepared=[],
+            opened=[],
+            closed=[],
+            loaded=[],
+            cell=SimpleNamespace(
+                display_outputs=[],
+                display_output=None,
+                artifact_uris={},
+                artifact_uri=None,
+                cache_hit=False,
+                last_provenance_hash=None,
+                mutation_defines=["defined"],
+            ),
+            export_error=None,
+        )
+        monkeypatch.setattr(python, "resolve_worker_spec", lambda *_args: worker)
+        monkeypatch.setattr(
+            python, "write_module_export_outputs", lambda *_args: calls.export_error
+        )
+        host = SimpleNamespace(
+            notebook_state=SimpleNamespace(id="nb", get_cell=lambda _id: calls.cell),
+            dag=SimpleNamespace(each_cells=set(), consumed_variables={"c": set(consumed)}),
+            venv_python=Path("venv/python"),
+            get_artifact_manager=lambda: SimpleNamespace(
+                cell_artifact_id=lambda cell_id, var, variant=None: f"{cell_id}.{var}",
+                artifact_store=SimpleNamespace(get_latest_version=lambda _id: hit),
+            ),
+            resolve_cached_display_outputs=lambda *_args: list(displays),
+            resolve_cached_console=lambda *_args, **_kwargs: console,
+            record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
+                (args, kwargs)
+            ),
+            apply_execution_result_metadata=lambda cell_id, res: calls.applied.append(
+                (cell_id, res)
+            ),
+            persist_display_outputs=lambda cell_id, outputs: calls.persisted.append(
+                (cell_id, outputs)
+            ),
+        )
+
+        async def execute_each_cell(*_args, **_kwargs):
+            raise AssertionError("not an each cell")
+
+        async def execute_fanout_cell(*_args, **_kwargs):
+            raise AssertionError("not a fan-out")
+
+        async def materialize_upstreams(cell_id):
+            calls.materialized.append(cell_id)
+
+        async def compute_provenance(*_args):
+            return prov
+
+        def remote_execution_metadata(spec, remote_build_id=None):
+            metadata = {
+                "remote_worker": spec.name,
+                "remote_transport": python.worker_transport(spec),
+            }
+            return {**metadata, **({"remote_build_id": remote_build_id} if remote_build_id else {})}
+
+        async def find_or_pull_outputs(*_args, **_kwargs):
+            return hit, None
+
+        def promote_reverted_leaf(*args):
+            calls.promoted.append(args)
+            return False
+
+        def load_input_blobs(cell_id, output_dir, fanout_variant=None):
+            calls.loaded.append(fanout_variant)
+            return {}
+
+        async def prepare_mounts(specs, cell_id):
+            calls.prepared.append(specs)
+            return {}
+
+        def open_local_run(**kwargs):
+            calls.opened.append(kwargs)
+            return SimpleNamespace(restores_from=None)
+
+        local_runs = SimpleNamespace(open=open_local_run, start_renewing=lambda _run: "renewing")
+
+        async def dispatch_execution(*args, **kwargs):
+            calls.dispatched.append((args, kwargs))
+            outcome = result if result is not None else {"success": True}
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome, args[4], "cold", {}
+
+        def parse_result(cell_id, res, duration_ms, method):
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=res.get("success", True),
+                error=res.get("error"),
+                stdout="printed",
+                stderr="warned",
+                duration_ms=duration_ms,
+                display_outputs=res.get("display_outputs", []),
+                mutation_warnings=res.get("mutation_warnings", []),
+                execution_method=method,
+            )
+
+        async def collect(*_args):
+            return "collected"
+
+        def store_outputs(*args, **kwargs):
+            calls.stored.append((args, kwargs))
+            return True
+
+        async def close_open_run(cell_id):
+            calls.closed.append(cell_id)
+
+        async def push_to_team_store(**kwargs):
+            calls.pushed.append(kwargs)
+
+        async def sync_back_mounts(_mounts):
+            return []
+
+        fields = {
+            "execute_each_cell": execute_each_cell,
+            "execute_fanout_cell": execute_fanout_cell,
+            "fanout_variants": lambda _cell_id: None,
+            "materialize_upstreams": materialize_upstreams,
+            "compute_provenance": compute_provenance,
+            "remote_execution_metadata": remote_execution_metadata,
+            "manifest_tables": lambda *_args: {},
+            "find_or_pull_outputs": find_or_pull_outputs,
+            "validate_output_hit": lambda *args: (args[5], args[7]),
+            "promote_reverted_leaf": promote_reverted_leaf,
+            "moved": lambda _cell_id: ({}, {}),
+            "table_write_refusal": lambda _source: None,
+            "load_input_blobs": load_input_blobs,
+            "add_dataset_inputs": lambda *_args: None,
+            "prepare_mounts": prepare_mounts,
+            "local_runs": lambda: local_runs,
+            "input_refs": lambda *_args: {},
+            "restore_manifest": lambda *_args: None,
+            "dispatch_execution": dispatch_execution,
+            "parse_result": parse_result,
+            "collect_output_dirs_off_loop": collect,
+            "keep_failed_output_dirs": lambda *args, **kwargs: calls.kept.append((args, kwargs)),
+            "store_outputs": store_outputs,
+            "close_open_run": close_open_run,
+            "push_to_team_store": push_to_team_store,
+            "store_result_displays": lambda *_args, **_kwargs: None,
+            "store_console_outputs": lambda *args, **kwargs: calls.consoles.append((args, kwargs)),
+            "store_mount_writes": lambda *args, **kwargs: calls.writes.append((args, kwargs)),
+            "record_good_run": lambda *args: calls.good.append(args),
+            "timeout_message": lambda _cell_id, seconds: f"timed out after {seconds}",
+            "sync_back_mounts": sync_back_mounts,
+            "received_output_files": {},
+            "folder_listings": {},
+            "each_items": {},
+            "each_listed": {},
+            "branch_inits": {},
+            "open_runs": {},
+            "variant_writes": {},
+        }
+        calls.context = PythonContext(**{**fields, **overrides})
+        calls.host = host
+        return host, calls.context, calls
+
+    @staticmethod
+    async def _run(host, context, *, source=None, use_cache=True, materialize=True, variant=None):
+        return await run_python_cell(
+            host,
+            context,
+            "c",
+            TestPython.SOURCE if source is None else source,
+            7.0,
+            0.0,
+            materialize_upstreams=materialize,
+            use_cache=use_cache,
+            fanout_variant=variant,
+        )
+
+    # A run's start
+
+    async def test_a_run_drops_what_an_earlier_one_uploaded(self, monkeypatch):
+        host, context, _calls = self._fakes(
+            monkeypatch,
+            received_output_files={"c": ["old"]},
+            folder_listings={"c": ["old"]},
+        )
+
+        await self._run(host, context)
+
+        assert "c" not in context.received_output_files
+        assert "c" not in context.folder_listings
+
+    async def test_upstreams_are_materialized_only_when_asked(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch)
+
+        await self._run(host, context, materialize=False)
+        assert calls.materialized == []
+
+        await self._run(host, context, materialize=True)
+        assert calls.materialized == ["c"]
+
+    # Fetches
+
+    @staticmethod
+    def _fetched(tmp_path):
+        path = tmp_path / "data.csv"
+        path.write_text("bytes")
+        return {"f": path}
+
+    async def test_a_fetch_is_a_read_only_mount_here(self, monkeypatch, tmp_path):
+        prov = self._prov(fetched=self._fetched(tmp_path))
+        host, context, calls = self._fakes(monkeypatch, prov)
+
+        await self._run(host, context)
+
+        args, _kwargs = calls.dispatched[0]
+        assert "f" not in args[2]
+        assert [(m.name, m.mode) for m in args[3]] == [("f", MountMode.READ_ONLY)]
+
+    async def test_a_fetch_travels_as_an_input_to_a_worker(self, monkeypatch, tmp_path):
+        prov = self._prov(fetched=self._fetched(tmp_path))
+        host, context, calls = self._fakes(monkeypatch, prov, worker=self.HTTP)
+
+        await self._run(host, context)
+
+        args, _kwargs = calls.dispatched[0]
+        assert args[2]["f"]["content_type"] == "file/path"
+        assert args[3] == []
+
+    # The cache check
+
+    async def test_a_consumer_does_not_hit_on_a_console_alone(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, consumed=["x"], console=self.CONSOLE)
+
+        result = await self._run(host, context)
+
+        assert result.cache_hit is False
+        assert calls.dispatched
+
+    async def test_a_leaf_is_not_promoted_when_the_cache_is_off(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch)
+
+        await self._run(host, context, use_cache=False)
+
+        assert calls.promoted == []
+
+    async def test_a_leaf_hits_on_its_displays_alone(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, displays=[self.DISPLAY])
+
+        result = await self._run(host, context)
+
+        assert result.cache_hit is True
+        assert result.execution_method == "cached"
+        assert result.artifact_uri == self.DISPLAY.artifact_uri
+        assert calls.dispatched == []
+
+    async def test_a_hit_updates_the_cell(self, monkeypatch):
+        other = SimpleNamespace(artifact_uri="u2", model_dump=lambda: {"kind": "last"})
+        host, context, calls = self._fakes(monkeypatch, displays=[self.DISPLAY, other])
+
+        result = await self._run(host, context)
+
+        assert calls.cell.cache_hit is True
+        assert calls.cell.display_outputs == [self.DISPLAY, other]
+        assert calls.cell.display_output is other
+        assert result.display_output == {"kind": "last"}
+
+    async def test_a_hit_reports_how_long_the_check_took(self, monkeypatch):
+        host, context, _calls = self._fakes(monkeypatch, displays=[self.DISPLAY])
+
+        # Started at the epoch, so any elapsed time is far above zero.
+        result = await self._run(host, context)
+
+        assert result.duration_ms > 0
+
+    async def test_a_signed_workers_hit_is_a_ready_build(self, monkeypatch):
+        host, context, _calls = self._fakes(
+            monkeypatch, worker=self.SIGNED, displays=[self.DISPLAY]
+        )
+
+        result = await self._run(host, context)
+
+        assert result.remote_build_state == "ready"
+
+    @pytest.mark.parametrize(
+        ("variant", "last_hash", "replaces"),
+        [("v", None, False), (None, "prov", False), (None, "older", True)],
+    )
+    async def test_a_hit_with_no_console_record_replaces_only_another_keys_console(
+        self, monkeypatch, variant, last_hash, replaces
+    ):
+        host, context, calls = self._fakes(monkeypatch, displays=[self.DISPLAY])
+        calls.cell.last_provenance_hash = last_hash
+
+        result = await self._run(host, context, variant=variant)
+
+        assert result.replaces_console is replaces
+
+    async def test_a_variants_hit_is_left_for_its_fan_out_to_record(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, displays=[self.DISPLAY])
+
+        await self._run(host, context, variant="v")
+        assert calls.recorded == []
+
+        await self._run(host, context)
+        assert calls.recorded[0][0] == ("c", "prov", "source", "env")
+
+    # Refusals before anything runs
+
+    async def test_a_refused_table_write_does_not_run(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, table_write_refusal=lambda _s: "refused")
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert result.error == "refused"
+        assert result.execution_method == "error"
+        assert calls.dispatched == []
+
+    async def test_a_second_run_of_a_running_build_is_refused(self, monkeypatch):
+        def refuse(**_kwargs):
+            raise RunRefused("already running")
+
+        host, context, calls = self._fakes(
+            monkeypatch,
+            local_runs=lambda: SimpleNamespace(open=refuse),
+        )
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert result.error == "already running"
+        assert result.execution_method == "error"
+        assert calls.dispatched == []
+
+    # Mounts
+
+    async def test_an_embedded_worker_gets_mounts_this_server_prepared(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, worker=self.EMBEDDED)
+
+        await self._run(host, context)
+
+        assert calls.prepared == [[]]
+        assert calls.dispatched[0][1]["resolved_mounts"] == {}
+
+    async def test_an_http_worker_prepares_its_own(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, worker=self.HTTP)
+
+        await self._run(host, context)
+
+        assert calls.prepared == []
+        assert calls.dispatched[0][1]["resolved_mounts"] is None
+
+    @staticmethod
+    def _listed_mount():
+        spec = MountSpec(name="raw", uri="file:///raw")
+        return spec, ResolvedMount(spec=spec, local_path=Path("/raw"), fingerprint="fp")
+
+    async def test_a_plain_run_lists_its_mounts_itself(self, monkeypatch):
+        spec, mount = self._listed_mount()
+        prov = self._prov(mount_specs=[spec])
+        host, context, calls = self._fakes(monkeypatch, prov, each_listed={"c": {"raw": mount}})
+
+        await self._run(host, context)
+
+        assert calls.prepared == [[spec]]
+
+    async def test_an_item_binds_as_a_mount_of_its_own_file(self, monkeypatch, tmp_path):
+        spec, mount = self._listed_mount()
+        item = SimpleNamespace(instance="inst", path=tmp_path / "a.csv", digest="digest")
+        prov = self._prov(mount_specs=[spec])
+        host, context, calls = self._fakes(
+            monkeypatch,
+            prov,
+            each_listed={"c": {"raw": mount}},
+            each_items={"c": {"v": item}},
+        )
+
+        await self._run(
+            host,
+            context,
+            source="# @mount raw file:///raw ro\n# @each path in raw\nx = 1\n",
+            variant="v",
+        )
+
+        assert calls.prepared == [[]]
+        bound = calls.dispatched[0][1]["resolved_mounts"]
+        assert bound["raw"] is mount
+        assert bound["path"].fingerprint == "digest"
+        assert bound["path"].local_path == item.path
+        assert bound["path"].spec.mode == MountMode.READ_ONLY
+
+    # The run
+
+    async def test_a_local_run_opens_under_the_cells_timeout(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch)
+
+        await self._run(host, context)
+
+        assert calls.opened[0]["timeout_seconds"] == 7.0
+
+    async def test_a_run_is_told_what_the_cell_mutates(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch)
+
+        await self._run(host, context)
+
+        assert calls.dispatched[0][1]["mutation_defines"] == ["defined"]
+
+    async def test_a_signed_build_is_ready_once_it_returns(self, monkeypatch):
+        host, context, _calls = self._fakes(monkeypatch, worker=self.SIGNED)
+
+        result = await self._run(host, context)
+
+        assert result.remote_build_state == "ready"
+
+    async def test_a_failed_run_keeps_its_output_dirs_under_its_variant(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, result={"success": False, "error": "boom"})
+
+        await self._run(host, context, variant="v")
+
+        assert calls.kept[0][0][3:5] == ("prov", "env")
+        assert calls.kept[0][1] == {"variant": "v"}
+
+    async def test_a_failed_run_keeps_no_displays(self, monkeypatch):
+        host, context, calls = self._fakes(
+            monkeypatch,
+            result={"success": False, "error": "boom", "display_outputs": [{"kind": "x"}]},
+        )
+
+        await self._run(host, context)
+
+        assert calls.persisted == [("c", None)]
+
+    # After a run
+
+    async def test_an_export_failure_keeps_what_the_run_reported(self, monkeypatch):
+        host, context, calls = self._fakes(
+            monkeypatch,
+            worker=self.HTTP,
+            result={"success": True, "mutation_warnings": ["careful"]},
+        )
+        calls.export_error = "cannot export"
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert result.error == "cannot export"
+        assert result.stdout == "printed"
+        assert result.stderr == "warned"
+        assert result.mutation_warnings == ["careful"]
+        assert result.remote_worker == "w"
+        assert calls.stored == []
+
+    async def test_outputs_are_stored_with_what_the_run_reported(self, monkeypatch):
+        prov = self._prov(annotations={"stochastic": True})
+        host, context, calls = self._fakes(
+            monkeypatch,
+            prov,
+            result={"success": True, "build_env": "linux", "hardware": {"gpu": "a"}},
+        )
+
+        await self._run(host, context, variant="v")
+
+        _args, kwargs = calls.stored[0]
+        assert kwargs["variant"] == "v"
+        assert kwargs["build_env"] == "linux"
+        assert kwargs["hardware"] == {"gpu": "a"}
+        assert kwargs["collected"] == "collected"
+        assert kwargs["stochastic"] is True
+        assert calls.pushed == [{"cell_id": "c", "variant": "v"}]
+
+    async def test_a_table_write_failure_is_named_and_not_pushed(self, monkeypatch):
+        def store_outputs(*_args, **_kwargs):
+            raise TableWriteError("no such warehouse")
+
+        host, context, calls = self._fakes(monkeypatch, store_outputs=store_outputs)
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert result.error == "no such warehouse"
+        assert calls.closed == ["c"]
+        assert calls.pushed == []
+
+    async def test_a_false_store_fails_the_run_and_is_not_pushed(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, store_outputs=lambda *_a, **_k: False)
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert calls.pushed == []
+        assert calls.consoles == []
+
+    async def test_only_a_cacheable_runs_console_is_stored(self, monkeypatch):
+        prov = self._prov(annotations={"nocache": True})
+        host, context, calls = self._fakes(monkeypatch, prov)
+
+        await self._run(host, context)
+
+        assert calls.consoles == []
+
+    async def test_a_console_is_stored_with_its_display_count_and_variant(self, monkeypatch):
+        host, context, calls = self._fakes(
+            monkeypatch, result={"success": True, "display_outputs": [{"kind": "x"}]}
+        )
+
+        await self._run(host, context, variant="v")
+
+        _args, kwargs = calls.consoles[0]
+        assert kwargs["display_count"] == 1
+        assert kwargs["variant"] == "v"
+        assert calls.persisted == [("c", [{"kind": "x"}])]
+
+    @staticmethod
+    def _rw_write():
+        return {"mount": "out", "uri": "file:///out", "files": []}
+
+    async def test_what_a_worker_reports_writing_is_recorded(self, monkeypatch):
+        spec = MountSpec(name="out", uri="file:///out", mode=MountMode.READ_WRITE)
+        prov = self._prov(mount_specs=[spec])
+        host, context, calls = self._fakes(
+            monkeypatch,
+            prov,
+            worker=self.HTTP,
+            result={"success": True, "mount_writes": [self._rw_write()]},
+        )
+
+        await self._run(host, context)
+
+        written = calls.writes[0][0][2]
+        assert [write.mount for write in written] == ["out"]
+        assert calls.good[0][5] == written
+
+    async def test_mounts_a_run_used_are_synced_back(self, monkeypatch):
+        write = MountWrite(mount="out", uri="file:///out", files=[])
+        synced = []
+
+        async def sync_back_mounts(mounts):
+            synced.append(mounts)
+            return [write]
+
+        host, context, calls = self._fakes(monkeypatch, sync_back_mounts=sync_back_mounts)
+
+        async def dispatch_execution(*args, **_kwargs):
+            return {"success": True}, args[4], "cold", {"out": "resolved"}
+
+        context = replace(context, dispatch_execution=dispatch_execution)
+
+        await self._run(host, context)
+
+        assert synced == [{"out": "resolved"}]
+        assert calls.writes[0][0][2] == [write]
+
+    async def test_a_failed_sync_keeps_the_workers_metadata(self, monkeypatch):
+        async def sync_back_mounts(_mounts):
+            raise OSError("disk gone")
+
+        async def dispatch_execution(*args, **_kwargs):
+            return {"success": True}, args[4], "cold", {"out": "resolved"}
+
+        host, context, calls = self._fakes(
+            monkeypatch,
+            worker=self.HTTP,
+            sync_back_mounts=sync_back_mounts,
+            dispatch_execution=dispatch_execution,
+        )
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert result.remote_worker == "w"
+        assert calls.good == []
+
+    async def test_a_variant_leaves_its_good_run_to_the_fan_out(self, monkeypatch):
+        write = MountWrite(mount="out", uri="file:///out", files=[])
+
+        async def sync_back_mounts(_mounts):
+            return [write]
+
+        async def dispatch_execution(*args, **_kwargs):
+            return {"success": True}, args[4], "cold", {"out": "resolved"}
+
+        host, context, calls = self._fakes(
+            monkeypatch,
+            sync_back_mounts=sync_back_mounts,
+            dispatch_execution=dispatch_execution,
+        )
+
+        await self._run(host, context, variant="v")
+
+        assert calls.good == []
+        assert context.variant_writes == {"c": [write]}
+
+    async def test_a_good_run_is_recorded(self, monkeypatch):
+        prov = self._prov()
+        host, context, calls = self._fakes(monkeypatch, prov)
+
+        await self._run(host, context)
+
+        assert calls.good == [("c", "prov", "source", "env", prov, [])]
+
+    # Failures
+
+    async def test_a_cancel_keeps_what_the_worker_uploaded(self, monkeypatch):
+        host, context, calls = self._fakes(
+            monkeypatch, result=asyncio.CancelledError(), received_output_files={}
+        )
+
+        async def dispatch_execution(*_args, **_kwargs):
+            context.received_output_files["c"] = ["up"]
+            raise asyncio.CancelledError()
+
+        context = replace(context, dispatch_execution=dispatch_execution)
+
+        with pytest.raises(asyncio.CancelledError):
+            await self._run(host, context, variant="v")
+
+        assert calls.kept[0][0][:3] == ("c", self.SOURCE, None)
+        assert calls.kept[0][1] == {"variant": "v"}
+
+    @staticmethod
+    def _lost():
+        return RemoteExecutionError("lost it", remote_build_state="failed", remote_error_code="E1")
+
+    async def test_a_lost_worker_keeps_what_it_uploaded_and_says_so(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, worker=self.HTTP)
+
+        async def dispatch_execution(*_args, **_kwargs):
+            context.received_output_files["c"] = ["up"]
+            raise self._lost()
+
+        context = replace(context, dispatch_execution=dispatch_execution)
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert result.error == "lost it"
+        assert result.duration_ms > 0
+        assert result.remote_worker == "w"
+        assert result.remote_build_state == "failed"
+        assert result.remote_error_code == "E1"
+        assert calls.kept[0][0][:3] == ("c", self.SOURCE, None)
+        assert calls.persisted == [("c", None)]
+        assert calls.applied == [("c", result)]
+
+    async def test_a_lost_worker_with_no_uploads_keeps_nothing(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, worker=self.HTTP, result=self._lost())
+
+        await self._run(host, context)
+
+        assert calls.kept == []
+
+    async def test_a_timeout_names_the_limit_and_clears_the_displays(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, worker=self.HTTP, result=TimeoutError())
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert result.error == "timed out after 7.0"
+        assert result.remote_worker == "w"
+        assert calls.persisted == [("c", None)]
+        assert calls.applied == [("c", result)]
+
+    async def test_any_other_failure_is_a_failed_result(self, monkeypatch):
+        host, context, calls = self._fakes(monkeypatch, worker=self.HTTP, result=ValueError("bad"))
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert result.error == "Execution failed: bad"
+        assert result.remote_worker == "w"
+        assert calls.persisted == [("c", None)]
+        assert calls.applied == [("c", result)]
+
+
+class TestPythonDispatchLocal:
+    """A run on this machine: the warm pool first, then the cold harness."""
+
+    @staticmethod
+    def _fakes(monkeypatch, *, pool=None, pool_result=None, **overrides):
+        seen = SimpleNamespace(manifests=[], harness=[], warm=[], tokens=[])
+
+        @contextmanager
+        def run_token(_seconds):
+            token = f"token{len(seen.tokens)}"
+            seen.tokens.append(token)
+            yield token
+
+        def write_manifest(*args, **kwargs):
+            seen.manifests.append((args, kwargs))
+            return Path("run/manifest.json")
+
+        async def run_harness(*args, **kwargs):
+            seen.harness.append((args, kwargs))
+            return {"success": True, "from": "cold"}
+
+        async def execute_with_pool(*args, **kwargs):
+            seen.warm.append((args, kwargs))
+            if isinstance(pool_result, BaseException):
+                raise pool_result
+            return pool_result
+
+        monkeypatch.setattr(
+            "strata.notebook.pool.PooledCellExecutor.execute_with_pool",
+            staticmethod(execute_with_pool),
+        )
+
+        async def prepare_mounts(*_args):
+            return {}
+
+        fields = {
+            "prepare_mounts": prepare_mounts,
+            "local_runs": lambda: SimpleNamespace(event_handler=lambda *_args: "on event"),
+            "run_token": run_token,
+            "write_manifest": write_manifest,
+            "run_harness": run_harness,
+            "pool": pool,
+        }
+        return (
+            SimpleNamespace(path=Path("nb")),
+            LocalDispatchContext(**{**fields, **overrides}),
+            seen,
+        )
+
+    @staticmethod
+    async def _dispatch(host, context, *, venv=Path("venv/python"), local_run="run"):
+        return await dispatch_local(
+            host,
+            context,
+            "x = 1\n",
+            {},
+            [],
+            Path("out"),
+            venv,
+            {},
+            7.0,
+            mutation_defines=["defined"],
+            tables={"t": {}},
+            cell_id="c",
+            local_run=local_run,
+            restore={"release_id": "r"},
+            resolved_mounts={},
+        )
+
+    async def test_the_manifest_gets_all_of_the_run(self, monkeypatch):
+        host, context, seen = self._fakes(monkeypatch)
+
+        await self._dispatch(host, context)
+
+        _args, kwargs = seen.manifests[0]
+        assert kwargs == {
+            "mutation_defines": ["defined"],
+            "tables": {"t": {}},
+            "cell_id": "c",
+            "run_token": "token0",
+            "restore": {"release_id": "r"},
+        }
+
+    async def test_the_cold_harness_gets_its_own_token_and_the_runs_events(self, monkeypatch):
+        host, context, seen = self._fakes(monkeypatch)
+
+        result, _output, method, _mounts = await self._dispatch(host, context)
+
+        assert result["from"] == "cold"
+        assert method == "cold"
+        assert seen.harness[0][1] == {"run_token": "token1", "on_event": "on event"}
+
+    async def test_a_run_outside_the_ledger_has_no_event_handler(self, monkeypatch):
+        host, context, seen = self._fakes(monkeypatch)
+
+        await self._dispatch(host, context, local_run=None)
+
+        assert seen.harness[0][1]["on_event"] is None
+
+    async def test_the_warm_pool_gets_the_token_and_the_runs_events(self, monkeypatch):
+        host, context, seen = self._fakes(monkeypatch, pool="pool", pool_result={"success": True})
+
+        _result, _output, method, _mounts = await self._dispatch(host, context)
+
+        assert method == "warm"
+        assert seen.warm[0][1] == {"run_token": "token0", "on_event": "on event"}
+        assert seen.harness == []
+
+    async def test_without_an_interpreter_the_pool_is_not_asked(self, monkeypatch):
+        host, context, seen = self._fakes(monkeypatch, pool="pool", pool_result={"success": True})
+
+        await self._dispatch(host, context, venv=None)
+
+        assert seen.warm == []
+        assert seen.harness
+
+    async def test_a_fenced_warm_run_is_a_failed_result(self, monkeypatch):
+        host, context, seen = self._fakes(
+            monkeypatch, pool="pool", pool_result=RunFenced("lost the build")
+        )
+
+        result, _output, method, _mounts = await self._dispatch(host, context)
+
+        assert result["success"] is False
+        assert result["error"] == "lost the build"
+        assert method == "warm"
+        assert seen.harness == []
+
+
+class TestPythonHarness:
+    """What the cold harness is started with, with no process behind it."""
+
+    USER = object()
+    MESSAGE = "no interpreter here"
+
+    @pytest.fixture
+    def spawned(self, monkeypatch):
+        seen = SimpleNamespace(
+            handed=[],
+            terminated=[],
+            spawn=None,
+            outcome=(b"out", b"err"),
+            sent=[],
+            timeouts=[],
+            extra=[],
+            relay=None,
+            eof=None,
+            relay_cancelled=False,
+        )
+
+        async def communicate(data=None):
+            seen.sent.append(data)
+            await asyncio.sleep(0)
+            if isinstance(seen.outcome, BaseException):
+                raise seen.outcome
+            return seen.outcome
+
+        seen.proc = SimpleNamespace(pid=1, communicate=communicate)
+
+        async def create_subprocess_exec(*cmd, **kwargs):
+            seen.spawn = (cmd, kwargs)
+            return seen.proc
+
+        async def terminate(proc):
+            seen.terminated.append(proc)
+
+        async def relay_events(read_fd, on_event, proc):
+            # A non-blocking read sees EOF only if the executor closed its write end.
+            os.set_blocking(read_fd, False)
+            try:
+                seen.eof = os.read(read_fd, 1) == b""
+            except BlockingIOError:
+                seen.eof = False
+            os.close(read_fd)
+            seen.relay = (on_event, proc)
+            if seen.relay_hangs:
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    seen.relay_cancelled = True
+                    raise
+            return seen.fence
+
+        real_wait_for = asyncio.wait_for
+
+        async def wait_for(awaitable, timeout):
+            seen.timeouts.append(timeout)
+            return await real_wait_for(awaitable, timeout)
+
+        seen.relay_hangs = False
+        seen.fence = None
+        monkeypatch.setattr(python.asyncio, "create_subprocess_exec", create_subprocess_exec)
+        monkeypatch.setattr(python.asyncio, "wait_for", wait_for)
+        monkeypatch.setattr("strata.notebook.process_tree.terminate_subprocess_tree", terminate)
+        monkeypatch.setattr(
+            "strata.notebook.process_tree.subprocess_kwargs_for_new_group",
+            lambda: {"new_group": True},
+        )
+        monkeypatch.setattr(python, "relay_events", relay_events)
+        monkeypatch.setattr(python, "resolve_harness_user", lambda: self.USER)
+        monkeypatch.setattr(
+            python, "hand_over", lambda path, user: seen.handed.append((path, user))
+        )
+        monkeypatch.setattr(python, "identity_env", lambda env, user: {"env": env, "user": user})
+        monkeypatch.setattr(python, "uv_env", lambda env: {"uv": env})
+        monkeypatch.setattr(python, "spawn_kwargs", lambda user: {"spawned_as": user})
+        monkeypatch.setattr(python, "lifeline_handoff", lambda: ((), {"LIFE": "1"}))
+        return seen
+
+    @staticmethod
+    async def _run(
+        tmp_path, *, command=("harness",), run_token="tok", on_event=None, venv=Path("py")
+    ):
+        return await python.run_harness(
+            SimpleNamespace(
+                path=Path("notebook"),
+                environment_execution_block_message=lambda: TestPythonHarness.MESSAGE,
+            ),
+            lambda *_args: None if command is None else list(command),
+            lambda extra: {"extra": extra},
+            tmp_path / "manifest.json",
+            venv,
+            7.0,
+            run_token=run_token,
+            on_event=on_event,
+        )
+
+    @staticmethod
+    async def _on_event(_event):
+        return None
+
+    async def test_it_starts_as_the_harness_user(self, spawned, tmp_path):
+        await self._run(tmp_path)
+
+        cmd, kwargs = spawned.spawn
+        assert cmd == ("harness",)
+        assert spawned.handed == [(tmp_path, self.USER)]
+        assert kwargs["env"] == {"uv": {"env": {"extra": {"LIFE": "1"}}, "user": self.USER}}
+        assert kwargs["spawned_as"] is self.USER
+        assert kwargs["new_group"] is True
+        assert kwargs["cwd"] == "notebook"
+
+    async def test_the_token_goes_on_its_stdin(self, spawned, tmp_path):
+        await self._run(tmp_path, run_token="tok")
+
+        assert spawned.spawn[1]["stdin"] == asyncio.subprocess.PIPE
+        assert spawned.sent == [b"tok\n"]
+
+    async def test_no_token_means_no_stdin(self, spawned, tmp_path):
+        await self._run(tmp_path, run_token=None)
+
+        assert spawned.spawn[1]["stdin"] is None
+        assert spawned.sent == [None]
+
+    async def test_it_runs_under_the_cells_timeout(self, spawned, tmp_path):
+        await self._run(tmp_path)
+
+        assert spawned.timeouts == [7.0]
+
+    async def test_no_interpreter_runs_nothing(self, spawned, tmp_path):
+        result = await self._run(tmp_path, venv=None)
+
+        assert result["success"] is False
+        assert result["error"] == self.MESSAGE
+        assert spawned.spawn is None
+
+    async def test_a_refused_host_runs_nothing(self, spawned, tmp_path, monkeypatch):
+        def refuse():
+            raise LocalExecutionRefused("not here")
+
+        monkeypatch.setattr(python, "resolve_harness_user", refuse)
+
+        result = await self._run(tmp_path)
+
+        assert result["success"] is False
+        assert result["error"] == "not here"
+        assert spawned.spawn is None
+
+    async def test_no_uv_runs_nothing_and_says_so(self, spawned, tmp_path):
+        result = await self._run(tmp_path, command=None)
+
+        assert result["success"] is False
+        assert result["error"] == python.UV_NOT_FOUND_MESSAGE
+        assert spawned.spawn is None
+
+    async def test_the_event_pipe_reaches_the_harness_and_the_relay(self, spawned, tmp_path):
+        await self._run(tmp_path, on_event=self._on_event)
+
+        _cmd, kwargs = spawned.spawn
+        write_fd = kwargs["pass_fds"][0]
+        extra = kwargs["env"]["uv"]["env"]["extra"]
+        assert extra[python.EVENTS_FD_ENV] == str(write_fd)
+        assert spawned.relay == (self._on_event, spawned.proc)
+        # Its own copy closed, or the relay would never see the harness exit.
+        assert spawned.eof is True
+
+    async def test_a_fenced_run_is_a_failed_result(self, spawned, tmp_path):
+        spawned.fence = RunFenced("lost the build")
+
+        result = await self._run(tmp_path, on_event=self._on_event)
+
+        assert result["success"] is False
+        assert result["error"] == "lost the build"
+
+    async def test_a_pipe_a_child_holds_open_does_not_hang_the_run(
+        self, spawned, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(python, "EVENTS_DRAIN_SECONDS", 0.01)
+        spawned.relay_hangs = True
+        (tmp_path / "harness-result.json").write_text('{"success": true}')
+
+        result = await self._run(tmp_path, on_event=self._on_event)
+
+        assert result == {"success": True}
+        assert spawned.timeouts == [7.0, 0.01]
+
+    async def test_no_result_file_reports_what_it_printed(self, spawned, tmp_path):
+        result = await self._run(tmp_path)
+
+        assert result["success"] is False
+        assert result["error"] == "err"
+        assert result["stderr"] == "err"
+        assert result["stdout"] == "out"
+
+    async def test_a_result_file_is_the_result(self, spawned, tmp_path):
+        (tmp_path / "harness-result.json").write_text('{"success": true, "variables": {"x": 1}}')
+
+        result = await self._run(tmp_path)
+
+        assert result == {"success": True, "variables": {"x": 1}}
+
+    async def test_a_result_file_that_is_a_link_is_not_followed(self, spawned, tmp_path):
+        secret = tmp_path / "secret"
+        secret.write_text('{"success": true}')
+        (tmp_path / "harness-result.json").symlink_to(secret)
+
+        with pytest.raises(UnsafeRunFile):
+            await self._run(tmp_path)
+
+    @pytest.mark.parametrize(
+        ("outcome", "raised"),
+        [(TimeoutError(), TimeoutError), (asyncio.CancelledError(), asyncio.CancelledError)],
+    )
+    async def test_an_interrupted_run_ends_the_tree_and_the_relay(
+        self, spawned, tmp_path, outcome, raised
+    ):
+        spawned.outcome = outcome
+        spawned.relay_hangs = True
+
+        with pytest.raises(raised):
+            await self._run(tmp_path, on_event=self._on_event)
+
+        # The cancel is delivered on the loop's next pass.
+        await asyncio.sleep(0)
+        assert spawned.terminated == [spawned.proc]
+        assert spawned.relay_cancelled is True
