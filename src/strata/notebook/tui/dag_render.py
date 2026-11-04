@@ -11,15 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# Status glyphs (kept in sync with app._STATUS_GLYPHS).
-_GLYPHS: dict[str, str] = {
-    "idle": "○",
-    "running": "▶",
-    "ready": "✓",
-    "error": "✗",
-    "stale": "⊘",
-    "queued": "…",
-}
+from strata.notebook.tui.viewmodel import state_glyph
 
 _BOX_H = 3  # rendered box height (top border, label, bottom border)
 _LAYER_GAP = 3  # rows between box rows, for edge routing
@@ -74,7 +66,7 @@ class _Layout:
 
 
 def _box_text(cid: str, labels: dict[str, str], statuses: dict[str, str]) -> str:
-    glyph = _GLYPHS.get(statuses.get(cid, ""), "?")
+    glyph = state_glyph(statuses.get(cid, ""))
     return f"{glyph} {labels.get(cid, cid)}"
 
 

@@ -41,17 +41,13 @@ from textual_image.renderable import Image as TerminalImage
 
 from strata.notebook.tui.client import TuiClient, TuiClientError
 from strata.notebook.tui.dag_render import render_dag
-from strata.notebook.tui.viewmodel import CellView, NotebookViewModel
-
-# ``?`` is for a cell whose status is not yet known.
-_STATUS_GLYPHS: dict[str, str] = {
-    "idle": "○",
-    "running": "▶",
-    "ready": "✓",
-    "error": "✗",
-    "stale": "⊘",
-    "queued": "…",
-}
+from strata.notebook.tui.viewmodel import (
+    CELL_STATES,
+    CellView,
+    NotebookViewModel,
+    cell_state,
+    state_glyph,
+)
 
 
 def _utc_iso_z() -> str:
@@ -63,8 +59,10 @@ def _upgrade_refused(exc: Exception) -> bool:
     return isinstance(exc, websockets.exceptions.InvalidStatus) and exc.response.status_code == 403
 
 
-def _glyph(status: str) -> str:
-    return _STATUS_GLYPHS.get(status, "?")
+def _state_cell(cell: CellView) -> Text:
+    """The cell list's state column. The glyph tells the states apart; the color only repeats it."""
+    state = cell_state(cell)
+    return Text(state_glyph(state), style=CELL_STATES[state][1] if state in CELL_STATES else "")
 
 
 def _literal(value: Any) -> Any:
@@ -448,7 +446,7 @@ class NotebookTUI(App[None]):
         if not self.vm.cell_order:
             return
         labels = {cid: (self.vm.cells[cid].name or cid) for cid in self.vm.cell_order}
-        statuses = {cid: self.vm.cells[cid].status for cid in self.vm.cell_order}
+        statuses = {cid: cell_state(self.vm.cells[cid]) for cid in self.vm.cell_order}
         dag_text = render_dag(
             self.vm.cell_order, labels, statuses, self.vm.edges, selected=self._selected
         )
@@ -626,6 +624,8 @@ class NotebookTUI(App[None]):
                 c.iteration,
                 c.duration_ms,
                 c.cache_hit,
+                c.remote_worker,
+                c.blocked,
                 c.source,
                 c.test_summary,
             )
@@ -641,7 +641,7 @@ class NotebookTUI(App[None]):
         for cid in self.vm.cell_order:
             cell = self.vm.cells[cid]
             table.add_row(
-                _glyph(cell.status), _time_str(cell), _literal(self._cell_label(cell)), key=cid
+                _state_cell(cell), _time_str(cell), _literal(self._cell_label(cell)), key=cid
             )
         if self.vm.cell_order:
             if self._selected not in self.vm.cells:
@@ -674,7 +674,7 @@ class NotebookTUI(App[None]):
         # update_width=True, or columns keep their pre-run width and clip later
         # values ("cached" -> "cach").
         try:
-            table.update_cell(cid, status_col, _glyph(cell.status), update_width=True)
+            table.update_cell(cid, status_col, _state_cell(cell), update_width=True)
             table.update_cell(cid, cell_col, _literal(self._cell_label(cell)), update_width=True)
             table.update_cell(cid, time_col, _time_str(cell), update_width=True)
         except Exception:  # noqa: BLE001 (row may not exist yet, pre-snapshot frame)
@@ -922,9 +922,10 @@ def _source_renderable(cell: CellView):
 
 
 def _time_str(cell: CellView) -> str:
-    """Compact last-run timing for the cell list: 'cached', '0.4s', or '120ms'."""
-    if cell.cache_hit:
-        return "cached"
+    """The cell list's text beside the glyph: a state's label, or a finished run's '0.4s'."""
+    state = cell_state(cell)
+    if state not in ("idle", "ready"):
+        return state
     ms = cell.duration_ms
     if ms is None:
         return ""

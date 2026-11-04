@@ -12,6 +12,20 @@ from typing import Any
 
 from strata.notebook.annotations import parse_annotations
 
+# The terminal's half of frontend/DESIGN.md: each state's glyph and color. A state's name is its
+# label. ANSI names, so the terminal's own theme decides how they read on its background.
+CELL_STATES: dict[str, tuple[str, str]] = {
+    "idle": ("○", "bright_black"),
+    "queued": ("…", "bright_black"),
+    "running": ("▶", "blue"),
+    "dispatching": ("↗", "cyan"),
+    "ready": ("✓", "green"),
+    "cached": ("◆", "bright_cyan"),
+    "stale": ("⊘", "yellow"),
+    "error": ("✗", "red"),
+    "blocked": ("■", "bright_red"),
+}
+
 
 @dataclass
 class CellView:
@@ -36,6 +50,10 @@ class CellView:
     # From a ``cell_output`` frame.
     duration_ms: int | None = None
     cache_hit: bool = False
+    # From ``cell_status`` frames, while a remote worker has the run.
+    remote_worker: str = ""
+    # An annotation error, from the notebook state.
+    blocked: bool = False
     # From ``cell_test_*`` frames: "✓ 4/4", "✗ 2/4", or "tests…" while running.
     test_summary: str = ""
     # Per-test outcomes from the last cell_test_results frame (the Results tab).
@@ -55,6 +73,27 @@ class CellView:
     @property
     def console_stderr(self) -> str:
         return "".join(text for stream, text in self.console_parts if stream == "stderr")
+
+
+def state_glyph(state: str) -> str:
+    """``?`` is for a state this client does not know."""
+    return CELL_STATES[state][0] if state in CELL_STATES else "?"
+
+
+def cell_state(cell: CellView) -> str:
+    """What a cell shows, as ``frontend/src/utils/cellState.ts`` reads it for the web UI.
+
+    A status this client does not know passes through, and shows as unknown.
+    """
+    if cell.status == "running":
+        return "dispatching" if cell.remote_worker else "running"
+    if cell.status == "queued":
+        return "queued"
+    if cell.blocked:
+        return "blocked"
+    if cell.status == "ready" and cell.cache_hit:
+        return "cached"
+    return cell.status
 
 
 class NotebookViewModel:
@@ -111,7 +150,11 @@ class NotebookViewModel:
                 console_parts=list(prior.console_parts) if prior else [],
                 error=prior.error if prior else None,
                 duration_ms=prior.duration_ms if prior else None,
-                cache_hit=prior.cache_hit if prior else False,
+                cache_hit=bool(raw.get("cache_hit")) or (prior.cache_hit if prior else False),
+                remote_worker=prior.remote_worker if prior else "",
+                blocked=any(
+                    d.get("severity") == "error" for d in raw.get("annotation_diagnostics") or []
+                ),
                 # Test results arrive only via cell_test_* frames, so keep them across a
                 # resync or the 2.5s auto-resync blanks the badge and Tests tab.
                 test_summary=prior.test_summary if prior else "",
@@ -161,6 +204,8 @@ class NotebookViewModel:
 
         if msg_type == "cell_status":
             cell.status = str(payload.get("status") or cell.status)
+            if "remote_worker" in payload or cell.status != "running":
+                cell.remote_worker = str(payload.get("remote_worker") or "")
             # A frame with remote_build_state only moves a remote cell's badge mid-run.
             if cell.status == "running" and "remote_build_state" not in payload:
                 cell.console_parts = []

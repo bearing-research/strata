@@ -778,7 +778,9 @@ async def test_a_cache_hit_shows_beside_a_long_label_at_the_default_split(monkey
                     "ts": "t",
                     "payload": {
                         "name": "NB",
-                        "cells": [{"id": "a", "name": "summarize", "source": source}],
+                        "cells": [
+                            {"id": "a", "name": "summarize", "source": source, "status": "ready"}
+                        ],
                     },
                 }
             )
@@ -826,7 +828,9 @@ async def test_time_column_widens_for_a_live_timing_update(monkeypatch):
                     "ts": "t",
                     "payload": {
                         "name": "NB",
-                        "cells": [{"id": "a", "name": "load", "source": "import time\n"}],
+                        "cells": [
+                            {"id": "a", "name": "load", "source": "import time\n", "status": "ready"}
+                        ],
                     },
                 }
             )

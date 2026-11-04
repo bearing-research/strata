@@ -1,19 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { cellDotTitle, cellRunBadge } from './cellRunBadge.ts'
-
-test('a stale cell says stale, however its last run got its result', () => {
-  assert.equal(cellRunBadge('stale', true), 'stale')
-  assert.equal(cellRunBadge('stale', false), 'stale')
-  assert.equal(cellRunBadge('stale', undefined), 'stale')
-})
-
-test('a current cell shows its cache state, and no badge without a hit', () => {
-  assert.equal(cellRunBadge('ready', true), 'cached')
-  assert.equal(cellRunBadge('ready', false), null)
-  assert.equal(cellRunBadge('idle', undefined), null)
-})
+import { cellDotTitle } from './cellRunBadge.ts'
 
 const plain = { isLeaf: false, executionMethod: '', hasRunBadge: false }
 

@@ -95,6 +95,79 @@
   --shadow-modal: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
+/* Runtime states, as frontend/DESIGN.md defines them. The accents and tints these alias are set
+   per theme. A state's own class hands its pair to whatever is inside it. */
+:root {
+  --state-idle: var(--text-muted);
+  --state-idle-tint: var(--tint-muted);
+  --state-queued: var(--text-muted);
+  --state-queued-tint: var(--tint-muted);
+  --state-running: var(--accent-primary);
+  --state-running-tint: var(--tint-primary);
+  --state-dispatching: var(--accent-info);
+  --state-dispatching-tint: var(--tint-info);
+  --state-ready: var(--accent-success);
+  --state-ready-tint: var(--tint-success);
+  --state-cached: var(--accent-teal);
+  --state-cached-tint: var(--tint-teal);
+  --state-stale: var(--accent-warning);
+  --state-stale-tint: var(--tint-warning);
+  --state-error: var(--accent-danger);
+  --state-error-tint: var(--tint-danger);
+  --state-blocked: var(--accent-peach);
+  --state-blocked-tint: var(--tint-peach);
+}
+.state-idle {
+  --state: var(--state-idle);
+  --state-tint: var(--state-idle-tint);
+}
+.state-queued {
+  --state: var(--state-queued);
+  --state-tint: var(--state-queued-tint);
+}
+.state-running {
+  --state: var(--state-running);
+  --state-tint: var(--state-running-tint);
+}
+.state-dispatching {
+  --state: var(--state-dispatching);
+  --state-tint: var(--state-dispatching-tint);
+}
+.state-ready {
+  --state: var(--state-ready);
+  --state-tint: var(--state-ready-tint);
+}
+.state-cached {
+  --state: var(--state-cached);
+  --state-tint: var(--state-cached-tint);
+}
+.state-stale {
+  --state: var(--state-stale);
+  --state-tint: var(--state-stale-tint);
+}
+.state-error {
+  --state: var(--state-error);
+  --state-tint: var(--state-error-tint);
+}
+.state-blocked {
+  --state: var(--state-blocked);
+  --state-tint: var(--state-blocked-tint);
+}
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--state-tint);
+  color: var(--text-primary);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.state-badge .lucide {
+  color: var(--state);
+}
+
 [data-theme='light'] {
   /* Catppuccin Latte palette */
   --cat-crust: #dce0e8;
