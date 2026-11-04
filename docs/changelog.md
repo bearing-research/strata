@@ -39,7 +39,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **The docs are reorganized into five tabs: Get started, Guides, Concepts, Reference and
   Deploy.** The home page is now a landing page, and its highlights moved to a Features
   page. The two longest pages are split, one per cell kind, and annotations gain a
-  one-screen index. Old URLs, with their anchors, still arrive at the same heading. (#PRNUM)
+  one-screen index. Old URLs, with their anchors, still arrive at the same heading. (#1411)
 - **The docs look like the app, and publish themselves for agents.** The theme uses the
   app's blue, diamond and JetBrains Mono. Installation now comes first under "Start here".
   Each page is published as Markdown beside its HTML, with a **Copy page as Markdown**
