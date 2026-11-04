@@ -1,0 +1,3445 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A notebook built for coding agents: every result cached, versioned, and visible to the human watching">
+      
+      
+      
+        <link rel="canonical" href="https://bearingresearch.com/strata/dev/guides/share/team-store/">
+      
+      
+        <link rel="prev" href="../../../notebook/export/">
+      
+      
+        <link rel="next" href="../../../notebook/registry-dashboard/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Team store - Strata</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#team-store" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Strata" class="md-header__button md-logo" aria-label="Strata" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.59-7.59a2.41 2.41 0 0 0-3.41 0Z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Strata
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Team store
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/bearing-research/strata" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bearing-research/strata
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../.." class="md-tabs__link">
+          
+  
+  
+  Get started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../cells/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../concepts/caching/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../reference/annotations/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../deployment/modes/" class="md-tabs__link">
+          
+  
+  
+  Deploy
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Strata" class="md-nav__button md-logo" aria-label="Strata" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.59-7.59a2.41 2.41 0 0 0-3.41 0Z"/></svg>
+
+    </a>
+    Strata
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/bearing-research/strata" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bearing-research/strata
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/notebook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your first notebook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    With a coding agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terminal viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from Jupyter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Example gallery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_1" id="__nav_2_1_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cells
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Cells
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cells/python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cells/sql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cells/r/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    R
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cells/prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cells/widget/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Widget
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cells/loops-and-variants/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loops and variants
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../data/mounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mounts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/lake-aware-cells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lake and Iceberg
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../data/fetch-and-datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fetch and datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../data/write-back/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write back
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_3" id="__nav_2_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compute
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Compute
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/workers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/worker-pool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker pool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../compute/ssh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SSH
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2_4" id="__nav_2_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Share
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Share
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../app-view/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    App view
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/publishing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Publish
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export and import
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Team store
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Team store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#connecting-a-notebook-to-the-shared-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting a notebook to the shared store
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-team-cache-sharing-results-nobody-named" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The team cache: sharing results nobody named
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sharing-on-purpose-promoted-and-strata-artifact-promote" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sharing on purpose: promoted and strata artifact promote
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#promoting-into-an-iceberg-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Promoting into an Iceberg table
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/registry-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_5" id="__nav_2_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/agent-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/scratchpad/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scratchpad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_6" id="__nav_2_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Library
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Library
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../core/registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts and registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How caching works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/dag-and-staleness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The DAG and staleness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/artifacts-and-lineage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts and lineage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/file-format-and-git/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File format and git
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Strata compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_1" id="__nav_4_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Annotations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/annotations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Index
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/annotations/python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/annotations/sql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/annotations/r/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    R
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/annotations/prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/annotations/loops-and-variants/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loops and variants
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/annotations/widget/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Widget and app view
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/notebook-toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    notebook.toml
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/rest-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/notebook-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook client protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/executor-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Executor protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/worker-connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker relay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebook/keyboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deploy
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deployment/modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deployment/service-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deployment/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deployment/fly/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fly.io
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deployment/codespaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Codespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deployment/lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deployment/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deployment/privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#connecting-a-notebook-to-the-shared-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting a notebook to the shared store
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-team-cache-sharing-results-nobody-named" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The team cache: sharing results nobody named
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sharing-on-purpose-promoted-and-strata-artifact-promote" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sharing on purpose: promoted and strata artifact promote
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#promoting-into-an-iceberg-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Promoting into an Iceberg table
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+<button type="button" class="md-content__button md-icon" title="Copy page as Markdown" aria-label="Copy page as Markdown" data-copy-markdown>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.56 18H3.44C2.65 18 2 17.37 2 16.59V7.41C2 6.63 2.65 6 3.44 6h17.12c.79 0 1.44.63 1.44 1.41v9.18c0 .78-.65 1.41-1.44 1.41M3.44 6.94c-.26 0-.48.21-.48.47v9.19c0 .25.22.46.48.46h17.12c.26 0 .48-.21.48-.46V7.41c0-.26-.22-.47-.48-.47zm1.45 8.25V8.81h1.92l1.92 2.35 1.92-2.35h1.93v6.38h-1.93v-3.66l-1.92 2.35-1.92-2.35v3.66zm12.01 0-2.9-3.1h1.94V8.81h1.92v3.28h1.93z"/></svg>
+</button>
+
+<h1 id="team-store">Team store<a class="headerlink" href="#team-store" title="Permanent link">&para;</a></h1>
+<div class="admonition warning">
+<p class="admonition-title">Preview</p>
+<p>Authenticated write-back is a <strong>preview</strong> feature - it deliberately re-opens
+writes in service mode, which is security-sensitive. It's off by default,
+auth-required, scope-gated, tenant-scoped, and audited, but the surface is
+new and may change. Evaluate it before relying on it in production. The
+server logs a notice at startup when it's enabled.</p>
+</div>
+<p>By default service mode is read-only to clients, computation goes through
+server-side transforms. But a common deployment wants the inverse: a team of
+researchers, each driving their own notebook, who <strong>publish</strong> processed datasets
+to one central store so a dataset computed once is available to the whole team.</p>
+<p><code>service_writes_enabled</code> opts into that. It lets authenticated clients write
+directly - <code>put</code>, <code>set_name</code>, <code>set_alias</code>, tags - under a strict contract:</p>
+<ul>
+<li><strong>Opt-in and auth-required.</strong> Off by default; setting it requires
+  <code>auth_mode=trusted_proxy</code> (enforced at startup), so every write is
+  attributable.</li>
+<li><strong>Scope-gated.</strong> Publishing requires the <code>artifacts:write</code> scope in the
+  proxy-issued token (<code>admin:*</code> also satisfies it). Members without it stay
+  read-only.</li>
+<li><strong>Tenant-scoped (team = tenant).</strong> A write lands in the caller's tenant and
+  can't target another, so teammates share a namespace and other teams are
+  isolated. A name, alias or tag aimed at another tenant's artifact answers
+  <code>404 Artifact not found</code>, the same as a missing artifact or a read of it.
+  An upload or import that names an artifact id another tenant already holds,
+  at any version, answers <code>409</code>.
+  The publishing principal is recorded in the registry audit.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret-with-proxy&gt;
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/dir<span class="w">   </span><span class="c1"># required with any artifact store, blob backend or not</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nv">STRATA_MULTI_TENANT_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">              </span><span class="c1"># team = tenant</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nv">STRATA_SERVICE_WRITES_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">            </span><span class="c1"># the opt-in</span>
+</code></pre></div>
+<p>The proxy injects <code>X-Strata-Scopes: artifacts:write</code> for principals allowed to
+publish. The publish → consume loop then looks like:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Researcher A (team-a, artifacts:write) publishes a processed dataset:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[],</span> <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">"ref"</span><span class="p">:</span> <span class="s2">"clean@v1"</span><span class="p">},</span> <span class="n">data</span><span class="o">=</span><span class="n">cleaned</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"team/cleaned-events"</span><span class="p">)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Any teammate (team-a) resolves the name to its current artifact and reads it:</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">info</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">resolve_name</span><span class="p">(</span><span class="s2">"team/cleaned-events"</span><span class="p">)</span>  <span class="c1"># {artifact_uri, version, …}</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Other-team principals (team-b) cannot resolve team-a's name - tenant isolation.</span>
+</code></pre></div>
+<h2 id="connecting-a-notebook-to-the-shared-store">Connecting a notebook to the shared store<a class="headerlink" href="#connecting-a-notebook-to-the-shared-store" title="Permanent link">&para;</a></h2>
+<p>Each researcher runs their own notebook, which <strong>computes locally</strong> but points
+its ambient <code>strata</code> client at the central store via
+<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>. The notebook's own cell outputs and
+provenance stay local; only what a cell explicitly publishes
+(<code>strata.put(name=…)</code>) goes to the shared store.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># On each researcher's notebook server:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_URL</span><span class="o">=</span>https://store.team.example
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># Auth the remote store needs (set via env, not committed config):</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</span><span class="o">=</span><span class="s1">'{"X-Strata-Proxy-Token":"…","X-Strata-Principal":"alice@team","X-Tenant-ID":"team-a","X-Strata-Scopes":"artifacts:write"}'</span>
+</code></pre></div>
+<p>In a fully proxy-fronted setup the notebook's requests instead flow through the
+same auth proxy, which injects identity, and <code>notebook_remote_store_headers</code>
+can be omitted.</p>
+<p>On a <strong>shared</strong> notebook server several members run cells, and the static
+headers name one identity for all of them. When a request carries a principal,
+the server sends that caller's id as <code>X-Strata-Principal</code> to the remote store,
+replacing the one in the static headers. This covers results offered to the
+team cache, promotions, registry reads and approvals from the Registry tab, and
+a cell's own ambient client. The team cache's "computed by" and the registry
+audit then name the member. The remote store still has to accept that principal:
+the static headers are what authenticate the server to it. Set
+<code>STRATA_NOTEBOOK_REMOTE_STORE_FORWARD_PRINCIPAL=false</code> for a store that expects
+one fixed service identity. Personal mode has no principal and is unaffected.</p>
+<h2 id="the-team-cache-sharing-results-nobody-named">The team cache: sharing results nobody named<a class="headerlink" href="#the-team-cache-sharing-results-nobody-named" title="Permanent link">&para;</a></h2>
+<p>Everything above is <strong>explicit publish</strong> - a researcher decides a dataset is
+worth sharing and names it. That leaves out the expensive middle of a pipeline,
+because nobody names their intermediate results, and that is exactly where the
+recomputation is.</p>
+<p><code>STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true</code> closes that gap. On a <strong>local cache
+miss</strong> the notebook asks the shared store whether anyone has already run this
+exact computation, and on a hit it fetches the result instead of running the
+cell. After a cell does run, its outputs are offered back to the store so the
+next teammate hits.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># On each researcher's notebook server, alongside the two settings above:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+</code></pre></div>
+<p>It works because a cell's provenance key -
+<code>sha256(sorted_input_hashes + source_hash + env_hash)</code> - contains no notebook id
+and no cell id, and <code>env_hash</code> leaves out the notebook's own project name in
+<code>uv.lock</code>. Two people running the same source over the same inputs in the
+same environment already arrive at the same hash; the store just had no way to
+be asked.</p>
+<p>Lineage answers the follow-up. Opening a result's lineage (from the cell's
+artifact strip, or the registry panel) shows each step with <strong>who computed it,
+on what, and what it cost</strong> - <code>alice@lab · cpython-3.14-linux-x86_64 · 38s</code>.
+Each step also carries its <strong>environment identity</strong> - <code>env:3d731494</code> (which
+package set) alongside the platform (on what). Those two together are what
+answers the question a shared cache generates on day one: <em>"you got a hit and I
+didn't - why?"</em> The answer is almost always that the identities differ, and
+until they were readable there was no way to see it.</p>
+<p>On a shared notebook server the author column names the member who ran each
+cell: every artifact the run stores, variables and displays alike, records the
+principal of the request that started it (a WebSocket run, the REST execute
+route, or an MCP tool call), even when another member is watching the same
+notebook. Promoting a result keeps those authors, so the team store says who
+computed each step, not who promoted it. In personal mode there is no
+authenticated identity, so the column fills in only for steps that came <em>from</em>
+the store and stays blank throughout on a solo notebook. The platform and
+environment identity are recorded on every run, so what a shared store changes
+is not that they appear
+but that they stop being the same value on every row. A graph where one step
+ran on someone else's machine, in a different environment, is the case these
+columns exist to make visible.</p>
+<p>All of it is best-effort and recent: artifacts produced before these fields
+existed show blanks, and re-running the cell is what fills them in.</p>
+<p>The notebook's profiling panel splits the savings once a team hit happens:
+"Cache savings ~12m" alongside "From your team ~8m (4 hits, alice, bob)". The
+team figure is priced by what the <em>publisher's</em> run actually cost, carried on
+the artifact - whoever gets the hit never ran the cell, so their own history
+holds no comparable number and a locally-derived estimate would credit zero for
+exactly the case the shared store exists to create.</p>
+<p>What to know before switching it on:</p>
+<ul>
+<li><strong>It is a separate opt-in from the URL, deliberately.</strong> Wanting a shared store
+  to publish <em>to</em> is not the same as wanting one to silently source results
+  <em>from</em>. Enabling it without <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> is rejected at
+  startup rather than left silently inert.</li>
+<li><strong>Publishing needs <code>artifacts:write</code>.</strong> Members without the scope still get
+  team cache <em>hits</em>; they just do not contribute. That is a supported
+  configuration, and the notebook logs a warning when a publish is refused so
+  it does not look like the cache is simply empty.</li>
+<li><strong>It never fails a cell.</strong> A store that is unreachable, refusing, or missing
+  one of a cell's outputs ends in "run it locally".</li>
+<li><strong>A <a href="../../../reference/annotations/python/#output_dir"><code># @output_dir</code></a> folder travels
+  with its files.</strong> A publish offers each file the folder names, one blob each
+  under its own provenance key (a file the store already holds is not sent
+  again), then the manifest naming where each landed. A pull fetches every file
+  and checks its sha256 and size against the manifest before anything lands;
+  the files land under the pulling notebook's own ids, then the manifest. A
+  missing or altered file lands nothing and the cell runs locally. A stored
+  folder whose files are gone is a miss, and the next publish of it replaces it.</li>
+<li><strong>A notebook whose environment does not match its lockfile will not publish.</strong>
+  A failed <code>uv sync</code> keeps the previous venv and stays usable on purpose, so a
+  transient network failure does not lock you out of your own notebook - but
+  provenance is computed from <code>uv.lock</code>, which has moved on, so anything
+  produced afterwards would be stamped with an environment it was not built in.
+  Locally that is your own problem; published it is permanent and everyone's,
+  because the store keeps the first writer's result. The cell still runs and
+  its result is still cached locally; only the publish is refused, with a
+  warning naming the cell. Re-run the environment sync to resume publishing.</li>
+<li><strong>Point it at an authenticated store.</strong> Without auth there is no tenant, so
+  every team shares one flat namespace, and no principal, so every result
+  arrives authored by nobody. The server warns at startup if the team cache is
+  on with no <code>notebook_remote_store_headers</code>.</li>
+<li><strong>The environment key does not include the platform, but the artifact
+  records it.</strong> <code>uv.lock</code> resolves to different wheels on macOS-arm64 and
+  Linux-x86_64, and the env hash covers the lockfile only. That is deliberate, since
+  hashing the platform would drop cross-machine hit rate to roughly zero and
+  delete the feature in order to protect it. So a hit can legitimately cross
+  machines, and every artifact carries the interpreter and hardware that
+  produced it (<code>cpython-3.14-linux-x86_64</code>), reported by the process that
+  actually ran the cell: the notebook venv locally, or the worker's
+  interpreter for a remote cell. A team hit says which platform it came from
+  rather than crossing one silently. In practice a shared cache handing the
+  whole team one number is the more reproducible outcome, but if your work
+  depends on hardware-identical results, leave the team cache off for now.</li>
+</ul>
+<h2 id="sharing-on-purpose-promoted-and-strata-artifact-promote">Sharing on purpose: <code>promoted</code> and <code>strata artifact promote</code><a class="headerlink" href="#sharing-on-purpose-promoted-and-strata-artifact-promote" title="Permanent link">&para;</a></h2>
+<p>Offering every downstream-consumed variable of every successful cell is right
+for a server whose whole purpose is a shared cache. It is wrong for a personal
+server: there, it means every intermediate a researcher ever computed lands in
+the team's store, whether or not they meant to share it.</p>
+<p><code>STRATA_NOTEBOOK_TEAM_CACHE_PUBLISH</code> is the setting between "everything" and
+"nothing":</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Offers outward</th>
+<th>Pulls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>all</code> (default)</td>
+<td>every consumed variable of every successful cell</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>promoted</code></td>
+<td>nothing automatically</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>off</code></td>
+<td>nothing</td>
+<td>no</td>
+</tr>
+</tbody>
+</table>
+<p>Under <code>promoted</code>, a result reaches the team when someone says so:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c2_var_model<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/model<span class="w"> </span>--alias<span class="w"> </span>champion
+</code></pre></div>
+<p><code>--tag KEY=VALUE</code> (repeatable) tags the promoted version, <code>--header 'Name:
+value'</code> (repeatable) adds a header for <code>--to</code> beyond the <code>STRATA_STORE_TOKEN</code>
+bearer, and <code>--max-depth</code> (default 10) bounds how far the chain is walked.</p>
+<p>The chain travels with it, and has to. The cache is keyed by provenance, so
+each ancestor that arrives is a hit for the next person whose cell computes the
+same thing - promoting the result alone would share the answer and none of the
+work. Each row the promotion writes is stamped with its name (an <code>nb_promotion</code>
+tag, kept out of the registry's tag lists), so a colleague's hit on any of it
+says which promotion it came from: their profiling panel lists it under "Via
+promotions". A row the store already held, from a cache publish or an earlier
+promotion, keeps whatever it had. A protected alias (<code>registry_protected_aliases</code>) queues for approval
+rather than moving, and the command says so.</p>
+<p>The Registry tab and the per-cell strip describe that store too. They read the
+local one until a team store is configured, then forward to it with the server's
+remote-store headers: the notebook names things there, so describing the local
+store would show an empty registry. Every registry route forwards the same way
+(names, aliases, tags, lineage and approvals), so a promotion from the tab lands
+where the tab reads, and a protected alias filed from one person's server gets
+approved from another's.</p>
+<p>A cell can promote one of its own upstream results without leaving the
+notebook, naming it the way the cell reads it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">strata</span><span class="o">.</span><span class="n">promote</span><span class="p">(</span><span class="s2">"rows"</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"taxi/rows"</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">"champion"</span><span class="p">)</span>
+</code></pre></div>
+<p><code>off</code> is the whole feature off without unsetting
+<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>, which a cell's ambient <code>strata</code> client
+still needs.</p>
+<h2 id="promoting-into-an-iceberg-table">Promoting into an Iceberg table<a class="headerlink" href="#promoting-into-an-iceberg-table" title="Permanent link">&para;</a></h2>
+<p>A tabular result can also become a table in the team's warehouse, so tools
+outside Strata read it as a table and a notebook reads it with <code>@table</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c1_var_features<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/features<span class="w"> </span>--alias<span class="w"> </span>champion<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>--table<span class="w"> </span><span class="s2">"s3://lake/warehouse#taxi.features"</span>
+</code></pre></div>
+<p>The team store does the writing, with its own catalog settings, since that is
+where the bytes and the warehouse credentials are. <code>--table</code> takes the same
+forms <code>@table</code> reads: <code>&lt;warehouse&gt;#namespace.table</code>, or <code>namespace.table</code> in the
+store's configured catalog.</p>
+<ul>
+<li>The first promotion creates the table and appends. Later promotions overwrite
+  it, so the current snapshot is always one version. A table Strata did not
+  write is refused rather than replaced. A notebook's <code>@table</code> on
+  it goes stale when the next version is written, as for any other table.</li>
+<li>A table belongs to the tenant whose export last wrote it. Another tenant's
+  export to it is refused like a denied table (<code>404 Table not found</code>, or <code>403</code>
+  with <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=false</code>), even when the ACL lets that
+  tenant read it. An <code>admin:*</code> export is not tenant-scoped, and leaves a table
+  only another unscoped export can replace.</li>
+<li>Each snapshot's summary names what it holds: <code>strata.artifact_id</code>,
+  <code>strata.version</code>, <code>strata.provenance_hash</code>, <code>strata.promoted_by</code> when the
+  store knows the caller, and <code>strata.tenant</code> when the export was
+  tenant-scoped. (An overwrite commits a delete and then an append; the
+  append is the snapshot that holds the version.)</li>
+<li>A new version may add columns or widen a type. One whose schema the table
+  cannot evolve to is refused before anything is written.</li>
+<li>The alias is an Iceberg tag on the snapshot. Moving the alias later, including
+  approving a protected one, moves the tag, as long as that version was written
+  to the table. When two moves overlap, the tag ends on the version the alias
+  ends on.</li>
+</ul>
+<p>The same write is <code>strata artifact export --table &lt;table&gt; &lt;ref&gt;</code> against a local
+store (<code>--alias</code> tags the new snapshot, <code>--by</code> is recorded as
+<code>strata.promoted_by</code>), and <code>POST /v1/artifacts/{id}/v/{version}/export</code> with
+<code>{"table": ..., "alias": ...}</code> for a platform that exports once a promotion
+lands. Only Arrow tables can be written; a JSON value, a pickle, an array or a
+scalar is refused.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  <div class="md-copyright__highlight">
+    <a href="../../../changelog/">Changelog</a>
+  </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.sections", "navigation.tabs", "navigation.top", "content.code.copy", "search.highlight", "search.suggest"], "search": "../../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../../javascripts/copy-markdown.js"></script>
+      
+        <script src="../../../javascripts/changelog-link.js"></script>
+      
+    
+  </body>
+</html>

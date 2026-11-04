@@ -153,7 +153,7 @@ Practical consequences for generated code:
 
 Cell-level settings are `# @` comment lines at the top of the cell
 source - they always win over anything persisted elsewhere. The full
-surface is [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/); the most common:
+surface is [Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/); the most common:
 
 ```python
 # @name revenue_model     ← stable display name
@@ -253,7 +253,7 @@ what that run stored, so pass `--force` once before comparing.
   exists - annotations are the single per-cell configuration surface.
 - **Mind where cell code writes files.** Cells run in the gitignored
   `work/` directory, so a relative path lands there. Files to keep as a
-  result go in a [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder. Don't
+  result go in a [`# @output_dir`](https://bearingresearch.com/strata/dev/reference/annotations/python/#output_dir) folder. Don't
   write into `../` (the notebook directory) unless you mean to commit the
   file.
 

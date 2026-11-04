@@ -116,7 +116,7 @@ re-add it with the kind you want.
 | --- | --- |
 | **Python** | Regular Python code. Most cells. |
 | **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. Needs the `sql` extra and a driver extra (see [Installation](https://bearingresearch.com/strata/dev/getting-started/installation/)). |
-| **R** | R code - stats and tidyverse. See [Cell Types](https://bearingresearch.com/strata/dev/notebook/cells/). |
+| **R** | R code - stats and tidyverse. See [Cell Types](https://bearingresearch.com/strata/dev/guides/cells/). |
 | **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
 | **Widget** | A declarative control panel - one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
 | **Markdown** | Prose between cells. Rendered as HTML; not part of the DAG. |
@@ -131,8 +131,8 @@ line:
 | **Variant** | `# @variant group name` - several cells share one DAG slot, for A/B-ing implementations of the same step. |
 
 Library, mount, and worker shapes are annotation-driven too. See
-[Cell Types](https://bearingresearch.com/strata/dev/notebook/cells/) for the full surface and
-[Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/) for every annotation.
+[Cell Types](https://bearingresearch.com/strata/dev/guides/cells/) for the full surface and
+[Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) for every annotation.
 
 ## 3. Walk through a pipeline
 
@@ -179,7 +179,7 @@ df.head()
 
 The `# @name load` line labels the cell in the DAG view and its header; without
 it, a cell is labelled by the variables it defines. See
-[`@name`](https://bearingresearch.com/strata/dev/notebook/annotations/#name).
+[`@name`](https://bearingresearch.com/strata/dev/reference/annotations/python/#name).
 
 Press ++shift+enter++. The first run pauses ~2 seconds (the simulated
 fetch) and the DataFrame preview renders below the cell.
@@ -245,7 +245,7 @@ computed again. A cell's console output is keyed by the same hash and
 replayed with it, so even a cell that only `print`s and feeds nothing
 downstream is cached. A cell that must always
 run (a side effect, a live API call, a fresh random draw) opts out
-with [`# @nocache`](https://bearingresearch.com/strata/dev/notebook/annotations/#nocache).
+with [`# @nocache`](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache).
 
 ## 5. Edit upstream, watch the cascade
 
@@ -302,8 +302,8 @@ inputs, model config)`. Running again with the same upstream
 `stats` and the same template is a cache hit, no second API call.
 
 Needs `ANTHROPIC_API_KEY` (or another provider's key) configured in
-the Runtime panel. See [Provider configuration](https://bearingresearch.com/strata/dev/notebook/cells/#provider-configuration)
-for provider setup and [Prompt cells](https://bearingresearch.com/strata/dev/notebook/cells/#prompt-cells)
+the Runtime panel. See [Provider configuration](https://bearingresearch.com/strata/dev/guides/cells/prompt/#provider-configuration)
+for provider setup and [Prompt cells](https://bearingresearch.com/strata/dev/guides/cells/prompt/#prompt-cells)
 for the full annotation surface (`@output_schema`, `@validate_retries`).
 
 ## 7. Other display types
@@ -365,9 +365,9 @@ See the [Examples catalog](https://bearingresearch.com/strata/dev/notebook/examp
 - [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/): hand this notebook to Claude Code and watch it build, in a browser or a terminal - one command sets it up
 - [Agent scratchpad](https://bearingresearch.com/strata/dev/notebook/scratchpad/): the other way round - an agent working on something else using a notebook as **cached** throwaway compute instead of temp scripts; installs as a one-command plugin
 - [Terminal viewer (TUI)](https://bearingresearch.com/strata/dev/notebook/tui/) to watch this notebook live from a terminal with `strata watch ./my-notebook`
-- [Concepts](https://bearingresearch.com/strata/dev/notebook/concepts/) for how the DAG, caching, and cascade work
-- [Cell Types](https://bearingresearch.com/strata/dev/notebook/cells/) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
-- [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/) for `@worker`, `@mount`, `@loop`, and friends
+- [Concepts](https://bearingresearch.com/strata/dev/concepts/caching/) for how the DAG, caching, and cascade work
+- [Cell Types](https://bearingresearch.com/strata/dev/guides/cells/) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
+- [Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) for `@worker`, `@mount`, `@loop`, and friends
 - [Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/) for `# @worker gpu-fly` and dispatching to remote compute
 - [Import from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/) for `strata import nb.ipynb`
 - [Export](https://bearingresearch.com/strata/dev/notebook/export/) for sharing a notebook as a single self-contained markdown or HTML file, or as a snapshot bundle (state and artifacts) that imports back

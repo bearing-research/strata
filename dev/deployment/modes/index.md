@@ -133,7 +133,7 @@ shapes:
 - **A personal server per member.** Each member runs their own (a laptop,
   or one container each behind your proxy) and shares results through a
   service-mode store; see
-  [Connecting a notebook to the shared store](https://bearingresearch.com/strata/dev/deployment/service-mode/#connecting-a-notebook-to-the-shared-store).
+  [Connecting a notebook to the shared store](https://bearingresearch.com/strata/dev/guides/share/team-store/#connecting-a-notebook-to-the-shared-store).
 - **One shared server in service mode**, where every request carries the
   caller's identity and scopes. See [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/).
 

@@ -102,7 +102,7 @@ optional, since it is your workspace and some people keep it.
     cell stale.
 
     A cell that reads a file you are actively changing wants
-    [`# @nocache`](https://bearingresearch.com/strata/dev/notebook/annotations/#nocache), the same as a clock read. A cell
+    [`# @nocache`](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache), the same as a clock read. A cell
     that reads a file you are not changing is fine as it is, and is the case
     the pin exists for.
 
@@ -117,7 +117,7 @@ optional, since it is your workspace and some people keep it.
   an invisible script in `/tmp`. You can open it later, or watch it live.
 - **Side effects stay honest.** A cell that writes a file, calls an API, reads
   the clock, or reads a file that changes underneath it must not replay a stale
-  result. Those get [`# @nocache`](https://bearingresearch.com/strata/dev/notebook/annotations/#nocache) and always
+  result. Those get [`# @nocache`](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache) and always
   re-execute; everything else stays cached.
 
 ## Why the agent actually reaches for it
@@ -178,4 +178,4 @@ someone is watching, point the agent at that server instead: MCP, or
 - [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/): the other use case, where
   the notebook is the point.
 - [MCP Server](https://bearingresearch.com/strata/dev/notebook/mcp/): the tool list and the endpoint's security model.
-- [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/): `# @nocache` and the rest.
+- [Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/): `# @nocache` and the rest.

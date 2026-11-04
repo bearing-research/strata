@@ -39,7 +39,7 @@ identical notebook code but different notebooks each produce their
 own artifacts under different `notebook_id`s, they don't dedupe
 across notebooks. So sharing a Strata instance with a teammate
 does **not** mean your cell outputs cross-pollinate. The exception
-is opt-in: the [team cache](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named)
+is opt-in: the [team cache](https://bearingresearch.com/strata/dev/guides/share/team-store/#the-team-cache-sharing-results-nobody-named)
 (`STRATA_NOTEBOOK_TEAM_CACHE_ENABLED`) offers results to a shared
 store by provenance, so identical cells in different notebooks hit
 each other there.
@@ -66,7 +66,7 @@ Use this shape unless something else applies.
 
 Give each member a personal server (their own machine, or one container
 each behind your proxy) and share results through a service-mode store:
-see [Connecting a notebook to the shared store](https://bearingresearch.com/strata/dev/deployment/service-mode/#connecting-a-notebook-to-the-shared-store).
+see [Connecting a notebook to the shared store](https://bearingresearch.com/strata/dev/guides/share/team-store/#connecting-a-notebook-to-the-shared-store).
 Share results by [publishing](https://bearingresearch.com/strata/dev/notebook/publishing/) them rather
 than by sending a notebook link. For one server the whole team uses,
 run service mode (next section).

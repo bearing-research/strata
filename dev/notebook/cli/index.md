@@ -281,7 +281,7 @@ by default; `--rerun` bypasses the target's cache, `--force` runs against
 whatever upstream artifacts already exist). `--init RELEASE` starts a normal
 run from an accepted checkpoint's parts (`strata.restore()` returns them) as a
 branch under its own provenance key; see
-[checkpoints](https://bearingresearch.com/strata/dev/notebook/cells/#checkpoints-stratacheckpoint-stratarestore-stratahead). `cell test` runs the cell's
+[checkpoints](https://bearingresearch.com/strata/dev/guides/cells/python/#checkpoints-stratacheckpoint-stratarestore-stratahead). `cell test` runs the cell's
 `cells/{cell_id}.test.py` via pytest and reports per-test outcomes; pass
 `--file tests.py` (or `-` for stdin) to **set** the cell's test source first and
 then run it - the one cell-test affordance that previously required editing the
@@ -351,12 +351,12 @@ scratchpad primitive), and the run outcome (`status`, `cache_hit`, `stdout`,
 `stderr`) is folded into the output under `run`. The returned cell is the
 **post-run** view, so its rendered `outputs` (a trailing bare expression's value)
 ride along without a separate `cell show` (`--no-sync` skips the venv sync, as
-with `cell run`). `cell annotate` splices `# @key` [annotations](https://bearingresearch.com/strata/dev/notebook/annotations/) into a
+with `cell run`). `cell annotate` splices `# @key` [annotations](https://bearingresearch.com/strata/dev/reference/annotations/) into a
 cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with `edit`;
 it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit
 the source directly for repeatable `mount` / `table` / `env`. `cell pin-fetch`
-pins a cell's [`@fetch`](https://bearingresearch.com/strata/dev/notebook/annotations/#fetch) inputs: it writes `sha256=` with
+pins a cell's [`@fetch`](https://bearingresearch.com/strata/dev/reference/annotations/python/#fetch) inputs: it writes `sha256=` with
 the digest of the bytes the notebook last downloaded into each named fetch line
 (every fetch in the cell when no name is given) and prints the cell and a
 `pinned` list of `{name, url, sha256}`. It reads the notebook's own fetch

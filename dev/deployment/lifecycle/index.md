@@ -137,7 +137,7 @@ Three options, depending on the surface:
 | **REST** | `DELETE /v1/notebooks/{session_id}` for an open session, or `POST /v1/notebooks/delete-by-path` for a path-based delete. Both are personal mode only. | Same as the UI |
 | **Filesystem** | `rm -rf ~/.strata/notebooks/mynotebook` while the server isn't running | Same outcome, no graceful session close |
 
-Deleting a notebook also deletes its local store, `.strata/artifacts/`. Copies that already left it stay where they went: results you [published](https://bearingresearch.com/strata/dev/notebook/publishing/) live in the server's store, and results promoted or offered to a [team store](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named) live there.
+Deleting a notebook also deletes its local store, `.strata/artifacts/`. Copies that already left it stay where they went: results you [published](https://bearingresearch.com/strata/dev/notebook/publishing/) live in the server's store, and results promoted or offered to a [team store](https://bearingresearch.com/strata/dev/guides/share/team-store/#the-team-cache-sharing-results-nobody-named) live there.
 
 ## Cleaning up the Core artifact store
 

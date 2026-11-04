@@ -9,6 +9,26 @@
          <lastmod>2026-11-04</lastmod>
     </url>
     <url>
+         <loc>https://bearingresearch.com/strata/dev/concepts/artifacts-and-lineage/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/concepts/caching/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/concepts/dag-and-staleness/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/concepts/features/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/concepts/file-format-and-git/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
          <loc>https://bearingresearch.com/strata/dev/core/registry/</loc>
          <lastmod>2026-11-04</lastmod>
     </url>
@@ -137,6 +157,58 @@
          <lastmod>2026-11-04</lastmod>
     </url>
     <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/cells/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/cells/prompt/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/cells/python/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/cells/r/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/cells/sql/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/cells/widget/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/compute/ssh/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/data/fetch-and-datasets/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/data/mounts/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/data/write-back/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/share/app-view/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/guides/share/team-store/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/agent-authoring/</loc>
          <lastmod>2026-11-04</lastmod>
     </url>
@@ -145,23 +217,11 @@
          <lastmod>2026-11-04</lastmod>
     </url>
     <url>
-         <loc>https://bearingresearch.com/strata/dev/notebook/annotations/</loc>
-         <lastmod>2026-11-04</lastmod>
-    </url>
-    <url>
-         <loc>https://bearingresearch.com/strata/dev/notebook/cells/</loc>
-         <lastmod>2026-11-04</lastmod>
-    </url>
-    <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/cli/</loc>
          <lastmod>2026-11-04</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/comparison/</loc>
-         <lastmod>2026-11-04</lastmod>
-    </url>
-    <url>
-         <loc>https://bearingresearch.com/strata/dev/notebook/concepts/</loc>
          <lastmod>2026-11-04</lastmod>
     </url>
     <url>
@@ -250,6 +310,34 @@
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/worker-connect/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/reference/annotations/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/reference/annotations/loops-and-variants/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/reference/annotations/prompt/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/reference/annotations/python/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/reference/annotations/r/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/reference/annotations/sql/</loc>
+         <lastmod>2026-11-04</lastmod>
+    </url>
+    <url>
+         <loc>https://bearingresearch.com/strata/dev/reference/annotations/widget/</loc>
          <lastmod>2026-11-04</lastmod>
     </url>
 </urlset>

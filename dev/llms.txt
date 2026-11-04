@@ -2,62 +2,84 @@
 
 > A notebook built for coding agents: every result cached, versioned, and visible to the human watching
 
-## Start
+## Get started
 
-- [Home](https://bearingresearch.com/strata/dev/index.md): Strata is a notebook your coding agent can drive, and everything it computes stays.
+- [Overview](https://bearingresearch.com/strata/dev/index.md): Strata is a notebook your coding agent can drive, and everything it computes stays.
+- [Install](https://bearingresearch.com/strata/dev/getting-started/installation/index.md): Install Strata, and the commands it gives you.
+- [Your first notebook](https://bearingresearch.com/strata/dev/getting-started/notebook/index.md): Strata Notebook is an interactive notebook with content-addressed caching, automatic dependency tracking, and cascade execution.
+- [With a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/index.md): `strata agent <notebook-dir>` is a one-command on-ramp: it stands up everything a coding agent (Claude Code) needs to drive a live Strata notebook, and attache…
+- [Terminal viewer](https://bearingresearch.com/strata/dev/notebook/tui/index.md): `strata-notebook-tui` is a read-only terminal spectator for a live notebook session.
+- [Coming from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/index.md): `strata import` converts a Jupyter `.ipynb` file into a Strata notebook directory, or unpacks a snapshot back into one.
+- [Example gallery](https://bearingresearch.com/strata/dev/notebook/examples/index.md): Every notebook under `examples/` in the repo demonstrates a specific Strata capability.
 
-## Notebook
+## Guides
 
-- [Installation](https://bearingresearch.com/strata/dev/getting-started/installation/index.md): Install Strata, and the commands it gives you.
-- [Quickstart - Web UI](https://bearingresearch.com/strata/dev/getting-started/notebook/index.md): Strata Notebook is an interactive notebook with content-addressed caching, automatic dependency tracking, and cascade execution.
-- [Quickstart - Terminal (TUI)](https://bearingresearch.com/strata/dev/notebook/tui/index.md): `strata-notebook-tui` is a read-only terminal spectator for a live notebook session.
-- [Quickstart - Coding agent](https://bearingresearch.com/strata/dev/notebook/agent/index.md): `strata agent <notebook-dir>` is a one-command on-ramp: it stands up everything a coding agent (Claude Code) needs to drive a live Strata notebook, and attache…
-- [Quickstart - Agent scratchpad](https://bearingresearch.com/strata/dev/notebook/scratchpad/index.md): A coding agent working on *something else* (debugging your service, exploring a dataset, checking what a function returns) constantly needs to run a bit of thr…
-- [Concepts](https://bearingresearch.com/strata/dev/notebook/concepts/index.md): Strata Notebook is a content-addressed compute graph over Python.
-- [vs Jupyter, Marimo, Pluto](https://bearingresearch.com/strata/dev/notebook/comparison/index.md): Strata is closest in spirit to the new generation of reactive notebooks (Marimo, Pluto.jl) - it shares the "your DAG comes from your variable references" idea.
-- [Examples](https://bearingresearch.com/strata/dev/notebook/examples/index.md): Every notebook under `examples/` in the repo demonstrates a specific Strata capability.
-- [Cell Types](https://bearingresearch.com/strata/dev/notebook/cells/index.md): Strata Notebook has seven cell kinds:
-- [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/index.md): Annotations are metadata directives written in the leading comment block of a cell.
-- [Cell Unit Tests](https://bearingresearch.com/strata/dev/notebook/testing/index.md): Every Python cell can carry its own `pytest` tests - written right next to the cell, run against the cell's real outputs, with per-test pass/fail surfaced inli…
-- [Lake-Aware Cells](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/index.md): A lake-aware cell is a notebook cell that takes an Iceberg table as a versioned input via the `@table` annotation.
-- [Registry Dashboard](https://bearingresearch.com/strata/dev/notebook/registry-dashboard/index.md): The registry dashboard is the UI for promoting models and approving changes right inside the notebook - so promotion doesn't have to be code.
-- [Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/index.md): Strata Notebook can dispatch individual cells to remote machines via the executor protocol.
-- [Worker Pool](https://bearingresearch.com/strata/dev/notebook/worker-pool/index.md): Worker pool for dispatching Strata jobs to ephemeral machines.
-- [Publishing an artifact](https://bearingresearch.com/strata/dev/notebook/publishing/index.md): A figure in a paper can carry a URL.
+- [Overview](https://bearingresearch.com/strata/dev/guides/cells/index.md): Strata Notebook has seven cell kinds:
+- [Python](https://bearingresearch.com/strata/dev/guides/cells/python/index.md): The default.
+- [SQL](https://bearingresearch.com/strata/dev/guides/cells/sql/index.md): A SQL cell sends a query to a connected database via ADBC (DuckDB through its own driver) and stores the result as an Arrow Table artifact.
+- [R](https://bearingresearch.com/strata/dev/guides/cells/r/index.md): R is a first-class notebook language alongside Python.
+- [Prompt](https://bearingresearch.com/strata/dev/guides/cells/prompt/index.md): A prompt cell is a text template that gets rendered with upstream variable values, sent to an AI model, and the response stored as an artifact.
+- [Widget](https://bearingresearch.com/strata/dev/guides/cells/widget/index.md): A widget cell is a declarative control panel - one control per line - that feeds values into the DAG.
+- [Loops and variants](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/index.md): A loop cell is a regular Python cell with a `# @loop` annotation.
+- [Tests](https://bearingresearch.com/strata/dev/notebook/testing/index.md): Every Python cell can carry its own `pytest` tests - written right next to the cell, run against the cell's real outputs, with per-test pass/fail surfaced inli…
+- [Mounts](https://bearingresearch.com/strata/dev/guides/data/mounts/index.md): Attach a filesystem mount to the cell.
+- [Lake and Iceberg](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/index.md): A lake-aware cell is a notebook cell that takes an Iceberg table as a versioned input via the `@table` annotation.
+- [Fetch and datasets](https://bearingresearch.com/strata/dev/guides/data/fetch-and-datasets/index.md): Declare a URL the cell reads.
+- [Write back](https://bearingresearch.com/strata/dev/guides/data/write-back/index.md): Write one of the cell's variables into an Iceberg table when the run succeeds: a cleaning cell that replaces a table, an ingest cell that appends each day's da…
+- [Workers](https://bearingresearch.com/strata/dev/notebook/workers/index.md): Strata Notebook can dispatch individual cells to remote machines via the executor protocol.
+- [Worker pool](https://bearingresearch.com/strata/dev/notebook/worker-pool/index.md): Worker pool for dispatching Strata jobs to ephemeral machines.
+- [SSH](https://bearingresearch.com/strata/dev/guides/compute/ssh/index.md): If you have a box you reach over SSH (a GPU machine, a bigger instance, one closer to the data), Strata can turn it into a worker for you in one step, without…
 - [Environment](https://bearingresearch.com/strata/dev/notebook/environment/index.md): Each notebook has its own isolated Python environment managed by uv.
-- [Secret Manager](https://bearingresearch.com/strata/dev/notebook/secrets/index.md): Strata can pull environment variables from an external secret manager so API keys, database URLs, and other sensitive config don't have to be re-entered every…
-- [Headless Runner](https://bearingresearch.com/strata/dev/notebook/cli/index.md): `strata run` executes every cell in a notebook directory without starting the server or opening the UI.
-- [Authoring Programmatically](https://bearingresearch.com/strata/dev/notebook/agent-authoring/index.md): A Strata notebook is a plain-text directory - TOML config plus one source file per cell.
-- [MCP Server](https://bearingresearch.com/strata/dev/notebook/mcp/index.md): Strata Notebook can expose a running notebook session to an external coding agent (Claude Code, and any other Model Context Protocol client) over an HTTP endpo…
-- [Import from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/index.md): `strata import` converts a Jupyter `.ipynb` file into a Strata notebook directory, or unpacks a snapshot back into one.
-- [Export](https://bearingresearch.com/strata/dev/notebook/export/index.md): `strata export` renders a notebook directory to a single self-contained file, markdown or HTML, for sharing or archiving.
-- [Keyboard Shortcuts](https://bearingresearch.com/strata/dev/notebook/keyboard/index.md): Press ? anywhere in the notebook (outside a code editor or text field) to show the shortcuts modal.
-
-## Core
-
+- [Secrets](https://bearingresearch.com/strata/dev/notebook/secrets/index.md): Strata can pull environment variables from an external secret manager so API keys, database URLs, and other sensitive config don't have to be re-entered every…
+- [App view](https://bearingresearch.com/strata/dev/guides/share/app-view/index.md): Click App in the notebook header (or visit `/#/app/<sessionId>`) to open the notebook as a read-only interactive app: only widget control panels, markdown, and…
+- [Publish](https://bearingresearch.com/strata/dev/notebook/publishing/index.md): A figure in a paper can carry a URL.
+- [Export and import](https://bearingresearch.com/strata/dev/notebook/export/index.md): `strata export` renders a notebook directory to a single self-contained file, markdown or HTML, for sharing or archiving.
+- [Team store](https://bearingresearch.com/strata/dev/guides/share/team-store/index.md): By default service mode is read-only to clients, computation goes through server-side transforms.
+- [Registry dashboard](https://bearingresearch.com/strata/dev/notebook/registry-dashboard/index.md): The registry dashboard is the UI for promoting models and approving changes right inside the notebook - so promotion doesn't have to be code.
+- [MCP](https://bearingresearch.com/strata/dev/notebook/mcp/index.md): Strata Notebook can expose a running notebook session to an external coding agent (Claude Code, and any other Model Context Protocol client) over an HTTP endpo…
+- [CLI authoring](https://bearingresearch.com/strata/dev/notebook/agent-authoring/index.md): A Strata notebook is a plain-text directory - TOML config plus one source file per cell.
+- [Scratchpad](https://bearingresearch.com/strata/dev/notebook/scratchpad/index.md): A coding agent working on *something else* (debugging your service, exploring a dataset, checking what a function returns) constantly needs to run a bit of thr…
 - [Quickstart](https://bearingresearch.com/strata/dev/getting-started/core/index.md): Strata Core is the programmatic materialization and artifact layer.
-- [Artifacts & Registry](https://bearingresearch.com/strata/dev/core/registry/index.md): Every materialized result in Strata is an immutable, versioned artifact with content-addressed provenance.
+- [Artifacts and registry](https://bearingresearch.com/strata/dev/core/registry/index.md): Every materialized result in Strata is an immutable, versioned artifact with content-addressed provenance.
 
-## API Reference
+## Concepts
 
-- [Notebook Client Protocol](https://bearingresearch.com/strata/dev/reference/notebook-protocol/index.md): A single reference for writing a non-Vue client (TUI, scripting, third-party integration) against the notebook backend.
-- [REST API](https://bearingresearch.com/strata/dev/reference/rest-api/index.md): This page documents the notebook REST surface, mounted under `/v1/notebooks`, plus the core routes a client meets most: materialize, streams, health and metric…
-- [WebSocket Protocol](https://bearingresearch.com/strata/dev/reference/websocket/index.md): The notebook UI communicates with the backend via a WebSocket connection for real-time updates.
-- [Executor Protocol](https://bearingresearch.com/strata/dev/reference/executor-protocol/index.md): The executor protocol is the HTTP contract between Strata's notebook orchestrator and remote workers.
-- [Worker Relay Protocol](https://bearingresearch.com/strata/dev/reference/worker-connect/index.md): `strata-worker --connect <url>` runs a worker that binds no port.
-- [notebook.toml Schema](https://bearingresearch.com/strata/dev/reference/notebook-toml/index.md): `notebook.toml` is the committed configuration for a notebook.
+- [How caching works](https://bearingresearch.com/strata/dev/concepts/caching/index.md): The provenance hash determines cache identity.
+- [The DAG and staleness](https://bearingresearch.com/strata/dev/concepts/dag-and-staleness/index.md): Each cell's source code is analyzed via Python's AST to extract:
+- [Artifacts and lineage](https://bearingresearch.com/strata/dev/concepts/artifacts-and-lineage/index.md): Strata Notebook is a content-addressed compute graph over Python.
+- [File format and git](https://bearingresearch.com/strata/dev/concepts/file-format-and-git/index.md): Each notebook is a directory on disk:
+- [How Strata compares](https://bearingresearch.com/strata/dev/notebook/comparison/index.md): Strata is closest in spirit to the new generation of reactive notebooks (Marimo, Pluto.jl) - it shares the "your DAG comes from your variable references" idea.
+- [Features](https://bearingresearch.com/strata/dev/concepts/features/index.md): The interactive notebook surface: Python, R, SQL, prompt, widget and loop cells, each producing artifacts that flow through an auto-built DAG.
 
-## Deployment
+## Reference
 
+- [Index](https://bearingresearch.com/strata/dev/reference/annotations/index.md): R cells take a subset of these: see R cell annotations.
+- [Python](https://bearingresearch.com/strata/dev/reference/annotations/python/index.md): These apply to Python cells, and most to other compute cells too.
+- [SQL](https://bearingresearch.com/strata/dev/reference/annotations/sql/index.md): A cell with `language = "sql"` runs a query through a declared connection.
+- [R](https://bearingresearch.com/strata/dev/reference/annotations/r/index.md): The same annotation parser handles both Python and R cells (`#`-prefixed comments at the top of the source).
+- [Prompt](https://bearingresearch.com/strata/dev/reference/annotations/prompt/index.md): Prompt cells (language `prompt`) accept an additional set of annotations that configure the AI call.
+- [Loops and variants](https://bearingresearch.com/strata/dev/reference/annotations/loops-and-variants/index.md): A Python cell carrying `@loop` is executed iteratively.
+- [Widget and app view](https://bearingresearch.com/strata/dev/reference/annotations/widget/index.md): On a widget cell, `# @live` makes a control change auto-run the cheap downstream cells instead of only marking them stale.
+- [CLI](https://bearingresearch.com/strata/dev/notebook/cli/index.md): `strata run` executes every cell in a notebook directory without starting the server or opening the UI.
+- [notebook.toml](https://bearingresearch.com/strata/dev/reference/notebook-toml/index.md): `notebook.toml` is the committed configuration for a notebook.
 - [Configuration](https://bearingresearch.com/strata/dev/reference/configuration/index.md): Strata is configured via environment variables (prefixed with `STRATA_`) or a `[tool.strata]` section in `pyproject.toml`.
-- [Deployment Modes](https://bearingresearch.com/strata/dev/deployment/modes/index.md): Strata's `deployment_mode` is `personal` or `service`.
-- [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/index.md): Service mode is what you run when more than one person uses Strata through a network.
-- [Operations & Lifecycle](https://bearingresearch.com/strata/dev/deployment/lifecycle/index.md): This page covers the operational disk-and-state story: where notebook data lives, how big it gets, how to back it up, how to move it, and how to clean up.
-- [Privacy & Sharing](https://bearingresearch.com/strata/dev/deployment/privacy/index.md): A personal server has one user, so it checks no identity: anyone who can reach it can list, open and execute every notebook under the storage root.
+- [REST](https://bearingresearch.com/strata/dev/reference/rest-api/index.md): This page documents the notebook REST surface, mounted under `/v1/notebooks`, plus the core routes a client meets most: materialize, streams, health and metric…
+- [WebSocket](https://bearingresearch.com/strata/dev/reference/websocket/index.md): The notebook UI communicates with the backend via a WebSocket connection for real-time updates.
+- [Notebook client protocol](https://bearingresearch.com/strata/dev/reference/notebook-protocol/index.md): A single reference for writing a non-Vue client (TUI, scripting, third-party integration) against the notebook backend.
+- [Executor protocol](https://bearingresearch.com/strata/dev/reference/executor-protocol/index.md): The executor protocol is the HTTP contract between Strata's notebook orchestrator and remote workers.
+- [Worker relay](https://bearingresearch.com/strata/dev/reference/worker-connect/index.md): `strata-worker --connect <url>` runs a worker that binds no port.
+- [Keyboard](https://bearingresearch.com/strata/dev/notebook/keyboard/index.md): Press ? anywhere in the notebook (outside a code editor or text field) to show the shortcuts modal.
+
+## Deploy
+
+- [Modes](https://bearingresearch.com/strata/dev/deployment/modes/index.md): Strata's `deployment_mode` is `personal` or `service`.
+- [Service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/index.md): Service mode is what you run when more than one person uses Strata through a network.
 - [Docker](https://bearingresearch.com/strata/dev/deployment/docker/index.md): Run Strata in Docker with Compose.
 - [Fly.io](https://bearingresearch.com/strata/dev/deployment/fly/index.md): This page deploys Strata on Fly.io as a single-tenant, personal-mode server, from the template `fly.example.toml` at the repository root.
-- [GitHub Codespaces](https://bearingresearch.com/strata/dev/deployment/codespaces/index.md): Click "Open in Codespaces" on the repo to get a ready-to-use Strata environment with the server running automatically.
+- [Codespaces](https://bearingresearch.com/strata/dev/deployment/codespaces/index.md): Click "Open in Codespaces" on the repo to get a ready-to-use Strata environment with the server running automatically.
+- [Operations](https://bearingresearch.com/strata/dev/deployment/lifecycle/index.md): This page covers the operational disk-and-state story: where notebook data lives, how big it gets, how to back it up, how to move it, and how to clean up.
 - [Observability](https://bearingresearch.com/strata/dev/deployment/observability/index.md): Strata ships an opt-in observability stack, Jaeger for traces, Prometheus for metrics, Grafana for dashboards, wired up as a docker-compose file you can run al…
+- [Privacy](https://bearingresearch.com/strata/dev/deployment/privacy/index.md): A personal server has one user, so it checks no identity: anyone who can reach it can list, open and execute every notebook under the storage root.
 
 ## Optional
 

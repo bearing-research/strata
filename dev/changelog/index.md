@@ -36,6 +36,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (#1381)
 
 ### Changed
+- **The docs are reorganized into five tabs: Get started, Guides, Concepts, Reference and
+  Deploy.** The home page is now a landing page, and its highlights moved to a Features
+  page. The two longest pages are split, one per cell kind, and annotations gain a
+  one-screen index. Old URLs, with their anchors, still arrive at the same heading. (#1411)
 - **The docs look like the app, and publish themselves for agents.** The theme uses the
   app's blue, diamond and JetBrains Mono. Installation now comes first under "Start here".
   Each page is published as Markdown beside its HTML, with a **Copy page as Markdown**
@@ -3436,7 +3440,7 @@ names.
   actually saved, and lineage now says who computed each step, on which machine,
   and in which environment: the questions you ask first when a result came from
   somewhere else. See
-  [Service mode → the team cache](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named).
+  [Service mode → the team cache](https://bearingresearch.com/strata/dev/guides/share/team-store/#the-team-cache-sharing-results-nobody-named).
 - **Artifacts are addressable by provenance hash**, which is what makes the
   lookup above a single request rather than a scan.
 - **Unknown libraries are stored as Arrow, not pickle.** A value from a library
@@ -3634,7 +3638,7 @@ values. No breaking changes.
   Cells that must always run - a side effect, a live API call, a fresh random
   draw - opt out with `# @nocache` (`# @nocache off` re-enables); the gate
   applies to every language. See
-  [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/#nocache) and
+  [Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache) and
   [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/).
 
 - **`strata agent <notebook-dir>` - one command to drive a notebook with a
@@ -3715,7 +3719,7 @@ Artifacts** operator pages. No breaking changes.
   (`Content-Security-Policy: frame-ancestors 'self'`) until you list host origins
   in `embed_frame_ancestors` (env `STRATA_EMBED_FRAME_ANCESTORS`), which also
   closes the prior gap where no framing header was sent at all. See
-  [Cell Types → Embedding the app view](https://bearingresearch.com/strata/dev/notebook/cells/).
+  [Cell Types → Embedding the app view](https://bearingresearch.com/strata/dev/guides/share/app-view/).
 - **Interactive widget cells.** A new `widget` cell kind is a declarative
   control panel - one control per line (`alpha = slider(0, 1, default=0.5)`,
   plus `number` / `dropdown` / `checkbox` / `text`). Each control defines a
@@ -3723,7 +3727,7 @@ Artifacts** operator pages. No breaking changes.
   (run them, or flip the widget's **⚡ Live** toggle to auto-run the cheap
   downstream cells as you drag). Values are content-addressed, so
   returning a slider to a prior value is a cache hit. Add one from the **+**
-  menu; see [Widget Cells](https://bearingresearch.com/strata/dev/notebook/cells/) and the
+  menu; see [Widget Cells](https://bearingresearch.com/strata/dev/guides/cells/widget/) and the
   `examples/widget_playground` notebook. (#420–#423) Omit a slider's `step=`
   and a readable increment is derived from its range (`slider(0, 100)` → `1`,
   `slider(0, 1)` → `0.01`); an explicit `step=` always wins. (#431)
@@ -3754,7 +3758,7 @@ Artifacts** operator pages. No breaking changes.
   back to a `{variant: value}` dict. Bare `# @per_variant` infers the group when
   the cell reads exactly one sweep group; name it (`# @per_variant model`) to
   choose among several. The web UI and terminal viewer show per-variant progress
-  chips as the instances run. See [Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/)
+  chips as the instances run. See [Annotations](https://bearingresearch.com/strata/dev/reference/annotations/)
   and the `examples/model_variants_sweep` notebook. (#407, #408, #412, #413, #415)
 - **Logs and Artifacts pages in the web UI.** Two operator views: **Logs**
   (`/logs`) renders the server-log stream with filters and a live SSE tail

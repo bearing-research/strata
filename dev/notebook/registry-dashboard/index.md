@@ -43,7 +43,7 @@ Open **http://localhost:8765** and open (or create) a notebook.
 ## 2. Publish a model from a cell
 
 The dashboard surfaces what your **cells publish** to the registry. Inside any
-Python cell, use the [ambient `strata` client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client).
+Python cell, use the [ambient `strata` client](https://bearingresearch.com/strata/dev/guides/cells/python/#the-ambient-strata-client).
 It's already in the namespace, no import or setup:
 
 ```python
@@ -121,7 +121,7 @@ top to bottom:
    first, with who and from → to.
 
 **Read by** lists the cells that read a name with
-[`# @dataset`](https://bearingresearch.com/strata/dev/notebook/annotations/#dataset), each from a result it stored. Cells of
+[`# @dataset`](https://bearingresearch.com/strata/dev/reference/annotations/python/#dataset), each from a result it stored. Cells of
 the open notebook show by name as soon as they have run. A cell in another
 notebook shows as `<notebook id>/<cell id>` once one of its results reaches
 the store the tab describes, by promotion or publication; a result that stays
@@ -187,7 +187,7 @@ root.](https://bearingresearch.com/strata/dev/assets/registry-lineage-dark.png#o
 
 - [Artifacts & Model Registry](https://bearingresearch.com/strata/dev/core/registry/) - the concepts and the
   SDK/CLI that drive the same registry.
-- [The ambient `strata` client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client) - how cells
+- [The ambient `strata` client](https://bearingresearch.com/strata/dev/guides/cells/python/#the-ambient-strata-client) - how cells
   publish.
 - [Lake-Aware Cells](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/) - the `@table` flow that makes a
   training cell stale so you *re-promote* when new data lands.

@@ -121,7 +121,7 @@ print(df.head())
 
 A notebook's `# @output_dir` folder in the store is files, not rows:
 `client.download_folder(artifact_id, version, "out")` rebuilds them in a new
-directory ([output folders](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir)).
+directory ([output folders](https://bearingresearch.com/strata/dev/reference/annotations/python/#output_dir)).
 
 ## 5. Integration with data libraries
 

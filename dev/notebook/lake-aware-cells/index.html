@@ -13,10 +13,10 @@
         <link rel="canonical" href="https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/">
       
       
-        <link rel="prev" href="../testing/">
+        <link rel="prev" href="../../guides/data/mounts/">
       
       
-        <link rel="next" href="../registry-dashboard/">
+        <link rel="next" href="../../guides/data/fetch-and-datasets/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Lake-Aware Cells - Strata</title>
+        <title>Lake and Iceberg - Strata</title>
       
     
     
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Lake-Aware Cells
+              Lake and Iceberg
             
           </span>
         </div>
@@ -230,36 +230,18 @@
   
   
   
-    <li class="md-tabs__item">
-      <a href="../.." class="md-tabs__link">
-        
-  
-  
     
-  
-  Home
-
-      </a>
-    </li>
-  
-
-      
-        
-  
-  
-  
-  
-    <li class="md-tabs__item">
-      <a href="../../changelog/" class="md-tabs__link">
-        
-  
-  
     
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
   
-  Changelog
+  
+  Get started
 
-      </a>
-    </li>
+        </a>
+      </li>
+    
   
 
       
@@ -282,11 +264,11 @@
     
     
       <li class="md-tabs__item md-tabs__item--active">
-        <a href="../../getting-started/installation/" class="md-tabs__link">
+        <a href="../../guides/cells/" class="md-tabs__link">
           
   
   
-  Notebook
+  Guides
 
         </a>
       </li>
@@ -305,11 +287,11 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../getting-started/core/" class="md-tabs__link">
+        <a href="../../concepts/caching/" class="md-tabs__link">
           
   
   
-  Core
+  Concepts
 
         </a>
       </li>
@@ -324,15 +306,25 @@
   
     
     
+      
+  
+  
+  
+  
+    
+    
       <li class="md-tabs__item">
-        <a href="../../reference/notebook-protocol/" class="md-tabs__link">
+        <a href="../../reference/annotations/" class="md-tabs__link">
           
   
   
-  API Reference
+  Reference
 
         </a>
       </li>
+    
+  
+
     
   
 
@@ -345,11 +337,11 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../reference/configuration/" class="md-tabs__link">
+        <a href="../../deployment/modes/" class="md-tabs__link">
           
   
   
-  Deployment
+  Deploy
 
         </a>
       </li>
@@ -408,6 +400,58 @@
   
   
   
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="../.." class="md-nav__link">
         
@@ -416,7 +460,7 @@
   <span class="md-ellipsis">
     
   
-    Home
+    Overview
   
 
     
@@ -428,22 +472,23 @@
     </li>
   
 
-    
-      
-      
+              
+            
+              
+                
   
   
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/" class="md-nav__link">
+      <a href="../../getting-started/installation/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Changelog
+    Install
   
 
     
@@ -452,6 +497,154 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/notebook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your first notebook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    With a coding agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terminal viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Coming from Jupyter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Example gallery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -481,17 +674,17 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   
   <span class="md-ellipsis">
     
   
-    Notebook
+    Guides
   
 
     
@@ -502,12 +695,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_3">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
   
-    Notebook
+    Guides
   
 
           </label>
@@ -536,17 +729,17 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_1" >
         
           
-          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="">
+          <label class="md-nav__link" for="__nav_2_1" id="__nav_2_1_label" tabindex="">
             
   
   
   <span class="md-ellipsis">
     
   
-    Start here
+    Cells
   
 
     
@@ -557,12 +750,12 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_3_1">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_1">
             <span class="md-nav__icon md-icon"></span>
             
   
-    Start here
+    Cells
   
 
           </label>
@@ -575,14 +768,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/installation/" class="md-nav__link">
+      <a href="../../guides/cells/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Installation
+    Overview
   
 
     
@@ -603,14 +796,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/notebook/" class="md-nav__link">
+      <a href="../../guides/cells/python/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Quickstart - Web UI
+    Python
   
 
     
@@ -631,14 +824,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../tui/" class="md-nav__link">
+      <a href="../../guides/cells/sql/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Quickstart - Terminal (TUI)
+    SQL
   
 
     
@@ -659,14 +852,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../agent/" class="md-nav__link">
+      <a href="../../guides/cells/r/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Quickstart - Coding agent
+    R
   
 
     
@@ -687,50 +880,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../scratchpad/" class="md-nav__link">
+      <a href="../../guides/cells/prompt/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Quickstart - Agent scratchpad
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../concepts/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Concepts
+    Prompt
   
 
     
@@ -751,14 +908,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../comparison/" class="md-nav__link">
+      <a href="../../guides/cells/widget/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    vs Jupyter, Marimo, Pluto
+    Widget
   
 
     
@@ -779,70 +936,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../examples/" class="md-nav__link">
+      <a href="../../guides/cells/loops-and-variants/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Examples
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cells/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Types
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../annotations/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Cell Annotations
+    Loops and variants
   
 
     
@@ -870,7 +971,100 @@
   <span class="md-ellipsis">
     
   
-    Cell Unit Tests
+    Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Data
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/data/mounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mounts
   
 
     
@@ -907,7 +1101,7 @@
   <span class="md-ellipsis">
     
   
-    Lake-Aware Cells
+    Lake and Iceberg
   
 
     
@@ -925,7 +1119,7 @@
   <span class="md-ellipsis">
     
   
-    Lake-Aware Cells
+    Lake and Iceberg
   
 
     
@@ -1098,14 +1292,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../registry-dashboard/" class="md-nav__link">
+      <a href="../../guides/data/fetch-and-datasets/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Registry Dashboard
+    Fetch and datasets
   
 
     
@@ -1126,6 +1320,97 @@
   
   
     <li class="md-nav__item">
+      <a href="../../guides/data/write-back/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Write back
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_3" id="__nav_2_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compute
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Compute
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../workers/" class="md-nav__link">
         
   
@@ -1133,7 +1418,7 @@
   <span class="md-ellipsis">
     
   
-    Distributed Workers
+    Workers
   
 
     
@@ -1161,7 +1446,7 @@
   <span class="md-ellipsis">
     
   
-    Worker Pool
+    Worker pool
   
 
     
@@ -1182,14 +1467,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../publishing/" class="md-nav__link">
+      <a href="../../guides/compute/ssh/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Publishing an artifact
+    SSH
   
 
     
@@ -1245,7 +1530,98 @@
   <span class="md-ellipsis">
     
   
-    Secret Manager
+    Secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_4" id="__nav_2_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Share
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Share
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/share/app-view/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    App view
   
 
     
@@ -1266,98 +1642,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../cli/" class="md-nav__link">
+      <a href="../publishing/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Headless Runner
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../agent-authoring/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Authoring Programmatically
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../mcp/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    MCP Server
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../import/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Import from Jupyter
+    Publish
   
 
     
@@ -1385,7 +1677,7 @@
   <span class="md-ellipsis">
     
   
-    Export
+    Export and import
   
 
     
@@ -1406,14 +1698,543 @@
   
   
     <li class="md-nav__item">
-      <a href="../keyboard/" class="md-nav__link">
+      <a href="../../guides/share/team-store/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Keyboard Shortcuts
+    Team store
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../registry-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_5" id="__nav_2_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Agents
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scratchpad/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scratchpad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_6" id="__nav_2_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Library
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Library
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core/registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts and registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How caching works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/dag-and-staleness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The DAG and staleness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/artifacts-and-lineage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts and lineage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/file-format-and-git/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File format and git
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How Strata compares
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
   
 
     
@@ -1464,7 +2285,7 @@
   <span class="md-ellipsis">
     
   
-    Core
+    Reference
   
 
     
@@ -1480,7 +2301,59 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Core
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_1" id="__nav_4_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Annotations
   
 
           </label>
@@ -1493,14 +2366,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/core/" class="md-nav__link">
+      <a href="../../reference/annotations/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Quickstart
+    Index
   
 
     
@@ -1521,14 +2394,414 @@
   
   
     <li class="md-nav__item">
-      <a href="../../core/registry/" class="md-nav__link">
+      <a href="../../reference/annotations/python/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Artifacts & Registry
+    Python
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/annotations/sql/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/annotations/r/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    R
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/annotations/prompt/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompt
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/annotations/loops-and-variants/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Loops and variants
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/annotations/widget/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Widget and app view
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/notebook-toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    notebook.toml
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/rest-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/notebook-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook client protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/executor-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Executor protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/worker-connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker relay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keyboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard
   
 
     
@@ -1579,7 +2852,7 @@
   <span class="md-ellipsis">
     
   
-    API Reference
+    Deploy
   
 
     
@@ -1595,266 +2868,11 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    API Reference
+    Deploy
   
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/notebook-protocol/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Notebook Client Protocol
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/rest-api/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    REST API
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/websocket/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    WebSocket Protocol
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/executor-protocol/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Executor Protocol
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/worker-connect/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Worker Relay Protocol
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/notebook-toml/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    notebook.toml Schema
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Deployment
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_6">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Deployment
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../reference/configuration/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Configuration
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
             
               
                 
@@ -1870,7 +2888,7 @@
   <span class="md-ellipsis">
     
   
-    Deployment Modes
+    Modes
   
 
     
@@ -1898,63 +2916,7 @@
   <span class="md-ellipsis">
     
   
-    Service Mode
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../deployment/lifecycle/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Operations & Lifecycle
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../deployment/privacy/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Privacy & Sharing
+    Service mode
   
 
     
@@ -2038,7 +3000,35 @@
   <span class="md-ellipsis">
     
   
-    GitHub Codespaces
+    Codespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
   
 
     
@@ -2067,6 +3057,34 @@
     
   
     Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy
   
 
     
@@ -2266,14 +3284,14 @@
 
 <h1 id="lake-aware-cells">Lake-Aware Cells<a class="headerlink" href="#lake-aware-cells" title="Permanent link">&para;</a></h1>
 <p>A <strong>lake-aware cell</strong> is a notebook cell that takes an Iceberg table as a
-versioned input via the <a href="../annotations/#table"><code>@table</code></a> annotation. The
+versioned input via the <a href="../../reference/annotations/python/#table"><code>@table</code></a> annotation. The
 table's current snapshot id is folded into the cell's provenance, so <strong>new
 data landing in the lake puts the cell out of date, its downstream cells go
 stale, and the normal cascade re-runs them</strong> - no manual data-version
 bookkeeping, no re-pointing paths.</p>
 <p>This page is the end-to-end walkthrough: build a tiny warehouse, scan it from
 a cell, retrain when new data arrives, and pin a snapshot for reproducibility.
-For the bare syntax, see the <a href="../annotations/#table"><code>@table</code> reference</a>.</p>
+For the bare syntax, see the <a href="../../reference/annotations/python/#table"><code>@table</code> reference</a>.</p>
 <h2 id="when-to-use-it">When to use it<a class="headerlink" href="#when-to-use-it" title="Permanent link">&para;</a></h2>
 <p>Reach for <code>@table</code> when a cell's input is a table that <strong>grows or changes over
 time</strong> and you want re-runs to track those changes automatically:</p>
@@ -2285,7 +3303,7 @@ time</strong> and you want re-runs to track those changes automatically:</p>
 <p>If your input is a fixed file, a plain mount (<code># @mount</code>) or a hard-coded path
 is simpler. <code>@table</code> earns its keep precisely when the snapshot can move.</p>
 <p>To query catalog tables in SQL rather than scan them from Python, a DuckDB
-<a href="../cells/#duckdb-over-the-lake">SQL cell over the lake</a> pins every table it
+<a href="../../guides/cells/sql/#duckdb-over-the-lake">SQL cell over the lake</a> pins every table it
 reads the same way, with no <code>@table</code> line.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2335,7 +3353,7 @@ SQL catalog under that name (see
 <code>file:///tmp/strata-demo/warehouse#shop.orders</code>. This is the same URI format
 <code>client.materialize</code> accepts. A table in a catalog the server names under
 <code>STRATA_CATALOGS</code> is written <code>&lt;catalog&gt;:&lt;namespace&gt;.&lt;table&gt;</code> instead (see the
-<a href="../annotations/#table"><code>@table</code> reference</a>).</p>
+<a href="../../reference/annotations/python/#table"><code>@table</code> reference</a>).</p>
 <p>Strata finds a local warehouse's tables in <code>&lt;warehouse&gt;/catalog.db</code>. An object
 store (<code>s3://</code>, <code>gs://</code>, <code>abfs://</code>) has no such file, so set the catalog database
 with <code>STRATA_CATALOG_URI</code>. Without it, a personal server keeps the catalog in
@@ -2350,7 +3368,7 @@ object storage with no <code>uri</code> stops the server at startup
 (<a href="../../reference/configuration/#catalog">Catalog settings</a>).</p>
 <h2 id="step-2-declare-a-lake-aware-cell">Step 2 - Declare a lake-aware cell<a class="headerlink" href="#step-2-declare-a-lake-aware-cell" title="Permanent link">&para;</a></h2>
 <p>In a notebook cell, declare the table and scan it with the cell's
-<a href="../cells/#the-ambient-strata-client">ambient <code>strata</code> client</a>, which is already
+<a href="../../guides/cells/python/#the-ambient-strata-client">ambient <code>strata</code> client</a>, which is already
 bound to the server. The <code>@table</code> annotation injects two variables: <code>orders</code>
 (the table URI) and <code>orders_snapshot</code> (the resolved snapshot id).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @table orders file:///tmp/strata-demo/warehouse#shop.orders</span>
@@ -2558,8 +3576,8 @@ result turns out to be cached may still ask; asking is the safe direction.</p>
 </ul>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../annotations/#table"><code>@table</code> annotation reference</a> - the syntax surface.</li>
-<li><a href="../annotations/">Cell Annotations</a> - all per-cell annotations.</li>
+<li><a href="../../reference/annotations/python/#table"><code>@table</code> annotation reference</a> - the syntax surface.</li>
+<li><a href="../../reference/annotations/">Cell Annotations</a> - all per-cell annotations.</li>
 <li><a href="../../getting-started/core/">Core Quickstart</a> - <code>client.materialize</code> and
   <code>scan@v1</code> from the SDK directly, without the notebook.</li>
 </ul>
@@ -2596,6 +3614,9 @@ result turns out to be cached may still ask; asking is the safe direction.</p>
   <div class="md-footer-meta md-typeset">
     <div class="md-footer-meta__inner md-grid">
       <div class="md-copyright">
+  <div class="md-copyright__highlight">
+    <a href="../../changelog/">Changelog</a>
+  </div>
   
   
     Made with
@@ -2624,6 +3645,8 @@ result turns out to be cached may still ask; asking is the safe direction.</p>
       <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="../../javascripts/copy-markdown.js"></script>
+      
+        <script src="../../javascripts/changelog-link.js"></script>
       
     
   </body>

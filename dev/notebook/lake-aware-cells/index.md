@@ -1,7 +1,7 @@
 # Lake-Aware Cells
 
 A **lake-aware cell** is a notebook cell that takes an Iceberg table as a
-versioned input via the [`@table`](https://bearingresearch.com/strata/dev/notebook/annotations/#table) annotation. The
+versioned input via the [`@table`](https://bearingresearch.com/strata/dev/reference/annotations/python/#table) annotation. The
 table's current snapshot id is folded into the cell's provenance, so **new
 data landing in the lake puts the cell out of date, its downstream cells go
 stale, and the normal cascade re-runs them** - no manual data-version
@@ -9,7 +9,7 @@ bookkeeping, no re-pointing paths.
 
 This page is the end-to-end walkthrough: build a tiny warehouse, scan it from
 a cell, retrain when new data arrives, and pin a snapshot for reproducibility.
-For the bare syntax, see the [`@table` reference](https://bearingresearch.com/strata/dev/notebook/annotations/#table).
+For the bare syntax, see the [`@table` reference](https://bearingresearch.com/strata/dev/reference/annotations/python/#table).
 
 ## When to use it
 
@@ -24,7 +24,7 @@ If your input is a fixed file, a plain mount (`# @mount`) or a hard-coded path
 is simpler. `@table` earns its keep precisely when the snapshot can move.
 
 To query catalog tables in SQL rather than scan them from Python, a DuckDB
-[SQL cell over the lake](https://bearingresearch.com/strata/dev/notebook/cells/#duckdb-over-the-lake) pins every table it
+[SQL cell over the lake](https://bearingresearch.com/strata/dev/guides/cells/sql/#duckdb-over-the-lake) pins every table it
 reads the same way, with no `@table` line.
 
 ## Prerequisites
@@ -81,7 +81,7 @@ The **table URI** is `<warehouse>#<namespace>.<table>` - here
 `file:///tmp/strata-demo/warehouse#shop.orders`. This is the same URI format
 `client.materialize` accepts. A table in a catalog the server names under
 `STRATA_CATALOGS` is written `<catalog>:<namespace>.<table>` instead (see the
-[`@table` reference](https://bearingresearch.com/strata/dev/notebook/annotations/#table)).
+[`@table` reference](https://bearingresearch.com/strata/dev/reference/annotations/python/#table)).
 
 Strata finds a local warehouse's tables in `<warehouse>/catalog.db`. An object
 store (`s3://`, `gs://`, `abfs://`) has no such file, so set the catalog database
@@ -99,7 +99,7 @@ object storage with no `uri` stops the server at startup
 ## Step 2 - Declare a lake-aware cell
 
 In a notebook cell, declare the table and scan it with the cell's
-[ambient `strata` client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client), which is already
+[ambient `strata` client](https://bearingresearch.com/strata/dev/guides/cells/python/#the-ambient-strata-client), which is already
 bound to the server. The `@table` annotation injects two variables: `orders`
 (the table URI) and `orders_snapshot` (the resolved snapshot id).
 
@@ -348,7 +348,7 @@ result turns out to be cached may still ask; asking is the safe direction.
 
 ## See also
 
-- [`@table` annotation reference](https://bearingresearch.com/strata/dev/notebook/annotations/#table) - the syntax surface.
-- [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/) - all per-cell annotations.
+- [`@table` annotation reference](https://bearingresearch.com/strata/dev/reference/annotations/python/#table) - the syntax surface.
+- [Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) - all per-cell annotations.
 - [Core Quickstart](https://bearingresearch.com/strata/dev/getting-started/core/) - `client.materialize` and
   `scan@v1` from the SDK directly, without the notebook.

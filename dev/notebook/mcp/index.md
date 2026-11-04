@@ -157,7 +157,7 @@ computes, and reading the source cannot tell you what it is computing.
 and current `value` (the default itself, for a control nobody has moved, since
 that is what the cell runs at), and `set_widget_value(session_id, cell_id,
 {"utilization": 0.9})` sets them and re-materializes the cell, marking
-everything downstream stale. On a [`# @live`](https://bearingresearch.com/strata/dev/notebook/cells/#live-mode) widget it
+everything downstream stale. On a [`# @live`](https://bearingresearch.com/strata/dev/guides/cells/widget/#live-mode) widget it
 runs the same cost-gated cascade a drag does, so the cheap downstream cells
 come back computed rather than stale. Send only the controls you are changing.
 A notebook that is mid-run refuses the call and leaves the stored values alone,
@@ -185,7 +185,7 @@ with `approve_reads=true`; the yes is remembered for that cell, machine and
 inputs, so the same run does not ask again. Without either, the run goes ahead
 and the reads index records that it was not asked.
 
-`set_variant` drives [variant groups](https://bearingresearch.com/strata/dev/notebook/annotations/#variant-cells):
+`set_variant` drives [variant groups](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells):
 `set_variant(session_id, "policy", active="service")` picks one variant,
 `set_variant(session_id, "policy", mode="sweep")` runs them all, and either
 argument can be sent alone. It makes the same two calls the UI's tab strip

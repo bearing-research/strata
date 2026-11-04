@@ -157,7 +157,7 @@ move = client.set_alias("taxi/tip-model", "champion", model_art.artifact_id, mod
 print(move.get("status", "applied"))  # "applied" | "pending" | "unchanged"
 ```
 
-New data lands in the lake → the [`@table` annotation](https://bearingresearch.com/strata/dev/notebook/annotations/#table)
+New data lands in the lake → the [`@table` annotation](https://bearingresearch.com/strata/dev/reference/annotations/python/#table)
 makes the training cells stale → the pipeline re-runs → promote proposes the
 challenger → a human approves → and the whole history is reconstructible:
 
@@ -183,7 +183,7 @@ local one.
     The rest of this section is the reference for what each piece does.
 
 **Publishing.** Inside a cell, the [ambient `strata`
-client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client) publishes with a name:
+client](https://bearingresearch.com/strata/dev/guides/cells/python/#the-ambient-strata-client) publishes with a name:
 
 ```python
 art = strata.put(
