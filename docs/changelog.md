@@ -38,7 +38,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ### Changed
 - **README, repo metadata and `CONTRIBUTING.md`.** The README leads with coding agents and
   drops the long feature list, which stays in the docs. Package URLs use
-  `bearingresearch.com/strata/`, and there is now a `CONTRIBUTING.md`. (#PRNUM)
+  `bearingresearch.com/strata/`, and there is now a `CONTRIBUTING.md`. (#1403)
 - **A quieter notebook chrome.** Artifacts, Logs and Delete Notebook move to a `⋯`
   menu, and below 1280px wide Rerun All, App and shortcuts join them, so the top bar
   stays on one row. The personal-mode chip is gone, and a dot with a tooltip replaces
