@@ -3847,6 +3847,12 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A first-run path: <code>strata tutorial</code>, bundled samples and a tutorial on caching.</strong>
+  The wheel now ships three sample notebooks, so there is nothing to clone. <code>strata
+  tutorial</code> lists them and <code>strata tutorial caching</code> opens a copy under a fresh name and
+  prints its URL, starting a server if none is running. The home page gains <strong>Open a
+  sample</strong> and lists the notebooks in the storage directory as well as browser recents.
+  (#1402)</li>
 <li><strong><code>@write_table ... sync</code> keeps a table equal to what a cell produces.</strong>
   <code># @write_table &lt;var&gt; &lt;table&gt; sync on=&lt;col&gt;,...</code> upserts on the key columns
   and deletes the rows whose key the variable no longer holds. The table ends up
@@ -4010,6 +4016,9 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A markdown cell no longer reads as a cache hit.</strong> Run All gave markdown cells a
+  <code>cached</code> badge and counted them in the profiler's hits and rows, so a first run said
+  <code>4 cached</code>. Nothing runs for one, so it now has no badge and is not counted. (#1402)</li>
 <li><strong>A result known not to match reads stale, and going back reads cached.</strong> A cell
   whose environment or declared outside input changed read idle while it went on
   showing the old result. It now reads <code>stale · environment changed</code> or
