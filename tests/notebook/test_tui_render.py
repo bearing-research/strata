@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+from pathlib import Path
 
 import httpx
 import pytest
@@ -13,7 +14,6 @@ from textual_image.renderable import Image as TerminalImage
 
 from strata.notebook.tui.app import (
     _decode_data_url,
-    _glyph,
     _image_renderable,
     _render_outputs,
     _render_table,
@@ -26,7 +26,13 @@ from strata.notebook.tui.app import (
     _time_str,
 )
 from strata.notebook.tui.client import TuiClient, TuiClientError, _json_or_error
-from strata.notebook.tui.viewmodel import CellView
+from strata.notebook.tui.viewmodel import (
+    CELL_STATES,
+    CellView,
+    NotebookViewModel,
+    cell_state,
+    state_glyph,
+)
 
 
 def _png_data_url(color: str = "red", size: tuple[int, int] = (4, 4)) -> str:
@@ -36,9 +42,65 @@ def _png_data_url(color: str = "red", size: tuple[int, int] = (4, 4)) -> str:
 
 
 def test_glyph_known_and_unknown():
-    assert _glyph("running") == "▶"
-    assert _glyph("ready") == "✓"
-    assert _glyph("mystery") == "?"
+    assert state_glyph("running") == "▶"
+    assert state_glyph("ready") == "✓"
+    assert state_glyph("mystery") == "?"
+
+
+@pytest.mark.parametrize(
+    ("cell", "state"),
+    [
+        (CellView(id="a"), "idle"),
+        (CellView(id="a", status="queued"), "queued"),
+        (CellView(id="a", status="running"), "running"),
+        (CellView(id="a", status="running", remote_worker="gpu"), "dispatching"),
+        (CellView(id="a", status="ready"), "ready"),
+        (CellView(id="a", status="ready", cache_hit=True), "cached"),
+        (CellView(id="a", status="stale", cache_hit=True), "stale"),
+        (CellView(id="a", status="error"), "error"),
+        (CellView(id="a", blocked=True), "blocked"),
+        (CellView(id="a", status="ready", blocked=True), "blocked"),
+        (CellView(id="a", status="error", blocked=True), "blocked"),
+        (CellView(id="a", status="running", blocked=True), "running"),
+    ],
+)
+def test_a_cell_reads_as_its_state(cell, state):
+    assert cell_state(cell) == state
+
+
+def test_the_terminal_keeps_to_the_state_table():
+    design = (Path(__file__).parents[2] / "frontend" / "DESIGN.md").read_text()
+    rows = [[c.strip() for c in r.split("|")] for r in design.splitlines() if r.startswith("|")]
+    for state, (glyph, color) in CELL_STATES.items():
+        # The first table with this state's name in its first column is the one with the glyphs.
+        row = next(r for r in rows if r[1] == state)
+        assert row[-3:-1] == [f"`{glyph}`", f"`{color}`"]
+    glyphs = [glyph for glyph, _ in CELL_STATES.values()]
+    assert len(set(glyphs)) == len(glyphs)
+
+
+def test_a_snapshot_says_a_cell_is_blocked_and_a_warning_does_not():
+    vm = NotebookViewModel()
+    cell = {"id": "a", "source": "x = 1"}
+    vm.apply_notebook_state(
+        {"cells": [{**cell, "annotation_diagnostics": [{"severity": "warn"}]}], "dag": {}}
+    )
+    assert cell_state(vm.cells["a"]) == "idle"
+    vm.apply_notebook_state(
+        {"cells": [{**cell, "annotation_diagnostics": [{"severity": "error"}]}], "dag": {}}
+    )
+    assert cell_state(vm.cells["a"]) == "blocked"
+
+
+def test_a_remote_run_dispatches_and_the_next_local_one_does_not():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state({"cells": [{"id": "a", "source": "x = 1"}], "dag": {}})
+    status = {"cell_id": "a", "status": "running"}
+    vm.apply_frame("cell_status", {**status, "remote_worker": "gpu"})
+    assert cell_state(vm.cells["a"]) == "dispatching"
+    vm.apply_frame("cell_status", {"cell_id": "a", "status": "ready"})
+    vm.apply_frame("cell_status", status)
+    assert cell_state(vm.cells["a"]) == "running"
 
 
 def test_source_preview_skips_annotations_and_blanks():
@@ -175,11 +237,13 @@ def test_image_renderable_builds_and_degrades():
 
 def test_time_str_formats_duration_and_cache():
     assert _time_str(CellView(id="a")) == ""  # no run yet
-    assert _time_str(CellView(id="a", cache_hit=True)) == "cached"
+    assert _time_str(CellView(id="a", status="ready", cache_hit=True)) == "cached"
     assert _time_str(CellView(id="a", duration_ms=120)) == "120ms"
     assert _time_str(CellView(id="a", duration_ms=1500)) == "1.5s"
     # cache hit wins over a recorded duration.
-    assert _time_str(CellView(id="a", duration_ms=999, cache_hit=True)) == "cached"
+    assert _time_str(CellView(id="a", status="ready", duration_ms=999, cache_hit=True)) == "cached"
+    # A result no longer current doesn't read as a hit, whatever its last run was.
+    assert _time_str(CellView(id="a", status="stale", duration_ms=999, cache_hit=True)) == "stale"
 
 
 def test_single_table_detects_one_tabular_output():

@@ -6,10 +6,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Circle,
-  CircleDashed,
-  Clock,
-  Contrast,
   Copy,
   FlaskConical,
   Pencil,
@@ -17,6 +13,7 @@ import {
   Plus,
   RotateCw,
   Search,
+  Send,
   Settings,
   Square,
   TriangleAlert,
@@ -42,7 +39,8 @@ import {
 import { inputWeightBadge } from '../utils/inputWeights'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
 import { cacheBadgeLabel, cacheBadgeTitle } from '../utils/cacheBadge'
-import { cellDotTitle, cellRunBadge } from '../utils/cellRunBadge'
+import { cellDotTitle } from '../utils/cellRunBadge'
+import { CELL_STATES, cellState } from '../utils/cellState'
 import { renderMarkdownToHtml } from '../utils/markdown'
 import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
 
@@ -245,7 +243,7 @@ watch(
   },
 )
 
-const statusClass = computed(() => `status-${props.cell.status}`)
+const state = computed(() => cellState(props.cell))
 
 // Live badge for a remote cell in flight. An async worker reports "starting"
 // while its machine is provisioned, before the cell's timeout begins, and a
@@ -269,22 +267,7 @@ const inputsBadge = computed(() =>
   }),
 )
 
-const statusIcon = computed(() => {
-  switch (props.cell.status) {
-    case 'idle':
-      return Circle
-    case 'queued':
-      return Clock
-    case 'running':
-      return CircleDashed
-    case 'ready':
-      return Circle
-    case 'stale':
-      return Contrast
-    case 'error':
-      return X
-  }
-})
+const stateInfo = computed(() => CELL_STATES[state.value])
 
 // Status-dot tooltip text, e.g. "stale · upstream changed".
 const STALENESS_REASON_LABELS: Record<StalenessReason, string> = {
@@ -297,11 +280,11 @@ const STALENESS_REASON_LABELS: Record<StalenessReason, string> = {
 
 const statusTitle = computed(() => {
   const reasons = props.cell.stalenessReasons
-  if (props.cell.status === 'stale' && reasons?.length) {
+  if (state.value === 'stale' && reasons?.length) {
     const detail = reasons.map((r) => STALENESS_REASON_LABELS[r] ?? r).join(', ')
     return `stale · ${detail}`
   }
-  return props.cell.status
+  return stateInfo.value.label
 })
 
 const durationLabel = computed(() => {
@@ -332,13 +315,11 @@ const executionMethodLabel = computed(() => {
   }
 })
 
-const runBadge = computed(() => cellRunBadge(props.cell.status, props.cell.output?.cacheHit))
-
 const statusDotTitle = computed(() =>
   cellDotTitle(statusTitle.value, {
     isLeaf: Boolean(props.cell.isLeaf),
     executionMethod: executionMethodLabel.value,
-    hasRunBadge: runBadge.value !== null,
+    hasRunBadge: state.value === 'cached' || state.value === 'stale',
   }),
 )
 
@@ -759,7 +740,7 @@ function outputKey(output: CellOutput, index: number): string {
   <div
     class="cell"
     :class="[
-      statusClass,
+      `state-${state}`,
       {
         'cell-prompt': cell.language === 'prompt',
         'cell-markdown': cell.language === 'markdown',
@@ -770,8 +751,8 @@ function outputKey(output: CellOutput, index: number): string {
   >
     <!-- Left gutter -->
     <div class="cell-gutter">
-      <span class="status-dot" :title="statusDotTitle"
-        ><component :is="statusIcon" :fill="cell.status === 'ready' ? 'currentColor' : 'none'"
+      <span class="status-dot" role="img" :aria-label="stateInfo.label" :title="statusDotTitle"
+        ><component :is="stateInfo.icon" :fill="state === 'ready' ? 'currentColor' : 'none'"
       /></span>
       <div class="cell-actions">
         <button
@@ -958,8 +939,12 @@ function outputKey(output: CellOutput, index: number): string {
               >
                 {{ who }}
               </span>
-              <span v-if="dispatchBadge" class="dispatch-badge" :title="dispatchBadge.title">
-                {{ dispatchBadge.label }}
+              <span
+                v-if="dispatchBadge"
+                class="state-badge dispatch-badge"
+                :title="dispatchBadge.title"
+              >
+                <Send /> {{ dispatchBadge.label }}
               </span>
               <span v-if="inputsBadge" class="inputs-badge" :title="inputsBadge.title">
                 {{ inputsBadge.label }}
@@ -1061,22 +1046,26 @@ function outputKey(output: CellOutput, index: number): string {
               </span>
               <span
                 v-if="cell.status === 'running' && !loopProgressLabel"
-                class="running-badge"
+                class="state-badge running-badge"
                 data-testid="running-elapsed"
                 :title="runningElapsedTitle"
               >
                 <span class="running-spinner" aria-hidden="true"></span>
                 running · {{ runningElapsedLabel }}
               </span>
-              <span v-if="runBadge === 'stale'" class="stale-badge" :title="statusTitle"
-                >stale</span
-              >
               <span
-                v-else-if="runBadge === 'cached'"
-                class="cache-badge"
+                v-if="state === 'cached'"
+                class="state-badge"
                 :title="cacheBadgeTitle(cell.output?.cacheLoadMs)"
               >
                 <Zap /> {{ cacheBadgeLabel(cell.output?.cacheSavedMs, cell.output?.cacheLoadMs) }}
+              </span>
+              <span
+                v-else-if="['queued', 'stale', 'error', 'blocked'].includes(state)"
+                class="state-badge"
+                :title="state === 'blocked' ? annotationDiagnosticsTitle : statusTitle"
+              >
+                <component :is="stateInfo.icon" /> {{ stateInfo.label }}
               </span>
             </div>
           </div>
@@ -1447,17 +1436,14 @@ function outputKey(output: CellOutput, index: number): string {
 .cell:hover {
   border-color: var(--accent-lavender);
 }
-.cell.status-running {
-  border-color: var(--accent-primary);
-}
-.cell.status-ready {
-  border-color: var(--accent-success);
-}
-.cell.status-stale {
-  border-color: var(--accent-warning);
-}
-.cell.status-error {
-  border-color: var(--accent-danger);
+.cell.state-running,
+.cell.state-dispatching,
+.cell.state-ready,
+.cell.state-cached,
+.cell.state-stale,
+.cell.state-error,
+.cell.state-blocked {
+  border-color: var(--state);
 }
 
 .cell-gutter {
@@ -1471,20 +1457,11 @@ function outputKey(output: CellOutput, index: number): string {
 }
 .status-dot {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--state);
 }
-.status-ready .status-dot {
-  color: var(--accent-success);
-}
-.status-running .status-dot {
-  color: var(--accent-primary);
+.state-running .status-dot,
+.state-dispatching .status-dot {
   animation: pulse 1s infinite;
-}
-.status-stale .status-dot {
-  color: var(--accent-warning);
-}
-.status-error .status-dot {
-  color: var(--accent-danger);
 }
 
 @keyframes pulse {
@@ -1801,20 +1778,6 @@ function outputKey(output: CellOutput, index: number): string {
 .cell-vars code {
   color: var(--accent-primary);
 }
-.cache-badge {
-  background: var(--tint-success);
-  color: var(--accent-success);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-weight: 600;
-}
-.stale-badge {
-  background: var(--tint-warning);
-  color: var(--accent-warning);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-weight: 600;
-}
 .loop-progress-badge {
   display: inline-flex;
   align-items: center;
@@ -1866,19 +1829,8 @@ function outputKey(output: CellOutput, index: number): string {
 }
 
 /* Matches the loop-progress badge so running states look the same. */
-.running-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--tint-warning);
-  color: var(--accent-warning);
-  border: 1px solid var(--tint-warning);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 600;
-}
 .running-spinner {
+  color: var(--state);
   display: inline-block;
   width: 8px;
   height: 8px;
@@ -1946,13 +1898,6 @@ function outputKey(output: CellOutput, index: number): string {
   white-space: nowrap;
 }
 .dispatch-badge {
-  background: var(--tint-warning);
-  color: var(--accent-warning);
-  border: 1px solid var(--tint-warning);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 600;
   animation: dispatch-pulse 1.2s ease-in-out infinite;
 }
 .inputs-badge {

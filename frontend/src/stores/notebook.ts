@@ -974,7 +974,7 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
     ? serverCell.annotation_diagnostics
         .filter((d: any) => d && typeof d.code === 'string')
         .map((d: any) => ({
-          severity: d.severity === 'info' ? ('info' as const) : ('warn' as const),
+          severity: d.severity === 'info' || d.severity === 'error' ? d.severity : 'warn',
           code: String(d.code),
           message: String(d.message ?? ''),
           line: typeof d.line === 'number' ? d.line : null,
@@ -2261,7 +2261,7 @@ function initializeWebSocket() {
             cell.annotationDiagnostics = sc.annotation_diagnostics
               .filter((d: any) => d && typeof d.code === 'string')
               .map((d: any) => ({
-                severity: d.severity === 'info' ? ('info' as const) : ('warn' as const),
+                severity: d.severity === 'info' || d.severity === 'error' ? d.severity : 'warn',
                 code: String(d.code),
                 message: String(d.message ?? ''),
                 line: typeof d.line === 'number' ? d.line : null,

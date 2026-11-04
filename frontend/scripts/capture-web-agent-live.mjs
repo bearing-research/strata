@@ -145,11 +145,11 @@ async function main() {
     // The run takes two seconds: catch it in flight, then finished.
     const loadRun = strata(['cell', 'run', loadId])
     await beat('the first cell running', (page) =>
-      page.locator('.cell.status-running').first().waitFor({ timeout: TIMEOUT_MS }),
+      page.locator('.cell.state-running').first().waitFor({ timeout: TIMEOUT_MS }),
     )
     await loadRun
     await beat('the first cell finishing', (page) =>
-      page.locator('.cell.status-ready').first().waitFor({ timeout: TIMEOUT_MS }),
+      page.locator('.cell.state-ready').first().waitFor({ timeout: TIMEOUT_MS }),
     )
 
     await strata(['cell', 'add', '-c', SUMMARIZE])
@@ -160,13 +160,13 @@ async function main() {
 
     await strata(['cell', 'run', summarizeId])
     await beat('both cells finishing', (page) =>
-      page.locator('.cell.status-ready').nth(1).waitFor({ timeout: TIMEOUT_MS }),
+      page.locator('.cell.state-ready').nth(1).waitFor({ timeout: TIMEOUT_MS }),
     )
 
     // The payoff: running the slow cell again is a cache hit.
     await strata(['cell', 'run', loadId])
     await beat('the first cell served from the cache', (page) =>
-      cells(page).first().locator('.cache-badge').waitFor({ timeout: TIMEOUT_MS }),
+      page.locator('.cell.state-cached').first().waitFor({ timeout: TIMEOUT_MS }),
     )
   } finally {
     await browser.close()

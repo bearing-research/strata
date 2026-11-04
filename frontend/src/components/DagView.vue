@@ -3,10 +3,11 @@ import * as dagre from '@dagrejs/dagre'
 import { PanelBottom, PanelRight } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
+import { CELL_STATES, cellState, type CellState } from '../utils/cellState'
 import { LABEL_HEIGHT, labelAnchor, placeEdgeLabels } from '../utils/dagLabels'
 import { dagLineage, edgeOnLineage } from '../utils/dagLineage'
 import { panToCenter, viewBox as dagViewBox } from '../utils/dagViewport'
-import type { Cell, CellId } from '../types/notebook'
+import type { CellId } from '../types/notebook'
 
 defineProps<{ docked?: boolean }>()
 defineEmits<{ toggleDock: [] }>()
@@ -23,7 +24,7 @@ interface NodeLayout {
   width: number
   label: string
   fullLabel: string
-  status: Cell['status']
+  state: CellState
   /** When this cell is the active variant of a group, the count of
    * sibling variants. Drives the "stacked card" visual + tooltip. */
   variantSiblings: number
@@ -44,7 +45,8 @@ interface EdgeLayout {
 // capped and ellipsized: unbounded widths make dagre lay out lopsided.
 const nodeHeight = 36
 const charWidthPx = 6.6
-const nodePaddingPx = 20
+const nodeIconPx = 12
+const nodePaddingPx = 36
 const minNodeWidth = 110
 const maxNodeWidth = 260
 const maxLabelLen = Math.floor((maxNodeWidth - nodePaddingPx) / charWidthPx)
@@ -122,7 +124,7 @@ const layout = computed(() => {
       width: nodeWidths.get(c.id) ?? minNodeWidth,
       label,
       fullLabel: rawLabel,
-      status: c.status,
+      state: cellState(c),
       variantSiblings: groupSize > 1 ? groupSize - 1 : 0,
       variantGroup: c.variantGroup ?? null,
       variantName: c.variantName ?? null,
@@ -345,38 +347,6 @@ function scrollToCell(cellId: CellId) {
   }
 }
 
-function statusStroke(status: Cell['status']): string {
-  switch (status) {
-    case 'ready':
-      return 'var(--accent-success)'
-    case 'running':
-      return 'var(--accent-primary)'
-    case 'stale':
-      return 'var(--accent-warning)'
-    case 'error':
-      return 'var(--accent-danger)'
-    default:
-      return 'var(--text-muted)'
-  }
-}
-
-// Translucent fill for statusStroke. Appending alpha to a var() string
-// ("var(--accent-success)" + "22") is invalid CSS and renders black.
-function statusFill(status: Cell['status']): string {
-  switch (status) {
-    case 'ready':
-      return 'var(--tint-success)'
-    case 'running':
-      return 'var(--tint-primary)'
-    case 'stale':
-      return 'var(--tint-warning)'
-    case 'error':
-      return 'var(--tint-danger)'
-    default:
-      return 'var(--tint-muted)'
-  }
-}
-
 /** Build a smooth path through dagre's edge points */
 function edgePath(points: { x: number; y: number }[]): string {
   if (points.length < 2) return ''
@@ -482,11 +452,14 @@ function edgePath(points: { x: number; y: number }[]): string {
           v-for="n in nodes"
           :key="n.id"
           class="dag-node"
-          :class="{ 'dag-selected': n.id === activeSelection, 'dag-dimmed': nodeDimmed(n.id) }"
+          :class="[
+            `state-${n.state}`,
+            { 'dag-selected': n.id === activeSelection, 'dag-dimmed': nodeDimmed(n.id) },
+          ]"
           :data-testid="`dag-node-${n.id}`"
           role="button"
           tabindex="0"
-          :aria-label="`Go to ${n.fullLabel}, and show what it connects to`"
+          :aria-label="`Go to ${n.fullLabel}, ${CELL_STATES[n.state].label}, and show what it connects to`"
           :aria-pressed="n.id === activeSelection"
           @click.stop="onNodeClick(n.id)"
           @keydown.enter.prevent="selectNode(n.id)"
@@ -499,8 +472,8 @@ function edgePath(points: { x: number; y: number }[]): string {
               :width="n.width"
               :height="nodeHeight"
               rx="6"
-              :fill="statusFill(n.status)"
-              :stroke="statusStroke(n.status)"
+              fill="var(--state-tint)"
+              stroke="var(--state)"
               stroke-width="1"
               opacity="0.35"
             />
@@ -510,8 +483,8 @@ function edgePath(points: { x: number; y: number }[]): string {
               :width="n.width"
               :height="nodeHeight"
               rx="6"
-              :fill="statusFill(n.status)"
-              :stroke="statusStroke(n.status)"
+              fill="var(--state-tint)"
+              stroke="var(--state)"
               stroke-width="1"
               opacity="0.65"
             />
@@ -523,12 +496,21 @@ function edgePath(points: { x: number; y: number }[]): string {
             :width="n.width"
             :height="nodeHeight"
             rx="6"
-            :fill="statusFill(n.status)"
-            :stroke="statusStroke(n.status)"
+            fill="var(--state-tint)"
+            stroke="var(--state)"
             stroke-width="1.5"
           />
+          <component
+            :is="CELL_STATES[n.state].icon"
+            class="dag-node-icon"
+            :x="n.x - n.width / 2 + 8"
+            :y="n.y - nodeIconPx / 2"
+            :width="nodeIconPx"
+            :height="nodeIconPx"
+            :fill="n.state === 'ready' ? 'currentColor' : 'none'"
+          />
           <text
-            :x="n.x"
+            :x="n.x + nodeIconPx / 2"
             :y="n.y + 4"
             text-anchor="middle"
             fill="var(--text-primary)"
@@ -537,8 +519,8 @@ function edgePath(points: { x: number; y: number }[]): string {
             <title>
               {{
                 n.variantSiblings > 0
-                  ? `${n.fullLabel}\nVariant: ${n.variantName} (${n.variantSiblings + 1} options in ${n.variantGroup})`
-                  : n.fullLabel
+                  ? `${n.fullLabel}\n${CELL_STATES[n.state].label}\nVariant: ${n.variantName} (${n.variantSiblings + 1} options in ${n.variantGroup})`
+                  : `${n.fullLabel}\n${CELL_STATES[n.state].label}`
               }}
             </title>
             {{ n.label }}
@@ -573,6 +555,11 @@ function edgePath(points: { x: number; y: number }[]): string {
 </template>
 
 <style scoped>
+/* A nested svg takes its size from attributes in Chrome and from CSS elsewhere: .lucide is 1em. */
+.dag-node-icon {
+  font-size: 12px;
+  color: var(--state);
+}
 .dag-panel {
   background: transparent;
   min-width: 180px;
