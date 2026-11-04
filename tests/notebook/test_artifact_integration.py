@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from strata.notebook.artifact_integration import NotebookArtifactManager
+from strata.notebook.cell_paths.context import OutputNotSaved
 
 
 @pytest.fixture
@@ -689,7 +690,8 @@ class TestOneRunsOutputsTogether:
         executor = CellExecutor(session)
         assert self._run(executor, tmp_path / "out", 1)
 
-        assert not self._run(executor, tmp_path / "out", 2, write_metric=False)
+        with pytest.raises(OutputNotSaved, match="metric"):
+            self._run(executor, tmp_path / "out", 2, write_metric=False)
 
         assert self._current(session) == {"model": b'{"run": 1}', "metric": b'{"run": 1}'}
 

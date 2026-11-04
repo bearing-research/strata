@@ -98,6 +98,28 @@ class RemoteExecutionError(RuntimeError):
         self.remote_error_code = remote_error_code
 
 
+# For what only the server's log can explain: why a run's value did not save is told instead.
+STORE_FAILED = "Cell executed successfully but failed to store output artifacts. Check server logs."
+
+
+class OutputNotSaved(RuntimeError):
+    """A run left no value for a variable another cell reads; the message says why."""
+
+
+def output_not_saved(var_name: str, run_outputs: dict[str, Any] | None) -> OutputNotSaved:
+    """The failure for ``var_name``, from what the harness reported about the run."""
+    output = (run_outputs or {}).get(var_name) or {}
+    error = output.get("error")
+    if error is None:
+        return OutputNotSaved(
+            f"Cell ran, but {var_name} is not set when it finishes, and another cell reads it."
+        )
+    return OutputNotSaved(
+        f"Cell ran, but its output {var_name} ({output.get('type', 'unknown')}) "
+        f"could not be saved for the cells that read it: {error}"
+    )
+
+
 def _store_failure_result(
     result: CellExecutionResult, store_error: str | None
 ) -> CellExecutionResult:
@@ -109,8 +131,7 @@ def _store_failure_result(
         stderr=result.stderr,
         outputs=result.outputs,
         duration_ms=result.duration_ms,
-        error=store_error
-        or "Cell executed successfully but failed to store output artifacts. Check server logs.",
+        error=store_error or STORE_FAILED,
         execution_method=result.execution_method,
     )
 

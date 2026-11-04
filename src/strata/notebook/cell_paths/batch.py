@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from strata.notebook.cell_paths.context import (
     _ARTIFACT_EXT_BY_CONTENT_TYPE,
+    STORE_FAILED,
+    OutputNotSaved,
     cell_timeout_message,
 )
 from strata.notebook.cell_paths.context import artifact_content_type as _artifact_content_type
@@ -948,8 +950,9 @@ async def batch_service_persist(
             source_hash=source_hash,
             source=executed_source,
             env_hash=env_hash,
+            run_outputs=payload.get("outputs"),
         )
-    except (UnsafeRunFile, TableWriteError) as exc:
+    except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
         return {"ok": False, "error": str(exc)}
 
     # Carry the post-persist metadata (with artifact_uri) in the ack so the dispatcher
@@ -972,7 +975,7 @@ async def batch_service_persist(
             logger.warning("Batch display persist failed for %s: %s", cell_id, exc)
 
     if not stored_ok:
-        return {"ok": False, "error": "store_outputs returned False"}
+        return {"ok": False, "error": STORE_FAILED}
 
     # Stored as in single-cell. Rerun All stores it too, or the next Run All replays an
     # older run's; only ``# @nocache`` stores none.

@@ -18,6 +18,7 @@ import httpx
 import pytest
 
 import strata.notebook.executor as executor_module
+from strata.notebook.cell_paths import dispatch as dispatch_module
 
 
 class _Clock:
@@ -130,8 +131,8 @@ def run_cell(tmp_path, monkeypatch, notebook_executor_server, notebook_personal_
     from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
     clock = _Clock()
-    monkeypatch.setattr(executor_module, "_monotonic", clock)
-    monkeypatch.setattr(executor_module, "_JOB_POLL_SECONDS", 0)
+    monkeypatch.setattr(dispatch_module, "_monotonic", clock)
+    monkeypatch.setattr(dispatch_module, "_JOB_POLL_SECONDS", 0)
     phases: list[str | tuple] = []
     cancel_at: list[str] = []
 

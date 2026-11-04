@@ -396,7 +396,7 @@ class TestBatch:
 
         assert result.end_reason == "persist_failed"
         assert result.failed_cell_id == "v"
-        assert self._first(result).error == "store_outputs returned False"
+        assert self._first(result).error == STORE_FAILED
         assert steps == ["_store_outputs", "_store_display_outputs"]
         # The display outlives the cell's outputs.
         assert _latest(session, "v", "__display__0") == 1
