@@ -571,6 +571,9 @@ URI the display output carries.
   `{col, op, value, value2}`). The response has `columns`, `rows` and `total`,
   or `pageable: false` for an output that is not a table.
 - `summary` returns per-column dtype, null, distinct and min/max figures.
+- JSON has no NaN or infinity, so in `rows`, the display preview and the min/max
+  figures those values arrive as the strings `"NaN"`, `"inf"` and `"-inf"`. A
+  `null` is a null.
 - `export` downloads the same filtered and sorted view as `fmt=csv` or
   `fmt=parquet`.
 

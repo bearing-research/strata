@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import pickle
 import sys
 import tempfile
@@ -324,6 +325,22 @@ class TestArrowSerialization:
                 {"when": "2024-01-02", "amount": "1.25"},
                 {"when": "2024-01-03", "amount": "2.50"},
             ]
+
+    def test_arrow_json_fallback_names_infinity_only_in_its_preview(self, monkeypatch):
+        df = pd.DataFrame({"x": [1.5, math.inf]})
+
+        def _raise_arrow_invalid(value, output_dir, variable_name):
+            raise pa.ArrowInvalid("unsupported dtype")
+
+        monkeypatch.setattr(serializer_module, "_serialize_arrow", _raise_arrow_invalid)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(df, tmpdir, "data")
+
+            assert meta["preview"] == [[1.5], ["inf"]]
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+            assert loaded["x"].tolist() == [1.5, math.inf]
 
     def test_arrow_json_fallback_keeps_a_null_apart_from_an_empty_string(self, monkeypatch):
         df = pd.DataFrame({"when": [date(2024, 1, 2), None], "name": ["", None]}, dtype=object)
@@ -1756,6 +1773,31 @@ class TestReadTablePage:
 
         assert page is None
 
+    def test_nan_and_infinity_are_not_sent_as_null(self):
+        table = pa.table({"x": [1.5, math.nan, math.inf, -math.inf, None]})
+
+        page = read_table_page(_arrow_blob(table))
+
+        assert page is not None
+        assert [row[0] for row in page["rows"]] == [1.5, "NaN", "inf", "-inf", None]
+        assert json.loads(json.dumps(page["rows"], allow_nan=False)) == page["rows"]
+
+    def test_nan_and_infinity_inside_a_list_are_named_too(self):
+        table = pa.table({"x": [[1.0, math.inf], [math.nan]]})
+
+        page = read_table_page(_arrow_blob(table))
+
+        assert page is not None
+        assert page["rows"] == [[[1.0, "inf"]], [["NaN"]]]
+
+    def test_a_summary_range_can_end_at_infinity(self):
+        table = pa.table({"x": [1.5, math.inf, -math.inf]})
+
+        summary = read_table_summary(_arrow_blob(table))
+
+        assert summary is not None
+        assert (summary["columns"][0]["min"], summary["columns"][0]["max"]) == ("-inf", "inf")
+
     def test_a_null_stays_null_and_an_empty_string_stays_empty(self):
         table = pa.table({"score": [1.5, None], "name": ["", None]})
 
@@ -1932,6 +1974,10 @@ class TestPandasIndexDisplay:
     def test_the_preview_keeps_a_null_apart_from_an_empty_string(self):
         meta = self._preview(pa.table({"score": [1.5, None], "name": ["", None]}))
         assert meta["preview"] == [[1.5, ""], [None, None]]
+
+    def test_the_preview_names_nan_and_infinity(self):
+        meta = self._preview(pa.table({"x": [1.5, math.nan, math.inf, -math.inf, None]}))
+        assert meta["preview"] == [[1.5], ["NaN"], ["inf"], ["-inf"], [None]]
 
     def test_an_unnamed_index_is_hidden_from_the_preview(self):
         meta = self._preview(self._filtered())
