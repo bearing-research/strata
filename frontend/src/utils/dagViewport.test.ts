@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { MIN_FIT_SCALE, panToCenter, viewBox, viewScale, type DagView } from './dagViewport.ts'
+import { DOCK_MIN_FIT_SCALE, panToCenter, viewBox, viewScale, type DagView } from './dagViewport.ts'
 
 const view = (over: Partial<DagView> = {}): DagView => ({
   graphWidth: 400,
@@ -18,12 +18,28 @@ test('a graph that fits fills the panel', () => {
   assert.deepEqual(viewBox(view()), { x: 0, y: 0, width: 400, height: 200 })
 })
 
-test('a graph wider than the panel keeps a readable scale and shows its middle', () => {
-  const v = view({ graphWidth: 1000, panelWidth: 400, panelHeight: 600 })
-  assert.equal(viewScale(v), MIN_FIT_SCALE)
+test('in the dock, a graph wider than the panel keeps a readable scale and shows its middle', () => {
+  const v = view({
+    graphWidth: 1000,
+    panelWidth: 400,
+    panelHeight: 600,
+    minFitScale: DOCK_MIN_FIT_SCALE,
+  })
+  assert.equal(viewScale(v), DOCK_MIN_FIT_SCALE)
   const box = viewBox(v)
-  assert.equal(box.width, 400 / MIN_FIT_SCALE)
+  assert.equal(box.width, 400 / DOCK_MIN_FIT_SCALE)
   assert.equal(box.x + box.width / 2, 500)
+})
+
+test('in the drawer, a graph wider than the panel shrinks to show all of it', () => {
+  const box = viewBox(view({ graphWidth: 1000, panelWidth: 400, panelHeight: 600 }))
+  assert.equal(box.x, 0)
+  assert.equal(box.width, 1000)
+})
+
+test('in the dock, a graph that fits is fitted, not held at the minimum', () => {
+  const v = view({ minFitScale: DOCK_MIN_FIT_SCALE })
+  assert.equal(viewScale(v), 2)
 })
 
 test('a graph taller than the panel starts at its top', () => {
