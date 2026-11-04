@@ -4019,6 +4019,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The table viewer no longer shows NaN and infinity as <code>null</code>.</strong> JSON cannot carry
+  them, so a column holding <code>inf</code> read <code>null</code> and a range ending there read <code>1.5 – null</code>.
+  Pages, previews and min/max now send <code>"NaN"</code>, <code>"inf"</code> and <code>"-inf"</code>. A pandas NaN is
+  stored as a null, so it still reads <code>null</code>. (#1404)</li>
 <li><strong>A markdown cell no longer reads as a cache hit.</strong> Run All gave markdown cells a
   <code>cached</code> badge and counted them in the profiler's hits and rows, so a first run said
   <code>4 cached</code>. Nothing runs for one, so it now has no badge and is not counted. (#1402)</li>

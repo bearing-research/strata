@@ -4741,6 +4741,9 @@ URI the display output carries.</p>
   <code>{col, op, value, value2}</code>). The response has <code>columns</code>, <code>rows</code> and <code>total</code>,
   or <code>pageable: false</code> for an output that is not a table.</li>
 <li><code>summary</code> returns per-column dtype, null, distinct and min/max figures.</li>
+<li>JSON has no NaN or infinity, so in <code>rows</code>, the display preview and the min/max
+  figures those values arrive as the strings <code>"NaN"</code>, <code>"inf"</code> and <code>"-inf"</code>. A
+  <code>null</code> is a null.</li>
 <li><code>export</code> downloads the same filtered and sorted view as <code>fmt=csv</code> or
   <code>fmt=parquet</code>.</li>
 </ul>
