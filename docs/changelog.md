@@ -15,7 +15,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   tutorial` lists them and `strata tutorial caching` opens a copy under a fresh name and
   prints its URL, starting a server if none is running. The home page gains **Open a
   sample** and lists the notebooks in the storage directory as well as browser recents.
-  (#PRNUM)
+  (#1402)
 - **`@write_table ... sync` keeps a table equal to what a cell produces.**
   `# @write_table <var> <table> sync on=<col>,...` upserts on the key columns
   and deletes the rows whose key the variable no longer holds. The table ends up
@@ -179,7 +179,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ### Fixed
 - **A markdown cell no longer reads as a cache hit.** Run All gave markdown cells a
   `cached` badge and counted them in the profiler's hits and rows, so a first run said
-  `4 cached`. Nothing runs for one, so it now has no badge and is not counted. (#PRNUM)
+  `4 cached`. Nothing runs for one, so it now has no badge and is not counted. (#1402)
 - **A result known not to match reads stale, and going back reads cached.** A cell
   whose environment or declared outside input changed read idle while it went on
   showing the old result. It now reads `stale · environment changed` or
