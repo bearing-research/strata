@@ -25,6 +25,9 @@ HOLDS = {
     # Empty, cell added, running, finished, second cell, both done, cache hit.
     "web-agent-live-light": [1400, 2000, 1600, 2200, 2000, 2400, 3200],
     "web-agent-live-dark": [1400, 2000, 1600, 2200, 2000, 2400, 3200],
+    # Fresh, computed, all cached, edited, and the payoff, which holds longest.
+    "cache-payoff-light": [1600, 2200, 3000, 3000, 4500],
+    "cache-payoff-dark": [1600, 2200, 3000, 3000, 4500],
 }
 
 # GIF alpha is one bit, so the SVG's antialiased rounded corners would fringe;

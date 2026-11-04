@@ -744,6 +744,7 @@ function outputKey(output: CellOutput, index: number): string {
       {
         'cell-prompt': cell.language === 'prompt',
         'cell-markdown': cell.language === 'markdown',
+        'cell-folded': folded,
       },
     ]"
     data-testid="notebook-cell"
@@ -757,6 +758,7 @@ function outputKey(output: CellOutput, index: number): string {
       <div class="cell-actions">
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"
+          class="keeps-when-folded"
           title="Run (Shift+Enter)"
           aria-label="Run"
           :disabled="!connected || environmentMutationActive"
@@ -810,6 +812,7 @@ function outputKey(output: CellOutput, index: number): string {
         <button
           :title="folded ? 'Expand cell' : 'Collapse cell'"
           :aria-label="folded ? 'Expand cell' : 'Collapse cell'"
+          class="keeps-when-folded"
           :class="{ active: folded }"
           @click="folded = !folded"
         >
@@ -1476,6 +1479,10 @@ function outputKey(output: CellOutput, index: number): string {
   gap: 2px;
   opacity: 0;
   transition: opacity 0.15s;
+}
+/* The rest of the column would hold a collapsed cell open at its full height. */
+.cell-folded .cell-actions > :not(.keeps-when-folded) {
+  display: none;
 }
 .cell:hover .cell-actions {
   opacity: 1;
