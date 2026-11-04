@@ -5,6 +5,7 @@ import {
   cacheBadgeLabel,
   cacheBadgeTitle,
   cachedAgainFields,
+  cacheFieldsAfterSync,
   formatDuration,
   isCachedAgain,
 } from './cacheBadge.ts'
@@ -56,5 +57,39 @@ test('a hit that is current again keeps its saving, not its load time', () => {
   assert.deepEqual(cachedAgainFields({ cacheHit: true, cacheSavedMs: 2100 }, 11), {
     cacheHit: true,
     cacheSavedMs: 2100,
+  })
+})
+
+test('a sync keeps a hit, what it saved and what it took to load', () => {
+  const hit = { cacheHit: true, cacheSavedMs: 2100, cacheLoadMs: 11 }
+  assert.deepEqual(cacheFieldsAfterSync(true, 'ready', hit, 11), hit)
+})
+
+test('a sync that finds a stale result current again reads as a hit', () => {
+  assert.deepEqual(cacheFieldsAfterSync(true, 'ready', { cacheHit: false }, 2100), {
+    cacheHit: true,
+    cacheSavedMs: 2100,
+    cacheLoadMs: undefined,
+  })
+})
+
+test('a stale result keeps its saving through a sync, for when it is current again', () => {
+  const hit = { cacheHit: true, cacheSavedMs: 2100, cacheLoadMs: 11 }
+  const stale = cacheFieldsAfterSync(false, 'stale', hit, 11)
+  assert.deepEqual(cacheFieldsAfterSync(true, 'ready', stale, 11), hit)
+})
+
+test('a result the server did not get from the cache is not a hit', () => {
+  const hit = { cacheHit: true, cacheSavedMs: 2100 }
+  assert.deepEqual(cacheFieldsAfterSync(false, 'ready', hit, 9), {})
+  assert.deepEqual(cacheFieldsAfterSync(false, 'stale', { cacheHit: false }, 9), {})
+  assert.deepEqual(cacheFieldsAfterSync(false, 'idle', undefined, 9), {})
+})
+
+test('a hit found on a page with no earlier output says nothing of a saving', () => {
+  assert.deepEqual(cacheFieldsAfterSync(true, 'ready', undefined, undefined), {
+    cacheHit: true,
+    cacheSavedMs: undefined,
+    cacheLoadMs: undefined,
   })
 })

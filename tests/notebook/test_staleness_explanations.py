@@ -11,7 +11,15 @@ from strata.notebook.executor import CellExecutor
 from strata.notebook.keys import cell_key
 from strata.notebook.runtime_state import load_runtime_state
 from strata.notebook.session import NotebookSession, SessionManager
-from strata.notebook.staleness_explanations import StaleCell, explain_staleness
+from strata.notebook.staleness_explanations import (
+    CausalityChain,
+    CausalityDetail,
+    CausalityReason,
+    CausalityType,
+    StaleCell,
+    explain_staleness,
+    stale_reasons,
+)
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
 
@@ -146,6 +154,56 @@ async def test_an_input_that_cannot_be_resolved_is_unavailable(tmp_path):
     ).details
 
     assert (detail.type, detail.input_kind, detail.input_name) == ("unavailable", "mount", "data")
+
+
+class TestWhenTheResultIsKnownNotToMatch:
+    """Stale is a claim about what the record shows moved; otherwise idle."""
+
+    async def test_a_moved_input_is_stale(self, tmp_path):
+        data, mount = _mounted(tmp_path)
+        session = _open(_notebook(tmp_path, c1=mount + "x = 1"))
+        await _run(session, "c1")
+        (data / "one.txt").write_text("moved")
+
+        staleness = session.compute_staleness()["c1"]
+
+        assert staleness.status == "stale"
+        assert staleness.reasons == ["external"]
+
+    async def test_with_no_record_of_what_it_read_it_cannot_tell(self, tmp_path):
+        """A run from before parts were saved: its key differs, and nothing says why."""
+        data, mount = _mounted(tmp_path)
+        session = _open(_notebook(tmp_path, c1=mount + "x = 1"))
+        await _run(session, "c1")
+        session.notebook_state.get_cell("c1").last_key_parts = None
+        (data / "one.txt").write_text("moved")
+
+        staleness = session.compute_staleness()["c1"]
+
+        assert staleness.status == "idle"
+        assert staleness.reasons == []
+
+    def test_an_input_that_cannot_be_read_says_nothing(self):
+        chain = CausalityChain(
+            reason=CausalityReason.EXTERNAL,
+            details=[CausalityDetail(type=CausalityType.UNAVAILABLE, input_kind="table")],
+        )
+
+        assert stale_reasons(chain) == []
+
+    def test_each_kind_of_change_has_its_reason(self):
+        kinds = [
+            CausalityType.SOURCE_CHANGED,
+            CausalityType.INPUT_CHANGED,
+            CausalityType.EXTERNAL_CHANGED,
+            CausalityType.IDENTITY_CHANGED,
+            CausalityType.ENV_CHANGED,
+        ]
+        chain = CausalityChain(
+            reason=CausalityReason.UNKNOWN, details=[CausalityDetail(type=kind) for kind in kinds]
+        )
+
+        assert stale_reasons(chain) == ["self", "upstream", "external", "env"]
 
 
 def test_every_unresolved_component_is_recognized():

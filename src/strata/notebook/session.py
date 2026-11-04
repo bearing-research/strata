@@ -89,6 +89,7 @@ from strata.notebook.staleness_explanations import (
     StaleCell,
     explain_staleness,
     skip_none,
+    stale_reasons,
 )
 from strata.notebook.tables import without_empty_table_nonce
 from strata.notebook.timing import NotebookTimingRecorder
@@ -1027,7 +1028,7 @@ class NotebookSession:
                     stale_cells.add(cell_id)
                 else:
                     # No cached artifact: idle unless it provably matches the last
-                    # successful uncached run.
+                    # successful uncached run, or its record says what moved (below).
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                     stale_cells.add(cell_id)
                 if cell_id in stale_cells:
@@ -1041,10 +1042,16 @@ class NotebookSession:
                 cell.display_outputs = cached_display_outputs or []
                 cell.display_output = cached_display_outputs[-1] if cached_display_outputs else None
 
+        self.causality_map = explain_staleness(self, to_explain)
+        # Stale once its last run's record says what moved. Without that the result is not
+        # known to be wrong (a run of ``# @nocache``, an input that cannot be read), so idle.
+        for cell_id, chain in self.causality_map.items():
+            reasons = stale_reasons(chain)
+            if reasons and staleness_map[cell_id].status == CellStatus.IDLE:
+                staleness_map[cell_id] = CellStaleness(status=CellStatus.STALE, reasons=reasons)
+
         self._apply_staleness_map(staleness_map, executing)
         self._cell_test_inputs = test_inputs
-
-        self.causality_map = explain_staleness(self, to_explain)
 
         return staleness_map
 

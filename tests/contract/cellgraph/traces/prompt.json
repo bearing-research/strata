@@ -483,8 +483,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "external"
+      ],
+      "status": "stale"
      }
     },
     "u1": {

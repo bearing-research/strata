@@ -6,6 +6,7 @@ not be a cache hit.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -117,14 +118,25 @@ class TestUpstreamInvalidation:
         assert staleness["c1"].status == "ready"
         assert staleness["c2"].status == "ready"
 
+        before = (data_dir / "data.txt").stat()
         (data_dir / "data.txt").write_text("goodbye", encoding="utf-8")
 
         staleness = session.compute_staleness()
-        assert staleness["c1"].status == "idle"
+        assert staleness["c1"].status == "stale"
+        assert staleness["c1"].reasons == [StalenessReason.EXTERNAL]
         # c2 ran and holds a result that c1's changed mount invalidated, so it is STALE
         # with an upstream reason, not a bare idle.
         assert staleness["c2"].status == "stale"
         assert StalenessReason.UPSTREAM in staleness["c2"].reasons
+
+        # A local mount is keyed on size and mtime, so that is what going back means.
+        (data_dir / "data.txt").write_text("hello", encoding="utf-8")
+        os.utime(data_dir / "data.txt", ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        staleness = session.compute_staleness()
+        assert staleness["c1"].status == "ready"
+        assert staleness["c2"].status == "ready"
+        assert session.notebook_state.get_cell("c1").cache_hit is True
 
     @pytest.mark.asyncio
     async def test_multi_output_upstream_stays_ready_when_unchanged(self, tmp_path):
@@ -574,8 +586,21 @@ class TestEditedCellReadsStale:
         session = pipeline_notebook
         await self._run_pipeline(session)
 
-        monkeypatch.setattr(session, "cell_env_hash", lambda cell: "another-environment")
-        staleness = session.compute_staleness()
+        with monkeypatch.context() as moved:
+            moved.setattr(session, "cell_env_hash", lambda cell: "another-environment")
+            staleness = session.compute_staleness()
 
-        assert staleness["c1"].status == "idle"
-        assert staleness["c1"].reasons == []
+            assert staleness["c1"].status == "stale"
+            assert staleness["c1"].reasons == [StalenessReason.ENV]
+
+        # The same lockfile again: the same keys, so nothing has to run.
+        assert session.compute_staleness()["c1"].status == "ready"
+        assert session.notebook_state.get_cell("c1").cache_hit is True
+
+    @pytest.mark.asyncio
+    async def test_a_cell_that_never_ran_is_idle(self, pipeline_notebook, monkeypatch):
+        session = pipeline_notebook
+
+        monkeypatch.setattr(session, "cell_env_hash", lambda cell: "another-environment")
+
+        assert session.compute_staleness()["c1"].status == "idle"

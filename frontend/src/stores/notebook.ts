@@ -34,7 +34,7 @@ import type {
   WorkerSpec,
   WidgetSpec,
 } from '../types/notebook'
-import { cachedAgainFields, isCachedAgain } from '../utils/cacheBadge'
+import { cachedAgainFields, cacheFieldsAfterSync, isCachedAgain } from '../utils/cacheBadge'
 import { useStrata } from '../composables/useStrata'
 import type {
   AliasMoveResult,
@@ -936,6 +936,7 @@ function adoptBackendSource(localCell: Cell, remote: unknown) {
 }
 
 function applyBackendCellState(localCell: Cell, serverCell: any) {
+  const previousOutput = localCell.output
   adoptBackendSource(localCell, serverCell.source)
   localCell.defines = serverCell.defines || []
   localCell.references = serverCell.references || []
@@ -989,6 +990,17 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
     serverCell.display_output,
     typeof serverCell.artifact_uri === 'string' ? serverCell.artifact_uri : null,
   )
+  const cacheFields = cacheFieldsAfterSync(
+    serverCell.cache_hit,
+    localCell.status,
+    previousOutput,
+    localCell.durationMs,
+  )
+  if (cacheFields.cacheHit) {
+    // A cell that displays nothing still has a result, as in `cell_output`.
+    localCell.output ??= { contentType: 'json/object', artifactUri: serverCell.artifact_uri }
+    Object.assign(localCell.output, cacheFields)
+  }
   applySerializedExecutionMetadata(localCell, serverCell)
 }
 

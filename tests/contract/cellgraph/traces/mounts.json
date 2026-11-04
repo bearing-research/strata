@@ -624,8 +624,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "external"
+      ],
+      "status": "stale"
      }
     },
     "m2": {
@@ -1209,8 +1211,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "external"
+      ],
+      "status": "stale"
      }
     },
     "m2": {
