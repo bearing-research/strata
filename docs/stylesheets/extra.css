@@ -23,3 +23,30 @@
 .md-content__button.copied {
   color: var(--md-accent-fg-color);
 }
+
+.md-header__topic .changelog-link {
+  margin-left: 0.8rem;
+  font-size: 0.65rem;
+  color: var(--md-primary-bg-color--light);
+}
+
+.md-header__topic .changelog-link:hover {
+  color: var(--md-primary-bg-color);
+}
+
+/* One screen for the index of every annotation. */
+.md-typeset .annotation-index table:not([class]) th,
+.md-typeset .annotation-index table:not([class]) td {
+  padding: 0.05em 0.8em;
+  line-height: 1.4;
+}
+
+/* Small enough that the three cards start on the first screen. */
+.md-typeset img.hero {
+  max-width: 34rem;
+}
+
+/* Not display on the image, or it would beat the rule that hides the other theme's copy. */
+.md-typeset p:has(> img.hero) {
+  text-align: center;
+}

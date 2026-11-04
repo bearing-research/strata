@@ -61,7 +61,7 @@ strata export ./my_analysis --app-view --to html --out dashboard.html
 A regular export is a **document** view - it shows every cell's *source*
 alongside its outputs, for reading or archiving the notebook. An
 app-view snapshot is a **dashboard** view: it renders only what the
-[read-only app view](cells.md#app-view) shows - widget panels (as their
+[read-only app view](../guides/share/app-view.md#app-view) shows - widget panels (as their
 current control values), markdown, and display outputs - with **no cell
 sources, chips, or console**.
 
@@ -96,7 +96,7 @@ For each cell, the exporter emits in order:
     - **PNG images** inline as `data:` URLs, loaded lazily from the
       artifact store when needed.
     - **JSON / dict / list** as fenced JSON.
-    - **Markdown** (including an [`# @output_dir`](annotations.md#output_dir)
+    - **Markdown** (including an [`# @output_dir`](../reference/annotations/python.md#output_dir)
       folder's summary) rendered as content in markdown exports and as
       preformatted text in HTML.
     - **Pickled** values become a placeholder with the type hint
@@ -184,7 +184,7 @@ What travels is `--include`:
 
 A carried loop cell brings every stored iteration (`@iter=k`) with it, so a
 cell that forks from one with `start_from` still runs after an import. A carried
-[`# @output_dir`](annotations.md#output_dir) folder brings the version of each
+[`# @output_dir`](../reference/annotations/python.md#output_dir) folder brings the version of each
 file its manifest names, which need not be the file's latest.
 
 ```bash

@@ -43,7 +43,7 @@ Open **http://localhost:8765** and open (or create) a notebook.
 ## 2. Publish a model from a cell
 
 The dashboard surfaces what your **cells publish** to the registry. Inside any
-Python cell, use the [ambient `strata` client](cells.md#the-ambient-strata-client).
+Python cell, use the [ambient `strata` client](../guides/cells/python.md#the-ambient-strata-client).
 It's already in the namespace, no import or setup:
 
 ```python
@@ -121,7 +121,7 @@ top to bottom:
    first, with who and from → to.
 
 **Read by** lists the cells that read a name with
-[`# @dataset`](annotations.md#dataset), each from a result it stored. Cells of
+[`# @dataset`](../reference/annotations/python.md#dataset), each from a result it stored. Cells of
 the open notebook show by name as soon as they have run. A cell in another
 notebook shows as `<notebook id>/<cell id>` once one of its results reaches
 the store the tab describes, by promotion or publication; a result that stays
@@ -187,7 +187,7 @@ root.](../assets/registry-lineage-dark.png#only-dark)
 
 - [Artifacts & Model Registry](../core/registry.md) - the concepts and the
   SDK/CLI that drive the same registry.
-- [The ambient `strata` client](cells.md#the-ambient-strata-client) - how cells
+- [The ambient `strata` client](../guides/cells/python.md#the-ambient-strata-client) - how cells
   publish.
 - [Lake-Aware Cells](lake-aware-cells.md) - the `@table` flow that makes a
   training cell stale so you *re-promote* when new data lands.

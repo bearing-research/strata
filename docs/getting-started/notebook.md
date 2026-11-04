@@ -116,7 +116,7 @@ re-add it with the kind you want.
 | --- | --- |
 | **Python** | Regular Python code. Most cells. |
 | **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. Needs the `sql` extra and a driver extra (see [Installation](installation.md)). |
-| **R** | R code - stats and tidyverse. See [Cell Types](../notebook/cells.md). |
+| **R** | R code - stats and tidyverse. See [Cell Types](../guides/cells/index.md). |
 | **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
 | **Widget** | A declarative control panel - one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
 | **Markdown** | Prose between cells. Rendered as HTML; not part of the DAG. |
@@ -131,8 +131,8 @@ line:
 | **Variant** | `# @variant group name` - several cells share one DAG slot, for A/B-ing implementations of the same step. |
 
 Library, mount, and worker shapes are annotation-driven too. See
-[Cell Types](../notebook/cells.md) for the full surface and
-[Cell Annotations](../notebook/annotations.md) for every annotation.
+[Cell Types](../guides/cells/index.md) for the full surface and
+[Cell Annotations](../reference/annotations/index.md) for every annotation.
 
 ## 3. Walk through a pipeline
 
@@ -179,7 +179,7 @@ df.head()
 
 The `# @name load` line labels the cell in the DAG view and its header; without
 it, a cell is labelled by the variables it defines. See
-[`@name`](../notebook/annotations.md#name).
+[`@name`](../reference/annotations/python.md#name).
 
 Press ++shift+enter++. The first run pauses ~2 seconds (the simulated
 fetch) and the DataFrame preview renders below the cell.
@@ -245,7 +245,7 @@ computed again. A cell's console output is keyed by the same hash and
 replayed with it, so even a cell that only `print`s and feeds nothing
 downstream is cached. A cell that must always
 run (a side effect, a live API call, a fresh random draw) opts out
-with [`# @nocache`](../notebook/annotations.md#nocache).
+with [`# @nocache`](../reference/annotations/python.md#nocache).
 
 ## 5. Edit upstream, watch the cascade
 
@@ -302,8 +302,8 @@ inputs, model config)`. Running again with the same upstream
 `stats` and the same template is a cache hit, no second API call.
 
 Needs `ANTHROPIC_API_KEY` (or another provider's key) configured in
-the Runtime panel. See [Provider configuration](../notebook/cells.md#provider-configuration)
-for provider setup and [Prompt cells](../notebook/cells.md#prompt-cells)
+the Runtime panel. See [Provider configuration](../guides/cells/prompt.md#provider-configuration)
+for provider setup and [Prompt cells](../guides/cells/prompt.md#prompt-cells)
 for the full annotation surface (`@output_schema`, `@validate_retries`).
 
 ## 7. Other display types
@@ -365,9 +365,9 @@ See the [Examples catalog](../notebook/examples.md) for the full list, grouped b
 - [Driving a notebook with a coding agent](../notebook/agent.md): hand this notebook to Claude Code and watch it build, in a browser or a terminal - one command sets it up
 - [Agent scratchpad](../notebook/scratchpad.md): the other way round - an agent working on something else using a notebook as **cached** throwaway compute instead of temp scripts; installs as a one-command plugin
 - [Terminal viewer (TUI)](../notebook/tui.md) to watch this notebook live from a terminal with `strata watch ./my-notebook`
-- [Concepts](../notebook/concepts.md) for how the DAG, caching, and cascade work
-- [Cell Types](../notebook/cells.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
-- [Cell Annotations](../notebook/annotations.md) for `@worker`, `@mount`, `@loop`, and friends
+- [Concepts](../concepts/caching.md) for how the DAG, caching, and cascade work
+- [Cell Types](../guides/cells/index.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
+- [Cell Annotations](../reference/annotations/index.md) for `@worker`, `@mount`, `@loop`, and friends
 - [Distributed Workers](../notebook/workers.md) for `# @worker gpu-fly` and dispatching to remote compute
 - [Import from Jupyter](../notebook/import.md) for `strata import nb.ipynb`
 - [Export](../notebook/export.md) for sharing a notebook as a single self-contained markdown or HTML file, or as a snapshot bundle (state and artifacts) that imports back

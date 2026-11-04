@@ -21,7 +21,7 @@ result alongside that change.
 
 | File | Surface | Shown on |
 | ---- | ------- | -------- |
-| `notebook-anatomy-{light,dark}.png` | Web UI | Docs home, Notebook quickstart, `README.md` |
+| `notebook-anatomy-{light,dark}.png` | Web UI | Notebook quickstart |
 | `cascade-stale-{light,dark}.png` | Web UI | Notebook quickstart, step 5 |
 | `cell-tests-{light,dark}.png` | Web UI | Cell unit tests, the Tests panel |
 | `registry-promote-strip-{light,dark}.png` | Web UI | Registry dashboard, step 3 |

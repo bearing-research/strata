@@ -38,7 +38,7 @@ Authentication depends on `deployment_mode`:
 | `service` + `auth_mode="trusted_proxy"` | Proxy-injected identity | `X-Strata-Principal`, `X-Strata-Scopes`, `X-Strata-Proxy-Token`; `X-Tenant-ID` if multi-tenant |
 | `service` + `auth_mode="api_key"` | Strata verifies the key itself | `Authorization: Bearer strata_<key_id>_<secret>`; the key carries the principal, tenant and scopes |
 
-Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret; under `api_key`, a valid bearer key. The exceptions are the health and metrics endpoints, the signed build-transport routes (the signature is the credential) and public publication reads. A notebook cell's ambient client sends `X-Strata-Run-Token` instead, a token for its run that reaches only the client's own routes (see [the ambient client](../notebook/cells.md#the-ambient-strata-client)). Two further restrictions narrow what each endpoint accepts:
+Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret; under `api_key`, a valid bearer key. The exceptions are the health and metrics endpoints, the signed build-transport routes (the signature is the credential) and public publication reads. A notebook cell's ambient client sends `X-Strata-Run-Token` instead, a token for its run that reaches only the client's own routes (see [the ambient client](../guides/cells/python.md#the-ambient-strata-client)). Two further restrictions narrow what each endpoint accepts:
 
 **Personal-mode-only endpoints.** These four return `403 Forbidden` outside personal mode. They expose either a filesystem delete or the in-memory session table, neither of which fits a multi-tenant service deployment. Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service Mode](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
 
@@ -596,7 +596,7 @@ GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}
 GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}/v/{version}/files/{path}?variant={variant}
 ```
 
-A [`# @output_dir`](../notebook/annotations.md#output_dir) folder's versions
+A [`# @output_dir`](annotations/python.md#output_dir) folder's versions
 and files. `name` must be one of the cell's current `# @output_dir` names, or
 the answer is `404`; neither route takes an artifact URI.
 
@@ -607,7 +607,7 @@ the answer is `404`; neither route takes an artifact URI.
   kept. A run still writing, or a crash's version with no manifest, is not
   listed, nor is a loop cell's per-iteration `@iter=k` version: the loop's
   last iteration is the cell's own version. A
-  [`# @per_variant`](../notebook/annotations.md#fan-out-run-a-downstream-cell-once-per-variant) cell keeps a
+  [`# @per_variant`](../guides/cells/loops-and-variants.md#fan-out-run-a-downstream-cell-once-per-variant) cell keeps a
   folder per variant, each numbered on its own: `variant` names the instance,
   and is `null` for a cell that does not fan out.
 - The second streams one file of that version (of that `variant`'s folder

@@ -1,0 +1,84 @@
+# Annotations
+
+<div class="annotation-index" markdown>
+
+| Annotation | What it does |
+| --- | --- |
+| [`@name`](python.md#name) | A display name for the cell. |
+| [`@worker`](python.md#worker) | Run the cell on a named worker. |
+| [`@timeout`](python.md#timeout) | A time limit for this cell, in seconds. |
+| [`@env`](python.md#env) | An environment variable for this cell only. |
+| [`@mount`](python.md#mount) | Attach a local or remote folder as a path. |
+| [`@fetch`](python.md#fetch) | Bytes from a URL, as a recorded input. |
+| [`@dataset`](python.md#dataset) | A registry name, as a recorded input. |
+| [`@table`](python.md#table) | An Iceberg table, as a versioned input. |
+| [`@write_table`](python.md#write_table) | Write a variable into an Iceberg table. |
+| [`@output_dir`](python.md#output_dir) | A folder whose files are an output. |
+| [`@each`](python.md#each) | Run once per file or row, each cached on its own. |
+| [`@nocache`](python.md#nocache) | Always run; never serve a cached result. |
+| [`@stochastic`](python.md#stochastic) | Every run is a sample, so it always runs. |
+| [`@after`](python.md#after) | An ordering-only edge from another cell. |
+| [`@sql`](sql.md#sql) | Mark a SQL cell and name its connection. |
+| [`@cache`](sql.md#cache) | Choose a SQL cell's cache policy. |
+| [`@model`](prompt.md#model) | The model a prompt cell calls. |
+| [`@temperature`](prompt.md#temperature) | Sampling temperature. |
+| [`@max_tokens`](prompt.md#max_tokens) | The most tokens the response may use. |
+| [`@system`](prompt.md#system) | The system prompt. |
+| [`@output`](prompt.md#output) | Parse the response as JSON. |
+| [`@output_schema`](prompt.md#output_schema) | Validate the response against a JSON Schema. |
+| [`@validate_retries`](prompt.md#validate_retries) | How often to retry a response that fails validation. |
+| [`@loop`](loops-and-variants.md#loop) | Iterate the cell, carrying a variable between steps. |
+| [`@loop_until`](loops-and-variants.md#loop_until) | Stop a loop when an expression is true. |
+| [`@variant`](loops-and-variants.md#variant) | Mark the cell as one alternative in a group. |
+| [`@per_variant`](loops-and-variants.md#per_variant) | Run the cell once per variant of its input. |
+| [`@live`](widget.md#live) | Let a control's change run the cheap cells below it. |
+| [`@app hide`](widget.md#app-hide) | Keep the cell out of the app view. |
+
+</div>
+
+R cells take a subset of these: see [R cell annotations](r.md).
+
+## How annotations are read
+
+Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, filesystem mounts, and cache behavior, without separate configuration UI. The cell source is the single source of truth.
+
+```python
+# @name Train Classifier
+# @worker my-gpu
+# @timeout 120
+# @env CUDA_VISIBLE_DEVICES=0
+x = embeddings
+y = labels
+classifier.fit(x, y)
+```
+
+Annotations are parsed from the **first contiguous block** of `#`-prefixed lines. Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`. A key that is not an
+annotation, such as a misspelled `# @wroker gpu`, does nothing; validation
+warns about it (`annotation_unknown`, in the cell header and `strata validate`)
+and suggests the annotation it is closest to.
+
+A known annotation whose value cannot be read, such as `# @timeout soon`,
+`# @mount data` with no URI or `# @nocache maybe`, stops the cell: it does not
+run, on any path (the editor, Run All, `strata run`, the API), and fails with an
+error that names the line and why, such as `timeout_not_numeric` or
+`mount_unreadable`. The cells that depend on it are skipped too. Running it
+anyway would compute, and cache, something other than what the source declares.
+`strata validate` reports the same errors before you run.
+
+In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to `strata cell add/edit`, or splice a single directive without touching the body: `strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout` (see the [CLI](../../notebook/cli.md#authoring-cells-and-dependencies-cell-addeditrmmv-dep)).
+
+## Precedence Rules
+
+When the same setting is configured at multiple levels, the most specific wins:
+
+| Setting | Annotation | Cell config (notebook.toml) | Notebook default |
+|---------|-----------|---------------------------|-----------------|
+| **Worker** | `# @worker X` | `cell.worker` field | `notebook.worker` field |
+| **Timeout** | `# @timeout N` | `cell.timeout` field | `notebook.timeout` field, else 300 seconds |
+| **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
+| **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
+| **SQL connection** | `# @sql connection=X` | (annotation only) | none; required for SQL cells |
+| **Cache policy** | `# @cache <policy>` | (annotation only) | `fingerprint` (read), `session` (write) |
+| **Cache opt-out** | `# @nocache` | (annotation only) | cache on (serve provenance hits) |
+
+Annotations always take priority. This lets you override per-cell behavior without editing `notebook.toml`.

@@ -55,7 +55,7 @@ model = "claude-sonnet-4-6"
 | `max_output_tokens` | integer | Max output tokens requested. Default `4096`. |
 | `timeout_seconds` | float | Request timeout. Default `60.0`. |
 
-Every key is optional and overrides the same setting from the notebook's environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `STRATA_AI_API_KEY`) and from the server's `STRATA_AI_*`. See [Provider configuration](../notebook/cells.md#provider-configuration).
+Every key is optional and overrides the same setting from the notebook's environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `STRATA_AI_API_KEY`) and from the server's `STRATA_AI_*`. See [Provider configuration](../guides/cells/prompt.md#provider-configuration).
 
 ## `[secret_manager]` - External secret-manager wiring
 
@@ -108,7 +108,7 @@ run, which reads `cell.<name>`. A mount declared on a cell is always bound. An R
 gets the mounts whose names appear anywhere in its source, comments and strings
 included, and every mount if it uses a way of reading a variable by a computed name,
 such as `get`, `eval`, `source`, `ls` or `environment`. A SQL cell reads the mounts its
-[connection](#connections) names.
+[connection](#connectionsname-named-database-connections) names.
 
 ### Mount options on a shared server
 
@@ -154,7 +154,7 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 - A remote worker resolves names against its own `STRATA_NOTEBOOK_CREDENTIALS`; only the name travels in the dispatch.
 - On a service-mode server, and on any remote worker, a mount's own `options` cannot override a credential's fields or name another secret, file or endpoint: see [Mount options on a shared server](#mount-options-on-a-shared-server).
 - `STRATA_NOTEBOOK_CREDENTIAL_PATHS='{"lab-a": ["/srv/projects/lab-a"]}'` keeps a name to the notebooks under those directories, for a server that hosts several projects. Anywhere else, the cell fails with `credential 'lab-a' is not available to this notebook`, naming the credential and none of its fields. Mounts, connections and catalogs are all checked, and so is a mount sent to a remote worker, before it is sent. A listed name is not usable outside a notebook at all, for example by a scan through a catalog that names it. Names not listed stay open to every notebook.
-- `STRATA_NOTEBOOK_CREDENTIAL_WRITERS='{"lab-bucket": ["user_*", "agent:agt_1/*"]}'` says who may write through a name, as glob patterns over the principal who started the run (`["*"]` is anyone). It gates three writes: an `rw` mount, a `# @sql connection=... write=true` cell whose connection names the credential, and a [`# @write_table`](../notebook/annotations.md#write_table) into a catalog whose `strata_credential` names it. Once it is set, even to `{}`, a name not listed is read-only. A write through a name the run may not write with fails before the run with `credential 'lab-bucket' is read-only on this server` or `... is not writable by '<principal>'`, and nothing is staged or written. An `rw` mount from a cell or from `notebook.toml` is checked, and so is one sent to a remote worker, before it is sent. A mount names a credential when its scheme has a default (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) as well as when it names its own, and both are checked, since the write uses both. An `rw` mount on `s3`, `gs` or `az` that names no credential, and whose scheme has no default, fails with `a read-write s3 mount must name the source it writes to with credential=<name>`, since it would write as the server's own identity. A `file://` mount is outside the setting. A run with no principal (personal mode) matches only `*`. Unset, every name writes. Reads and provenance are unchanged.
+- `STRATA_NOTEBOOK_CREDENTIAL_WRITERS='{"lab-bucket": ["user_*", "agent:agt_1/*"]}'` says who may write through a name, as glob patterns over the principal who started the run (`["*"]` is anyone). It gates three writes: an `rw` mount, a `# @sql connection=... write=true` cell whose connection names the credential, and a [`# @write_table`](annotations/python.md#write_table) into a catalog whose `strata_credential` names it. Once it is set, even to `{}`, a name not listed is read-only. A write through a name the run may not write with fails before the run with `credential 'lab-bucket' is read-only on this server` or `... is not writable by '<principal>'`, and nothing is staged or written. An `rw` mount from a cell or from `notebook.toml` is checked, and so is one sent to a remote worker, before it is sent. A mount names a credential when its scheme has a default (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) as well as when it names its own, and both are checked, since the write uses both. An `rw` mount on `s3`, `gs` or `az` that names no credential, and whose scheme has no default, fails with `a read-write s3 mount must name the source it writes to with credential=<name>`, since it would write as the server's own identity. A `file://` mount is outside the setting. A run with no principal (personal mode) matches only `*`. Unset, every name writes. Reads and provenance are unchanged.
 
 What these settings limit is what Strata stages and syncs back. A cell never receives a credential's resolved values from Strata: the manifest names a mount's local path, not its options. But a value can reach a cell another way, and then the cell can use it directly, whatever the settings say:
 
@@ -318,7 +318,7 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 | `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become driver auth, underneath this block's own `auth`. |
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
 | (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... - interpreted by the driver adapter. |
-| `catalog` (DuckDB) | string \| absent | A REST or Glue catalog to attach under its name, from the server's catalogs or, in personal mode, this file's [`[catalogs.<name>]`](#notebook-catalogs); the query reads each of its tables at the snapshot the cell's provenance folds. See [DuckDB over the lake](../notebook/cells.md#duckdb-over-the-lake). |
+| `catalog` (DuckDB) | string \| absent | A REST or Glue catalog to attach under its name, from the server's catalogs or, in personal mode, this file's [`[catalogs.<name>]`](#notebook-catalogs); the query reads each of its tables at the snapshot the cell's provenance folds. See [DuckDB over the lake](../guides/cells/sql.md#duckdb-over-the-lake). |
 | `mounts` (DuckDB) | list of strings \| absent | Mounts declared for the cell (`file`, `s3`, `gs` or `az`) to expose as views by name over their Parquet, CSV or JSON files. |
 
 **Malformed connection preservation.** If a `[connections.<name>]` block fails validation (bad name, missing `driver`, etc.), its body is written back verbatim under the same `[connections.<name>]` table on save, so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.
@@ -397,7 +397,7 @@ timeout = 600                 # cell-level override
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against - **not** `@name`. See [Cell IDs](../notebook/annotations.md#cell-ids). |
+| `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against - **not** `@name`. See [Cell IDs](annotations/python.md#cell-ids). |
 | `file` | string (required) | Path to the cell source under `cells/`. The backend names it `<id>.py`, or `<id>.md`, `<id>.r` and `<id>.widget` for markdown, R and widget cells. |
 | `language` | `"python"` \| `"prompt"` \| `"sql"` \| `"markdown"` \| `"r"` \| `"widget"` | Default `"python"`. |
 | `order` | float | Display order. Float so cells can be inserted between existing ones without renumbering. Default `0`. |
@@ -420,7 +420,7 @@ When the same piece of metadata is declared in multiple places, the most specifi
 2. Cell-level `worker` / `timeout` / `env` in `[[cells]]`
 3. Notebook-level `worker` / `timeout` / `env` in the top-level table
 
-Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See [Cell Annotations](../notebook/annotations.md).
+Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See [Cell Annotations](annotations/index.md).
 
 ## What lives elsewhere
 

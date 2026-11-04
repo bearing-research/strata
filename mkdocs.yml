@@ -42,6 +42,7 @@ extra_css:
 
 extra_javascript:
   - javascripts/copy-markdown.js
+  - javascripts/changelog-link.js
 
 markdown_extensions:
   - admonition
@@ -72,64 +73,99 @@ plugins:
 hooks:
   - docs_hooks/export_examples.py
   - docs_hooks/llms_txt.py
+  - docs_hooks/redirects.py
 
 nav:
-  - Home: index.md
-  - Changelog: changelog.md
-  - Notebook:
-    - Start here:
-      - Installation: getting-started/installation.md
-      - Quickstart - Web UI: getting-started/notebook.md
-      - Quickstart - Terminal (TUI): notebook/tui.md
-      - Quickstart - Coding agent: notebook/agent.md
-      - Quickstart - Agent scratchpad: notebook/scratchpad.md
-    - Concepts: notebook/concepts.md
-    - vs Jupyter, Marimo, Pluto: notebook/comparison.md
-    - Examples: notebook/examples.md
-    - Cell Types: notebook/cells.md
-    - Cell Annotations: notebook/annotations.md
-    - Cell Unit Tests: notebook/testing.md
-    - Lake-Aware Cells: notebook/lake-aware-cells.md
-    - Registry Dashboard: notebook/registry-dashboard.md
-    - Distributed Workers: notebook/workers.md
-    - Worker Pool: notebook/worker-pool.md
-    - Publishing an artifact: notebook/publishing.md
-    - Environment: notebook/environment.md
-    - Secret Manager: notebook/secrets.md
-    - Headless Runner: notebook/cli.md
-    - Authoring Programmatically: notebook/agent-authoring.md
-    - MCP Server: notebook/mcp.md
-    - Import from Jupyter: notebook/import.md
-    - Export: notebook/export.md
-    - Keyboard Shortcuts: notebook/keyboard.md
-  - Core:
-    - Quickstart: getting-started/core.md
-    - Artifacts & Registry: core/registry.md
-  - API Reference:
-    - Notebook Client Protocol: reference/notebook-protocol.md
-    - REST API: reference/rest-api.md
-    - WebSocket Protocol: reference/websocket.md
-    - Executor Protocol: reference/executor-protocol.md
-    - Worker Relay Protocol: reference/worker-connect.md
-    - notebook.toml Schema: reference/notebook-toml.md
-  - Deployment:
+  - Get started:
+    - Overview: index.md
+    - Install: getting-started/installation.md
+    - Your first notebook: getting-started/notebook.md
+    - With a coding agent: notebook/agent.md
+    - Terminal viewer: notebook/tui.md
+    - Coming from Jupyter: notebook/import.md
+    - Example gallery: notebook/examples.md
+  - Guides:
+    - Cells:
+      - Overview: guides/cells/index.md
+      - Python: guides/cells/python.md
+      - SQL: guides/cells/sql.md
+      - R: guides/cells/r.md
+      - Prompt: guides/cells/prompt.md
+      - Widget: guides/cells/widget.md
+      - Loops and variants: guides/cells/loops-and-variants.md
+      - Tests: notebook/testing.md
+    - Data:
+      - Mounts: guides/data/mounts.md
+      - Lake and Iceberg: notebook/lake-aware-cells.md
+      - Fetch and datasets: guides/data/fetch-and-datasets.md
+      - Write back: guides/data/write-back.md
+    - Compute:
+      - Workers: notebook/workers.md
+      - Worker pool: notebook/worker-pool.md
+      - SSH: guides/compute/ssh.md
+      - Environment: notebook/environment.md
+      - Secrets: notebook/secrets.md
+    - Share:
+      - App view: guides/share/app-view.md
+      - Publish: notebook/publishing.md
+      - Export and import: notebook/export.md
+      - Team store: guides/share/team-store.md
+      - Registry dashboard: notebook/registry-dashboard.md
+    - Agents:
+      - MCP: notebook/mcp.md
+      - CLI authoring: notebook/agent-authoring.md
+      - Scratchpad: notebook/scratchpad.md
+    - Library:
+      - Quickstart: getting-started/core.md
+      - Artifacts and registry: core/registry.md
+  - Concepts:
+    - How caching works: concepts/caching.md
+    - The DAG and staleness: concepts/dag-and-staleness.md
+    - Artifacts and lineage: concepts/artifacts-and-lineage.md
+    - File format and git: concepts/file-format-and-git.md
+    - How Strata compares: notebook/comparison.md
+    - Features: concepts/features.md
+  - Reference:
+    - Annotations:
+      - Index: reference/annotations/index.md
+      - Python: reference/annotations/python.md
+      - SQL: reference/annotations/sql.md
+      - R: reference/annotations/r.md
+      - Prompt: reference/annotations/prompt.md
+      - Loops and variants: reference/annotations/loops-and-variants.md
+      - Widget and app view: reference/annotations/widget.md
+    - CLI: notebook/cli.md
+    - notebook.toml: reference/notebook-toml.md
     - Configuration: reference/configuration.md
-    - Deployment Modes: deployment/modes.md
-    - Service Mode: deployment/service-mode.md
-    - Operations & Lifecycle: deployment/lifecycle.md
-    - Privacy & Sharing: deployment/privacy.md
+    - REST: reference/rest-api.md
+    - WebSocket: reference/websocket.md
+    - Notebook client protocol: reference/notebook-protocol.md
+    - Executor protocol: reference/executor-protocol.md
+    - Worker relay: reference/worker-connect.md
+    - Keyboard: notebook/keyboard.md
+  - Deploy:
+    - Modes: deployment/modes.md
+    - Service mode: deployment/service-mode.md
     - Docker: deployment/docker.md
     - Fly.io: deployment/fly.md
-    - GitHub Codespaces: deployment/codespaces.md
+    - Codespaces: deployment/codespaces.md
+    - Operations: deployment/lifecycle.md
     - Observability: deployment/observability.md
+    - Privacy: deployment/privacy.md
 
 exclude_docs: |
   internal/
   assets/README.md
 
-# Rendered from examples/ by the hook above and linked from notebook/examples.md.
+# Rendered from examples/ by the hook above and linked from notebook/examples.md. The
+# changelog is linked from the header and the footer.
 not_in_nav: |
   /examples/*.md
+  /changelog.md
+
+# A link to a heading that is gone fails the strict build.
+validation:
+  anchors: warn
 
 # Versioned docs via `mike`, which maintains ``versions.json`` on ``gh-pages``
 # for Material's version picker. Aliases:

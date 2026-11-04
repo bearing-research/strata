@@ -102,7 +102,7 @@ optional, since it is your workspace and some people keep it.
     cell stale.
 
     A cell that reads a file you are actively changing wants
-    [`# @nocache`](annotations.md#nocache), the same as a clock read. A cell
+    [`# @nocache`](../reference/annotations/python.md#nocache), the same as a clock read. A cell
     that reads a file you are not changing is fine as it is, and is the case
     the pin exists for.
 
@@ -117,7 +117,7 @@ optional, since it is your workspace and some people keep it.
   an invisible script in `/tmp`. You can open it later, or watch it live.
 - **Side effects stay honest.** A cell that writes a file, calls an API, reads
   the clock, or reads a file that changes underneath it must not replay a stale
-  result. Those get [`# @nocache`](annotations.md#nocache) and always
+  result. Those get [`# @nocache`](../reference/annotations/python.md#nocache) and always
   re-execute; everything else stays cached.
 
 ## Why the agent actually reaches for it
@@ -178,4 +178,4 @@ someone is watching, point the agent at that server instead: MCP, or
 - [Driving a notebook with a coding agent](agent.md): the other use case, where
   the notebook is the point.
 - [MCP Server](mcp.md): the tool list and the endpoint's security model.
-- [Cell Annotations](annotations.md): `# @nocache` and the rest.
+- [Cell Annotations](../reference/annotations/index.md): `# @nocache` and the rest.

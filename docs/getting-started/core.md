@@ -121,7 +121,7 @@ print(df.head())
 
 A notebook's `# @output_dir` folder in the store is files, not rows:
 `client.download_folder(artifact_id, version, "out")` rebuilds them in a new
-directory ([output folders](../notebook/annotations.md#output_dir)).
+directory ([output folders](../reference/annotations/python.md#output_dir)).
 
 ## 5. Integration with data libraries
 

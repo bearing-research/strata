@@ -164,7 +164,7 @@ def on_post_build(config):
     optional += [
         f.page
         for f in _files.documentation_pages()
-        if f.src_uri in _pages and f.src_uri not in in_nav
+        if f.src_uri in _pages and f.src_uri not in in_nav and f.src_uri not in _OPTIONAL
     ]
     sections = [("Start", links(top_pages))]
     sections += [(title, links(pages)) for title, pages in groups]
