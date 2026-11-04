@@ -2028,8 +2028,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "double": {
@@ -4096,8 +4098,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "double": {
@@ -5230,8 +5234,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "seen": {
@@ -6250,8 +6256,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "seen": {
@@ -7351,8 +7359,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "single": {
@@ -8376,8 +8386,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "single": {
@@ -9257,8 +9269,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "last": {
@@ -9754,7 +9768,9 @@
       "status": "error"
      },
      "staleness": {
-      "reasons": [],
+      "reasons": [
+       "self"
+      ],
       "status": "error"
      }
     },
@@ -11513,8 +11529,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "tail": {
@@ -12063,7 +12081,9 @@
       ]
      },
      "staleness": {
-      "reasons": [],
+      "reasons": [
+       "self"
+      ],
       "status": "error"
      }
     },

@@ -184,7 +184,7 @@ The last-run time is where caching becomes visible. Edit one cell and run: the
 cells above it resolve from cache without executing, and only the edited one
 computes.
 
-![The viewer through a re-run: the plot cell is edited and goes idle, then runs
+![The viewer through a re-run: the plot cell is edited and goes stale, then runs
 while the load and summarize cells above it both read cached, and finishes -
 the two-second load never executes again.](../assets/tui-cache-payoff.gif)
 

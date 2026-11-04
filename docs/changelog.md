@@ -39,6 +39,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   shrinks to a thin rail and the cells take its width. A typical cell header is
   one row, with `leaf` and the execution method in the status dot's tooltip. DAG edge
   labels no longer overlap. (#1395)
+- **An edited cell reads stale, and undoing the edit brings it back.** A cell
+  that ran and was then edited read `idle` while it went on showing that run's
+  output. It now reads `stale · source changed`, and reverting the edit returns
+  it and the cells below it to `ready`, shown as cached. (#1397)
 - **One icon set.** The UI's icons are SVGs from Lucide, not emoji and Unicode glyphs
   that render differently per OS, and every icon-only button has an accessible name.
   (#1398)

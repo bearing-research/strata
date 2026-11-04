@@ -34,6 +34,7 @@ import type {
   WorkerSpec,
   WidgetSpec,
 } from '../types/notebook'
+import { cachedAgainFields, isCachedAgain } from '../utils/cacheBadge'
 import { useStrata } from '../composables/useStrata'
 import type {
   AliasMoveResult,
@@ -1960,11 +1961,16 @@ function initializeWebSocket() {
       const p = msg.payload as Record<string, any>
       const cellId = p.cell_id as CellId
       const status = p.status as CellStatus
+      const previousStatus = cellMap.value.get(cellId)?.status
       setCellStatus(cellId, status)
       optimisticRuns.settle(cellId)
       dirtyCells.statusChanged(cellId, status)
 
       const cell = cellMap.value.get(cellId)
+
+      if (cell?.output && !cell.output.error && isCachedAgain(previousStatus, status)) {
+        Object.assign(cell.output, cachedAgainFields(cell.output, cell.durationMs))
+      }
 
       // A new run: drop the previous run's stream buffer. Run-all, cascade
       // and force paths skip the local execute* helpers that clear it.

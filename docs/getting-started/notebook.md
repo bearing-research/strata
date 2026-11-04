@@ -252,9 +252,10 @@ with [`# @nocache`](../notebook/annotations.md#nocache).
 Edit the loader, say, change `time.sleep(2)` to `time.sleep(1)`.
 Strata re-analyzes the source and computes a new provenance hash, so
 the loader's cached result no longer matches its source and the cell
-returns to **idle**. The summary and plot cells flip **stale**: they
-referenced `df`, which is no longer the cached value. (Hover
-**Why stale?** on either to see the reason - here, `upstream`.)
+flips **stale**. So do the summary and plot cells: they referenced
+`df`, which is no longer the cached value. (Hover **Why stale?** on
+any of them to see the reason: `source changed` on the loader,
+`upstream changed` on the others.)
 
 Now press ++shift+enter++ on the plot cell. Strata walks back through
 the stale upstream cells and runs loader → summary → plot in
