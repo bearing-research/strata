@@ -177,6 +177,8 @@ EXPECTED_ROUTES = [
     ("/v1/notebooks/{notebook_id}/release", "POST", 1),
     ("/v1/notebooks/{notebook_id}/secret-manager/config", "PUT", 1),
     ("/v1/notebooks/{notebook_id}/secret-manager/refresh", "POST", 1),
+    ("/v1/notebooks/{notebook_id}/store/artifacts", "GET", 1),
+    ("/v1/notebooks/{notebook_id}/store/stats", "GET", 1),
     ("/v1/notebooks/{notebook_id}/timeout", "PUT", 1),
     ("/v1/notebooks/{notebook_id}/variant-groups/{group_id}", "PUT", 1),
     ("/v1/notebooks/{notebook_id}/variant-groups/{group_id}/variants", "POST", 1),

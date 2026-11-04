@@ -777,11 +777,11 @@ function goHome() {
           </button>
           <router-link
             v-if="overflow.includes('artifacts')"
-            to="/artifacts"
+            :to="`/notebook/${sessionId}/artifacts`"
             class="overflow-item"
             role="menuitem"
             data-testid="nav-artifacts"
-            title="Artifact store"
+            title="What this notebook has stored"
           >
             Artifacts
           </router-link>

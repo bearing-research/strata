@@ -404,9 +404,9 @@ function formatTime(ts: number): string {
         to="/artifacts"
         class="nav-link"
         data-testid="nav-artifacts"
-        title="Artifact store"
+        title="What the server has stored. Each notebook keeps its own results."
       >
-        Artifacts
+        Server store
       </router-link>
       <router-link to="/logs" class="nav-link" data-testid="nav-logs" title="Server logs">
         Logs
