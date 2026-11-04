@@ -1025,6 +1025,10 @@ async def run_harness(
             **spawn_kwargs(harness_user),
             **subprocess_kwargs_for_new_group(),
         )
+    except BaseException:
+        if read_fd >= 0:
+            os.close(read_fd)
+        raise
     finally:
         for fd in events_fds:
             os.close(fd)

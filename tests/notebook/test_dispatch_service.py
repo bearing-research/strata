@@ -668,6 +668,49 @@ class TestDirect:
 
         assert cancelled == [("http://worker:9/v1/execute", "secret")]
 
+    @pytest.mark.parametrize("lost", [httpx.TimeoutException("slow"), httpx.ConnectError("down")])
+    async def test_a_lost_request_asks_the_worker_to_stop(
+        self, http, features, tmp_path, monkeypatch, lost
+    ):
+        cancelled = []
+
+        async def cancel(url, build_id, token):
+            cancelled.append((url, build_id, token))
+
+        monkeypatch.setattr(dispatch, "cancel_remote_execution", cancel)
+        http.answers.append(lost)
+
+        with pytest.raises(RemoteExecutionError):
+            await self._run(tmp_path, worker=_worker(token="secret"))
+
+        sent = _metadata(http.requests[0])
+        assert cancelled == [("http://worker:9/v1/execute", sent["build_id"], "secret")]
+
+    async def test_a_missing_input_closes_the_files_opened_before_it(
+        self, http, features, tmp_path, monkeypatch
+    ):
+        (tmp_path / "out").mkdir()
+        (tmp_path / "out" / "x.pickle").write_text("value")
+        opened = []
+
+        def recording_open(path, mode):
+            handle = open(path, mode)
+            opened.append(handle)
+            return handle
+
+        monkeypatch.setattr(dispatch, "open", recording_open, raising=False)
+
+        with pytest.raises(FileNotFoundError):
+            await self._run(
+                tmp_path,
+                input_specs={
+                    "x": {"file": "x.pickle", "injected": {"y": {"file": "gone.pickle"}}},
+                },
+            )
+
+        assert [handle.closed for handle in opened] == [True]
+        assert http.requests == []
+
     async def test_input_files_are_closed_whatever_happens(self, http, features, tmp_path):
         (tmp_path / "out").mkdir()
         (tmp_path / "out" / "x.pickle").write_text("value")
@@ -843,6 +886,25 @@ class TestAwaitAcceptedJob:
         assert raised.value.remote_build_state == "failed"
         assert raised.value.cancelled == [True]
         assert http.requests == []
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            httpx.Response(200, text="<html>gateway</html>"),
+            httpx.Response(200, json=["a list"]),
+            httpx.Response(200, json={"state": "finished", "status_code": "ok"}),
+            httpx.Response(200, json={"state": "failed", "status_code": ["502"]}),
+        ],
+    )
+    async def test_a_reply_that_is_not_a_job_stops_the_job(self, http, clock, reply):
+        http.answers.append(reply)
+
+        with pytest.raises(RemoteExecutionError, match="cannot read") as raised:
+            await self._await()
+
+        assert raised.value.remote_error_code == "JOB_STATUS_FAILED"
+        assert raised.value.remote_build_state == "failed"
+        assert raised.value.cancelled == [True]
 
     async def test_a_job_on_another_host_is_never_polled(self, http, clock):
         accepted = httpx.Response(202, json={"job_url": "http://evil:9/jobs/1"})
@@ -1496,6 +1558,75 @@ class TestSigned:
     async def test_it_needs_a_url(self, signed, tmp_path):
         with pytest.raises(RuntimeError, match="is missing config.url"):
             await self._run(tmp_path, worker=_worker(url="", transport="signed"))
+
+    @pytest.fixture
+    def stopped(self, monkeypatch):
+        calls = []
+
+        async def cancel(url, build_id, token):
+            calls.append((url, build_id, token))
+
+        monkeypatch.setattr(dispatch, "cancel_remote_execution", cancel)
+        return calls
+
+    async def test_a_cancel_before_the_request_tells_the_worker_nothing(
+        self, signed, http, stopped, tmp_path
+    ):
+        loop = asyncio.get_running_loop()
+        real = signed.build_store.create_build
+
+        def create_build(**kwargs):
+            real(**kwargs)
+            loop.call_soon_threadsafe(running.cancel)
+
+        signed.build_store.create_build = create_build
+        running = asyncio.create_task(self._run(tmp_path, worker=_worker(transport="signed")))
+
+        with pytest.raises(asyncio.CancelledError):
+            await running
+
+        assert signed.failed == [("Notebook manifest execution cancelled", "CANCELLED")]
+        assert stopped == []
+        assert http.requests == []
+
+    async def test_a_setup_failure_before_the_request_tells_the_worker_nothing(
+        self, signed, http, stopped, tmp_path
+    ):
+        def create_build(**kwargs):
+            raise OSError("store down")
+
+        signed.build_store.create_build = create_build
+
+        with pytest.raises(RemoteExecutionError, match="setup failed") as raised:
+            await self._run(tmp_path)
+
+        assert raised.value.remote_error_code == "SETUP_FAILED"
+        assert stopped == []
+
+    @pytest.mark.parametrize("lost", [httpx.TimeoutException("slow"), httpx.ConnectError("down")])
+    async def test_a_lost_request_asks_the_worker_to_stop(
+        self, signed, http, stopped, tmp_path, lost
+    ):
+        http.answers.append(lost)
+
+        with pytest.raises(RemoteExecutionError):
+            await self._run(tmp_path, worker=_worker(transport="signed", token="secret"))
+
+        assert stopped == [("http://worker:9/v1/execute", "b1", "secret")]
+
+    async def test_an_error_after_the_request_asks_the_worker_to_stop(
+        self, signed, http, stopped, tmp_path, monkeypatch
+    ):
+        async def broken(*_args, **_kwargs):
+            raise ValueError("broken")
+
+        monkeypatch.setattr(dispatch, "await_accepted_job", broken)
+        http.answers.append(httpx.Response(202, json={"job_url": "/jobs/1"}))
+
+        with pytest.raises(RemoteExecutionError, match="setup failed"):
+            await self._run(tmp_path, worker=_worker(transport="signed", token="secret"))
+
+        assert stopped == [("http://worker:9/v1/execute", "b1", "secret")]
 
     async def test_a_cancel_while_recording_a_failure_keeps_that_failure(
         self, signed, http, tmp_path

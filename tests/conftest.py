@@ -199,12 +199,14 @@ def _reset_process_globals():
     server_module._state = None
     from vestigo.store import reset_artifact_store
 
+    from strata.auth.api_keys import reset_api_key_store
     from strata.cache.metadata import reset_caches
     from strata.notebook.worker_store import reset_notebook_worker_store
     from strata.rate_limiter import reset_rate_limiter
     from strata.tenancy.registry import reset_tenant_registry
 
     reset_artifact_store()
+    reset_api_key_store()
     reset_notebook_worker_store()
     reset_tenant_registry()
     # The metadata store is a process global and a no-arg ``get_metadata_store()``
