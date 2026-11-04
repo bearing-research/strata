@@ -590,7 +590,9 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> Serial
     view = _display_table(table)
     preview = []
     for i in range(min(20, view.num_rows)):
-        preview.append([to_serialization_safe(col[i].as_py()) for col in view.columns])
+        preview.append(
+            [to_serialization_safe(col[i].as_py(), keep_none=True) for col in view.columns]
+        )
     return {
         "content_type": ContentType.ARROW_IPC,
         "file": filename,
@@ -1137,7 +1139,7 @@ def _serialize_dataframe_json(
         columns = [to_serialization_safe(column) for column in list(frame.columns)]
         num_rows = len(frame)
         rows = [
-            [to_serialization_safe(v) for v in row]
+            [to_serialization_safe(v, keep_none=True) for v in row]
             for row in frame.itertuples(index=False, name=None)
         ]
         preview = rows[:20]
@@ -1491,7 +1493,8 @@ def read_table_page(
     columns = list(page.column_names)
     pydict = page.to_pydict()
     rows = [
-        [to_serialization_safe(pydict[col][i]) for col in columns] for i in range(page.num_rows)
+        [to_serialization_safe(pydict[col][i], keep_none=True) for col in columns]
+        for i in range(page.num_rows)
     ]
     return {"columns": columns, "rows": rows, "total": total}
 
@@ -1520,7 +1523,8 @@ def read_table_summary(blob: bytes) -> dict[str, Any] | None:
             "name": name,
             "dtype": str(ftype),
             "nulls": column.null_count,
-            "distinct": pc.count_distinct(column).as_py(),
+            # Arrow has no count_distinct for a column of nothing but nulls.
+            "distinct": 0 if pa.types.is_null(ftype) else pc.count_distinct(column).as_py(),
             "min": None,
             "max": None,
         }

@@ -1035,7 +1035,7 @@ def _render_table(columns: list[str], preview: list[Any], total: int | None) -> 
 
 
 def _cell_str(value: Any) -> str:
-    text = str(value)
+    text = "" if value is None else str(value)
     return text if len(text) <= 40 else text[:37] + "…"
 
 

@@ -2,6 +2,7 @@
 import { ArrowDown, ArrowUp, X } from '@lucide/vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useStrata } from '../composables/useStrata'
+import { numericColumns } from '../utils/tableColumns'
 
 /**
  * Interactive viewer for a DataFrame cell output.
@@ -205,11 +206,10 @@ function exportUrl(fmt: 'csv' | 'parquet'): string {
 }
 
 // Cell rendering ----------------------------------------------------------
+const numeric = computed(() => numericColumns(rows.value, columns.value.length))
+
 function isNull(v: unknown): boolean {
   return v === null || v === undefined
-}
-function isNumeric(v: unknown): boolean {
-  return typeof v === 'number' && Number.isFinite(v)
 }
 function fmtCell(v: unknown): string {
   if (isNull(v)) return 'null'
@@ -298,9 +298,9 @@ onMounted(() => {
         <thead>
           <tr>
             <th
-              v-for="col in columns"
+              v-for="(col, colIndex) in columns"
               :key="col"
-              :class="{ sortable: canQuery, active: sortBy === col }"
+              :class="{ sortable: canQuery, active: sortBy === col, numeric: numeric[colIndex] }"
               @click="sortByColumn(col)"
             >
               {{ col
@@ -310,7 +310,11 @@ onMounted(() => {
             </th>
           </tr>
           <tr v-if="showStats" class="stats-row">
-            <th v-for="col in columns" :key="col">
+            <th
+              v-for="(col, colIndex) in columns"
+              :key="col"
+              :class="{ numeric: numeric[colIndex] }"
+            >
               <template v-if="summaryByName[col]">
                 <span class="dtype">{{ summaryByName[col].dtype }}</span>
                 <span v-if="summaryByName[col].nulls" class="stat"
@@ -330,7 +334,7 @@ onMounted(() => {
               v-for="(col, colIndex) in columns"
               :key="col"
               :class="{
-                numeric: isNumeric(row[colIndex]),
+                numeric: numeric[colIndex],
                 'null-cell': isNull(row[colIndex]),
                 expanded: expanded.has(cellKey(rowIndex, colIndex)),
               }"
@@ -490,6 +494,7 @@ onMounted(() => {
   max-width: none;
   word-break: break-word;
 }
+.data-table th.numeric,
 .data-table td.numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;

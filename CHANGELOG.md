@@ -169,6 +169,10 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A table's columns line up, and a null reads as a null.** A numeric column's
+  header, stats and cells now right-align together, a null among them. Nulls reach
+  the viewer as nulls, not as empty strings, and the Stats row no longer goes blank
+  for a table holding an all-null column. (#1399)
 - **Run All records what each cell cost, and a cache hit says what it saved.** Run
   All recorded 0 for every cell, so the profiler read "0ms" and later hits were
   priced at nothing. A hit's badge now reads `cached · saved 2.1s`, with the load

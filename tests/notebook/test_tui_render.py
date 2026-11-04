@@ -249,6 +249,11 @@ def test_render_table_includes_columns_values_and_truncation_caption():
     assert "showing 2 of 100 rows" in text
 
 
+def test_render_table_leaves_a_null_blank():
+    text = _render_to_text(_render_table(["id", "name"], [[1, None]], total=1))
+    assert "None" not in text
+
+
 def test_render_table_caps_wide_tables():
     cols = [f"c{i}" for i in range(20)]
     rows = [[f"v{i}" for i in range(20)]]

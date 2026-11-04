@@ -325,6 +325,23 @@ class TestArrowSerialization:
                 {"when": "2024-01-03", "amount": "2.50"},
             ]
 
+    def test_arrow_json_fallback_keeps_a_null_apart_from_an_empty_string(self, monkeypatch):
+        df = pd.DataFrame({"when": [date(2024, 1, 2), None], "name": ["", None]}, dtype=object)
+
+        def _raise_arrow_invalid(value, output_dir, variable_name):
+            raise pa.ArrowInvalid("unsupported dtype")
+
+        monkeypatch.setattr(serializer_module, "_serialize_arrow", _raise_arrow_invalid)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(df, tmpdir, "data")
+
+            assert meta["preview"] == [["2024-01-02", ""], [None, None]]
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+            assert loaded["name"].isna().tolist() == [False, True]
+            assert loaded["name"].iloc[0] == ""
+
     def test_arrow_json_fallback_roundtrips_series(self, monkeypatch):
         series = pd.Series([10, 20, 30], name="target")
 
@@ -1739,6 +1756,13 @@ class TestReadTablePage:
 
         assert page is None
 
+    def test_a_null_stays_null_and_an_empty_string_stays_empty(self):
+        table = pa.table({"score": [1.5, None], "name": ["", None]})
+
+        page = read_table_page(_arrow_blob(table))
+
+        assert page["rows"] == [[1.5, ""], [None, None]]
+
     def test_non_arrow_blob_returns_none(self):
         assert read_table_page(b"not arrow at all") is None
 
@@ -1834,6 +1858,18 @@ class TestReadTableSummary:
         assert by_name["label"]["distinct"] == 3
         assert by_name["label"]["min"] is None
 
+    def test_summary_of_an_all_null_column(self):
+        from strata.notebook.serializer import read_table_summary
+
+        table = pa.table({"n": [1, 2], "gone": pa.nulls(2)})
+
+        by_name = {c["name"]: c for c in read_table_summary(_arrow_blob(table))["columns"]}
+
+        assert by_name["gone"]["nulls"] == 2
+        assert by_name["gone"]["distinct"] == 0
+        assert by_name["gone"]["min"] is None
+        assert by_name["n"]["distinct"] == 2
+
     def test_summary_none_for_non_table(self):
         import numpy as np
 
@@ -1892,6 +1928,10 @@ class TestPandasIndexDisplay:
         """Without this the test below would pass against a serializer that dropped the data."""
         table = pa.ipc.open_stream(pa.BufferReader(_arrow_blob(self._filtered()))).read_all()
         assert "__index_level_0__" in table.column_names
+
+    def test_the_preview_keeps_a_null_apart_from_an_empty_string(self):
+        meta = self._preview(pa.table({"score": [1.5, None], "name": ["", None]}))
+        assert meta["preview"] == [[1.5, ""], [None, None]]
 
     def test_an_unnamed_index_is_hidden_from_the_preview(self):
         meta = self._preview(self._filtered())
