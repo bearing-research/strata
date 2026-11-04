@@ -10,7 +10,6 @@ made absolute, since they were written against ``docs/`` and not against the pub
 
 from __future__ import annotations
 
-import os
 import posixpath
 import re
 from collections.abc import Callable
@@ -80,10 +79,8 @@ def render_llms_txt(
 
 
 def _base_url(config) -> str:
-    site = config["site_url"].rstrip("/")
-    # mike sets this, and a link that stays in this version outlives a move of ``latest``.
-    version = os.environ.get("MIKE_DOCS_VERSION")
-    return f"{site}/{version}/" if version else f"{site}/"
+    # Under ``mike deploy`` this already names the version being deployed.
+    return config["site_url"].rstrip("/") + "/"
 
 
 def _expand_snippets(markdown: str, config) -> str:

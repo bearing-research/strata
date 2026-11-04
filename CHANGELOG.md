@@ -38,7 +38,7 @@ exhaustive commit history.
   app's blue, diamond and JetBrains Mono. Installation now comes first under "Start here".
   Each page is published as Markdown beside its HTML, with a **Copy page as Markdown**
   button, and `llms.txt` and `llms-full.txt` are built with the docs. Links now use
-  `bearingresearch.com/strata`. (#1408)
+  `bearingresearch.com/strata`. (#1408, #1409)
 - **README, repo metadata and `CONTRIBUTING.md`.** The README leads with coding agents and
   drops the long feature list, which stays in the docs. Package URLs use
   `bearingresearch.com/strata/`, and there is now a `CONTRIBUTING.md`. (#1403)
