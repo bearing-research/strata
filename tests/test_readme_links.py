@@ -29,4 +29,4 @@ def test_the_pattern_sees_the_root_readme_images() -> None:
     text = (_REPO / "README.md").read_text(encoding="utf-8")
     targets = [a or b for a, b in _TARGETS.findall(text)]
 
-    assert any(t.endswith("notebook-anatomy-light.png") for t in targets)
+    assert any(t.endswith("web-agent-live-light.gif") for t in targets)

@@ -195,8 +195,8 @@ strata-notebook-tui = "strata.notebook.tui.cli:main"
 strata-worker = "strata.notebook.remote_executor:main"
 
 [project.urls]
-Homepage = "https://bearing-research.github.io/strata/"
-Documentation = "https://bearing-research.github.io/strata/"
+Homepage = "https://bearingresearch.com/strata/"
+Documentation = "https://bearingresearch.com/strata/"
 Repository = "https://github.com/bearing-research/strata"
 Issues = "https://github.com/bearing-research/strata/issues"
 Changelog = "https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"

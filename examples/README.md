@@ -110,7 +110,7 @@ Iceberg warehouse in S3 and your credentials filled in.
 | [07_error_handling.py](07_error_handling.py) | Handle common errors gracefully |
 | [10_artifacts.py](10_artifacts.py) | Materialize, chain, and track transform artifacts |
 | [11_async_client.py](11_async_client.py) | Non-blocking async operations for high throughput |
-| [12_delibera_integration.py](12_delibera_integration.py) | Direct artifact upload via `put()` for non-Strata producers |
+| [12_direct_upload.py](12_direct_upload.py) | Direct artifact upload via `put()` for non-Strata producers |
 
 ### Demo helpers
 
