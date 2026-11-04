@@ -145,6 +145,28 @@ def scan_server(tmp_path):
 
 
 @pytest.mark.integration
+async def test_a_later_cell_reads_what_strata_put_returned(scan_server, tmp_path):
+    keeps = (
+        "kept = strata.put(inputs=[], transform={'ref': 'kept@v1'}, data={'a': [1, 2, 3]})\n"
+        "print('TOKEN', strata._headers['X-Strata-Run-Token'])\n"
+    )
+    reads = "print('ROWS', kept.to_arrow().num_rows, kept.uri)\n"
+    session = _session(tmp_path / "nb", keeps, reads)
+
+    kept = await _run(session, "a")
+    read = await _run(session, "b")
+
+    assert kept.success, kept.error
+    assert read.success, read.error
+    assert "ROWS 3 strata://artifact/" in read.stdout
+    # The run's token ends with the run, and a kept handle must not carry it into the store.
+    token = kept.stdout.split("TOKEN ", 1)[1].split()[0].encode()
+    store = session.get_artifact_manager().artifact_dir
+    [blob] = store.rglob("*_var_kept@*")
+    assert token not in blob.read_bytes()
+
+
+@pytest.mark.integration
 async def test_a_cell_scans_the_table_through_the_server(scan_server, tmp_path):
     scans = (
         "# @table rows ./wh#lab.rows\n"
