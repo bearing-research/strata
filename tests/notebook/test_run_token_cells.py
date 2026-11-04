@@ -47,6 +47,7 @@ def server(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("strata.notebook.executor.resolve_harness_user", lambda: None)
     monkeypatch.setattr("strata.notebook.cell_paths.batch.resolve_harness_user", lambda: None)
+    monkeypatch.setattr("strata.notebook.cell_paths.python.resolve_harness_user", lambda: None)
     monkeypatch.setattr("strata.notebook.pool.resolve_harness_user", lambda: None)
     with run_server(config) as base:
         yield base
