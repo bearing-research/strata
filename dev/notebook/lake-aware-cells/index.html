@@ -2398,9 +2398,9 @@ bound to the server. The <code>@table</code> annotation injects two variables: <
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>append_month2.py
 </code></pre></div>
-<p>Back in the notebook, the <code>@table</code> cell is now <strong>out of date (idle)</strong> - its
+<p>Back in the notebook, the <code>@table</code> cell now reads <strong>stale · input changed</strong> - its
 snapshot id moved from S1 to S2, so its provenance changed and no stored result
-matches it. The cells downstream of it that ran before read <strong>stale</strong>. The
+matches it. The cells downstream of it that ran before read <strong>stale</strong> too. The
 badges do not update live: the notebook looks up the current snapshot only when
 it recomputes staleness, which happens when you reopen the notebook, edit a
 cell, or run one. Refreshing the browser tab alone keeps the old badge. A plain
@@ -2532,9 +2532,9 @@ result turns out to be cached may still ask; asking is the safe direction.</p>
   commits no new snapshot. The cell stays a cache hit, and a scan that passes
   <code>orders_snapshot</code> keeps reading that snapshot's schema. The new schema shows
   up once new data lands in a new snapshot.</li>
-<li><strong>Unreachable catalog → conservatively out of date.</strong> If the catalog can't
-  be reached when provenance is computed (which also happens on notebook open),
-  the cell is treated as out of date rather than crashing; if it's still unreachable
+<li><strong>Unreachable catalog → idle.</strong> If the catalog can't be reached when provenance
+  is computed (which also happens on notebook open), the cell reads idle rather than
+  crashing, since nothing says its result is wrong; if it's still unreachable
   at execution time, the run fails with a clear error.</li>
 <li><strong>The embedded scan runs in-process.</strong> <code>scan@v1</code> is handled by the server
   itself in both modes: it is resolved before any executor dispatch, so

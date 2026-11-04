@@ -3258,7 +3258,7 @@ cells do not record writes, so a successful run of one drops the entry too.</p>
 <h2 id="fetch">@fetch<a class="headerlink" href="#fetch" title="Permanent link">&para;</a></h2>
 <p>Declare a URL the cell reads. The bytes are downloaded into the notebook's
 cache and <strong>their digest becomes part of the cell's provenance</strong>, so the cell
-goes out of date (idle) and its downstream cells stale when the URL starts
+and its downstream cells go stale when the URL starts
 serving something else - instead of the URL
 string being in the source hash and the bytes being in nothing.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># @fetch zones https://example.org/taxi_zones.csv</span>
@@ -3315,7 +3315,7 @@ addresses too. Hosts in <code>NO_PROXY</code> connect directly, held to the chec
 address.</p>
 <p>Personal mode allows private addresses, so <code>http://localhost:8000/data.csv</code>
 works on your own machine, and uses the proxy settings as usual. A URL that
-cannot be checked shows the cell as out of date, and running
+cannot be checked leaves the cell idle, since nothing says the result is wrong, and running
 it fails with the reason. A cell with <code>@fetch</code> runs on its own in Run All rather
 than in a batch.</p>
 <p>On a remote worker the server does the fetching: the bytes travel with the
@@ -3327,8 +3327,8 @@ on <code>&lt;name&gt;</code>.</p>
 <h2 id="dataset">@dataset<a class="headerlink" href="#dataset" title="Permanent link">&para;</a></h2>
 <p>Declare a registry name the cell reads. The name resolves to one artifact
 version, and <strong>that version becomes part of the cell's provenance</strong>, so when
-<code>champion</code> moves, a cell that reads the team's champion model goes out of date
-(idle) and its downstream cells stale. Resolving
+<code>champion</code> moves, a cell that reads the team's champion model and its downstream
+cells go stale. Resolving
 the name with the <code>strata</code> client inside the cell records nothing: the name is
 in the source hash and the version is in nothing.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># @dataset model taxi/model@champion</span>
@@ -3360,13 +3360,13 @@ step the registry no longer holds ends the walk there, as it does in the
 registry. The Registry tab lists, beside each name, the cells that read it.</p>
 <p>The registry is asked at most once a minute while staleness is being
 recomputed, and always right before the cell runs. A name that does not
-resolve shows the cell as out of date, and running it fails with the reason. A cell
+resolve leaves the cell idle, and running it fails with the reason. A cell
 with <code>@dataset</code> runs on its own in Run All rather than in a batch. <code>@loop</code> and
 R cells cannot declare one; read the dataset in an upstream Python cell.</p>
 <h2 id="table">@table<a class="headerlink" href="#table" title="Permanent link">&para;</a></h2>
 <p>Declare an Iceberg table input. The table's current snapshot id becomes part
-of the cell's provenance: <strong>when new data lands in the table, the cell goes
-out of date (idle), its downstream cells go stale, and the normal cascade
+of the cell's provenance: <strong>when new data lands in the table, the cell and its
+downstream cells go stale, and the normal cascade
 machinery re-runs them</strong> - no manual data-version
 bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
@@ -3422,8 +3422,8 @@ To use the snapshot id downstream, export it as a real variable:
 <code>scanned_snapshot = trips_snapshot</code>. A <code>@loop</code> cell gets them in every
 iteration. An R cell cannot declare <code>@table</code>; read the table in an upstream
 Python cell.</p>
-<p>If the catalog is unreachable when provenance is computed, the cell is
-conservatively treated as out of date; if it is still unreachable at execution time,
+<p>If the catalog is unreachable when provenance is computed, the cell reads
+idle, since nothing says its result is wrong; if it is still unreachable at execution time,
 the run fails with a clear error.</p>
 <h2 id="write_table">@write_table<a class="headerlink" href="#write_table" title="Permanent link">&para;</a></h2>
 <p>Write one of the cell's variables into an Iceberg table when the run succeeds:
