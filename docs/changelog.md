@@ -180,6 +180,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **The browser tab shows Strata's diamond.** The app never linked a tab icon, and the
+  file it shipped was the Vite template's logo. (#PRNUM)
 - **A markdown cell no longer reads as a cache hit.** Run All gave markdown cells a
   `cached` badge and counted them in the profiler's hits and rows, so a first run said
   `4 cached`. Nothing runs for one, so it now has no badge and is not counted. (#1402)

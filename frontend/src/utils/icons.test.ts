@@ -64,3 +64,14 @@ test('a button with only an icon has a name', () => {
   }
   assert.deepEqual(found, [])
 })
+
+test('the tab icon is linked, and is the same diamond as the logo', () => {
+  const frontend = new URL('../../', import.meta.url).pathname
+  assert.match(readFileSync(join(frontend, 'index.html'), 'utf8'), /rel="icon"[^>]*\/favicon\.svg/)
+  const diamond = readFileSync(
+    join(frontend, 'node_modules/@lucide/vue/dist/esm/icons/diamond.mjs'),
+    'utf8',
+  ).match(/d: "([^"]+)"/)?.[1]
+  assert.ok(diamond)
+  assert.ok(readFileSync(join(frontend, 'public/favicon.svg'), 'utf8').includes(diamond))
+})
