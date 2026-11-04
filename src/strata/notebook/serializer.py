@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import pickle
 import sys
@@ -590,9 +591,7 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> Serial
     view = _display_table(table)
     preview = []
     for i in range(min(20, view.num_rows)):
-        preview.append(
-            [to_serialization_safe(col[i].as_py(), keep_none=True) for col in view.columns]
-        )
+        preview.append([table_cell(col[i].as_py()) for col in view.columns])
     return {
         "content_type": ContentType.ARROW_IPC,
         "file": filename,
@@ -967,6 +966,21 @@ def to_serialization_safe(value: Any, *, keep_none: bool = False) -> Any:
     return str(value)
 
 
+def _named_non_finite(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return "NaN" if math.isnan(value) else "inf" if value > 0 else "-inf"
+    if isinstance(value, list):
+        return [_named_non_finite(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _named_non_finite(v) for k, v in value.items()}
+    return value
+
+
+def table_cell(value: Any) -> Any:
+    """A table value for the viewer. JSON has no NaN or infinity and would send ``null``."""
+    return _named_non_finite(to_serialization_safe(value, keep_none=True))
+
+
 def _is_png_display_value(value: Any) -> bool:
     repr_png = getattr(value, "_repr_png_", None)
     if callable(repr_png):
@@ -1142,7 +1156,7 @@ def _serialize_dataframe_json(
             [to_serialization_safe(v, keep_none=True) for v in row]
             for row in frame.itertuples(index=False, name=None)
         ]
-        preview = rows[:20]
+        preview = [[_named_non_finite(v) for v in row] for row in rows[:20]]
         payload.update(
             {
                 "kind": "series" if is_series else "dataframe",
@@ -1492,10 +1506,7 @@ def read_table_page(
     page = table.slice(max(0, offset), max(0, limit))
     columns = list(page.column_names)
     pydict = page.to_pydict()
-    rows = [
-        [to_serialization_safe(pydict[col][i], keep_none=True) for col in columns]
-        for i in range(page.num_rows)
-    ]
+    rows = [[table_cell(pydict[col][i]) for col in columns] for i in range(page.num_rows)]
     return {"columns": columns, "rows": rows, "total": total}
 
 
@@ -1535,8 +1546,8 @@ def read_table_summary(blob: bytes) -> dict[str, Any] | None:
             or pa.types.is_decimal(ftype)
         )
         if orderable and column.null_count < len(column):
-            info["min"] = to_serialization_safe(pc.min(column).as_py())
-            info["max"] = to_serialization_safe(pc.max(column).as_py())
+            info["min"] = table_cell(pc.min(column).as_py())
+            info["max"] = table_cell(pc.max(column).as_py())
         columns.append(info)
 
     return {"columns": columns, "total": table.num_rows}
