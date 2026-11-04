@@ -15,7 +15,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   tutorial` lists them and `strata tutorial caching` opens a copy under a fresh name and
   prints its URL, starting a server if none is running. The home page gains **Open a
   sample** and lists the notebooks in the storage directory as well as browser recents.
-  (#1402, #PRNUM)
+  (#1402, #1407)
 - **`@write_table ... sync` keeps a table equal to what a cell produces.**
   `# @write_table <var> <table> sync on=<col>,...` upserts on the key columns
   and deletes the rows whose key the variable no longer holds. The table ends up
