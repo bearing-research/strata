@@ -11,8 +11,8 @@ the web UI (or let an AI agent drive it), and follow along in a terminal - a
 second pane, an SSH session, or a tmux window beside your editor.
 
 This is the **terminal** quickstart. Something else has to be driving the
-notebook - either you in the [web UI](https://bearingresearch.com/strata/dev/dev/getting-started/notebook/), or a
-[coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/).
+notebook - either you in the [web UI](https://bearingresearch.com/strata/dev/getting-started/notebook/), or a
+[coding agent](https://bearingresearch.com/strata/dev/notebook/agent/).
 
 ## Install
 
@@ -81,7 +81,7 @@ strata watch                   # auto-attach the only session, or show a picker
 `--server URL` names the server, as for `strata-notebook-tui` (default
 `$STRATA_TUI_SERVER` or `http://localhost:8765`).
 
-`strata watch` is watch-only: unlike [`strata agent`](https://bearingresearch.com/strata/dev/dev/notebook/agent/), it writes no
+`strata watch` is watch-only: unlike [`strata agent`](https://bearingresearch.com/strata/dev/notebook/agent/), it writes no
 `.mcp.json` / `CLAUDE.md` and never owns the server lifecycle - it just shows a
 notebook live. Point it at a scratchpad an agent is driving to see the cells land
 in real time.
@@ -94,27 +94,27 @@ somewhere else.
 ### A coding agent in another terminal
 
 A coding agent - Claude Code, or anything that can run a command - drives the
-notebook through the [CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/) while you watch it happen:
+notebook through the [CLI](https://bearingresearch.com/strata/dev/notebook/cli/) while you watch it happen:
 
 1. `strata-notebook` in one terminal, and open the notebook.
 2. `strata-notebook-tui` in a second, pointed at it.
 3. In a third, let the agent work, giving it `--server`/`--session` rather than
-   the notebook path (this is what the [scratchpad skill](https://bearingresearch.com/strata/dev/dev/notebook/scratchpad/) tells it to
+   the notebook path (this is what the [scratchpad skill](https://bearingresearch.com/strata/dev/notebook/scratchpad/) tells it to
    do).
 
 ![The terminal viewer over five moments: an empty notebook, a cell arriving,
 that cell finishing in 1.0s with its output, a second cell arriving that reads
-the first one's variable, and both cells green.](https://bearingresearch.com/strata/dev/dev/assets/tui-agent-live.gif)
+the first one's variable, and both cells green.](https://bearingresearch.com/strata/dev/assets/tui-agent-live.gif)
 
 Cells appear, flip to running, and report their output as the agent works -
 nothing to refresh, and no need to share the agent's terminal. The selector is
 what makes it live: given a notebook path the same commands edit files on disk
 and the viewer sees nothing, which is [the distinction the CLI page
-draws](https://bearingresearch.com/strata/dev/dev/notebook/cli/#working-against-a-live-session-server-session).
+draws](https://bearingresearch.com/strata/dev/notebook/cli/#working-against-a-live-session-server-session).
 
 ### The Agent tab
 
-An agent driving the notebook over [MCP](https://bearingresearch.com/strata/dev/dev/notebook/mcp/) narrates its tool actions
+An agent driving the notebook over [MCP](https://bearingresearch.com/strata/dev/notebook/mcp/) narrates its tool actions
 ("ran cell abc → ok", "added dependency polars") and any note it posts with the
 `note` tool into the **Agent** tab, so you can follow why it is doing something
 as well as what it changed.
@@ -123,7 +123,7 @@ as well as what it changed.
 
 ![The terminal viewer: a cell list on the left with status glyphs and last-run
 times including a cached entry, and on the right the selected cell's source above
-its output rendered as a table.](https://bearingresearch.com/strata/dev/dev/assets/tui-layout.svg)
+its output rendered as a table.](https://bearingresearch.com/strata/dev/assets/tui-layout.svg)
 
 The left pane lists the cells (status glyph, name, and last-run time); the right
 pane is split into two tab-groups for the selected cell - the **code** on top
@@ -131,7 +131,7 @@ pane is split into two tab-groups for the selected cell - the **code** on top
 Results). A header line shows the connection state, follow mode, and any
 cascade / environment / agent activity.
 
-When the driver runs a cell's [unit tests](https://bearingresearch.com/strata/dev/dev/notebook/testing/), the result shows as a
+When the driver runs a cell's [unit tests](https://bearingresearch.com/strata/dev/notebook/testing/), the result shows as a
 badge on that cell in the list - `✓ 4/4` (green), `✗ 2/4` on failure, `·stale`
 when the cell changed since the run - and the header notes the test run. The
 top **Tests** tab (`3`) shows the test *source*; the bottom **Results** tab (`7`)
@@ -186,17 +186,17 @@ computes.
 
 ![The viewer through a re-run: the plot cell is edited and goes stale, then runs
 while the load and summarize cells above it both read cached, and finishes -
-the two-second load never executes again.](https://bearingresearch.com/strata/dev/dev/assets/tui-cache-payoff.gif)
+the two-second load never executes again.](https://bearingresearch.com/strata/dev/assets/tui-cache-payoff.gif)
 
 `load` sleeps two seconds on purpose in the
-[quickstart](https://bearingresearch.com/strata/dev/dev/getting-started/notebook/); that is what makes the point
+[quickstart](https://bearingresearch.com/strata/dev/getting-started/notebook/); that is what makes the point
 legible. It is the step you would notice re-running, and it does not.
 
 ## When the server closes the session
 
 The server closes a session nobody has used for a while, when too many are
 open, when memory runs low, or when someone closes or deletes the notebook (see
-[Session lifetime](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/#session-lifetime-and-session_closed)).
+[Session lifetime](https://bearingresearch.com/strata/dev/reference/notebook-protocol/#session-lifetime-and-session_closed)).
 The viewer then stops reconnecting, shows why in a notification, and keeps
 `session closed (<reason>)` in its header. Unless the notebook was deleted, its
 results stay on disk.
@@ -227,5 +227,5 @@ strata-notebook-tui [--session ID | --notebook PATH] [--server URL]
 
 No auth flags are needed: a personal server has one user. Point at a
 non-default server with `--server` (or the `STRATA_TUI_SERVER` environment
-variable). See [Privacy & Sharing](https://bearingresearch.com/strata/dev/dev/deployment/privacy/) for who can reach
+variable). See [Privacy & Sharing](https://bearingresearch.com/strata/dev/deployment/privacy/) for who can reach
 a notebook.

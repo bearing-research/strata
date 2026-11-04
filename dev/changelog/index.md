@@ -40,7 +40,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   app's blue, diamond and JetBrains Mono. Installation now comes first under "Start here".
   Each page is published as Markdown beside its HTML, with a **Copy page as Markdown**
   button, and `llms.txt` and `llms-full.txt` are built with the docs. Links now use
-  `bearingresearch.com/strata`. (#1408)
+  `bearingresearch.com/strata`. (#1408, #1409)
 - **README, repo metadata and `CONTRIBUTING.md`.** The README leads with coding agents and
   drops the long feature list, which stays in the docs. Package URLs use
   `bearingresearch.com/strata/`, and there is now a `CONTRIBUTING.md`. (#1403)
@@ -1540,7 +1540,7 @@ from outside the frontend.
   metadata database and copy the blob bucket. Keep the notebook storage
   directory (without `.venv`) and the artifact directory's
   `notebook_workers.json` too.
-  [Operations](https://bearingresearch.com/strata/dev/dev/deployment/lifecycle/#backing-up-a-server) has the
+  [Operations](https://bearingresearch.com/strata/dev/deployment/lifecycle/#backing-up-a-server) has the
   steps. The `strata artifact` commands that only read (`list`, `show`,
   `lineage`, `verify`, `audit`, `pending`, `archive`) never migrate a store: on
   one an older release wrote they refuse and say to start this release's
@@ -1567,7 +1567,7 @@ from outside the frontend.
 - Behind a trusted proxy, check that the proxy sets `X-Strata-Principal`, the
   tenant header, `X-Strata-Scopes` and `X-Strata-Proxy-Token` on every request,
   with an empty value when the user has none: a header the proxy leaves alone
-  reaches Strata from the client. [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#the-trusted-proxy-contract)
+  reaches Strata from the client. [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-trusted-proxy-contract)
   has an nginx block that does.
 - Personal mode refuses a request whose `Host` is not loopback, an IP
   address, the bind host or a name in the new `STRATA_ALLOWED_HOSTS`: a server
@@ -3384,7 +3384,7 @@ names.
   reproduced. Publishing is explicit, per artifact version, and lists the whole
   chain it will expose before you send the link; `strata artifact unpublish`
   withdraws it, and the token is never reissued for other content. See
-  [Publishing an artifact](https://bearingresearch.com/strata/dev/dev/notebook/publishing/).
+  [Publishing an artifact](https://bearingresearch.com/strata/dev/notebook/publishing/).
 - **Publishing copies the artifact into the store that serves it.** A notebook
   writes to its own `.strata/artifacts` while the server serves
   `~/.strata/artifacts`, so a published link could 404 unless the two happened
@@ -3405,7 +3405,7 @@ names.
   re-entrantly, the build store sits on the same dialect seam, and API keys
   authenticate callers that do not arrive through a trusted proxy. A stream
   request that lands on the wrong node is redirected to the one holding it. See
-  [Service mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/).
+  [Service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/).
 - **Migrate an existing store onto Postgres.** `strata migrate` copies an
   established SQLite store across, per-row and idempotently, so an interrupted
   run can simply be run again. It reports the rows Postgres refuses (a store
@@ -3419,7 +3419,7 @@ names.
   than handed on. Docker and RunPod backends ship; the fleet has a global cap,
   not just a per-tenant one. Optional HTTP service via
   `pip install "strata-pool[server]"`. See
-  [Distributed workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/).
+  [Distributed workers](https://bearingresearch.com/strata/dev/notebook/workers/).
 - **`strata-worker` is now a worker-pool worker.** The pool dispatches to
   `POST /execute`, which the worker did not serve, so a pool had no image to
   drive, and the one the docs named did not exist. The worker now answers that
@@ -3427,7 +3427,7 @@ names.
   cannot validate differently), and `worker.Dockerfile` builds the image
   the pool's examples reference. The payload is a build manifest: the worker
   fetches its own inputs and uploads its own result, so job bytes never flow
-  through the pool. See [Worker pool](https://bearingresearch.com/strata/dev/dev/notebook/worker-pool/).
+  through the pool. See [Worker pool](https://bearingresearch.com/strata/dev/notebook/worker-pool/).
 - **The team cache: a cell served by a colleague's run.** With
   `STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true`, a local cache miss asks the shared
   store whether anyone has already run this exact computation, and a cell that
@@ -3436,7 +3436,7 @@ names.
   actually saved, and lineage now says who computed each step, on which machine,
   and in which environment: the questions you ask first when a result came from
   somewhere else. See
-  [Service mode → the team cache](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named).
+  [Service mode → the team cache](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named).
 - **Artifacts are addressable by provenance hash**, which is what makes the
   lookup above a single request rather than a scan.
 - **Unknown libraries are stored as Arrow, not pickle.** A value from a library
@@ -3447,7 +3447,7 @@ names.
 - **Typed WebSocket payloads, with TypeScript generated from them.** Fifteen
   frames now have a payload model, and `frontend/src/types/ws-payloads.generated.ts`
   is generated from those models, so a second client narrows `payload` instead of
-  casting. See [Notebook protocol](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/).
+  casting. See [Notebook protocol](https://bearingresearch.com/strata/dev/reference/notebook-protocol/).
 - **An empty notebook says what to do next** instead of presenting a blank cell.
 
 ### Security
@@ -3564,7 +3564,7 @@ values. No breaking changes.
   --worker-ssh user@host` wires it up front. Key-based SSH only; the worker binds
   remote-localhost and is reachable only through the tunnel, and its generated
   token never touches `notebook.toml`. See
-  [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/).
+  [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/).
 - **Register a worker without hand-editing `notebook.toml`.** New
   `strata worker add|ls|rm|default` CLI writes notebook-scoped `[[workers]]`
   definitions (e.g. a remote executor's `/v1/execute` endpoint), and matching
@@ -3583,21 +3583,21 @@ values. No breaking changes.
   `strata cell show <dir> --var NAME` (and the `get_variable` MCP tool) return the
   cell that defines a variable (its source, status, and outputs), or, if it's not
   defined, the list of variables that are. Lets an agent reference a value it
-  already computed instead of recomputing it. See [Notebook CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/#inspecting-a-notebook-cell-dag-status).
+  already computed instead of recomputing it. See [Notebook CLI](https://bearingresearch.com/strata/dev/notebook/cli/#inspecting-a-notebook-cell-dag-status).
 - **`strata new --project-mount`: read project files from a scratchpad without
   absolute paths.** Adds a pinned, read-only notebook-level mount of the project
   directory as a `project` Path variable, so a scratchpad living in a
   subdirectory reads project files as `open(project / "file")` even though a cell
   runs in the notebook dir. Pinned → no directory hashing and no staleness churn.
   The `strata-scratchpad` skill now uses it, removing the absolute-path papercut
-  the un-primed measurement surfaced. See [Notebook CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/#strata-new).
+  the un-primed measurement surfaced. See [Notebook CLI](https://bearingresearch.com/strata/dev/notebook/cli/#strata-new).
 - **`strata-scratchpad` Claude Code plugin.** The repo now ships a plugin
   (marketplace `strata`, plugin `plugins/strata-scratchpad/`) bundling the
   scratchpad skill plus a `/strata-scratchpad:scratch` command. Install with
   `/plugin marketplace add bearing-research/strata` then `/plugin install
   strata-scratchpad@strata`, the most reliable way to give any Claude Code
   session the scratchpad behavior. See
-  [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/).
+  [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/).
 - **`strata-scratchpad` agent skill + sharpened working agreement.** The
   `strata-notebook` package now ships a `strata-scratchpad` skill (under
   `<site-packages>/strata/.agents/skills/`) that a coding agent discovers in any
@@ -3606,7 +3606,7 @@ values. No breaking changes.
   rewritten to lead with a decision rule, the one-call `run_snippet`, and the
   consumed-output caching + edit-and-rerun patterns (including a note that a cell
   runs in the notebook dir, so project files need absolute paths). See
-  [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/).
+  [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/).
 - **One-call add-and-run + `strata watch` - lower-friction agent scratchpad.**
   `strata cell add` gains `-c 'src'` (inline source) and `--run` (execute right
   after adding, folding the run outcome into the JSON), and the notebook MCP
@@ -3614,8 +3614,8 @@ values. No breaking changes.
   so an exploratory computation costs one call, the same as `python -c`. New
   `strata watch [dir|--session]` attaches the read-only TUI to a live session
   without writing any config (unlike `strata agent`), so a human can watch an
-  agent's scratchpad at any moment. See [Notebook CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/) and
-  [Terminal Viewer](https://bearingresearch.com/strata/dev/dev/notebook/tui/).
+  agent's scratchpad at any moment. See [Notebook CLI](https://bearingresearch.com/strata/dev/notebook/cli/) and
+  [Terminal Viewer](https://bearingresearch.com/strata/dev/notebook/tui/).
 - **Runtime-hydrated module export - share a cell's `def`/`class` even when it
   closes over a runtime value.** Previously a cell that defined a reusable
   function referencing a runtime global (an upstream artifact, or a value
@@ -3634,8 +3634,8 @@ values. No breaking changes.
   Cells that must always run - a side effect, a live API call, a fresh random
   draw - opt out with `# @nocache` (`# @nocache off` re-enables); the gate
   applies to every language. See
-  [Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#nocache) and
-  [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/).
+  [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/#nocache) and
+  [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/).
 
 - **`strata agent <notebook-dir>` - one command to drive a notebook with a
   coding agent.** The MCP server, the CLI ops, and the terminal viewer already
@@ -3647,7 +3647,7 @@ values. No breaking changes.
   notebook directory, and attaches the read-only TUI. Then you run `claude` in
   that directory in another pane: it auto-connects, reads the agreement, and
   drives cells that light up **live** in the TUI. Needs the `[mcp]` and `[tui]`
-  extras. See [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/).
+  extras. See [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/).
 - **`agent_demo` example - a coding agent's notebook, and the recipe to record
   it.** A small, runnable notebook (`examples/agent_demo/`) that trains a model
   once and reuses it from cache when only the evaluation changes - the
@@ -3715,7 +3715,7 @@ Artifacts** operator pages. No breaking changes.
   (`Content-Security-Policy: frame-ancestors 'self'`) until you list host origins
   in `embed_frame_ancestors` (env `STRATA_EMBED_FRAME_ANCESTORS`), which also
   closes the prior gap where no framing header was sent at all. See
-  [Cell Types → Embedding the app view](https://bearingresearch.com/strata/dev/dev/notebook/cells/).
+  [Cell Types → Embedding the app view](https://bearingresearch.com/strata/dev/notebook/cells/).
 - **Interactive widget cells.** A new `widget` cell kind is a declarative
   control panel - one control per line (`alpha = slider(0, 1, default=0.5)`,
   plus `number` / `dropdown` / `checkbox` / `text`). Each control defines a
@@ -3723,7 +3723,7 @@ Artifacts** operator pages. No breaking changes.
   (run them, or flip the widget's **⚡ Live** toggle to auto-run the cheap
   downstream cells as you drag). Values are content-addressed, so
   returning a slider to a prior value is a cache hit. Add one from the **+**
-  menu; see [Widget Cells](https://bearingresearch.com/strata/dev/dev/notebook/cells/) and the
+  menu; see [Widget Cells](https://bearingresearch.com/strata/dev/notebook/cells/) and the
   `examples/widget_playground` notebook. (#420–#423) Omit a slider's `step=`
   and a readable increment is derived from its range (`slider(0, 100)` → `1`,
   `slider(0, 1)` → `0.01`); an explicit `step=` always wins. (#431)
@@ -3754,7 +3754,7 @@ Artifacts** operator pages. No breaking changes.
   back to a `{variant: value}` dict. Bare `# @per_variant` infers the group when
   the cell reads exactly one sweep group; name it (`# @per_variant model`) to
   choose among several. The web UI and terminal viewer show per-variant progress
-  chips as the instances run. See [Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/)
+  chips as the instances run. See [Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/)
   and the `examples/model_variants_sweep` notebook. (#407, #408, #412, #413, #415)
 - **Logs and Artifacts pages in the web UI.** Two operator views: **Logs**
   (`/logs`) renders the server-log stream with filters and a live SSE tail
@@ -3769,7 +3769,7 @@ Artifacts** operator pages. No breaking changes.
   images baked in as `data:` URLs. It's the static counterpart to embedding the
   live app view: portable to anywhere the server can't reach (email a report,
   archive a run). `# @app hide` and prompt-response privacy are honored, matching
-  the live app view. See [Export](https://bearingresearch.com/strata/dev/dev/notebook/export/#app-view-snapshot-app-view).
+  the live app view. See [Export](https://bearingresearch.com/strata/dev/notebook/export/#app-view-snapshot-app-view).
 
 ### Fixed
 
@@ -3836,7 +3836,7 @@ fixes, and CI hardening. No breaking changes.
   without manual refresh. Ships behind the `[tui]` extra
   (`uv tool install "strata-notebook[tui]"`); it never edits or runs cells -
   purely for watching, e.g. an agent build a notebook in one terminal while you
-  watch in another. See [Terminal Viewer](https://bearingresearch.com/strata/dev/dev/notebook/tui/).
+  watch in another. See [Terminal Viewer](https://bearingresearch.com/strata/dev/notebook/tui/).
 
 - **A full notebook CLI for agents (`strata cell`, `dag`, `status`, `dep`).**
   The `strata` command grew an agent-facing surface over one shared
@@ -3848,8 +3848,8 @@ fixes, and CI hardening. No breaking changes.
   error), so an agent can drive a notebook as a first-class tool. Every command
   runs **either offline against a notebook directory or against a live session
   on a running server** via `--server/--session` (the same session a human
-  watches in the TUI). See [Notebook CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/) and [Authoring
-  Programmatically](https://bearingresearch.com/strata/dev/dev/notebook/agent-authoring/).
+  watches in the TUI). See [Notebook CLI](https://bearingresearch.com/strata/dev/notebook/cli/) and [Authoring
+  Programmatically](https://bearingresearch.com/strata/dev/notebook/agent-authoring/).
 
 - **Per-cell unit tests in the notebook.** Every Python code cell gets a
   **Tests** panel (the `🧪` toggle next to Inspect, which doubles as a health

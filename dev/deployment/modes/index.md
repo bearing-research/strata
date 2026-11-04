@@ -29,13 +29,13 @@ shared?). The flags that follow are the consequences.
   nothing to configure, writes land in your home directory. This is
   the default for Docker Compose and the "from source" instructions.
   A personal server you reach over the network is still one person's;
-  see [Fly.io deployment](https://bearingresearch.com/strata/dev/dev/deployment/fly/) for a recipe that hosts one.
+  see [Fly.io deployment](https://bearingresearch.com/strata/dev/deployment/fly/) for a recipe that hosts one.
 - **Service**: one server for more than one person, users you can't
   fully trust, sensitive data, or multi-tenant isolation requirements.
   Reads are tenant-scoped and ACL-gated; writes are off by default
   (routed through server-side transforms), or authenticated clients
   can publish directly to a shared store with `service_writes_enabled`.
-  See [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/).
+  See [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/).
 
 ## Setting the mode
 
@@ -116,7 +116,7 @@ machine callers of a proxied server go through the proxy too. API keys
 (`STRATA_AUTH_MODE=api_key`) are a separate auth mode, for a server no
 proxy fronts; a trusted-proxy server ignores them.
 
-See [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) for the full story:
+See [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) for the full story:
 
 - The trusted-proxy header contract.
 - The shipped demo stack (`docker-compose.service.yml` + nginx
@@ -133,9 +133,9 @@ shapes:
 - **A personal server per member.** Each member runs their own (a laptop,
   or one container each behind your proxy) and shares results through a
   service-mode store; see
-  [Connecting a notebook to the shared store](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#connecting-a-notebook-to-the-shared-store).
+  [Connecting a notebook to the shared store](https://bearingresearch.com/strata/dev/deployment/service-mode/#connecting-a-notebook-to-the-shared-store).
 - **One shared server in service mode**, where every request carries the
-  caller's identity and scopes. See [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/).
+  caller's identity and scopes. See [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/).
 
 ## Coherence enforcement
 
@@ -189,7 +189,7 @@ STRATA_PUBLIC_BASE_URL=https://app.example.com   # origin only; the path comes f
 
 The proxy may strip the prefix before forwarding or pass it through; both
 reach the same routes. The notebook UI, its WebSocket, the API docs, signed
-build URLs and every link on a [publication](https://bearingresearch.com/strata/dev/dev/notebook/publishing/) page
+build URLs and every link on a [publication](https://bearingresearch.com/strata/dev/notebook/publishing/) page
 carry the prefix. Open the UI with the trailing slash
 (`https://app.example.com/o/acme/lab/`), since its assets load relative to
 the page. The prefix's first segment must not be one of Strata's own

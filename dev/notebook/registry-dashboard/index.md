@@ -3,7 +3,7 @@
 The registry dashboard is the **UI for promoting models and approving changes**
 right inside the notebook - so promotion doesn't have to be code. It surfaces
 the same names / aliases / tags / audit / lineage that the
-[SDK and CLI](https://bearingresearch.com/strata/dev/dev/core/registry/) drive, backed by the identical audited routes.
+[SDK and CLI](https://bearingresearch.com/strata/dev/core/registry/) drive, backed by the identical audited routes.
 
 !!! note "It describes the store your cells write to"
     The dashboard is available in both deployment modes. With
@@ -18,10 +18,10 @@ the same names / aliases / tags / audit / lineage that the
     The forwarding happens on the server, not in the page, because the
     credentials do: `notebook_remote_store_headers` is the trusted-proxy
     identity the server holds. See
-    [Service Mode → shared research store](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
+    [Service Mode → shared research store](https://bearingresearch.com/strata/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
 
 This page is a step-by-step walkthrough. For the concepts (what a name, alias,
-tag, or approval gate *is*), see [Artifacts & Model Registry](https://bearingresearch.com/strata/dev/dev/core/registry/).
+tag, or approval gate *is*), see [Artifacts & Model Registry](https://bearingresearch.com/strata/dev/core/registry/).
 
 ## What you'll build
 
@@ -43,7 +43,7 @@ Open **http://localhost:8765** and open (or create) a notebook.
 ## 2. Publish a model from a cell
 
 The dashboard surfaces what your **cells publish** to the registry. Inside any
-Python cell, use the [ambient `strata` client](https://bearingresearch.com/strata/dev/dev/notebook/cells/#the-ambient-strata-client).
+Python cell, use the [ambient `strata` client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client).
 It's already in the namespace, no import or setup:
 
 ```python
@@ -87,10 +87,10 @@ shows on the strip like one the cell published itself.
 
 ![A published cell with the promote strip along its bottom edge: the
 taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
-button.](https://bearingresearch.com/strata/dev/dev/assets/registry-promote-strip-light.png#only-light)
+button.](https://bearingresearch.com/strata/dev/assets/registry-promote-strip-light.png#only-light)
 ![A published cell with the promote strip along its bottom edge: the
 taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
-button.](https://bearingresearch.com/strata/dev/dev/assets/registry-promote-strip-dark.png#only-dark)
+button.](https://bearingresearch.com/strata/dev/assets/registry-promote-strip-dark.png#only-dark)
 
 ## 4. Promote to champion
 
@@ -121,7 +121,7 @@ top to bottom:
    first, with who and from → to.
 
 **Read by** lists the cells that read a name with
-[`# @dataset`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#dataset), each from a result it stored. Cells of
+[`# @dataset`](https://bearingresearch.com/strata/dev/notebook/annotations/#dataset), each from a result it stored. Cells of
 the open notebook show by name as soon as they have run. A cell in another
 notebook shows as `<notebook id>/<cell id>` once one of its results reaches
 the store the tab describes, by promotion or publication; a result that stays
@@ -129,10 +129,10 @@ in its own notebook is not visible from anywhere else.
 
 ![The Registry tab in the bottom drawer: a names table with the champion alias
 chip, an rmse tag and a Promote menu, above an expanded audit timeline of every
-name, alias and tag change.](https://bearingresearch.com/strata/dev/dev/assets/registry-tab-light.png#only-light)
+name, alias and tag change.](https://bearingresearch.com/strata/dev/assets/registry-tab-light.png#only-light)
 ![The Registry tab in the bottom drawer: a names table with the champion alias
 chip, an rmse tag and a Promote menu, above an expanded audit timeline of every
-name, alias and tag change.](https://bearingresearch.com/strata/dev/dev/assets/registry-tab-dark.png#only-dark)
+name, alias and tag change.](https://bearingresearch.com/strata/dev/assets/registry-tab-dark.png#only-dark)
 
 (No pending-approval banner here - nothing is queued. Step 6 covers what it
 looks like when a protected alias holds a move back.)
@@ -165,10 +165,10 @@ view. It answers "which snapshot trained this model?" in one click.
 
 ![The lineage view for taxi/tip-model: the training transform above the feature
 set, the scan below it, and the Iceberg table at the
-root.](https://bearingresearch.com/strata/dev/dev/assets/registry-lineage-light.png#only-light)
+root.](https://bearingresearch.com/strata/dev/assets/registry-lineage-light.png#only-light)
 ![The lineage view for taxi/tip-model: the training transform above the feature
 set, the scan below it, and the Iceberg table at the
-root.](https://bearingresearch.com/strata/dev/dev/assets/registry-lineage-dark.png#only-dark)
+root.](https://bearingresearch.com/strata/dev/assets/registry-lineage-dark.png#only-dark)
 
 ---
 
@@ -185,9 +185,9 @@ root.](https://bearingresearch.com/strata/dev/dev/assets/registry-lineage-dark.p
 
 ## See also
 
-- [Artifacts & Model Registry](https://bearingresearch.com/strata/dev/dev/core/registry/) - the concepts and the
+- [Artifacts & Model Registry](https://bearingresearch.com/strata/dev/core/registry/) - the concepts and the
   SDK/CLI that drive the same registry.
-- [The ambient `strata` client](https://bearingresearch.com/strata/dev/dev/notebook/cells/#the-ambient-strata-client) - how cells
+- [The ambient `strata` client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client) - how cells
   publish.
-- [Lake-Aware Cells](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/) - the `@table` flow that makes a
+- [Lake-Aware Cells](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/) - the `@table` flow that makes a
   training cell stale so you *re-promote* when new data lands.

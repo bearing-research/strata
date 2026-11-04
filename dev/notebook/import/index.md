@@ -53,7 +53,7 @@ statement of an indented block leaves a `pass` behind.
 - **Non-Python `%%` cell magics** (`%%R`, `%%ruby`, `%%javascript`,
   `%%html`, `%%latex`, `%%svg`, `%%markdown`). Dropped.
 - **`%%sql`.** Dropped - convert by hand to a Strata
-  [SQL cell](https://bearingresearch.com/strata/dev/dev/notebook/cells/#sql-cells) if you want it back.
+  [SQL cell](https://bearingresearch.com/strata/dev/notebook/cells/#sql-cells) if you want it back.
 - **REPL-inspection magics** (`%who`, `%whos`, `%lsmagic`, `%history`,
   `%alias`, etc.). Dropped; no Strata equivalent.
 
@@ -138,7 +138,7 @@ clean `400` or `409` with `detail` set. An upload over the cap is a
 | Raw             | Skipped; counted in the report                               |
 
 A notebook whose kernel language is R (IRkernel) imports its code
-cells as [R cells](https://bearingresearch.com/strata/dev/dev/notebook/cells/) as written: no magic, shell or `;`
+cells as [R cells](https://bearingresearch.com/strata/dev/notebook/cells/) as written: no magic, shell or `;`
 translation and no dependency capture. Install the packages it loads
 in system R or with renv.
 
@@ -239,7 +239,7 @@ importer doesn't call `uv add` itself, that's slow, networked, and
 partial-failure-prone. In personal mode that sync builds any dependency
 without a wheel, running its build code as you before any cell runs, so
 read what an untrusted notebook installs first (see
-[Environment Management](https://bearingresearch.com/strata/dev/dev/notebook/environment/#how-it-works)).
+[Environment Management](https://bearingresearch.com/strata/dev/notebook/environment/#how-it-works)).
 
 ## The import report
 

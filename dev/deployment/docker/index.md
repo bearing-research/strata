@@ -114,7 +114,7 @@ upstream) must change with it.
 The port is published on `127.0.0.1` only. The image runs personal mode,
 which has no authentication: anyone who can reach the port can run code as
 the container's `strata` user. To share a server with other people, run
-[service mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) with principal auth instead.
+[service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) with principal auth instead.
 
 To reach your own container from another machine you trust, publish the port
 on every interface (`"8765:8765"`, or `-p 8765:8765`), knowing that everyone
@@ -126,7 +126,7 @@ it expects, so a DNS-rebinding page cannot drive it.
   - STRATA_ALLOWED_HOSTS=devbox.lan
 ```
 
-See [Configuration Reference](https://bearingresearch.com/strata/dev/dev/reference/configuration/) for all options.
+See [Configuration Reference](https://bearingresearch.com/strata/dev/reference/configuration/) for all options.
 
 ## Prebuilt image
 
@@ -145,7 +145,7 @@ docker run --rm -p 127.0.0.1:8765:8765 \
 To extend it, start your own Dockerfile `FROM` it.
 
 The image runs as the non-root `strata` user, so a service-mode server in it
-refuses [`STRATA_NOTEBOOK_HARNESS_USER`](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#who-a-cell-is-strata_notebook_harness_user):
+refuses [`STRATA_NOTEBOOK_HARNESS_USER`](https://bearingresearch.com/strata/dev/deployment/service-mode/#who-a-cell-is-strata_notebook_harness_user):
 switching users needs root. To run cells as a harness user here, run the
 container as root (`--user root`, or `user: root` in Compose) and under an init
 (`docker run --init`, or `init: true`).

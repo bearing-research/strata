@@ -2,7 +2,7 @@
 
 This page covers the operational disk-and-state story: where notebook data lives, how big it gets, how to back it up, how to move it, and how to clean up.
 
-If you're configuring caps and tuning, see [Configuration](https://bearingresearch.com/strata/dev/dev/reference/configuration/). If you're shipping to production, see [Deployment Modes](https://bearingresearch.com/strata/dev/dev/deployment/modes/).
+If you're configuring caps and tuning, see [Configuration](https://bearingresearch.com/strata/dev/reference/configuration/). If you're shipping to production, see [Deployment Modes](https://bearingresearch.com/strata/dev/deployment/modes/).
 
 ## Where everything lives
 
@@ -22,7 +22,7 @@ up if you write tables that way.
 Read-only remote mounts are kept once per machine in the mount cache,
 `STRATA_NOTEBOOK_MOUNT_CACHE_DIR` (by default `mount_cache` beside the notebook
 storage directory, so `~/.strata/mount_cache/`). It is a cache, safe to delete
-while the server is stopped. See [Configuration](https://bearingresearch.com/strata/dev/dev/reference/configuration/#notebook).
+while the server is stopped. See [Configuration](https://bearingresearch.com/strata/dev/reference/configuration/#notebook).
 
 Inside each notebook directory:
 
@@ -123,7 +123,7 @@ uv sync       # rebuilds .venv from pyproject.toml + uv.lock
 
 The `uv.lock` ensures the rebuilt venv pins identical versions to the source machine.
 
-`strata export <dir> --to snapshot --include all --out <file>.zip` packs the committed files, runtime state, every artifact and the bytes each `@fetch` read into one zip, and `strata import <file>.zip` unpacks it on the other side. See [Snapshots](https://bearingresearch.com/strata/dev/dev/notebook/export/#snapshots).
+`strata export <dir> --to snapshot --include all --out <file>.zip` packs the committed files, runtime state, every artifact and the bytes each `@fetch` read into one zip, and `strata import <file>.zip` unpacks it on the other side. See [Snapshots](https://bearingresearch.com/strata/dev/notebook/export/#snapshots).
 
 **What doesn't transfer.** Mounted external storage (`s3://`, `gs://`) is referenced by URI, so cells that use mounts work on any machine with the right credentials. Mounts with `file://` URIs pointing at machine-local paths don't.
 
@@ -137,7 +137,7 @@ Three options, depending on the surface:
 | **REST** | `DELETE /v1/notebooks/{session_id}` for an open session, or `POST /v1/notebooks/delete-by-path` for a path-based delete. Both are personal mode only. | Same as the UI |
 | **Filesystem** | `rm -rf ~/.strata/notebooks/mynotebook` while the server isn't running | Same outcome, no graceful session close |
 
-Deleting a notebook also deletes its local store, `.strata/artifacts/`. Copies that already left it stay where they went: results you [published](https://bearingresearch.com/strata/dev/dev/notebook/publishing/) live in the server's store, and results promoted or offered to a [team store](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named) live there.
+Deleting a notebook also deletes its local store, `.strata/artifacts/`. Copies that already left it stay where they went: results you [published](https://bearingresearch.com/strata/dev/notebook/publishing/) live in the server's store, and results promoted or offered to a [team store](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named) live there.
 
 ## Cleaning up the Core artifact store
 
@@ -152,7 +152,7 @@ nothing needs, least recently used first:
 
 Service mode does this only when an operator sets
 `STRATA_ARTIFACT_GC_INTERVAL_SECONDS`. Every limit is a setting; see
-[Configuration](https://bearingresearch.com/strata/dev/dev/reference/configuration/#artifact-storage).
+[Configuration](https://bearingresearch.com/strata/dev/reference/configuration/#artifact-storage).
 
 A version is collected only when nothing holds it:
 
@@ -291,7 +291,7 @@ Practical guidance:
 - In personal mode the Core store is capped out of the box; lower `STRATA_ARTIFACT_GC_MAX_BYTES` if 20 GiB is too much for the disk. In service mode set `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` and a limit, or run `POST /v1/artifacts/gc` on a cron.
 - The Iceberg cache is self-managing under its byte cap - leave it.
 - If a single notebook's `.strata/artifacts/` gets uncomfortably large, the cleanest reset is to delete the notebook's `.strata/` directory while the server isn't running. Cell source survives; provenance cache resets.
-- For `.venv/` sprawl: `du -sh ~/.strata/notebooks/*/.venv` is the quickest audit. Old notebooks you don't open anymore can have their `.venv/` deleted - `uv sync` will recreate it next time. With `STRATA_NOTEBOOK_ENV_BACKEND=shared`, notebooks with the same lockfile share one environment instead; the server removes shared environments nothing links to after `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` (default 7), and `strata env gc` does it on demand. See [Shared environments](https://bearingresearch.com/strata/dev/dev/notebook/environment/#shared-environments).
+- For `.venv/` sprawl: `du -sh ~/.strata/notebooks/*/.venv` is the quickest audit. Old notebooks you don't open anymore can have their `.venv/` deleted - `uv sync` will recreate it next time. With `STRATA_NOTEBOOK_ENV_BACKEND=shared`, notebooks with the same lockfile share one environment instead; the server removes shared environments nothing links to after `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` (default 7), and `strata env gc` does it on demand. See [Shared environments](https://bearingresearch.com/strata/dev/notebook/environment/#shared-environments).
 - `GET /v1/artifacts/usage` reports the Core store's version counts and bytes. In service mode it reports the caller's tenant (`admin:*` can name one with `?tenant=`).
 
 ## Notebook storage location

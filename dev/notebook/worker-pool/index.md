@@ -14,7 +14,7 @@
     `strata-worker` binary either way.
 
     If what you want is hardware you keep running and point cells at, see
-    [Distributed Workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/#worker-pools-a-different-layer), which
+    [Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/#worker-pools-a-different-layer), which
     compares the two side by side.
 
 Worker pool for dispatching Strata jobs to ephemeral machines. This is the

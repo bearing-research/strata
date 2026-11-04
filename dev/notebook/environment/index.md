@@ -14,11 +14,11 @@ Opening a notebook runs the same `uv sync` (and restores `renv.lock`, when the n
 
 !!! warning "Opening someone else's notebook runs its build code"
 
-    In personal mode that `uv sync` builds any dependency that has no wheel, and the notebook itself when its `pyproject.toml` declares a `[build-system]`. A build runs the package's build backend as you, with your environment, before any cell runs. Before you open or import a notebook from someone you don't trust, read its `pyproject.toml` (or, for an `.ipynb`, the `%pip install` lines and imports that become its dependencies). Service mode installs wheels only (`UV_NO_BUILD=1`; see [Service mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#who-a-cell-is-strata_notebook_harness_user)).
+    In personal mode that `uv sync` builds any dependency that has no wheel, and the notebook itself when its `pyproject.toml` declares a `[build-system]`. A build runs the package's build backend as you, with your environment, before any cell runs. Before you open or import a notebook from someone you don't trust, read its `pyproject.toml` (or, for an `.ipynb`, the `%pip install` lines and imports that become its dependencies). Service mode installs wheels only (`UV_NO_BUILD=1`; see [Service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/#who-a-cell-is-strata_notebook_harness_user)).
 
-A hash of the lockfiles (`uv.lock`, plus `renv.lock` when the notebook has one) participates in provenance, so changing the environment invalidates all cached cell outputs. Only the lock's Python version (`requires-python`) and the runtime dependency closure of `uv.lock` are hashed (each package's version, source and artifact hashes), so moving the notebook to another Python version invalidates it, and adding a dev tool such as `pytest`, the first one included, leaves the cache alone. The notebook's own project entry (its name from `pyproject.toml`) is left out, so two notebooks with the same resolved dependencies get the same hash, and a [team cache](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named) serves one's results to the other.
+A hash of the lockfiles (`uv.lock`, plus `renv.lock` when the notebook has one) participates in provenance, so changing the environment invalidates all cached cell outputs. Only the lock's Python version (`requires-python`) and the runtime dependency closure of `uv.lock` are hashed (each package's version, source and artifact hashes), so moving the notebook to another Python version invalidates it, and adding a dev tool such as `pytest`, the first one included, leaves the cache alone. The notebook's own project entry (its name from `pyproject.toml`) is left out, so two notebooks with the same resolved dependencies get the same hash, and a [team cache](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named) serves one's results to the other.
 
-A cell sent to a [remote worker](https://bearingresearch.com/strata/dev/dev/notebook/workers/) runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.
+A cell sent to a [remote worker](https://bearingresearch.com/strata/dev/notebook/workers/) runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.
 
 ## Python Version
 
@@ -43,7 +43,7 @@ matplotlib
 
 The operation runs asynchronously, you can continue editing cells while it installs.
 
-On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. R packages are not added from the notebook there, nor on a personal-mode server with `STRATA_NOTEBOOK_HARNESS_USER` set: the server restores the notebook's committed `renv.lock` as the harness user when the notebook opens. See [Service mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/).
+On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. R packages are not added from the notebook there, nor on a personal-mode server with `STRATA_NOTEBOOK_HARNESS_USER` set: the server restores the notebook's committed `renv.lock` as the harness user when the notebook opens. See [Service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/).
 
 ### Import from requirements.txt
 

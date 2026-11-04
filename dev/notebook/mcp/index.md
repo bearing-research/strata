@@ -3,12 +3,12 @@
 Strata Notebook can expose a **running notebook session** to an external coding
 agent (Claude Code, and any other [Model Context
 Protocol](https://modelcontextprotocol.io) client) over an HTTP endpoint at
-`/mcp`. The agent gets the same operations the [`strata` CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/) drives -
+`/mcp`. The agent gets the same operations the [`strata` CLI](https://bearingresearch.com/strata/dev/notebook/cli/) drives -
 read, run, author, manage dependencies - but against a **warm session**: its
 populated artifact cache and current cell state, not an offline copy.
 
 Because the tools reuse Strata's broadcasting execution paths, the browser UI
-and the [terminal viewer](https://bearingresearch.com/strata/dev/dev/notebook/tui/) double as a **live view** of the agent at
+and the [terminal viewer](https://bearingresearch.com/strata/dev/notebook/tui/) double as a **live view** of the agent at
 work - cells flip status, outputs render, and new cells appear as the agent
 edits them.
 
@@ -65,7 +65,7 @@ An agent on another machine uses the server's name or address instead
 (`http://devbox.lan:8765/mcp`). `/mcp` answers to the same `Host` names as
 the rest of the server: `localhost`, any IP literal, `STRATA_HOST` and the
 names in `STRATA_ALLOWED_HOSTS` (see
-[Deployment modes](https://bearingresearch.com/strata/dev/dev/deployment/modes/#personal-mode)). Any other `Host`
+[Deployment modes](https://bearingresearch.com/strata/dev/deployment/modes/#personal-mode)). Any other `Host`
 is refused (in service mode, only once `STRATA_ALLOWED_HOSTS` is set). A request from a browser page must also be same-origin or come
 from an origin in `STRATA_CORS_ALLOW_ORIGINS`.
 
@@ -75,7 +75,7 @@ endpoint. With `mcp` 1 installed (another tool may pin it), `/mcp` stays off
 the same way and the server logs that the installed `mcp` is too old.
 
 !!! tip "One-command setup"
-    [`strata agent <notebook-dir>`](https://bearingresearch.com/strata/dev/dev/notebook/agent/) does the enable-open-register-watch
+    [`strata agent <notebook-dir>`](https://bearingresearch.com/strata/dev/notebook/agent/) does the enable-open-register-watch
     steps below for you: it starts the server with this endpoint on, opens a
     session, writes the `.mcp.json` an agent auto-connects to, and attaches the
     TUI. Reach for it unless you want to wire the pieces up by hand.
@@ -127,7 +127,7 @@ details stay in the server log.
 | `add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)` | Register a remote executor worker so cells can run on it. Refused where the server manages worker definitions (service mode, or `STRATA_NOTEBOOK_WORKERS_EDITABLE=false`), as are `remove_worker` and `connect_ssh_worker`. |
 | `set_default_worker(session_id, name?)` | Set the notebook's default worker (`name` omitted/`local` clears it). |
 | `remove_worker(session_id, name)` | Remove a notebook-scoped worker. |
-| `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Distributed Workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to)). |
+| `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to)). |
 | `disconnect_ssh_worker(session_id, name, stop_remote?)` | Close an SSH worker's tunnel and unregister it. |
 | `lineage(session_id, cell_id, variable, max_depth?)` | The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. For one instance of a `# @per_variant` cell, name it `variable@variant=<name>` (for example `score@variant=triple`); the error on a bare name lists the stored ones. `variable` may be `__mount__<name>`, what a run wrote through its `rw` mount `<name>`. |
 | `promote(session_id, cell_id, variable, name, alias?, tags?)` | Copy the output **and everything behind it** into the team's store, under a name colleagues can ask for. Mints no public link. A protected alias comes back `pending`. Needs `STRATA_NOTEBOOK_REMOTE_STORE_URL`. |
@@ -157,7 +157,7 @@ computes, and reading the source cannot tell you what it is computing.
 and current `value` (the default itself, for a control nobody has moved, since
 that is what the cell runs at), and `set_widget_value(session_id, cell_id,
 {"utilization": 0.9})` sets them and re-materializes the cell, marking
-everything downstream stale. On a [`# @live`](https://bearingresearch.com/strata/dev/dev/notebook/cells/#live-mode) widget it
+everything downstream stale. On a [`# @live`](https://bearingresearch.com/strata/dev/notebook/cells/#live-mode) widget it
 runs the same cost-gated cascade a drag does, so the cheap downstream cells
 come back computed rather than stale. Send only the controls you are changing.
 A notebook that is mid-run refuses the call and leaves the stored values alone,
@@ -168,7 +168,7 @@ upstreams first; `rerun` bypasses the target's cache but still refreshes
 upstreams; `force` ("run this only") runs against whatever upstream artifacts
 already exist.
 
-On a server that [asks before a large read](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#asking-before-a-large-read),
+On a server that [asks before a large read](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/#asking-before-a-large-read),
 pass `confirm_reads=true` so a run that would move more than the threshold
 returns, rather than starting:
 
@@ -185,7 +185,7 @@ with `approve_reads=true`; the yes is remembered for that cell, machine and
 inputs, so the same run does not ask again. Without either, the run goes ahead
 and the reads index records that it was not asked.
 
-`set_variant` drives [variant groups](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#variant-cells):
+`set_variant` drives [variant groups](https://bearingresearch.com/strata/dev/notebook/annotations/#variant-cells):
 `set_variant(session_id, "policy", active="service")` picks one variant,
 `set_variant(session_id, "policy", mode="sweep")` runs them all, and either
 argument can be sent alone. It makes the same two calls the UI's tab strip
@@ -203,15 +203,15 @@ actions are narrated automatically** into the terminal viewer's **Agent** tab -
 "ran cell abc → ok", "added python cell def", "added dependency polars" - as it
 works. It can also call the `note`
 tool to post an explicit line of narration ("about to refactor featurize into
-two cells"). Open the notebook in the [terminal viewer](https://bearingresearch.com/strata/dev/dev/notebook/tui/) and you can
+two cells"). Open the notebook in the [terminal viewer](https://bearingresearch.com/strata/dev/notebook/tui/) and you can
 follow along in real time; the browser UI does not show these notes.
 
 ## Relationship to the CLI
 
 The MCP tools and the `strata` CLI share one operation contract
-([`NotebookOps`](https://bearingresearch.com/strata/dev/dev/notebook/agent-authoring/)) and return the same curated views. The CLI
+([`NotebookOps`](https://bearingresearch.com/strata/dev/notebook/agent-authoring/)) and return the same curated views. The CLI
 is the right tool for **offline / headless** authoring (write files, `strata
 run`); the MCP server is for driving a **live, warm session** - rich outputs,
 partial re-runs against a populated cache, and edits a human watches in real
-time. See [Authoring Programmatically](https://bearingresearch.com/strata/dev/dev/notebook/agent-authoring/) for the file + CLI
+time. See [Authoring Programmatically](https://bearingresearch.com/strata/dev/notebook/agent-authoring/) for the file + CLI
 loop that needs no server at all.

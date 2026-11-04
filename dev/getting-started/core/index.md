@@ -121,7 +121,7 @@ print(df.head())
 
 A notebook's `# @output_dir` folder in the store is files, not rows:
 `client.download_folder(artifact_id, version, "out")` rebuilds them in a new
-directory ([output folders](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir)).
+directory ([output folders](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir)).
 
 ## 5. Integration with data libraries
 
@@ -157,11 +157,11 @@ directory ([output folders](https://bearingresearch.com/strata/dev/dev/notebook/
 - Same inputs + transform → existing artifact, no recomputation
 - Artifacts are immutable and versioned
 - Names are mutable pointers to specific artifact versions
-- An unnamed result is a cache entry: kept while it is used, and computed again if the store collected it. Name or pin a result to keep it ([retention](https://bearingresearch.com/strata/dev/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store))
+- An unnamed result is a cache entry: kept while it is used, and computed again if the store collected it. Name or pin a result to keep it ([retention](https://bearingresearch.com/strata/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store))
 - Provenance hash is derived from pinned inputs and transform identity
 
 ## What's next
 
-- [Configuration](https://bearingresearch.com/strata/dev/dev/reference/configuration/): all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)
-- [Deployment Modes](https://bearingresearch.com/strata/dev/dev/deployment/modes/): `personal` vs `service` mode and the auth boundary
-- [REST API](https://bearingresearch.com/strata/dev/dev/reference/rest-api/): the HTTP routes, including the `/v1/materialize` and `/v1/streams` endpoints this page calls into
+- [Configuration](https://bearingresearch.com/strata/dev/reference/configuration/): all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)
+- [Deployment Modes](https://bearingresearch.com/strata/dev/deployment/modes/): `personal` vs `service` mode and the auth boundary
+- [REST API](https://bearingresearch.com/strata/dev/reference/rest-api/): the HTTP routes, including the `/v1/materialize` and `/v1/streams` endpoints this page calls into

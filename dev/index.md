@@ -5,11 +5,11 @@
 ![The Strata notebook UI: two named Python cells, load and summarize, each with
 its source and an interactive table of results, the sidebar panels for mounts,
 workers and environment, and a bottom drawer showing the DAG of load, summarize
-and plot with per-cell timings.](https://bearingresearch.com/strata/dev/dev/assets/notebook-anatomy-light.png#only-light)
+and plot with per-cell timings.](https://bearingresearch.com/strata/dev/assets/notebook-anatomy-light.png#only-light)
 ![The Strata notebook UI: two named Python cells, load and summarize, each with
 its source and an interactive table of results, the sidebar panels for mounts,
 workers and environment, and a bottom drawer showing the DAG of load, summarize
-and plot with per-cell timings.](https://bearingresearch.com/strata/dev/dev/assets/notebook-anatomy-dark.png#only-dark)
+and plot with per-cell timings.](https://bearingresearch.com/strata/dev/assets/notebook-anatomy-dark.png#only-dark)
 
 Coding agents explore by writing throwaway scripts that nobody sees and
 nothing remembers. Point one at Strata and the work lands in a notebook
@@ -112,12 +112,12 @@ same cell run.
 
 | Surface | For | Start here |
 | --- | --- | --- |
-| **Web UI** | Writing and running cells yourself, with rendered tables, plots, and the DAG view. | [Quickstart - Web UI](https://bearingresearch.com/strata/dev/dev/getting-started/notebook/) |
-| **Terminal (TUI)** | Watching a notebook live from a terminal - a second pane, an SSH session, or beside your editor. Read-only. | [Quickstart - Terminal](https://bearingresearch.com/strata/dev/dev/notebook/tui/) |
-| **Coding agent** | Handing the notebook to Claude Code and watching it build, through MCP tools. The notebook is what you wanted. | [Quickstart - Coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/) |
+| **Web UI** | Writing and running cells yourself, with rendered tables, plots, and the DAG view. | [Quickstart - Web UI](https://bearingresearch.com/strata/dev/getting-started/notebook/) |
+| **Terminal (TUI)** | Watching a notebook live from a terminal - a second pane, an SSH session, or beside your editor. Read-only. | [Quickstart - Terminal](https://bearingresearch.com/strata/dev/notebook/tui/) |
+| **Coding agent** | Handing the notebook to Claude Code and watching it build, through MCP tools. The notebook is what you wanted. | [Quickstart - Coding agent](https://bearingresearch.com/strata/dev/notebook/agent/) |
 
-![A terminal running strata CLI commands beside a browser on the same notebook, over seven moments: the empty notebook, a load cell arriving, the cell running, finishing after about two seconds, a summarize cell arriving that reads its variable, both cells green, and the load cell run again and served from the cache in milliseconds.](https://bearingresearch.com/strata/dev/dev/assets/web-agent-live-light.gif#only-light)
-![A terminal running strata CLI commands beside a browser on the same notebook, over seven moments: the empty notebook, a load cell arriving, the cell running, finishing after about two seconds, a summarize cell arriving that reads its variable, both cells green, and the load cell run again and served from the cache in milliseconds.](https://bearingresearch.com/strata/dev/dev/assets/web-agent-live-dark.gif#only-dark)
+![A terminal running strata CLI commands beside a browser on the same notebook, over seven moments: the empty notebook, a load cell arriving, the cell running, finishing after about two seconds, a summarize cell arriving that reads its variable, both cells green, and the load cell run again and served from the cache in milliseconds.](https://bearingresearch.com/strata/dev/assets/web-agent-live-light.gif#only-light)
+![A terminal running strata CLI commands beside a browser on the same notebook, over seven moments: the empty notebook, a load cell arriving, the cell running, finishing after about two seconds, a summarize cell arriving that reads its variable, both cells green, and the load cell run again and served from the cache in milliseconds.](https://bearingresearch.com/strata/dev/assets/web-agent-live-dark.gif#only-dark)
 
 Two of those front doors at once: a coding agent adds and runs cells through
 the `strata` CLI while the web UI on the same session updates live. Captured
@@ -126,9 +126,9 @@ from a real run rather than assembled from canned frames.
 There is also a use that is not a front door at all: an agent working on
 something else entirely, using a notebook as a **cached scratchpad** for
 throwaway Python instead of temp scripts. Nobody watches that one, which is
-rather the point - see [Agent scratchpad](https://bearingresearch.com/strata/dev/dev/notebook/scratchpad/).
+rather the point - see [Agent scratchpad](https://bearingresearch.com/strata/dev/notebook/scratchpad/).
 
-[:octicons-arrow-right-24: Notebook Quickstart](https://bearingresearch.com/strata/dev/dev/getting-started/notebook/){ .md-button .md-button--primary }
+[:octicons-arrow-right-24: Notebook Quickstart](https://bearingresearch.com/strata/dev/getting-started/notebook/){ .md-button .md-button--primary }
 
 ---
 
@@ -140,7 +140,7 @@ scans, custom transforms, and headless workflows; the notebook
 executor is a separate pipeline that writes to the same artifact
 store. The client talks to a running Strata server.
 
-[:octicons-arrow-right-24: Library Quickstart](https://bearingresearch.com/strata/dev/dev/getting-started/core/){ .md-button }
+[:octicons-arrow-right-24: Library Quickstart](https://bearingresearch.com/strata/dev/getting-started/core/){ .md-button }
 
 ---
 
@@ -182,7 +182,7 @@ store. The client talks to a running Strata server.
 
     Then open [http://localhost:8765](http://localhost:8765).
 
-See [Installation](https://bearingresearch.com/strata/dev/dev/getting-started/installation/) for full details.
+See [Installation](https://bearingresearch.com/strata/dev/getting-started/installation/) for full details.
 
 ## Status
 

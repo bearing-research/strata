@@ -25,7 +25,7 @@ error that names the line and why, such as `timeout_not_numeric` or
 anyway would compute, and cache, something other than what the source declares.
 `strata validate` reports the same errors before you run.
 
-In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to `strata cell add/edit`, or splice a single directive without touching the body: `strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout` (see the [CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/#authoring-cells-and-dependencies-cell-addeditrmmv-dep)).
+In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to `strata cell add/edit`, or splice a single directive without touching the body: `strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout` (see the [CLI](https://bearingresearch.com/strata/dev/notebook/cli/#authoring-cells-and-dependencies-cell-addeditrmmv-dep)).
 
 ---
 
@@ -123,7 +123,7 @@ url = "https://my-datafusion-worker.fly.dev/v1/execute"
 transport = "direct"
 ```
 
-A server may hide the Workers panel (`STRATA_NOTEBOOK_WORKERS_PANEL=hidden`) or run remote cells only on its own registry's workers, ignoring a notebook's `[[workers]]` (`STRATA_NOTEBOOK_WORKERS_EDITABLE=false`); see [Server-managed workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/#server-managed-workers).
+A server may hide the Workers panel (`STRATA_NOTEBOOK_WORKERS_PANEL=hidden`) or run remote cells only on its own registry's workers, ignoring a notebook's `[[workers]]` (`STRATA_NOTEBOOK_WORKERS_EDITABLE=false`); see [Server-managed workers](https://bearingresearch.com/strata/dev/notebook/workers/#server-managed-workers).
 
 During execution, the UI shows a pulsing "dispatching → df-cluster" badge on the cell. After completion, the worker name appears in the cell's metadata.
 
@@ -181,7 +181,7 @@ Format: `# @env KEY=value`. Multiple `@env` lines are supported. The variable is
     For API keys and other secrets, use the notebook's `[env]` block
     in `notebook.toml` (blanked automatically) or the Runtime panel
     in the UI (kept in the server process only). See
-    [notebook.toml `[env]`](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#env-notebook-environment-variables).
+    [notebook.toml `[env]`](https://bearingresearch.com/strata/dev/reference/notebook-toml/#env-notebook-environment-variables).
     `# @env` is for non-sensitive overrides like `CUDA_VISIBLE_DEVICES`
     or `OMP_NUM_THREADS`.
 
@@ -218,7 +218,7 @@ every notebook using the view shares them. A run's result is keyed on the
 listing its view was built from, so a prefix that changes while the run starts
 is keyed on what the run read. The cache stays under a size bound
 and drops views unused for some days, least recently used first; see
-[`STRATA_NOTEBOOK_MOUNT_CACHE_DIR`](https://bearingresearch.com/strata/dev/dev/reference/configuration/#notebook) and
+[`STRATA_NOTEBOOK_MOUNT_CACHE_DIR`](https://bearingresearch.com/strata/dev/reference/configuration/#notebook) and
 the two settings after it. A worker keeps its cache across jobs. An `rw` mount
 is still staged per notebook.
 
@@ -231,10 +231,10 @@ data files, and a pool cannot say which machine will run the cell, so those make
 total an upper bound ("up to 2.0 GB to read"). A size that is not known, such as a
 pinned mount's, is not guessed. After a successful run, `.strata/reads/index.json` records
 what each input moved and on which machine; see
-[What a run moved](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#what-a-run-moved).
+[What a run moved](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/#what-a-run-moved).
 
-![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 26.3 MB" beside its worker and cache badges.](https://bearingresearch.com/strata/dev/dev/assets/input-weight-light.png#only-light)
-![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 26.3 MB" beside its worker and cache badges.](https://bearingresearch.com/strata/dev/dev/assets/input-weight-dark.png#only-dark)
+![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 26.3 MB" beside its worker and cache badges.](https://bearingresearch.com/strata/dev/assets/input-weight-light.png#only-light)
+![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 26.3 MB" beside its worker and cache badges.](https://bearingresearch.com/strata/dev/assets/input-weight-dark.png#only-dark)
 
 Strata copies a remote mount in its own process, not the notebook's venv, so
 its filesystem library goes where Strata is installed: the `s3` extra for
@@ -272,7 +272,7 @@ cell's entry lists every variant's files, merged per mount, once every variant h
 succeeded; a path two variants wrote keeps the later one's. Loop, SQL and prompt
 cells do not record writes, so a successful run of one drops the entry too.
 
-Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#named-credentials) instead of putting a secret in the cell. On a server that sets `STRATA_NOTEBOOK_CREDENTIAL_WRITERS`, an `rw` mount of `s3://`, `gs://` or `az://` must write through a credential its run's principal is listed for (its `credential=`, or the server's default for that scheme), or the cell fails before it runs; a credential that `STRATA_NOTEBOOK_CREDENTIAL_PATHS` restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).
+Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials) instead of putting a secret in the cell. On a server that sets `STRATA_NOTEBOOK_CREDENTIAL_WRITERS`, an `rw` mount of `s3://`, `gs://` or `az://` must write through a credential its run's principal is listed for (its `credential=`, or the server's default for that scheme), or the cell fails before it runs; a credential that `STRATA_NOTEBOOK_CREDENTIAL_PATHS` restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).
 
 ---
 
@@ -323,7 +323,7 @@ shown as ready before that first run.
 
 Each artifact the cell stores records the URL and the digest of the bytes the
 run read as one of its inputs, and when those bytes were downloaded. That
-record is how a [publication](https://bearingresearch.com/strata/dev/dev/notebook/publishing/) page lists the URL under
+record is how a [publication](https://bearingresearch.com/strata/dev/notebook/publishing/) page lists the URL under
 "External inputs" with its digest and retrieval time, and its RO-Crate gives
 the URL's `File` node an `sdDatePublished`. A snapshot export lists every fetch with whether it is
 pinned, so an unpinned one can be flagged before the snapshot is shared, and
@@ -410,7 +410,7 @@ downstream cells go stale, and the normal cascade
 machinery re-runs them** - no manual data-version
 bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
-[Lake-Aware Cells](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/).
+[Lake-Aware Cells](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/).
 
 ```python
 # @table trips file:///data/warehouse#nyc.trips
@@ -444,7 +444,7 @@ The warehouse may be local or on S3, GCS (`gs://`) or Azure (`abfs://`,
 `STRATA_GCS_*` and `STRATA_AZURE_*` settings the artifact blob store uses. An
 Azure table's metadata is read with `adlfs`, or with PyArrow only when the table's
 locations have no `@<account>` host
-([Azure Storage](https://bearingresearch.com/strata/dev/dev/reference/configuration/#azure-storage)). The name must be a
+([Azure Storage](https://bearingresearch.com/strata/dev/reference/configuration/#azure-storage)). The name must be a
 valid Python identifier.
 
 A warehouse in the notebook's folder suits a notebook that builds its own tables: a
@@ -458,7 +458,7 @@ Catalogs are named on the server, not in `notebook.toml`, because the scan the
 cell runs happens in the server and has to resolve the same name. (A DuckDB
 connection, which attaches its catalog itself, can also name one the notebook
 defines on a personal server; see
-[notebook-level catalogs](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#notebook-catalogs).)
+[notebook-level catalogs](https://bearingresearch.com/strata/dev/reference/notebook-toml/#notebook-catalogs).)
 
 `snapshot=<id>` pins the table: the cell reads that snapshot forever and never
 goes out of date on new data (the lake-side analog of a mount `pin`). Without a pin,
@@ -548,7 +548,7 @@ applies, as for an export, and a table last written for another tenant is
 refused. In service mode a write also needs what an export needs:
 `STRATA_SERVICE_WRITES_ENABLED=true` and the `artifacts:write` scope. A catalog
 whose `strata_credential` the server's
-[`STRATA_NOTEBOOK_CREDENTIAL_WRITERS`](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#named-credentials)
+[`STRATA_NOTEBOOK_CREDENTIAL_WRITERS`](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials)
 does not let the run's principal write through is refused too. Each of these
 fails the cell, naming why, before it runs (in a Run All batch, before its
 outputs are kept).
@@ -581,19 +581,19 @@ table of paths and sizes (the first 20 files, then a count of the rest), ahead
 of the cell's own output. It is a markdown display like any other, so a cache
 hit, a reopened notebook and an export show it too.
 
-![A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: "ckpt: 4 files, 3.0 MiB" and a table of each file with its size.](https://bearingresearch.com/strata/dev/dev/assets/output-dir-light.png#only-light)
-![A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: "ckpt: 4 files, 3.0 MiB" and a table of each file with its size.](https://bearingresearch.com/strata/dev/dev/assets/output-dir-dark.png#only-dark)
+![A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: "ckpt: 4 files, 3.0 MiB" and a table of each file with its size.](https://bearingresearch.com/strata/dev/assets/output-dir-light.png#only-light)
+![A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: "ckpt: 4 files, 3.0 MiB" and a table of each file with its size.](https://bearingresearch.com/strata/dev/assets/output-dir-dark.png#only-dark)
 
 **A failed run keeps what it wrote.** Its files are stored and its manifest is
 kept as a failed version: never a cache hit and never an input, but lineage
 shows it, and its files are listed and downloaded over
-[REST](https://bearingresearch.com/strata/dev/dev/reference/rest-api/#read-a-cells-output-folder) like any
+[REST](https://bearingresearch.com/strata/dev/reference/rest-api/#read-a-cells-output-folder) like any
 version's. A link in the folder, or a file with more than one hard link, is
 left out with a warning.
 
 **Files go with the last version that names them.** Folder versions are pruned
 like any cell output's earlier values
-([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](https://bearingresearch.com/strata/dev/dev/reference/configuration/#notebook)),
+([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](https://bearingresearch.com/strata/dev/reference/configuration/#notebook)),
 except that a failed run's version stays until a later run of the cell stores
 a new successful version, and at least as long as the successful version it
 follows, so a crash's checkpoints can still be downloaded. A cache hit (the
@@ -625,7 +625,7 @@ local `Path` with the same name it has on the server before the cell runs. A
 worker too old to take one is refused before the cell runs.
 
 **In a `# @loop` cell the folder lasts the whole loop**, and each iteration's
-contents are stored as its `@iter=k` version ([loop cells](https://bearingresearch.com/strata/dev/dev/notebook/cells/#output-folders)).
+contents are stored as its `@iter=k` version ([loop cells](https://bearingresearch.com/strata/dev/notebook/cells/#output-folders)).
 
 **A [`# @per_variant`](#fan-out-run-a-downstream-cell-once-per-variant) cell
 keeps a folder per variant**, a failed variant's too, and a plain downstream
@@ -642,11 +642,11 @@ from that store as [`@dataset`](#dataset), the folder arrives as a `Path` with
 its files; `strata artifact pull <id>@v=<n> --to <dir>` on that store's server
 rebuilds them in a new directory, and from anywhere else strata-client's
 `client.download_folder(<id>, <n>, <dir>)` does, over HTTP, checking each
-file's size and sha256. A [snapshot](https://bearingresearch.com/strata/dev/dev/notebook/export/#snapshots) carries the file versions each
-manifest names, and a [publication's archive](https://bearingresearch.com/strata/dev/dev/notebook/publishing/#archiving-the-copy-that-needs-no-server)
+file's size and sha256. A [snapshot](https://bearingresearch.com/strata/dev/notebook/export/#snapshots) carries the file versions each
+manifest names, and a [publication's archive](https://bearingresearch.com/strata/dev/notebook/publishing/#archiving-the-copy-that-needs-no-server)
 holds the files under `folder/`.
 
-The [team cache](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named)
+The [team cache](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named)
 offers and serves a folder with its files: a teammate's pull lands every file
 under their notebook's own ids before the manifest, or nothing.
 
@@ -680,7 +680,7 @@ to one item in each instance. What `<source>` is decides what an item is:
 
 With `glob=`, a remote mount downloads only the files the pattern names, and the
 input weights and the large-read prompt count only those.
-The [`each_pipeline`](https://bearingresearch.com/strata/dev/dev/examples/each_pipeline/) example runs over 287 files from a
+The [`each_pipeline`](https://bearingresearch.com/strata/dev/examples/each_pipeline/) example runs over 287 files from a
 public bucket and syncs a table in a REST catalog.
 
 A file is bound as a `pathlib.Path`, and a link to a file counts as a file. A mount
@@ -743,7 +743,7 @@ By default every cell is cached by provenance
 (`sha256(inputs + source + env)`), including a leaf cell that only `print`s,
 an unchanged rerun replays its output instantly instead of recomputing. That is
 exactly what you want for deterministic work, and it makes the notebook a good
-**scratchpad** (see [Driving a notebook with an agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/)). But it is
+**scratchpad** (see [Driving a notebook with an agent](https://bearingresearch.com/strata/dev/notebook/agent/)). But it is
 wrong for a cell whose *point* is a side effect or fresh value:
 
 - writes a file, sends a request, mutates external state: replaying the cached
@@ -936,7 +936,7 @@ runs the loop again rather than returning the old result.
 ## SQL Cell Annotations
 
 A cell with `language = "sql"` runs a query through a declared connection.
-See [SQL Cells](https://bearingresearch.com/strata/dev/dev/notebook/cells/#sql-cells) for the full feature walkthrough; this
+See [SQL Cells](https://bearingresearch.com/strata/dev/notebook/cells/#sql-cells) for the full feature walkthrough; this
 section is the per-annotation reference.
 
 ### `@sql`
@@ -1028,9 +1028,9 @@ the tables the query reads. On BigQuery it is 48 hours, the shortest time travel
 window a dataset can be configured with, since a dataset's own setting lives in
 a region-scoped view the connection does not name. After the horizon, a rerun
 works, but the recorded state can no longer be queried again. The horizon is
-also on the [publication page](https://bearingresearch.com/strata/dev/dev/notebook/publishing/) of a result built from the cell.
+also on the [publication page](https://bearingresearch.com/strata/dev/notebook/publishing/) of a result built from the cell.
 
-On a DuckDB connection over a [catalog](https://bearingresearch.com/strata/dev/dev/notebook/cells/#duckdb-over-the-lake), the
+On a DuckDB connection over a [catalog](https://bearingresearch.com/strata/dev/notebook/cells/#duckdb-over-the-lake), the
 state is the Iceberg snapshot of each catalog table the query reads. The first
 run records those snapshot ids on its artifact and reads each table `AT
 (VERSION => id)`; later runs read the same snapshots and hit the cache without
@@ -1048,7 +1048,7 @@ snapshots to read again: a query that reads a mount or a table in the
 connection's own database file is refused, naming it. An Iceberg snapshot stays
 queryable until the catalog's maintenance expires it, which Strata cannot see,
 so no horizon is recorded. Per-driver
-freshness probe details are in [SQL Cells](https://bearingresearch.com/strata/dev/dev/notebook/cells/#per-driver-freshness).
+freshness probe details are in [SQL Cells](https://bearingresearch.com/strata/dev/notebook/cells/#per-driver-freshness).
 
 ### `@name`
 
@@ -1257,13 +1257,13 @@ exist.)
 
 ### `@live`
 
-On a [widget cell](https://bearingresearch.com/strata/dev/dev/notebook/cells/#widget-cells), `# @live` makes a control change
+On a [widget cell](https://bearingresearch.com/strata/dev/notebook/cells/#widget-cells), `# @live` makes a control change
 auto-run the cheap downstream cells instead of only marking them stale.
-`# @live off` turns it back off. See [Live mode](https://bearingresearch.com/strata/dev/dev/notebook/cells/#live-mode).
+`# @live off` turns it back off. See [Live mode](https://bearingresearch.com/strata/dev/notebook/cells/#live-mode).
 
 ### `@app hide`
 
-`# @app hide` keeps a cell out of the read-only [app view](https://bearingresearch.com/strata/dev/dev/notebook/cells/#app-view),
+`# @app hide` keeps a cell out of the read-only [app view](https://bearingresearch.com/strata/dev/notebook/cells/#app-view),
 for a setup cell whose output is noise. It applies to any cell.
 In a markdown cell it is the only annotation read: a heading such as
 `# @after` there is prose.

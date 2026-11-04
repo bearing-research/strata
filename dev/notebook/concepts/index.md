@@ -40,10 +40,10 @@ The notebook is an **orchestration layer**: it decides what to run next. The cel
 
 The three surfaces are **peers on one protocol**, not a primary and two
 add-ons: they speak the same REST and WebSocket API. A cell an agent runs
-against a live session appears in the web UI and the [terminal viewer](https://bearingresearch.com/strata/dev/dev/notebook/tui/)
+against a live session appears in the web UI and the [terminal viewer](https://bearingresearch.com/strata/dev/notebook/tui/)
 as it happens - though only when the agent addresses the session rather than
 the notebook directory, since [the local backend edits files and the server
-learns nothing](https://bearingresearch.com/strata/dev/dev/notebook/cli/#working-against-a-live-session-server-session). Of the
+learns nothing](https://bearingresearch.com/strata/dev/notebook/cli/#working-against-a-live-session-server-session). Of the
 three, only the TUI is deliberately read-only.
 
 ## Why "every output is an artifact"
@@ -118,7 +118,7 @@ trained_model = model
 For a large handoff, export a **checkpoint** instead of a live object: save a
 `state_dict` (or a file path) from the training cell and load it downstream with
 explicit `map_location` - see the device/placement guidance in
-[Distributed Workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/).
+[Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/).
 
 ## Notebook File Format
 
@@ -179,7 +179,7 @@ re-run, a Strata notebook is just a directory of plain text:
   edits one number in `notebook.toml`, not a giant JSON re-serialize.
 - **`notebook.toml` is the manifest.** Stable config only: cell list,
   workers, mounts, env, AI defaults, and the active variant per group
-  (see [Variant Cells](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#variant-cells)). Reviewers see
+  (see [Variant Cells](https://bearingresearch.com/strata/dev/notebook/annotations/#variant-cells)). Reviewers see
   exactly what changed about the notebook's *shape*, not its execution
   history.
 - **`.strata/` is gitignored.** Display outputs, console snapshots, the
@@ -226,12 +226,12 @@ When you run a cell, this happens:
 2. **Cache check**: Look up the hash in the artifact store → return immediately on hit
 3. **Resolve inputs**: Load upstream variable artifacts into a temp directory
 4. **Execute**: Spawn a subprocess running the cell harness in the notebook's
-   venv, or, for a cell annotated with a [`# @worker`](https://bearingresearch.com/strata/dev/dev/notebook/workers/), POST the
+   venv, or, for a cell annotated with a [`# @worker`](https://bearingresearch.com/strata/dev/notebook/workers/), POST the
    work to that worker over HTTP instead. Everything either side of this step
    is identical; only where the Python runs changes. In service mode a cell
    on the server's own host runs as a separate OS user
    (`STRATA_NOTEBOOK_HARNESS_USER`) or not at all; see
-   [What a cell can read](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#what-a-cell-can-read).
+   [What a cell can read](https://bearingresearch.com/strata/dev/deployment/service-mode/#what-a-cell-can-read).
 5. **Harness**: Deserializes inputs → `exec(source, namespace)` → serializes new variables
 6. **Store outputs**: Each consumed variable becomes an artifact
 7. **Broadcast**: WebSocket sends status, output, and console messages to the UI
@@ -256,7 +256,7 @@ When you change a cell's source, its provenance hash changes, and all downstream
 
 Because the hash describes the computation rather than the machine, a match
 found somewhere else is just as valid. That is what the optional
-[team cache](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named) trades on: with a shared store configured, a local
+[team cache](https://bearingresearch.com/strata/dev/deployment/service-mode/#the-team-cache-sharing-results-nobody-named) trades on: with a shared store configured, a local
 miss asks whether a colleague has already run this exact computation, and a
 cell that does run offers its outputs back. Nobody has to decide in advance
 which results are worth publishing - the expensive middle of a pipeline is
@@ -272,7 +272,7 @@ cell that only `print`s a diagnostic. It has no output artifact to cache, so its
 console is the record that it ran, and an unchanged re-run doesn't re-execute.
 That is what makes the notebook a usable scratchpad. A cell that must always run, because it has a side effect
 (writing a file, calling an API) or produces a fresh value (the clock,
-`random`), opts out of caching with [`# @nocache`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#nocache).
+`random`), opts out of caching with [`# @nocache`](https://bearingresearch.com/strata/dev/notebook/annotations/#nocache).
 
 ## Serialization
 

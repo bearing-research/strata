@@ -248,7 +248,7 @@ Iceberg warehouse there whose catalog records paths under
 `examples/setup_demo.py` writes, records host paths that do not exist
 in the container). Then run a few `scan@v1` materializes against
 `http://localhost:8765` with the
-[Python client](https://bearingresearch.com/strata/dev/dev/getting-started/core/#3-materialize-a-result),
+[Python client](https://bearingresearch.com/strata/dev/getting-started/core/#3-materialize-a-result),
 using `file:///data/warehouse#<namespace>.<table>` as the input.
 
 For sustained load, point `benchmarks/capacity_sweep.py` at the stack:

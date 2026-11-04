@@ -2,7 +2,7 @@
 
 The executor protocol is the HTTP contract between Strata's notebook orchestrator and remote workers. Anyone can implement it to bring custom compute (GPUs, alternative engines, sandboxed environments). The reference implementation is `strata-worker` from `strata.notebook.remote_executor`.
 
-This page is the canonical specification. The [Distributed Workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/) page covers deployment and registration; this one covers wire format.
+This page is the canonical specification. The [Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/) page covers deployment and registration; this one covers wire format.
 
 ## Versioning
 
@@ -76,7 +76,7 @@ Liveness + capabilities probe. No auth.
 
 `locked_environments: true` says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before. Answer it honestly: building that environment is a `uv sync --frozen`, so the reference worker reports it by probing for `uv` on its own `PATH` rather than claiming it unconditionally. A worker that claims it without `uv` is sent work it will refuse, and every notebook has a lockfile.
 
-A cell runs with the worker's environment minus the worker's own secrets: `strata-worker` takes its token, its credentials and the variables their `${VAR}` values name out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through `/proc`. `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#what-a-cell-can-read) narrows a cell there. A cell gets what its manifest carries.
+A cell runs with the worker's environment minus the worker's own secrets: `strata-worker` takes its token, its credentials and the variables their `${VAR}` values name out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through `/proc`. `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](https://bearingresearch.com/strata/dev/deployment/service-mode/#what-a-cell-can-read) narrows a cell there. A cell gets what its manifest carries.
 
 `languages` lists the cell languages the worker can run: `r` when `Rscript` is on its `PATH`. An R cell's request says `"language": "r"`, in `transform.params.language` on `POST /v1/execute`, `language` in `POST /v1/notebook-execute` metadata, and `params.language` in a manifest; a Python cell's request carries no `language`. The worker runs `harness.R` under `Rscript` with the same manifest a Python cell's harness gets, and answers an R cell with `500` and `Rscript is not installed on this worker` when it has no R, or `400` for a language it does not know.
 
@@ -127,7 +127,7 @@ An R cell sent to a worker that advertises `locked_r_environments` carries the n
 }
 ```
 
-`key` is `strata.notebook.env.renv_lock_key(lockfile)`: the SHA-256 hex digest of the lock's UTF-8 bytes, the same digest the [shared environment backend](https://bearingresearch.com/strata/dev/dev/notebook/environment/#shared-environments) keys an R library by. An `renv.lock` names no project, so nothing is left out. The worker then:
+`key` is `strata.notebook.env.renv_lock_key(lockfile)`: the SHA-256 hex digest of the lock's UTF-8 bytes, the same digest the [shared environment backend](https://bearingresearch.com/strata/dev/notebook/environment/#shared-environments) keys an R library by. An `renv.lock` names no project, so nothing is left out. The worker then:
 
 - Keeps one R library per `key` and R build under `STRATA_WORKER_ENV_ROOT/r`, and reuses it, so a second R cell with the same lock restores nothing.
 - Fetches a missing one from `STRATA_WORKER_ENV_REGISTRY_URL/r/<key>/<R version>/<platform>` when that is set: a `.tar.gz` whose top-level directories are the packages (`jsonlite/DESCRIPTION`, ...). A `404` is restored locally; any other failure fails the cell. Without a registry, or on a `404`, it runs `renv::restore(lockfile = ..., library = <that directory>)`, with renv's package cache in `STRATA_WORKER_ENV_ROOT/r/cache`.
@@ -196,7 +196,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | `transform.ref` | string (required) | Must be `"notebook_cell@v1"` for the notebook executor. |
 | `transform.params.source` | string (required) | The cell Python source to execute. |
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
-| `transform.params.mounts` | array of MountSpec | Filesystem mounts injected as `Path` variables (see [notebook.toml schema](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#mounts-filesystem-mounts)). |
+| `transform.params.mounts` | array of MountSpec | Filesystem mounts injected as `Path` variables (see [notebook.toml schema](https://bearingresearch.com/strata/dev/reference/notebook-toml/#mounts-filesystem-mounts)). |
 | `transform.params.env` | object | Env vars set in the cell subprocess. |
 | `transform.params.mutation_defines` | array of string | Present only when non-empty. Variables the cell changes in place without rebinding. The harness re-serializes exactly these: without the list it sees an unchanged `id()` and stores nothing, and the downstream cell reads the value from before, under a provenance hash that says otherwise. |
 | `transform.params.tables` | object | Present only when non-empty. `{name: {uri, snapshot_id}}` for each `@table` the cell declares. Injected as `<name>` and `<name>_snapshot`; no catalog access is needed at the worker to read them. |
@@ -483,7 +483,7 @@ dispatcher maps the worker to one.
 
 ## `POST /v1/mount-cache/cached` (optional)
 
-Before a cell with a read-only `# @mount` runs on a worker, the notebook lists the mount (it needs the listing for the cell's provenance anyway) and asks the worker how much of it the worker's [mount cache](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/) already holds. The cache keys objects by a hash that covers the storage options, and only the worker holds its own credentials, so only the worker can answer. The URL is the worker's `/health` URL with `/health` replaced by `/v1/mount-cache/cached`, with the same `Authorization` header as a dispatch.
+Before a cell with a read-only `# @mount` runs on a worker, the notebook lists the mount (it needs the listing for the cell's provenance anyway) and asks the worker how much of it the worker's [mount cache](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/) already holds. The cache keys objects by a hash that covers the storage options, and only the worker holds its own credentials, so only the worker can answer. The URL is the worker's `/health` URL with `/health` replaced by `/v1/mount-cache/cached`, with the same `Authorization` header as a dispatch.
 
 ```json
 {
@@ -603,7 +603,7 @@ The minimum surface is `POST /v1/execute` + `GET /health`. The reference Python 
 
 A custom worker doesn't have to run Python - it just has to accept the `notebook_cell@v1` envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the `strata-worker` script is the path of least resistance.
 
-A worker the server cannot reach can dial out instead: `strata-worker --connect` carries these same requests over one outbound WebSocket to a relay, which presents the worker at an ordinary URL. The [Worker Relay Protocol](https://bearingresearch.com/strata/dev/dev/reference/worker-connect/) specifies the framing a relay implements.
+A worker the server cannot reach can dial out instead: `strata-worker --connect` carries these same requests over one outbound WebSocket to a relay, which presents the worker at an ordinary URL. The [Worker Relay Protocol](https://bearingresearch.com/strata/dev/reference/worker-connect/) specifies the framing a relay implements.
 
 ## Core transform executors
 

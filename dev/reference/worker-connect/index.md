@@ -2,7 +2,7 @@
 
 `strata-worker --connect <url>` runs a worker that binds no port. It opens one outbound WebSocket to a relay, and the relay presents the worker at an HTTP URL the notebook server dispatches to like any other worker. Each HTTP request the relay receives for that URL travels over the WebSocket as a stream of frames, and the worker's in-process app answers it the same way. A worker behind NAT, or a firewall that allows only outbound connections, can then serve `# @worker` cells.
 
-Strata ships the worker side. The relay is not part of Strata; this page is what a relay implements. Everything the server and worker say to each other is the [executor protocol](https://bearingresearch.com/strata/dev/dev/reference/executor-protocol/), unchanged: this page only says how those HTTP requests ride over one WebSocket.
+Strata ships the worker side. The relay is not part of Strata; this page is what a relay implements. Everything the server and worker say to each other is the [executor protocol](https://bearingresearch.com/strata/dev/reference/executor-protocol/), unchanged: this page only says how those HTTP requests ride over one WebSocket.
 
 ```
 notebook server ──HTTP──► relay ◄══WebSocket══ strata-worker --connect

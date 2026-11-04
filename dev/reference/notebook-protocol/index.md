@@ -2,8 +2,8 @@
 
 A single reference for writing a non-Vue client (TUI, scripting, third-party
 integration) against the notebook backend. The deeper per-endpoint and
-per-frame details live in [REST API Reference](https://bearingresearch.com/strata/dev/dev/reference/rest-api/) and
-[WebSocket Protocol](https://bearingresearch.com/strata/dev/dev/reference/websocket/); this page is the orientation map plus the
+per-frame details live in [REST API Reference](https://bearingresearch.com/strata/dev/reference/rest-api/) and
+[WebSocket Protocol](https://bearingresearch.com/strata/dev/reference/websocket/); this page is the orientation map plus the
 load-bearing rules that aren't obvious from either of those individually.
 
 If you want exhaustive request/response shapes, the live OpenAPI document at
@@ -118,7 +118,7 @@ every endpoint. This is the local-dev default.
   `notebook:write` / `notebook:execute` table that checks the frames below
   - so a principal that cannot run a cell over this socket cannot run it
   over REST either. A route nobody classified requires `notebook:execute`.
-  See the [REST API page](https://bearingresearch.com/strata/dev/dev/reference/rest-api/#authentication) for the full list.
+  See the [REST API page](https://bearingresearch.com/strata/dev/reference/rest-api/#authentication) for the full list.
 
 ## Cold-start payload
 
@@ -133,7 +133,7 @@ further calls are required before showing a useful UI. The shape is
 | `path` | Absolute notebook directory path. |
 | `dag` | `edges`, `topological_order`, `roots`, `leaves` and `variable_producer` (which cell defines each variable); `error` instead when the DAG cannot be built. |
 | Runtime config | `deployment_mode`, `default_parent_path`, `available_python_versions`, `default_python_version`, `python_selection_fixed`, `registry_enabled`, `team_store_configured`, `workers_panel`. |
-| `id`, `name`, `worker`, `timeout`, `env`, `created_at`, `updated_at` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](https://bearingresearch.com/strata/dev/dev/reference/rest-api/#update-notebook-default-env)) |
+| `id`, `name`, `worker`, `timeout`, `env`, `created_at`, `updated_at` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](https://bearingresearch.com/strata/dev/reference/rest-api/#update-notebook-default-env)) |
 | `env_sources`, `env_fetch_error`, `env_fetched_at` | Secret-manager fetch status |
 | `workers`, `mounts`, `connections`, `malformed_connections`, `catalogs`, `r`, `secret_manager_config`, `variant_groups`, `variant_active_selections`, `variant_modes` | `notebook.toml` |
 | `cells` (full) | Source, status, display outputs, console stdout/stderr, provenance hashes, causality chains, DAG shadow warnings, per-cell overrides. |
@@ -183,13 +183,13 @@ What this means for a client:
   `console_stdout` / `console_stderr` hold the last 64 KiB of what it has
   streamed so far, and the `cell_console` frames after it append. A running
   local cell's console is empty there; it arrives with the result. The full
-  console rules are in [WebSocket Protocol](https://bearingresearch.com/strata/dev/dev/reference/websocket/#console).
+  console rules are in [WebSocket Protocol](https://bearingresearch.com/strata/dev/reference/websocket/#console).
 - **Sequence numbers continue across reconnects.** Every server-to-client
   message carries a `seq` from a per-notebook counter. The counter doesn't
   reset on reconnect; if you see a large gap, that's expected - treat it as
   a hint to drop local in-flight state and replace from `notebook_state`.
 
-See [WebSocket Protocol → Reconnection semantics](https://bearingresearch.com/strata/dev/dev/reference/websocket/#reconnection-semantics)
+See [WebSocket Protocol → Reconnection semantics](https://bearingresearch.com/strata/dev/reference/websocket/#reconnection-semantics)
 for the message-level detail.
 
 ## Session lifetime and `session_closed`
@@ -218,7 +218,7 @@ reopening it restores every result. The server closes a session when:
 
 A server pass every minute applies the first three. None of them closes a
 session with a running cell, an environment job, a cell soft lock still held,
-or a [quiesce](https://bearingresearch.com/strata/dev/dev/reference/rest-api/) hold. Before the socket closes (code `1000`,
+or a [quiesce](https://bearingresearch.com/strata/dev/reference/rest-api/) hold. Before the socket closes (code `1000`,
 `Session closed`), each client gets a `session_closed` frame:
 
 ```json
@@ -232,7 +232,7 @@ or a [quiesce](https://bearingresearch.com/strata/dev/dev/reference/rest-api/) h
 `shutdown`. Do not reconnect to the old `session_id` (the upgrade is refused
 with HTTP `403`); reopen the notebook by path with `POST /v1/notebooks/open`,
 which starts a new session. The browser shows the message with a Reopen button;
-the [terminal viewer](https://bearingresearch.com/strata/dev/dev/notebook/tui/#when-the-server-closes-the-session)
+the [terminal viewer](https://bearingresearch.com/strata/dev/notebook/tui/#when-the-server-closes-the-session)
 shows it in a notification and reopens on `r`.
 
 Sessions live in memory, so a server restart ends all of them. A graceful stop
@@ -244,7 +244,7 @@ Python or R and warm-pool workers included, is killed when the process that
 started it exits, so a long cell does not keep holding CPU or GPU with nobody to
 collect its result. A cell on a `strata-worker` stops the same way when the
 worker exits, and the `ssh -L` tunnel to an
-[SSH worker](https://bearingresearch.com/strata/dev/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to)
+[SSH worker](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to)
 closes instead of holding its local port. Windows does not have this yet. A browser cannot read why an upgrade failed,
 so after a failed reconnect the web UI asks
 `GET /v1/notebooks/{session_id}/dag`: a `404` means the session is gone, and
@@ -254,7 +254,7 @@ then does the same. The terminal viewer reads the `403` directly.
 
 ## Message types
 
-The full list of WS frame types lives on the [WebSocket Protocol](https://bearingresearch.com/strata/dev/dev/reference/websocket/)
+The full list of WS frame types lives on the [WebSocket Protocol](https://bearingresearch.com/strata/dev/reference/websocket/)
 page. **Every type corresponds to a member of
 `strata.notebook.protocol.MessageType`** - that enum is the canonical
 source. A non-Vue client can enumerate the full set by iterating it:
@@ -359,11 +359,11 @@ edits exactly as before. `0` turns the lock off.
 
 ## Where to go next
 
-- [REST API Reference](https://bearingresearch.com/strata/dev/dev/reference/rest-api/) - the notebook routes and core client
+- [REST API Reference](https://bearingresearch.com/strata/dev/reference/rest-api/) - the notebook routes and core client
   routes with request / response shapes.
-- [WebSocket Protocol](https://bearingresearch.com/strata/dev/dev/reference/websocket/) - every C→S and S→C frame with
+- [WebSocket Protocol](https://bearingresearch.com/strata/dev/reference/websocket/) - every C→S and S→C frame with
   payload shapes.
-- [notebook.toml Schema](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/) - what the on-disk config
+- [notebook.toml Schema](https://bearingresearch.com/strata/dev/reference/notebook-toml/) - what the on-disk config
   looks like.
-- [Configuration](https://bearingresearch.com/strata/dev/dev/reference/configuration/) - the server-side knobs
+- [Configuration](https://bearingresearch.com/strata/dev/reference/configuration/) - the server-side knobs
   (deployment mode, auth mode, storage root, …).

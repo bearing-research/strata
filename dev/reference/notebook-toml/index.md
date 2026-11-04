@@ -36,7 +36,7 @@ DATA_BUCKET = "s3://my-bucket"
 ANTHROPIC_API_KEY = ""              # blanked: keys matching KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL
 ```
 
-**What gets blanked.** Values for keys whose name contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, or `CREDENTIAL` are written as empty strings to disk. The blanked entry is still committed so users can see which env vars a notebook *expects* without leaking the value into the repo. A value typed in the Runtime panel stays in the server's memory for the session, and no response or WebSocket frame carries it: clients get `"__strata_masked__"` in its place (see [Update Notebook Default Env](https://bearingresearch.com/strata/dev/dev/reference/rest-api/#update-notebook-default-env)). In a new session the key comes back empty: fill it in the Runtime panel, or let a [secret manager](#secret_manager-external-secret-manager-wiring) fill it. Until then a cell sees the server's own value for that variable, if it has one: an empty secret-looking value is a placeholder, not an override.
+**What gets blanked.** Values for keys whose name contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, or `CREDENTIAL` are written as empty strings to disk. The blanked entry is still committed so users can see which env vars a notebook *expects* without leaking the value into the repo. A value typed in the Runtime panel stays in the server's memory for the session, and no response or WebSocket frame carries it: clients get `"__strata_masked__"` in its place (see [Update Notebook Default Env](https://bearingresearch.com/strata/dev/reference/rest-api/#update-notebook-default-env)). In a new session the key comes back empty: fill it in the Runtime panel, or let a [secret manager](#secret_manager-external-secret-manager-wiring) fill it. Until then a cell sees the server's own value for that variable, if it has one: an empty secret-looking value is a placeholder, not an override.
 
 **Whole-block elision.** If every entry is either empty or a blanked sensitive key, the writer omits the `[env]` block entirely on save. Typing an API key into the Runtime panel doesn't churn the committed file.
 
@@ -55,7 +55,7 @@ model = "claude-sonnet-4-6"
 | `max_output_tokens` | integer | Max output tokens requested. Default `4096`. |
 | `timeout_seconds` | float | Request timeout. Default `60.0`. |
 
-Every key is optional and overrides the same setting from the notebook's environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `STRATA_AI_API_KEY`) and from the server's `STRATA_AI_*`. See [Provider configuration](https://bearingresearch.com/strata/dev/dev/notebook/cells/#provider-configuration).
+Every key is optional and overrides the same setting from the notebook's environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `STRATA_AI_API_KEY`) and from the server's `STRATA_AI_*`. See [Provider configuration](https://bearingresearch.com/strata/dev/notebook/cells/#provider-configuration).
 
 ## `[secret_manager]` - External secret-manager wiring
 
@@ -68,7 +68,7 @@ path = "/notebook-secrets"
 base_url = "https://app.infisical.com"
 ```
 
-Routing-only config for an external secret manager. Infisical is the only supported `provider`. The authentication token for the manager itself lives in the strata-notebook's process environment, **not** here. See [Secret Manager](https://bearingresearch.com/strata/dev/dev/notebook/secrets/).
+Routing-only config for an external secret manager. Infisical is the only supported `provider`. The authentication token for the manager itself lives in the strata-notebook's process environment, **not** here. See [Secret Manager](https://bearingresearch.com/strata/dev/notebook/secrets/).
 
 Allowed keys: `provider`, `project_id`, `environment`, `path`, `base_url`. Unknown keys are dropped on save.
 
@@ -154,12 +154,12 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 - A remote worker resolves names against its own `STRATA_NOTEBOOK_CREDENTIALS`; only the name travels in the dispatch.
 - On a service-mode server, and on any remote worker, a mount's own `options` cannot override a credential's fields or name another secret, file or endpoint: see [Mount options on a shared server](#mount-options-on-a-shared-server).
 - `STRATA_NOTEBOOK_CREDENTIAL_PATHS='{"lab-a": ["/srv/projects/lab-a"]}'` keeps a name to the notebooks under those directories, for a server that hosts several projects. Anywhere else, the cell fails with `credential 'lab-a' is not available to this notebook`, naming the credential and none of its fields. Mounts, connections and catalogs are all checked, and so is a mount sent to a remote worker, before it is sent. A listed name is not usable outside a notebook at all, for example by a scan through a catalog that names it. Names not listed stay open to every notebook.
-- `STRATA_NOTEBOOK_CREDENTIAL_WRITERS='{"lab-bucket": ["user_*", "agent:agt_1/*"]}'` says who may write through a name, as glob patterns over the principal who started the run (`["*"]` is anyone). It gates three writes: an `rw` mount, a `# @sql connection=... write=true` cell whose connection names the credential, and a [`# @write_table`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#write_table) into a catalog whose `strata_credential` names it. Once it is set, even to `{}`, a name not listed is read-only. A write through a name the run may not write with fails before the run with `credential 'lab-bucket' is read-only on this server` or `... is not writable by '<principal>'`, and nothing is staged or written. An `rw` mount from a cell or from `notebook.toml` is checked, and so is one sent to a remote worker, before it is sent. A mount names a credential when its scheme has a default (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) as well as when it names its own, and both are checked, since the write uses both. An `rw` mount on `s3`, `gs` or `az` that names no credential, and whose scheme has no default, fails with `a read-write s3 mount must name the source it writes to with credential=<name>`, since it would write as the server's own identity. A `file://` mount is outside the setting. A run with no principal (personal mode) matches only `*`. Unset, every name writes. Reads and provenance are unchanged.
+- `STRATA_NOTEBOOK_CREDENTIAL_WRITERS='{"lab-bucket": ["user_*", "agent:agt_1/*"]}'` says who may write through a name, as glob patterns over the principal who started the run (`["*"]` is anyone). It gates three writes: an `rw` mount, a `# @sql connection=... write=true` cell whose connection names the credential, and a [`# @write_table`](https://bearingresearch.com/strata/dev/notebook/annotations/#write_table) into a catalog whose `strata_credential` names it. Once it is set, even to `{}`, a name not listed is read-only. A write through a name the run may not write with fails before the run with `credential 'lab-bucket' is read-only on this server` or `... is not writable by '<principal>'`, and nothing is staged or written. An `rw` mount from a cell or from `notebook.toml` is checked, and so is one sent to a remote worker, before it is sent. A mount names a credential when its scheme has a default (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) as well as when it names its own, and both are checked, since the write uses both. An `rw` mount on `s3`, `gs` or `az` that names no credential, and whose scheme has no default, fails with `a read-write s3 mount must name the source it writes to with credential=<name>`, since it would write as the server's own identity. A `file://` mount is outside the setting. A run with no principal (personal mode) matches only `*`. Unset, every name writes. Reads and provenance are unchanged.
 
 What these settings limit is what Strata stages and syncs back. A cell never receives a credential's resolved values from Strata: the manifest names a mount's local path, not its options. But a value can reach a cell another way, and then the cell can use it directly, whatever the settings say:
 
 - a `${VAR}` that resolves from the notebook's environment, which the cell also gets;
-- the server's environment, which reaches every cell unless `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` is set (a cell under a [harness user](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#who-a-cell-is-strata_notebook_harness_user) still cannot read the server's own environment through `/proc`);
+- the server's environment, which reaches every cell unless `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` is set (a cell under a [harness user](https://bearingresearch.com/strata/dev/deployment/service-mode/#who-a-cell-is-strata_notebook_harness_user) still cannot read the server's own environment through `/proc`);
 - on a remote worker, the variables its own credentials reference, under the same allowlist rule.
 
 So a credential is read-only in fact when its values come from the server's environment, the allowlist is set and leaves them out, and the notebook's environment does not hold them.
@@ -227,7 +227,7 @@ curl -X PUT "$STRATA/v1/admin/notebook-credentials" -H 'Content-Type: applicatio
   size threshold can ask.
 - Any other setting left out of the body is replaced by its default, as if unset.
 - `notebook_credential_read_cost` is dollars per GB for each name, the rate
-  [asking before a large read](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#asking-before-a-large-read)
+  [asking before a large read](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/#asking-before-a-large-read)
   uses. A rate that is not a number, or is negative, NaN or infinite, is
   refused with `422` naming the field, as it is at startup.
 - The next run uses the new settings, in a session opened before the call too. A
@@ -289,7 +289,7 @@ token_env = "STRATA_FLY_WORKER_TOKEN"
 | `name` | string (required) | Worker name referenced in `# @worker <name>` annotations. Must match `[a-zA-Z0-9][a-zA-Z0-9._-]*`. |
 | `backend` | `"local"` \| `"executor"` | Default `"local"`. `"executor"` for HTTP workers; `"local"` for in-process. |
 | `runtime_id` | string \| absent | Stable fingerprint hashed into cell provenance. Bump to invalidate the cache for cells using this worker. |
-| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"direct"` push, the default, or `"signed"` pull-model), `token` (literal - dev only), `token_env` (env var name - preferred), and for `"signed"` an optional `strata_url`, the server address the worker uses for the manifest's URLs (default: the server's own URL). See [Distributed Workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/). |
+| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"direct"` push, the default, or `"signed"` pull-model), `token` (literal - dev only), `token_env` (env var name - preferred), and for `"signed"` an optional `strata_url`, the server address the worker uses for the manifest's URLs (default: the server's own URL). See [Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/). |
 
 ## `[connections.<name>]` - Named database connections
 
@@ -318,7 +318,7 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 | `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become driver auth, underneath this block's own `auth`. |
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
 | (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... - interpreted by the driver adapter. |
-| `catalog` (DuckDB) | string \| absent | A REST or Glue catalog to attach under its name, from the server's catalogs or, in personal mode, this file's [`[catalogs.<name>]`](#notebook-catalogs); the query reads each of its tables at the snapshot the cell's provenance folds. See [DuckDB over the lake](https://bearingresearch.com/strata/dev/dev/notebook/cells/#duckdb-over-the-lake). |
+| `catalog` (DuckDB) | string \| absent | A REST or Glue catalog to attach under its name, from the server's catalogs or, in personal mode, this file's [`[catalogs.<name>]`](#notebook-catalogs); the query reads each of its tables at the snapshot the cell's provenance folds. See [DuckDB over the lake](https://bearingresearch.com/strata/dev/notebook/cells/#duckdb-over-the-lake). |
 | `mounts` (DuckDB) | list of strings \| absent | Mounts declared for the cell (`file`, `s3`, `gs` or `az`) to expose as views by name over their Parquet, CSV or JSON files. |
 
 **Malformed connection preservation.** If a `[connections.<name>]` block fails validation (bad name, missing `driver`, etc.), its body is written back verbatim under the same `[connections.<name>]` table on save, so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.
@@ -397,7 +397,7 @@ timeout = 600                 # cell-level override
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against - **not** `@name`. See [Cell IDs](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#cell-ids). |
+| `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against - **not** `@name`. See [Cell IDs](https://bearingresearch.com/strata/dev/notebook/annotations/#cell-ids). |
 | `file` | string (required) | Path to the cell source under `cells/`. The backend names it `<id>.py`, or `<id>.md`, `<id>.r` and `<id>.widget` for markdown, R and widget cells. |
 | `language` | `"python"` \| `"prompt"` \| `"sql"` \| `"markdown"` \| `"r"` \| `"widget"` | Default `"python"`. |
 | `order` | float | Display order. Float so cells can be inserted between existing ones without renumbering. Default `0`. |
@@ -420,7 +420,7 @@ When the same piece of metadata is declared in multiple places, the most specifi
 2. Cell-level `worker` / `timeout` / `env` in `[[cells]]`
 3. Notebook-level `worker` / `timeout` / `env` in the top-level table
 
-Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See [Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/).
+Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/).
 
 ## What lives elsewhere
 

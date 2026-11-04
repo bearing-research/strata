@@ -1,7 +1,7 @@
 # Lake-Aware Cells
 
 A **lake-aware cell** is a notebook cell that takes an Iceberg table as a
-versioned input via the [`@table`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#table) annotation. The
+versioned input via the [`@table`](https://bearingresearch.com/strata/dev/notebook/annotations/#table) annotation. The
 table's current snapshot id is folded into the cell's provenance, so **new
 data landing in the lake puts the cell out of date, its downstream cells go
 stale, and the normal cascade re-runs them** - no manual data-version
@@ -9,7 +9,7 @@ bookkeeping, no re-pointing paths.
 
 This page is the end-to-end walkthrough: build a tiny warehouse, scan it from
 a cell, retrain when new data arrives, and pin a snapshot for reproducibility.
-For the bare syntax, see the [`@table` reference](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#table).
+For the bare syntax, see the [`@table` reference](https://bearingresearch.com/strata/dev/notebook/annotations/#table).
 
 ## When to use it
 
@@ -24,7 +24,7 @@ If your input is a fixed file, a plain mount (`# @mount`) or a hard-coded path
 is simpler. `@table` earns its keep precisely when the snapshot can move.
 
 To query catalog tables in SQL rather than scan them from Python, a DuckDB
-[SQL cell over the lake](https://bearingresearch.com/strata/dev/dev/notebook/cells/#duckdb-over-the-lake) pins every table it
+[SQL cell over the lake](https://bearingresearch.com/strata/dev/notebook/cells/#duckdb-over-the-lake) pins every table it
 reads the same way, with no `@table` line.
 
 ## Prerequisites
@@ -42,7 +42,7 @@ Any Iceberg catalog works (local, S3, GCS, Azure). For this walkthrough, a
 local SQLite-catalog warehouse with one table. Run this once, outside the
 notebook. The catalog must be named `strata`: a warehouse URI always reads its
 SQL catalog under that name (see
-[Catalog](https://bearingresearch.com/strata/dev/dev/reference/configuration/#catalog)).
+[Catalog](https://bearingresearch.com/strata/dev/reference/configuration/#catalog)).
 
 ```python
 # setup_warehouse.py
@@ -81,7 +81,7 @@ The **table URI** is `<warehouse>#<namespace>.<table>` - here
 `file:///tmp/strata-demo/warehouse#shop.orders`. This is the same URI format
 `client.materialize` accepts. A table in a catalog the server names under
 `STRATA_CATALOGS` is written `<catalog>:<namespace>.<table>` instead (see the
-[`@table` reference](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#table)).
+[`@table` reference](https://bearingresearch.com/strata/dev/notebook/annotations/#table)).
 
 Strata finds a local warehouse's tables in `<warehouse>/catalog.db`. An object
 store (`s3://`, `gs://`, `abfs://`) has no such file, so set the catalog database
@@ -89,17 +89,17 @@ with `STRATA_CATALOG_URI`. Without it, a personal server keeps the catalog in
 SQLite at `STRATA_METADATA_DB` on its own disk, which no other reader of the
 bucket sees, and a service refuses the table, naming the setting. Either
 catalog reads the table's metadata with the server's own S3, GCS or Azure
-settings ([GCS](https://bearingresearch.com/strata/dev/dev/reference/configuration/#gcs-storage),
-[Azure](https://bearingresearch.com/strata/dev/dev/reference/configuration/#azure-storage), which also says when an
+settings ([GCS](https://bearingresearch.com/strata/dev/reference/configuration/#gcs-storage),
+[Azure](https://bearingresearch.com/strata/dev/reference/configuration/#azure-storage), which also says when an
 Azure table needs `adlfs`). A configured
 warehouse (`warehouse` in `catalog_properties` or in a named SQL catalog) in
 object storage with no `uri` stops the server at startup
-([Catalog settings](https://bearingresearch.com/strata/dev/dev/reference/configuration/#catalog)).
+([Catalog settings](https://bearingresearch.com/strata/dev/reference/configuration/#catalog)).
 
 ## Step 2 - Declare a lake-aware cell
 
 In a notebook cell, declare the table and scan it with the cell's
-[ambient `strata` client](https://bearingresearch.com/strata/dev/dev/notebook/cells/#the-ambient-strata-client), which is already
+[ambient `strata` client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client), which is already
 bound to the server. The `@table` annotation injects two variables: `orders`
 (the table URI) and `orders_snapshot` (the resolved snapshot id).
 
@@ -258,7 +258,7 @@ worker reached through signed URLs, a forced rerun of a build the server already
 stored is answered with that stored result, so its entry repeats the first run's
 figures. It follows the table index's rules: a failed run leaves the
 entry, and a cell that stops reading these inputs, or is deleted, drops out.
-Running a cell's [tests](https://bearingresearch.com/strata/dev/dev/notebook/testing/) reads its inputs too, so a test run
+Running a cell's [tests](https://bearingresearch.com/strata/dev/notebook/testing/) reads its inputs too, so a test run
 that was not refused replaces the entry as well.
 
 With a [read threshold](#asking-before-a-large-read) set, each entry also has
@@ -277,7 +277,7 @@ in the thresholds, the rates and the dialog alike. What would move is what the m
 sizes that are known; a table counts its snapshot's files, an upper bound. When
 that passes `STRATA_NOTEBOOK_CONFIRM_READ_BYTES`, or its cost at
 `STRATA_NOTEBOOK_CREDENTIAL_READ_COST`'s rate per GB (which a host can
-[replace while the server runs](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#changing-them-while-the-server-runs))
+[replace while the server runs](https://bearingresearch.com/strata/dev/reference/notebook-toml/#changing-them-while-the-server-runs))
 passes
 `STRATA_NOTEBOOK_CONFIRM_READ_COST`, nothing starts: the notebook lists those
 cells, their inputs, sizes and cost, and the host's
@@ -286,8 +286,8 @@ the whole run, Run All included, and running a cell's tests asks too. A ready
 cell is left out, since its run is a cache hit, unless its stored result has
 since been collected.
 
-![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](https://bearingresearch.com/strata/dev/dev/assets/read-confirm-light.png#only-light)
-![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](https://bearingresearch.com/strata/dev/dev/assets/read-confirm-dark.png#only-dark)
+![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](https://bearingresearch.com/strata/dev/assets/read-confirm-light.png#only-light)
+![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](https://bearingresearch.com/strata/dev/assets/read-confirm-dark.png#only-dark)
 
 A Run is kept per cell, machine and inputs (the mount listings, table snapshots
 and fetch URLs), so a rerun on the same machine does not ask again, while new
@@ -296,8 +296,8 @@ table with no snapshot yet, counts by its name rather than its contents. A worke
 somewhere else, or a changed threshold or rate, asks again. A run that cannot ask goes ahead and its reads
 index entry says `not_asked`: a headless `strata run`, the CLI, and REST or MCP
 runs that do not pass `confirm_reads` (see
-[Execute Cell](https://bearingresearch.com/strata/dev/dev/reference/rest-api/#execute-cell-rest) and
-[MCP](https://bearingresearch.com/strata/dev/dev/notebook/mcp/)). Nothing is ever refused for its size.
+[Execute Cell](https://bearingresearch.com/strata/dev/reference/rest-api/#execute-cell-rest) and
+[MCP](https://bearingresearch.com/strata/dev/notebook/mcp/)). Nothing is ever refused for its size.
 
 The question comes before a cell's cache is checked, so a stale cell whose
 result turns out to be cached may still ask; asking is the safe direction.
@@ -348,7 +348,7 @@ result turns out to be cached may still ask; asking is the safe direction.
 
 ## See also
 
-- [`@table` annotation reference](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#table) - the syntax surface.
-- [Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/) - all per-cell annotations.
-- [Core Quickstart](https://bearingresearch.com/strata/dev/dev/getting-started/core/) - `client.materialize` and
+- [`@table` annotation reference](https://bearingresearch.com/strata/dev/notebook/annotations/#table) - the syntax surface.
+- [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/) - all per-cell annotations.
+- [Core Quickstart](https://bearingresearch.com/strata/dev/getting-started/core/) - `client.materialize` and
   `scan@v1` from the SDK directly, without the notebook.

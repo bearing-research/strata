@@ -19,7 +19,7 @@ resolved = client.resolve_name("taxi/tip-model")
 
 A named version is also kept: the store's retention sweep collects only what
 nothing holds, and an unnamed result is a cache entry that may be computed again
-later. See [Cleaning up the Core artifact store](https://bearingresearch.com/strata/dev/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store).
+later. See [Cleaning up the Core artifact store](https://bearingresearch.com/strata/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store).
 
 Slash-namespaced names (`team/dataset/raw`) are the natural convention and
 fully supported. A name tracks "the latest blessed build of this line";
@@ -140,7 +140,7 @@ gates are inert. Resolving names/aliases is a tenant-scoped read in service
 mode; *publishing* them (`set_name` / `set_alias`, or `name=` on a
 materialize) requires opting into
 `service_writes_enabled` and holding the `artifacts:write` scope - see
-[Service Mode → shared research store](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
+[Service Mode → shared research store](https://bearingresearch.com/strata/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
 
 ## The promotion flow, end to end
 
@@ -157,7 +157,7 @@ move = client.set_alias("taxi/tip-model", "champion", model_art.artifact_id, mod
 print(move.get("status", "applied"))  # "applied" | "pending" | "unchanged"
 ```
 
-New data lands in the lake → the [`@table` annotation](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#table)
+New data lands in the lake → the [`@table` annotation](https://bearingresearch.com/strata/dev/notebook/annotations/#table)
 makes the training cells stale → the pipeline re-runs → promote proposes the
 challenger → a human approves → and the whole history is reconstructible:
 
@@ -179,11 +179,11 @@ local one.
 
 !!! tip "New to it? Start with the walkthrough"
     For a click-by-click guide - publish from a cell → promote → approve →
-    lineage - see [**Registry Dashboard**](https://bearingresearch.com/strata/dev/dev/notebook/registry-dashboard/).
+    lineage - see [**Registry Dashboard**](https://bearingresearch.com/strata/dev/notebook/registry-dashboard/).
     The rest of this section is the reference for what each piece does.
 
 **Publishing.** Inside a cell, the [ambient `strata`
-client](https://bearingresearch.com/strata/dev/dev/notebook/cells/#the-ambient-strata-client) publishes with a name:
+client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client) publishes with a name:
 
 ```python
 art = strata.put(

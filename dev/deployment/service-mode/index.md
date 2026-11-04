@@ -14,7 +14,7 @@ through a network. It's the right mode when:
   publish directly to a shared store with `service_writes_enabled`
   (the [shared research store](#authenticated-write-back-the-shared-research-store)).
 
-For one person, use [personal mode](https://bearingresearch.com/strata/dev/dev/deployment/modes/#personal-mode). A team can
+For one person, use [personal mode](https://bearingresearch.com/strata/dev/deployment/modes/#personal-mode). A team can
 also give each member a personal server and share results through a
 service-mode store; see
 [Connecting a notebook to the shared store](#connecting-a-notebook-to-the-shared-store).
@@ -94,7 +94,7 @@ server no proxy fronts: `strata apikey create` issues one, and the key
 carries its own principal, tenant and scopes. A trusted-proxy server
 ignores them, so machine callers (a CI job, an ETL service) of a proxied
 server go through the proxy like everyone else. See
-[Configuration → API keys](https://bearingresearch.com/strata/dev/dev/reference/configuration/#api-key-authentication).
+[Configuration → API keys](https://bearingresearch.com/strata/dev/reference/configuration/#api-key-authentication).
 
 3. **Is the only path to Strata.** Strata is on a private network /
    VPC / Kubernetes namespace; the proxy is the only ingress.
@@ -200,7 +200,7 @@ one machine; set `STRATA_ARTIFACT_METADATA_DSN` to put it on Postgres
 instead. A DSN with `STRATA_ARTIFACT_BLOB_BACKEND=local` is rejected at
 startup for the same reason: shared metadata pointing at blobs only one
 node can read is worse than either alone. See
-[Configuration → artifact metadata](https://bearingresearch.com/strata/dev/dev/reference/configuration/#sharing-one-artifact-store-across-nodes)
+[Configuration → artifact metadata](https://bearingresearch.com/strata/dev/reference/configuration/#sharing-one-artifact-store-across-nodes)
 for the settings and `strata migrate` for moving an existing store
 across, and [Running more than one replica](#running-more-than-one-replica)
 for what else the nodes must share.
@@ -250,7 +250,7 @@ Compared to personal mode:
   `STRATA_ARTIFACT_METADATA_DSN`, otherwise `artifacts.sqlite` in the
   artifact directory) holds artifact metadata, names, aliases,
   publications, pins, API keys and the server-managed
-  [worker registry](https://bearingresearch.com/strata/dev/dev/notebook/workers/#server-managed-workers).
+  [worker registry](https://bearingresearch.com/strata/dev/notebook/workers/#server-managed-workers).
   The *blob store* holds artifact bytes: the configured bucket, or
   `blobs/` in the artifact directory with the local backend. Notebooks
   live in `STRATA_NOTEBOOK_STORAGE_DIR`. Back up those three. The
@@ -295,7 +295,7 @@ everything durable:
   `/v1/admin/notebook-workers` on one node is offered by every node from
   its next request. Each node can hold up to 41 connections to the
   database, so size its `max_connections` for every node at once (see
-  [Sharing one artifact store](https://bearingresearch.com/strata/dev/dev/reference/configuration/#sharing-one-artifact-store-across-nodes)).
+  [Sharing one artifact store](https://bearingresearch.com/strata/dev/reference/configuration/#sharing-one-artifact-store-across-nodes)).
 - **One notebook storage.** Every node mounts the same
   `STRATA_NOTEBOOK_STORAGE_DIR` (NFS, EFS, Filestore or similar), so any
   node can open any notebook. A notebook's environment is built inside
@@ -306,7 +306,7 @@ everything durable:
   signed on one node fails on another. Set `STRATA_NODE_ADVERTISED_URL`
   per node to its own address, so stream fetches and a remote cell's
   console reach the right node (see
-  [Running several nodes](https://bearingresearch.com/strata/dev/dev/reference/configuration/#running-several-nodes-behind-one-address)).
+  [Running several nodes](https://bearingresearch.com/strata/dev/reference/configuration/#running-several-nodes-behind-one-address)).
 - **Session-affine routing.** A notebook session, which
   `POST /v1/notebooks/open` or `/create` returns, lives in the memory of
   the node that opened it, together with its WebSocket and running
@@ -436,7 +436,7 @@ auth (`admin:*` satisfies any of them):
 | `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/stats`, `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` |
 | `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
 | `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload); a personal server, which has no principal auth, serves them to whoever can reach it |
-| `admin:notebook-credentials` | `GET` and `PUT /v1/admin/notebook-credentials`, a running server's named credentials and catalogs (see [Changing them while the server runs](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#changing-them-while-the-server-runs)) |
+| `admin:notebook-credentials` | `GET` and `PUT /v1/admin/notebook-credentials`, a running server's named credentials and catalogs (see [Changing them while the server runs](https://bearingresearch.com/strata/dev/reference/notebook-toml/#changing-them-while-the-server-runs)) |
 | `admin:notebooks` | Quiescing a notebook or project and releasing it (`POST /v1/notebooks/{id}/quiesce` and `/release`, `POST /v1/projects/{path}/quiesce` and `/release`) |
 | `admin:*` | Garbage collection over the whole store, another tenant or the tenantless rows (`POST /v1/artifacts/gc`), reading another tenant's `GET /v1/artifacts/usage` / `stats`, the server-wide log buffer (`GET /v1/logs`, `GET /v1/logs/stream`), per-table metrics (`GET /metrics/tables*`), and the process diagnostics under `/v1/debug/*` (latency, GC pauses, pools, connections, memory, rate limits) |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
@@ -613,7 +613,7 @@ What to know before switching it on:
   it does not look like the cache is simply empty.
 - **It never fails a cell.** A store that is unreachable, refusing, or missing
   one of a cell's outputs ends in "run it locally".
-- **A [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder travels
+- **A [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder travels
   with its files.** A publish offers each file the folder names, one blob each
   under its own provenance key (a file the store already holds is not sent
   again), then the manifest naming where each landed. A pull fetches every file
@@ -838,7 +838,7 @@ than that wants a worker on another machine.
 
 A cell's ambient `strata` client reaches this server with a token the server
 hands each run on the harness's stdin (see
-[the ambient client](https://bearingresearch.com/strata/dev/dev/notebook/cells/#the-ambient-strata-client)), which
+[the ambient client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client)), which
 stands in for the proxy token (or, under `api_key`, the key) on the client's
 routes, plus promoting into its own session, and stops working when the run
 ends. A request with it acts as whoever started the run, without their
@@ -920,8 +920,8 @@ environment, which would otherwise go to whatever host the notebook names; a
 secret the server holds reaches a connection only as a named `credential`.
 `STRATA_NOTEBOOK_CREDENTIAL_PATHS` keeps a named credential to the notebooks
 under some directories, and `STRATA_NOTEBOOK_CREDENTIAL_WRITERS` says who may
-mount one read-write (see [Configuration](https://bearingresearch.com/strata/dev/dev/reference/configuration/#notebook)
-and [Named credentials](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#named-credentials)).
+mount one read-write (see [Configuration](https://bearingresearch.com/strata/dev/reference/configuration/#notebook)
+and [Named credentials](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials)).
 
 Prompt cells call their model from the server process too, and show the author
 what came back. A `base_url` from the notebook's `[ai]` section is checked like
@@ -1019,7 +1019,7 @@ If you've been running personal mode and want to grow into service:
    one of `STRATA_ARTIFACT_BLOB_BACKEND=s3|gcs|azure` and the
    matching credentials, and keep `STRATA_ARTIFACT_DIR` set: service
    mode refuses a non-local blob backend without it. See
-   [Artifact Storage](https://bearingresearch.com/strata/dev/dev/reference/configuration/#artifact-storage).
+   [Artifact Storage](https://bearingresearch.com/strata/dev/reference/configuration/#artifact-storage).
 
 3. **Flip the mode** in env or `pyproject.toml`:
    ```bash

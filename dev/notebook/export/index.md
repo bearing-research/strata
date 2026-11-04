@@ -14,7 +14,7 @@ with **no runtime dependency** on the recipient's end.
 - **Archive a notebook's state at a moment in time.** Re-runs change
   outputs; an exported file captures what *this* run produced.
 - **Auto-generate documentation.** The docs site you're reading right
-  now generates the [Examples catalog](https://bearingresearch.com/strata/dev/dev/notebook/examples/) by running
+  now generates the [Examples catalog](https://bearingresearch.com/strata/dev/notebook/examples/) by running
   `strata export` against every `examples/*/` at mkdocs build time.
 
 For exports inside the notebook UI itself, click the **Export** button
@@ -61,7 +61,7 @@ strata export ./my_analysis --app-view --to html --out dashboard.html
 A regular export is a **document** view - it shows every cell's *source*
 alongside its outputs, for reading or archiving the notebook. An
 app-view snapshot is a **dashboard** view: it renders only what the
-[read-only app view](https://bearingresearch.com/strata/dev/dev/notebook/cells/#app-view) shows - widget panels (as their
+[read-only app view](https://bearingresearch.com/strata/dev/notebook/cells/#app-view) shows - widget panels (as their
 current control values), markdown, and display outputs - with **no cell
 sources, chips, or console**.
 
@@ -96,7 +96,7 @@ For each cell, the exporter emits in order:
     - **PNG images** inline as `data:` URLs, loaded lazily from the
       artifact store when needed.
     - **JSON / dict / list** as fenced JSON.
-    - **Markdown** (including an [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir)
+    - **Markdown** (including an [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir)
       folder's summary) rendered as content in markdown exports and as
       preformatted text in HTML.
     - **Pickled** values become a placeholder with the type hint
@@ -167,12 +167,12 @@ format.
 ## Snapshots
 
 `--to snapshot` writes a zip rather than a rendering: the committed files
-(exactly the [committed set](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#what-to-commit),
+(exactly the [committed set](https://bearingresearch.com/strata/dev/reference/notebook-toml/#what-to-commit),
 cell tests and `.gitignore` included), the per-cell runtime state (including each cell's last failure and the source it
 was about, and what a widget's controls were set to), and as many artifact
 bytes as you ask for. `strata
 import <file>.zip` unpacks one back into a notebook directory (see
-[Importing a snapshot](https://bearingresearch.com/strata/dev/dev/notebook/import/#importing-a-snapshot)).
+[Importing a snapshot](https://bearingresearch.com/strata/dev/notebook/import/#importing-a-snapshot)).
 
 What travels is `--include`:
 
@@ -184,7 +184,7 @@ What travels is `--include`:
 
 A carried loop cell brings every stored iteration (`@iter=k`) with it, so a
 cell that forks from one with `start_from` still runs after an import. A carried
-[`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder brings the version of each
+[`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder brings the version of each
 file its manifest names, which need not be the file's latest.
 
 ```bash
@@ -211,7 +211,7 @@ The docs site uses a small mkdocs hook
 notebook at build time. The hook calls `export_notebook` directly:
 no CLI process is spawned. Generated pages are gitignored and
 regenerated on every build. The hand-written
-[Examples catalog](https://bearingresearch.com/strata/dev/dev/notebook/examples/) provides the feature-grouped table of
+[Examples catalog](https://bearingresearch.com/strata/dev/notebook/examples/) provides the feature-grouped table of
 contents.
 
 To run something similar on your own docs build, the simplest

@@ -5,9 +5,9 @@ server or opening the UI. Useful for CI, scheduled jobs, and sanity-checking
 that a notebook still works after a dependency bump.
 
 For rendering a notebook to a shareable markdown or HTML file (without
-executing anything), see [Export](https://bearingresearch.com/strata/dev/dev/notebook/export/) and its `strata export`
+executing anything), see [Export](https://bearingresearch.com/strata/dev/notebook/export/) and its `strata export`
 sibling command. For converting an existing Jupyter `.ipynb` into a
-Strata notebook directory, see [Import from Jupyter](https://bearingresearch.com/strata/dev/dev/notebook/import/) and
+Strata notebook directory, see [Import from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/) and
 its `strata import` sibling.
 
 It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
@@ -119,7 +119,7 @@ the expected artifacts.
 - **No interactive prompts.** A cascade that would pop a confirmation in the
   UI just runs, the CLI treats every cell as "confirmed."
 - **No large-read question.** With a
-  [read threshold](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#asking-before-a-large-read) set, the CLI
+  [read threshold](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/#asking-before-a-large-read) set, the CLI
   never asks: `strata run` and `strata cell run` (`--server` included) go
   ahead, and `.strata/reads/index.json` records the read as `not_asked`.
 
@@ -160,7 +160,7 @@ intended) and its `diagnostics` with `severity` / `code` / `message` /
 The intended loop for scripts and coding agents: **write files → validate →
 fix → run**. Validation is cheap enough to call after every edit; `strata
 run` is the expensive step. See
-[Authoring Notebooks Programmatically](https://bearingresearch.com/strata/dev/dev/notebook/agent-authoring/).
+[Authoring Notebooks Programmatically](https://bearingresearch.com/strata/dev/notebook/agent-authoring/).
 
 ## `strata new`
 
@@ -187,7 +187,7 @@ cell, so cells read project files as `open(project / "file")` without absolute
 paths, even though a cell runs in the notebook's `work/` directory. The mount is **pinned**, so it never gets fingerprinted (no directory
 hashing, and the project's own churn never re-stales cells). This is the
 scratchpad-friendly default when the notebook lives in a subdirectory of a
-project (see [the notebook as an agent's scratchpad](https://bearingresearch.com/strata/dev/dev/notebook/scratchpad/)).
+project (see [the notebook as an agent's scratchpad](https://bearingresearch.com/strata/dev/notebook/scratchpad/)).
 
 ## Inspecting a notebook (`cell`, `dag`, `status`)
 
@@ -250,7 +250,7 @@ strata status    --server http://localhost:8765 --session $SID
 `strata agent` prints it when it starts; without that, `POST
 /v1/notebooks/open` with the notebook's path returns it as `session_id`, and
 `GET /v1/notebooks/sessions` lists the open ones (see the
-[REST API](https://bearingresearch.com/strata/dev/dev/reference/rest-api/#open-notebook)). The output is identical to the local backend - both project the same wire shape - so
+[REST API](https://bearingresearch.com/strata/dev/reference/rest-api/#open-notebook)). The output is identical to the local backend - both project the same wire shape - so
 a script written against a local notebook works unchanged against a live session.
 `cell run` / `cell test` and the authoring commands accept the same selector
 (see below), so the entire surface works against a live session. `cell cancel`
@@ -281,7 +281,7 @@ by default; `--rerun` bypasses the target's cache, `--force` runs against
 whatever upstream artifacts already exist). `--init RELEASE` starts a normal
 run from an accepted checkpoint's parts (`strata.restore()` returns them) as a
 branch under its own provenance key; see
-[checkpoints](https://bearingresearch.com/strata/dev/dev/notebook/cells/#checkpoints-stratacheckpoint-stratarestore-stratahead). `cell test` runs the cell's
+[checkpoints](https://bearingresearch.com/strata/dev/notebook/cells/#checkpoints-stratacheckpoint-stratarestore-stratahead). `cell test` runs the cell's
 `cells/{cell_id}.test.py` via pytest and reports per-test outcomes; pass
 `--file tests.py` (or `-` for stdin) to **set** the cell's test source first and
 then run it - the one cell-test affordance that previously required editing the
@@ -351,12 +351,12 @@ scratchpad primitive), and the run outcome (`status`, `cache_hit`, `stdout`,
 `stderr`) is folded into the output under `run`. The returned cell is the
 **post-run** view, so its rendered `outputs` (a trailing bare expression's value)
 ride along without a separate `cell show` (`--no-sync` skips the venv sync, as
-with `cell run`). `cell annotate` splices `# @key` [annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/) into a
+with `cell run`). `cell annotate` splices `# @key` [annotations](https://bearingresearch.com/strata/dev/notebook/annotations/) into a
 cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with `edit`;
 it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit
 the source directly for repeatable `mount` / `table` / `env`. `cell pin-fetch`
-pins a cell's [`@fetch`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#fetch) inputs: it writes `sha256=` with
+pins a cell's [`@fetch`](https://bearingresearch.com/strata/dev/notebook/annotations/#fetch) inputs: it writes `sha256=` with
 the digest of the bytes the notebook last downloaded into each named fetch line
 (every fetch in the cell when no name is given) and prints the cell and a
 `pinned` list of `{name, url, sha256}`. It reads the notebook's own fetch
@@ -383,7 +383,7 @@ Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
 run/test`), this is the full agent surface - and **all of it** works either
 offline against a directory or `--server/--session` against a running server. An
 MCP server wrapping the same operations is also available; see
-[MCP Server](https://bearingresearch.com/strata/dev/dev/notebook/mcp/), or [`strata agent`](https://bearingresearch.com/strata/dev/dev/notebook/agent/) for the one-command on-ramp
+[MCP Server](https://bearingresearch.com/strata/dev/notebook/mcp/), or [`strata agent`](https://bearingresearch.com/strata/dev/notebook/agent/) for the one-command on-ramp
 that stands it up and points a coding agent at a live session.
 
 ## Workers (`strata worker`)
@@ -391,5 +391,5 @@ that stands it up and points a coding agent at a live session.
 `strata worker ls|add|rm|default <notebook_dir> ...` edits the notebook's
 `[[workers]]` block, and `strata worker add-ssh|rm-ssh` connects a box you reach
 over SSH to a running server. See
-[Registering workers from the CLI](https://bearingresearch.com/strata/dev/dev/notebook/workers/#from-the-cli) and
-[Run cells on a machine you can SSH to](https://bearingresearch.com/strata/dev/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to).
+[Registering workers from the CLI](https://bearingresearch.com/strata/dev/notebook/workers/#from-the-cli) and
+[Run cells on a machine you can SSH to](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to).

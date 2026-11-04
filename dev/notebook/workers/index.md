@@ -20,11 +20,11 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 4. The worker runs the cell in a subprocess and returns outputs as a gzipped bundle.
 5. Strata stores the outputs as artifacts; cache hits work identically to local cells.
 
-Cells run in **the notebook's locked environment** on a `strata-worker` of this version or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as `locked_environments` in `/health`, and says `false` when `uv` is not on its `PATH`. A worker that answers without it (an older `strata-worker`, one without `uv`, or a custom worker; a `404` on `/health` counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a `5xx` on `/health`) is refused for a notebook that has a `uv.lock`, rather than running the cell in an environment its provenance would not describe. Either way the worker process does **not** require a uv-managed env - it can be pip-installed into a plain Docker image. See [the `environment` block](https://bearingresearch.com/strata/dev/dev/reference/executor-protocol/#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
+Cells run in **the notebook's locked environment** on a `strata-worker` of this version or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as `locked_environments` in `/health`, and says `false` when `uv` is not on its `PATH`. A worker that answers without it (an older `strata-worker`, one without `uv`, or a custom worker; a `404` on `/health` counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a `5xx` on `/health`) is refused for a notebook that has a `uv.lock`, rather than running the cell in an environment its provenance would not describe. Either way the worker process does **not** require a uv-managed env - it can be pip-installed into a plain Docker image. See [the `environment` block](https://bearingresearch.com/strata/dev/reference/executor-protocol/#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
 
-R cells work the same way with the notebook's `renv.lock`: the worker restores it with `renv` into one library per lock and R build, reuses it for every later R cell with that lock, and runs the cell with that library first on R's library path. It advertises this as `locked_r_environments`, `true` when its R can load `renv`; a notebook with an `renv.lock` is refused on a worker that cannot be asked, as above. See [the R `environment` block](https://bearingresearch.com/strata/dev/dev/reference/executor-protocol/#the-r-environment-block).
+R cells work the same way with the notebook's `renv.lock`: the worker restores it with `renv` into one library per lock and R build, reuses it for every later R cell with that lock, and runs the cell with that library first on R's library path. It advertises this as `locked_r_environments`, `true` when its R can load `renv`; a notebook with an `renv.lock` is refused on a worker that cannot be asked, as above. See [the R `environment` block](https://bearingresearch.com/strata/dev/reference/executor-protocol/#the-r-environment-block).
 
-For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the [Executor Protocol](https://bearingresearch.com/strata/dev/dev/reference/executor-protocol/) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
+For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the [Executor Protocol](https://bearingresearch.com/strata/dev/reference/executor-protocol/) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
 
 ## Quick start: run a worker locally
 
@@ -151,13 +151,13 @@ strata-worker --connect wss://relay.example.com/connect
 
 Register the worker at the URL the relay gives it, for example `config.url = "https://relay.example.com/w/abc/v1/execute"`, with `token_env` naming the worker token as usual. The relay token is read only from the environment, never from a flag, because the cells the worker runs could read its command line; it is removed from the environment at startup like the worker token. The worker reconnects with backoff when the connection drops, and exits with status 1 if the relay refuses the token.
 
-Strata does not ship a relay. A relay is a small service that accepts the worker's WebSocket and forwards HTTP requests over it; the [Worker Relay Protocol](https://bearingresearch.com/strata/dev/dev/reference/worker-connect/) specifies it. A `signed` worker still fetches its inputs and posts its console to the server's signed URLs directly, so it needs outbound reach to them; a `direct` worker needs only the relay.
+Strata does not ship a relay. A relay is a small service that accepts the worker's WebSocket and forwards HTTP requests over it; the [Worker Relay Protocol](https://bearingresearch.com/strata/dev/reference/worker-connect/) specifies it. A `signed` worker still fetches its inputs and posts its console to the server's signed URLs directly, so it needs outbound reach to them; a `direct` worker needs only the relay.
 
 ## Run cells on a machine you can SSH to
 
 If you have a box you reach over SSH (a GPU machine, a bigger instance, one closer to the data), Strata can turn it into a worker for you in one step, without you deploying anything or hand-editing `notebook.toml`. Strata SSHes in, installs `strata-worker` if it's missing, launches it bound to the box's localhost, opens an `ssh -L` tunnel back to the notebook server, and registers it as a `direct`-transport worker. Cells then run on that box, cached by provenance like any other worker.
 
-**Driving a coding agent (the common case).** When you're driving the notebook with a coding agent ([Drive with a Coding Agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/)), tell it the target and it calls the `connect_ssh_worker` MCP tool:
+**Driving a coding agent (the common case).** When you're driving the notebook with a coding agent ([Drive with a Coding Agent](https://bearingresearch.com/strata/dev/notebook/agent/)), tell it the target and it calls the `connect_ssh_worker` MCP tool:
 
 ```
 You: use ssh user@gpu-box for the training cells
@@ -185,7 +185,7 @@ strata worker rm-ssh gpu-box --server http://localhost:8765 --session <session-i
 - **Key-based SSH only.** Strata runs `ssh` in batch mode and never handles passwords, so the target must authenticate non-interactively (an agent/key that works when you run `ssh user@gpu-box` yourself). A `user@host`, a bare `host`, or an `~/.ssh/config` alias all work.
 - **The first connect can take a minute** while it installs `strata-worker` on the box (via `uv tool install`); a reconnect skips the install, but it starts a fresh worker rather than adopting one already running.
 - **Security.** The worker binds the box's `127.0.0.1` (never a public port) and is reachable only through the authenticated SSH tunnel. A per-worker bearer token is generated for defense-in-depth; it's held in the notebook server's memory and **never written to `notebook.toml`**. Each launch also hands the worker a one-off `launch_id` (over stdin, like the token), and Strata connects only when `/health` through the tunnel reports it, so another process already listening on the box's port never receives the token.
-- **A remote cell runs on the box's filesystem.** Absolute paths in the cell resolve there, not on your machine, and a `file://` mount is refused on any remote worker, and cloud mounts use the box's own credentials. A mount's `options` may set only the [non-secret keys a shared server allows](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#mount-options-on-a-shared-server), so an endpoint or a profile goes in the box's `STRATA_NOTEBOOK_CREDENTIALS`. The box keeps its read-only mount copies across jobs, in `STRATA_NOTEBOOK_MOUNT_CACHE_DIR` (default `~/.strata/mount_cache`), bounded by the same two settings as the server's. Results are cached under the remote environment's identity, so they don't collide with local runs.
+- **A remote cell runs on the box's filesystem.** Absolute paths in the cell resolve there, not on your machine, and a `file://` mount is refused on any remote worker, and cloud mounts use the box's own credentials. A mount's `options` may set only the [non-secret keys a shared server allows](https://bearingresearch.com/strata/dev/reference/notebook-toml/#mount-options-on-a-shared-server), so an endpoint or a profile goes in the box's `STRATA_NOTEBOOK_CREDENTIALS`. The box keeps its read-only mount copies across jobs, in `STRATA_NOTEBOOK_MOUNT_CACHE_DIR` (default `~/.strata/mount_cache`), bounded by the same two settings as the server's. Results are cached under the remote environment's identity, so they don't collide with local runs.
 
 ## Deploy to the cloud
 
@@ -383,7 +383,7 @@ transport = "direct"
 ## Worker pools: a different layer
 
 Everything above is a worker **you** run and **the notebook** dispatches to.
-[`strata-pool`](https://bearingresearch.com/strata/dev/dev/notebook/worker-pool/) is a separate package that hands out machines
+[`strata-pool`](https://bearingresearch.com/strata/dev/notebook/worker-pool/) is a separate package that hands out machines
 on demand instead - starting one when no warm machine of that type is free,
 holding it for a tenant, and stopping it when the work finishes.
 
@@ -448,7 +448,7 @@ pick up local worker changes; build a wheel for that. The container refuses to s
 without `STRATA_WORKER_TOKEN`, since it binds `0.0.0.0`; the pool mints one per
 machine, and you set it yourself to run the image by hand.
 
-See [Worker Pool](https://bearingresearch.com/strata/dev/dev/notebook/worker-pool/) for machine types, dispatch, the HTTP
+See [Worker Pool](https://bearingresearch.com/strata/dev/notebook/worker-pool/) for machine types, dispatch, the HTTP
 service, and the isolation model.
 
 ## Registering workers
@@ -456,8 +456,8 @@ service, and the isolation model.
 Workers live in `notebook.toml` under `[[workers]]`. You can add them through the **Workers panel** under **Notebook settings** in the sidebar (which writes the same TOML) or edit the file directly:
 
 
-![The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes.](https://bearingresearch.com/strata/dev/dev/assets/workers-panel-light.png#only-light)
-![The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes.](https://bearingresearch.com/strata/dev/dev/assets/workers-panel-dark.png#only-dark)
+![The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes.](https://bearingresearch.com/strata/dev/assets/workers-panel-light.png#only-light)
+![The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes.](https://bearingresearch.com/strata/dev/assets/workers-panel-dark.png#only-dark)
 
 | Field | Description |
 | --- | --- |
@@ -508,7 +508,7 @@ strata worker rm ./my-notebook fly-cpu
 
 ### Signed workers and private hosts
 
-A `signed` (pull) worker fetches its inputs from, and uploads its result to, the URLs in the manifest, so it refuses any manifest URL whose host resolves to a private, loopback, link-local or other non-public address (`100.64.0.0/10` included). A Strata server on your own network or tailnet trips this. Name its host in `STRATA_WORKER_ALLOWED_HOSTS` on the worker, or set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to turn the check off (local dev). Those connections also ignore `HTTPS_PROXY`, so a worker that reaches the server only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`. See [Worker configuration](https://bearingresearch.com/strata/dev/dev/reference/configuration/#worker).
+A `signed` (pull) worker fetches its inputs from, and uploads its result to, the URLs in the manifest, so it refuses any manifest URL whose host resolves to a private, loopback, link-local or other non-public address (`100.64.0.0/10` included). A Strata server on your own network or tailnet trips this. Name its host in `STRATA_WORKER_ALLOWED_HOSTS` on the worker, or set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to turn the check off (local dev). Those connections also ignore `HTTPS_PROXY`, so a worker that reaches the server only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`. See [Worker configuration](https://bearingresearch.com/strata/dev/reference/configuration/#worker).
 
 ### Server-managed workers
 
@@ -671,9 +671,9 @@ embeddings = model.encode(abstracts, batch_size=256)
 
 The worker annotation is the **only** change needed; the cell code itself is identical to local execution. On a worker that runs locked environments the cell gets the notebook's own packages; on one that does not, the worker's image needs them installed.
 
-A [loop cell](https://bearingresearch.com/strata/dev/dev/notebook/cells/#loop-cells) is the exception: it runs only on the notebook's own server, so a `# @loop` cell sent to a remote worker (by its `# @worker` or the notebook's default) fails before it starts. Give it `# @worker local`, or run the part that needs the worker in an ordinary cell.
+A [loop cell](https://bearingresearch.com/strata/dev/notebook/cells/#loop-cells) is the exception: it runs only on the notebook's own server, so a `# @loop` cell sent to a remote worker (by its `# @worker` or the notebook's default) fails before it starts. Give it `# @worker local`, or run the part that needs the worker in an ordinary cell.
 
-A worker cell runs in a `work/` directory made for the run and removed with it, so a file it writes by a relative path does not come back. To keep files from a worker run, write them to an [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder, which the worker returns with the result. A worker whose `/health` does not advertise `output_dirs` (or `folder_inputs`, for a cell that reads another cell's folder), or that cannot be asked, is refused before the cell runs.
+A worker cell runs in a `work/` directory made for the run and removed with it, so a file it writes by a relative path does not come back. To keep files from a worker run, write them to an [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder, which the worker returns with the result. A worker whose `/health` does not advertise `output_dirs` (or `folder_inputs`, for a cell that reads another cell's folder), or that cannot be asked, is refused before the cell runs.
 
 ### Precedence
 

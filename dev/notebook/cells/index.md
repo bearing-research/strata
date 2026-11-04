@@ -14,7 +14,7 @@ Strata Notebook has seven cell kinds:
 
 Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; this page walks through each.
 
-See [Concepts](https://bearingresearch.com/strata/dev/dev/notebook/concepts/) for the execution model; see [Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/) for the full per-annotation reference.
+See [Concepts](https://bearingresearch.com/strata/dev/notebook/concepts/) for the execution model; see [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/) for the full per-annotation reference.
 
 ---
 
@@ -81,7 +81,7 @@ on promote for its own notebook session; any other route answers 403. The token
 stops working when the run ends. Run All uses one token for the whole batch.
 On any server the client also sends the run's token and its cell id so the
 server can count what the cell's scans read from storage for the
-[reads index](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#what-a-run-moved); where callers are not
+[reads index](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/#what-a-run-moved); where callers are not
 authenticated, the token grants nothing.
 
 `strata.promote()` sends an upstream result, and the whole chain behind it, to
@@ -94,7 +94,7 @@ strata.promote("rows", name="taxi/rows", alias="champion")
 ```
 
 This is the deliberate half of
-[`STRATA_NOTEBOOK_TEAM_CACHE_PUBLISH`](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#sharing-on-purpose-promoted-and-strata-artifact-promote):
+[`STRATA_NOTEBOOK_TEAM_CACHE_PUBLISH`](https://bearingresearch.com/strata/dev/deployment/service-mode/#sharing-on-purpose-promoted-and-strata-artifact-promote):
 under `promoted`, nothing reaches the team on its own and this is how something
 does. It needs a team store configured (`STRATA_NOTEBOOK_REMOTE_STORE_URL`) and
 raises if there is none. Only *upstream* results can be promoted from inside a
@@ -105,7 +105,7 @@ The ambient client points at this server, never at the team store, and it
 carries no team-store credential. When a cell publishes with a name
 (`strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")`), the
 artifact lands in the notebook's own store and reaches the team by promotion.
-It appears in the [registry dashboard](https://bearingresearch.com/strata/dev/dev/core/registry/#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).
+It appears in the [registry dashboard](https://bearingresearch.com/strata/dev/core/registry/#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).
 
 > Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op). A cell that stores no variable is cached too, keyed on its own provenance, so a cell whose whole point is the side effect needs `# @nocache` to re-fire.
 
@@ -260,7 +260,7 @@ The synthetic module is built from one cell's source only, with no transitive co
 
 One concession: annotations that reference names outside the slice would normally block, but adding `from __future__ import annotations` relaxes this. PEP 563 stringifies annotations and the free-variable check drops them, so cross-cell type hints "just work" with the future import.
 
-Walked through end-to-end in the [`library_cells`](https://bearingresearch.com/strata/dev/dev/examples/library_cells/) example notebook.
+Walked through end-to-end in the [`library_cells`](https://bearingresearch.com/strata/dev/examples/library_cells/) example notebook.
 
 ### Mutation warnings
 
@@ -283,7 +283,7 @@ A cell runs in its notebook's `work/` directory, not beside `notebook.toml`. A f
 
 A file beside the notebook is one directory up: read it as `../data.csv`. A Python cell that opens `data.csv` and finds it only beside the notebook fails with a hint saying so. A SQL connection's relative `path` still resolves against the notebook's directory.
 
-A cell on a [worker](https://bearingresearch.com/strata/dev/dev/notebook/workers/) runs in a `work/` of its own, made for the run and removed with it. To keep a file from a worker run, write it to an [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder.
+A cell on a [worker](https://bearingresearch.com/strata/dev/notebook/workers/) runs in a `work/` of its own, made for the run and removed with it. To keep a file from a worker run, write it to an [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder.
 
 ### Python-cell annotations
 
@@ -297,15 +297,15 @@ A cell on a [worker](https://bearingresearch.com/strata/dev/dev/notebook/workers
 | `# @table …`       | Declare an Iceberg table input; its snapshot joins the provenance |
 | `# @fetch …`       | Download a URL as a recorded input; its digest joins the provenance |
 | `# @dataset …`     | Bind a registry name as a recorded input; its version joins the provenance |
-| `# @write_table …` | Write a variable into an Iceberg table when the run succeeds (see [`@write_table`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#write_table)) |
-| `# @output_dir X`  | Give the cell a folder whose contents are an output (see [`@output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir)) |
+| `# @write_table …` | Write a variable into an Iceberg table when the run succeeds (see [`@write_table`](https://bearingresearch.com/strata/dev/notebook/annotations/#write_table)) |
+| `# @output_dir X`  | Give the cell a folder whose contents are an output (see [`@output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir)) |
 | `# @nocache`       | Always re-execute; never serve a cache hit       |
-| `# @stochastic`    | Every run persists beside the cache and never serves it (see [`@stochastic`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#stochastic)) |
+| `# @stochastic`    | Every run persists beside the cache and never serves it (see [`@stochastic`](https://bearingresearch.com/strata/dev/notebook/annotations/#stochastic)) |
 | `# @loop …`        | Turn the cell into a [loop cell](#loop-cells)    |
 
 See [Cell Annotations][a] for the full reference.
 
-[a]: https://bearingresearch.com/strata/dev/dev/notebook/annotations/
+[a]: https://bearingresearch.com/strata/dev/notebook/annotations/
 
 ---
 
@@ -570,13 +570,13 @@ password = "${PGPASS}"
 Notes:
 
 - **Driver-specific extras** (e.g. `options.search_path`, `options.warehouse` for Snowflake, future driver-specific keys) round-trip through the editor unchanged. The form editorializes the keys it knows; everything else is preserved.
-- **Auth values use `${VAR}` indirection.** Literal credentials get blanked when `notebook.toml` is saved, so committing the file never leaks secrets. The form shows a warning border on a literal value so you know to switch it to a variable reference. A personal server reads the variable from its own environment; a server in [service mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) reads it from the notebook's env.
+- **Auth values use `${VAR}` indirection.** Literal credentials get blanked when `notebook.toml` is saved, so committing the file never leaks secrets. The form shows a warning border on a literal value so you know to switch it to a variable reference. A personal server reads the variable from its own environment; a server in [service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) reads it from the notebook's env.
 - **Relative `path` values are notebook-local.** `path = "analytics.db"` resolves against the notebook directory at execution time. The on-disk value stays relative so a notebook moves cleanly between machines.
 - **Currently shipped drivers**: DuckDB, SQLite, PostgreSQL, Snowflake, and BigQuery. DuckDB uses the native DuckDB DBAPI; the other four are ADBC-backed (`adbc-driver-sqlite`, `adbc-driver-postgresql`, `adbc-driver-snowflake`, `adbc-driver-bigquery`). For Snowflake, read cells use `role`; `write=true` cells switch to `write_role` when configured, otherwise they reuse `role`. For BigQuery, read cells use `credentials_path`; `write=true` cells switch to `write_credentials_path` when configured, otherwise they reuse `credentials_path`. Snowflake and BigQuery do not have a session-level read-only flag like PostgreSQL's `SET default_transaction_read_only = on`, so the safety boundary is the grants on the configured role or service account.
 
 ### DuckDB over the lake
 
-A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a REST or AWS Glue catalog the server configures (`[tool.strata.catalogs.<name>]`) or, on a personal server, one the notebook defines in [`[catalogs.<name>]`](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#notebook-catalogs). `mounts` names mounts declared for the cell, in `[[mounts]]` or with `# @mount`:
+A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a REST or AWS Glue catalog the server configures (`[tool.strata.catalogs.<name>]`) or, on a personal server, one the notebook defines in [`[catalogs.<name>]`](https://bearingresearch.com/strata/dev/reference/notebook-toml/#notebook-catalogs). `mounts` names mounts declared for the cell, in `[[mounts]]` or with `# @mount`:
 
 ```toml
 [connections.lake]
@@ -593,7 +593,7 @@ FROM lake.taxi.trips t JOIN raw USING (zone)
 GROUP BY t.zone
 ```
 
-Each mount is a view by its name over its Parquet, CSV or JSON files, read with the mount's storage options. `file`, `s3`, `gs` and `az` mounts work; GCS and Azure ones are read through the same fsspec filesystem (gcsfs, adlfs) a Python cell's mount uses, so a connection's mounts on one of those schemes must share their storage options. Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. With [`# @cache snapshot`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#cache) the cell instead keeps reading the snapshots its first run read until it is rerun. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. A REST catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends. A catalog that vends nothing (its store has no STS) sets `header.X-Iceberg-Access-Delegation` to something other than `vended-credentials`, usually empty: DuckDB then asks it for no credentials, and its `s3.*` keys read the tables, under its `s3://` warehouse or, when the warehouse is a name, under the locations of the tables the query names. A table named only at run time is outside those, so its files are read without the keys. So are data files outside a table's location (added with `add_files` from another prefix, or a `write.data.path` elsewhere): in personal mode they are read without the keys and fail with the store's 403, and service mode refuses them already. A Glue catalog is attached through Glue's Iceberg REST endpoint in its `glue.region` for the account `glue.id`, both required; its `glue.*` keys (or `client.*`, or `s3.*`) sign the catalog's requests and read its tables' files, and without keys the AWS credential chain (environment, profile, instance role) does.
+Each mount is a view by its name over its Parquet, CSV or JSON files, read with the mount's storage options. `file`, `s3`, `gs` and `az` mounts work; GCS and Azure ones are read through the same fsspec filesystem (gcsfs, adlfs) a Python cell's mount uses, so a connection's mounts on one of those schemes must share their storage options. Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. With [`# @cache snapshot`](https://bearingresearch.com/strata/dev/notebook/annotations/#cache) the cell instead keeps reading the snapshots its first run read until it is rerun. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. A REST catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends. A catalog that vends nothing (its store has no STS) sets `header.X-Iceberg-Access-Delegation` to something other than `vended-credentials`, usually empty: DuckDB then asks it for no credentials, and its `s3.*` keys read the tables, under its `s3://` warehouse or, when the warehouse is a name, under the locations of the tables the query names. A table named only at run time is outside those, so its files are read without the keys. So are data files outside a table's location (added with `add_files` from another prefix, or a `write.data.path` elsewhere): in personal mode they are read without the keys and fail with the store's 403, and service mode refuses them already. A Glue catalog is attached through Glue's Iceberg REST endpoint in its `glue.region` for the account `glue.id`, both required; its `glue.*` keys (or `client.*`, or `s3.*`) sign the catalog's requests and read its tables' files, and without keys the AWS credential chain (environment, profile, instance role) does.
 
 A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `# @sql connection=<name> write=true` for a cell that changes a database.
 
@@ -644,7 +644,7 @@ A SQL cell's **provenance hash** folds together:
 | `forever`       | Static salt; never invalidates from DB-side state.                                                                        | True reference data. User asserts. |
 | `session`       | Session-unique salt; invalidates across sessions.                                                                         | Always-fresh queries / dashboards. |
 | `ttl=<seconds>` | `floor(now / ttl)` in the salt; bucketed time-based invalidation.                                                         | Stale-tolerant aggregations.       |
-| `snapshot`      | Pins the query to one point in time through the warehouse's time travel (Snowflake, BigQuery), or to the Iceberg snapshots of a DuckDB connection's catalog tables. Refused on other drivers before a connection opens. See [`@cache`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#cache). | Reproducibility-critical reads.    |
+| `snapshot`      | Pins the query to one point in time through the warehouse's time travel (Snowflake, BigQuery), or to the Iceberg snapshots of a DuckDB connection's catalog tables. Refused on other drivers before a connection opens. See [`@cache`](https://bearingresearch.com/strata/dev/notebook/annotations/#cache). | Reproducibility-critical reads.    |
 
 **On reopen.** `fingerprint` and `snapshot` open idle. Both say, in the cell's
 own annotation, that the cached rows are good only while the source still
@@ -693,7 +693,7 @@ SQL cells are **read-only by default**, but the enforcement mechanism depends on
 
 For SQLite, DuckDB and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into `write=true`,” and the statement check above refuses anything but a read before the driver sees it.
 
-In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: its database file must be in the notebook's directory or outside the server's state (a SQLite `uri` is refused), a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot `ATTACH`, `DETACH` or `VACUUM`. A BigQuery connection there must name a `credentials_path` key file in the notebook's directory, so it never runs as the server's own Google credentials. See [Service mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/).
+In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: its database file must be in the notebook's directory or outside the server's state (a SQLite `uri` is refused), a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot `ATTACH`, `DETACH` or `VACUUM`. A BigQuery connection there must name a `credentials_path` key file in the notebook's directory, so it never runs as the server's own Google credentials. See [Service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/).
 
 ### Write cells
 
@@ -756,7 +756,7 @@ SELECT category, COUNT(*) FROM products GROUP BY category
 
 ### Worked example
 
-The [`sql_orders_report`](https://bearingresearch.com/strata/dev/dev/examples/sql_orders_report/) example notebook walks through all of this end-to-end: a SQL `seed` cell, a Python `threshold` cell, two parameterized SQL queries, and a Python report cell: five cells, two languages, with both `fingerprint` and `forever` cache policies side by side.
+The [`sql_orders_report`](https://bearingresearch.com/strata/dev/examples/sql_orders_report/) example notebook walks through all of this end-to-end: a SQL `seed` cell, a Python `threshold` cell, two parameterized SQL queries, and a Python report cell: five cells, two languages, with both `fingerprint` and `forever` cache policies side by side.
 
 ### SQL-cell annotations
 
@@ -827,7 +827,7 @@ control's current value is stored as a content-addressed artifact, so:
 - The **declaration** (`slider(0, 1, …)`) is the committed cell file,
   `cells/<id>.widget`; the **current value** is runtime state in
   `.strata/runtime.json` (a drag never churns a committed file).
-  It travels in a [snapshot](https://bearingresearch.com/strata/dev/dev/notebook/export/#snapshots), so an imported copy computes
+  It travels in a [snapshot](https://bearingresearch.com/strata/dev/notebook/export/#snapshots), so an imported copy computes
   the scenario the bundle was taken from rather than the declared defaults.
 
 In the web UI a widget cell shows its controls in place of the code editor;
@@ -937,7 +937,7 @@ everything downstream reads.
 
 Create a markdown cell via the **+ Add cell** menu (pick "Markdown") or by setting `language = "markdown"` on a cell entry in `notebook.toml`. The cell source lives in `cells/<id>.md` rather than `.py`.
 
-See [Markdown showcase](https://bearingresearch.com/strata/dev/dev/examples/markdown_showcase/) for what the supported renderers handle (headings, lists, tables, code fences, fenced HTML attributes) and what's stripped by the security guard.
+See [Markdown showcase](https://bearingresearch.com/strata/dev/examples/markdown_showcase/) for what the supported renderers handle (headings, lists, tables, code fences, fenced HTML attributes) and what's stripped by the security guard.
 
 ---
 
@@ -955,7 +955,7 @@ For loop cells, each iteration gets a suffix:
 strata://artifact/<artifact_id>@iter=<k>@v=<version>
 ```
 
-A notebook's `<artifact_id>` names a cell variable, not its content: `nb_<notebook_id>_cell_<cell_id>_var_<variable>`. Each new result for that variable is stored as the next `@v=N` of the same id, with its provenance hash (code + inputs + env) recorded on the version. The cache lookup searches by that hash, so same code + same inputs + same env finds the stored version whatever its number. A notebook keeps each id's current value plus its last 3 earlier versions, so reverting a recent edit is still a cache hit ([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](https://bearingresearch.com/strata/dev/dev/reference/configuration/#notebook) sets how many).
+A notebook's `<artifact_id>` names a cell variable, not its content: `nb_<notebook_id>_cell_<cell_id>_var_<variable>`. Each new result for that variable is stored as the next `@v=N` of the same id, with its provenance hash (code + inputs + env) recorded on the version. The cache lookup searches by that hash, so same code + same inputs + same env finds the stored version whatever its number. A notebook keeps each id's current value plus its last 3 earlier versions, so reverting a recent edit is still a cache hit ([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](https://bearingresearch.com/strata/dev/reference/configuration/#notebook) sets how many).
 
 You don't usually need to construct these ids by hand; the inspect panel surfaces them and `# @loop start_from=<cell-id>@iter=k` references them by cell ID + iteration index, not the full URI.
 
@@ -1025,7 +1025,7 @@ The inspect panel shows an iteration picker so you can scrub through the interme
 
 ### Output folders
 
-A loop cell's [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder lasts the
+A loop cell's [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder lasts the
 whole loop: each iteration sees what the earlier ones wrote, so a training loop
 can add one checkpoint per iteration. After every iteration the folder is
 stored as that iteration's `@iter=k` version, and the last one is the cell's
@@ -1078,7 +1078,7 @@ once you've thrown away the intermediates.
 
 A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch` or `@dataset`; read those in an upstream cell. Its `@table` names are bound in every iteration, at the snapshot its provenance records. A `@write_table` on a loop cell writes the final value once, after the last iteration.
 
-A loop cell runs on the notebook's own server, never on a [remote worker](https://bearingresearch.com/strata/dev/dev/notebook/workers/): one whose `# @worker`, or the notebook's default worker, names another fails before it starts. Add `# @worker local` to the loop cell, or put the work that needs the worker in an ordinary cell upstream.
+A loop cell runs on the notebook's own server, never on a [remote worker](https://bearingresearch.com/strata/dev/notebook/workers/): one whose `# @worker`, or the notebook's default worker, names another fails before it starts. Add `# @worker local` to the loop cell, or put the work that needs the worker in an ordinary cell upstream.
 
 Reach for loop cells when **being able to inspect or fork from iteration k matters**. That's the feature you're paying for.
 
@@ -1099,7 +1099,7 @@ R environments are managed from the **Environment** panel, at parity with Python
 
 `renv.lock` is committed config (like `uv.lock`); the built `renv/library/` is gitignored.
 
-On a server that isolates cell code (service mode, or any server with `STRATA_NOTEBOOK_HARNESS_USER` set), **Initialize renv** and **Install** are refused: renv builds packages from source, which runs their code, and writes into the notebook directory. Add packages to `renv.lock` where the notebook is authored and commit it; the server restores that lock as the harness user when the notebook opens. See [What a cell can read](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#what-a-cell-can-read).
+On a server that isolates cell code (service mode, or any server with `STRATA_NOTEBOOK_HARNESS_USER` set), **Initialize renv** and **Install** are refused: renv builds packages from source, which runs their code, and writes into the notebook directory. Add packages to `renv.lock` where the notebook is authored and commit it; the server restores that lock as the harness user when the notebook opens. See [What a cell can read](https://bearingresearch.com/strata/dev/deployment/service-mode/#what-a-cell-can-read).
 
 ### Plots
 
@@ -1150,7 +1150,7 @@ back the way a local run's do, so it is a cache hit here afterwards, a
 downstream Python cell reads its data frame, and an R-only value returns as RDS.
 A worker whose R has `renv` restores the notebook's `renv.lock` once per lock
 and runs the cell against that library; one without `renv` uses its own R
-library (see [Workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/)). An `@fetch` on an R cell
+library (see [Workers](https://bearingresearch.com/strata/dev/notebook/workers/)). An `@fetch` on an R cell
 is read on this machine, so an R cell with both `@fetch` and `@worker` fails;
 run it locally, or fetch in an upstream Python cell.
 
@@ -1174,4 +1174,4 @@ An R cell whose harness can't find `Rscript` on `PATH` returns a clean cell-leve
 
 Mixing is encouraged: a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.
 
-Any kind of cell can also live inside a [variant group](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#variant-cells): a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.
+Any kind of cell can also live inside a [variant group](https://bearingresearch.com/strata/dev/notebook/annotations/#variant-cells): a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.

@@ -5,21 +5,21 @@ a coding agent (Claude Code) needs to drive a **live** Strata notebook, and
 attaches a terminal viewer so you watch it happen in real time.
 
 This is the **coding agent** quickstart. The same notebook can also be driven
-by hand in the [web UI](https://bearingresearch.com/strata/dev/dev/getting-started/notebook/) or watched from a
-[terminal](https://bearingresearch.com/strata/dev/dev/notebook/tui/).
+by hand in the [web UI](https://bearingresearch.com/strata/dev/getting-started/notebook/) or watched from a
+[terminal](https://bearingresearch.com/strata/dev/notebook/tui/).
 
-!!! info "Not the same as [using a notebook as a scratchpad](https://bearingresearch.com/strata/dev/dev/notebook/scratchpad/)"
+!!! info "Not the same as [using a notebook as a scratchpad](https://bearingresearch.com/strata/dev/notebook/scratchpad/)"
 
     Here the notebook is **the deliverable**: you asked for it, you watch it get
     built, you keep it. An agent can also use a notebook as **disposable
     infrastructure** while working on something else entirely, running
     throwaway Python that happens to be cached instead of thrown away. That is
-    [a separate setup](https://bearingresearch.com/strata/dev/dev/notebook/scratchpad/) with a different starting point: this page
+    [a separate setup](https://bearingresearch.com/strata/dev/notebook/scratchpad/) with a different starting point: this page
     starts with you running a command, that one starts with the agent noticing
     it has a better option than `python -c`.
 
-It exists because the pieces were already there (the [MCP server](https://bearingresearch.com/strata/dev/dev/notebook/mcp/), the
-[`strata` CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/) ops, the [terminal viewer](https://bearingresearch.com/strata/dev/dev/notebook/tui/)), but wiring them
+It exists because the pieces were already there (the [MCP server](https://bearingresearch.com/strata/dev/notebook/mcp/), the
+[`strata` CLI](https://bearingresearch.com/strata/dev/notebook/cli/) ops, the [terminal viewer](https://bearingresearch.com/strata/dev/notebook/tui/)), but wiring them
 together by hand is a fiddly, ordered dance: enable the MCP endpoint *before*
 the server boots, open a session (the agent can't do that itself), point the
 agent at the right session, and only then start driving. `strata agent` does all
@@ -101,7 +101,7 @@ Claude Code finds the `.mcp.json` that step 1 wrote, connects to the
     Then either point the agent's MCP client at `http://127.0.0.1:8765/mcp`
     (streamable HTTP, the same endpoint `.mcp.json` names), or drive the
     session from the CLI with the selectors the
-    [CLI guide](https://bearingresearch.com/strata/dev/dev/notebook/cli/#working-against-a-live-session-server-session) covers:
+    [CLI guide](https://bearingresearch.com/strata/dev/notebook/cli/#working-against-a-live-session-server-session) covers:
 
     ```bash
     strata status    --server http://127.0.0.1:8765 --session "$SID"
@@ -136,7 +136,7 @@ code failing, which is a normal first draft.
 
 ### 4. Take it from there
 
-The notebook is a normal notebook. Open it in the [web UI](https://bearingresearch.com/strata/dev/dev/getting-started/notebook/)
+The notebook is a normal notebook. Open it in the [web UI](https://bearingresearch.com/strata/dev/getting-started/notebook/)
 to edit a cell yourself, re-run it, or keep working after the agent stops.
 [Several views can watch at once](#watching-an-agent-work), and you can edit in
 the browser while the agent is still going.
@@ -166,7 +166,7 @@ step. **It is not the only one, and it is not the richest.**
 
 ![The terminal viewer while an agent works: two finished cells showing 2.0s and
 cached, the third marked running, and its console output streaming in the pane
-below.](https://bearingresearch.com/strata/dev/dev/assets/tui-agent-running.svg)
+below.](https://bearingresearch.com/strata/dev/assets/tui-agent-running.svg)
 
 Everything that watches a notebook is a WebSocket client on the same session,
 and the server broadcasts each `cell_status` / `cell_output` / `cell_console`
@@ -178,7 +178,7 @@ agent is driving:
 | --- | --- | --- |
 | **Web UI**, by opening the server URL in a browser | The full editor: outputs, plots, the DAG, the inspector. **Not read-only**, so you can edit and run cells alongside the agent | You want to see rendered output, or take over |
 | **TUI**, via `strata watch ./my-notebook` | Read-only live spectator in the terminal | No browser, over SSH, or beside the agent in a split terminal |
-| **Any WebSocket client** | The raw frames | You are building your own view; see the [client protocol](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/) |
+| **Any WebSocket client** | The raw frames | You are building your own view; see the [client protocol](https://bearingresearch.com/strata/dev/reference/notebook-protocol/) |
 | **Nothing, then read the directory** | `cells/*.py` is the source; `.strata/runtime.json` holds display outputs, provenance and timings; `.strata/console/` holds per-cell stdout/stderr | You would rather review afterwards than watch |
 
 One thing to know about the web UI row: an open tab follows the agent's source
@@ -187,7 +187,7 @@ typing in is left alone until you stop. Your unflushed keystrokes are never
 overwritten. If the agent changed the cell in the last few seconds, your edit
 is held back and the cell shows who changed it, with a **Take over** button;
 the agent is told the same about yours. Neither is a merge. See
-[presence and soft locks](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/#presence-and-soft-locks).
+[presence and soft locks](https://bearingresearch.com/strata/dev/reference/notebook-protocol/#presence-and-soft-locks).
 
 The last row is worth knowing: a notebook is a directory of ordinary files, so
 `strata cell show`, `strata dag`, `git diff` and your editor all work on an
@@ -248,7 +248,7 @@ machine, a bigger instance, or one closer to the data. The agent calls the
 target); or wire it up as the session opens with `strata agent … --worker-ssh
 user@gpu-box`. Strata installs the worker on the box if needed, tunnels to it,
 and makes it the default; keep a specific cell local with `# @worker local`. See
-[Run cells on a machine you can SSH to](https://bearingresearch.com/strata/dev/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to).
+[Run cells on a machine you can SSH to](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to).
 
 ## Reusing a server you already run
 
@@ -260,9 +260,9 @@ If it can't, stop it and let `strata agent` start one scoped to your notebook.
 
 ## Related
 
-- [The notebook as an agent's scratchpad](https://bearingresearch.com/strata/dev/dev/notebook/scratchpad/): the other use case,
+- [The notebook as an agent's scratchpad](https://bearingresearch.com/strata/dev/notebook/scratchpad/): the other use case,
   where the notebook is disposable rather than the deliverable.
-- [MCP Server](https://bearingresearch.com/strata/dev/dev/notebook/mcp/): the full tool list and the endpoint's security model.
-- [Terminal Viewer (TUI)](https://bearingresearch.com/strata/dev/dev/notebook/tui/): the live spectator `strata agent` attaches.
-- [Authoring Programmatically](https://bearingresearch.com/strata/dev/dev/notebook/agent-authoring/): the same ops as a Python API.
-- [Distributed Workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to): running cells on a remote box over SSH.
+- [MCP Server](https://bearingresearch.com/strata/dev/notebook/mcp/): the full tool list and the endpoint's security model.
+- [Terminal Viewer (TUI)](https://bearingresearch.com/strata/dev/notebook/tui/): the live spectator `strata agent` attaches.
+- [Authoring Programmatically](https://bearingresearch.com/strata/dev/notebook/agent-authoring/): the same ops as a Python API.
+- [Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to): running cells on a remote box over SSH.

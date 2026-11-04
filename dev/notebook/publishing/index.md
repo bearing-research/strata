@@ -82,10 +82,10 @@ the silent case used to be exactly the one where it already matched.
 ![The published page for a figure: the plot itself, then the artifact's id,
 provenance hash and content digest, and below them the code that produced it
 and every step behind
-it.](https://bearingresearch.com/strata/dev/dev/assets/publication-page-light.png#only-light)
+it.](https://bearingresearch.com/strata/dev/assets/publication-page-light.png#only-light)
 ![The published page for a figure: the plot itself, then the artifact's id,
 provenance hash and content digest, and below them the code that produced it
-and every step behind it.](https://bearingresearch.com/strata/dev/dev/assets/publication-page-dark.png#only-dark)
+and every step behind it.](https://bearingresearch.com/strata/dev/assets/publication-page-dark.png#only-dark)
 
 ## What the page claims, and what it does not
 
@@ -198,7 +198,7 @@ People appear once each. A step run by someone listed as an author points at
 that author's node (the ORCID when one is given, as a bare id or a link), and an
 author listed twice is credited once.
 
-A step that read a URL through [`@fetch`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#fetch) names it as
+A step that read a URL through [`@fetch`](https://bearingresearch.com/strata/dev/notebook/annotations/#fetch) names it as
 an input. On the page it appears under "External inputs" with the digest of the
 bytes read, when they were retrieved, and when the reading step ran. In the
 crate it is a `File` whose `@id` is the URL, with that `sha256` and the
@@ -206,7 +206,7 @@ retrieval time as `sdDatePublished`. The digest describes what was read, and
 the URL may serve something else now. A step stored before retrieval times were
 recorded shows only when it ran.
 
-A Snowflake or BigQuery cell with [`# @cache snapshot`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#cache),
+A Snowflake or BigQuery cell with [`# @cache snapshot`](https://bearingresearch.com/strata/dev/notebook/annotations/#cache),
 published or upstream of what is, shows the moment of the warehouse state it
 read ("Warehouse state as of") and how long the warehouse keeps that state
 ("Queryable until"). Until then a reader with access to the warehouse can run
@@ -241,7 +241,7 @@ that only knows its internal origin will advertise an oEmbed endpoint nobody
 can reach and reject the public link a wiki pastes. Unset, the request's own
 origin is used, which is right for a directly-reachable server.
 A proxy that serves Strata under a path also needs `STRATA_PUBLIC_BASE_PATH`
-([Serving under a path](https://bearingresearch.com/strata/dev/dev/deployment/modes/#serving-under-a-path)); every
+([Serving under a path](https://bearingresearch.com/strata/dev/deployment/modes/#serving-under-a-path)); every
 link on the page and in the card then carries it.
 
 ## Archiving: the copy that needs no server
@@ -279,7 +279,7 @@ the whole table in memory; neither the manifest nor the crate then lists one.
 The limit is fixed, so it never makes one publication's archive differ between
 builds.
 
-A [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder's published bytes are its
+A [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder's published bytes are its
 manifest, the list of its files (`artifact.bin`, JSON), which `/p/<token>/data`
 serves. The bundle holds the files themselves under `folder/`, at their paths in
 the folder, each with its own digest in the manifest's `additional_files` and
@@ -438,7 +438,7 @@ version id a different computation took there) lands as a copy under a fresh
 id, `<id>@import=<8 hex>`, in the caller's tenant. Each copy keeps its
 provenance hash, and the CLI points every descendant's lineage edges at the
 ids its ancestors landed on, so the published page resolves every step.
-A [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder in the chain goes with
+A [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder in the chain goes with
 every file its version names, each before the manifest. A file the target
 already holds (`GET /v1/artifacts/by-provenance/{hash}` finds it with the same
 digest) is not uploaded again, and when a file lands under another version or a

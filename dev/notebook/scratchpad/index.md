@@ -9,7 +9,7 @@ scratch every time.
 A Strata notebook is a better home for exactly that. The agent adds a cell and
 runs it; the cell is versioned, content-addressed, and cached.
 
-!!! info "This is not the same as [driving a notebook](https://bearingresearch.com/strata/dev/dev/notebook/agent/)"
+!!! info "This is not the same as [driving a notebook](https://bearingresearch.com/strata/dev/notebook/agent/)"
 
     There the notebook is **the deliverable**: you asked for it, you watch it
     being built, you keep it. Here it is **disposable infrastructure** for some
@@ -102,7 +102,7 @@ optional, since it is your workspace and some people keep it.
     cell stale.
 
     A cell that reads a file you are actively changing wants
-    [`# @nocache`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#nocache), the same as a clock read. A cell
+    [`# @nocache`](https://bearingresearch.com/strata/dev/notebook/annotations/#nocache), the same as a clock read. A cell
     that reads a file you are not changing is fine as it is, and is the case
     the pin exists for.
 
@@ -117,7 +117,7 @@ optional, since it is your workspace and some people keep it.
   an invisible script in `/tmp`. You can open it later, or watch it live.
 - **Side effects stay honest.** A cell that writes a file, calls an API, reads
   the clock, or reads a file that changes underneath it must not replay a stale
-  result. Those get [`# @nocache`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#nocache) and always
+  result. Those get [`# @nocache`](https://bearingresearch.com/strata/dev/notebook/annotations/#nocache) and always
   re-execute; everything else stays cached.
 
 ## Why the agent actually reaches for it
@@ -125,7 +125,7 @@ optional, since it is your workspace and some people keep it.
 A better option that costs more gets ignored. Two things keep the cost equal:
 
 - **One call, not three.** `run_snippet(session_id, source)` over
-  [MCP](https://bearingresearch.com/strata/dev/dev/notebook/mcp/), or `strata cell add … -c 'src' --run` on the CLI, adds a cell
+  [MCP](https://bearingresearch.com/strata/dev/notebook/mcp/), or `strata cell add … -c 'src' --run` on the CLI, adds a cell
   **and** runs it **and** returns `stdout`, the same shape as `python -c`.
 - **No setup step.** The skill tells the agent how to create or reuse a
   scratch notebook itself, so there is no moment where using the notebook means
@@ -163,19 +163,19 @@ It also writes `.mcp.json` and a `CLAUDE.md` working agreement into
     ```
 
 Once something is attached, everything in
-[Watching an agent work](https://bearingresearch.com/strata/dev/dev/notebook/agent/#watching-an-agent-work) applies here too,
-including opening it in the [web UI](https://bearingresearch.com/strata/dev/dev/getting-started/notebook/) instead.
+[Watching an agent work](https://bearingresearch.com/strata/dev/notebook/agent/#watching-an-agent-work) applies here too,
+including opening it in the [web UI](https://bearingresearch.com/strata/dev/getting-started/notebook/) instead.
 
 One thing changes for the agent, though: `strata cell run ./scratch …` opens
 its own offline session on the directory, so its runs do not appear in the
 viewer you just attached, and both sessions are writing the same files. Once
 someone is watching, point the agent at that server instead: MCP, or
 `--server`/`--session` on the same commands, both covered in the
-[CLI guide](https://bearingresearch.com/strata/dev/dev/notebook/cli/#working-against-a-live-session-server-session).
+[CLI guide](https://bearingresearch.com/strata/dev/notebook/cli/#working-against-a-live-session-server-session).
 
 ## Related
 
-- [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/): the other use case, where
+- [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/): the other use case, where
   the notebook is the point.
-- [MCP Server](https://bearingresearch.com/strata/dev/dev/notebook/mcp/): the tool list and the endpoint's security model.
-- [Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/): `# @nocache` and the rest.
+- [MCP Server](https://bearingresearch.com/strata/dev/notebook/mcp/): the tool list and the endpoint's security model.
+- [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/): `# @nocache` and the rest.

@@ -18,8 +18,8 @@ This page deploys Strata on [Fly.io](https://fly.io) as a single-tenant, persona
     This is **not** appropriate for: shared team deployments without
     an auth proxy, anything with sensitive data, anything you'd be
     upset about a stranger writing to. For those, use
-    [service mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) with the trusted-proxy auth
-    pattern instead. See [Deployment Modes](https://bearingresearch.com/strata/dev/dev/deployment/modes/) for the full
+    [service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) with the trusted-proxy auth
+    pattern instead. See [Deployment Modes](https://bearingresearch.com/strata/dev/deployment/modes/) for the full
     comparison.
 
 ## Prerequisites

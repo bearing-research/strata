@@ -2,14 +2,14 @@
 
 This page documents the **notebook** REST surface, mounted under `/v1/notebooks`, plus the core routes a client meets most: materialize, streams, health and metrics ([Core API](#core-api)), and the log buffer and artifact listing ([Observability](#observability)). It does not list every route. The rest are documented with their feature:
 
-- Registry and names (`/v1/registry/*`, `/v1/names*`): [Registry](https://bearingresearch.com/strata/dev/dev/core/registry/)
-- Publications (`/v1/artifacts/{id}/v/{n}/publish`, `/v1/publications*`, `/p/*`): [Publishing](https://bearingresearch.com/strata/dev/dev/notebook/publishing/)
-- Admin, debug and cache routes (`/v1/admin/*`, `/v1/debug/*`, `/v1/cache/*`): [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) and [Observability](https://bearingresearch.com/strata/dev/dev/deployment/observability/)
-- Garbage collection (`POST /v1/artifacts/gc`): [Operations & Lifecycle](https://bearingresearch.com/strata/dev/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store)
+- Registry and names (`/v1/registry/*`, `/v1/names*`): [Registry](https://bearingresearch.com/strata/dev/core/registry/)
+- Publications (`/v1/artifacts/{id}/v/{n}/publish`, `/v1/publications*`, `/p/*`): [Publishing](https://bearingresearch.com/strata/dev/notebook/publishing/)
+- Admin, debug and cache routes (`/v1/admin/*`, `/v1/debug/*`, `/v1/cache/*`): [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) and [Observability](https://bearingresearch.com/strata/dev/deployment/observability/)
+- Garbage collection (`POST /v1/artifacts/gc`): [Operations & Lifecycle](https://bearingresearch.com/strata/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store)
 
-For materializing from Python, see the [Library Quickstart](https://bearingresearch.com/strata/dev/dev/getting-started/core/). The live OpenAPI schema ([below](#canonical-machine-readable-spec)) lists every route.
+For materializing from Python, see the [Library Quickstart](https://bearingresearch.com/strata/dev/getting-started/core/). The live OpenAPI schema ([below](#canonical-machine-readable-spec)) lists every route.
 
-The remote-worker contract - `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` - is documented separately on the [Executor Protocol](https://bearingresearch.com/strata/dev/dev/reference/executor-protocol/) page. Those endpoints live on a different process (`strata-worker`), not the main server.
+The remote-worker contract - `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` - is documented separately on the [Executor Protocol](https://bearingresearch.com/strata/dev/reference/executor-protocol/) page. Those endpoints live on a different process (`strata-worker`), not the main server.
 
 !!! note "Session ID vs Notebook ID"
 Route parameters use the **session ID** (a UUID generated when the notebook is opened), not the persistent `notebook_id` from `notebook.toml`. The session ID is returned by the `open` and `create` endpoints.
@@ -38,9 +38,9 @@ Authentication depends on `deployment_mode`:
 | `service` + `auth_mode="trusted_proxy"` | Proxy-injected identity | `X-Strata-Principal`, `X-Strata-Scopes`, `X-Strata-Proxy-Token`; `X-Tenant-ID` if multi-tenant |
 | `service` + `auth_mode="api_key"` | Strata verifies the key itself | `Authorization: Bearer strata_<key_id>_<secret>`; the key carries the principal, tenant and scopes |
 
-Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret; under `api_key`, a valid bearer key. The exceptions are the health and metrics endpoints, the signed build-transport routes (the signature is the credential) and public publication reads. A notebook cell's ambient client sends `X-Strata-Run-Token` instead, a token for its run that reaches only the client's own routes (see [the ambient client](https://bearingresearch.com/strata/dev/dev/notebook/cells/#the-ambient-strata-client)). Two further restrictions narrow what each endpoint accepts:
+Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret; under `api_key`, a valid bearer key. The exceptions are the health and metrics endpoints, the signed build-transport routes (the signature is the credential) and public publication reads. A notebook cell's ambient client sends `X-Strata-Run-Token` instead, a token for its run that reaches only the client's own routes (see [the ambient client](https://bearingresearch.com/strata/dev/notebook/cells/#the-ambient-strata-client)). Two further restrictions narrow what each endpoint accepts:
 
-**Personal-mode-only endpoints.** These four return `403 Forbidden` outside personal mode. They expose either a filesystem delete or the in-memory session table, neither of which fits a multi-tenant service deployment. Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
+**Personal-mode-only endpoints.** These four return `403 Forbidden` outside personal mode. They expose either a filesystem delete or the in-memory session table, neither of which fits a multi-tenant service deployment. Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
 
 | Endpoint | Why personal-mode-only |
 | --- | --- |
@@ -79,7 +79,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 
 Without principal auth (personal mode, or `auth_mode="none"`), the scope gate returns immediately and none of this applies.
 
-Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](https://bearingresearch.com/strata/dev/dev/deployment/modes/); see [Fly.io deployment](https://bearingresearch.com/strata/dev/dev/deployment/fly/#trust-model) for the load-bearing details.
+Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](https://bearingresearch.com/strata/dev/deployment/modes/); see [Fly.io deployment](https://bearingresearch.com/strata/dev/deployment/fly/#trust-model) for the load-bearing details.
 
 ### Error shape
 
@@ -146,7 +146,7 @@ Every request gets an `X-Request-ID` response header (and the same value is echo
 
 ### Tenancy
 
-In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) for the full contract.
+In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service Mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) for the full contract.
 
 ## Notebook Lifecycle
 
@@ -198,7 +198,7 @@ the path is returned rather than a second one: in personal mode any open
 session, in service mode only one the same principal opened. Before opening, when
 `STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB` is set and available memory is below
 it, idle sessions are closed (see
-[Session lifetime](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/#session-lifetime-and-session_closed)).
+[Session lifetime](https://bearingresearch.com/strata/dev/reference/notebook-protocol/#session-lifetime-and-session_closed)).
 
 ### Close Notebook Session
 
@@ -235,7 +235,7 @@ the result. Returns the same notebook state shape as `POST
 /v1/notebooks/create` plus an `import_report` field with the
 converter's per-cell findings (translated magics, captured deps,
 warnings, full report markdown). See
-[Import from Jupyter](https://bearingresearch.com/strata/dev/dev/notebook/import/) for the magic
+[Import from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/) for the magic
 translation table and limitations.
 
 ### Import Snapshot
@@ -486,7 +486,7 @@ checkpoint (its parts come back from `strata.restore()`); with any other mode
 it returns `400`.
 
 A run whose inputs would move more than the server's
-[threshold](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#asking-before-a-large-read) goes ahead
+[threshold](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/#asking-before-a-large-read) goes ahead
 and records that it was not asked. With `confirm_reads=true` it does not start:
 it answers `409` with `{"code": "large_read", "message": "...", "cells": [...]}`,
 each cell as in the WebSocket `read_confirm_prompt`. Sending the request again with
@@ -596,7 +596,7 @@ GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}
 GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}/v/{version}/files/{path}?variant={variant}
 ```
 
-A [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder's versions
+A [`# @output_dir`](https://bearingresearch.com/strata/dev/notebook/annotations/#output_dir) folder's versions
 and files. `name` must be one of the cell's current `# @output_dir` names, or
 the answer is `404`; neither route takes an artifact URI.
 
@@ -607,7 +607,7 @@ the answer is `404`; neither route takes an artifact URI.
   kept. A run still writing, or a crash's version with no manifest, is not
   listed, nor is a loop cell's per-iteration `@iter=k` version: the loop's
   last iteration is the cell's own version. A
-  [`# @per_variant`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant) cell keeps a
+  [`# @per_variant`](https://bearingresearch.com/strata/dev/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant) cell keeps a
   folder per variant, each numbered on its own: `variant` names the instance,
   and is `null` for a cell that does not fan out.
 - The second streams one file of that version (of that `variant`'s folder
@@ -826,7 +826,7 @@ it as a notebook worker:
 Optional fields are `remote_port`, `local_port`, `extras` (default
 `notebook`), `pin` and `install` (default `true`). `GET` reports each tunnel's
 live status; `DELETE` closes the tunnel and removes the registration. See
-[Run cells on a machine you can SSH to](https://bearingresearch.com/strata/dev/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to).
+[Run cells on a machine you can SSH to](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to).
 
 ## Mounts
 
@@ -959,7 +959,7 @@ One endpoint, four output formats:
 | `markdown`   | Single-file rendering for sharing / docs ingestion. Same engine as `strata export`.                      |
 | `html`       | Standalone HTML with embedded CSS + Pygments syntax highlighting.                                        |
 
-Markdown and HTML renderings additionally accept `include_inactive_variants=true` to stack all variants of every group, and `app_view=true` to render only what the read-only app view shows (widgets, markdown and display outputs, with no sources or console). Prompt-cell responses are intentionally excluded from rendered formats (see [Export](https://bearingresearch.com/strata/dev/dev/notebook/export/)).
+Markdown and HTML renderings additionally accept `include_inactive_variants=true` to stack all variants of every group, and `app_view=true` to render only what the read-only app view shows (widgets, markdown and display outputs, with no sources or console). Prompt-cell responses are intentionally excluded from rendered formats (see [Export](https://bearingresearch.com/strata/dev/notebook/export/)).
 
 #### Snapshots
 
@@ -1189,7 +1189,7 @@ GET /health
 ```
 
 Readiness (`GET /health/ready`) and per-dependency checks (`GET /health/dependencies`)
-are covered in [Observability](https://bearingresearch.com/strata/dev/dev/deployment/observability/#health-endpoints).
+are covered in [Observability](https://bearingresearch.com/strata/dev/deployment/observability/#health-endpoints).
 
 ### Metrics
 
@@ -1205,7 +1205,7 @@ tenant ids are `admin:tenants` data (`GET /v1/admin/tenants`). The AI usage
 series carry no `tenant` or `principal` label there: they are per-model
 totals. Requests are counted by method, route template and status class, and
 timed per route; failed object-store calls are counted by operation (see
-[Observability](https://bearingresearch.com/strata/dev/dev/deployment/observability/#metrics-metricsprometheus)).
+[Observability](https://bearingresearch.com/strata/dev/deployment/observability/#metrics-metricsprometheus)).
 
 ### Artifacts, names, cache and diagnostics
 

@@ -47,7 +47,7 @@ your upstream cell produced, not a mock. If the cell source itself raises, every
 test that requests `cell` reports a clear *setup* error rather than an opaque
 collection failure.
 
-A [`# @per_variant`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant)
+A [`# @per_variant`](https://bearingresearch.com/strata/dev/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant)
 cell is tested once per variant, each session binding the value that variant's
 instance reads, and each case is named for its variant the way pytest names a
 parametrized one: `test_score[logreg]`, `test_score[rf]`.
@@ -80,11 +80,11 @@ an upstream cell and test with its result.
 ![A Python cell with its results table above an open Tests panel: the test
 source, a green "2 passed" summary, and a tick beside each test name. The flask
 toggle on the cell's left rail carries a green 2/2
-badge.](https://bearingresearch.com/strata/dev/dev/assets/cell-tests-light.png#only-light)
+badge.](https://bearingresearch.com/strata/dev/assets/cell-tests-light.png#only-light)
 ![A Python cell with its results table above an open Tests panel: the test
 source, a green "2 passed" summary, and a tick beside each test name. The flask
 toggle on the cell's left rail carries a green 2/2
-badge.](https://bearingresearch.com/strata/dev/dev/assets/cell-tests-dark.png#only-dark)
+badge.](https://bearingresearch.com/strata/dev/assets/cell-tests-dark.png#only-dark)
 
 ### The health badge
 
@@ -117,7 +117,7 @@ Results are saved to `.strata/runtime.json` and **rehydrate when you reopen the
 notebook**, so you see the last run's pass/fail and the stale badge immediately,
 without re-running. (Test *source* lives in the committed `cells/<id>.test.py`;
 the *results* are runtime state under `.strata/`, like the rest of
-[`runtime.json`](https://bearingresearch.com/strata/dev/dev/notebook/concepts/).)
+[`runtime.json`](https://bearingresearch.com/strata/dev/notebook/concepts/).)
 
 ## Over WebSocket
 
@@ -128,7 +128,7 @@ clients and automation can run them too:
 - receive **`cell_test_status`** (running → done) and **`cell_test_results`**
   (per-test outcomes, counts, durations).
 
-See the [WebSocket Protocol reference](https://bearingresearch.com/strata/dev/dev/reference/websocket/) for the frame
+See the [WebSocket Protocol reference](https://bearingresearch.com/strata/dev/reference/websocket/) for the frame
 shapes.
 
 ## From the CLI, REST and MCP
@@ -149,7 +149,7 @@ same code.
 
 ## A worked example
 
-The [`pandas_basics`](https://bearingresearch.com/strata/dev/dev/examples/pandas_basics/) example ships tests on four
+The [`pandas_basics`](https://bearingresearch.com/strata/dev/examples/pandas_basics/) example ships tests on four
 of its cells - validating a produced DataFrame, a computed column, a filter
 invariant, and an aggregation - a good template for the common shapes:
 
@@ -177,5 +177,5 @@ plugin, so the same cell tests can drive a CI or pre-commit check later.
 
 ---
 
-**See also:** [Cell Types](https://bearingresearch.com/strata/dev/dev/notebook/cells/) · [Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/) ·
-[`pandas_basics` example](https://bearingresearch.com/strata/dev/dev/examples/pandas_basics/)
+**See also:** [Cell Types](https://bearingresearch.com/strata/dev/notebook/cells/) · [Cell Annotations](https://bearingresearch.com/strata/dev/notebook/annotations/) ·
+[`pandas_basics` example](https://bearingresearch.com/strata/dev/examples/pandas_basics/)
