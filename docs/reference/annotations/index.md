@@ -16,7 +16,7 @@
 | [`@output_dir`](python.md#output_dir) | A folder whose files are an output. |
 | [`@each`](python.md#each) | Run once per file or row, each cached on its own. |
 | [`@nocache`](python.md#nocache) | Always run; never serve a cached result. |
-| [`@stochastic`](python.md#stochastic) | Every run is a sample, so it always runs. |
+| [`@stochastic`](python.md#stochastic) | Every run is a sample: it always runs and keeps its outputs. |
 | [`@after`](python.md#after) | An ordering-only edge from another cell. |
 | [`@sql`](sql.md#sql) | Mark a SQL cell and name its connection. |
 | [`@cache`](sql.md#cache) | Choose a SQL cell's cache policy. |
