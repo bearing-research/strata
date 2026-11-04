@@ -471,8 +471,10 @@
       "stdout": "None\n"
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "external"
+      ],
+      "status": "stale"
      }
     },
     "t1": {
@@ -745,8 +747,10 @@
       ]
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "external"
+      ],
+      "status": "stale"
      }
     },
     "t1": {
@@ -787,8 +791,10 @@
       ]
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "external"
+      ],
+      "status": "stale"
      }
     },
     "t2": {
@@ -973,8 +979,10 @@
       "stdout": "1002\n"
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "external"
+      ],
+      "status": "stale"
      }
     },
     "t1": {

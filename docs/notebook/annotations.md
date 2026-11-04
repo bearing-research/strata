@@ -280,7 +280,7 @@ Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (r
 
 Declare a URL the cell reads. The bytes are downloaded into the notebook's
 cache and **their digest becomes part of the cell's provenance**, so the cell
-goes out of date (idle) and its downstream cells stale when the URL starts
+and its downstream cells go stale when the URL starts
 serving something else - instead of the URL
 string being in the source hash and the bytes being in nothing.
 
@@ -345,7 +345,7 @@ address.
 
 Personal mode allows private addresses, so `http://localhost:8000/data.csv`
 works on your own machine, and uses the proxy settings as usual. A URL that
-cannot be checked shows the cell as out of date, and running
+cannot be checked leaves the cell idle, since nothing says the result is wrong, and running
 it fails with the reason. A cell with `@fetch` runs on its own in Run All rather
 than in a batch.
 
@@ -360,8 +360,8 @@ on `<name>`.
 
 Declare a registry name the cell reads. The name resolves to one artifact
 version, and **that version becomes part of the cell's provenance**, so when
-`champion` moves, a cell that reads the team's champion model goes out of date
-(idle) and its downstream cells stale. Resolving
+`champion` moves, a cell that reads the team's champion model and its downstream
+cells go stale. Resolving
 the name with the `strata` client inside the cell records nothing: the name is
 in the source hash and the version is in nothing.
 
@@ -398,15 +398,15 @@ registry. The Registry tab lists, beside each name, the cells that read it.
 
 The registry is asked at most once a minute while staleness is being
 recomputed, and always right before the cell runs. A name that does not
-resolve shows the cell as out of date, and running it fails with the reason. A cell
+resolve leaves the cell idle, and running it fails with the reason. A cell
 with `@dataset` runs on its own in Run All rather than in a batch. `@loop` and
 R cells cannot declare one; read the dataset in an upstream Python cell.
 
 ## @table
 
 Declare an Iceberg table input. The table's current snapshot id becomes part
-of the cell's provenance: **when new data lands in the table, the cell goes
-out of date (idle), its downstream cells go stale, and the normal cascade
+of the cell's provenance: **when new data lands in the table, the cell and its
+downstream cells go stale, and the normal cascade
 machinery re-runs them** - no manual data-version
 bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
@@ -471,8 +471,8 @@ To use the snapshot id downstream, export it as a real variable:
 iteration. An R cell cannot declare `@table`; read the table in an upstream
 Python cell.
 
-If the catalog is unreachable when provenance is computed, the cell is
-conservatively treated as out of date; if it is still unreachable at execution time,
+If the catalog is unreachable when provenance is computed, the cell reads
+idle, since nothing says its result is wrong; if it is still unreachable at execution time,
 the run fails with a clear error.
 
 ## @write_table

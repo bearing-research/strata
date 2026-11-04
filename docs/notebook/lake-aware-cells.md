@@ -153,9 +153,9 @@ print("snapshot S2:", table.current_snapshot().snapshot_id)
 uv run python append_month2.py
 ```
 
-Back in the notebook, the `@table` cell is now **out of date (idle)** - its
+Back in the notebook, the `@table` cell now reads **stale · input changed** - its
 snapshot id moved from S1 to S2, so its provenance changed and no stored result
-matches it. The cells downstream of it that ran before read **stale**. The
+matches it. The cells downstream of it that ran before read **stale** too. The
 badges do not update live: the notebook looks up the current snapshot only when
 it recomputes staleness, which happens when you reopen the notebook, edit a
 cell, or run one. Refreshing the browser tab alone keeps the old badge. A plain
@@ -315,9 +315,9 @@ result turns out to be cached may still ask; asking is the safe direction.
   commits no new snapshot. The cell stays a cache hit, and a scan that passes
   `orders_snapshot` keeps reading that snapshot's schema. The new schema shows
   up once new data lands in a new snapshot.
-- **Unreachable catalog → conservatively out of date.** If the catalog can't
-  be reached when provenance is computed (which also happens on notebook open),
-  the cell is treated as out of date rather than crashing; if it's still unreachable
+- **Unreachable catalog → idle.** If the catalog can't be reached when provenance
+  is computed (which also happens on notebook open), the cell reads idle rather than
+  crashing, since nothing says its result is wrong; if it's still unreachable
   at execution time, the run fails with a clear error.
 - **The embedded scan runs in-process.** `scan@v1` is handled by the server
   itself in both modes: it is resolved before any executor dispatch, so

@@ -500,7 +500,9 @@ async def test_undoing_an_edit_to_a_sql_cell_still_checks_its_connection(tmp_pat
 
     assert edit(edited).status == CellStatus.STALE
     monkeypatch.setattr(session, "reopen_identity", lambda cell: "another-connection")
-    assert edit(original).status == CellStatus.IDLE
+    staleness = edit(original)
+    assert staleness.status == CellStatus.STALE
+    assert staleness.reasons == [StalenessReason.EXTERNAL]
 
 
 @pytest.mark.asyncio

@@ -369,7 +369,7 @@ A cell is out of date when no stored result matches its current provenance. This
 - The environment (`uv.lock`, or an `@env` it declares) changed
 - A declared outside input moved: a mounted file, an `@table` snapshot, an `@fetch` URL's bytes, an `@dataset` alias
 
-A cell that still has a result and whose upstream moved reads **stale · upstream changed**. A cell you edited after it ran reads **stale · source changed**, and undoing the edit brings it back to **ready**, shown as cached, along with the cells downstream of it. A cell whose environment or declared outside input changed has nothing that matches, so it reads **idle** until it runs, and the cells downstream of it read stale. The `@fetch` and `@dataset` checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the `@table` catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.
+A cell that still has a result and whose upstream moved reads **stale · upstream changed**. A cell you edited after it ran reads **stale · source changed**, and undoing the edit brings it back to **ready**, shown as cached, along with the cells downstream of it. A cell whose environment or declared outside input changed reads **stale · environment changed** or **stale · input changed**, and the cells downstream of it read stale too. When the change goes away, as when `uv.lock` returns to what it was, they read ready again without running. If an input cannot be read at all, or a run's record cannot say what moved, nothing is known to be wrong, so the cell reads **idle**. The `@fetch` and `@dataset` checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the `@table` catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.
 
 The **causality chain** explains why a cell is stale. Each good run saves the parts its key was built from (source, environment, upstream outputs and outside inputs), and the chain lists the parts that differ now: "the source of X changed", "upstream X changed", "mount `raw` changed". An input that cannot be read now is reported as that. When the record cannot explain the change, for example a run from before parts were saved, the chain says it is incomplete rather than guessing.
 
@@ -380,8 +380,8 @@ idle ──→ running ──→ ready ──→ stale
               └───→ error
 ```
 
-- **idle**: no current result: never executed, its environment or a declared outside input changed since it ran, or, after a reopen, a leaf cell that keeps no record of its run (`# @nocache`, or a read-write mount)
+- **idle**: no result, or no way to tell whether it still holds: never executed, an input that cannot be read now, or, after a reopen, a leaf cell that keeps no record of its run (`# @nocache`, or a read-write mount)
 - **running**: currently executing. If an upstream cell is edited while it runs, it stays running and finishes **stale**, since it read the old value.
 - **ready**: last execution succeeded (or was a cache hit), artifact is current
-- **stale**: it has a result, but its source was edited since, something upstream has moved, or Run All skipped it because a cell it reads from failed
+- **stale**: it has a result known not to match: its source was edited since, something upstream has moved, its environment or a declared outside input changed, or Run All skipped it because a cell it reads from failed
 - **error**: last execution failed. The traceback and the console output before it are kept against the source that failed, so `strata cell show`, the MCP view, a reopen, a snapshot and an export all still report them. The error stands until the cell is edited or runs successfully (a cache hit counts).

@@ -35,3 +35,21 @@ export function cachedAgainFields(
 ): { cacheHit: true; cacheSavedMs: number | undefined } {
   return { cacheHit: true, cacheSavedMs: output.cacheHit ? output.cacheSavedMs : lastRunMs }
 }
+
+/**
+ * How a result was got, for the output a sync from the server has just rebuilt from its
+ * display. A stale one keeps its saving: if the change goes away it is a hit again.
+ */
+export function cacheFieldsAfterSync(
+  serverCacheHit: boolean | undefined,
+  status: string,
+  previous: { cacheHit?: boolean; cacheSavedMs?: number; cacheLoadMs?: number } | undefined,
+  lastRunMs: number | undefined,
+): { cacheHit?: true; cacheSavedMs?: number; cacheLoadMs?: number } {
+  const cacheLoadMs = previous?.cacheLoadMs
+  if (serverCacheHit) return { ...cachedAgainFields(previous ?? {}, lastRunMs), cacheLoadMs }
+  if (status === 'stale' && previous?.cacheHit) {
+    return { cacheHit: true, cacheSavedMs: previous.cacheSavedMs, cacheLoadMs }
+  }
+  return {}
+}

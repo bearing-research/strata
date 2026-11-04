@@ -175,7 +175,7 @@ class TestMountInvalidation:
 
                 state = ws.sync()
                 cells = state["payload"]["cells"]
-                assert _cell(cells, "c1")["status"] == "idle"
+                assert _cell(cells, "c1")["status"] == "stale"
                 # Repointing c1's mount invalidated c2's cached result via its stale
                 # upstream: STALE, not idle.
                 assert _cell(cells, "c2")["status"] == "stale"

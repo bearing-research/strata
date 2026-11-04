@@ -133,7 +133,7 @@ export interface LoopAnnotationInfo {
 }
 
 export type CellStatus =
-  | 'idle' // never executed
+  | 'idle' // no result, or no way to tell whether it still holds
   | 'queued' // waiting for upstream deps in cascade
   | 'running' // executing
   | 'ready' // has cached artifact (provenance matches)
@@ -146,6 +146,7 @@ export type StalenessReason =
   | 'self' // cell source was edited since last run
   | 'upstream' // cell source unchanged, but an upstream input is stale or re-ran
   | 'env' // environment (uv.lock runtime deps) changed since last run
+  | 'external' // a mount, table, fetch or dataset, a connection or a model changed since last run
   | 'forced' // ran with stale inputs ("Run this only"): result exists but suspect
 
 /** State of a single input variable for a cell */

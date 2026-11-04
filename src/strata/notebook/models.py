@@ -287,6 +287,7 @@ class StalenessReason(StrEnum):
     SELF = "self"
     UPSTREAM = "upstream"
     ENV = "env"
+    EXTERNAL = "external"  # a mount, table, fetch or dataset, a connection or a model
     FORCED = "forced"  # Re-run despite a cache hit
 
 

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import cellgraph as cg
 
 from strata.notebook import nonce
+from strata.notebook.models import StalenessReason
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -31,6 +32,14 @@ class CausalityType(StrEnum):
     EXTERNAL_CHANGED = "external_changed"  # a mount, table, fetch or dataset
     IDENTITY_CHANGED = "identity_changed"  # a SQL cell's connection, a prompt cell's model
     UNAVAILABLE = "unavailable"  # an input that cannot be read now
+
+
+_STALE_BECAUSE = (
+    (StalenessReason.SELF, {CausalityType.SOURCE_CHANGED}),
+    (StalenessReason.UPSTREAM, {CausalityType.INPUT_CHANGED}),
+    (StalenessReason.EXTERNAL, {CausalityType.EXTERNAL_CHANGED, CausalityType.IDENTITY_CHANGED}),
+    (StalenessReason.ENV, {CausalityType.ENV_CHANGED}),
+)
 
 
 class CausalityReason(StrEnum):
@@ -93,6 +102,12 @@ def explain_staleness(
         if cell is not None and cell.last_provenance_hash is not None:
             chains[cell_id] = _explain(session, cell, found)
     return chains
+
+
+def stale_reasons(chain: CausalityChain) -> list[StalenessReason]:
+    """What a chain knows moved under a cell's result. An unreadable input says nothing."""
+    types = {detail.type for detail in chain.details}
+    return [reason for reason, moved in _STALE_BECAUSE if types & moved]
 
 
 def _explain(session: NotebookSession, cell: CellState, found: StaleCell) -> CausalityChain:

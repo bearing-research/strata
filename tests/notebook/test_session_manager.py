@@ -297,7 +297,8 @@ def test_reload_does_not_restore_ready_state_after_mount_change(tmp_path: Path):
     session.reload()
 
     cell = next(c for c in session.notebook_state.cells if c.id == "c1")
-    assert cell.status == "idle"
+    assert cell.status == "stale"
+    assert cell.staleness.reasons == ["external"]
 
 
 def _prime_env_reload_session(tmp_path: Path, source: str, notebook_env: dict[str, str]):
@@ -438,7 +439,8 @@ def test_reload_does_not_restore_ready_state_after_worker_runtime_change(tmp_pat
     session.reload()
 
     cell = next(c for c in session.notebook_state.cells if c.id == "c1")
-    assert cell.status == "idle"
+    assert cell.status == "stale"
+    assert cell.staleness.reasons == ["env"]
 
 
 def test_open_notebook_can_reuse_existing_session_by_path(tmp_path: Path):

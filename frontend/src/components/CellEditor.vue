@@ -287,6 +287,7 @@ const STALENESS_REASON_LABELS: Record<StalenessReason, string> = {
   self: 'source changed',
   upstream: 'upstream changed',
   env: 'environment changed',
+  external: 'input changed',
   forced: 'forced re-run',
 }
 

@@ -2319,8 +2319,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "upstream"
+      ],
+      "status": "stale"
      }
     },
     "rv": {
@@ -3043,8 +3045,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "upstream"
+      ],
+      "status": "stale"
      }
     },
     "rv": {
