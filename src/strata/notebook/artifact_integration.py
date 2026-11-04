@@ -458,6 +458,14 @@ class NotebookArtifactManager:
             "created_at": artifact.created_at,
         }
 
+    def cell_output_of(self, artifact_id: str) -> tuple[str, str] | None:
+        """``(cell_id, output)`` from a :meth:`cell_artifact_id`, or None for any other id."""
+        prefix = f"nb_{self.notebook_id}_cell_"
+        if not artifact_id.startswith(prefix):
+            return None
+        cell_id, separator, output = artifact_id[len(prefix) :].partition("_var_")
+        return (cell_id, output) if separator else None
+
     def list_cell_artifacts(self, cell_id: str) -> list[tuple[str, ArtifactVersion]]:
         """List a cell's canonical artifacts: one ``(variable_name, latest version)`` per variable.
 

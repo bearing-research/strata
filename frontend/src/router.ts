@@ -35,6 +35,12 @@ const router = createRouter({
       name: 'artifacts',
       component: () => import('./views/ArtifactsPage.vue'),
     },
+    {
+      path: '/notebook/:sessionId/artifacts',
+      name: 'notebook-artifacts',
+      component: () => import('./views/ArtifactsPage.vue'),
+      props: true,
+    },
   ],
 })
 
