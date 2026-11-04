@@ -3339,12 +3339,12 @@ browser. The same notebook can also be driven by a
 <a href="../../notebook/agent/">coding agent</a> or watched live from a
 <a href="../../notebook/tui/">terminal</a>.</p>
 <p><img alt="The Strata notebook UI: two named Python cells, load and summarize, each with
-its source and an interactive table of results, the sidebar panels for mounts,
-workers and environment, and a bottom drawer showing the DAG of load, summarize
+its source and an interactive table of results, the Notebook settings rail
+collapsed on the right, and a bottom drawer showing the DAG of load, summarize
 and plot with per-cell timings." src="../../assets/notebook-anatomy-light.png#only-light" />
 <img alt="The Strata notebook UI: two named Python cells, load and summarize, each with
-its source and an interactive table of results, the sidebar panels for mounts,
-workers and environment, and a bottom drawer showing the DAG of load, summarize
+its source and an interactive table of results, the Notebook settings rail
+collapsed on the right, and a bottom drawer showing the DAG of load, summarize
 and plot with per-cell timings." src="../../assets/notebook-anatomy-dark.png#only-dark" /></p>
 <p>The pipeline below is the one in that screenshot.</p>
 <h2 id="1-start-the-server">1. Start the server<a class="headerlink" href="#1-start-the-server" title="Permanent link">&para;</a></h2>
@@ -3578,12 +3578,12 @@ topological order, with a live progress strip showing which cell is
 executing. There is no confirmation step: cascades run automatically,
 so running a cell always gives you a result computed from current
 inputs.</p>
-<p><img alt="The same notebook after the loader is edited: the loader carries a &quot;Why
-stale?&quot; pill and the two cells that depend on it are outlined in amber, in the
-cell list and in the DAG below." src="../../assets/cascade-stale-light.png#only-light" />
-<img alt="The same notebook after the loader is edited: the loader carries a &quot;Why
-stale?&quot; pill and the two cells that depend on it are outlined in amber, in the
-cell list and in the DAG below." src="../../assets/cascade-stale-dark.png#only-dark" /></p>
+<p><img alt="The same notebook after the loader is edited: the loader reads stale, with a
+&quot;Why stale?&quot; pill and its old output dimmed under &quot;Output from the previous
+run&quot;, and all three cells are outlined in amber in the DAG below." src="../../assets/cascade-stale-light.png#only-light" />
+<img alt="The same notebook after the loader is edited: the loader reads stale, with a
+&quot;Why stale?&quot; pill and its old output dimmed under &quot;Output from the previous
+run&quot;, and all three cells are outlined in amber in the DAG below." src="../../assets/cascade-stale-dark.png#only-dark" /></p>
 <p>Revert the edit (<code>time.sleep(1)</code> back to <code>time.sleep(2)</code>) and
 re-run: every cell becomes a cache hit on the way through, no work
 happens, the cascade short-circuits to milliseconds.</p>

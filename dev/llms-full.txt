@@ -304,12 +304,12 @@ browser. The same notebook can also be driven by a
 [terminal](https://bearingresearch.com/strata/dev/notebook/tui/).
 
 ![The Strata notebook UI: two named Python cells, load and summarize, each with
-its source and an interactive table of results, the sidebar panels for mounts,
-workers and environment, and a bottom drawer showing the DAG of load, summarize
+its source and an interactive table of results, the Notebook settings rail
+collapsed on the right, and a bottom drawer showing the DAG of load, summarize
 and plot with per-cell timings.](https://bearingresearch.com/strata/dev/assets/notebook-anatomy-light.png#only-light)
 ![The Strata notebook UI: two named Python cells, load and summarize, each with
-its source and an interactive table of results, the sidebar panels for mounts,
-workers and environment, and a bottom drawer showing the DAG of load, summarize
+its source and an interactive table of results, the Notebook settings rail
+collapsed on the right, and a bottom drawer showing the DAG of load, summarize
 and plot with per-cell timings.](https://bearingresearch.com/strata/dev/assets/notebook-anatomy-dark.png#only-dark)
 
 The pipeline below is the one in that screenshot.
@@ -556,12 +556,12 @@ executing. There is no confirmation step: cascades run automatically,
 so running a cell always gives you a result computed from current
 inputs.
 
-![The same notebook after the loader is edited: the loader carries a "Why
-stale?" pill and the two cells that depend on it are outlined in amber, in the
-cell list and in the DAG below.](https://bearingresearch.com/strata/dev/assets/cascade-stale-light.png#only-light)
-![The same notebook after the loader is edited: the loader carries a "Why
-stale?" pill and the two cells that depend on it are outlined in amber, in the
-cell list and in the DAG below.](https://bearingresearch.com/strata/dev/assets/cascade-stale-dark.png#only-dark)
+![The same notebook after the loader is edited: the loader reads stale, with a
+"Why stale?" pill and its old output dimmed under "Output from the previous
+run", and all three cells are outlined in amber in the DAG below.](https://bearingresearch.com/strata/dev/assets/cascade-stale-light.png#only-light)
+![The same notebook after the loader is edited: the loader reads stale, with a
+"Why stale?" pill and its old output dimmed under "Output from the previous
+run", and all three cells are outlined in amber in the DAG below.](https://bearingresearch.com/strata/dev/assets/cascade-stale-dark.png#only-dark)
 
 Revert the edit (`time.sleep(1)` back to `time.sleep(2)`) and
 re-run: every cell becomes a cache hit on the way through, no work
@@ -3127,8 +3127,8 @@ pinned mount's, is not guessed. After a successful run, `.strata/reads/index.jso
 what each input moved and on which machine; see
 [What a run moved](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/#what-a-run-moved).
 
-![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 26.3 MB" beside its worker and cache badges.](https://bearingresearch.com/strata/dev/assets/input-weight-light.png#only-light)
-![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 26.3 MB" beside its worker and cache badges.](https://bearingresearch.com/strata/dev/assets/input-weight-dark.png#only-dark)
+![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 27.5 MB" beside its worker and cache badges.](https://bearingresearch.com/strata/dev/assets/input-weight-light.png#only-light)
+![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 27.5 MB" beside its worker and cache badges.](https://bearingresearch.com/strata/dev/assets/input-weight-dark.png#only-dark)
 
 Strata copies a remote mount in its own process, not the notebook's venv, so
 its filesystem library goes where Strata is installed: the `s3` extra for
@@ -3458,8 +3458,8 @@ the whole run, Run All included, and running a cell's tests asks too. A ready
 cell is left out, since its run is a cache hit, unless its stored result has
 since been collected.
 
-![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](https://bearingresearch.com/strata/dev/assets/read-confirm-light.png#only-light)
-![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](https://bearingresearch.com/strata/dev/assets/read-confirm-dark.png#only-dark)
+![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 27.5 MB onto local, from table rides (lake:taxi.rides), up to 27.5 MB, followed by the host's message and Cancel and Run buttons.](https://bearingresearch.com/strata/dev/assets/read-confirm-light.png#only-light)
+![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 27.5 MB onto local, from table rides (lake:taxi.rides), up to 27.5 MB, followed by the host's message and Cancel and Run buttons.](https://bearingresearch.com/strata/dev/assets/read-confirm-dark.png#only-dark)
 
 A Run is kept per cell, machine and inputs (the mount listings, table snapshots
 and fetch URLs), so a rerun on the same machine does not ask again, while new
