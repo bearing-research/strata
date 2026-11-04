@@ -7,7 +7,7 @@ import { CELL_STATES, cellState, type CellState } from '../utils/cellState'
 import { LABEL_HEIGHT, labelAnchor, placeEdgeLabels } from '../utils/dagLabels'
 import { dagLineage, edgeOnLineage } from '../utils/dagLineage'
 import { panToCenter, viewBox as dagViewBox } from '../utils/dagViewport'
-import type { Cell, CellId } from '../types/notebook'
+import type { CellId } from '../types/notebook'
 
 defineProps<{ docked?: boolean }>()
 defineEmits<{ toggleDock: [] }>()
