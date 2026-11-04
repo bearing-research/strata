@@ -12,12 +12,12 @@ browser. The same notebook can also be driven by a
 [terminal](../notebook/tui.md).
 
 ![The Strata notebook UI: two named Python cells, load and summarize, each with
-its source and an interactive table of results, the sidebar panels for mounts,
-workers and environment, and a bottom drawer showing the DAG of load, summarize
+its source and an interactive table of results, the Notebook settings rail
+collapsed on the right, and a bottom drawer showing the DAG of load, summarize
 and plot with per-cell timings.](../assets/notebook-anatomy-light.png#only-light)
 ![The Strata notebook UI: two named Python cells, load and summarize, each with
-its source and an interactive table of results, the sidebar panels for mounts,
-workers and environment, and a bottom drawer showing the DAG of load, summarize
+its source and an interactive table of results, the Notebook settings rail
+collapsed on the right, and a bottom drawer showing the DAG of load, summarize
 and plot with per-cell timings.](../assets/notebook-anatomy-dark.png#only-dark)
 
 The pipeline below is the one in that screenshot.
@@ -264,12 +264,12 @@ executing. There is no confirmation step: cascades run automatically,
 so running a cell always gives you a result computed from current
 inputs.
 
-![The same notebook after the loader is edited: the loader carries a "Why
-stale?" pill and the two cells that depend on it are outlined in amber, in the
-cell list and in the DAG below.](../assets/cascade-stale-light.png#only-light)
-![The same notebook after the loader is edited: the loader carries a "Why
-stale?" pill and the two cells that depend on it are outlined in amber, in the
-cell list and in the DAG below.](../assets/cascade-stale-dark.png#only-dark)
+![The same notebook after the loader is edited: the loader reads stale, with a
+"Why stale?" pill and its old output dimmed under "Output from the previous
+run", and all three cells are outlined in amber in the DAG below.](../assets/cascade-stale-light.png#only-light)
+![The same notebook after the loader is edited: the loader reads stale, with a
+"Why stale?" pill and its old output dimmed under "Output from the previous
+run", and all three cells are outlined in amber in the DAG below.](../assets/cascade-stale-dark.png#only-dark)
 
 Revert the edit (`time.sleep(1)` back to `time.sleep(2)`) and
 re-run: every cell becomes a cache hit on the way through, no work

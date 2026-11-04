@@ -193,8 +193,8 @@ async function main() {
         await context.close()
       }
 
-      // 2: the same notebook after its loader is edited: the loader falls back
-      // to idle and everything downstream goes stale.
+      // 2: the same notebook after its loader is edited: it and everything
+      // downstream read stale.
       //
       // The edit has to happen before the page loads, not while it is open: an
       // out-of-band source change (REST, CLI, MCP: anything that isn't this
@@ -218,9 +218,13 @@ async function main() {
 
       // 2b: the Tests panel, on the cell whose tests the fixture ran.
       // Results persist to runtime.json and rehydrate on open, so the badge is
-      // already green here; nothing waits on a live pytest run.
+      // already green here; nothing waits on a live pytest run. Tall enough that the
+      // drawer does not cover the last test.
       {
-        const { context, page } = await loadNotebook(browser, baseUrl, iris.sessionId, theme)
+        const { context, page } = await loadNotebook(browser, baseUrl, iris.sessionId, theme, {
+          width: VIEWPORT.width,
+          height: 1400,
+        })
         const cell = page
           .locator('.cell')
           .filter({ has: page.locator('.tests-badge') })
