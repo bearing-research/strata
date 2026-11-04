@@ -28,18 +28,18 @@ What you'll learn:
 from strata_client import StrataClient
 
 
-def delibera_transform(operation: str, step_id: str, role: str, code_hash: str, **kwargs) -> dict:
-    """Create a Delibera transform spec.
+def step_transform(operation: str, step_id: str, role: str, code_hash: str, **kwargs) -> dict:
+    """Create a transform spec for one step of a pipeline.
 
     The transform spec is opaque to Strata - it's used only for provenance
-    hash computation. Delibera includes:
+    hash computation. This one includes:
     - operation: WORK, VOTE, AGGREGATE, etc.
     - step_id: Which step in the protocol
     - role: Planner, Proposer, Validator, etc.
     - code_hash: Hash of the step implementation code
     """
     return {
-        "executor": "delibera@v1",
+        "executor": "my-pipeline@v1",
         "params": {
             "operation": operation,
             "step_id": step_id,
@@ -71,7 +71,7 @@ def basic_put_json():
         # Persist with provenance tracking
         artifact = client.put_json(
             inputs=[],  # No inputs for root artifacts
-            transform=delibera_transform(
+            transform=step_transform(
                 operation="WORK",
                 step_id="PROPOSE",
                 role="Proposer",
@@ -98,7 +98,7 @@ def basic_put_json():
 def cache_hit_detection():
     """Demonstrate cache hit on identical requests (replay)."""
     with StrataClient(base_url="http://127.0.0.1:8765") as client:
-        transform = delibera_transform(
+        transform = step_transform(
             operation="WORK",
             step_id="VALIDATE",
             role="Validator",
@@ -122,7 +122,7 @@ def cache_hit_detection():
 
 
 def lineage_tracking():
-    """Track lineage between Delibera steps."""
+    """Track lineage between steps."""
     with StrataClient(base_url="http://127.0.0.1:8765") as client:
         # Step 1: Persist protocol specification
         protocol = client.put_json(
@@ -152,7 +152,7 @@ def lineage_tracking():
         # Step 3: Planner step (depends on protocol + constraints)
         planner_result = client.put_json(
             inputs=[protocol.uri, constraints.uri],  # Lineage!
-            transform=delibera_transform(
+            transform=step_transform(
                 operation="WORK",
                 step_id="PLAN",
                 role="Planner",
@@ -168,7 +168,7 @@ def lineage_tracking():
         # Step 4: Proposer step (depends on planner output)
         proposer_result = client.put_json(
             inputs=[planner_result.uri, constraints.uri],  # Chains from planner
-            transform=delibera_transform(
+            transform=step_transform(
                 operation="WORK",
                 step_id="PROPOSE",
                 role="Proposer",
@@ -196,9 +196,9 @@ def lineage_tracking():
 
 
 def crash_recovery():
-    """Demonstrate how Strata enables crash recovery for Delibera.
+    """Demonstrate how Strata enables crash recovery for a pipeline.
 
-    If Delibera crashes mid-run, it can restart and:
+    If a pipeline crashes mid-run, it can restart and:
     1. Completed steps return cache hits (no recomputation)
     2. Failed steps are retried automatically
     3. Lineage is preserved for debugging
@@ -218,7 +218,7 @@ def crash_recovery():
 
             artifact = client.put_json(
                 inputs=inputs,
-                transform=delibera_transform(
+                transform=step_transform(
                     operation="WORK",
                     step_id=step_id,
                     role=step_id.title() + "er",
@@ -240,7 +240,7 @@ def crash_recovery():
 
             artifact = client.put_json(
                 inputs=inputs,
-                transform=delibera_transform(
+                transform=step_transform(
                     operation="WORK",
                     step_id=step_id,
                     role=step_id.title() + "er",
@@ -255,12 +255,12 @@ def crash_recovery():
 
 
 # =============================================================================
-# Example 5: Branching deliberation (exploring alternatives)
+# Example 5: Branching execution (exploring alternatives)
 # =============================================================================
 
 
-def branching_deliberation():
-    """Demonstrate branching execution paths in Delibera.
+def branching_execution():
+    """Demonstrate branching execution paths.
 
     Multiple proposers can explore different branches, each persisted
     as a separate artifact with shared lineage to the planner.
@@ -269,7 +269,7 @@ def branching_deliberation():
         # Shared planner output
         planner = client.put_json(
             inputs=[],
-            transform=delibera_transform(
+            transform=step_transform(
                 operation="WORK",
                 step_id="PLAN",
                 role="Planner",
@@ -284,7 +284,7 @@ def branching_deliberation():
         for branch in ["aggressive", "conservative", "balanced"]:
             proposal = client.put_json(
                 inputs=[planner.uri],  # All share same parent
-                transform=delibera_transform(
+                transform=step_transform(
                     operation="WORK",
                     step_id="PROPOSE",
                     role="Proposer",
@@ -299,7 +299,7 @@ def branching_deliberation():
         # Aggregator combines all proposals
         aggregator = client.put_json(
             inputs=[p.uri for p in proposals],  # All proposals as inputs
-            transform=delibera_transform(
+            transform=step_transform(
                 operation="AGGREGATE",
                 step_id="DECIDE",
                 role="Aggregator",
@@ -455,8 +455,8 @@ if __name__ == "__main__":
     print("\n=== Crash Recovery ===")
     crash_recovery()
 
-    print("\n=== Branching Deliberation ===")
-    branching_deliberation()
+    print("\n=== Branching Execution ===")
+    branching_execution()
 
     print("\n=== Arrow Table ===")
     put_with_arrow_table()

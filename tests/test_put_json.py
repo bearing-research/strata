@@ -50,7 +50,7 @@ class TestPutJson:
         request_body = {
             "inputs": [],
             "transform": {
-                "executor": "delibera@v1",
+                "executor": "my-pipeline@v1",
                 "params": {
                     "operation": "WORK",
                     "step_id": "PROPOSE",
@@ -130,7 +130,7 @@ class TestPutJsonClient:
             artifact = client.put_json(
                 inputs=[],
                 transform={
-                    "executor": "delibera@v1",
+                    "executor": "my-pipeline@v1",
                     "params": {
                         "operation": "WORK",
                         "step_id": "PLAN",
@@ -152,7 +152,7 @@ class TestPutJsonClient:
 
         try:
             transform = {
-                "executor": "delibera@v1",
+                "executor": "my-pipeline@v1",
                 "params": {"step_id": "VALIDATE", "code_hash": "sha256:val123"},
             }
             data = {"validation_result": "passed"}
@@ -205,11 +205,11 @@ class TestPutJsonClient:
             client.close()
 
 
-class TestDeliberaIntegration:
-    """Delibera-like usage patterns."""
+class TestPipelineSteps:
+    """How a pipeline persists its steps."""
 
-    def test_delibera_step_persistence(self, server_with_artifacts):
-        """Delibera-style step artifact persistence."""
+    def test_step_persistence(self, server_with_artifacts):
+        """Step artifact persistence."""
         base_url = server_with_artifacts["base_url"]
         client = StrataClient(base_url=base_url)
 
@@ -234,7 +234,7 @@ class TestDeliberaIntegration:
             planner_result = client.put_json(
                 inputs=[protocol.uri, constraints.uri],
                 transform={
-                    "executor": "delibera@v1",
+                    "executor": "my-pipeline@v1",
                     "params": {
                         "operation": "WORK",
                         "step_id": "PLAN",
@@ -249,7 +249,7 @@ class TestDeliberaIntegration:
             proposer_result = client.put_json(
                 inputs=[planner_result.uri, constraints.uri],
                 transform={
-                    "executor": "delibera@v1",
+                    "executor": "my-pipeline@v1",
                     "params": {
                         "operation": "WORK",
                         "step_id": "PROPOSE",
@@ -276,7 +276,7 @@ class TestDeliberaIntegration:
             replay_planner = client.put_json(
                 inputs=[protocol.uri, constraints.uri],
                 transform={
-                    "executor": "delibera@v1",
+                    "executor": "my-pipeline@v1",
                     "params": {
                         "operation": "WORK",
                         "step_id": "PLAN",
