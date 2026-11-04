@@ -1401,6 +1401,33 @@ async def test_an_output_overtaken_by_a_duplicate_offers_its_canonical_bytes(loc
     assert offered == [b"bytes"]
 
 
+async def test_an_output_that_cannot_be_offered_leaves_the_others(local_manager):
+    from strata.notebook.team_store import publish_cell_outputs
+
+    store = local_manager.artifact_store
+    spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
+    for var in ("a", "b"):
+        artifact_id = local_manager.cell_artifact_id(CELL_ID, var)
+        version = store.create_artifact(artifact_id, provenance_hash=var, transform_spec=spec)
+        store.write_blob(artifact_id, version, b"bytes")
+        store.finalize_artifact(artifact_id, version, "", 0, 5)
+    offered: list[str] = []
+
+    class Breaking:
+        async def publish(self, provenance_hash, blob, **_):
+            if provenance_hash == "a":
+                raise RuntimeError("no team")
+            offered.append(provenance_hash)
+            return True
+
+    published = await publish_cell_outputs(
+        Breaking(), local_manager, cell_id=CELL_ID, consumed_vars={"a", "b"}
+    )
+
+    assert published == 1
+    assert offered == ["b"]
+
+
 FOLDER_WRITER = (
     "# @output_dir ckpt\n"
     "(ckpt / 'epochs').mkdir()\n"

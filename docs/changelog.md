@@ -189,6 +189,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A team store failure no longer fails your cell.** A problem offering finished outputs
+  to the team store could fail a cell whose outputs were already saved, and stop a Run All
+  partway. It's now logged and the run goes on, and one output that can't be offered no
+  longer stops the others. (#PRNUM)
 - **A worker is told to stop whenever Strata stops waiting for it.** A remote request that
   times out or drops, and a job status reply Strata cannot read, now cancel the job, so the
   machine isn't left computing for nobody. An unreadable status also reads as a job status
