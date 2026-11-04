@@ -25,6 +25,7 @@ from vestigo.provenance import derive_subkey
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import (
     _ARTIFACT_EXT_BY_CONTENT_TYPE,
+    OutputNotSaved,
     RemoteExecutionError,
     _mount_sync_failure_result,
     _refused_result,
@@ -739,8 +740,9 @@ async def run_python_cell(
                         collected=collected,
                         local_run=local_run,
                         stochastic=prov.annotations.stochastic,
+                        run_outputs=exec_result.outputs,
                     )
-                except TableWriteError as exc:
+                except (TableWriteError, OutputNotSaved) as exc:
                     stored_ok, store_error = False, str(exc)
                 await context.close_open_run(cell_id)
                 if not stored_ok:
