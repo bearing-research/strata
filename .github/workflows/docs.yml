@@ -69,6 +69,15 @@ jobs:
           test -s site/llms.txt && test -s site/llms-full.txt && test -s site/index.md
           test -s site/notebook/cells/index.html
 
+      # mike changes site_url, so only a real deploy shows what a published link will read.
+      - name: Check versioned links (PRs)
+        if: github.event_name == 'pull_request'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          uv run mike deploy --branch llms-check check
+          git show llms-check:check/llms.txt | grep -q 'strata/check/index.md'
+
       - name: Configure git for mike
         if: github.event_name == 'push'
         run: |

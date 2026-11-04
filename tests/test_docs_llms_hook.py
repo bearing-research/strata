@@ -1,4 +1,4 @@
-"""The docs hook behind ``llms.txt``. docs.yml builds the real site and checks the files exist."""
+"""The docs hook behind ``llms.txt``. docs.yml runs a real deploy and checks its links."""
 
 from __future__ import annotations
 
@@ -107,9 +107,6 @@ def test_llms_txt_format():
     )
 
 
-def test_links_name_the_deployed_version(monkeypatch):
-    config = {"site_url": "https://x/strata/"}
-    monkeypatch.delenv("MIKE_DOCS_VERSION", raising=False)
-    assert hook._base_url(config) == "https://x/strata/"
-    monkeypatch.setenv("MIKE_DOCS_VERSION", "0.12.0")
-    assert hook._base_url(config) == "https://x/strata/0.12.0/"
+def test_links_start_at_the_site_url_with_one_slash():
+    assert hook._base_url({"site_url": "https://x/strata/dev/"}) == "https://x/strata/dev/"
+    assert hook._base_url({"site_url": "https://x/strata/dev"}) == "https://x/strata/dev/"
