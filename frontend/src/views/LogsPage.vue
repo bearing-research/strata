@@ -175,7 +175,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="logs-header-actions">
         <router-link to="/artifacts" class="nav-link" data-testid="nav-artifacts"
-          >Artifacts</router-link
+          >Server store</router-link
         >
         <ThemeToggle />
       </div>

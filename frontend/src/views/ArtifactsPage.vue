@@ -3,11 +3,15 @@ import { ArrowDown, ArrowLeft, ArrowUp, Diamond } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-// Back to wherever the user came from, falling back to the home list.
+// With a session this lists that notebook's own store, which is where its results live.
+// Without one, the server's.
+const props = defineProps<{ sessionId?: string }>()
+
+// Back to wherever the user came from, falling back to the notebook or the home list.
 const router = useRouter()
 function goBack() {
   if (window.history.length > 1) router.back()
-  else router.push('/')
+  else router.push(props.sessionId ? `/notebook/${props.sessionId}` : '/')
 }
 import {
   useStrata,
@@ -17,6 +21,7 @@ import {
 } from '../composables/useStrata'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { apiErrorCode } from '../utils/refusal'
+import { outputLabel } from '../utils/storeRows'
 
 const strata = useStrata()
 
@@ -24,6 +29,7 @@ const PAGE_SIZE = 100
 const STATES = ['', 'ready', 'building', 'superseded', 'failed'] as const
 type SortKey = NonNullable<ArtifactQuery['sort']>
 
+const notebookName = ref('')
 const stats = ref<ArtifactStats | null>(null)
 const rows = ref<ArtifactRow[]>([])
 const loading = ref(false)
@@ -63,7 +69,9 @@ function formatTime(ts: number | null): string {
 
 async function loadStats() {
   try {
-    stats.value = await strata.getArtifactStats()
+    stats.value = props.sessionId
+      ? await strata.getNotebookStoreStats(props.sessionId)
+      : await strata.getArtifactStats()
   } catch {
     // Don't blank the table; the list load reports an unreachable store.
     stats.value = null
@@ -74,15 +82,19 @@ async function loadArtifacts() {
   loading.value = true
   error.value = null
   try {
-    const data = await strata.getArtifacts({
+    const query = {
       limit: PAGE_SIZE,
       offset: offset.value,
       state: stateFilter.value || undefined,
       namePrefix: namePrefix.value.trim() || undefined,
       sort: sort.value,
       order: order.value,
-    })
+    }
+    const data = props.sessionId
+      ? await strata.getNotebookStoreArtifacts(props.sessionId, query)
+      : await strata.getArtifacts(query)
     rows.value = data.artifacts
+    notebookName.value = data.notebook_name ?? ''
   } catch (e: any) {
     rows.value = []
     if (apiErrorCode(e) === 'writes_disabled') listUnavailable.value = true
@@ -151,13 +163,31 @@ onMounted(() => {
           ><Diamond fill="currentColor" /> strata</router-link
         >
         <span class="crumb">/</span>
-        <span class="page-name">artifacts</span>
+        <template v-if="sessionId">
+          <span class="page-name" data-testid="artifacts-scope">{{
+            notebookName || 'notebook'
+          }}</span>
+          <span class="crumb">/</span>
+          <span class="page-name">artifacts</span>
+        </template>
+        <span v-else class="page-name" data-testid="artifacts-scope">server store</span>
       </div>
       <div class="artifacts-header-actions">
         <router-link to="/logs" class="nav-link" data-testid="nav-logs">Logs</router-link>
         <ThemeToggle />
       </div>
     </div>
+
+    <p class="scope-note" data-testid="artifacts-scope-note">
+      <template v-if="sessionId">
+        The results this notebook has stored, in its own <code>.strata/artifacts</code>. A cell's
+        output is stored when another cell reads it.
+      </template>
+      <template v-else>
+        Results of server-side scans and transforms. Notebook results aren't here: each notebook
+        keeps its own store, under Artifacts in the notebook's menu.
+      </template>
+    </p>
 
     <div v-if="stats" class="stat-strip" data-testid="artifact-stats">
       <div class="stat-card">
@@ -206,7 +236,7 @@ onMounted(() => {
           <option v-for="s in STATES" :key="s" :value="s">{{ s ? s : 'all' }}</option>
         </select>
       </label>
-      <label class="filter filter-grow">
+      <label v-if="!sessionId" class="filter filter-grow">
         Name prefix
         <input
           v-model="namePrefix"
@@ -227,7 +257,11 @@ onMounted(() => {
       <table class="artifact-table" data-testid="artifacts-table">
         <thead>
           <tr>
-            <th>Artifact ID</th>
+            <template v-if="sessionId">
+              <th>Cell</th>
+              <th>Output</th>
+            </template>
+            <th v-else>Artifact ID</th>
             <th>Ver</th>
             <th>State</th>
             <th class="sortable num" @click="setSort('row_count')">
@@ -248,14 +282,22 @@ onMounted(() => {
         </thead>
         <tbody>
           <tr v-if="!rows.length && !loading">
-            <td colspan="6" class="empty">No artifacts match these filters.</td>
+            <td :colspan="sessionId ? 7 : 6" class="empty">No artifacts match these filters.</td>
           </tr>
           <tr
             v-for="a in rows"
             :key="a.artifact_uri"
             :data-testid="`artifact-row-${a.artifact_id}-${a.version}`"
           >
-            <td class="mono" :title="a.artifact_id">{{ shortId(a.artifact_id) }}</td>
+            <template v-if="sessionId">
+              <td class="mono" :title="a.cell_id ?? undefined">
+                {{ a.cell_name || a.cell_id || 'n/a' }}
+              </td>
+              <td class="mono" :title="a.artifact_id">
+                {{ outputLabel(a.output, a.artifact_id) }}
+              </td>
+            </template>
+            <td v-else class="mono" :title="a.artifact_id">{{ shortId(a.artifact_id) }}</td>
             <td class="num">{{ a.version }}</td>
             <td>
               <span class="state-pill" :class="`state-${a.state}`">{{ a.state }}</span>
@@ -525,6 +567,12 @@ onMounted(() => {
 .mono {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   color: var(--text-secondary);
+}
+
+.scope-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .empty {
