@@ -189,6 +189,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A cell can keep what `strata.put` and `strata.materialize` return.** A later cell
+  reading the handle failed with "failed to store output artifacts", because the handle
+  pickled the run's checkpoint pipe. It now leaves the run's pipe and token behind, and
+  reads through the running cell's client. (#1412)
 - **The browser tab shows Strata's diamond.** The app never linked a tab icon, and the
   file it shipped was the Vite template's logo. (#1406)
 - **The table viewer no longer shows NaN and infinity as `null`.** JSON cannot carry
