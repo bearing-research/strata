@@ -44,7 +44,7 @@
 
 ## Concepts
 
-- [How caching works](https://bearingresearch.com/strata/dev/concepts/caching/index.md): The provenance hash determines cache identity.
+- [How caching works](https://bearingresearch.com/strata/dev/concepts/caching/index.md): *Edit one cell in `strata tutorial`: only the cells that read it run again, and the cell above keeps what it saved.
 - [The DAG and staleness](https://bearingresearch.com/strata/dev/concepts/dag-and-staleness/index.md): Each cell's source code is analyzed via Python's AST to extract:
 - [Artifacts and lineage](https://bearingresearch.com/strata/dev/concepts/artifacts-and-lineage/index.md): Strata Notebook is a content-addressed compute graph over Python.
 - [File format and git](https://bearingresearch.com/strata/dev/concepts/file-format-and-git/index.md): Each notebook is a directory on disk:
