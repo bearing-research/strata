@@ -79,7 +79,7 @@ from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
-from strata.notebook.execution_result import CellExecutionResult
+from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.graph import analysis_with, mounts_of
 from strata.notebook.harness_user import (
     HarnessUser,
@@ -500,6 +500,8 @@ class BatchCellResult:
     duration_ms: float | None = None
     # Set on a hit the team store served; ws prices the hit from it.
     team_pull: TeamPull | None = None
+    replaces_console: bool = False
+    hit_run_ms: int = 0
 
 
 @dataclass(kw_only=True)
@@ -1414,7 +1416,7 @@ class CellExecutor:
             provenance_hash = run_key(prov)
 
             # RW mounts have side effects: not cacheable. A rerun bypasses the cache but still
-            # records a cacheable leaf's console, or the next plain run replays an older one.
+            # records a cacheable cell's console, or the next plain run replays an older one.
             cacheable = not prov.has_rw_mount and not prov.annotations.nocache
             if not cacheable:
                 use_cache = False
@@ -1511,8 +1513,10 @@ class CellExecutor:
             # A leaf cell has no artifact, but its stdout/stderr are stored by provenance; replay
             # them so an unchanged re-run is instant.
             cached_console = (
-                self.session.resolve_cached_console(cell_id, provenance_hash)
-                if (cell is not None and use_cache and not consumed_vars)
+                self.session.resolve_cached_console(
+                    cell_id, provenance_hash, variant=fanout_variant
+                )
+                if (cell is not None and use_cache)
                 else None
             )
             team_pull: TeamPull | None = None
@@ -1540,15 +1544,19 @@ class CellExecutor:
                     cached_display_outputs,
                     fanout_variant,
                 )
+                # The hit may have just promoted it.
+                cached_console = self.session.resolve_cached_console(
+                    cell_id, provenance_hash, variant=fanout_variant
+                )
 
             # A leaf's record is its console and displays; a revert finds them under an older
-            # version, promoted like a consumed variable's above.
+            # version, promoted like a consumed variable's above. Its displays alone may match:
+            # the run it reverts over could have made none.
             if (
                 use_cache
                 and cell is not None
                 and not consumed_vars
                 and cached_console is None
-                and not cached_display_outputs
                 and self._promote_reverted_leaf(
                     cell_id, provenance_hash, len(current_display_outputs)
                 )
@@ -1595,8 +1603,12 @@ class CellExecutor:
                     cell_id=cell_id,
                     success=True,
                     outputs={},
-                    stdout=cached_console[0] if cached_console else "",
-                    stderr=cached_console[1] if cached_console else "",
+                    # A fan-out says this of the cell, once it has every instance's.
+                    **hit_console(
+                        cached_console,
+                        shows_this_key=fanout_variant is not None
+                        or (cell is not None and cell.last_provenance_hash == provenance_hash),
+                    ),
                     display_outputs=[output.model_dump() for output in cached_display_outputs],
                     display_output=(
                         cached_display_outputs[-1].model_dump() if cached_display_outputs else None
@@ -1851,8 +1863,8 @@ class CellExecutor:
                             source=source,
                             env_hash=env_hash,
                         )
-                        # Cache a leaf cell's console by provenance so a re-run replays it.
-                        if cacheable and not consumed_vars:
+                        # Cache the cell's console by provenance so a hit replays this run's.
+                        if cacheable:
                             self._store_console_outputs(
                                 cell_id,
                                 provenance_hash,
@@ -1863,6 +1875,8 @@ class CellExecutor:
                                 source=source,
                                 env_hash=env_hash,
                                 display_count=len(exec_result.display_outputs),
+                                duration_ms=exec_result.duration_ms,
+                                variant=fanout_variant,
                             )
 
                     # ⑥ Sync back read-write mounts. A worker syncs its own and reports what
@@ -2074,7 +2088,8 @@ class CellExecutor:
         current_display_count: int,
         variant: str | None = None,
     ) -> int | None:
-        """Make each variable's and display's version under ``provenance_hash`` latest again.
+        """Make each variable's, display's and console's version under ``provenance_hash``
+        latest again.
 
         A mismatched latest may still have the right result under an older version (reverting
         an edit P1 -> P2 -> P1); promoting re-points "latest" at it without running the cell.
@@ -2126,6 +2141,19 @@ class CellExecutor:
                     invalid = (display_id, display_art, display_prov)
                     break
                 to_promote.append((display_id, older_display.version))
+
+        # The console the reverted run printed, or the hit replays a later run's. A run with
+        # none on record still hits: its outputs are all a hit needs.
+        if invalid is None and variant is None:
+            console_id = artifact_mgr.cell_artifact_id(cell_id, "__console__")
+            console_prov = derive_subkey(provenance_hash, "__console__")
+            console_art = store.get_latest_version(console_id)
+            if console_art is None or console_art.provenance_hash != console_prov:
+                older_console = store.find_version_by_provenance(console_id, console_prov)
+                if older_console is not None and store.blob_exists(
+                    console_id, older_console.version
+                ):
+                    to_promote.append((console_id, older_console.version))
 
         if invalid is not None:
             artifact_id, latest, expected = invalid
@@ -2216,6 +2244,7 @@ class CellExecutor:
             execute_python_cell=self._execute_python_cell,
             moved=self._moved,
             promote_reverted_outputs=self._promote_reverted_outputs,
+            store_console_outputs=self._store_console_outputs,
             prepare_mounts=self._prepare_mounts,
             input_refs=self._input_refs,
             write_cell_tables=self._write_cell_tables,
@@ -2427,8 +2456,8 @@ class CellExecutor:
                     current_display_outputs,
                     cached_display_outputs,
                 )
-            # A leaf's displays, promoted as a variable's above. No console: an R leaf with only
-            # a console is not cached, so it has nothing to promote.
+            # A leaf's displays, promoted as a variable's above. An R leaf with only a console
+            # is not cached, so it has nothing to promote.
             elif (
                 use_cache
                 and cell is not None
@@ -2443,6 +2472,8 @@ class CellExecutor:
                 )
 
             if cached_artifact is not None or (not consumed_vars and cached_display_outputs):
+                # After the promotion above, which carries the console.
+                cached_console = self.session.resolve_cached_console(cell_id, provenance_hash)
                 duration_ms = (time.time() - start_time) * 1000
                 if cell:
                     cell.cache_hit = True
@@ -2463,6 +2494,12 @@ class CellExecutor:
                     cell_id=cell_id,
                     success=True,
                     outputs={},
+                    **hit_console(
+                        cached_console,
+                        shows_this_key=(
+                            cell is not None and cell.last_provenance_hash == provenance_hash
+                        ),
+                    ),
                     display_outputs=[output.model_dump() for output in cached_display_outputs],
                     display_output=(
                         cached_display_outputs[-1].model_dump() if cached_display_outputs else None
@@ -2628,6 +2665,25 @@ class CellExecutor:
                             source=source,
                             env_hash=env_hash,
                         )
+                        # So a hit replays this run's. An R leaf with only a console isn't
+                        # cached, and a record would read it as ready.
+                        if (
+                            not prov.has_rw_mount
+                            and not prov.annotations.nocache
+                            and (consumed_vars or exec_result.display_outputs)
+                        ):
+                            self._store_console_outputs(
+                                cell_id,
+                                provenance_hash,
+                                exec_result.stdout,
+                                exec_result.stderr,
+                                input_hashes,
+                                source_hash=source_hash,
+                                source=source,
+                                env_hash=env_hash,
+                                display_count=len(exec_result.display_outputs),
+                                duration_ms=exec_result.duration_ms,
+                            )
 
                     # A worker syncs its own and reports what was written in its result.
                     mount_writes = _worker_mount_writes(result, mount_specs)
@@ -5665,17 +5721,21 @@ class CellExecutor:
         source: str = "",
         env_hash: str = "",
         display_count: int | None = None,
+        duration_ms: float,
+        variant: str | None = None,
     ) -> None:
-        """Persist a leaf cell's console output as a provenance-keyed artifact.
+        """Persist a cell's console output as a provenance-keyed artifact.
 
-        So a cell that only prints can still cache-hit and replay its output. Stored
-        even when both streams are empty: a leaf has no other artifact, so the console
-        is the record that it ran under this provenance (cache hit, ready on reopen).
+        So a hit replays what its own run printed, and a cell that only prints can
+        cache-hit at all. Stored even when both streams are empty: that is what the run
+        printed, and a leaf has no other artifact, so the console is the record that it
+        ran under this provenance (cache hit, ready on reopen).
         ``display_count`` records how many displays the run made, which a run with
-        none leaves no display artifact to say.
+        none leaves no display artifact to say. ``duration_ms`` is what the run cost,
+        hence what a hit on this record saves.
         """
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self._input_refs(cell_id)
+        input_versions = self._input_refs(cell_id, variant)
         blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
         params = self._fetch_params(cell_id)
         if display_count is not None:
@@ -5690,7 +5750,9 @@ class CellExecutor:
             source_hash=source_hash,
             source=source,
             env_hash=env_hash,
+            build_duration_ms=duration_ms,
             extra_params=params,
+            variant=variant,
         )
 
     def _store_mount_writes(
@@ -6537,6 +6599,7 @@ class CellExecutor:
         end_reason = "subprocess_died"
         failed_cell_id: str | None = None
         team_pulls: dict[str, TeamPull] = {}
+        hit_consoles: dict[str, tuple[bool, int]] = {}
 
         async def _record(cell_id: str, result: BatchCellResult) -> None:
             cell_results[cell_id] = result
@@ -6641,6 +6704,10 @@ class CellExecutor:
                 team_pull = response.pop("team_pull", None)
                 if team_pull is not None:
                     team_pulls[payload.get("cell_id", "")] = team_pull
+                hit_consoles[payload.get("cell_id", "")] = (
+                    response.pop("replaces_console", False),
+                    response.pop("hit_run_ms", 0),
+                )
                 # Answered once here instead of at each cache-check return; the cell's ambient
                 # client needs it to name what it promotes.
                 response["input_uris"] = self._upstream_artifact_uris(payload.get("cell_id", ""))
@@ -6707,6 +6774,8 @@ class CellExecutor:
                             display_outputs=payload.get("display_outputs") or [],
                             duration_ms=payload.get("duration_ms"),
                             team_pull=team_pulls.get(active_cell_id),
+                            replaces_console=hit_consoles[active_cell_id][0],
+                            hit_run_ms=hit_consoles[active_cell_id][1],
                         ),
                     )
                 if watchdog_state is not None:
@@ -6948,11 +7017,7 @@ class CellExecutor:
 
         # A leaf's record is its console (empty when it printed nothing), as in single-cell;
         # without one, or any cached display, there is nothing to serve, so run it.
-        cached_console = (
-            self.session.resolve_cached_console(cell_id, provenance_hash)
-            if not consumed_vars
-            else None
-        )
+        cached_console = self.session.resolve_cached_console(cell_id, provenance_hash)
         if not consumed_vars and not cached_displays and cached_console is None:
             return {"cache_hit": False, "provenance_hash": provenance_hash}
 
@@ -6983,6 +7048,10 @@ class CellExecutor:
         if cached_display_models:
             cell.display_outputs = list(cached_display_models)
             cell.display_output = cached_display_models[-1]
+        # Before the record below moves the cell's last key on to this one.
+        console = hit_console(
+            cached_console, shows_this_key=cell.last_provenance_hash == provenance_hash
+        )
         # As a single-cell hit does, so the table index names the reads behind these outputs.
         self.session.record_successful_execution_provenance(
             cell_id,
@@ -6999,8 +7068,10 @@ class CellExecutor:
             "provenance_hash": provenance_hash,
             "cached_outputs": cached_outputs,
             "cached_displays": cached_displays,
-            "stdout": cached_console[0] if cached_console else "",
-            "stderr": cached_console[1] if cached_console else "",
+            "stdout": console.get("stdout", ""),
+            "stderr": console.get("stderr", ""),
+            "replaces_console": console["replaces_console"],
+            "hit_run_ms": console.get("hit_run_ms", 0),
             "team_pull": team_pull,
         }
 
@@ -7093,14 +7164,9 @@ class CellExecutor:
         if not stored_ok:
             return {"ok": False, "error": "store_outputs returned False"}
 
-        # A leaf's console is its record, as in single-cell. Rerun All stores it too, or the
-        # next Run All replays an older run's; only ``# @nocache`` stores none.
-        consumed_vars = (
-            self.session.dag.consumed_variables.get(cell_id, set())
-            if self.session.dag is not None
-            else set()
-        )
-        if not prov.annotations.nocache and not consumed_vars:
+        # Stored as in single-cell. Rerun All stores it too, or the next Run All replays an
+        # older run's; only ``# @nocache`` stores none.
+        if not prov.annotations.nocache:
             self._store_console_outputs(
                 cell_id,
                 provenance_hash,
@@ -7111,6 +7177,7 @@ class CellExecutor:
                 source=executed_source,
                 env_hash=env_hash,
                 display_count=len(persisted_displays),
+                duration_ms=float(payload.get("duration_ms") or 0.0),
             )
 
         # Offer it to the team, as a single run does. Inert unless configured, and it

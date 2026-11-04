@@ -8,6 +8,32 @@ from typing import Any
 from strata.notebook.immutability import MutationWarning
 
 
+@dataclass(frozen=True)
+class CachedConsole:
+    """A run's console as its record holds it, with what that run cost."""
+
+    stdout: str
+    stderr: str
+    run_ms: int = 0
+
+
+def hit_console(console: CachedConsole | None, *, shows_this_key: bool) -> dict[str, Any]:
+    """A hit's console fields on `CellExecutionResult`.
+
+    With no record (a team pull, or a store from before every cell kept one) a console
+    from this key stays and one from another key goes: nothing here says what this run
+    printed, and the other key's output would read as if it did.
+    """
+    if console is None:
+        return {"replaces_console": not shows_this_key}
+    return {
+        "stdout": console.stdout,
+        "stderr": console.stderr,
+        "replaces_console": True,
+        "hit_run_ms": console.run_ms,
+    }
+
+
 @dataclass(kw_only=True)
 class CellExecutionResult:
     """Result from executing a cell.
@@ -62,6 +88,10 @@ class CellExecutionResult:
     team_cache_saved_ms: int = 0
     # The promotion the team hit came from, when one put it in the store.
     team_cache_promotion: str | None = None
+    # A hit's stdout and stderr replace the console the cell shows, even when empty.
+    replaces_console: bool = False
+    # What the run a local hit stands for cost. 0 when its record does not say.
+    hit_run_ms: int = 0
 
     def __post_init__(self) -> None:
         # Legacy shim: accept either `display_outputs` or `display_output` and keep both

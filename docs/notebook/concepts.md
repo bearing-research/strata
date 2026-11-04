@@ -262,11 +262,15 @@ cell that does run offers its outputs back. Nobody has to decide in advance
 which results are worth publishing - the expensive middle of a pipeline is
 shared on the same terms as anything else.
 
+A cell's console output is keyed by the same provenance hash and replayed with
+its outputs, so a hit shows what the run behind it printed. That holds after you
+undo an edit you ran: the cell reads stale, because what it shows is the edit's
+run, and running it brings back the first run whole without executing anything.
+
 This applies even to a **leaf cell**, one with no downstream consumer, like a
-cell that only `print`s a diagnostic. It has no output artifact to cache, but
-its console output is keyed by the same provenance hash and replayed on an
-unchanged re-run, so it doesn't re-execute. That is what makes the notebook a
-usable scratchpad. A cell that must always run, because it has a side effect
+cell that only `print`s a diagnostic. It has no output artifact to cache, so its
+console is the record that it ran, and an unchanged re-run doesn't re-execute.
+That is what makes the notebook a usable scratchpad. A cell that must always run, because it has a side effect
 (writing a file, calling an API) or produces a fresh value (the clock,
 `random`), opts out of caching with [`# @nocache`](annotations.md#nocache).
 

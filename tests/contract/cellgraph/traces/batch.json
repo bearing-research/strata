@@ -1499,6 +1499,7 @@
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",
@@ -3569,6 +3570,7 @@
       "execution_method": "cached",
       "provenance_hash": "ba50826d960e1d6bb0d186d06619c25d828fd47c2a21d3af2baffbaed159f9a5",
       "status": "ok",
+      "stdout": "double 4\n",
       "then": [
        [
         "cached",
@@ -4604,11 +4606,12 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "double 4\n",
+      "console": "double 2\n",
       "displays": [],
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",
@@ -5626,11 +5629,12 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "double 4\n",
+      "console": "double 2\n",
       "displays": [],
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",
@@ -6648,11 +6652,12 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "double 4\n",
+      "console": "double 2\n",
       "displays": [],
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",
@@ -7670,11 +7675,12 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "double 4\n",
+      "console": "double 2\n",
       "displays": [],
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",
@@ -8697,11 +8703,12 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "double 4\n",
+      "console": "double 2\n",
       "displays": [],
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",
@@ -10760,11 +10767,12 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "",
+      "console": "double 2\n",
       "displays": [],
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",
@@ -11819,11 +11827,12 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "",
+      "console": "double 2\n",
       "displays": [],
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",
@@ -12817,11 +12826,12 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "",
+      "console": "double 2\n",
       "displays": [],
       "execution_method": "cached",
       "provenance_hash": "3ce4cd634105f8c121341dae6cb6d58dcfb51c58e97ec9ded39f931b5d55394d",
       "status": "ok",
+      "stdout": "double 2\n",
       "then": [
        [
         "cached",

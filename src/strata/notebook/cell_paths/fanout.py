@@ -17,7 +17,7 @@ from vestigo.store import StagedVersion
 from strata.notebook import each, output_dirs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import _writes_entry
-from strata.notebook.execution_result import CellExecutionResult
+from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.models import MountMode, TableWriteSpec, WorkerBackendType
 from strata.notebook.mounts import MountWrite, parse_mount_uri
 from strata.notebook.table_writes import StagedOutput, TableWriteError
@@ -41,6 +41,7 @@ class FanoutContext:
     execute_python_cell: Callable[..., Awaitable[CellExecutionResult]]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     promote_reverted_outputs: Callable[..., int | None]
+    store_console_outputs: Callable[..., None]
     prepare_mounts: Callable[..., Awaitable[dict[str, ResolvedMount]]]
     input_refs: Callable[[str], dict[str, str]]
     write_cell_tables: Callable[..., None]
@@ -214,15 +215,30 @@ def _finish_fanout(
             execution_method="fanout",
         )
     else:
+        # Cached only when no instance ran: one recompute makes the cell a run.
+        cache_hit = bool(results) and all(r.cache_hit for _, r in results)
+        cell = host.notebook_state.get_cell(cell_id)
         aggregate = CellExecutionResult(
             cell_id=cell_id,
             success=True,
             stdout=stdout,
             stderr=stderr,
             duration_ms=duration_ms,
-            # Cached only when no instance ran: one recompute makes the cell a run.
-            cache_hit=bool(results) and all(r.cache_hit for _, r in results),
+            cache_hit=cache_hit,
             execution_method="fanout",
+            # Before the record below moves the cell's last key on to this one.
+            replaces_console=cache_hit
+            and (
+                all(r.replaces_console for _, r in results)
+                or cell is None
+                or cell.last_provenance_hash != base.provenance_hash
+            ),
+            # Instances run in turn, so their costs add. One unpriced leaves the sum unknown.
+            hit_run_ms=(
+                sum(r.hit_run_ms for _, r in results)
+                if cache_hit and all(r.hit_run_ms for _, r in results)
+                else 0
+            ),
         )
         # Record the BASE provenance: compute_staleness recomputes the base hash, so a
         # variant-scoped value would leave the fan-out cell perpetually stale on re-open.
@@ -341,9 +357,23 @@ async def run_each_cell(
             error = "an item failed"
     if error is not None and cell is not None and last_good is not None:
         cell.artifact_uris, cell.artifact_uri = last_good
-    return _finish_fanout(
+    finished = _finish_fanout(
         host, context, cell_id, results, base, start_time, error=error, instance_noun="Item"
     )
+    # The one probe that serves a later hit runs no instance, so it reads their console here.
+    if finished.success and not finished.cache_hit and consumed and not annotations.nocache:
+        context.store_console_outputs(
+            cell_id,
+            base.provenance_hash,
+            finished.stdout,
+            finished.stderr,
+            base.input_hashes,
+            source_hash=base.source_hash,
+            source=source,
+            env_hash=base.env_hash,
+            duration_ms=finished.duration_ms,
+        )
+    return finished
 
 
 def _each_cached(
@@ -357,6 +387,10 @@ def _each_cached(
     """A ``# @each`` cell whose key found its manifests: nothing to do."""
     manager = host.get_artifact_manager()
     cell = host.notebook_state.get_cell(cell_id)
+    console = hit_console(
+        host.resolve_cached_console(cell_id, base.provenance_hash),
+        shows_this_key=cell is not None and cell.last_provenance_hash == base.provenance_hash,
+    )
     if cell is not None:
         cell.cache_hit = True
         for var_name in sorted(consumed):
@@ -379,6 +413,7 @@ def _each_cached(
     result = CellExecutionResult(
         cell_id=cell_id,
         success=True,
+        **console,
         duration_ms=(time.time() - start_time) * 1000,
         cache_hit=True,
         execution_method="cached",

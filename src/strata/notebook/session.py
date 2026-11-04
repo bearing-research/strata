@@ -45,6 +45,7 @@ from strata.notebook.env import (
     compute_lockfile_hash,
     narrow_env_for_provenance,
 )
+from strata.notebook.execution_result import CachedConsole
 from strata.notebook.graph import analysis_with, analyze_notebook, mounts_of
 from strata.notebook.keys import CellKey, InputNotFingerprinted, cell_key, input_parts
 from strata.notebook.models import (
@@ -199,6 +200,9 @@ class ExecutionSample:
     team_principal: str | None = None
     team_saved_ms: int = 0
     team_promotion: str | None = None
+    # What the run a local hit stands for cost, from that run's record. An edit run and
+    # undone costs differently from the run a hit replays, so a cell's last run can't say.
+    hit_run_ms: int = 0
 
 
 @dataclass
@@ -970,63 +974,62 @@ class NotebookSession:
                     language_executor.has_alternate_cache_scheme
                     or parse_annotations(cell.source).per_variant
                 )
-                if cached_display_outputs and not keyed_elsewhere:
+                # A display alone says nothing of the cell's variables and console, and after
+                # edit, run, undo it is older than both. Restored only as part of the last run.
+                if cached_display_outputs and (
+                    keyed_elsewhere or cell.last_provenance_hash == provenance_hash
+                ):
                     cell.display_outputs = cached_display_outputs
                     cell.display_output = cached_display_outputs[-1]
+                # Alternate-scheme cells (PROMPT, SQL, ``# @per_variant`` fan-out) store under
+                # hashes the generic lookup can't match; the generic hash is recorded via
+                # ``record_successful_execution_provenance`` so a match preserves status.
+                # They are preserved from IDLE too, since a cold open starts every cell IDLE.
+                # A leaf still needs READY: its structural comparison on reload (mounts,
+                # worker, env) catches what its hash does not.
+                allowed_status = (
+                    (CellStatus.READY, CellStatus.STALE, CellStatus.IDLE)
+                    if keyed_elsewhere
+                    else (CellStatus.READY,)
+                )
+                # The generic hash isn't all these cells cache on (a SQL cell's connection and
+                # cache policy, a prompt's model), so the cell's own identity must match what it
+                # recorded; None means it can't be settled without a probe. Only needed when
+                # the cell is not READY; a READY cell ran in this session as it stands.
+                identity_required = keyed_elsewhere and cell.status != CellStatus.READY
+                identity = self.reopen_identity(cell) if identity_required else None
+                identity_holds = not identity_required or (
+                    identity is not None and identity == (cell.last_reopen_identity or "")
+                )
+                can_preserve_uncached_ready = (
+                    (cell.is_leaf or keyed_elsewhere)
+                    and cell.status in allowed_status
+                    and cell.last_provenance_hash == provenance_hash
+                    and identity_holds
+                )
+                if can_preserve_uncached_ready:
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
+                    # Outputs live under a per-language scheme, so artifact uris are still empty
+                    # here, and downstream cells read them to build their provenance.
+                    self._restore_alternate_scheme_outputs(cell)
+                elif self._upstream_moved_under(cell, source_hash, env_hash):
+                    # Upstream artifacts were replaced by newer versions with this cell's source
+                    # and env unchanged: stale, not idle (which would read as "never ran").
+                    staleness_map[cell_id] = CellStaleness(
+                        status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
+                    )
+                    stale_cells.add(cell_id)
+                elif cell.last_source_hash not in (None, source_hash):
+                    # Edited since it ran: its result is still shown, and no longer matches.
+                    staleness_map[cell_id] = CellStaleness(
+                        status=CellStatus.STALE, reasons=[StalenessReason.SELF]
+                    )
+                    stale_cells.add(cell_id)
                 else:
-                    if cached_display_outputs:
-                        cell.display_outputs = cached_display_outputs
-                        cell.display_output = cached_display_outputs[-1]
-                    # Alternate-scheme cells (PROMPT, SQL, ``# @per_variant`` fan-out) store under
-                    # hashes the generic lookup can't match; the generic hash is recorded via
-                    # ``record_successful_execution_provenance`` so a match preserves status.
-                    # They are preserved from IDLE too, since a cold open starts every cell IDLE.
-                    # A leaf still needs READY: its structural comparison on reload (mounts,
-                    # worker, env) catches what its hash does not.
-                    allowed_status = (
-                        (CellStatus.READY, CellStatus.STALE, CellStatus.IDLE)
-                        if keyed_elsewhere
-                        else (CellStatus.READY,)
-                    )
-                    # The generic hash isn't all these cells cache on (a SQL cell's connection and
-                    # cache policy, a prompt's model), so the cell's own identity must match what it
-                    # recorded; None means it can't be settled without a probe. Only needed when
-                    # the cell is not READY; a READY cell ran in this session as it stands.
-                    identity_required = keyed_elsewhere and cell.status != CellStatus.READY
-                    identity = self.reopen_identity(cell) if identity_required else None
-                    identity_holds = not identity_required or (
-                        identity is not None and identity == (cell.last_reopen_identity or "")
-                    )
-                    can_preserve_uncached_ready = (
-                        (cell.is_leaf or keyed_elsewhere)
-                        and cell.status in allowed_status
-                        and cell.last_provenance_hash == provenance_hash
-                        and identity_holds
-                    )
-                    if can_preserve_uncached_ready:
-                        staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
-                        # Outputs live under a per-language scheme, so artifact uris are still empty
-                        # here, and downstream cells read them to build their provenance.
-                        self._restore_alternate_scheme_outputs(cell)
-                    elif self._upstream_moved_under(cell, source_hash, env_hash):
-                        # Upstream artifacts were replaced by newer versions with this cell's source
-                        # and env unchanged: stale, not idle (which would read as "never ran").
-                        staleness_map[cell_id] = CellStaleness(
-                            status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
-                        )
-                        stale_cells.add(cell_id)
-                    elif cell.last_source_hash not in (None, source_hash):
-                        # Edited since it ran: its result is still shown, and no longer matches.
-                        staleness_map[cell_id] = CellStaleness(
-                            status=CellStatus.STALE, reasons=[StalenessReason.SELF]
-                        )
-                        stale_cells.add(cell_id)
-                    else:
-                        # No cached artifact: idle unless it provably matches the last
-                        # successful uncached run.
-                        staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
-                        stale_cells.add(cell_id)
+                    # No cached artifact: idle unless it provably matches the last
+                    # successful uncached run.
+                    staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
+                    stale_cells.add(cell_id)
                 if cell_id in stale_cells:
                     to_explain[cell_id] = StaleCell(key.parts)
             else:
@@ -1091,9 +1094,11 @@ class NotebookSession:
                 return False
             artifact = store.get_artifact(artifact_id, version)
         elif cell.is_leaf:
-            artifact = store.get_latest_version(
+            # A fan-out leaf keeps one per instance; each says what its run read.
+            records = store.list_latest_by_id_prefix(
                 f"nb_{self.notebook_state.id}_cell_{cell.id}_var___console__"
             )
+            artifact = records[0] if records else None
         else:
             return False
         if artifact is None or not artifact.transform_spec or not artifact.input_versions:
@@ -1241,10 +1246,10 @@ class NotebookSession:
                 error=cell.error,
                 source_hash=cell.error_source_hash,
             )
-        # Write on a real execution or a cache hit that replays console. A hit with no
-        # console must not write: ``update_cell_console_output`` would unlink the
+        # Write on a real execution or a hit that says what to show, empty included. Any
+        # other hit must not write: ``update_cell_console_output`` would unlink the
         # original run's output. A failed run is a real execution.
-        if not result.cache_hit or result.stdout or result.stderr:
+        if not result.cache_hit or result.replaces_console:
             cell.console_stdout = result.stdout or ""
             cell.console_stderr = result.stderr or ""
             # Runtime writers never touch notebook.toml.
@@ -1504,13 +1509,15 @@ class NotebookSession:
             resolved.append(CellOutput(**hydrated) if hydrated is not None else output)
         return resolved
 
-    def resolve_cached_console(self, cell_id: str, provenance_hash: str) -> tuple[str, str] | None:
-        """Return cached ``(stdout, stderr)`` for a leaf cell's identical provenance, else ``None``.
+    def resolve_cached_console(
+        self, cell_id: str, provenance_hash: str, *, variant: str | None = None
+    ) -> CachedConsole | None:
+        """The console of the run under exactly this provenance, else ``None``.
 
         Keyed by ``derive_subkey(provenance_hash, "__console__")``, so it replays only
         on an identical provenance.
         """
-        artifact = self._cached_console_record(cell_id, provenance_hash)
+        artifact = self._cached_console_record(cell_id, provenance_hash, variant=variant)
         if artifact is None:
             return None
         try:
@@ -1518,14 +1525,28 @@ class NotebookSession:
             payload = json.loads(blob)
         except (ValueError, OSError, KeyError):
             return None
-        return str(payload.get("stdout", "")), str(payload.get("stderr", ""))
+        return CachedConsole(
+            stdout=str(payload.get("stdout", "")),
+            stderr=str(payload.get("stderr", "")),
+            run_ms=int(artifact.params.get("build_duration_ms") or 0),
+        )
 
-    def _cached_console_record(self, cell_id: str, provenance_hash: str) -> ArtifactVersion | None:
-        """The leaf's console artifact for this exact provenance, without reading its blob."""
-        notebook_id = self.notebook_state.id
-        artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___console__"
-        expected_hash = hashlib.sha256(f"{provenance_hash}:__console__".encode()).hexdigest()
-        artifact = self.artifact_manager.artifact_store.get_latest_version(artifact_id)
+    def _cached_console_record(
+        self, cell_id: str, provenance_hash: str, *, variant: str | None = None
+    ) -> ArtifactVersion | None:
+        """The console artifact for this exact provenance, without reading its blob.
+
+        The latest version, since a leaf's record says it is ready as it stands, and a
+        revert promotes it. Nothing reads a variant's as latest, so any version serves.
+        """
+        artifact_id = self.artifact_manager.cell_artifact_id(
+            cell_id, "__console__", variant=variant
+        )
+        expected_hash = derive_subkey(provenance_hash, "__console__")
+        store = self.artifact_manager.artifact_store
+        if variant is not None:
+            return store.find_version_by_provenance(artifact_id, expected_hash)
+        artifact = store.get_latest_version(artifact_id)
         if artifact is None or artifact.provenance_hash != expected_hash:
             return None
         return artifact
@@ -1962,7 +1983,11 @@ class NotebookSession:
         consumed_vars = self.dag.consumed_variables.get(cell_id, set()) if self.dag else set()
         if not consumed_vars:
             # A leaf's only product is its console, stored under its own subkey; that is
-            # what the executor replays as a hit, so it is what makes the cell ready.
+            # what the executor replays as a hit, so it is what makes the cell ready. A later
+            # run that stores none (``# @nocache``) leaves it latest, and is what still shows.
+            cell = self.notebook_state.get_cell(cell_id)
+            if cell is not None and cell.last_provenance_hash not in (None, provenance_hash):
+                return None
             if self._cached_console_record(cell_id, provenance_hash) is not None:
                 return {}
             return None
@@ -2253,6 +2278,7 @@ class NotebookSession:
                     team_principal=sample.get("team_principal"),
                     team_saved_ms=int(sample.get("team_saved_ms") or 0),
                     team_promotion=sample.get("team_promotion"),
+                    hit_run_ms=int(sample.get("hit_run_ms") or 0),
                 )
                 for sample in entry.execution_samples
             ]
@@ -2270,6 +2296,7 @@ class NotebookSession:
         team_principal: str | None = None,
         team_saved_ms: int = 0,
         team_promotion: str | None = None,
+        hit_run_ms: int = 0,
     ) -> None:
         """Record a cell execution for profiling.
 
@@ -2281,6 +2308,7 @@ class NotebookSession:
             team_saved_ms: What their run cost, hence what this hit saved; this user
                 has no local run to price it against.
             team_promotion: The promotion that put the result in the team store, if any.
+            hit_run_ms: What the run a local hit stands for cost, when its record says.
         """
         if cell_id not in self.execution_history:
             self.execution_history[cell_id] = []
@@ -2292,6 +2320,7 @@ class NotebookSession:
                 team_principal=team_principal,
                 team_saved_ms=team_saved_ms,
                 team_promotion=team_promotion,
+                hit_run_ms=hit_run_ms,
             )
         )
         # Mirrored to disk; trim to the file's cap so memory and disk don't drift across a reopen.
@@ -2305,6 +2334,7 @@ class NotebookSession:
             team_principal=team_principal,
             team_saved_ms=team_saved_ms,
             team_promotion=team_promotion,
+            hit_run_ms=hit_run_ms,
         )
 
     def get_estimated_duration(self, cell_id: str) -> int:
@@ -2325,7 +2355,7 @@ class NotebookSession:
         saved_ms = 0
         for sample in self.execution_history.get(cell_id, []):
             if sample.cache_hit:
-                saved_ms = sample.team_saved_ms or last_run_ms
+                saved_ms = sample.team_saved_ms or sample.hit_run_ms or last_run_ms
             elif sample.duration_ms is not None:
                 saved_ms = last_run_ms = int(sample.duration_ms)
         return saved_ms
@@ -2360,8 +2390,9 @@ class NotebookSession:
                 }
             )
 
-        # A local hit is priced against the cell's last uncached run. A team hit has
-        # no such run, so its price rides on the sample from the publisher's run.
+        # A local hit is priced by the run it stands for, or without that record the cell's
+        # last uncached run. A team hit has neither, so its price rides on the sample from
+        # the publisher's run.
         cache_savings_ms = 0
         team_cache_savings_ms = 0
         team_cache_hits = 0
@@ -2375,6 +2406,8 @@ class NotebookSession:
                     if sample.team_saved_ms:
                         cache_savings_ms += sample.team_saved_ms
                         team_cache_savings_ms += sample.team_saved_ms
+                    elif sample.hit_run_ms:
+                        cache_savings_ms += sample.hit_run_ms
                     elif last_non_cached_duration is not None:
                         cache_savings_ms += last_non_cached_duration
                     if sample.from_team:

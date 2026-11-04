@@ -18,7 +18,7 @@ from vestigo.provenance import derive_subkey
 from strata.notebook import output_dirs
 from strata.notebook.annotations import LoopAnnotation, parse_annotations
 from strata.notebook.cell_paths.context import artifact_content_type, effective_worker_name
-from strata.notebook.execution_result import CellExecutionResult
+from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
     hand_over,
@@ -146,6 +146,10 @@ def _cached_loop_result(
         cell_id=cell_id,
         success=True,
         outputs={},
+        **hit_console(
+            host.resolve_cached_console(cell_id, cell_provenance),
+            shows_this_key=cell is not None and cell.last_provenance_hash == cell_provenance,
+        ),
         display_outputs=[output.model_dump() for output in cached_displays],
         duration_ms=(time.time() - start_time) * 1000,
         cache_hit=True,
@@ -756,8 +760,8 @@ async def run_loop_cell(
                 source=source,
                 env_hash=env_hash,
             )
-    # A leaf's console is its record of the run, so a cold open reads it ready.
-    if not consumed_vars and not annotations.nocache:
+    # So a hit replays this run's. A leaf's is its record of the run: a cold open reads it ready.
+    if not annotations.nocache:
         context.store_console_outputs(
             cell_id,
             cell_provenance,
@@ -768,6 +772,7 @@ async def run_loop_cell(
             source=source,
             env_hash=env_hash,
             display_count=len(display_outputs),
+            duration_ms=loop_duration_ms,
         )
 
     duration_ms = loop_duration_ms

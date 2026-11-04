@@ -2295,6 +2295,7 @@ async def execute_cell_and_broadcast(
             team_principal=result.team_cache_principal,
             team_promotion=result.team_cache_promotion,
             team_saved_ms=result.team_cache_saved_ms,
+            hit_run_ms=result.hit_run_ms,
         )
         session.apply_execution_result_metadata(cell_id, result)
 
@@ -2449,6 +2450,7 @@ async def _execute_cascade(
                         team_principal=result.team_cache_principal,
                         team_promotion=result.team_cache_promotion,
                         team_saved_ms=result.team_cache_saved_ms,
+                        hit_run_ms=result.hit_run_ms,
                     )
                     session.apply_execution_result_metadata(cell_id, result)
 
@@ -2791,6 +2793,8 @@ async def _run_partition_batch(
             error=result.error,
             execution_method="batch" if not result.cache_hit else "cached",
             mutation_warnings=result.mutation_warnings,
+            replaces_console=result.replaces_console,
+            hit_run_ms=result.hit_run_ms,
         )
         team_pull = result.team_pull
         if team_pull is not None:
@@ -2808,6 +2812,7 @@ async def _run_partition_batch(
             team_principal=synthetic.team_cache_principal,
             team_promotion=synthetic.team_cache_promotion,
             team_saved_ms=synthetic.team_cache_saved_ms,
+            hit_run_ms=synthetic.hit_run_ms,
         )
         session.apply_execution_result_metadata(result.cell_id, synthetic)
         await _broadcast_execution_result(notebook_id, result.cell_id, synthetic)
@@ -2967,6 +2972,7 @@ async def _run_partition_single_cell(
             team_principal=result.team_cache_principal,
             team_promotion=result.team_cache_promotion,
             team_saved_ms=result.team_cache_saved_ms,
+            hit_run_ms=result.hit_run_ms,
         )
         session.apply_execution_result_metadata(cell_id, result)
         await _broadcast_execution_result(notebook_id, cell_id, result)
@@ -3533,7 +3539,7 @@ async def _broadcast_output_or_error(
             payload["artifact_uris"] = dict(cell.artifact_uris)
             if result.cache_hit and session is not None:
                 payload["saved_ms"] = session.last_hit_saved_ms(cell_id)
-            # A hit that replays no console keeps the cell's last one, so the
+            # A hit with no console on record may keep the cell's last one, so the
             # frame says what a resync or reopen shows.
             if result.cache_hit and not (result.stdout or result.stderr):
                 payload["stdout"] = cell.console_stdout

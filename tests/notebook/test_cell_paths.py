@@ -1040,13 +1040,13 @@ class TestLoop:
         real = executor._store_console_outputs
 
         def spy(*args, **kwargs):
-            calls.append(args)
+            calls.append(args[0])
             return real(*args, **kwargs)
 
         executor._store_console_outputs = spy
         result = await executor.execute_cell("lp", source)
         assert result.success, result.error
-        assert len(calls) == stored
+        assert calls.count("lp") == stored
 
 
 @pytest.mark.parametrize(
@@ -1106,7 +1106,9 @@ class TestFanout:
     def _fakes(base, *, consumed=(), latest=None, finalized=(), **overrides):
         """A host and a context with nothing behind them, and a record of what they were asked."""
         calls = SimpleNamespace(recorded=[], applied=[], instances=[], staged=[], discarded=[])
-        cell = SimpleNamespace(artifact_uris={}, artifact_uri=None, cache_hit=False)
+        cell = SimpleNamespace(
+            artifact_uris={}, artifact_uri=None, cache_hit=False, last_provenance_hash=None
+        )
         calls.cell = cell
 
         def stage_cell_output(**kwargs):
@@ -1127,6 +1129,7 @@ class TestFanout:
                 read_producer=lambda _cell_id, _source: None,
             ),
             get_artifact_manager=lambda: manager,
+            resolve_cached_console=lambda *_args, **_kwargs: None,
             record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
                 (args, kwargs)
             ),
@@ -1151,6 +1154,7 @@ class TestFanout:
             "execute_python_cell": execute_python_cell,
             "moved": lambda _cell_id: ({}, {}),
             "promote_reverted_outputs": lambda *_args: None,
+            "store_console_outputs": lambda *_args, **_kwargs: None,
             "prepare_mounts": nothing,
             "input_refs": lambda _cell_id: {"in": "strata://artifact/in@v=1"},
             "write_cell_tables": lambda *_args: None,

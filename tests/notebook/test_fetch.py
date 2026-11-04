@@ -17,6 +17,11 @@ from strata.notebook.fetch import FetchCache, FetchError, FetchPinMismatch
 from strata.notebook.models import FetchSpec
 
 
+def _outputs(manager, cell_id):
+    """A cell's stored variables, without the record of what its run printed."""
+    return [item for item in manager.list_cell_artifacts(cell_id) if item[0] != "__console__"]
+
+
 class _Origin:
     """A small HTTP server whose bytes the test can change, and which honours
     ``If-None-Match`` so a conditional check is observable."""
@@ -784,7 +789,7 @@ class TestInACell:
         from strata.services.artifact import ArtifactService
 
         manager = session.get_artifact_manager()
-        ((_, artifact),) = manager.list_cell_artifacts(cell_id)
+        ((_, artifact),) = _outputs(manager, cell_id)
         return ArtifactService().build_lineage(
             manager.artifact_store,
             artifact=artifact,

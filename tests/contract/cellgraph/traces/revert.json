@@ -7347,10 +7347,11 @@
      },
      "run": {
       "cache_hit": true,
-      "console": "printed 2\n",
+      "console": "printed 1\n",
       "displays": [],
       "provenance_hash": "65417c6beea5c9abd20f87b043812a9de4c4f27d7f97e069dbb7b802c52a9ecf",
-      "status": "ok"
+      "status": "ok",
+      "stdout": "printed 1\n"
      },
      "staleness": {
       "reasons": [],

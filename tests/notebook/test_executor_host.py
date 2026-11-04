@@ -146,7 +146,9 @@ class _FakeHost:
     def collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]:
         return {}
 
-    def resolve_cached_console(self, cell_id: str, provenance_hash: str) -> None:
+    def resolve_cached_console(
+        self, cell_id: str, provenance_hash: str, *, variant: str | None = None
+    ) -> None:
         return None
 
     def resolve_cached_display_outputs(self, cell_id, provenance_hash, current_outputs):
