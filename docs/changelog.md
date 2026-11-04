@@ -194,9 +194,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   machine isn't left computing for nobody. An unreadable status also reads as a job status
   failure, where before it reported "setup failed" or a raw parse error. Cancelling a
   signed-transport cell before its request went out raised `UnboundLocalError`; it now
-  cancels cleanly and leaves the worker alone. (#PRNUM)
+  cancels cleanly and leaves the worker alone. (#1426)
 - **A run that fails to start leaves no descriptors open.** A missing input file, or a
-  harness process that can't start, leaked open files in the server. (#PRNUM)
+  harness process that can't start, leaked open files in the server. (#1426)
 - **A DAG label stays off its own edge.** An edge running down and to the left no longer
   passes through its variable name. (#1413)
 - **A cell can keep what `strata.put` and `strata.materialize` return.** A later cell
