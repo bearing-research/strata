@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { LABEL_CHAR_WIDTH, LABEL_HEIGHT, placeEdgeLabels } from './dagLabels.ts'
+import { LABEL_CHAR_WIDTH, LABEL_HEIGHT, labelAnchor, placeEdgeLabels } from './dagLabels.ts'
 
 function assertNoOverlap(spots: ({ x: number; y: number } | null)[], text: string) {
   const width = text.length * LABEL_CHAR_WIDTH
@@ -17,6 +17,18 @@ function assertNoOverlap(spots: ({ x: number; y: number } | null)[], text: strin
     }
   }
 }
+
+test('a label sits clear of an edge running to either side', () => {
+  const mid = { x: 100, y: 50 }
+  const text = 'df'
+
+  const left = labelAnchor(mid, 200, 40, text)
+  assert.equal(left.x + text.length * LABEL_CHAR_WIDTH, mid.x - 6)
+
+  for (const toX of [100, 160]) {
+    assert.equal(labelAnchor(mid, 100, toX, text).x, mid.x + 6)
+  }
+})
 
 test('a label with room stays at its edge', () => {
   assert.deepEqual(

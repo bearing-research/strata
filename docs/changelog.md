@@ -189,6 +189,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A DAG label stays off its own edge.** An edge running down and to the left no longer
+  passes through its variable name. (#1413)
 - **A cell can keep what `strata.put` and `strata.materialize` return.** A later cell
   reading the handle failed with "failed to store output artifacts", because the handle
   pickled the run's checkpoint pipe. It now leaves the run's pipe and token behind, and

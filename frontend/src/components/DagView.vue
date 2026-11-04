@@ -2,7 +2,7 @@
 import * as dagre from '@dagrejs/dagre'
 import { computed, reactive, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
-import { LABEL_HEIGHT, placeEdgeLabels } from '../utils/dagLabels'
+import { LABEL_HEIGHT, labelAnchor, placeEdgeLabels } from '../utils/dagLabels'
 import type { Cell, CellId } from '../types/notebook'
 
 const { notebook, orderedCells, dagEdges } = useNotebook()
@@ -157,7 +157,7 @@ const layout = computed(() => {
   const labelSpots = placeEdgeLabels(
     edges.map((e) => {
       const mid = e.points[Math.floor(e.points.length / 2)]
-      return { x: mid.x + 6, y: mid.y - 6, text: e.variable }
+      return labelAnchor(mid, e.from.x, e.to.x, e.variable)
     }),
     nodes.map((n) => ({
       x: n.x - n.width / 2,

@@ -15,6 +15,17 @@ function overlaps(a: Box, b: Box): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
 }
 
+/** Where a label starts: on the side its edge bends away from, so the line misses the text. */
+export function labelAnchor(
+  mid: { x: number; y: number },
+  fromX: number,
+  toX: number,
+  text: string,
+): { x: number; y: number; text: string } {
+  const x = toX < fromX ? mid.x - 6 - text.length * LABEL_CHAR_WIDTH : mid.x + 6
+  return { x, y: mid.y - 6, text }
+}
+
 /** Each label's top-left corner, or null when it has no free spot. */
 export function placeEdgeLabels(
   labels: { x: number; y: number; text: string }[],
