@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowUpFromLine, ChevronDown, GitFork, Hexagon, Star } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import { promotableOutputs } from '../utils/artifactRef'
@@ -55,9 +56,9 @@ async function promote(row: StripRow, alias: 'champion' | 'candidate') {
   busy.value = row.key
   try {
     const result = await setAliasAction(row.name, alias, row.artifactId, row.version)
-    if (result.status === 'pending') pushToast(`⏳ ${alias} change pending approval`, 'info')
+    if (result.status === 'pending') pushToast(`${alias} change pending approval`, 'info')
     else if (result.status === 'unchanged') pushToast(`${row.name} → ${alias} (no change)`, 'info')
-    else pushToast(`✓ ${row.name} → ${alias}`, 'success')
+    else pushToast(`${row.name} → ${alias}`, 'success')
   } catch (err) {
     pushToast(err instanceof Error ? err.message : `Failed to set ${alias}`, 'error')
   } finally {
@@ -102,7 +103,7 @@ async function share() {
   try {
     const result = await promoteToTeamAction(props.cellId, uri, name)
     const carried = result.copied === 1 ? '1 artifact' : `${result.copied} artifacts`
-    pushToast(`✓ ${result.name} in the team store (${carried} copied)`, 'success')
+    pushToast(`${result.name} in the team store (${carried} copied)`, 'success')
     sharing.value = false
   } catch (err) {
     pushToast(err instanceof Error ? err.message : `Failed to promote ${name}`, 'error')
@@ -121,7 +122,7 @@ function tagList(tags: Record<string, string>): string {
 <template>
   <div v-if="registryEnabled && (rows.length || shareVariables.length)" class="cell-artifact-strip">
     <div v-for="row in rows" :key="row.key" class="strip-row">
-      <span class="glyph">⬡</span>
+      <span class="glyph"><Hexagon /></span>
       <span class="name">{{ row.name }}</span>
       <span class="ver">v{{ row.version }}</span>
       <span
@@ -129,7 +130,7 @@ function tagList(tags: Record<string, string>): string {
         :key="alias"
         class="chip"
         :class="{ champ: alias === 'champion' }"
-        >{{ alias === 'champion' ? '★' : '' }}{{ alias }}=v{{ ver }}</span
+        ><Star v-if="alias === 'champion'" fill="currentColor" />{{ alias }}=v{{ ver }}</span
       >
       <span v-if="tagList(row.tags)" class="tags">{{ tagList(row.tags) }}</span>
       <span class="spacer"></span>
@@ -139,7 +140,7 @@ function tagList(tags: Record<string, string>): string {
           :disabled="busy === row.key"
           @click="openMenu = openMenu === row.key ? null : row.key"
         >
-          Promote ▾
+          Promote <ChevronDown />
         </button>
         <div v-if="openMenu === row.key" class="promote-menu">
           <button @click="promote(row, 'champion')">Set as champion</button>
@@ -149,14 +150,15 @@ function tagList(tags: Record<string, string>): string {
       <button
         class="lineage-btn"
         title="View lineage"
+        aria-label="View lineage"
         @click="openLineageAction(row.artifactId, row.version, row.name)"
       >
-        ⎘
+        <GitFork />
       </button>
     </div>
     <div v-if="shareVariables.length" class="strip-row share-row">
       <template v-if="sharing">
-        <span class="glyph">⇪</span>
+        <span class="glyph"><ArrowUpFromLine /></span>
         <select
           v-if="shareVariables.length > 1"
           v-model="shareVariable"
@@ -189,7 +191,7 @@ function tagList(tags: Record<string, string>): string {
           title="Copy this output and everything behind it to the team store, under a name"
           @click="openShare"
         >
-          ⇪ Promote to team…
+          <ArrowUpFromLine /> Promote to team…
         </button>
       </template>
     </div>

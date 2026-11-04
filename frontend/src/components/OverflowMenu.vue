@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Ellipsis } from '@lucide/vue'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const open = ref(false)
@@ -38,7 +39,7 @@ onBeforeUnmount(() => {
       title="More actions"
       @click="open = !open"
     >
-      &#x22EF;
+      <Ellipsis />
     </button>
     <div v-if="open" class="overflow-dropdown" role="menu" @click="open = false">
       <slot />

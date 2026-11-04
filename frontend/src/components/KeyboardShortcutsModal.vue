@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from '@lucide/vue'
 import { historyShortcuts } from '../composables/editorKeymaps'
 
 defineProps<{ visible: boolean }>()
@@ -21,7 +22,7 @@ const shortcuts = [
     <div class="shortcuts-dialog" @click.stop>
       <div class="shortcuts-header">
         <h2>Keyboard Shortcuts</h2>
-        <button class="shortcuts-close" @click="emit('close')">&times;</button>
+        <button class="shortcuts-close" aria-label="Close" @click="emit('close')"><X /></button>
       </div>
       <table class="shortcuts-table">
         <tbody>

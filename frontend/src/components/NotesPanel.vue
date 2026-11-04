@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronRight } from '@lucide/vue'
 import { computed, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { Cell, CellId } from '../types/notebook'
@@ -55,7 +56,9 @@ function scrollToCell(cellId: CellId) {
     <header class="notes-panel-header" @click="collapsed = !collapsed">
       <span class="notes-panel-title">Notes</span>
       <span class="notes-panel-count">{{ noteCards.length }}</span>
-      <span class="notes-panel-chevron">{{ collapsed ? '▸' : '▾' }}</span>
+      <span class="notes-panel-chevron"
+        ><ChevronRight v-if="collapsed" /><ChevronDown v-else
+      /></span>
     </header>
     <div v-if="!collapsed" class="notes-panel-body">
       <div v-if="noteCards.length === 0" class="notes-panel-empty">No markdown cells</div>

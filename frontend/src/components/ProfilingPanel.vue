@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Cpu, RotateCw, Zap } from '@lucide/vue'
 import { onMounted } from 'vue'
 import { useNotebook } from '../stores/notebook'
 
@@ -29,7 +30,9 @@ function refresh() {
   <div class="profiling-panel">
     <div class="profiling-header">
       <span>Profiling</span>
-      <button class="refresh-btn" title="Refresh" @click="refresh">&#x21BB;</button>
+      <button class="refresh-btn" title="Refresh" aria-label="Refresh" @click="refresh">
+        <RotateCw />
+      </button>
     </div>
 
     <div v-if="profilingSummary" class="profiling-body">
@@ -86,7 +89,7 @@ function refresh() {
         <div v-for="cp in profilingSummary.cellProfiles" :key="cp.cellId" class="cell-profile-row">
           <span class="cp-name" :title="cp.cellId">{{ cp.cellName }}</span>
           <span class="cp-status" :class="`cp-${cp.status}`">
-            {{ cp.cacheHit ? '&#x26A1;' : '&#x25D0;' }}
+            <Zap v-if="cp.cacheHit" /><Cpu v-else />
           </span>
           <span class="cp-duration">{{ cp.durationMs ? formatMs(cp.durationMs) : '-' }}</span>
         </div>

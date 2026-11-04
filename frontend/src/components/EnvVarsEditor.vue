@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from '@lucide/vue'
 import { ref, watch } from 'vue'
 import { envDraftRows, envPayload, type EnvDraftRow } from '../utils/envMask'
 
@@ -106,7 +107,14 @@ function save() {
         :placeholder="row.maskedKey ? 'set (hidden); type to replace' : 'value'"
         :disabled="readOnly"
       />
-      <button v-if="!readOnly" class="env-remove" @click="removeRow(index)">×</button>
+      <button
+        v-if="!readOnly"
+        class="env-remove"
+        aria-label="Remove variable"
+        @click="removeRow(index)"
+      >
+        <X />
+      </button>
     </div>
 
     <div v-if="!readOnly" class="env-actions">

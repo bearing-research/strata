@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown } from '@lucide/vue'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 interface ExportOption {
@@ -97,7 +98,7 @@ onBeforeUnmount(() => {
       @click="toggle"
     >
       <span class="trigger-label">Export</span>
-      <span class="trigger-caret" aria-hidden="true">▾</span>
+      <span class="trigger-caret" aria-hidden="true"><ChevronDown /></span>
     </button>
 
     <div v-if="open" class="export-dropdown" role="menu" data-testid="export-menu-dropdown">

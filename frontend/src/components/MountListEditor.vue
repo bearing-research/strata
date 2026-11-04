@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from '@lucide/vue'
 import { ref, watch } from 'vue'
 import type { MountSpec } from '../types/notebook'
 
@@ -115,7 +116,14 @@ function save() {
         placeholder="pin (optional)"
         :disabled="readOnly"
       />
-      <button v-if="!readOnly" class="mount-remove" @click="removeMount(index)">×</button>
+      <button
+        v-if="!readOnly"
+        class="mount-remove"
+        aria-label="Remove mount"
+        @click="removeMount(index)"
+      >
+        <X />
+      </button>
     </div>
 
     <div v-if="!readOnly" class="mount-actions">

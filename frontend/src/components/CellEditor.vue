@@ -1,4 +1,28 @@
 <script setup lang="ts">
+import {
+  ArrowDown,
+  ArrowRightToLine,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleDashed,
+  Clock,
+  Contrast,
+  Copy,
+  FlaskConical,
+  Pencil,
+  Play,
+  Plus,
+  RotateCw,
+  Search,
+  Settings,
+  Square,
+  TriangleAlert,
+  X,
+  Zap,
+} from '@lucide/vue'
 import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useCodemirror } from '../composables/useCodemirror'
 import { useNotebook } from '../stores/notebook'
@@ -241,20 +265,20 @@ const inputsBadge = computed(() =>
   }),
 )
 
-const statusLabel = computed(() => {
+const statusIcon = computed(() => {
   switch (props.cell.status) {
     case 'idle':
-      return '\u25CB'
+      return Circle
     case 'queued':
-      return '\u25F7'
+      return Clock
     case 'running':
-      return '\u25CC'
+      return CircleDashed
     case 'ready':
-      return '\u25CF'
+      return Circle
     case 'stale':
-      return '\u25D0'
+      return Contrast
     case 'error':
-      return '\u2715'
+      return X
   }
 })
 
@@ -739,57 +763,87 @@ function outputKey(output: CellOutput, index: number): string {
   >
     <!-- Left gutter -->
     <div class="cell-gutter">
-      <span class="status-dot" :title="statusDotTitle">{{ statusLabel }}</span>
+      <span class="status-dot" :title="statusDotTitle"
+        ><component :is="statusIcon" :fill="cell.status === 'ready' ? 'currentColor' : 'none'"
+      /></span>
       <div class="cell-actions">
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"
           title="Run (Shift+Enter)"
+          aria-label="Run"
           :disabled="!connected || environmentMutationActive"
           @click="emit('run', cell.id)"
         >
-          &#x25B6;
+          <Play fill="currentColor" />
         </button>
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"
           title="Rerun: force re-execute, bypass cache (Cmd+Shift+Enter)"
+          aria-label="Rerun"
           data-testid="cell-rerun-button"
           :disabled="!connected || environmentMutationActive"
           @click="emit('rerun', cell.id)"
         >
-          &#x21BB;
+          <RotateCw />
         </button>
         <button
           v-else-if="cell.language !== 'markdown'"
           class="cancel-btn"
           title="Cancel running cell"
+          aria-label="Cancel running cell"
           data-testid="cancel-cell-button"
           @click="cancelThisCell"
         >
-          &#x25A0;
+          <Square fill="currentColor" />
         </button>
-        <button title="Move up" @click="emit('moveUp', cell.id)">&#x25B2;</button>
-        <button title="Move down" @click="emit('moveDown', cell.id)">&#x25BC;</button>
-        <button title="Add cell below" @click="emit('addBelow', cell.id)">+</button>
-        <button title="Duplicate cell" @click="emit('duplicate', cell.id)">&#x2398;</button>
-        <button title="Delete cell" @click="emit('delete', cell.id)">&times;</button>
+        <button title="Move up" aria-label="Move up" @click="emit('moveUp', cell.id)">
+          <ArrowUp />
+        </button>
+        <button title="Move down" aria-label="Move down" @click="emit('moveDown', cell.id)">
+          <ArrowDown />
+        </button>
+        <button
+          title="Add cell below"
+          aria-label="Add cell below"
+          @click="emit('addBelow', cell.id)"
+        >
+          <Plus />
+        </button>
+        <button
+          title="Duplicate cell"
+          aria-label="Duplicate cell"
+          @click="emit('duplicate', cell.id)"
+        >
+          <Copy />
+        </button>
+        <button title="Delete cell" aria-label="Delete cell" @click="emit('delete', cell.id)">
+          <X />
+        </button>
         <button
           :title="folded ? 'Expand cell' : 'Collapse cell'"
+          :aria-label="folded ? 'Expand cell' : 'Collapse cell'"
           :class="{ active: folded }"
           @click="folded = !folded"
         >
-          {{ folded ? '&#x25B7;' : '&#x25BD;' }}
+          <ChevronRight v-if="folded" /><ChevronDown v-else />
         </button>
-        <button title="Inspect inputs" :class="{ active: isInspecting }" @click="toggleInspect">
-          &#x1F50D;
+        <button
+          title="Inspect inputs"
+          aria-label="Inspect inputs"
+          :class="{ active: isInspecting }"
+          @click="toggleInspect"
+        >
+          <Search />
         </button>
         <button
           v-if="isPythonCell"
           class="tests-toggle"
           :title="testBadge?.title ?? 'Unit tests'"
+          aria-label="Unit tests"
           :class="{ active: isTesting }"
           @click="toggleTests(cell.id)"
         >
-          &#x1F9EA;
+          <FlaskConical />
           <span v-if="testBadge" class="tests-badge" :class="`tests-badge--${testBadge.cls}`">
             {{ testBadge.text }}
           </span>
@@ -851,7 +905,7 @@ function outputKey(output: CellOutput, index: number): string {
             :disabled="!connected || environmentMutationActive"
             @click="runVariantGroup"
           >
-            ▶ all
+            <Play fill="currentColor" /> all
           </button>
         </template>
       </div>
@@ -962,7 +1016,7 @@ function outputKey(output: CellOutput, index: number): string {
                 class="annotation-diagnostic-badge"
                 :title="annotationDiagnosticsTitle"
               >
-                &#x26A0; {{ annotationDiagnosticsLabel }}
+                <TriangleAlert /> {{ annotationDiagnosticsLabel }}
               </span>
               <span v-if="cell.isModuleCell" class="module-cell-badge" :title="moduleExportsTitle">
                 module
@@ -981,7 +1035,7 @@ function outputKey(output: CellOutput, index: number): string {
                   class="loop-spinner"
                   aria-hidden="true"
                 ></span>
-                &#x21BB; {{ loopProgressLabel }}
+                <RotateCw /> {{ loopProgressLabel }}
               </span>
               <span
                 v-for="v in cell.variantProgress"
@@ -996,7 +1050,7 @@ function outputKey(output: CellOutput, index: number): string {
                 "
                 data-testid="variant-progress-chip"
               >
-                {{ v.success ? '✓' : '✗' }} {{ v.variant }}
+                <Check v-if="v.success" /><X v-else /> {{ v.variant }}
               </span>
               <span
                 v-if="cell.status === 'running' && !loopProgressLabel"
@@ -1015,7 +1069,7 @@ function outputKey(output: CellOutput, index: number): string {
                 class="cache-badge"
                 :title="cacheBadgeTitle(cell.output?.cacheLoadMs)"
               >
-                &#x26A1; {{ cacheBadgeLabel(cell.output?.cacheSavedMs, cell.output?.cacheLoadMs) }}
+                <Zap /> {{ cacheBadgeLabel(cell.output?.cacheSavedMs, cell.output?.cacheLoadMs) }}
               </span>
             </div>
           </div>
@@ -1070,11 +1124,15 @@ function outputKey(output: CellOutput, index: number): string {
         </div>
         <ul class="causality-details">
           <li v-for="(detail, i) in cell.causality.details" :key="i" class="causality-detail">
-            <span v-if="detail.type === 'source_changed'" class="detail-icon">&#x270E;</span>
-            <span v-else-if="detail.type === 'input_changed'" class="detail-icon">&#x2191;</span>
-            <span v-else-if="detail.type === 'external_changed'" class="detail-icon">&#x21E5;</span>
-            <span v-else-if="detail.type === 'unavailable'" class="detail-icon">&#x26A0;</span>
-            <span v-else class="detail-icon">&#x2699;</span>
+            <span v-if="detail.type === 'source_changed'" class="detail-icon"><Pencil /></span>
+            <span v-else-if="detail.type === 'input_changed'" class="detail-icon"><ArrowUp /></span>
+            <span v-else-if="detail.type === 'external_changed'" class="detail-icon"
+              ><ArrowRightToLine
+            /></span>
+            <span v-else-if="detail.type === 'unavailable'" class="detail-icon"
+              ><TriangleAlert
+            /></span>
+            <span v-else class="detail-icon"><Settings /></span>
             <span v-if="detail.type === 'source_changed'">
               Source of <code>{{ detail.cellName || detail.cellId }}</code> changed
             </span>
@@ -1124,7 +1182,8 @@ function outputKey(output: CellOutput, index: number): string {
 
       <div v-if="!folded && cell.language === 'widget'" class="widget-source-toggle">
         <button type="button" @click="widgetShowSource = !widgetShowSource">
-          {{ widgetShowSource ? '✓ Done editing controls' : '✎ Edit controls' }}
+          <template v-if="widgetShowSource"><Check /> Done editing controls</template>
+          <template v-else><Pencil /> Edit controls</template>
         </button>
       </div>
       <WidgetCell v-if="!folded && cell.language === 'widget' && !widgetShowSource" :cell="cell" />
@@ -1155,7 +1214,7 @@ function outputKey(output: CellOutput, index: number): string {
         data-testid="cell-stream"
       >
         <span v-if="(cell.streamAttempt ?? 1) > 1" class="stream-retry-badge">
-          &#x21BB; attempt {{ cell.streamAttempt }}: previous response failed schema validation
+          <RotateCw /> attempt {{ cell.streamAttempt }}: previous response failed schema validation
         </span>
         <template v-if="streamIsStructured">
           <span class="stream-ticker" data-testid="stream-ticker">
@@ -1404,7 +1463,7 @@ function outputKey(output: CellOutput, index: number): string {
   border-right: 1px solid var(--border-subtle);
 }
 .status-dot {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .status-ready .status-dot {

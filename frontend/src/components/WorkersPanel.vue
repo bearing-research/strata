@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronUp } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { WorkerCatalogEntry, WorkerHealthHistoryEntry } from '../types/notebook'
@@ -146,7 +147,7 @@ watch(
     <button class="workers-toggle" @click="showPanel = !showPanel">
       Worker
       <span class="worker-label">{{ workerLabel }}</span>
-      <span class="toggle-icon">{{ showPanel ? '&#9650;' : '&#9660;' }}</span>
+      <span class="toggle-icon"><ChevronUp v-if="showPanel" /><ChevronDown v-else /></span>
     </button>
 
     <div v-if="showPanel" class="workers-content">

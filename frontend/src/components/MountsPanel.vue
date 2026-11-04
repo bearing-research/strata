@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronUp } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import MountListEditor from './MountListEditor.vue'
@@ -23,7 +24,7 @@ const mountCount = computed(() => notebook.mounts.length)
     <button class="mounts-toggle" @click="showPanel = !showPanel">
       Mounts
       <span class="mount-count">{{ mountCount }}</span>
-      <span class="toggle-icon">{{ showPanel ? '&#9650;' : '&#9660;' }}</span>
+      <span class="toggle-icon"><ChevronUp v-if="showPanel" /><ChevronDown v-else /></span>
     </button>
 
     <div v-if="showPanel" class="mounts-content">

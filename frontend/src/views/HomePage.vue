@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Diamond, FolderOpen, Notebook, Plus, RotateCw, X } from '@lucide/vue'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -370,7 +371,7 @@ function formatTime(ts: number): string {
     </div>
     <div class="home-container">
       <div class="home-header">
-        <span class="logo">◆ strata</span>
+        <span class="logo"><Diamond fill="currentColor" /> strata</span>
         <span class="subtitle">notebook</span>
       </div>
 
@@ -390,7 +391,7 @@ function formatTime(ts: number): string {
             from recents
           </button>
         </div>
-        <button class="btn-dismiss" @click="dismissError">&times;</button>
+        <button class="btn-dismiss" aria-label="Dismiss" @click="dismissError"><X /></button>
       </div>
 
       <!-- Actions -->
@@ -402,7 +403,7 @@ function formatTime(ts: number): string {
           @mouseenter="void preloadNotebookRoute()"
           @focusin="void preloadNotebookRoute()"
         >
-          <div class="action-icon">+</div>
+          <div class="action-icon"><Plus /></div>
           <div class="action-label">New Notebook</div>
         </div>
         <div
@@ -412,7 +413,7 @@ function formatTime(ts: number): string {
           @mouseenter="void preloadNotebookRoute()"
           @focusin="void preloadNotebookRoute()"
         >
-          <div class="action-icon">📂</div>
+          <div class="action-icon"><FolderOpen /></div>
           <div class="action-label">Open Existing</div>
         </div>
         <div
@@ -424,7 +425,7 @@ function formatTime(ts: number): string {
           @mouseenter="void preloadNotebookRoute()"
           @focusin="void preloadNotebookRoute()"
         >
-          <div class="action-icon">📒</div>
+          <div class="action-icon"><Notebook /></div>
           <div class="action-label">
             {{ importing ? 'Importing…' : 'Import from Jupyter' }}
           </div>
@@ -443,7 +444,14 @@ function formatTime(ts: number): string {
 
       <div v-if="importError" class="import-error" role="alert" data-testid="import-error">
         {{ importError }}
-        <button class="import-error-dismiss" type="button" @click="dismissImportError">×</button>
+        <button
+          class="import-error-dismiss"
+          type="button"
+          aria-label="Dismiss"
+          @click="dismissImportError"
+        >
+          <X />
+        </button>
       </div>
 
       <!-- New notebook form -->
@@ -510,11 +518,12 @@ function formatTime(ts: number): string {
           Scanning <code>{{ discoveryRoot || '(storage root unknown)' }}</code>
           <button
             class="discovery-refresh"
+            aria-label="Rescan for notebooks"
             :disabled="discoveryLoading"
             title="Rescan for notebooks"
             @click="loadDiscoveredNotebooks"
           >
-            ↻
+            <RotateCw />
           </button>
         </div>
         <div v-if="discoveryLoading" class="discovery-status">Scanning…</div>
@@ -596,7 +605,7 @@ function formatTime(ts: number): string {
     <!-- Drag-and-drop overlay for Jupyter import -->
     <div v-if="isDragHovering" class="drag-overlay" data-testid="drag-overlay" aria-hidden="true">
       <div class="drag-overlay-card">
-        <div class="drag-overlay-icon">📒</div>
+        <div class="drag-overlay-icon"><Notebook /></div>
         <div class="drag-overlay-title">Drop to import</div>
         <div class="drag-overlay-hint">.ipynb files only, one at a time</div>
       </div>

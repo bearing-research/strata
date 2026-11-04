@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowDown, ArrowUp } from '@lucide/vue'
 import { useNotebook } from '../stores/notebook'
 
 const { currentImpactPreview, clearImpactPreview, executeCellWebSocket } = useNotebook()
@@ -29,7 +30,7 @@ function runAnyway() {
         <!-- Upstream cells that need to run -->
         <div v-if="currentImpactPreview.upstream.length > 0" class="impact-section">
           <div class="section-label">
-            &#x2191; Will re-run {{ currentImpactPreview.upstream.length }} upstream cell{{
+            <ArrowUp /> Will re-run {{ currentImpactPreview.upstream.length }} upstream cell{{
               currentImpactPreview.upstream.length > 1 ? 's' : ''
             }}:
           </div>
@@ -45,9 +46,8 @@ function runAnyway() {
         <!-- Downstream cells that will become stale -->
         <div v-if="currentImpactPreview.downstream.length > 0" class="impact-section">
           <div class="section-label">
-            &#x2193; Will invalidate {{ currentImpactPreview.downstream.length }} downstream cell{{
-              currentImpactPreview.downstream.length > 1 ? 's' : ''
-            }}:
+            <ArrowDown /> Will invalidate {{ currentImpactPreview.downstream.length }} downstream
+            cell{{ currentImpactPreview.downstream.length > 1 ? 's' : '' }}:
           </div>
           <div v-for="d in currentImpactPreview.downstream" :key="d.cellId" class="impact-row">
             <span class="impact-cell-name">{{ d.cellName }}</span>

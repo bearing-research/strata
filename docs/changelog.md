@@ -43,6 +43,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   that ran and was then edited read `idle` while it went on showing that run's
   output. It now reads `stale · source changed`, and reverting the edit returns
   it and the cells below it to `ready`, shown as cached. (#1397)
+- **One icon set.** The UI's icons are SVGs from Lucide, not emoji and Unicode glyphs
+  that render differently per OS, and every icon-only button has an accessible name.
+  (#1398)
 - **A cell's inputs no longer pass through server memory.** An upstream value streams
   from the store into the run in 1 MiB chunks, so a 1 GB frame adds about 1 MB to the
   server's memory instead of 1 GB, per consuming cell per run. (#1383)
