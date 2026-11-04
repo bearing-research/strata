@@ -79,6 +79,7 @@ from strata.notebook.runtime_state import (
     MAX_EXECUTION_SAMPLES,
     EnvironmentRuntime,
     RRuntime,
+    how_last_got,
     load_runtime_state,
     persist_cell_execution_sample,
     persist_environment_synced_lockfile_hash,
@@ -1416,6 +1417,9 @@ class NotebookSession:
             data["causality"] = asdict(causality, dict_factory=skip_none)
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
+        got = how_last_got([asdict(s) for s in self.execution_history.get(cell.id, [])])
+        if got is not None:
+            data["last_got"] = {"cache_hit": got[0], "ms": got[1]}
         # A viewer joining mid-run gets what the running cell has printed so far;
         # clients cleared the last run's console when this run started.
         live = console_relay.live_console(self.id, cell.id)
@@ -1512,6 +1516,7 @@ class NotebookSession:
         resolved: list[CellOutput] = []
         for artifact, output in pairs:
             output.artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
+            output.computed_at = artifact.created_at
             hydrated = self._hydrate_display_output(output)
             resolved.append(CellOutput(**hydrated) if hydrated is not None else output)
         return resolved

@@ -3128,6 +3128,37 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
     }
 
 
+@router.get("/{notebook_id}/artifacts/{artifact_id}/v/{version}/lineage")
+def get_notebook_artifact_lineage(
+    notebook_id: str,
+    session: SessionDep,
+    artifact_id: str,
+    version: int,
+    max_depth: int = Query(default=10, ge=1, le=100),
+):
+    """``GET /v1/artifacts/{id}/v/{n}/lineage`` over this notebook's own store."""
+    from strata.services.artifact import artifact_service
+
+    store = session.get_artifact_manager().artifact_store
+    artifact = store.get_artifact(artifact_id, version)
+    if artifact is None:
+        raise HTTPException(
+            status_code=404, detail=f"{artifact_id}@v={version} is not in this notebook's store"
+        )
+    if artifact.state not in ("ready", "superseded"):
+        raise HTTPException(
+            status_code=400, detail=f"Artifact is not ready (state={artifact.state})"
+        )
+    return artifact_service.build_lineage(
+        store,
+        artifact=artifact,
+        artifact_id=artifact_id,
+        version=version,
+        tenant_filter=None,
+        max_depth=max_depth,
+    )
+
+
 @router.post("/{notebook_id}/artifacts/{artifact_id}/v/{version}/promote")
 async def promote_notebook_artifact(
     notebook_id: str,

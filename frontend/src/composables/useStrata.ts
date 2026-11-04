@@ -685,6 +685,20 @@ async function getLineage(artifactId: string, version: number): Promise<LineageG
   return readJson<LineageGraph>(resp)
 }
 
+async function getNotebookLineage(
+  sessionId: string,
+  artifactId: string,
+  version: number,
+): Promise<LineageGraph> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${sessionId}/artifacts/${encodeURIComponent(artifactId)}/v/${version}/lineage`,
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to load lineage')
+  }
+  return readJson<LineageGraph>(resp)
+}
+
 export interface CellIterationInfo {
   iteration: number
   artifactUri: string
@@ -1630,6 +1644,7 @@ export function useStrata() {
     rejectPending,
     getRegistryAudit,
     getLineage,
+    getNotebookLineage,
     updateCellSource,
     addCell,
     removeCell,

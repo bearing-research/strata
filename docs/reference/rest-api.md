@@ -935,6 +935,15 @@ notebook's own store rather than the server's. `store/artifacts` takes `limit`,
 and `output` (all `null` for a row no cell produced), and the response has
 `notebook_name`.
 
+### Read an Artifact's Lineage
+
+```
+GET /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/lineage
+```
+
+`GET /v1/artifacts/{id}/v/{n}/lineage` over the notebook's own store, which is
+where a cell's results and displays are. It takes `max_depth`.
+
 ### Promote an Artifact
 
 ```

@@ -76,3 +76,22 @@ test('a fetched URL is labelled by the URL, not as an artifact', () => {
   assert.equal(tree.children[0].type, 'fetch')
   assert.equal(tree.children[0].label, url)
 })
+
+test('a cell output reads as its cell and output, since every one has the same transform', () => {
+  const uri = 'strata://artifact/nb_abc_cell_load_var_rows@v=2'
+  const shown = 'strata://artifact/nb_abc_cell_load_var___display__1@v=1'
+  const named = (id: string) => (id === 'load' ? 'Load data' : undefined)
+  const label = (u: string, name?: (id: string) => string | undefined) =>
+    lineageToTree(
+      {
+        artifact_uri: u,
+        nodes: [{ uri: u, type: 'artifact', transform_ref: 'notebook/cell@v1' }],
+        edges: [],
+      } as never,
+      u,
+      name,
+    ).label
+  assert.equal(label(uri, named), 'Load data · rows')
+  assert.equal(label(uri), 'load · rows')
+  assert.equal(label(shown, named), 'Load data · display 1')
+})

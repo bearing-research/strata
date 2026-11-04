@@ -10,6 +10,7 @@ final iteration only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -222,7 +223,36 @@ def _render_app_cell(
                 max_bytes=options.max_output_bytes,
             )
         )
+    note = _provenance_note(cell, notebook_dir)
+    if note and cell.display_outputs:
+        blocks.append(NoteBlock(note))
     return blocks
+
+
+def _provenance_note(cell: CellState, notebook_dir: Path) -> str | None:
+    """When an app cell's output was computed and how it was got, from what's on disk."""
+    from strata.notebook.runtime_state import how_last_got, load_runtime_state
+
+    parts: list[str] = []
+    computed_at = cell.display_outputs[-1].computed_at if cell.display_outputs else None
+    if computed_at is not None:
+        # UTC: a static file can't know its reader's time zone.
+        computed = datetime.fromtimestamp(computed_at, tz=UTC)
+        parts.append(f"Computed {computed:%Y-%m-%d %H:%M} UTC")
+
+    entry = load_runtime_state(notebook_dir).cells.get(cell.id)
+    got = how_last_got(entry.execution_samples) if entry else None
+    if got is not None:
+        cache_hit, ms = got
+        if not cache_hit:
+            parts.append(f"took {_format_ms(ms)}")
+        else:
+            parts.append(f"from cache, saved {_format_ms(ms)}" if ms else "from cache")
+    return " · ".join(parts) or None
+
+
+def _format_ms(ms: int) -> str:
+    return f"{ms}ms" if ms < 1000 else f"{ms / 1000:.1f}s"
 
 
 def _render_cell(

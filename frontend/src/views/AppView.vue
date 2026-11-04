@@ -1,19 +1,30 @@
 <script setup lang="ts">
 import { ArrowLeft } from '@lucide/vue'
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useNotebook } from '../stores/notebook'
 import WidgetCell from '../components/WidgetCell.vue'
 import DataTable from '../components/DataTable.vue'
+import { parseArtifactRef } from '../utils/artifactRef'
 import { renderMarkdownToHtml } from '../utils/markdown'
+import { provenanceLine } from '../utils/provenanceLine'
 import type { Cell, CellOutput } from '../types/notebook'
+
+const LineageModal = defineAsyncComponent(() => import('../components/LineageModal.vue'))
 
 /**
  * Read-only app view: widget panels and display outputs, no editor or DAG.
  * The WS connects with `?role=viewer`, so the server rejects mutations.
  */
 const props = defineProps<{ sessionId: string }>()
-const { notebook, orderedCells, openBySessionId, cleanupWebSocket, setViewerMode } = useNotebook()
+const {
+  notebook,
+  orderedCells,
+  openBySessionId,
+  cleanupWebSocket,
+  setViewerMode,
+  openLineageAction,
+} = useNotebook()
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -80,6 +91,27 @@ function cellTitle(cell: Cell): string {
   return cell.annotations?.name || ''
 }
 
+// One line per cell: its outputs are one run's, so they share how they were got.
+function cellProvenance(cell: Cell): string {
+  return provenanceLine(cell.output?.computedAt, cell.lastGot, (epochSeconds) =>
+    new Date(epochSeconds * 1000).toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }),
+  )
+}
+
+function lineageRef(cell: Cell) {
+  return cell.output?.artifactUri ? parseArtifactRef(cell.output.artifactUri) : null
+}
+
+function openLineage(cell: Cell) {
+  const ref = lineageRef(cell)
+  if (ref) {
+    void openLineageAction(ref.id, ref.version, cellTitle(cell) || cell.id, props.sessionId)
+  }
+}
+
 // A preview row arrives as a column-keyed dict; DataTable wants positional rows.
 function outputRows(output: CellOutput): unknown[][] {
   const cols = output.columns ?? []
@@ -141,9 +173,25 @@ function outputRows(output: CellOutput): unknown[][] {
               output.scalar
             }}</pre>
           </div>
+          <p v-if="cellProvenance(cell)" class="app-provenance" data-testid="app-provenance">
+            {{ cellProvenance(cell) }}
+            <template v-if="lineageRef(cell)">
+              ·
+              <button
+                type="button"
+                class="app-provenance-link"
+                data-testid="app-lineage"
+                @click="openLineage(cell)"
+              >
+                lineage
+              </button>
+            </template>
+          </p>
         </template>
       </section>
     </div>
+
+    <LineageModal />
   </div>
 </template>
 
@@ -166,6 +214,23 @@ function outputRows(output: CellOutput): unknown[][] {
   border-bottom: 1px solid var(--border);
   padding-bottom: 12px;
   margin-bottom: 24px;
+}
+.app-provenance {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.app-provenance-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.app-provenance-link:hover {
+  color: var(--accent-primary);
 }
 .app-header h1 {
   font-size: 22px;
