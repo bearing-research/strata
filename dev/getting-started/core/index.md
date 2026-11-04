@@ -1,0 +1,167 @@
+# Core API Quickstart
+
+Strata Core is the programmatic materialization and artifact layer. Use this when you want the `materialize()` API, artifact caching, lineage tracking, or snapshot-aware Iceberg table scanning, without the notebook UI on top.
+
+## The primitive
+
+```
+materialize(inputs, transform, environment) → artifact
+```
+
+This gives you:
+
+- Immutable, versioned artifacts
+- Provenance-based deduplication (same inputs + transform = cache hit)
+- Explicit lineage
+- Safe reuse across runs and processes
+
+Reading from an Iceberg table is itself a `materialize` call with the built-in `scan@v1` transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, and a snapshot never changes, so a scan result never goes stale and there's no invalidation problem. A table with no snapshots yet (created, never written) reads as zero rows with its schema, and with no snapshot to key it on that result is never reused, so the first read after the first write sees the data. An unnamed result is still a cache entry: the store keeps it while it is used and may collect it later (see [Core behaviors](#core-behaviors)).
+
+## Install the client
+
+The Python examples on this page use `strata_client`, a package separate from
+the server. Add it to your own project with the extras step 5 uses:
+
+```bash
+uv add "strata-client[pandas,polars,duckdb]"
+```
+
+The `all` extra adds DataFusion too. Step 2's demo is `examples/hello_world.py`
+from a checkout of the [Strata repo](https://github.com/bearing-research/strata),
+where `uv run` already has the client.
+
+## 1. Start the server
+
+```bash
+uv run strata-notebook
+```
+
+## 2. Run the demo
+
+```bash
+uv run python examples/hello_world.py
+```
+
+This creates a local Iceberg table with 100K rows, clears the server's row-group cache, and times the same `scan@v1` call three times:
+
+```
+Run 1  (cold)       read Parquet, store the result as an artifact
+Run 2  (cache hit)  same provenance hash: the server returns the stored artifact
+Run 3  (cache hit)  the same artifact again, after a metadata cleanup call
+```
+
+Runs 2 and 3 are both artifact-store cache hits: the server finds the earlier result by provenance hash and serves its stored bytes without reading Parquet.
+
+## 3. Materialize a result
+
+Table URIs use the form `<scheme>://<warehouse-path>#<namespace>.<table>`:
+
+- `<scheme>` is the storage scheme - `file://` for a local Iceberg warehouse, `s3://` / `gs://` / `abfs://` (or `abfss://`) for cloud blob storage.
+- `<warehouse-path>` is the path to the warehouse root (the directory containing Iceberg metadata).
+- The fragment after `#` names the Iceberg table inside the warehouse, as `<namespace>.<table>`.
+
+A table URI is `<warehouse>#<namespace>.<table>`. The demo prints the exact one it created when it runs, because it builds its warehouse in a temporary directory rather than at a fixed path; copy that line rather than the shape below.
+
+```python
+from strata_client import StrataClient
+
+client = StrataClient()
+
+artifact = client.materialize(
+    inputs=["file:///warehouse#db.events"],
+    transform={
+        "executor": "scan@v1",
+        "params": {
+            "columns": ["id", "value"],
+            "filters": [{"column": "value", "op": ">", "value": 100}],
+        },
+    },
+)
+
+print(f"URI: {artifact.uri}")
+print(f"Cache hit: {artifact.cache_hit}")
+```
+
+```text title="Output"
+URI: strata://artifact/3f6c1a2e-8b4d-4e7a-9c15-2d0b7e4f8a61@v=1
+Cache hit: False
+```
+
+Re-running the same call returns the same URI with `Cache hit: True`.
+
+!!! note "`filters` prune, they do not filter rows"
+
+    Strata is not a query engine. A filter is a **pruning hint**: it skips
+    whole data files (via Iceberg manifest stats) and whole row groups (via
+    Parquet min/max), which is what makes a large scan cheap. Rows inside a
+    row group that survives pruning are returned as they are, so the result
+    is a **superset** of the rows matching your predicate. Apply the
+    predicate yourself on the result if you need exactly the matching rows.
+
+    Pruning is deliberately conservative: when Strata cannot prove a file or
+    row group is safe to skip, it reads it. That keeps a filter from ever
+    dropping a row you asked for.
+
+## 4. Fetch the result
+
+```python
+table = client.fetch(artifact.uri)
+df = table.to_pandas()
+print(df.head())
+```
+
+```text title="Output (illustrative; pruning keeps whole row groups, so rows outside the filter can appear)"
+     id    value
+0   101   142.50
+1   102   178.30
+2   103   215.75
+3   104   311.20
+4   105   168.40
+```
+
+A notebook's `# @output_dir` folder in the store is files, not rows:
+`client.download_folder(artifact_id, version, "out")` rebuilds them in a new
+directory ([output folders](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir)).
+
+## 5. Integration with data libraries
+
+=== "Pandas"
+
+    ```python
+    from strata_client.integration.pandas import fetch_to_pandas
+
+    df = fetch_to_pandas("file:///warehouse#db.events")
+    ```
+
+=== "Polars"
+
+    ```python
+    from strata_client.integration.polars import fetch_to_polars
+
+    df = fetch_to_polars("file:///warehouse#db.events")
+    ```
+
+=== "DuckDB"
+
+    ```python
+    from strata_client.integration.duckdb import StrataScanner
+
+    with StrataScanner() as scanner:
+        scanner.register("events", "file:///warehouse#db.events")
+        result = scanner.query("SELECT category, COUNT(*) FROM events GROUP BY category")
+        print(result.to_pandas())
+    ```
+
+## Core behaviors
+
+- Same inputs + transform → existing artifact, no recomputation
+- Artifacts are immutable and versioned
+- Names are mutable pointers to specific artifact versions
+- An unnamed result is a cache entry: kept while it is used, and computed again if the store collected it. Name or pin a result to keep it ([retention](https://bearingresearch.com/strata/dev/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store))
+- Provenance hash is derived from pinned inputs and transform identity
+
+## What's next
+
+- [Configuration](https://bearingresearch.com/strata/dev/dev/reference/configuration/): all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)
+- [Deployment Modes](https://bearingresearch.com/strata/dev/dev/deployment/modes/): `personal` vs `service` mode and the auth boundary
+- [REST API](https://bearingresearch.com/strata/dev/dev/reference/rest-api/): the HTTP routes, including the `/v1/materialize` and `/v1/streams` endpoints this page calls into

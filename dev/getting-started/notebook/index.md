@@ -1,0 +1,376 @@
+# Notebook Quickstart
+
+Strata Notebook is an interactive notebook with content-addressed
+caching, automatic dependency tracking, and cascade execution. This
+quickstart walks through a real three-cell pipeline, then surfaces
+the distinctive features (prompt cells, cascade, cache hits) on top
+of it.
+
+This is the **web UI** quickstart - you drive the notebook in a
+browser. The same notebook can also be driven by a
+[coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/) or watched live from a
+[terminal](https://bearingresearch.com/strata/dev/dev/notebook/tui/).
+
+![The Strata notebook UI: two named Python cells, load and summarize, each with
+its source and an interactive table of results, the sidebar panels for mounts,
+workers and environment, and a bottom drawer showing the DAG of load, summarize
+and plot with per-cell timings.](https://bearingresearch.com/strata/dev/dev/assets/notebook-anatomy-light.png#only-light)
+![The Strata notebook UI: two named Python cells, load and summarize, each with
+its source and an interactive table of results, the sidebar panels for mounts,
+workers and environment, and a bottom drawer showing the DAG of load, summarize
+and plot with per-cell timings.](https://bearingresearch.com/strata/dev/dev/assets/notebook-anatomy-dark.png#only-dark)
+
+The pipeline below is the one in that screenshot.
+
+## 1. Start the server
+
+=== "uv (recommended)"
+
+    Install the CLI from PyPI into a uv-managed tool environment, then
+    run it:
+
+    ```bash
+    uv tool install "strata-notebook[mcp,tui]"
+    strata-notebook
+    ```
+
+    The `mcp` and `tui` extras are for `strata agent` and `strata watch`
+    (see [What's next](#whats-next)); the web UI needs neither. SQL
+    cells need the `sql` extra plus a driver extra for each database,
+    for example
+    `uv tool install "strata-notebook[mcp,tui,sql,sql-duckdb,sql-sqlite]"`;
+    without it a notebook that holds a SQL cell does not open.
+    Personal mode is the default (single-user, writes enabled); no
+    config needed for a local run. Re-run `strata-notebook` to start it
+    again on later sessions. Requires [uv](https://docs.astral.sh/uv/);
+    plain `pip install` is not supported.
+
+=== "Docker"
+
+    ```bash
+    docker compose up -d --build
+    ```
+
+    The compose file runs Strata in personal mode (single-user,
+    writes enabled). See [Docker deployment](https://bearingresearch.com/strata/dev/dev/deployment/docker/)
+    for details.
+
+=== "From source (one-time setup)"
+
+    Clone the repo, then install it and build the frontend:
+
+    ```bash
+    uv sync                      # Python deps + Strata, editable
+    cd frontend && npm ci && npm run build && cd ..
+    ```
+
+    Run the server (this is the command you'll re-run on subsequent
+    sessions):
+
+    ```bash
+    uv run strata-notebook
+    ```
+
+    Personal mode is the default now; no env vars needed for a
+    local single-user run. The npm step above is one-time setup,
+    not part of the recurring start command.
+
+Open [http://localhost:8765](http://localhost:8765).
+
+## 2. Create a notebook
+
+Click **New Notebook** on the landing page. Pick a name, a parent
+directory under the notebook storage root, and a Python version.
+Strata creates a directory containing `notebook.toml`, a per-notebook
+`pyproject.toml`, and a `cells/` folder.
+
+The notebook opens empty - click **+ Add cell** and pick a kind to
+write the first one.
+
+By default the storage root is `~/.strata/notebooks` - **not** the
+directory you launched from - so new notebooks land there regardless of
+your shell's working directory. To put them somewhere else (the current
+directory is a common choice), start the server with `--notebook-dir`:
+
+```bash
+strata-notebook --notebook-dir .          # current directory
+strata-notebook --notebook-dir ~/work/nb  # or any path
+```
+
+(or set `STRATA_NOTEBOOK_STORAGE_DIR`). The server prints the active
+location on startup.
+
+Each notebook gets its own Python environment, managed by `uv`, so
+installing pandas in one notebook doesn't touch another. Everything
+autosaves: source goes to `cells/*.py`, runtime state to `.strata/`.
+Both diff cleanly in git, no JSON blobs in commits.
+
+### Cell types
+
+The **+ Add cell** menu offers six kinds, and Python is the default.
+A cell's kind is fixed when you create it - the kind shown in the cell
+header is a label, not a picker - so to change one, delete the cell and
+re-add it with the kind you want.
+
+| Kind | What it's for |
+| --- | --- |
+| **Python** | Regular Python code. Most cells. |
+| **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. Needs the `sql` extra and a driver extra (see [Installation](https://bearingresearch.com/strata/dev/dev/getting-started/installation/)). |
+| **R** | R code - stats and tidyverse. See [Cell Types](https://bearingresearch.com/strata/dev/dev/notebook/cells/). |
+| **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
+| **Widget** | A declarative control panel - one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
+| **Markdown** | Prose between cells. Rendered as HTML; not part of the DAG. |
+
+Two more shapes are **annotations on a Python cell** rather than menu
+entries - you add a Python cell and put the annotation on its first
+line:
+
+| Shape | Annotation |
+| --- | --- |
+| **Loop** | `# @loop max_iter=N carry=state` - re-runs the cell with `carry` threaded across iterations, one artifact per step. |
+| **Variant** | `# @variant group name` - several cells share one DAG slot, for A/B-ing implementations of the same step. |
+
+Library, mount, and worker shapes are annotation-driven too. See
+[Cell Types](https://bearingresearch.com/strata/dev/dev/notebook/cells/) for the full surface and
+[Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/) for every annotation.
+
+## 3. Walk through a pipeline
+
+Three cells, one real DAG. We'll load the iris dataset, summarize
+by species, and plot a scatter.
+
+**Before typing**, open **Notebook settings** in the sidebar, then the
+**Environment** panel, and add `scikit-learn`, `pandas`, and `matplotlib`. Each `uv add` runs
+in the background and the notebook surfaces a sync banner while it's
+working. Wait for the banner to clear before running the first cell.
+
+!!! note "Display rendering"
+    The output blocks below are shown as text for the doc. In the
+    UI, DataFrames render in an interactive grid (page, sort, filter,
+    and search over the full cached artifact, with CSV / Parquet
+    export), matplotlib figures render as inline PNGs, prompt-cell
+    responses render as structured JSON (when `@output_schema` is set)
+    or markdown.
+
+### Load the data
+
+```python
+# @name load
+import time
+import pandas as pd
+from sklearn.datasets import load_iris
+
+time.sleep(2)  # simulate the latency of a real fetch
+iris = load_iris(as_frame=True)
+df = iris.frame.copy()
+df["species"] = pd.Categorical.from_codes(df["target"], iris.target_names)
+feature_names = iris.feature_names
+df.head()
+```
+
+```text title="Output"
+   sepal length (cm)  sepal width (cm)  petal length (cm)  petal width (cm)  target species
+0                5.1               3.5                1.4               0.2       0  setosa
+1                4.9               3.0                1.4               0.2       0  setosa
+2                4.7               3.2                1.3               0.2       0  setosa
+3                4.6               3.1                1.5               0.2       0  setosa
+4                5.0               3.6                1.4               0.2       0  setosa
+```
+
+The `# @name load` line labels the cell in the DAG view and its header; without
+it, a cell is labelled by the variables it defines. See
+[`@name`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#name).
+
+Press ++shift+enter++. The first run pauses ~2 seconds (the simulated
+fetch) and the DataFrame preview renders below the cell.
+
+### Summarize by species
+
+```python
+# @name summarize
+stats = df.groupby("species", observed=True)[feature_names].mean().round(2)
+stats
+```
+
+```text title="Output"
+            sepal length (cm)  sepal width (cm)  petal length (cm)  petal width (cm)
+species
+setosa                   5.01              3.43               1.46              0.25
+versicolor               5.94              2.77               4.26              1.33
+virginica                6.59              2.97               5.55              2.03
+```
+
+Strata reads this cell's AST, sees it references `df` and `feature_names`
+from the loader, and wires an edge. The DAG view in the bottom
+drawer (click **expand**) shows the dependency.
+
+### Plot
+
+```python
+# @name plot
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(6, 4))
+for species, group in df.groupby("species", observed=True):
+    ax.scatter(
+        group["sepal length (cm)"],
+        group["petal length (cm)"],
+        label=str(species),
+        alpha=0.7,
+    )
+ax.set_xlabel("Sepal length (cm)")
+ax.set_ylabel("Petal length (cm)")
+ax.legend()
+fig
+```
+
+The matplotlib figure renders inline as a PNG.
+
+## 4. Re-run for cache hits
+
+Press ++shift+enter++ on the loader cell again. The 2-second pause
+is gone, Strata returned the cached `df` instantly, and the cell
+header shows a **cached** badge alongside the duration ("cached ·
+5ms" or similar).
+
+The cache is content-addressed: the cache key is a hash of the
+cell's source, its upstream artifacts, and the environment lockfile.
+Re-running with the same three is a cache hit. No `@memoize`,
+no manual invalidation, and the cached result is byte-identical to
+what produced it the first time. The notebook keeps each cell's
+current value plus its last 3 earlier ones
+([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](https://bearingresearch.com/strata/dev/dev/reference/configuration/#notebook)),
+so reverting a recent edit is a hit too and an older value is
+computed again. A cell's console output is keyed by the same hash and
+replayed with it, so even a cell that only `print`s and feeds nothing
+downstream is cached. A cell that must always
+run (a side effect, a live API call, a fresh random draw) opts out
+with [`# @nocache`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#nocache).
+
+## 5. Edit upstream, watch the cascade
+
+Edit the loader, say, change `time.sleep(2)` to `time.sleep(1)`.
+Strata re-analyzes the source and computes a new provenance hash, so
+the loader's cached result no longer matches its source and the cell
+flips **stale**. So do the summary and plot cells: they referenced
+`df`, which is no longer the cached value. (Hover **Why stale?** on
+any of them to see the reason: `source changed` on the loader,
+`upstream changed` on the others.)
+
+Now press ++shift+enter++ on the plot cell. Strata walks back through
+the stale upstream cells and runs loader → summary → plot in
+topological order, with a live progress strip showing which cell is
+executing. There is no confirmation step: cascades run automatically,
+so running a cell always gives you a result computed from current
+inputs.
+
+![The same notebook after the loader is edited: the loader carries a "Why
+stale?" pill and the two cells that depend on it are outlined in amber, in the
+cell list and in the DAG below.](https://bearingresearch.com/strata/dev/dev/assets/cascade-stale-light.png#only-light)
+![The same notebook after the loader is edited: the loader carries a "Why
+stale?" pill and the two cells that depend on it are outlined in amber, in the
+cell list and in the DAG below.](https://bearingresearch.com/strata/dev/dev/assets/cascade-stale-dark.png#only-dark)
+
+Revert the edit (`time.sleep(1)` back to `time.sleep(2)`) and
+re-run: every cell becomes a cache hit on the way through, no work
+happens, the cascade short-circuits to milliseconds.
+
+## 6. Add a prompt cell (optional)
+
+Prompt cells are the most distinctive Strata feature beyond caching.
+The body is a template; the response is a cached DAG node like any
+other cell.
+
+In the cell menu, click **+ Add cell** and pick **Prompt**. Paste
+this in:
+
+```text
+# @model claude-sonnet-4-6
+# @temperature 0.3
+# @system You are a botanist describing distinguishing features of iris species.
+
+Given these per-species feature means, write one sentence per
+species describing its most distinguishing trait:
+
+{{ stats }}
+```
+
+Hit ++shift+enter++. The `{{ stats }}` placeholder gets substituted
+with the upstream DataFrame, the prompt goes to the configured LLM,
+and the response is stored as an artifact keyed by `(template,
+inputs, model config)`. Running again with the same upstream
+`stats` and the same template is a cache hit, no second API call.
+
+Needs `ANTHROPIC_API_KEY` (or another provider's key) configured in
+the Runtime panel. See [Provider configuration](https://bearingresearch.com/strata/dev/dev/notebook/cells/#provider-configuration)
+for provider setup and [Prompt cells](https://bearingresearch.com/strata/dev/dev/notebook/cells/#prompt-cells)
+for the full annotation surface (`@output_schema`, `@validate_retries`).
+
+## 7. Other display types
+
+The cells above used trailing expressions for the DataFrame and
+the matplotlib `Figure`. Other shapes you can put at the end of a
+cell, or call from `display()`:
+
+| Trailing expression | Renders as |
+| --- | --- |
+| pandas DataFrame / Series | Interactive grid: page, sort, filter, and search over the full cached artifact, with CSV / Parquet export. |
+| matplotlib `Figure` | Inline PNG. |
+| PIL `Image` | Inline PNG. |
+| dict / list / primitive | Fenced JSON block. |
+| numpy ndarray | A one-line summary of its shape and dtype. |
+| `Markdown("**hi**")` | The `Markdown` helper renders inline HTML. |
+| `Image.open(...)` | Rendered inline as PNG. Video and audio are not display types; store them as artifacts and open them outside the notebook. |
+
+Use `display(x)` for **multiple** outputs in one cell (each call
+adds a new render below the cell). For one trailing expression at
+the end, no `display()` needed: the harness auto-displays it.
+
+## 8. Take the tutorial
+
+Strata ships sample notebooks that run without an API key, so there is nothing to clone.
+One is a two-minute tutorial on what the cache saves:
+
+```bash
+strata tutorial           # list the samples
+strata tutorial caching   # open a copy and print its URL
+```
+
+Each open copies the sample into your storage directory under a fresh name, so you can
+edit it freely. It uses the server on `:8765`, or starts one if none is running (pass
+`--server` for another address). The first open builds the copy's environment before it
+returns, so it takes a little longer.
+
+**Open a sample** on the home page does the same thing, and is the way in if your server
+runs in Docker.
+
+The repo's `examples/` directory holds many more, one for each cell type. Every example
+is rendered into the docs site, so you can read the cells before deciding which to open.
+See the [Examples catalog](https://bearingresearch.com/strata/dev/dev/notebook/examples/) for the full list, grouped by feature.
+
+## Cell operations
+
+| Action | How |
+| --- | --- |
+| Run cell | ++shift+enter++ or **Run** button in gutter |
+| Add cell | **Add cell below** button in gutter, or **Add cell** in the header |
+| Delete cell | **Delete cell** button in gutter |
+| Duplicate cell | **Duplicate cell** button in gutter |
+| Move cell | **Move up** / **Move down** buttons in gutter |
+| Change cell kind | Not editable - delete and re-add with the new kind |
+| Keyboard help | Press ++question++ |
+
+## What's next
+
+- [Driving a notebook with a coding agent](https://bearingresearch.com/strata/dev/dev/notebook/agent/): hand this notebook to Claude Code and watch it build, in a browser or a terminal - one command sets it up
+- [Agent scratchpad](https://bearingresearch.com/strata/dev/dev/notebook/scratchpad/): the other way round - an agent working on something else using a notebook as **cached** throwaway compute instead of temp scripts; installs as a one-command plugin
+- [Terminal viewer (TUI)](https://bearingresearch.com/strata/dev/dev/notebook/tui/) to watch this notebook live from a terminal with `strata watch ./my-notebook`
+- [Concepts](https://bearingresearch.com/strata/dev/dev/notebook/concepts/) for how the DAG, caching, and cascade work
+- [Cell Types](https://bearingresearch.com/strata/dev/dev/notebook/cells/) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
+- [Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/) for `@worker`, `@mount`, `@loop`, and friends
+- [Distributed Workers](https://bearingresearch.com/strata/dev/dev/notebook/workers/) for `# @worker gpu-fly` and dispatching to remote compute
+- [Import from Jupyter](https://bearingresearch.com/strata/dev/dev/notebook/import/) for `strata import nb.ipynb`
+- [Export](https://bearingresearch.com/strata/dev/dev/notebook/export/) for sharing a notebook as a single self-contained markdown or HTML file, or as a snapshot bundle (state and artifacts) that imports back
+- [Environment Management](https://bearingresearch.com/strata/dev/dev/notebook/environment/) for package management and Python versions
+- [Comparison with Jupyter, Marimo, Pluto](https://bearingresearch.com/strata/dev/dev/notebook/comparison/)
+- [Keyboard Shortcuts](https://bearingresearch.com/strata/dev/dev/notebook/keyboard/)

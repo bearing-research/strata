@@ -1,0 +1,395 @@
+# Headless Runner
+
+`strata run` executes every cell in a notebook directory without starting the
+server or opening the UI. Useful for CI, scheduled jobs, and sanity-checking
+that a notebook still works after a dependency bump.
+
+For rendering a notebook to a shareable markdown or HTML file (without
+executing anything), see [Export](https://bearingresearch.com/strata/dev/dev/notebook/export/) and its `strata export`
+sibling command. For converting an existing Jupyter `.ipynb` into a
+Strata notebook directory, see [Import from Jupyter](https://bearingresearch.com/strata/dev/dev/notebook/import/) and
+its `strata import` sibling.
+
+It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
+execution path is identical, artifact cache hits, cascade ordering, worker
+dispatch, and mount resolution all behave the same way.
+
+## Usage
+
+```bash
+strata run <notebook_dir> [options]
+```
+
+`<notebook_dir>` must be a path to a directory containing `notebook.toml`
+(plus `cells/`, `pyproject.toml`, `uv.lock`). It's the same on-disk layout the
+UI works with; you can pass any notebook directory from `STRATA_NOTEBOOK_STORAGE_DIR`
+or anywhere else on the filesystem. `strata run` is **local-only** - it does
+not talk to a running `strata-notebook` or a service-mode deployment. Each
+invocation opens its own `NotebookSession`, runs the cells, and exits.
+Python, R, SQL, prompt and widget cells all run (a widget cell stores its
+controls' current values); markdown cells are reported as `ok` with nothing to
+run.
+
+### Options
+
+| Flag          | Description                                                      |
+| ------------- | ---------------------------------------------------------------- |
+| `--force`     | Ignore the artifact cache and re-execute every cell from scratch |
+| `--no-sync`   | Skip `uv sync`; use `.venv/bin/python`, which must already exist |
+| `--timeout`   | Per-cell timeout (seconds) for this run, overriding the 300s default; a per-cell `# @timeout` or notebook.toml `timeout` still wins. For compute-heavy cells (model training, feature extraction). |
+| `--format`    | `human` (default) or `json` - both write to stdout               |
+| `--quiet`     | Suppress per-cell status lines (human format only)               |
+
+`--format json` writes a single JSON object to **stdout** when the run
+finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
+entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
+`cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
+`error` / `reason` where applicable, `traceback` when the cell raised, and
+`error_code` when the failure has a stable name, such as `fetch_pin_mismatch`). A
+cache hit replays the stdout/stderr of the run behind it, cached by provenance
+along with its outputs (`--force` re-executes). A result pulled from a team store
+brings no console, so `stdout` is absent there. Errors and pre-flight diagnostics go to
+stderr regardless of format. The executor's per-cell INFO logs are held back
+during a run; set `STRATA_LOG_LEVEL=INFO` to see them. Pipe stdout to `jq`:
+`strata run ... --format json | jq '.cells[] | select(.status == "error")'`.
+
+A successful cell also carries `provenance_hash` and `outputs`, one
+`{name, artifact_id, version, content_sha256}` per stored output, so two runs
+on two machines can be diffed digest by digest with no server involved.
+`strata run` stores the variables of leaf cells too (cells nothing downstream
+reads, which the notebook otherwise keeps no artifact for), so the notebook's
+final results have digests to compare; a leaf that is a cache hit from a run
+outside `strata run` (the UI, `cell run`, MCP) lists only what that run stored,
+so pass `--force` once before comparing; a value that cannot be serialized is
+skipped. Display outputs appear as `__display__N`; a cell's cached console is
+not listed. An output stored before digests were recorded gets its
+digest computed from its bytes when the report is written. The ZIP export's
+`provenance.json` lists the same `outputs` per cell.
+
+### Exit Codes
+
+| Code | Meaning                                                        |
+| ---- | -------------------------------------------------------------- |
+| `0`  | All cells succeeded                                            |
+| `1`  | One or more cells failed                                       |
+| `2`  | Invocation error (bad path, env sync failure, malformed TOML)  |
+
+CI scripts can branch on the exit code; the structured output stays parseable
+even when some cells failed (each failure produces a JSON object with
+`status: "error"`, its `error`, and the `traceback` when the cell raised).
+
+## Example: GitHub Actions
+
+```yaml
+jobs:
+  notebooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+      - name: Install Strata
+        # uv tool install creates a uv-managed env at
+        # ~/.local/share/uv/tools/strata-notebook with the strata
+        # CLI on PATH - satisfies the runtime guard.
+        run: uv tool install strata-notebook
+      - name: Run notebook
+        run: strata run ./notebooks/daily_report --format json
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+`--format json` emits a single structured result object, so downstream steps
+can parse per-cell status without screen-scraping.
+
+## What Gets Run
+
+Every cell in the notebook executes in topological order, exactly as if you
+had clicked **Run All** in the UI. Cached artifacts are reused, the first run
+populates the cache; subsequent runs on unchanged source + inputs return
+instantly.
+
+Passing `--force` skips each cell's cache lookup, so every cell re-executes
+(nothing cached is deleted), which is what you usually want in CI if you're testing that the code *still produces*
+the expected artifacts.
+
+## What Does Not Happen
+
+- **No server starts.** No ports are bound; no UI is served.
+- **No WebSocket broadcasts.** Progress is written to stdout only.
+- **No interactive prompts.** A cascade that would pop a confirmation in the
+  UI just runs, the CLI treats every cell as "confirmed."
+- **No large-read question.** With a
+  [read threshold](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#asking-before-a-large-read) set, the CLI
+  never asks: `strata run` and `strata cell run` (`--server` included) go
+  ahead, and `.strata/reads/index.json` records the read as `not_asked`.
+
+## Environment & Secrets
+
+`strata run` reads the notebook's `[env]` and `[secret_manager]` blocks the
+same way the server does. Secret-manager credentials (e.g.
+`INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET`) must be present in the
+shell that invokes the command, they are never stored in the notebook.
+
+For notebooks that require env vars set only via the Runtime panel (never
+committed), export them before invoking `strata run`.
+
+## `strata validate`
+
+Static checks without executing anything - no environment sync, no
+subprocesses, no LLM calls:
+
+```bash
+strata validate <notebook_dir> [--format human|json]
+```
+
+- `notebook.toml` parses and the cell files load
+- the DAG builds without cycles
+- per-cell annotation diagnostics - the **same validation the server runs
+  on open / reload** (`worker_unknown`, `loop_missing_carry`,
+  `sql_connection_missing`, `fetch_unreadable`, `dataset_unreadable`,
+  malformed `@output_schema`, …)
+
+Exit codes mirror `strata run`: `0` valid (warnings allowed), `1` invalid
+(parse failure, DAG cycle, or any error-severity diagnostic), `2`
+invocation error. `--format json` emits
+`{"notebook", "valid", "errors", "cells", "summary"}` where each cell
+carries its `defines` / `references` (so you can check the DAG wiring you
+intended) and its `diagnostics` with `severity` / `code` / `message` /
+`line`.
+
+The intended loop for scripts and coding agents: **write files → validate →
+fix → run**. Validation is cheap enough to call after every edit; `strata
+run` is the expensive step. See
+[Authoring Notebooks Programmatically](https://bearingresearch.com/strata/dev/dev/notebook/agent-authoring/).
+
+## `strata new`
+
+Scaffold a notebook directory without the server:
+
+```bash
+strata new "My Analysis" [--parent DIR] [--python 3.12] [--no-env] [--no-git] [--project-mount [NAME]] [--format human|json]
+```
+
+Creates `<parent>/my_analysis/` with `notebook.toml`, `pyproject.toml`
+(pre-seeded with the notebook runtime packages), an empty `cells/`
+directory and a `.gitignore` (skip it with `--no-git`; an existing
+`.gitignore` is never replaced). The `.gitignore` keeps `.strata/`, `.venv/`,
+`renv/library/`, `work/`, and the `.mcp.json` and `CLAUDE.md` that
+`strata agent` writes, out of version control. It then syncs the venv (skip with `--no-env`;
+`strata run` syncs it later). Idempotent on an existing notebook directory:
+the notebook is left as it is (its id, cells, configuration and
+dependencies), and only missing scaffolding is added, so re-running it never
+orphans artifacts or loses settings.
+
+`--project-mount [NAME]` adds a notebook-level **read-only mount of `--parent`**
+(the project directory) as a `Path` variable `NAME` (default `project`) in every
+cell, so cells read project files as `open(project / "file")` without absolute
+paths, even though a cell runs in the notebook's `work/` directory. The mount is **pinned**, so it never gets fingerprinted (no directory
+hashing, and the project's own churn never re-stales cells). This is the
+scratchpad-friendly default when the notebook lives in a subdirectory of a
+project (see [the notebook as an agent's scratchpad](https://bearingresearch.com/strata/dev/dev/notebook/scratchpad/)).
+
+## Inspecting a notebook (`cell`, `dag`, `status`)
+
+For agents (and humans) that need to read a notebook's state without executing
+it, three read-only commands print structured JSON (default) or a compact human
+view. They open the notebook locally - no server, no env sync:
+
+```bash
+strata cell list <notebook_dir>            # every cell: id, name, status, source
+strata cell show <notebook_dir> <cell_id>  # one cell: source, status, staleness (outputs and console with --format json)
+strata cell show <notebook_dir> --var NAME # the cell that DEFINES a variable (else the available names)
+strata dag       <notebook_dir>            # dependency edges + topological order
+strata status    <notebook_dir>            # per-cell status + staleness summary
+```
+
+Every `<cell_id>` here and below is the id from `notebook.toml` or `cell list`,
+not the cell's `# @name`.
+
+Each takes `--format human|json` (JSON is the default - these are agent-first).
+The JSON shapes match the server's REST API (`GET /{id}/cells`, `GET /{id}/dag`),
+so a script written against the local CLI keeps working against a running
+server later. Exit codes follow the same contract as `run` / `validate`: `0`
+success, `1` operation failure (e.g. unknown cell - a structured `{"error": …}`
+on stdout), `2` invocation error (bad path) on stderr.
+
+```bash
+strata cell list my_analysis | jq '.[] | select(.status == "error") | .id'
+```
+
+### Looking at a plot
+
+An image has no text form, so `cell show` reports a plotting cell's output as
+`image/png` with its size and an `artifact_uri`, and a `null` preview. To see
+it, write the bytes to a file:
+
+```bash
+strata cell output <notebook_dir> <cell_id> --out plot.png   # the last display output
+strata cell output <notebook_dir> <cell_id> --out first.png --index 0
+```
+
+`--index` counts display outputs in the order the cell emitted them; the
+default `-1` is the last, which is the value a cell ending in an expression
+produced. It works against a live session too, with `--server`/`--session`;
+the file is always written on the machine running the command.
+
+### Working against a live session (`--server` / `--session`)
+
+Every command above also targets a session on a **running** `strata-notebook` -
+the same session a human is watching in the TUI or web UI - instead of a local
+directory. Pass `--server <url> --session <id>` in place of the notebook path:
+
+```bash
+strata cell list --server http://localhost:8765 --session $SID
+strata cell show --server http://localhost:8765 --session $SID <cell_id>
+strata dag       --server http://localhost:8765 --session $SID
+strata status    --server http://localhost:8765 --session $SID
+```
+
+`<id>` is the session id (the route `{id}`, not the `notebook.toml` id).
+`strata agent` prints it when it starts; without that, `POST
+/v1/notebooks/open` with the notebook's path returns it as `session_id`, and
+`GET /v1/notebooks/sessions` lists the open ones (see the
+[REST API](https://bearingresearch.com/strata/dev/dev/reference/rest-api/#open-notebook)). The output is identical to the local backend - both project the same wire shape - so
+a script written against a local notebook works unchanged against a live session.
+`cell run` / `cell test` and the authoring commands accept the same selector
+(see below), so the entire surface works against a live session. `cell cancel`
+takes only this selector (see [Cancelling a run](#cancelling-a-run-cell-cancel)). Remote
+operations target a personal-mode server (the use case is driving the session
+you're watching locally).
+
+**The selector decides who sees the change.** Given a notebook *path*, the
+authoring commands edit the files directly and a running server learns nothing
+until its next resync - so a colleague watching in the TUI or web UI sees
+nothing happen. Given `--server`/`--session`, the same command goes through the
+server, which broadcasts it, and the change appears in every viewer as it lands.
+Both are correct; they are for different jobs. Use the path to prepare a
+notebook, and the session to drive one somebody is watching.
+
+## Running a cell or its tests (`cell run`, `cell test`)
+
+Beyond inspection, an agent can execute one cell at a time (not the whole
+notebook) and run a cell's unit tests, both with structured output:
+
+```bash
+strata cell run  <notebook_dir> <cell_id> [--rerun | --force] [--init RELEASE] [--no-sync]
+strata cell test <notebook_dir> <cell_id> [--file tests.py] [--no-sync]
+```
+
+`cell run` materializes the cell (using the cache and re-running stale upstreams
+by default; `--rerun` bypasses the target's cache, `--force` runs against
+whatever upstream artifacts already exist). `--init RELEASE` starts a normal
+run from an accepted checkpoint's parts (`strata.restore()` returns them) as a
+branch under its own provenance key; see
+[checkpoints](https://bearingresearch.com/strata/dev/dev/notebook/cells/#checkpoints-stratacheckpoint-stratarestore-stratahead). `cell test` runs the cell's
+`cells/{cell_id}.test.py` via pytest and reports per-test outcomes; pass
+`--file tests.py` (or `-` for stdin) to **set** the cell's test source first and
+then run it - the one cell-test affordance that previously required editing the
+file by hand. Both **sync the venv first** (like `strata run`) unless you pass
+`--no-sync`.
+
+Both also accept `--server <url> --session <id>` to run on a live session instead
+of a local directory (`strata cell run --server http://localhost:8765 --session
+$SID <cell_id> --rerun`). The server owns its venv, so the remote path never syncs
+(`--no-sync` is a local-only flag), and `--rerun` / `--force` map to the
+server's run modes, so remote execution has the same three modes as local.
+
+`--format json` (default) writes a single clean JSON object to **stdout** - the
+executor's logs go to stderr, so the stdout stream stays parseable:
+
+```bash
+strata cell run nb featurize --format json | jq '{status, cache_hit, error}'
+strata cell test nb featurize --format json | jq '.cases[] | select(.outcome != "passed")'
+```
+
+Exit codes: `cell run` → `0` ran ok, `1` the cell errored (or unknown cell), `2`
+setup error (no `.venv/bin/python` under `--no-sync`, sync failure). `cell test` → `0` all
+passed, `1` a test failed/errored, `2` pytest unavailable in the venv.
+
+### Cancelling a run (`cell cancel`)
+
+A run on a live session can be stopped from another shell, whoever started it
+(a `cell run --server`, an MCP agent, or the browser):
+
+```bash
+strata cell cancel --server http://localhost:8765 --session $SID <cell_id>
+```
+
+It does what the browser's stop button does: the run stops (a cell running in
+a local process has its whole process group killed), the cell goes back to
+`idle`, and the `cell run` that was waiting on it returns `status: "error"` with
+`error_code: "cancelled"`. The output is `{"cell_id", "cancelled", "status"}`.
+Exit codes: `0` a run was cancelled, `1` the cell was not running
+(`cancelled: false`; a finished cell keeps its state) or an operation error,
+`2` invocation error.
+
+Only a server run can be cancelled this way. A `cell run` on a notebook
+directory executes inside that command's own process, so `cell cancel` given a
+path exits `2` and says so; stop that run with Ctrl-C instead.
+
+## Authoring cells and dependencies (`cell add/edit/rm/mv`, `dep`)
+
+An agent can also build and edit a notebook through commands (instead of writing
+`notebook.toml` + `cells/*.py` by hand):
+
+```bash
+strata cell add      <notebook_dir> (--file body.py | -c 'src') [--run] [--after <id>] [--language python|markdown|sql|r|prompt|widget]
+strata cell edit     <notebook_dir> <cell_id> --file body.py     # replace a cell's source
+strata cell rm       <notebook_dir> <cell_id>                     # delete a cell
+strata cell mv       <notebook_dir> <cell_id> --to <index>        # reorder (0-based)
+strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout
+strata cell pin-fetch <notebook_dir> <cell_id> [NAME ...]        # write sha256= into @fetch lines
+strata dep add       <notebook_dir> <package>                     # uv add
+strata dep rm        <notebook_dir> <package>                     # uv remove
+```
+
+`--file -` reads cell source from stdin; `-c 'src'` passes the source inline
+(the two are mutually exclusive). `cell add` mints a backend-style 8-char id (the
+same scheme the server uses) and prints the new cell; `mv` prints the new order.
+Pass **`--run`** to execute the cell right after adding it (the one-call
+scratchpad primitive), and the run outcome (`status`, `cache_hit`, `stdout`,
+`stderr`) is folded into the output under `run`. The returned cell is the
+**post-run** view, so its rendered `outputs` (a trailing bare expression's value)
+ride along without a separate `cell show` (`--no-sync` skips the venv sync, as
+with `cell run`). `cell annotate` splices `# @key` [annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/) into a
+cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
+the body untouched - a convenience over rewriting the whole source with `edit`;
+it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit
+the source directly for repeatable `mount` / `table` / `env`. `cell pin-fetch`
+pins a cell's [`@fetch`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#fetch) inputs: it writes `sha256=` with
+the digest of the bytes the notebook last downloaded into each named fetch line
+(every fetch in the cell when no name is given) and prints the cell and a
+`pinned` list of `{name, url, sha256}`. It reads the notebook's own fetch
+cache, so it takes a local directory, not `--server`; a fetch with nothing
+downloaded yet is an error until the cell has run. Dependency
+commands run `uv add` / `uv remove` and report whether the lockfile changed. All
+take `--format json|human` and use the shared exit codes (`0` ok, `1` operation
+failure such as an unknown cell or a failed `uv` resolve, `2` invocation error).
+
+```bash
+echo 'total = sum(nums)' | strata cell add nb --file - --after load --format json | jq .id
+```
+
+These also accept `--server <url> --session <id>` to author into a live session
+instead of a local directory - edits land in the running notebook a human is
+watching in the TUI. (`cell add` makes two calls: it mints the cell on the
+server, then sets its source.)
+
+Every cell records who wrote it. Pass `--author NAME` (your agent's name, say)
+so a person can tell agent edits from their own; a server that authenticates
+its callers ignores it and records the authenticated identity instead.
+
+Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
+run/test`), this is the full agent surface - and **all of it** works either
+offline against a directory or `--server/--session` against a running server. An
+MCP server wrapping the same operations is also available; see
+[MCP Server](https://bearingresearch.com/strata/dev/dev/notebook/mcp/), or [`strata agent`](https://bearingresearch.com/strata/dev/dev/notebook/agent/) for the one-command on-ramp
+that stands it up and points a coding agent at a live session.
+
+## Workers (`strata worker`)
+
+`strata worker ls|add|rm|default <notebook_dir> ...` edits the notebook's
+`[[workers]]` block, and `strata worker add-ssh|rm-ssh` connects a box you reach
+over SSH to a running server. See
+[Registering workers from the CLI](https://bearingresearch.com/strata/dev/dev/notebook/workers/#from-the-cli) and
+[Run cells on a machine you can SSH to](https://bearingresearch.com/strata/dev/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to).

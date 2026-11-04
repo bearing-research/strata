@@ -1,0 +1,286 @@
+# Observability
+
+Strata ships an opt-in observability stack, Jaeger for traces,
+Prometheus for metrics, Grafana for dashboards, wired up as a
+docker-compose file you can run alongside the server. Used in dev
+to validate that a change didn't regress latency or cache hit rate,
+and in production as a reference layout your real observability
+provider can mirror.
+
+## Running the stack
+
+```bash
+docker compose -f docker-compose.observability.yml up -d --build
+```
+
+The stack starts four containers:
+
+| Container | Port | What it does |
+|---|---|---|
+| `strata` | 8765 | Strata server with OTel tracing enabled and structured JSON logging |
+| `jaeger` | 16686 | Trace UI + OTLP collector (gRPC on 4317, HTTP on 4318) |
+| `prometheus` | 9090 | Scrapes `strata:/metrics/prometheus` every 5s |
+| `grafana` | 3000 | Dashboards (login: `admin` / `admin`) |
+
+Open:
+
+- **Strata**: [http://localhost:8765](http://localhost:8765)
+- **Jaeger UI**: [http://localhost:16686](http://localhost:16686) (search for `strata` service)
+- **Prometheus**: [http://localhost:9090](http://localhost:9090)
+- **Grafana**: [http://localhost:3000](http://localhost:3000)
+
+Stop:
+
+```bash
+docker compose -f docker-compose.observability.yml down
+```
+
+To wipe state too (Prometheus / Grafana data), add `-v`.
+
+## What gets emitted
+
+### Metrics, `/metrics/prometheus`
+
+Strata exposes the standard Prometheus textfile format at
+`GET /metrics/prometheus`. The scrape config in
+`observability/prometheus.yml` pulls every 5 seconds. Metric
+families include:
+
+- **Cache**: hit rate, eviction count, byte-size occupancy
+- **Scans**: active count, completion rate, throughput in
+  bytes/second
+- **QoS**: interactive vs bulk slot usage, queue wait and rejections
+- **Rate limiter**: request acceptance / rejection counts
+- **Server**: draining flag, HTTP connections, thread pools, Arrow
+  memory, GC pauses
+- **HTTP requests**: `strata_http_requests_total{method, route, status}`
+  and the histogram `strata_http_request_duration_seconds{route}`
+  (`_bucket`, `_sum`, `_count`; buckets from 5 ms to 300 s). `route` is the
+  matched route's template (`/v1/artifacts/{artifact_id}/v/{version}`),
+  never the raw path; a mount is its prefix (`/assets/{path}`,
+  `/mcp/{path}`), and a request answered before routing (a refused Host,
+  auth, the rate limiter) or matching no route is `unmatched`. `status` is
+  the class: `2xx`, `3xx`, `4xx` or `5xx`. A request that raised before its
+  response started counts as `5xx`, the 500 the server answers; one that
+  raised mid-stream keeps the status it sent. A method outside the standard
+  set is `other`. The duration runs to the response's last byte, so a
+  stream (`/v1/streams/{stream_id}`) is timed to its end. There is no tenant
+  label. The error rate is
+  `sum(rate(strata_http_requests_total{status="5xx"}[5m])) / sum(rate(strata_http_requests_total[5m]))`.
+- **Object storage**: `strata_object_store_errors_total{operation}`, the
+  artifact store's S3, GCS and Azure calls that raised, by `put`, `get`,
+  `head`, `list` or `delete`, every operation present from the first
+  scrape. A call counts even when its caller carries on (an existence check
+  reports a refused `head` as absent); an object that is not there is an
+  answer, not an error. A `get` counts when opening the object fails, not a
+  read that fails partway. No artifact path lists the store today, so
+  `list` stays 0, and the local-disk backend is not counted.
+- **Per tenant**: `strata_tenant_scans_total`,
+  `strata_tenant_cache_hit_rate` and `strata_tenant_bytes_total`, labelled
+  by `tenant`, once a tenant has made a request, and the build series
+  `strata_build_tenant_started_total` and `strata_build_tenant_bytes_out_total`.
+  Left out under principal auth (`trusted_proxy` or `api_key`): the route is
+  unauthenticated for scrapers, and tenant ids are `admin:tenants` data there
+  (`GET /v1/admin/tenants`)
+- **Per table**: `strata_table_scans_total`, `strata_table_latency_p95_ms`
+  and `strata_table_cache_hit_rate`, labelled by `table`, for the 20 most
+  scanned tables. Left out under principal auth (`trusted_proxy` or
+  `api_key`): the route is unauthenticated for scrapers, and table names,
+  which span tenants, are `admin:*` data there (`GET /metrics/tables`)
+- **AI**: `strata_ai_calls_total`, `strata_ai_input_tokens_total` and
+  `strata_ai_output_tokens_total`, labelled by `tenant`, `principal` and
+  `model`. Counted from each provider response a prompt cell receives. The
+  labels are the caller the request ran as, and are empty in personal mode. The series appear after the first
+  model call. Under principal auth (`trusted_proxy` or `api_key`) the
+  `tenant` and `principal` labels are left out and each series is the
+  server's total per model: the route is unauthenticated for scrapers, and
+  who called a model is not theirs to see. Per-tenant and per-principal
+  counts are not exported in that mode.
+
+### Traces, OpenTelemetry OTLP
+
+Tracing is on whenever the `otel` extra is installed (the published
+image has it) and `OTEL_EXPORTER_OTLP_ENDPOINT` names a collector
+(`http://jaeger:4317` in the compose stack). Spans go over OTLP-gRPC.
+`STRATA_TRACING_ENABLED=false` turns it off. One span per HTTP request,
+plus child spans for planning (`plan_identity_materialize`,
+`resolve_manifests`) and for each row group fetched on a cache miss
+(`fetch_row_group`). The `service.name` attribute comes from
+`OTEL_SERVICE_NAME` (default `strata`).
+
+A cell sent to a remote worker is one trace across processes. The
+server opens `notebook.dispatch` with `worker`, `build_id`,
+`notebook_id` and `cell_id`, and sends its W3C `traceparent` in
+the request headers and the build manifest. The worker's
+`worker.execute` span is its child. When the job goes through
+`strata-pool`, and the pool has OpenTelemetry installed, its
+`pool.execute` span sits between the two, and `pool.queue` (from
+submit to dispatch) and `pool.boot` (a machine started for the job)
+sit beside it under the dispatch. Each process exports to its own
+`OTEL_EXPORTER_OTLP_ENDPOINT`, and the backend joins the spans by
+trace id.
+
+In Jaeger:
+
+1. Pick the `strata` service.
+2. Optional filter by `Operation` (e.g. `POST /v1/materialize`).
+3. Click into a trace to see the full waterfall, cache hits are
+   short; misses fan out through planner → Parquet I/O →
+   Arrow IPC writer.
+
+### Logs
+
+Logs are structured JSON by default (`STRATA_LOG_FORMAT=json`;
+`text` for a human-readable line). One line per log record with
+`level`, `logger`, `message`, `timestamp` (Unix seconds), and the
+request's context fields: `request_id`, `method`, `path`, `tenant_id`,
+and `trace_id` / `span_id` when tracing is on.
+uvicorn's own startup and access lines stay plain text, so keep only
+the JSON records before reading them with `jq`:
+
+```bash
+docker compose logs --no-log-prefix strata | jq -R 'fromjson? // empty'
+```
+
+### Web UI: Logs & Artifacts pages
+
+The notebook UI ships two operator views, reachable from any notebook's header
+(**Logs** / **Artifacts**) and via a **← Back** button that returns to the
+notebook:
+
+- **Logs** (`/logs`) - the server-log stream with level / notebook id / regex
+  filters and a **live tail**. Backed by an in-memory ring buffer:
+  `GET /v1/logs` (snapshot) and `GET /v1/logs/stream` (Server-Sent Events).
+  The buffer holds every tenant's records, so under principal auth both need
+  `admin:*`.
+- **Artifacts** (`/artifacts`) - a sortable, filterable list of stored
+  artifacts with summary stats. Backed by `GET /v1/artifacts` (with `since` /
+  sort / order filters) and `GET /v1/artifacts/stats`.
+
+In service mode `GET /v1/artifacts/stats` and `GET /v1/artifacts/usage`
+report the caller's own tenant (an `admin:*` caller sees the whole store, or
+one tenant named with `?tenant=`), which is the figure to meter storage on.
+`GET /v1/artifacts` is personal-mode only, so there the page shows the stats
+and says that the list is not available, without a table.
+
+These are convenience surfaces over the same data; use the Prometheus metrics
+and OTLP traces above for production monitoring and alerting.
+
+## Grafana dashboards
+
+`observability/grafana/provisioning/` is mounted into the Grafana
+container so the dashboard and the Prometheus datasource are
+provisioned on container start - no importing by hand.
+
+To open it:
+
+1. Bring up the stack (above) and go to
+   [http://localhost:3000](http://localhost:3000) - log in with
+   `admin` / `admin`.
+2. Left nav → **Dashboards** → **Strata - Iceberg Serving +
+   Observability**.
+3. Panels stay flat until the server sees traffic. Send some load
+   (see [Generating load](#generating-load)) and they fill in within
+   a scrape interval or two (~10s).
+
+The dashboard covers the serving layer end to end:
+
+- **Serving**: scan rate, active scans, throughput, row-group pruning,
+  prefetch usage
+- **Caches**: data / parquet-metadata / manifest hit rates and sizes,
+  eviction rate & pressure
+- **Admission & QoS**: interactive vs bulk slot usage, queue-wait
+  times, rejections
+- **Resilience**: rate limiter (allowed vs rejected, active clients)
+- **Multi-tenant**: per-tenant scan rate and cache hit rate (empty under
+  principal auth, where the scrape names no tenants)
+- **Server**: status / draining, stream aborts, client disconnects
+
+A test (`tests/test_observability_dashboard.py`) fails CI if a panel
+references a metric the server no longer exposes, so the dashboard
+can't silently drift out of sync with `/metrics/prometheus` again
+(it had - the QoS metrics were renamed and the panels went dark).
+
+To add more dashboards, drop the JSON into
+`observability/grafana/provisioning/dashboards/` and restart the
+Grafana container.
+
+## Wiring your own observability provider
+
+The compose stack is opinionated for local dev. In production you
+typically have an existing OTel collector, Prometheus instance, and
+log aggregator. Point Strata at yours via env vars:
+
+```bash
+# Tracing (needs the otel extra, which the published image includes)
+OTEL_EXPORTER_OTLP_ENDPOINT=https://your-collector:4317
+OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer <token>
+OTEL_SERVICE_NAME=strata-prod
+
+# Logs
+STRATA_LOG_FORMAT=json
+STRATA_LOG_LEVEL=INFO
+```
+
+Prometheus scraping is pull-based, your scrape config needs an
+entry pointing at `<strata-host>:8765/metrics/prometheus`. There's
+no push-gateway integration; if you need to push (e.g. for jobs in
+ephemeral containers), wrap the scrape in your own sidecar.
+
+A personal-mode server answers only to loopback names, IP literals, its
+own `STRATA_HOST` and the names in `STRATA_ALLOWED_HOSTS`, so list the
+name your scraper uses there (the compose stack lists `strata`); service
+mode checks the Host only when that setting is set.
+
+To use the bundled dashboard with your own Grafana, import
+`observability/grafana/provisioning/dashboards/strata.json` (Dashboards
+→ New → Import) and pick your Prometheus from the dashboard's
+**Datasource** dropdown - it's a template variable, not hard-wired to
+the compose stack.
+
+## Generating load
+
+A fresh stack is idle, so the Grafana panels and Jaeger are empty
+until the server scans a table. The compose file mounts
+`./demo-warehouse` read-only at `/data/warehouse` for that. Put an
+Iceberg warehouse there whose catalog records paths under
+`/data/warehouse` (a warehouse built on the host, such as the one
+`examples/setup_demo.py` writes, records host paths that do not exist
+in the container). Then run a few `scan@v1` materializes against
+`http://localhost:8765` with the
+[Python client](https://bearingresearch.com/strata/dev/dev/getting-started/core/#3-materialize-a-result),
+using `file:///data/warehouse#<namespace>.<table>` as the input.
+
+For sustained load, point `benchmarks/capacity_sweep.py` at the stack:
+
+```bash
+python benchmarks/capacity_sweep.py --no-server --base-url http://localhost:8765 \
+    --table-uri 'file:///data/warehouse#<namespace>.<table>'
+```
+
+`--table-uri` is repeatable, and each table needs the columns the
+sweep's queries use: `id`, `ts`, `user_id`, `category` and `value`.
+Without `--no-server` the sweep starts its own server on a free port
+and loads that one instead.
+
+After a few scans:
+
+- **Grafana** ([:3000](http://localhost:3000)) - the scan-rate,
+  cache, and QoS panels move within a scrape interval or two.
+- **Jaeger** ([:16686](http://localhost:16686)) - a handful of
+  materialize spans with their full child waterfall.
+
+## Health endpoints
+
+Cheap endpoints for k8s liveness/readiness probes or Fly health
+checks:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Liveness. Returns `{"status":"ok"}` if the server is running. Used by Docker / Fly / k8s. |
+| `GET /health/ready` | Readiness. `503` while draining, when both QoS tiers have been saturated for over 30s, or when the Parquet metadata cache (SQLite under `STRATA_CACHE_DIR`) or the artifact store's database (SQLite, or Postgres through `STRATA_ARTIFACT_METADATA_DSN`) does not answer a query within 5 seconds. The blob backend is not probed. |
+| `GET /health/dependencies` | Per-check report (disk cache, metadata store, Arrow memory, thread pools, rate limiter, eviction pressure); `503` if any check is unhealthy. |
+| `GET /metrics/prometheus` | Scrape target. Returns Prometheus textfile. |
+
+`/health` is intentionally minimal and doesn't probe anything. Point
+a readiness probe at `/health/ready`.

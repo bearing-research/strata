@@ -1,0 +1,1279 @@
+# REST API Reference
+
+This page documents the **notebook** REST surface, mounted under `/v1/notebooks`, plus the core routes a client meets most: materialize, streams, health and metrics ([Core API](#core-api)), and the log buffer and artifact listing ([Observability](#observability)). It does not list every route. The rest are documented with their feature:
+
+- Registry and names (`/v1/registry/*`, `/v1/names*`): [Registry](https://bearingresearch.com/strata/dev/dev/core/registry/)
+- Publications (`/v1/artifacts/{id}/v/{n}/publish`, `/v1/publications*`, `/p/*`): [Publishing](https://bearingresearch.com/strata/dev/dev/notebook/publishing/)
+- Admin, debug and cache routes (`/v1/admin/*`, `/v1/debug/*`, `/v1/cache/*`): [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) and [Observability](https://bearingresearch.com/strata/dev/dev/deployment/observability/)
+- Garbage collection (`POST /v1/artifacts/gc`): [Operations & Lifecycle](https://bearingresearch.com/strata/dev/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store)
+
+For materializing from Python, see the [Library Quickstart](https://bearingresearch.com/strata/dev/dev/getting-started/core/). The live OpenAPI schema ([below](#canonical-machine-readable-spec)) lists every route.
+
+The remote-worker contract - `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` - is documented separately on the [Executor Protocol](https://bearingresearch.com/strata/dev/dev/reference/executor-protocol/) page. Those endpoints live on a different process (`strata-worker`), not the main server.
+
+!!! note "Session ID vs Notebook ID"
+Route parameters use the **session ID** (a UUID generated when the notebook is opened), not the persistent `notebook_id` from `notebook.toml`. The session ID is returned by the `open` and `create` endpoints.
+
+## Conventions
+
+### Canonical machine-readable spec
+
+The server exposes a live OpenAPI document at runtime:
+
+| Path | What it serves |
+| --- | --- |
+| `GET /openapi.json` | Full OpenAPI 3.1 schema - request and response models for every endpoint, generated from the FastAPI route definitions. |
+| `GET /docs` | Swagger UI for interactive try-it-out. |
+| `GET /redoc` | ReDoc browser for the same schema. |
+
+When this page and the live spec disagree, the live spec wins - it's generated from the source of truth. This page exists for orientation and walks through the high-traffic flows.
+
+### Authentication
+
+Authentication depends on `deployment_mode`:
+
+| Mode | Default auth | Required headers |
+| --- | --- | --- |
+| `personal` | None (single user) | None |
+| `service` + `auth_mode="trusted_proxy"` | Proxy-injected identity | `X-Strata-Principal`, `X-Strata-Scopes`, `X-Strata-Proxy-Token`; `X-Tenant-ID` if multi-tenant |
+| `service` + `auth_mode="api_key"` | Strata verifies the key itself | `Authorization: Bearer strata_<key_id>_<secret>`; the key carries the principal, tenant and scopes |
+
+Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret; under `api_key`, a valid bearer key. The exceptions are the health and metrics endpoints, the signed build-transport routes (the signature is the credential) and public publication reads. A notebook cell's ambient client sends `X-Strata-Run-Token` instead, a token for its run that reaches only the client's own routes (see [the ambient client](https://bearingresearch.com/strata/dev/dev/notebook/cells/#the-ambient-strata-client)). Two further restrictions narrow what each endpoint accepts:
+
+**Personal-mode-only endpoints.** These four return `403 Forbidden` outside personal mode. They expose either a filesystem delete or the in-memory session table, neither of which fits a multi-tenant service deployment. Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
+
+| Endpoint | Why personal-mode-only |
+| --- | --- |
+| `DELETE /v1/notebooks/{session_id}` | Filesystem delete of a notebook directory |
+| `POST /v1/notebooks/delete-by-path` | Same, addressed by path |
+| `GET /v1/notebooks/sessions` | Lists in-memory session ids and notebook filesystem paths |
+| `GET /v1/notebooks/sessions/{session_id}` | Same, for one session |
+
+`POST /open`, `POST /create` and `GET /discover` are **not** restricted - they work in service mode. With `multi_tenant_enabled`, all three (and the imports) are confined to the caller's tenant subdir of the storage root.
+
+**Tenant-scoped sessions.** A session records the tenant of whoever opened, created or imported it, and every `/v1/notebooks/{session_id}/...` route answers `404` to a caller from another tenant, as for an unknown session. `admin:*` reaches every session; a session opened by a caller with no tenant belongs to the default tenant (`_default`) and is reached only by tenantless callers and `admin:*`.
+
+**Scope-gated endpoints.** Under principal auth, **every** route on the `/v1/notebooks` and `/v1/projects` routers requires a notebook scope in `X-Strata-Scopes`. The gate is a router-level dependency keyed on the matched path template, so a route added later is covered without anyone remembering to gate it, and it returns `403 Forbidden` naming the scope it wanted.
+
+| Endpoint | Required scope |
+| --- | --- |
+| Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
+| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, `/recents/validate`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
+| Anything that runs code - execute, cancelling a run, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
+| `POST /v1/cache/clear` | `admin:cache` |
+| `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
+| Artifact and registry writes, including `name` on `POST /v1/materialize` | `artifacts:write` |
+| `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/cache/stats`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` | `admin:cache` |
+| Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) | `artifacts:publish` |
+| Pinning and unpinning a version (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) | `artifacts:pin` |
+| Collecting the caller's own tenant's unneeded versions (`POST /v1/artifacts/gc`) | `artifacts:gc` |
+| `GET /v1/admin/tenants`, `GET /v1/admin/tenants/{tenant_id}` | `admin:tenants` |
+| `/v1/admin/notebook-workers*` (the server-managed worker registry) | `admin:notebook-workers` |
+| `GET` / `PUT /v1/admin/notebook-credentials` (the named credentials and catalogs cells use) | `admin:notebook-credentials` |
+| `POST /v1/registry/pending/approve` and `.../reject` | `admin:registry` |
+| Quiesce and release (`POST /v1/notebooks/{id}/quiesce` / `release`, `POST /v1/projects/{path}/quiesce` / `release`) | `admin:notebooks` |
+| A `POST /v1/artifacts/gc` sweep of the whole store, another tenant, or the tenantless rows (`include_tenantless=true`), and another tenant's `GET /v1/artifacts/usage` / `stats` | `admin:*` |
+| `GET /metrics/tables`, `GET /metrics/tables/{table_id}` (every tenant's table names), and `/v1/debug/*` other than cache inspection | `admin:*` |
+
+`notebook:execute` is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is `src/strata/notebook/scopes.py`, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.
+
+Without principal auth (personal mode, or `auth_mode="none"`), the scope gate returns immediately and none of this applies.
+
+Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](https://bearingresearch.com/strata/dev/dev/deployment/modes/); see [Fly.io deployment](https://bearingresearch.com/strata/dev/dev/deployment/fly/#trust-model) for the load-bearing details.
+
+### Error shape
+
+Most `4xx` and `5xx` responses use FastAPI's standard JSON shape:
+
+```json
+{"detail": "<human-readable error message>"}
+```
+
+Some carry an object in `detail` instead. The environment, cell-lock and
+quiesce `409`s name a `code` and a `message`, plus context for that code:
+`environment_job` on `ENVIRONMENT_BUSY`, `cell_id` and `held_by` on
+`cell_locked`. Some core-route `400`s and `403`s name an `error`
+(`writes_disabled`, `transform_unknown`, …) and a `message`. A `409` because a
+cell is already running (execute, close, delete) carries a plain string.
+
+```json
+{"detail": {"code": "cell_locked", "cell_id": "a1b2c3d4", "held_by": "alice", "message": "..."}}
+```
+
+Four middleware responses are plain text, not JSON: the host check's `400` (a
+`Host` the server does not answer to, see `STRATA_ALLOWED_HOSTS`), the tenant
+check's `400` (missing or invalid tenant header) and `403` (tenant not
+enabled), and the rate limiter's `429`, which also sets `Retry-After` (whole
+seconds) and `X-RateLimit-Limit-Type`. A stream refused by QoS admission is a
+JSON `429` (`{"error", "tier"}`) with `Retry-After`, and an unreachable object
+store is a JSON `503` with `Retry-After`.
+
+Validation errors (`422`) come from Pydantic and contain structured field info:
+
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "python_version"],
+      "msg": "String should have at most 16 characters",
+      "type": "string_too_long"
+    }
+  ]
+}
+```
+
+### Status codes you'll see
+
+| Status | Common cause |
+| --- | --- |
+| `200` | Success |
+| `307` | `GET /v1/streams/{id}` on a node that does not hold the stream, redirecting to the one that does (`STRATA_NODE_ADVERTISED_URL`) |
+| `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`, a scan of a column the table does not have, a transform param key starting with `_` at any depth, which is reserved for the server's own marks) |
+| `401` | Service mode auth header missing or proxy-token mismatch |
+| `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode; also a browser write whose `Origin` the server does not allow. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
+| `404` | Notebook session not found (or another tenant's), a table its catalog does not have, a local warehouse directory that does not exist, a snapshot id the table does not have, or a hidden 403 (see above) |
+| `409` | Conflict - concurrent environment job, a cell already running in the notebook (execute, close, delete), a cell someone else is editing (`cell_locked`), or a quiesced notebook (`NOTEBOOK_QUIESCED`) |
+| `413` | Request body or scan response exceeded the configured byte cap (`STRATA_MAX_UPLOAD_BYTES` for artifact uploads, `STRATA_MAX_RESPONSE_BYTES` for scans) |
+| `422` | Pydantic validation error on the request body, or a table input Strata refuses to read (an unreadable delete file, too many pending equality deletes); the detail says which. A table the ACL denies is refused first, so its caller gets the `403`/`404` instead |
+| `429` | Rate limit exceeded - global, per-client, or per-tenant |
+| `500` | Server bug - captured to logs with the request ID |
+| `503` | The server is draining for shutdown and takes no new materialize requests, or the object store holding a table could not be reached while planning a scan or resolving a transform's table input (with `Retry-After: 5`; access denied and missing files are not reported this way) |
+| `504` | Planning a scan exceeded its timeout |
+
+### Request IDs
+
+Every request gets an `X-Request-ID` response header (and the same value is echoed if the client sent one in). Log lines and traces include this ID - copy it when filing bugs.
+
+### Tenancy
+
+In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service Mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) for the full contract.
+
+## Notebook Lifecycle
+
+### Create Notebook
+
+```
+POST /v1/notebooks/create
+```
+
+```json
+{
+  "parent_path": "/path/to/directory",
+  "name": "My Notebook",
+  "python_version": "3.13",
+  "starter_cell": true
+}
+```
+
+Returns notebook state with `session_id` as soon as the notebook exists. Unlike
+`open`, it does not wait for the environment: the new venv's first `uv sync`
+runs as an environment job, which the response reports in `environment_job`
+(`status: "running"`) and `environment.sync_state` (`"pending"`), so a client
+can show the notebook while it builds. Until the job finishes, running a cell,
+starting another environment job or deleting the notebook answers `409` with
+`code: "ENVIRONMENT_BUSY"`. To run cells straight after creating, wait for the
+`environment_job_finished` WebSocket frame, or poll
+[`GET /v1/notebooks/{session_id}/environment/jobs/current`](#get-current-environment-job)
+until `environment_job.status` is `completed` (or `failed`). `POST
+/v1/notebooks/import` behaves the same way.
+
+### Open Notebook
+
+```
+POST /v1/notebooks/open
+```
+
+```json
+{
+  "path": "/path/to/notebook"
+}
+```
+
+`path` must be inside `STRATA_NOTEBOOK_STORAGE_DIR` (default
+`~/.strata/notebooks`; with multi-tenancy, the tenant's own subdirectory of it),
+and a relative `path` is taken from there. Any other path is a `400`.
+
+Returns notebook state with `session_id` and `dag`. A session already open on
+the path is returned rather than a second one: in personal mode any open
+session, in service mode only one the same principal opened. Before opening, when
+`STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB` is set and available memory is below
+it, idle sessions are closed (see
+[Session lifetime](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/#session-lifetime-and-session_closed)).
+
+### Close Notebook Session
+
+```
+POST /v1/notebooks/{session_id}/close
+```
+
+Closes the session and stops its warm processes, leaving the notebook and its
+results on disk; open it again by path to continue. Connected clients get a
+`session_closed` frame with `reason: "closed"`. `409` while a cell runs or an
+environment job is in progress. Needs `notebook:write`, the scope `open` needs.
+
+```json
+{"closed": true, "session_id": "…", "path": "/path/to/notebook"}
+```
+
+### Import Jupyter Notebook
+
+```
+POST /v1/notebooks/import
+Content-Type: multipart/form-data
+```
+
+Form fields:
+
+| Field         | Type            | Description                                                                  |
+| ------------- | --------------- | ---------------------------------------------------------------------------- |
+| `file`        | file (required) | The `.ipynb` upload. Hard cap of 50 MB.                                      |
+| `name`        | string          | Override the notebook name (defaults to the upload's filename stem).         |
+| `parent_path` | string          | Override the storage location (must lie inside the configured storage root). |
+
+Converts the upload through `strata import` and opens a session on
+the result. Returns the same notebook state shape as `POST
+/v1/notebooks/create` plus an `import_report` field with the
+converter's per-cell findings (translated magics, captured deps,
+warnings, full report markdown). See
+[Import from Jupyter](https://bearingresearch.com/strata/dev/dev/notebook/import/) for the magic
+translation table and limitations.
+
+### Import Snapshot
+
+```
+POST /v1/notebooks/import-snapshot
+Content-Type: multipart/form-data
+```
+
+Form fields as for the Jupyter import (`file`, `name`, `parent_path`), where
+`file` is a bundle from `GET …/export?fmt=snapshot`. Without `name`, the
+notebook keeps the bundle's name. The upload is streamed to
+disk and capped at 2 GiB, since an `include=all` snapshot is as large as the
+notebook's store. A bundle whose files would expand to more than 16 GiB, or
+holding a file the import reads whole (manifest, `notebook.toml`, a cell, a
+lockfile, a console log) over 16 MiB, is refused with `400` before anything is
+extracted.
+
+Turns the bundle into a notebook directory and opens a session on it. Cells
+whose artifacts the bundle carried are cache hits before anything runs; cells it
+only described open idle. With a team store configured, running one of those is
+a pull rather than a recompute.
+
+A notebook id already in use under the caller's storage root is replaced, and
+every artifact id and lineage edge that embeds it is rewritten to match. Two
+copies of one notebook sharing an id would collide as soon as both publish to a
+shared store.
+
+`import_report` carries `imported_artifacts`, `replaced_notebook_id` (the
+bundle's id when it was replaced, else `null`), and `by_reference_cells`.
+A zip that is not a snapshot is a 400; a snapshot exported before format 2,
+which lacked the artifact records an import needs, is refused with a request
+to export it again.
+
+### Delete Notebook
+
+```
+DELETE /v1/notebooks/{session_id}
+```
+
+Deletes the notebook directory and closes the session; connected clients get
+`session_closed` with `reason: "deleted"`.
+
+### Quiesce and Release
+
+```
+POST /v1/notebooks/{session_id}/quiesce
+POST /v1/notebooks/{session_id}/release
+POST /v1/projects/{path}/quiesce
+POST /v1/projects/{path}/release
+```
+
+Holds a notebook, or every notebook under a project directory, still so that a
+copy of the directory is consistent: sources, `runtime.json` and artifacts from
+the same moment.
+
+```json
+{"timeout_seconds": 30, "max_hold_seconds": 600}
+```
+
+Quiesce waits for running cells to finish. Any still running at
+`timeout_seconds` are cancelled and named in `cancelled_cells`. Then, until
+release, runs and edits are refused with **409** and `code: NOTEBOOK_QUIESCED`,
+over REST and the WebSocket alike, and so is any write that reaches the
+notebook's files another way (runtime state, a landing artifact). The hold
+ends on its own after `max_hold_seconds`, so a caller that dies mid-copy
+cannot freeze the notebook. A project hold also covers notebooks that are not
+open, and overlapping holds are refused with 409.
+
+```json
+{
+  "path": "/srv/notebooks/project",
+  "notebooks": ["/srv/notebooks/project/analysis"],
+  "cancelled_cells": {},
+  "hold_expires_in_seconds": 599.9
+}
+```
+
+Release answers `{"path", "released"}`, with `released: false` when there was
+no hold. Under principal auth both need the `admin:notebooks` scope (`admin:*`
+satisfies it); personal mode allows them. The project `{path}` is resolved
+inside the storage root like any other notebook path. Holds live in the server
+process and do not survive a restart.
+
+### Discover Notebooks
+
+```
+GET /v1/notebooks/discover
+```
+
+Lists notebook directories under the configured storage root. Returns
+`{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at" }] }`
+sorted newest-first. Used by the "Open existing" UI so users pick from a list
+instead of typing a filesystem path. Available in both modes; requires
+`notebook:read` under principal auth. On a multi-tenant server the scan root is
+`<notebook_storage_dir>/<tenant>/` (the whole root for `admin:*`).
+
+### Samples
+
+```
+GET /v1/notebooks/samples
+POST /v1/notebooks/samples/{name}/open
+```
+
+`GET` returns `{ "samples": [{ "name", "title", "description" }] }`, the notebooks
+bundled with Strata, and requires `notebook:read` under principal auth. `POST` copies
+one into the caller's storage root under a fresh name, as a notebook with its own id,
+and opens the copy. It responds as [Open Notebook](#open-notebook) does, once the
+copy's environment is synced and warmed, and requires `notebook:write`. An unknown name
+is a 404.
+
+### Validate Recent Notebooks
+
+```
+POST /v1/notebooks/recents/validate
+```
+
+```json
+{"paths": ["/path/to/notebook", "/path/that/moved"]}
+```
+
+Returns `{"valid": [...]}`, the subset of the (at most 100) paths that still
+hold a `notebook.toml` and lie inside the caller's notebook root (the tenant's
+folder on a multi-tenant server); any other path is left out like a missing
+one. The UI uses it to prune its recent-notebooks list. Needs `notebook:write`.
+
+### Delete Notebook By Path
+
+```
+POST /v1/notebooks/delete-by-path
+```
+
+```json
+{
+  "path": "/path/to/notebook"
+}
+```
+
+Deletes a notebook directory by filesystem path. Personal mode only (`403` in
+service mode). An open session on the path is closed first; `409` while it runs
+a cell or an environment job.
+
+### Rename Notebook
+
+```
+PUT /v1/notebooks/{session_id}/name
+```
+
+```json
+{
+  "name": "New Name"
+}
+```
+
+## Sessions
+
+### List Sessions
+
+```
+GET /v1/notebooks/sessions
+```
+
+Returns `{ "sessions": [{ "session_id", "name", "path", ... }] }`.
+
+### Get Session
+
+```
+GET /v1/notebooks/sessions/{session_id}
+```
+
+Returns full notebook state (same shape as `open`). Used for page refresh reconnection.
+
+## Cells
+
+### List Cells
+
+```
+GET /v1/notebooks/{session_id}/cells
+```
+
+### Add Cell
+
+```
+POST /v1/notebooks/{session_id}/cells
+```
+
+```json
+{
+  "after_cell_id": "optional-cell-id",
+  "language": "python",
+  "author": "optional-name"
+}
+```
+
+`language` may be `python`, `prompt`, `markdown`, `sql`, `r`, or `widget`. Defaults to `python`. An `after_cell_id` the notebook does not have is a `400`. `author` is honored only without principal auth, as on [Update Cell Source](#update-cell-source).
+
+### Update Cell Source
+
+```
+PUT /v1/notebooks/{session_id}/cells/{cell_id}
+```
+
+```json
+{
+  "source": "x = 1",
+  "author": "optional-name",
+  "force": false
+}
+```
+
+Returns updated cell, DAG, and all cells (with refreshed staleness). A cell
+someone else changed within `STRATA_NOTEBOOK_CELL_LOCK_SECONDS` is refused
+with **409** and `code: cell_locked`, naming the holder; `force: true` takes it
+over. `author` is honored only without principal auth, where there is no
+authenticated caller to credit.
+
+### Delete Cell
+
+```
+DELETE /v1/notebooks/{session_id}/cells/{cell_id}
+```
+
+### Reorder Cells
+
+```
+PUT /v1/notebooks/{session_id}/cells/reorder
+```
+
+```json
+{
+  "cell_ids": ["cell-1", "cell-3", "cell-2"]
+}
+```
+
+### Execute Cell (REST)
+
+```
+POST /v1/notebooks/{session_id}/cells/{cell_id}/execute?mode=normal
+```
+
+The optional `mode` query parameter selects the run mode: `normal` (default -
+use the cache and materialize stale upstreams), `rerun` (bypass the target
+cell's cache, still materialize upstreams), or `force` (run against whatever
+upstream artifacts already exist). An unrecognized mode returns `400`.
+While another cell in the notebook runs, the request is refused with `409`.
+`init=<release_id>` starts a `normal` run as a branch from that accepted
+checkpoint (its parts come back from `strata.restore()`); with any other mode
+it returns `400`.
+
+A run whose inputs would move more than the server's
+[threshold](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#asking-before-a-large-read) goes ahead
+and records that it was not asked. With `confirm_reads=true` it does not start:
+it answers `409` with `{"code": "large_read", "message": "...", "cells": [...]}`,
+each cell as in the WebSocket `read_confirm_prompt`. Sending the request again with
+`approve_reads=true` keeps the yes, as the notebook's Run does, and runs.
+
+!!! tip
+For interactive use, prefer the WebSocket `cell_execute` message. The REST endpoint is for programmatic access.
+
+A run cancelled before it finishes returns `200` with `"status": "error"` and
+`"error_code": "cancelled"`.
+
+### Cancel Cell (REST)
+
+```
+POST /v1/notebooks/{session_id}/cells/{cell_id}/cancel
+```
+
+Cancels the cell's run, however it was started (REST, MCP, or the browser), as
+the WebSocket `cell_cancel` message does: the run stops (a local cell's process
+group is killed) and the cell goes back to `idle`. Needs `notebook:execute`,
+like the frame. Returns `{ "cell_id", "cancelled", "status" }`. `cancelled` is
+`false` when no run of the cell was in flight; a finished cell keeps its state,
+and `status` says what it is. An unknown cell returns `404`.
+
+### Run Cell Tests (REST)
+
+```
+POST /v1/notebooks/{session_id}/cells/{cell_id}/tests
+```
+
+Runs the committed `cells/{cell_id}.test.py` via pytest against a re-executed
+copy of the cell and returns per-test outcomes: `{ "cell_id", "passed",
+"failed", "errored", "skipped", "pytest_unavailable", "ran_at", "tests": [{
+"name", "nodeid", "outcome", "message" }] }`. Python cells only - a non-Python
+cell or one with no test source returns `400`. The REST twin of the WebSocket
+`cell_run_tests` message, for clients (the CLI, agents) that don't drive a
+socket.
+
+### Set Cell Tests (REST)
+
+```
+PUT /v1/notebooks/{session_id}/cells/{cell_id}/tests
+```
+
+```json
+{"source": "def test_x(x):\n    assert x == 1\n"}
+```
+
+Writes the committed `cells/{cell_id}.test.py` and returns the updated cell.
+Python cells only (`400` otherwise). The authoring twin of the `POST` above,
+which runs them.
+
+### List Loop Cell Iterations
+
+```
+GET /v1/notebooks/{session_id}/cells/{cell_id}/iterations?variable=<name>
+```
+
+Lists stored iteration artifacts for a `@loop` cell. The `variable` query
+parameter defaults to the loop's `carry` variable if omitted. Non-loop cells
+and loops with no completed iterations return an empty list, safe to poll
+from the inspect panel.
+
+Returns `{ "cell_id", "variable", "iterations": [{ "iteration", "artifact_uri",
+"artifact_id", "version", "content_type", "byte_size", "row_count",
+"created_at" }] }`.
+
+### Browse a Cell's Table Output
+
+```
+GET /v1/notebooks/{session_id}/cells/{cell_id}/data?artifact_uri=<uri>
+GET /v1/notebooks/{session_id}/cells/{cell_id}/data/summary?artifact_uri=<uri>
+GET /v1/notebooks/{session_id}/cells/{cell_id}/data/export?artifact_uri=<uri>&fmt=csv
+```
+
+Read the full Arrow artifact behind a table-shaped display output, where the
+inline preview stops at 20 rows. `artifact_uri` is the `strata://artifact/...`
+URI the display output carries.
+
+- `data` returns a page: `offset`, `limit` (capped at 500), `sort_by`,
+  `sort_dir` (`asc` / `desc`), `search`, and `filters` (a JSON array of
+  `{col, op, value, value2}`). The response has `columns`, `rows` and `total`,
+  or `pageable: false` for an output that is not a table.
+- `summary` returns per-column dtype, null, distinct and min/max figures.
+- JSON has no NaN or infinity, so in `rows`, the display preview and the min/max
+  figures those values arrive as the strings `"NaN"`, `"inf"` and `"-inf"`. A
+  `null` is a null.
+- `export` downloads the same filtered and sorted view as `fmt=csv` or
+  `fmt=parquet`.
+
+### Get a Display Output's Bytes
+
+```
+GET /v1/notebooks/{session_id}/cells/{cell_id}/outputs/{index}/blob
+```
+
+Serves one display output (a plot's PNG, say) under its own content type, with
+the resolved index in `X-Strata-Output-Index`. A type Strata does not render
+(anything but PNG, Arrow, JSON or Markdown) downloads as
+`application/octet-stream`. What `strata cell output --out`
+and the MCP `save_cell_output` tool read.
+
+### Read a Cell's Output Folder
+
+```
+GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}
+GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}/v/{version}/files/{path}?variant={variant}
+```
+
+A [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder's versions
+and files. `name` must be one of the cell's current `# @output_dir` names, or
+the answer is `404`; neither route takes an artifact URI.
+
+- The first lists every version of the folder, newest first, a failed run's
+  included: `{ "cell_id", "name", "versions": [{ "variant", "version",
+  "created_at", "principal", "failed", "files": [{ "path", "size", "sha256" }],
+  "file_count", "total_bytes" }] }`. `failed` is `true` for what a failed run
+  kept. A run still writing, or a crash's version with no manifest, is not
+  listed, nor is a loop cell's per-iteration `@iter=k` version: the loop's
+  last iteration is the cell's own version. A
+  [`# @per_variant`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant) cell keeps a
+  folder per variant, each numbered on its own: `variant` names the instance,
+  and is `null` for a cell that does not fan out.
+- The second streams one file of that version (of that `variant`'s folder
+  when given) as
+  `application/octet-stream`, with `Content-Length` and its sha256 as
+  `Content-Digest: sha-256=:<base64>:` (RFC 9530). `path` is the file's path
+  in the version's `files`, matched exactly; any other path is `404`.
+
+## Variants
+
+### Add a Variant
+
+```
+POST /v1/notebooks/{session_id}/variant-groups/{group_id}/variants
+```
+
+Adds a sibling variant to an existing group. Returns `new_variant_name`,
+`new_cell_id`, `variant_groups` and `cells`.
+
+### Switch Variant or Mode
+
+```
+PUT /v1/notebooks/{session_id}/variant-groups/{group_id}
+```
+
+```json
+{"active": "fast", "mode": "switch"}
+```
+
+Either field may be sent alone, but not neither (`400`). `mode` is `switch` or
+`sweep`. Returns `variant_groups` and `cells`.
+
+## DAG
+
+### Get DAG
+
+```
+GET /v1/notebooks/{session_id}/dag
+```
+
+Returns edges, roots, leaves, and topological order.
+
+## Environment
+
+### List Dependencies
+
+```
+GET /v1/notebooks/{session_id}/dependencies
+```
+
+### Add Dependency
+
+```
+POST /v1/notebooks/{session_id}/dependencies
+```
+
+```json
+{
+  "package": "pandas>=2.0"
+}
+```
+
+### Remove Dependency
+
+```
+DELETE /v1/notebooks/{session_id}/dependencies/{package_name}
+```
+
+### Get Environment State
+
+```
+GET /v1/notebooks/{session_id}/environment
+```
+
+### Sync Environment
+
+```
+POST /v1/notebooks/{session_id}/environment/sync
+```
+
+Runs `uv sync` synchronously and invalidates any stale cell runtimes. Returns
+the full environment payload plus `lockfile_changed`, `operation_log`
+(command, duration, stdout/stderr), and the per-cell staleness map.
+
+For long syncs prefer the background `POST /environment/jobs` path, this
+endpoint blocks the request until the sync finishes.
+
+### Get Current Environment Job
+
+```
+GET /v1/notebooks/{session_id}/environment/jobs/current
+```
+
+### Start Environment Job
+
+```
+POST /v1/notebooks/{session_id}/environment/jobs
+```
+
+```json
+{
+  "action": "add",
+  "package": "scikit-learn"
+}
+```
+
+Actions: `add`, `remove` and `r_add` (each needs `package`), `sync`, `import`,
+`r_init`. A Python version change goes through
+[Change Python Version](#change-python-version). Returns **202** with the job.
+
+For `import`, send exactly one of `requirements` or `environment_yaml`.
+
+### Change Python Version
+
+```
+PUT /v1/notebooks/{session_id}/python-version
+```
+
+```json
+{"python_version": "3.13"}
+```
+
+Rewrites `requires-python`, removes `.venv/` and starts a background `uv sync`
+against the new interpreter, rolling back if that sync fails. Returns **202**
+with the job (`200` and `accepted: false` when the notebook is already on that
+version); progress arrives as `environment_job_progress` frames. A version
+not in the server's `available_python_versions` is a `400`.
+
+### List R Packages
+
+```
+GET /v1/notebooks/{session_id}/r-packages
+```
+
+The packages installed in the notebook's `renv` project library.
+
+### Export Requirements
+
+```
+GET /v1/notebooks/{session_id}/environment/requirements.txt
+```
+
+### Import Requirements
+
+```
+POST /v1/notebooks/{session_id}/environment/requirements.txt
+```
+
+### Preview Requirements Import
+
+```
+POST /v1/notebooks/{session_id}/environment/requirements.txt/preview
+```
+
+### Import environment.yaml
+
+```
+POST /v1/notebooks/{session_id}/environment/environment.yaml
+```
+
+### Preview environment.yaml Import
+
+```
+POST /v1/notebooks/{session_id}/environment/environment.yaml/preview
+```
+
+## Workers
+
+### List Workers
+
+```
+GET /v1/notebooks/{session_id}/workers
+```
+
+Each remote worker carries its `/health` result, reused for 5 seconds.
+`?refresh=true` probes every worker again instead of reusing it.
+
+### Update Notebook Worker
+
+```
+PUT /v1/notebooks/{session_id}/worker
+```
+
+```json
+{
+  "worker": "my-worker-name"
+}
+```
+
+### Update Worker Catalog
+
+```
+PUT /v1/notebooks/{session_id}/workers
+```
+
+Replaces the notebook's `[[workers]]`. A worker named `local` is refused with
+`400`: the name is reserved for the built-in worker. In service mode, or with
+`STRATA_NOTEBOOK_WORKERS_EDITABLE=false`, the server manages workers and the
+request is refused with `403`.
+
+### SSH Workers
+
+```
+GET    /v1/notebooks/{session_id}/workers/ssh
+POST   /v1/notebooks/{session_id}/workers/ssh
+DELETE /v1/notebooks/{session_id}/workers/ssh/{worker_name}?stop_remote=false
+```
+
+`POST` provisions `strata-worker` on an SSH target, tunnels to it and registers
+it as a notebook worker:
+
+```json
+{"ssh_target": "user@gpu-box", "name": "gpu", "set_default": true}
+```
+
+Optional fields are `remote_port`, `local_port`, `extras` (default
+`notebook`), `pin` and `install` (default `true`). `GET` reports each tunnel's
+live status; `DELETE` closes the tunnel and removes the registration. See
+[Run cells on a machine you can SSH to](https://bearingresearch.com/strata/dev/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to).
+
+## Mounts
+
+### Update Notebook Mounts
+
+```
+PUT /v1/notebooks/{session_id}/mounts
+```
+
+## Connections
+
+### List Notebook Connections
+
+```
+GET /v1/notebooks/{session_id}/connections
+```
+
+Returns:
+
+```json
+{
+  "connections": [
+    {
+      "name": "warehouse",
+      "driver": "sqlite",
+      "path": "analytics.db"
+    }
+  ]
+}
+```
+
+### Replace Notebook Connections
+
+```
+PUT /v1/notebooks/{session_id}/connections
+```
+
+```json
+{
+  "connections": [
+    {
+      "name": "warehouse",
+      "driver": "sqlite",
+      "path": "analytics.db"
+    }
+  ]
+}
+```
+
+The list is canonical: sending an empty list deletes the entire `[connections]`
+block. Literal auth values are blanked on disk during the write round-trip, but
+kept in-memory until the session reloads.
+
+Returns:
+
+```json
+{
+  "connections": [...],
+  "malformed_connections": [...],
+  "cells": [...]
+}
+```
+
+### Enumerate Connection Schema
+
+```
+GET /v1/notebooks/{session_id}/connections/{name}/schema
+```
+
+Enumerates the tables and columns visible through the named connection. Used by
+the schema sidebar. Opens the connection read-only; an unknown connection is a
+`404`; an unknown driver, a database the server may not open, or credentials it
+cannot resolve a `400`; and a driver that fails to connect or
+enumerate a `502` carrying its message, so auth / driver / connectivity
+failures are visible to the UI.
+
+## Artifacts
+
+### List a Notebook's Published Artifacts
+
+```
+GET /v1/notebooks/{session_id}/artifacts
+```
+
+Returns `{"cells": {<cell_id>: [...]}, "readers": {<name>: [...]}}`: the
+registry artifacts each cell published through the ambient `strata` client.
+Answered by the team store when `STRATA_NOTEBOOK_REMOTE_STORE_URL` is set,
+since that is where a cell's `put(name=...)` went. `readers` is read from the
+notebook's own store: per registry name, the cells whose stored results read
+it with `# @dataset`, as `{"notebook_id", "cell_id", "reference"}`. The rows of
+`GET /v1/registry/summary` carry the same `readers` list for the results in
+the registry's store, next to the row's `tenant` (`null` for the default
+tenant). A personal server or an `admin:*` caller gets every tenant's names,
+so one name can have a row per tenant, each with that tenant's readers.
+
+### Promote an Artifact
+
+```
+POST /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/promote
+```
+
+```json
+{"name": "team/churn_model", "alias": "candidate", "tags": {}, "table": null}
+```
+
+Copies one of the notebook's artifacts, and the chain that produced it, into
+the team store and names it there. `name` is optional: without it the chain is
+copied and nothing is named or stamped with the promotion tag, which is what a
+platform publishing the result needs; an `alias` without a `name` is refused
+with `400`. `table` also writes it into that Iceberg table in the team store's
+catalog. Returns `name`, `artifact_uri`, `copied`,
+`alias`, `alias_pending`, `table`, `table_snapshot` and `store`. `409` when no
+team store is configured, `404` for an artifact the notebook's store does not
+hold, `502` when the team store refuses or cannot be reached.
+
+## Export
+
+### Export Notebook
+
+```
+GET /v1/notebooks/{session_id}/export?fmt={zip,snapshot,markdown,html}
+```
+
+One endpoint, four output formats:
+
+| `fmt`        | Returns                                                                                                  |
+| ------------ | -------------------------------------------------------------------------------------------------------- |
+| `zip` *(default)* | Reproducible bundle, `notebook.toml`, `pyproject.toml`, `uv.lock`, cells, `provenance.json`. Each cell's entry in `provenance.json` lists its stored `outputs` (`name`, `artifact_id`, `version`, `content_sha256`), the same shape as `strata run --format json`, so a rerun's report can be diffed against the export. |
+| `snapshot`   | The `zip`'s members **plus** outputs, per-cell provenance and timings, an artifact index, and bytes.      |
+| `markdown`   | Single-file rendering for sharing / docs ingestion. Same engine as `strata export`.                      |
+| `html`       | Standalone HTML with embedded CSS + Pygments syntax highlighting.                                        |
+
+Markdown and HTML renderings additionally accept `include_inactive_variants=true` to stack all variants of every group, and `app_view=true` to render only what the read-only app view shows (widgets, markdown and display outputs, with no sources or console). Prompt-cell responses are intentionally excluded from rendered formats (see [Export](https://bearingresearch.com/strata/dev/dev/notebook/export/)).
+
+#### Snapshots
+
+A snapshot is the ZIP plus what a reader and a machine each need:
+
+```
+outputs/<cell id>/0.png          each display output as a file
+outputs/<cell id>/console.json   stdout / stderr
+artifacts.json                   per-cell provenance, timings, and every ready
+                                 cell's artifacts with their content digests
+                                 (an output folder's entries include each file
+                                 version its manifest names)
+artifacts/<id>@v=<n>             the bytes, for whichever were included
+fetch/<sha256>/<file>            with include=all, the bytes each @fetch last read
+fetch/index.json                 with include=all, which URL served which bytes
+```
+
+`include` chooses how much travels:
+
+| `include`  | Carries |
+| ---------- | ------- |
+| `all`      | Every artifact's bytes and the notebook's `.strata/fetch/`: the form for moving a project between servers. |
+| `selected` *(default)* | Only the cells named in `cells=a,b`; the rest are described in `artifacts.json` by id, version and digest. The form a review snapshot uses. |
+| `none`     | Description only. |
+
+`artifacts.json` names everything either way, `carried` lists what is actually
+in the file, and `records` holds each carried artifact's full record: its
+transform spec (the content type a value is read back as) and its lineage
+edges. [Importing](#import-snapshot) the bundle needs all three. Cells whose
+artifacts were only described open idle rather than stale. They ran and their
+result is current; it just isn't here.
+
+`fetches` lists every `@fetch` with its cell, name, URL, `refetch` policy and
+`pinned`. `sha256` is the pin, or else the digest last read. An unpinned fetch
+is the input a snapshot cannot vouch for, since its bytes are whatever the URL
+serves at the next run, so a preflight can flag them from this list. A pinned
+or `refetch=never` fetch carried under `include=all` runs on the importing side
+without its URL.
+
+The same bundle offline: `strata export <path> --to snapshot --out snap.zip
+--include all`.
+
+## Runtime
+
+### Get Server Runtime Config
+
+```
+GET /v1/notebooks/config
+```
+
+Returns deployment mode, available Python versions, and default paths for the
+server as a whole. Not notebook-scoped. `workers_panel` is `shown` or `hidden`
+(`STRATA_NOTEBOOK_WORKERS_PANEL`); the open and create responses carry the same
+keys.
+
+### Update Notebook Default Timeout
+
+```
+PUT /v1/notebooks/{session_id}/timeout
+```
+
+```json
+{
+  "timeout": 60
+}
+```
+
+`timeout` is seconds (0 < t ≤ 86400) or `null` to clear back to the system
+default. Returns the new timeout and the refreshed cell list.
+
+### Update Notebook Default Env
+
+```
+PUT /v1/notebooks/{session_id}/env
+```
+
+```json
+{
+  "env": {
+    "OPENAI_API_KEY": "sk-...",
+    "LOG_LEVEL": "info"
+  }
+}
+```
+
+Replaces the `[env]` block in `notebook.toml`. Sensitive values (keys matching
+`KEY`/`SECRET`/`TOKEN`/`PASSWORD`/`CREDENTIAL`) are blanked on disk but kept
+in-memory for the session so key-dependent cells keep working. Returns the
+merged env, per-key sources, and refreshed cell list.
+
+No response or WebSocket frame carries a secret value: a non-empty value under a
+sensitive name, or one fetched from the secret manager, is sent as
+`"__strata_masked__"` (in the notebook's `env` and in each cell's `env` and
+`env_overrides`). Send that marker back to keep a key's current value; any other
+value replaces it.
+
+### Update Secret Manager Config
+
+```
+PUT /v1/notebooks/{session_id}/secret-manager/config
+```
+
+```json
+{
+  "provider": "infisical",
+  "project_id": "your-project-id",
+  "environment": "dev",
+  "path": "/",
+  "base_url": null
+}
+```
+
+Persists the `[secret_manager]` block to `notebook.toml` and immediately
+refetches. An empty payload (all fields null) removes the block:
+"disconnect from secret manager". Credentials are never part of this payload;
+they must be exported in the server's shell environment.
+
+### Refresh Secret Manager
+
+```
+POST /v1/notebooks/{session_id}/secret-manager/refresh
+```
+
+Re-fetches secrets from the configured manager and merges them into env.
+Never returns 500 on fetch failure, the error surfaces in
+`env_fetch_error` so the UI can display it next to the Refresh button.
+
+## Observability
+
+### Server logs
+
+```
+GET /v1/logs
+GET /v1/logs/stream
+```
+
+`GET /v1/logs` returns a snapshot of the in-memory log ring buffer (the most
+recent `limit` matches, oldest first; pass the returned `cursor` back as
+`since` to get only newer records); `GET /v1/logs/stream` is a
+Server-Sent Events stream that tails new records live. Both accept optional
+`level` (minimum severity), `notebook` (exact notebook id) and `regex` filters.
+Powers the web UI **Logs** page.
+
+The buffer is server-wide, so under principal auth both routes require
+`admin:*` (403 otherwise). Without principal auth they stay open.
+
+### Artifacts listing
+
+```
+GET /v1/artifacts
+GET /v1/artifacts/stats
+GET /v1/artifacts/usage
+```
+
+`GET /v1/artifacts` (personal mode only) lists stored artifacts, with optional
+`limit`, `offset`, `state`, `name_prefix`, `since` (epoch seconds), `sort`
+(`created_at`, `byte_size` or `row_count`) and `order` query parameters; `GET /v1/artifacts/stats` returns summary
+counts and byte totals, and `GET /v1/artifacts/usage` adds unique-artifact,
+name and unreferenced counts. Both count `total_versions` and its split by
+state: `ready_versions`, `building_versions`, `superseded_versions` (a version
+a refresh or a duplicate build overtook) and `failed_versions`. Powers the web UI **Artifacts** page. Their
+`total_bytes` counts every version that still holds bytes, superseded ones
+included until a sweep collects them: the measure the byte cap uses.
+
+In personal mode, stats and usage cover the whole store. In service mode they
+cover **one tenant's holdings**: the caller's own, from the trusted-proxy
+identity, which is what a platform reads to meter storage per tenant. The
+tenant's figure counts only rows stamped with that tenant, so legacy tenantless
+rows are not charged to anyone. A caller with `admin:*` may pass
+`?tenant=<id>` to read another tenant (or omit it for the whole store). Service
+mode refuses a caller with no tenant (400), a non-admin naming another tenant
+(403), and a store with no principal auth configured (403), since without an
+authenticated caller the only possible answer is every tenant's at once.
+
+## Core API
+
+### Materialize
+
+```
+POST /v1/materialize
+```
+
+```json
+{
+  "inputs": ["file:///warehouse#db.events"],
+  "transform": {
+    "executor": "scan@v1",
+    "params": { "columns": ["id", "value"] }
+  },
+  "mode": "stream",
+  "name": "my_result"
+}
+```
+
+A table with no snapshots yet streams zero rows with the table's schema
+(projected by `columns`). Nothing read from it is reused: each request is a
+miss, as is a transform that takes the table as an input.
+
+A transform's table inputs take every URI form `scan@v1` reads (`file://`,
+`s3://`, `gs://`, `abfs://`, a schemeless `/wh#ns.t`, a named catalog's
+`cat:ns.t`, a bare `ns.t`). An input that does not resolve (denied, missing,
+unreadable, or a plan that failed) answers 4xx with the planner's message;
+the request never becomes a pending build.
+
+### Get Stream
+
+```
+GET /v1/streams/{stream_id}
+```
+
+Returns Arrow IPC stream. With an artifact store, the response carries
+`X-Arrow-Row-Count` and `X-Strata-Artifact-Uri`, the canonical
+`strata://artifact/{id}@v={n}` of the rows it serves. That URI can differ from the
+materialize response's: when two misses for one scan were in flight together,
+one artifact becomes the ready result and the other reads `superseded`. The
+superseded one keeps no bytes of its own: its `GET /v1/artifacts/{id}/v/{n}/data`
+serves the canonical artifact's blob, the store counts those bytes once, and
+retention collects the two together (or neither, while the superseded one is
+held). Deleting the canonical artifact first gives a published or pinned
+superseded one its own copy of the bytes. Read the header to keep the canonical
+one.
+
+### Health
+
+```
+GET /health
+```
+
+Readiness (`GET /health/ready`) and per-dependency checks (`GET /health/dependencies`)
+are covered in [Observability](https://bearingresearch.com/strata/dev/dev/deployment/observability/#health-endpoints).
+
+### Metrics
+
+```
+GET /metrics
+GET /metrics/prometheus
+```
+
+Both are unauthenticated, for scrapers. Under principal auth
+`/metrics/prometheus` leaves out the per-table series, since table names are
+`admin:*` data (`GET /metrics/tables`), and the per-tenant series, since
+tenant ids are `admin:tenants` data (`GET /v1/admin/tenants`). The AI usage
+series carry no `tenant` or `principal` label there: they are per-model
+totals. Requests are counted by method, route template and status class, and
+timed per route; failed object-store calls are counted by operation (see
+[Observability](https://bearingresearch.com/strata/dev/dev/deployment/observability/#metrics-metricsprometheus)).
+
+### Artifacts, names, cache and diagnostics
+
+The routes the client SDK and the web UI call that no feature page covers.
+The gate column uses these terms:
+
+- **read**: open in both modes. Under principal auth, a route that takes an
+  artifact id (`/v1/artifacts/{id}/v/{n}` and its `lineage`, `dependents` and `files`)
+  answers for the caller's tenant's versions and tenantless ones, refuses a
+  caller with no tenant (`400`), and lets `admin:*` reach every tenant. Name,
+  alias, tag, pending, tag-search and provenance lookups resolve in the
+  caller's own tenant (the default tenant when it has none), `admin:*`
+  included.
+- **write**: personal mode, or service mode with
+  `STRATA_SERVICE_WRITES_ENABLED` and the `artifacts:write` scope.
+- **personal**: personal mode only; `403` in service mode.
+- **build**: personal mode, or service mode with transforms enabled.
+- **open**: no gate beyond the server's authentication.
+
+On a server with `STRATA_NOTEBOOK_REMOTE_STORE_URL` set, the name, alias,
+tag and registry routes, writes included, and artifact lineage are answered
+by that team store, after this server's own gate.
+
+| Method | Path | Gate | What it does |
+| --- | --- | --- | --- |
+| `GET` | `/v1/artifacts/{id}/v/{n}` | read | An artifact version's metadata, including `input_versions` |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}` | personal | Delete a version, its blob and its name pointers; a published version is a `409` until withdrawn |
+| `GET` | `/v1/artifacts/{id}/v/{n}/lineage` | read | The transitive input graph (artifacts and tables), up to `max_depth` |
+| `GET` | `/v1/artifacts/{id}/v/{n}/dependents` | read | Ready artifacts that take this one as a direct input |
+| `GET` | `/v1/artifacts/{id}/v/{n}/files` | read | An `# @output_dir` folder's files, by path: each one's `size`, `sha256`, and the `artifact_id` and `version` whose `/data` serves its bytes. Not a folder is a `400`; a manifest that cannot be read, a path that leaves the folder, or a file the folder's tenant does not hold is a `404` |
+| `GET` | `/v1/artifacts/{id}/v/{n}/tags` | read | The version's tags |
+| `PUT` | `/v1/artifacts/{id}/v/{n}/tags` | write | Set one key/value tag |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}/tags/{key}` | write | Delete one tag |
+| `GET` | `/v1/artifacts/by-provenance/{hash}` | read | A ready artifact by provenance hash (the team-cache lookup); an `# @output_dir` folder whose files are gone is a miss |
+| `PUT` | `/v1/artifacts` | write | Store a locally computed result (`client.put`) under its inputs and transform, optionally naming it. The name is written in the commit that makes the version ready, so a name that cannot be written fails the request with `500` and leaves nothing ready |
+| `PUT` | `/v1/artifacts/by-provenance/{hash}` | write | Store a result under a provenance key the caller computed; the first writer's result stays the answer, unless it is a folder whose files are gone. An `artifact_id` another tenant holds, at any version, is a `409` |
+| `POST` | `/v1/artifacts/upload/{id}/v/{n}` | personal | Upload a version's Arrow IPC bytes |
+| `POST` | `/v1/artifacts/finalize` | personal | Mark an uploaded version ready, optionally naming it |
+| `POST` | `/v1/artifacts/explain-materialize` | read | Dry-run materialize: hit or miss, and why a rebuild would be needed |
+| `POST` | `/v1/artifacts/materialize` | build | The cached artifact on a provenance hit, else a `building` artifact and its build spec |
+| `GET` | `/v1/artifacts/builds/{build_id}` | build | Poll an asynchronous build started by materialize (the caller's own builds) |
+| `GET` | `/v1/artifacts/names/{name}/status` | read | A named artifact's state and whether any input has a newer version |
+| `GET` | `/v1/names` | read | Every name pointer and its artifact |
+| `POST` | `/v1/names` | write | Set or move a name pointer |
+| `GET` | `/v1/names/{name}` | read | Resolve a name to its artifact URI |
+| `DELETE` | `/v1/names/{name}` | personal | Delete a name pointer |
+| `GET` | `/v1/names/{name}/aliases` | read | The aliases a name holds |
+| `GET` | `/v1/names/{name}/aliases/{alias}` | read | Resolve `name @ alias` to its version |
+| `PUT` | `/v1/names/{name}/aliases/{alias}` | write | Point an alias at a version; a protected alias answers `202` and queues |
+| `DELETE` | `/v1/names/{name}/aliases/{alias}` | personal | Delete an alias; a protected alias answers `202` and queues |
+| `GET` | `/v1/registry/artifacts` | read | Ready artifacts carrying one tag (`tag_key`, optional `tag_value`) |
+| `GET` | `/v1/registry/pending` | read | Protected-alias changes awaiting approval |
+| `POST` | `/v1/registry/pending/approve` | `admin:registry` | Apply the pending change to `{"name", "alias"}`, with the approver as the audit actor. Service mode also needs `STRATA_SERVICE_WRITES_ENABLED`, but not `artifacts:write`. The requester approving their own change is a `403` unless they hold `admin:*`; no such change is a `404` |
+| `POST` | `/v1/registry/pending/reject` | `admin:registry` | Discard the pending change to `{"name", "alias"}`, audited, under the same gates as approve; no such change is a `404` |
+| `GET` | `/v1/cache/stats` | `admin:cache` | Disk cache statistics, with counts per table across tenants |
+| `GET` | `/v1/cache/evictions` | open | Eviction rate and pressure level; `include_events=true` adds recent events |
+| `POST` | `/v1/cache/warm` | table ACL | Warm the cache for some tables and wait until every row group is fetched |
+| `GET` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | A warming job's progress |
+| `DELETE` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | Cancel a warming job; what it cached stays |
+| `GET` | `/v1/metadata/stats` | open | Hit/miss counters and entry counts for the metadata store and its caches |
+| `GET` | `/v1/config/timeouts` | open | Every timeout setting, grouped by planning, scanning, QoS queue, fetching and S3 |
+| `GET` | `/v1/debug/latency` | `admin:*` | Latency histograms per stage (plan, first byte, fetch, total) |
+| `GET` | `/v1/debug/gc/pauses` | `admin:*` | Recent Python GC pauses and their totals |
+| `GET` | `/v1/debug/pools` | `admin:*` | Planning and fetch thread pool use and queue depth |
+| `GET` | `/v1/debug/connections` | `admin:*` | HTTP connection metrics: in flight, totals, peak, rate, keep-alive share |
+| `GET` | `/v1/debug/memory` | `admin:*` | Arrow pool, Python GC and process memory |
+| `GET` | `/v1/debug/rate-limits` | `admin:*` | Rate limiter allowed and rejected counts |
+| `GET` | `/v1/debug/cache/inspect` | `admin:cache` | Disk cache entries: key hash, file path, size and stored metadata |
+
+The `admin:*`, `admin:cache` and `admin:registry` gates apply under principal auth; without it
+those routes are open.

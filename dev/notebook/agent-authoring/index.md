@@ -1,0 +1,326 @@
+# Authoring Notebooks Programmatically
+
+A Strata notebook is a **plain-text directory** - TOML config plus one
+source file per cell. Anything that can write files can author one: a
+script, a code generator, or a coding agent (Claude Code, Codex, …). No
+server, no SDK, and no JSON blobs are involved.
+
+This page is the contract for external authors. If you follow it and the
+result doesn't open, validate, and run, that's a Strata bug - please
+report it.
+
+## The loop
+
+```bash
+strata new "My Analysis" --no-env     # 1. scaffold
+# 2. write cells/*.py, list them in notebook.toml
+strata validate my_analysis           # 3. static checks - cheap, run after every edit
+strata run my_analysis                # 4. execute (syncs the venv on first run)
+```
+
+`validate` and `run` both take `--format json` and use the same exit
+codes: `0` success (warnings allowed), `1` failure with structured
+findings on stdout, `2` invocation error on stderr. Iterate on the
+diagnostics until both exit `0`.
+
+## Editing files vs. driving commands
+
+Writing the files directly - as below - is the canonical contract, and the
+rest of this page documents it. If you'd rather not hand-edit `notebook.toml`
+or mint cell ids yourself, the `strata cell` and `strata dep` commands perform
+the same edits and print structured JSON:
+
+```bash
+strata cell add  my_analysis --file step.py --after load   # mint + insert a cell
+strata cell edit my_analysis <id> --file step.py           # replace a cell's source
+strata cell rm   my_analysis <id>                          # delete a cell
+strata cell mv   my_analysis <id> --to 2                   # reorder
+strata dep add   my_analysis pandas                        # uv add
+```
+
+They write the same plain-text files described here, so the two approaches are
+interchangeable, and the same commands (plus `cell list/show`, `dag`, `status`,
+`cell run/test`, `cell cancel`) also drive a *running* session over `--server/--session`. See
+the [Notebook CLI](https://bearingresearch.com/strata/dev/dev/notebook/cli/) for the full command surface. The rest of this page
+is the file-format contract underneath both.
+
+## On-disk layout
+
+```
+my_analysis/
+├── .gitignore             # written by `strata new`: keeps runtime state (.strata/, .venv/, work/, ...) out of git
+├── notebook.toml          # committed config: cells, env, workers, mounts
+├── pyproject.toml         # uv-managed dependencies
+├── uv.lock                # written by uv; do not hand-edit
+├── cells/
+│   ├── load.py
+│   ├── notes.md
+│   └── stats.py
+├── work/                  # where cells run and write files - not committed
+└── .strata/               # runtime state - NEVER create, edit, or commit
+```
+
+**`.strata/` is hands-off.** Display outputs, provenance hashes, console
+snapshots, and the artifact store live there; the server and CLI manage
+it entirely, and the `.gitignore` that `strata new` writes keeps it out of
+git. If you are generating a notebook from
+scratch, don't create it.
+
+## notebook.toml - the minimum that works
+
+```toml
+notebook_id = "my-analysis-001"
+name = "My Analysis"
+cells = [
+  { id = "load",  file = "load.py",  language = "python",   order = 0 },
+  { id = "notes", file = "notes.md", language = "markdown", order = 1 },
+  { id = "stats", file = "stats.py", language = "python",   order = 2 },
+]
+```
+
+**What `strata new` writes is a superset of this.** The scaffold
+emits a UUID `notebook_id`, `created_at` / `updated_at` timestamps, and
+empty `workers = []` / `mounts = []` arrays. **Edit the generated file in
+place** - replace `cells = []` with your cell list and leave the other
+fields alone. Don't overwrite it with the minimal template above; the
+minimum is what *you* must provide when writing from scratch, not what
+the scaffold looks like.
+
+The full schema (env, workers, mounts, connections, AI config) is
+[notebook.toml Schema](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/). Rules that matter
+when writing it by hand:
+
+- **`notebook_id`** - any stable, unique string. The server generates
+  UUIDs; hand-written IDs just need to never change afterwards (artifacts
+  are keyed to it - renaming orphans the cache).
+- **Cell `id`** - unique within the notebook, used in artifact keys and
+  API routes. The server generates 8-char UUID prefixes; hand-written
+  short names (`load`, `stats`) are fine. Don't reuse an ID after
+  deleting a cell.
+- **`file`** - relative to `cells/`. The extension is never read (the
+  language comes from `language`); the server writes `.py` for python,
+  prompt and sql, `.r` for r, `.md` for markdown and `.widget` for widget.
+- **`order`** - display order *and* reference-resolution order (see
+  below). Keep it consistent with the list order.
+- **`language`** - one of `python`, `r`, `sql`, `prompt`, `markdown`,
+  `widget`.
+
+## pyproject.toml - required for `strata run`
+
+`strata run` builds the notebook's environment with `uv sync`, which needs a
+`pyproject.toml`; without one the run stops with exit code `2`. `strata validate`
+does not read it. Declare the packages the cell harness uses to hand values
+between cells, plus your own:
+
+```toml
+[project]
+name = "my-analysis"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+]
+```
+
+`strata new` writes the same list, with `requires-python` pinned to one
+Python minor.
+
+## How variables flow between cells
+
+Each cell's top-level assignments are its **defines**; the free variables
+in its source are its **references**. A reference binds to the **nearest
+earlier cell** (by `order`) that defines that name - never to a later
+cell. There is no notebook-global mutable namespace: every cross-cell
+value is an immutable, content-addressed artifact.
+
+Practical consequences for generated code:
+
+- Put producers before consumers in `order`. A reference with no earlier
+  definer isn't an error at validate time (it could be an import or a
+  builtin), but it will `NameError` at run time.
+- Variables that downstream cells reference are stored as artifacts. The
+  server's interactive runs store nothing else; `strata run` also stores leaf
+  cells' variables, best-effort, so the final results have digests.
+- Re-running with unchanged source + inputs + environment is a cache hit;
+  cells re-execute only when something upstream changed.
+- Values cross cells by serialization (Arrow for tabular/numpy, JSON for
+  plain data, pickle otherwise) - write cells as if their inputs were
+  freshly deserialized, because they are.
+
+## Per-cell configuration: annotations, not TOML
+
+Cell-level settings are `# @` comment lines at the top of the cell
+source - they always win over anything persisted elsewhere. The full
+surface is [Cell Annotations](https://bearingresearch.com/strata/dev/dev/notebook/annotations/); the most common:
+
+```python
+# @name revenue_model     ← stable display name
+# @timeout 120            ← per-cell timeout (seconds)
+# @worker gpu-box         ← run on a named worker
+# @env API_BASE=https://… ← per-cell env var
+# @mount data s3://bucket/path ro   ← injects `data` as a pathlib.Path
+# @table trips file:///wh#nyc.trips ← lake input: injects `trips` (URI) and
+#                                     `trips_snapshot`; new table data makes
+#                                     the cell stale
+```
+
+Prompt cells (LLM calls) use the same mechanism:
+
+```python
+# @name summary
+# @output_schema {"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]}
+Summarize {{ findings }} as a verdict.
+```
+
+`{{ var }}` interpolates upstream variables. `strata validate` checks
+annotation syntax (`loop_missing_carry`, malformed `@output_schema`,
+unknown workers, …) without calling any LLM.
+
+## What validate catches vs. what run catches
+
+| Failure | Caught by |
+| --- | --- |
+| Malformed `notebook.toml` (with TOML line numbers) | `validate` |
+| Missing / unreadable cell file | `validate` |
+| DAG cycle | `validate` |
+| Bad annotation (`@loop` without `carry`, schema typos, unknown worker) | `validate` |
+| Reference that resolves to nothing (import? typo?) | `run` (NameError) |
+| Wrong logic, missing dependency in `pyproject.toml` | `run` |
+
+`run --format json` reports per-cell `status`, `error` (and its `traceback`
+when the cell raised), and `cache_hit`,
+and skips downstream cells when an upstream fails (`"reason": "upstream
+failed"`) - fix the first error and re-run; everything already correct is
+a cache hit.
+
+## Verifying computed values
+
+Per-cell `stdout` / `stderr` are included in the `run --format json`
+payload (truncated at 10k chars), so the way to check a result is to
+**print it** and read it back from the JSON:
+
+```python
+# cells/stats.py
+total = sum(s["revenue"] for s in sales)
+print(f"total={total}")
+```
+
+```bash
+strata run my_analysis --format json | jq -r '.cells[] | select(.id == "stats").stdout'
+# total=93900
+```
+
+A **cache hit replays the stored result without re-running the cell**, and that
+includes the console: `stdout` is what the run behind that result printed. Pass
+`--force` when you need the cell to actually run again. Don't read `.strata/`
+directly - it's machine-managed runtime state with no stability guarantees.
+
+## Comparing two runs
+
+A successful cell also reports its `provenance_hash` and its `outputs` - one
+entry per stored variable, each with `artifact_id`, `version` and
+`content_sha256`:
+
+```bash
+strata run my_analysis --format json | jq '.cells[] | {id, provenance_hash, outputs}'
+```
+
+The digest is what makes two reports comparable. `status` and `duration_ms`
+agree between a run that computed the right numbers and one that did not; the
+digest of the bytes does not. Run the notebook on two machines, diff the
+reports, and a cell whose output moved is named.
+
+Both are read back from the artifact store rather than from the run, so a cache
+hit reports them too - which is the run most worth comparing. `content_sha256`
+is `null` for artifacts written before digests were recorded. A leaf cell's
+variables are listed too, since `strata run` stores them; a leaf that is a
+cache hit from a run outside `strata run` (the UI, `cell run`, MCP) lists only
+what that run stored, so pass `--force` once before comparing.
+
+## Don'ts
+
+- **Don't create or edit `.strata/`** - runtime state, machine-managed.
+- **Don't hand-edit `uv.lock`** - declare dependencies in
+  `pyproject.toml` and let `strata run` / `uv sync` resolve. The
+  scaffolded `pyproject.toml` is **not empty**: it pins the notebook's
+  Python version and pre-seeds the runtime packages the cell harness
+  needs (`pyarrow`, `orjson`, `cloudpickle`) - append your dependencies
+  to the existing list.
+- **Don't reuse cell IDs** or change `notebook_id` after artifacts exist.
+- **Don't encode per-cell config in `notebook.toml`** when an annotation
+  exists - annotations are the single per-cell configuration surface.
+- **Mind where cell code writes files.** Cells run in the gitignored
+  `work/` directory, so a relative path lands there. Files to keep as a
+  result go in a [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder. Don't
+  write into `../` (the notebook directory) unless you mean to commit the
+  file.
+
+## Worked example
+
+Its `notebook.toml` and cells are pinned by Strata's test suite
+(`TestHandWrittenNotebookContract`) - if they ever stop working, CI fails:
+
+`notebook.toml`:
+
+```toml
+notebook_id = "agent-handwritten-001"
+name = "Hand-written by an agent"
+cells = [
+  { id = "load",  file = "load.py",  language = "python",   order = 0 },
+  { id = "doc",   file = "doc.md",   language = "markdown", order = 1 },
+  { id = "stats", file = "stats.py", language = "python",   order = 2 },
+]
+```
+
+`cells/load.py`:
+
+```python
+# @name load
+numbers = [1, 2, 3, 4]
+```
+
+`cells/doc.md`:
+
+```markdown
+# Analysis
+
+plain prose cell
+```
+
+`cells/stats.py`:
+
+```python
+total = sum(numbers)
+mean = total / len(numbers)
+```
+
+`pyproject.toml`:
+
+```toml
+[project]
+name = "handwritten"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+]
+```
+
+```bash
+$ strata validate ./handwritten && strata run ./handwritten
+...
+✓ valid: 3 cell(s)
+syncing environment…
+...
+  load numbers = [1, 2, 3, 4]           ✓ 1.4s
+  doc [markdown] plain prose cell      ✓ cached
+  stats total = sum(numbers)             ✓ 1.1s
+
+2 ran, 1 cached in 2.6s
+```
+
+A markdown cell never runs, so the summary counts it as cached.

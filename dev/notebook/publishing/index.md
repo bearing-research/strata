@@ -1,0 +1,479 @@
+# Publishing an artifact
+
+A figure in a paper can carry a URL. Someone who opens it (a referee, a
+replicator, you in eighteen months) sees the result, the code that produced
+it, and the code and environment of every step behind it. No account, no
+install, no notebook.
+
+```bash
+strata artifact publish nb_paper_cell_c2_var___display__0 --title "Figure 3" \
+  --artifact-dir ./paper/.strata/artifacts
+```
+
+```
+nb_paper_cell_c2_var___display__0@v=1 is public at /p/ocxQj-toxGttZYyRl-Zf9...
+Published into ~/.strata/artifacts (the store your server serves).
+Copied 2 artifacts across so the link resolves.
+
+Anyone with that link can read the artifact, its source, and the
+source and environment of every step behind it. That is the point,
+and it is worth knowing before sending the link:
+  - nb_paper_cell_c2_var___display__0@v=1
+  - nb_paper_cell_c1_var_rows@v=1
+
+Withdraw it with: strata artifact unpublish ocxQj-toxGttZYyRl-Zf9...
+```
+
+The link starts with the server's `STRATA_PUBLIC_BASE_URL` and
+`STRATA_PUBLIC_BASE_PATH` when they are set, or with `--to URL` when publishing
+to another store.
+
+Every cell output is already an artifact, and a plot is no exception: it is
+stored under its own id with a provenance hash binding it to its inputs, its
+source, and the environment it ran in. Publishing does not create any of that.
+It grants read access to one version of it.
+
+## Where the artifact ends up
+
+A notebook writes its cell outputs to its own `.strata/artifacts`; the server
+serves whatever `artifact_dir` it was started with, `~/.strata/artifacts` by
+default. Publishing therefore copies the artifact, and every step behind it
+since the page shows their code, into the store the server serves, and mints
+the token there. Point `--artifact-dir` at the notebook's `.strata/artifacts`,
+as above; without it the command reads the server's store, which does not hold
+the notebook's outputs until something copies them there. The command says how
+many it moved:
+
+```
+Copied 4 artifacts across so the link resolves.
+```
+
+The copies keep their original ids, versions, provenance hashes, authors and
+timestamps. An artifact that moves into a served store has to keep saying who
+computed it and when; publishing is not a re-computation and must not read like
+one.
+
+Reading and publishing are separate arguments, because they are separate
+questions:
+
+| Argument | Means |
+| --- | --- |
+| `--artifact-dir` | the store to read the artifact from, as in every other subcommand |
+| `--into DIR` | the store to publish into |
+| `--to URL` | a Strata server to publish to over HTTP (see [below](#copying-a-chain-into-another-store)) |
+| `--here` | publish into the store named by `--artifact-dir` |
+
+`--into` defaults to the store your server serves, which is what makes a link
+resolve. Whichever applies, the destination is printed:
+
+```
+Published into ~/.strata/artifacts (the store your server serves).
+Copied 4 artifacts across so the link resolves.
+```
+
+`--header 'Name: value'` (repeatable) adds a header for `--to` beyond the
+`STRATA_STORE_TOKEN` bearer, and `--max-depth` (default 10) bounds how far the
+chain is listed.
+
+That line is not conditional. A caller who is never told where a grant lives
+cannot tell a working link from one their own server will never resolve, and
+the silent case used to be exactly the one where it already matched.
+
+![The published page for a figure: the plot itself, then the artifact's id,
+provenance hash and content digest, and below them the code that produced it
+and every step behind
+it.](https://bearingresearch.com/strata/dev/dev/assets/publication-page-light.png#only-light)
+![The published page for a figure: the plot itself, then the artifact's id,
+provenance hash and content digest, and below them the code that produced it
+and every step behind it.](https://bearingresearch.com/strata/dev/dev/assets/publication-page-dark.png#only-dark)
+
+## What the page claims, and what it does not
+
+This matters more here than in most features, because the reader is being
+asked to trust what they see.
+
+**Transparency.** The page shows the code, the inputs, the environment and the
+author as recorded *when the bytes were produced*, not as they look now. A
+cell edited after the run does not change what its artifact reports.
+
+**Integrity.** A digest of the bytes is recorded at publication, and
+`/p/<token>/verify` re-reads them and compares. That proves the bytes have not
+changed since they were published. It does not prove they were honestly
+produced in the first place: nothing a server can compute about its own
+storage could establish that.
+
+**Reproduction is not claimed.** Re-running the computation and getting the
+same result is the strongest thing anyone could want, and it is not something
+Strata asserts. Random seeds, thread counts, floating-point accumulation order
+and unavailable input data each break it on their own. So there is no green
+check anywhere on the page: in a research context a checkmark is read as
+"someone reproduced this", and a badge that can be wrong is worse than no
+badge. The page says what it checked, in words. Re-running is left to the
+reader; the source and environment shown are what it takes.
+
+## Publishing exposes the chain
+
+This is the feature working as intended, and it is the thing to think about
+before sending a link. The page shows the source and environment of every
+upstream step, because a plot whose ancestry is hidden answers nothing.
+
+Upstream cell source can name private dataset paths, internal table names, or
+credential *names*. So publishing is explicit, one artifact version at a time,
+never a switch on a whole notebook, and the CLI prints the full list of steps
+the link will expose before you use it.
+
+Upstream **data** is never served. The page describes the steps; only the
+published artifact's own bytes are downloadable, at `/p/<token>/data`.
+
+Those bytes are served as data, never as a page. A PNG, Arrow, JSON or Markdown
+artifact is served under its own type; any other declared type (HTML or SVG, for
+instance, which a writer can set freely) downloads as
+`application/octet-stream`. Every response carries
+`X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, so
+nothing published runs script on your server's origin.
+
+## Withdrawing
+
+```bash
+strata artifact unpublish <token>
+```
+
+`<token>` can also be the publication's id, which `GET /v1/publications`
+lists. The store keeps only each token's SHA-256 (its id), so the token, and the
+link built from it, is shown once: in the answer to the publish that minted it.
+A version has at most one live publication. Publishing the same version again
+returns the existing publication without a token; keep the link when it is minted, or unpublish and publish again for a new
+one.
+
+The link then reports that it was withdrawn, rather than 404ing. A reader
+chasing a footnote deserves that answer rather than one that reads like a typo.
+The token is never reissued for other content, so a URL already in print fails
+closed instead of quietly starting to resolve to something else.
+
+## A badge for a README
+
+```markdown
+[![provenance](https://your-strata/p/<token>/badge.svg)](https://your-strata/p/<token>)
+```
+
+It reports the size of the recorded chain (`provenance · 4 steps`) and links
+to the page. It says nothing about whether the result is right, and it is
+deliberately not green: in badge convention green means "passing", and
+borrowing that would smuggle back the claim the rest of this is careful to
+avoid.
+
+A withdrawn publication still renders a badge, reading `withdrawn`. A broken
+image tells a reader nothing except that something is wrong with the server.
+
+**A badge is a pointer, not a revocation mechanism.** GitHub proxies badge
+images through its own cache, so a withdrawal can take a while to show. The
+page and the bytes stop immediately; the pill in someone's README lags.
+
+The page carries ready-made snippets for the badge, the iframe and the RO-Crate
+URL, under *Putting it somewhere*.
+
+## Machine-readable provenance
+
+The chain is also published as [RO-Crate](https://w3id.org/ro/crate/) JSON-LD,
+which repositories and provenance tooling read directly:
+
+- inline on the page, in a `application/ld+json` script block;
+- at `/p/{token}/ro-crate`, so a harvester need not scrape the page;
+- as `ro-crate-metadata.json` in an archived bundle, which is what turns a
+  Zenodo deposit from a folder someone can read into something the archive can
+  index.
+
+The graph maps each step to a `CreateAction` whose `instrument` is the cell
+source as `SoftwareSourceCode`, its `object` the inputs and its `result` the
+output: the shape PROV-O and RO-Crate both expect for "this code, on these
+inputs, made this".
+
+Upstream steps are `CreativeWork` entities, **not** files, and they are not
+listed under `hasPart`. Their bytes are deliberately not in the crate, and
+declaring files that are not there is a claim no validator would catch.
+An input past the depth limit is still named, as a stub saying the recorded
+chain stops there, so no reference dangles.
+
+People appear once each. A step run by someone listed as an author points at
+that author's node (the ORCID when one is given, as a bare id or a link), and an
+author listed twice is credited once.
+
+A step that read a URL through [`@fetch`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#fetch) names it as
+an input. On the page it appears under "External inputs" with the digest of the
+bytes read, when they were retrieved, and when the reading step ran. In the
+crate it is a `File` whose `@id` is the URL, with that `sha256` and the
+retrieval time as `sdDatePublished`. The digest describes what was read, and
+the URL may serve something else now. A step stored before retrieval times were
+recorded shows only when it ran.
+
+A Snowflake or BigQuery cell with [`# @cache snapshot`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#cache),
+published or upstream of what is, shows the moment of the warehouse state it
+read ("Warehouse state as of") and how long the warehouse keeps that state
+("Queryable until"). Until then a reader with access to the warehouse can run
+the query against the same state; after it, they cannot. A cell stored before
+the horizon was recorded shows "not recorded".
+
+## Embedding it elsewhere
+
+Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it
+unfurls into a card: the figure, what it is, how many steps are behind it, and
+a link through to the full provenance. Tools that do not, take the iframe
+directly:
+
+```html
+<iframe src="https://your-strata/p/<token>/embed"
+        width="480" height="420" frameborder="0"></iframe>
+```
+
+The card is deliberately not a smaller copy of the page. An embed sits in a
+post where the surrounding text is doing the explaining, so it carries the
+result and an honest one-line summary, then links out. Abbreviating the
+caveats into a card would produce exactly the badge this feature avoids.
+
+The card is framable from any origin, because being embeddable is the whole
+point of it. That applies to `/p/{token}/embed` and nothing else: the full
+page keeps the default `frame-ancestors 'self'`, and `embed_frame_ancestors`
+still governs the notebook app view.
+
+**Behind a reverse proxy, set `STRATA_PUBLIC_BASE_URL`** to the address readers
+use. The URLs in an embed are consumed by someone else's page, and a server
+that only knows its internal origin will advertise an oEmbed endpoint nobody
+can reach and reject the public link a wiki pastes. Unset, the request's own
+origin is used, which is right for a directly-reachable server.
+A proxy that serves Strata under a path also needs `STRATA_PUBLIC_BASE_PATH`
+([Serving under a path](https://bearingresearch.com/strata/dev/dev/deployment/modes/#serving-under-a-path)); every
+link on the page and in the card then carries it.
+
+## Archiving: the copy that needs no server
+
+A hosted link resolves for as long as your server does. A URL printed in a
+paper outlives most servers, so there is a second form:
+
+```bash
+strata artifact archive nb_paper_cell_c2_var___display__0 \
+  --artifact-dir ./paper/.strata/artifacts \
+  --to ./figure3-bundle --title "Figure 3" --author "F. Li"
+```
+
+```
+figure3-bundle/
+├── index.html              the page: opens in a browser, no server, no external requests
+├── artifact.png            the bytes
+├── manifest.json           the same record, machine-readable
+├── ro-crate-metadata.json  the chain as RO-Crate
+└── README.md               what it is and how to check it
+```
+
+`--force` writes into a non-empty directory (which may leave a stale payload
+beside the new one); `--max-depth` (default 10) bounds how far the chain is
+walked. With `--token` it defaults to 25, the depth the hosted page and its
+archive walk.
+
+A tabular artifact's bytes are Arrow IPC (`artifact.arrow`), and the bundle
+also carries `artifact.parquet`, the same rows in a format a data repository
+indexes. The manifest's digest covers the Arrow file; the Parquet file carries
+its own, in the manifest's `additional_files` and as a second `File` in the
+RO-Crate, so a repository reading the crate sees both. A table whose Arrow file
+is over 128 MiB is archived without the Parquet copy, since converting it holds
+the whole table in memory; neither the manifest nor the crate then lists one.
+The limit is fixed, so it never makes one publication's archive differ between
+builds.
+
+A [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder's published bytes are its
+manifest, the list of its files (`artifact.bin`, JSON), which `/p/<token>/data`
+serves. The bundle holds the files themselves under `folder/`, at their paths in
+the folder, each with its own digest in the manifest's `additional_files` and
+as a `File` in the RO-Crate.
+
+Whichever file a reader kept, the server can say whether it is this
+publication's. `GET /p/<token>/verify?sha256=<digest of the file>` answers with
+`file` naming it (`artifact.arrow`, `artifact.parquet` or a folder's
+`folder/<path>`, or `null` for a file from elsewhere) and `matches` true only when it names one and the stored bytes
+are unchanged. The Parquet digest is the one in the archive the server serves.
+
+Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
+retention promise then stands behind the link instead of yours.
+
+A published artifact serves the same bundle as a zip:
+
+```bash
+curl -O -J https://your-server/p/<token>/archive.zip
+```
+
+Same files, same code: the route and the command build the bundle from one
+implementation, because two implementations of a set of files that describe
+each other would drift and neither would stop producing a bundle. The response
+carries a `Content-Digest` of the zip, and the zip is the same bytes on every
+request, so a digest you record at deposit time can be checked against a later
+fetch. The server builds it once and keeps it under `publication-archives/` in
+the artifact directory: later requests send that file, editing the
+publication's authors or identifiers rebuilds it, and withdrawing deletes it.
+
+To build that zip from the store directly, name the publication rather than the
+artifact. The bundle then carries the publication's own record, with the
+authors and identifiers the hosted page shows, and a `--to` ending in `.zip`
+writes the file the route serves, byte for byte:
+
+```bash
+strata artifact archive --token <token> --to ./figure3.zip
+```
+
+`--token` also takes the publication's id, which `GET /v1/publications` lists,
+since the raw token is shown only when the link is minted.
+
+A withdrawn publication refuses here as it does for the bytes: the page still resolves and says "withdrawn", since a
+reader chasing a footnote deserves that answer, but handing over the archive
+anyway would undo the withdrawal.
+
+It needs no credentials, like the page, and contains nothing the page does not
+already show: the artifact's own bytes and the chain as rendered. Upstream
+bytes stay where they are.
+
+The page is the same document as the hosted one, with one difference: it points
+at the file beside it rather than at routes, and it tells the reader how to
+check the bytes themselves:
+
+```
+sha256sum artifact.png
+# 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
+```
+
+Archiving is not publishing. It grants nobody access to a running server and
+mints no link. It writes files you choose who to hand to.
+
+## Crediting an author
+
+The page carries two different facts, and they come from different places.
+
+**Who published or archived it** is the byline under the title. `--author` sets
+it on either command; in service mode a publish through the API uses the
+authenticated principal instead. Omit it and there is simply no byline.
+
+**Who computed it** is the *Computed by* row, and it comes from the artifact
+itself, recorded when the cell ran, not when you published. On a server that
+authenticates its callers (service mode) it is the member who ran the cell. A
+personal server has no authenticated identity to record, so there the row
+usually reads "not recorded".
+`--author` does not change it: crediting yourself for publishing a result is
+not the same as the store attesting who produced it, and the page keeps them
+apart deliberately.
+
+**Who wrote the work** is a third thing, and a list rather than a string:
+authors have an order, an affiliation, and an ORCID that distinguishes one
+researcher from another. Pass them when publishing over HTTP:
+
+```json
+POST /v1/artifacts/nb_paper_cell_c2_var___display__0/v/1/publish
+{
+  "title": "Figure 3",
+  "authors": [
+    {"name": "F. Li", "orcid": "0000-0002-1825-0097", "affiliation": "Somewhere"},
+    {"name": "B. Second"}
+  ]
+}
+```
+
+The byline then lists them in the order given, each ORCID as a link. Publishing
+without authors leaves `published_by` as the byline, so nothing published
+before this changes meaning.
+
+## Citing it: DOIs and other identifiers
+
+A DOI is registered against a deposit that already has to be reachable, so it
+almost always arrives *after* the token does:
+
+```json
+PATCH /v1/publications/{token}
+{"external_ids": [{"scheme": "doi", "value": "10.5281/zenodo.1234567"}]}
+```
+
+Schemes are `doi`, `zenodo`, `arxiv` and `url`; anything else is refused, since
+a record that accepted arbitrary scheme names would produce citation lines
+nobody can follow. The page grows a "Cite as" line of resolvable links, the
+JSON record and the archive `manifest.json` carry the entries, and the
+RO-Crate's root dataset gets the DOI as its `identifier`, which is what an
+ingesting repository indexes on.
+
+The patch cannot repoint the token, because a citation whose target could
+change under the reader would be worthless. A body naming `artifact_id` or
+`version` is refused with a 400 rather than half-applied, so a caller never
+reads a 200 as "the link now shows the other version". To cite another version,
+publish it for its own link.
+
+Each patch is recorded on the store's event feed (`GET /v1/events`) as a
+`credit` event with the publication's id in `value`, beside `publish` and `withdraw`, so a
+service mirroring the page learns of a new DOI without polling.
+
+## Copying a chain into another store
+
+A link resolves from the store its server serves, and a chain lives in the
+store its cells wrote to. When those are different machines, the chain is
+imported into the serving store first, ancestors before descendants, keeping
+each version's id and number so its lineage edges still resolve.
+`strata artifact publish --to <url>` does this for you, and a service doing it
+over HTTP does the same: upload each version's bytes, then its record:
+
+```
+PUT  /v1/artifacts/import/blobs/{content_sha256}     the bytes, checked against the digest; 201
+POST /v1/artifacts/import                    {"id": ..., "version": ..., "provenance_hash": ...,
+                                              "created_at": ..., "content_sha256": ...,
+                                              "input_versions": ..., ...}
+```
+
+The record's `content_sha256` names the bytes uploaded before it, and only the
+same tenant's upload counts: a digest is printed on every publication's page,
+so knowing one proves nothing. An upload nothing imports is dropped a day later.
+The import stamps the caller's tenant on the row, answers 409 for an id another
+tenant holds (at any version) or a version another computation holds unless
+`?remap=true` is set, and is
+idempotent: repeating a finished import writes nothing and needs no new upload.
+The same route also takes a multipart body with the record as `metadata` and
+the bytes as `data`. The server copies `data` to disk as it arrives, but a
+client usually builds the whole body in memory, so large artifacts suit the
+staged route.
+
+`publish --to` streams each artifact's bytes from a file to the upload route
+and sets `remap`. So a chain another tenant on the target already holds (or a
+version id a different computation took there) lands as a copy under a fresh
+id, `<id>@import=<8 hex>`, in the caller's tenant. Each copy keeps its
+provenance hash, and the CLI points every descendant's lineage edges at the
+ids its ancestors landed on, so the published page resolves every step.
+A [`# @output_dir`](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#output_dir) folder in the chain goes with
+every file its version names, each before the manifest. A file the target
+already holds (`GET /v1/artifacts/by-provenance/{hash}` finds it with the same
+digest) is not uploaded again, and when a file lands under another version or a
+fresh id, the copied manifest's entry names that version and `id`.
+Publishing the same chain again writes nothing. The target refuses a blob
+larger than its `STRATA_MAX_UPLOAD_BYTES` with `413`; raise it there to publish
+larger artifacts.
+
+## HTTP
+
+| Route | Auth | Purpose |
+| --- | --- | --- |
+| `POST /v1/artifacts/{id}/v/{n}/publish` | yes (`artifacts:publish`) | Mint a link. The response carries `token` and `url`, the only time they are shown, and `id`. Idempotent: republishing returns the existing publication, with `token` and `url` null. |
+| `DELETE /v1/publications/{token}` | yes (`artifacts:publish`) | Withdraw, by token or id. |
+| `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers, by token or id. Cannot change what the token points at: `artifact_id` or `version` in the body is a 400. |
+| `GET /v1/publications` | yes | List this tenant's live publications by id, without tokens (`?include_revoked=true` adds withdrawn ones). |
+| `PUT /v1/artifacts/import/blobs/{content_sha256}` | yes (`artifacts:write`) | Upload a version's bytes ahead of its record. |
+| `POST /v1/artifacts/import` | yes (`artifacts:write`) | Import a version, keeping its id and number. |
+| `GET /p/{token}` | **no** | The page. |
+| `GET /p/{token}/data` | **no** | The published bytes. |
+| `GET /p/{token}/archive.zip` | **no** | The archived bundle as a zip, with a `Content-Digest` header. |
+| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. `?sha256=` also says which bundle file (Arrow or Parquet) a digest names. |
+| `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
+| `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
+| `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |
+| `GET /p/{token}/badge.svg` | **no** | A README pill reporting the chain size. |
+| `GET /v1/publications/{token}` | **no** | The same record as JSON. |
+
+For a withdrawn token the page, the badge and `GET /v1/publications/{token}`
+still answer and say so; the record then carries only the token, title and
+the publish and withdraw times, no chain or source. Every route that serves
+content (`/data`, `/archive.zip`, `/verify`, `/embed`, `/ro-crate` and
+`/oembed`) answers `410 Gone`.
+
+The unauthenticated routes are exempt from the auth and tenant middleware by
+path, and only for `GET`. The token is the credential: it exists only because
+someone with authority over that artifact minted it for one version. Minting,
+withdrawing, editing credits and listing all stay behind the gate.

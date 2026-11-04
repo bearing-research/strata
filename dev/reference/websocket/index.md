@@ -1,0 +1,241 @@
+# WebSocket Protocol
+
+The notebook UI communicates with the backend via a WebSocket connection for real-time updates.
+
+For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, tenant gating, cold-start payload, grace window), start at the [Notebook Client Protocol](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/) page; this page is the message-level reference.
+
+Every frame type below corresponds to a member of `strata.notebook.protocol.MessageType` - that enum is the canonical source. If the tables here and the enum diverge, the enum wins.
+
+## Connection
+
+```
+ws://localhost:8765/v1/notebooks/ws/{session_id}
+```
+
+The `{session_id}` is the one returned by `POST /v1/notebooks/open` or `/create`. A session is single-process. On a personal server, opening the same notebook again returns the session already open on that path, so a second tab, the terminal viewer and an agent all drive one execution context and see each other's runs. In service mode an open returns the session the same principal already has open on that path, never another principal's, and an open without a principal always starts a new session.
+
+Under principal auth, the upgrade carries the same credentials as a REST call: `X-Strata-Principal`, `X-Strata-Proxy-Token`, and `X-Tenant-ID` if multi-tenant under `trusted_proxy`, or `Authorization: Bearer <key>` under `api_key`. A missing or invalid credential refuses the upgrade with HTTP `403` (see [Close codes](#close-codes)). Each client → server frame is then checked against the notebook scope it needs (`notebook:read`, `notebook:write` or `notebook:execute`); a frame the principal's scopes do not cover is answered with an `error` frame, `code: "insufficient_scope"`.
+
+A read-only app view connects with `?role=viewer`. Such a connection may send only `widget_update` and `notebook_sync`; anything else is answered with `code: "read_only"`.
+
+## Envelope
+
+All messages are JSON with this shape:
+
+```json
+{
+  "type": "message_type",
+  "seq": 1,
+  "ts": "2026-01-01T00:00:00Z",
+  "payload": { ... }
+}
+```
+
+`seq` and `ts` are present on server → client messages; the server doesn't require them on client → server. See [Sequence numbers](#sequence-numbers) below.
+
+## Client → Server Messages
+
+### Cell Execution
+
+| Type                   | Payload                                  | Description                                                 |
+| ---------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| `cell_execute`         | `{ "cell_id": "..." }`                   | Run cell (triggers cascade check)                           |
+| `cell_execute_cascade` | `{ "cell_id": "...", "plan_id": "..." }` | Confirm cascade execution                                   |
+| `cell_execute_force`   | `{ "cell_id": "..." }`                   | Run cell ignoring staleness (no upstream materialization)   |
+| `cell_execute_rerun`   | `{ "cell_id": "..." }`                   | Force re-execute target cell while cascading upstream rebuilds |
+| `cell_cancel`          | `{ "cell_id": "..." }`                   | Cancel running cell (see [Cancelling a SQL cell](#cancelling-a-sql-cell)); REST twin: [`POST …/cells/{cell_id}/cancel`](https://bearingresearch.com/strata/dev/dev/reference/rest-api/#cancel-cell-rest) |
+| `notebook_run_all`     | `{ "continue_on_error": true }`          | Run all cells in topological order (default continues on error) |
+| `notebook_rerun_all`   | `{ "continue_on_error": true }`          | Re-execute every cell with cache off                        |
+| `read_confirm`         | `{ "prompt_id": "..." }`                 | Run what a `read_confirm_prompt` asked about. Each cell's yes is kept for its machine and inputs. Cancel sends nothing |
+
+### Cell Editing
+
+| Type                 | Payload                                                  | Description    |
+| -------------------- | -------------------------------------------------------- | -------------- |
+| `cell_source_update` | `{ "cell_id": "...", "source": "...", "force": false, "author": "..." }` | Source changed. Refused with `cell_locked` when someone else changed the cell moments ago, unless `force` is true. `author` is optional and used only without principal auth |
+| `cell_focus`         | `{ "cell_id": "...", "author": "..." }`                 | The cell this client is on, or `null`. Updates `presence` for everyone |
+
+### Cell Tests
+
+| Type             | Payload                                      | Description                                                                              |
+| ---------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `cell_run_tests` | `{ "cell_id": "...", "test_source": "..." }` | Persist the cell's unit-test source (`cells/{id}.test.py`) and run it. Python cells only. Sends a `read_confirm_prompt` first when the run would read past the [threshold](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#asking-before-a-large-read), as a cell run does |
+
+### State
+
+| Type                     | Payload                | Description                           |
+| ------------------------ | ---------------------- | ------------------------------------- |
+| `notebook_sync`          | `{}`                   | Request full state (for reconnection) |
+| `impact_preview_request` | `{ "cell_id": "..." }` | Get upstream/downstream effects       |
+| `profiling_request`      | `{}`                   | Get execution metrics                 |
+
+### Inspect REPL
+
+| Type            | Payload                               | Description         |
+| --------------- | ------------------------------------- | ------------------- |
+| `inspect_open`  | `{ "cell_id": "..." }`                | Open REPL for cell  |
+| `inspect_eval`  | `{ "cell_id": "...", "expr": "..." }` | Evaluate expression |
+| `inspect_close` | `{ "cell_id": "..." }`                | Close REPL          |
+
+### Dependencies
+
+| Type                | Payload                | Description                                                     |
+| ------------------- | ---------------------- | --------------------------------------------------------------- |
+| `dependency_add`    | `{ "package": "..." }` | Compatibility shorthand for starting an `add` environment job   |
+| `dependency_remove` | `{ "package": "..." }` | Compatibility shorthand for starting a `remove` environment job |
+
+### Variants
+
+| Type                 | Payload                              | Description                                |
+| -------------------- | ------------------------------------ | ------------------------------------------ |
+| `variant_set_active` | `{ "group": "...", "name": "..." }`  | Switch the active variant in a group       |
+| `variant_add`        | `{ "group": "...", "author": "..." }` | Add a new variant cell, cloning the active. `author` is optional |
+| `widget_update`      | `{ "cell_id": "...", "values": { "<name>": <value> } }` | Set widget control value(s); re-materializes + stales downstream |
+
+## Server → Client Messages
+
+### Cell Status
+
+| Type                      | Payload                                                                                                                  | Description                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `cell_status`             | `{ "cell_id": "...", "status": "running", "remote_worker": "...", "remote_transport": "...", "remote_build_state": "...", "staleness_reasons": [...], "causality": {...} }` | Status changed. Only `cell_id` and `status` are always present: the `remote_*` fields come with `running` for a remote cell (`remote_build_state` is `starting` while a worker provisions the job), `staleness_reasons` and `causality` with a staleness update. A remote cell on a worker that queues its jobs gets two more `running` frames during the run, with `remote_build_state` `starting` and then `running`; they update the badge and do not start a new run. While `starting`, a frame may also carry `remote_queue_position` and `remote_queue_detail`, the dispatcher's report on a queued job, and while `running`, `remote_queue_detail` alone, its sentence on where the job runs. Another such frame follows each time the report changes. A `running` frame without `remote_build_state` starts a run: clear the cell's console (see [Console](#console)) |
+| `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...] }` | Execution result, including rich visible outputs. `outputs` maps each stored variable to its preview; `_` is the last displayed value. On a cache hit `duration_ms` is the load time, and `saved_ms` is what the hit saved (0 when no earlier run priced it). `artifact_uris` maps each stored variable to its artifact. `stdout` / `stderr` are the run's whole console and replace what `cell_console` built (see [Console](#console)). A remote run adds `remote_worker`, `remote_transport`, `remote_build_id` and `remote_build_state` |
+| `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed - clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. `kind: "notice"` is a provider-degradation message to show beside the stream, not part of its content. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
+| `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "...", "chunk_seq": 0 }`                                                | Console output. Append `text` to the cell's console for `stream`. A remote cell's output arrives while it runs, numbered per stream by `chunk_seq` from 0: chunk 0 starts that stream's console for the run, so replace what the last run left. `chunk_seq` is `null` on console sent when the cell finishes: for a cell that streamed nothing (every local cell), that frame is the stream's whole console for the run (see [Console](#console)) |
+| `cell_error`              | `{ "cell_id": "...", "error": "...", "stdout": "...", "stderr": "...", "suggest_install": "...", "suggest_install_language": "python" }` | Execution error. `stdout` / `stderr` are the failed run's whole console and replace it, as on `cell_output`; a cell that failed before it ran (a fetch pin mismatch, a missing input) sends them empty. Only an internal server error carries neither, and leaves the console as it was. `error_code`, when present, is a stable name to branch on (`fetch_pin_mismatch`: a `# @fetch ... sha256=` pin no longer matches the URL's bytes). `suggest_install` names a missing package to offer installing, with `python` or `r` for which installer. A remote run adds the `remote_*` fields of `cell_output` plus `remote_error_code` |
+| `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "until_reached": false, "duration_ms": 128 }` | Per-iteration update from a `@loop` cell. `until_reached` is true on the iteration where `@loop_until` held |
+| `cell_inputs`             | `{ "cell_id": "...", "machine": "local", "inputs": [{ "kind": "mount", "name": "data", "uri": "s3://bucket/data", "bytes": 5368709120, "cached_bytes": 1073741824 }] }` | What a cell's `@mount`, `@table` and `@fetch` inputs weigh on `machine`, sent before a run reads them, and after a `cell_source_update` that changes its `@mount`, `@table`, `@fetch` or `@worker` lines, when the estimate differs from the cell's last; an empty `inputs` means it reads none now. `bytes` is a read-only remote mount's listing, a table snapshot's data files (an upper bound on what a scan reads) or a fetch's size; `cached_bytes` is what the machine already holds. Either is absent when not known: a pinned mount is not listed, and a pool's machine is not known before dispatch. On a remote worker, `cached_bytes` is the worker's own cache, which it reports through [`POST /v1/mount-cache/cached`](https://bearingresearch.com/strata/dev/dev/reference/executor-protocol/#post-v1mount-cachecached-optional). `credential` names a [named credential](https://bearingresearch.com/strata/dev/dev/reference/notebook-toml/#named-credentials) when the input reads through one. `rw` and `file://` mounts move nothing and are left out. `notebook_state` carries each cell's last estimate as `inputs` and `inputs_machine` |
+| `cell_variant_progress`   | `{ "cell_id": "...", "variant": "rf", "index": 1, "total": 3, "success": true, "duration_ms": 128, "error": null }`        | Per-variant update from a `# @per_variant` fan-out cell |
+| `cell_test_status`        | `{ "cell_id": "...", "status": "running" }`                                                                              | Test run lifecycle: `running` → `ready` / `error` (mirrors `cell_status`) |
+| `cell_test_results`       | `{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000, "auto_installed": [] }` | Per-test outcomes + totals from a `cell_run_tests`. `outcome` ∈ `passed`/`failed`/`error`/`skipped`; `message` carries the rewritten-assert diff for failures. `stale` flags the result against a since-changed cell/test/input. `auto_installed` lists packages (pytest) installed into the notebook environment for this run. |
+
+### Console
+
+A cell's console follows three rules, in this order of frames:
+
+1. `cell_status` with `status: "running"` starts a run: clear the cell's stdout and stderr. A `running` frame that carries `remote_build_state` only moves a remote cell's badge between `starting` and `running` during the run; leave the console as it is.
+2. `cell_console` appends `text` to its `stream`; a frame with `chunk_seq: 0` first clears that stream.
+3. `cell_output` and `cell_error` that carry `stdout` / `stderr` strings replace the console with them. A cache hit carries the console of the run behind it. A hit with no such record, such as one pulled from a team store, carries the cell's console as `notebook_state` holds it: kept if it came from this same key, otherwise empty.
+
+A cell run as an upstream inside another cell's run may get its console and result without a `running` frame; rule 3 still leaves the right console. In `notebook_state`, a running cell's `console_stdout` / `console_stderr` hold what this run has shown so far (empty until it prints); any other cell's hold its last run's console.
+
+### Cascade
+
+| Type               | Payload                                                                      | Description                   |
+| ------------------ | ---------------------------------------------------------------------------- | ----------------------------- |
+| `cascade_prompt`   | `{ "cell_id": "...", "plan_id": "...", "cells_to_run": [...], "estimated_duration_ms": 0 }` | Upstream cells need execution. `cells_to_run` is the cells that will run, in order; ready upstreams are left out |
+| `cascade_progress` | `{ "plan_id": "...", "current_cell_id": "...", "completed": 1, "total": 3 }` | Sent as each cell starts. `completed` counts finished cells of the `total` that run; a cascade that succeeds ends with a frame where `completed` equals `total` |
+| `read_confirm_prompt` | `{ "prompt_id": "...", "cells": [{ "cell_id": "...", "machine": "local", "inputs": [...], "bytes_to_move": 12000000000, "cost": 1.08 }], "message": "..." }` | A run would read past the server's [threshold](https://bearingresearch.com/strata/dev/dev/notebook/lake-aware-cells/#asking-before-a-large-read), and nothing started. Each cell lists its inputs as `cell_inputs` does, the bytes its machine does not hold, and their cost in dollars. `message` is the host's sentence, when set. Answer with `read_confirm` |
+
+### DAG
+
+| Type         | Payload                                               | Description                 |
+| ------------ | ----------------------------------------------------- | --------------------------- |
+| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. Each `cells` entry carries `id`, `defines`, `references`, `upstream_ids`, `downstream_ids`, `is_leaf`, `annotation_diagnostics`, `variant_group` / `variant_name` / `variant_active`, `is_module_cell` / `module_exports`, and `created_by` / `updated_by`. After a `cell_source_update`, the edited cell's entry also carries its new `source` on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere `source` is null |
+
+### State
+
+| Type                | Payload                                                               | Description                              |
+| ------------------- | --------------------------------------------------------------------- | ---------------------------------------- |
+| `notebook_state`    | `{ "id": "...", "cells": [...], "dag": {...}, "environment": {...}, "environment_job": {...}, "environment_job_history": [...], "r_environment": {...}, ... }` | Full state: the answer to `notebook_sync`, and broadcast to every connection after a cell is added, removed, reordered or edited over REST or MCP. Carries the rest of the notebook's state as well (name, mounts, workers, env, variant groups) |
+| `impact_preview`    | `{ "target_cell_id": "...", "upstream": [...], "downstream": [...], "estimated_ms": 0 }` | Impact analysis result. `upstream` entries carry `cell_id`, `cell_name`, `reason`, `skip`, `estimated_ms`; `downstream` entries carry `cell_id`, `cell_name`, `current_status`, `new_status` |
+| `profiling_summary` | `{ "total_execution_ms": ..., "cache_hits": ..., "cache_misses": ..., "cache_savings_ms": ..., "team_cache_savings_ms": ..., "team_cache_hits": ..., "team_contributors": [...], "team_promotions": [...], "total_artifact_bytes": ..., "cell_profiles": [...] }` | Profiling metrics. `cell_profiles` entries carry `cell_id`, `cell_name`, `status`, `duration_ms` (null when the last run's time is unknown), `cache_hit`, `artifact_uri`, `execution_count` |
+
+### Inspect
+
+| Type             | Payload                                                           | Description |
+| ---------------- | ----------------------------------------------------------------- | ----------- |
+| `inspect_result` | `{ "cell_id": "...", "action": "eval", "expr": "...", "ok": true, "result": "42", "type": "int" }` | REPL result. `action` is `open`, `eval` or `close`; a failed eval carries `error`, and an expression that printed carries `stdout` |
+
+### Dependencies
+
+| Type                       | Payload                                                   | Description                                      |
+| -------------------------- | --------------------------------------------------------- | ------------------------------------------------ |
+| `environment_job_started`  | `{ "environment_job": {...} }`                            | Background environment job accepted              |
+| `environment_job_progress` | `{ "environment_job": {...} }`                            | Background environment job phase/log update      |
+| `environment_job_finished` | `{ "environment_job": {...}, "environment_job_history": [...], "cells": [...], "lockfile_changed": false, "stale_cell_count": 0, "stale_cell_ids": [...], "environment": {...}, "r_environment": {...}, "dependencies": [...], "resolved_dependencies": [...] }` | Background environment job completed or failed. The environment and dependency fields are present only on success; an import job adds `warnings` and `imported_count` |
+
+### Agent
+
+| Type         | Payload                                         | Description |
+| ------------ | ----------------------------------------------- | ----------- |
+| `agent_note` | `{ "source": "mcp" \| "agent", "text": "..." }` | An outside agent driving this notebook over MCP narrating what it did (`mcp`) or a note it pushed itself (`agent`) |
+
+### Presence
+
+| Type       | Payload                                                                                          | Description |
+| ---------- | ------------------------------------------------------------------------------------------------ | ----------- |
+| `presence` | `{ "principals": [{ "principal": "alice", "focused_cell_id": "c1", "since": 1789455008.4 }], "you": "bob" }` | Who is on the session and which cell each is on. Sent on connect, disconnect and focus change, and after an edit over REST |
+
+### Session
+
+| Type             | Payload                                    | Description |
+| ---------------- | ------------------------------------------ | ----------- |
+| `session_closed` | `{ "reason": "idle", "message": "..." }` | The server closed this session; the socket closes next with `1000`. `reason` is `idle`, `session_limit`, `memory`, `closed` (the close route), `deleted` or `shutdown` (a graceful server stop; sessions do not survive a restart). Reopen the notebook by path; see [Session lifetime](#session-lifetime) |
+
+### Errors
+
+| Type    | Payload              | Description    |
+| ------- | -------------------- | -------------- |
+| `error` | `{ "error": "...", "code": "...", "cell_id": "...", "held_by": "..." }` | A request could not be served. Only `error` is always present; see [the `error` frame](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/#the-error-frame) for the codes. A run refused because another run holds the notebook has `code: "notebook_busy"` and the refused `cell_id`, so a client that showed the cell running can put it back |
+
+## Sequence numbers
+
+Every server → client message carries a `seq` from a single counter scoped to the **notebook session** (not the WebSocket connection). The counter increments on every outbound message; it persists across reconnects to the same session and only resets when the session itself is closed (see [Session lifetime](#session-lifetime)).
+
+What the client uses `seq` for:
+
+- **Ordering.** Messages arrive in `seq` order under normal conditions. Every frame carries its own number, including the console and result of one execution and each cell of a batch, so if your client coalesces state updates, key dedupe on `seq` rather than `type`.
+- **Gap detection across reconnects.** After reconnecting, the first message you receive may have a `seq` far higher than the last one you saw - events emitted while you were disconnected are not buffered. Treat any gap (or any reconnect) as a reason to send `notebook_sync` and replace local state.
+- **One-way ack.** The client doesn't echo `seq` back; the server tracks no per-connection ack state.
+
+## Reconnection semantics
+
+Disconnects happen - proxy timeouts, network drops, server restarts, tab sleep. The recovery protocol:
+
+1. **Client reconnects** to `ws://.../v1/notebooks/ws/{session_id}` with the same session ID. The session itself is in-memory on the server and survives reconnects until it is closed (see [Session lifetime](#session-lifetime)).
+2. **Server accepts the reconnect** and resumes emitting messages from the session's existing `seq` counter (continuing, not resetting). If the previous client disconnected within the **60-second cancel grace window** and a cell is still running, the execution survives the disconnect - the client picks up where it left off.
+3. **Client sends `notebook_sync`** as its first message after reconnecting. The server responds with `notebook_state` containing the full current state (cells, DAG, cell statuses, latest display outputs).
+4. **Client replaces local state** with the synced payload and resumes listening.
+
+There is **no replay** of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_output_delta` for a streaming prompt cell, `cell_iteration_progress` for a `@loop` cell, `cell_variant_progress` for a `# @per_variant` fan-out cell, `cascade_progress`) are not. The one exception is a remote cell's live console: while it runs, its `console_stdout` / `console_stderr` in `notebook_state` hold the last 64 KiB it has streamed of each stream, so a client that joins mid-run shows the run so far and appends the `cell_console` frames that follow. A running local cell's console there is empty: it arrives with the result.
+
+### Session lifetime
+
+A session ends when:
+
+- the notebook is deleted (`DELETE /v1/notebooks/{session_id}`, or `POST /v1/notebooks/delete-by-path`, which closes any session open on that directory),
+- a client closes it (`POST /v1/notebooks/{session_id}/close`), which leaves the notebook on disk,
+- nobody has edited, run or focused anything in it for `STRATA_NOTEBOOK_SESSION_TTL_SECONDS` (default 4 hours), with a tab connected or not,
+- more than `STRATA_NOTEBOOK_MAX_SESSIONS` (default 50) are open: the least recently used is closed,
+- `STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB` is set and the host's available memory is below it: the least recently used are closed until it is above,
+- or the server restarts.
+
+`notebook_sync`, previews, profiling requests, unknown frames and pings are not activity; a running cell is. The checks run every minute and when a notebook is opened, and never close a session with a running cell, an environment job, a held soft lock or a quiesce hold. Connected clients get `session_closed` with the reason before the socket closes. A reconnect to a closed session is refused with HTTP `403`; call `POST /v1/notebooks/open` again for a new session ID. See [Session lifetime and `session_closed`](https://bearingresearch.com/strata/dev/dev/reference/notebook-protocol/#session-lifetime-and-session_closed).
+
+### Cancelling a SQL cell
+
+A cancel stops the notebook waiting for the cell: the run is abandoned, no
+result is published, the cell leaves `running`, and the next cell can start.
+The query itself keeps going in the database until it finishes, because ADBC
+exposes cancellation per driver and several drivers (SQLite among them) answer
+`NOT_IMPLEMENTED`. So a cancelled long query still costs the database what it
+was going to cost; what it no longer costs is the notebook.
+
+### Cancel-on-disconnect grace window
+
+When the **last** WebSocket for a notebook drops, the handler schedules a teardown task instead of running it immediately. Any incoming upgrade for the same `session_id` within ~60 seconds cancels the pending task and resumes against the preserved execution and inspect state. Past the window, the execution that was running when the last socket dropped is cancelled and inspect REPLs are closed; a run another surface (REST, CLI, MCP) started during the window is left alone.
+
+This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style transients: closing a tab still cancels (just after a ~60s delay), but a tmux detach or a network blip won't kill a long-running cell. The grace constant lives at `_GRACE_CANCEL_SECONDS` in `src/strata/notebook/ws.py` if you need to tune it for your deployment.
+
+## Close codes
+
+| Code | Meaning |
+| --- | --- |
+| `1000` | Normal closure (client or server initiated) |
+| `1008` | Policy violation: under `api_key`, the key was revoked or expired while connected |
+| `1011` | Internal error while handling a frame |
+
+A refused upgrade never gets a close code: the server answers the handshake with HTTP `403` before any WebSocket exists, for an unknown or closed session (notebook deleted, evicted, server restart), another tenant's session, an `Origin` not allowed, or a missing or invalid credential. The response carries no reason, so a client cannot tell these apart; reopen by path and, if that fails, report the REST error. A session closed while you are connected sends `session_closed` and then closes with `1000`. The client should call `POST /v1/notebooks/open` to start a new session.
+
+The server does not send protocol-level pings; the WebSocket library's default frame keepalive is what holds idle connections open. If your client sees no traffic for an extended period and you can't tell whether the connection is live, the safest probe is to send `notebook_sync` and watch for the response.

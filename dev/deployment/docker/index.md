@@ -1,0 +1,170 @@
+# Docker Deployment
+
+## Prerequisites
+
+- Docker Engine ≥ 24 with Compose v2 (`docker compose`, not the
+  legacy `docker-compose` script). [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+  bundles both; on Linux install Docker Engine + the
+  [Compose plugin](https://docs.docker.com/compose/install/linux/).
+- ~1.5 GB of disk for the first build; subsequent rebuilds reuse the
+  layer cache.
+
+## Quick Start
+
+```bash
+docker compose up -d --build
+```
+
+Open [http://localhost:8765](http://localhost:8765).
+
+To stop:
+
+```bash
+docker compose down
+```
+
+## What's included
+
+The `docker-compose.yml` runs Strata in **personal mode** with:
+
+- Frontend built and served by the backend
+- Persistent notebook storage via a named volume
+- Persistent cache and metadata via a named volume
+- Health check on `/health`
+
+## Volumes
+
+| Volume | Mount point | Purpose |
+|--------|------------|---------|
+| `strata-state` | `/home/strata/.strata` | Cache, metadata DB, artifacts |
+| `strata-notebooks` | `/tmp/strata-notebooks` | Notebook directories |
+| `./demo-warehouse` (bind, read-only) | `/data/warehouse` | A local Iceberg warehouse to scan, if you have one; Docker creates the host directory empty otherwise |
+
+Data persists across `docker compose down/up` cycles. To reset completely:
+
+```bash
+docker compose down -v  # removes volumes
+```
+
+### Edit notebooks from your host (bind mount)
+
+Named volumes live inside Docker's storage area and aren't visible to
+your file manager or editor on the host. To open the notebook
+directories in VS Code, IntelliJ, or any local editor, swap the
+named volume for a **bind mount** that maps a host path into the
+container.
+
+In `docker-compose.yml`, replace:
+
+```yaml
+    volumes:
+      - strata-state:/home/strata/.strata
+      - strata-notebooks:/tmp/strata-notebooks
+```
+
+…with:
+
+```yaml
+    volumes:
+      - strata-state:/home/strata/.strata
+      - ./notebooks:/tmp/strata-notebooks       # ← bind mount: ./notebooks is on your host
+```
+
+…and drop the matching `strata-notebooks` entry from the top-level
+`volumes:` block (it's no longer used).
+
+```bash
+mkdir -p ./notebooks
+docker compose up -d --build
+# Notebook files now live in ./notebooks/ on your host, editable
+# in VS Code / vim / Finder.
+```
+
+**Permissions.** The container runs as a non-root `strata` user (UID
+1000 in the Docker image). If your host user has a different UID,
+files the container writes will be owned by UID 1000 from the host's
+perspective. On Linux, `chown -R 1000:1000 ./notebooks` once.
+On macOS Docker Desktop this is handled transparently by the file-
+sharing layer; no action needed.
+
+**Why `/tmp/strata-notebooks` inside the container?** That's the path
+the compose file pins via `STRATA_NOTEBOOK_STORAGE_DIR`. The path is
+arbitrary as long as the env var and the volume mount agree - feel
+free to change both to `/data/notebooks` or whatever fits your
+mental model.
+
+## Environment variables
+
+Override defaults in the `environment:` block of `docker-compose.yml`:
+
+```yaml
+environment:
+  - STRATA_HOST=0.0.0.0
+  - STRATA_PORT=8765
+  - STRATA_DEPLOYMENT_MODE=personal
+  - STRATA_CACHE_DIR=/home/strata/.strata/cache
+```
+
+To serve on another host port, change the host side of `ports:`
+(`"9000:8765"`) and leave `STRATA_PORT` alone. Changing `STRATA_PORT`
+moves the port inside the container: the healthcheck follows it, but the
+container side of `ports:` (and, in the service-mode demo, the nginx
+upstream) must change with it.
+
+The port is published on `127.0.0.1` only. The image runs personal mode,
+which has no authentication: anyone who can reach the port can run code as
+the container's `strata` user. To share a server with other people, run
+[service mode](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/) with principal auth instead.
+
+To reach your own container from another machine you trust, publish the port
+on every interface (`"8765:8765"`, or `-p 8765:8765`), knowing that everyone
+on that network can then run cells. To reach it by a host name
+(`devbox.lan`), also add that name: personal mode answers only to the names
+it expects, so a DNS-rebinding page cannot drive it.
+
+```yaml
+  - STRATA_ALLOWED_HOSTS=devbox.lan
+```
+
+See [Configuration Reference](https://bearingresearch.com/strata/dev/dev/reference/configuration/) for all options.
+
+## Prebuilt image
+
+Each release after 0.9.0 publishes the image this Dockerfile builds as
+`ghcr.io/bearing-research/strata:<version>`, and `:latest` names the
+newest stable release. Pin a version for anything you deploy or build
+on. The image is linux/amd64 only; an arm64 host runs it under
+emulation, or builds its own as below.
+
+```bash
+docker run --rm -p 127.0.0.1:8765:8765 \
+  -v strata_state:/home/strata/.strata \
+  ghcr.io/bearing-research/strata:<version>
+```
+
+To extend it, start your own Dockerfile `FROM` it.
+
+The image runs as the non-root `strata` user, so a service-mode server in it
+refuses [`STRATA_NOTEBOOK_HARNESS_USER`](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#who-a-cell-is-strata_notebook_harness_user):
+switching users needs root. To run cells as a harness user here, run the
+container as root (`--user root`, or `user: root` in Compose) and under an init
+(`docker run --init`, or `init: true`).
+
+## Building the image manually
+
+```bash
+docker build -t strata .
+docker run --rm -p 127.0.0.1:8765:8765 \
+  -v strata_state:/home/strata/.strata \
+  strata
+```
+
+The multi-stage Dockerfile:
+
+1. **Frontend builder** (Node 26) builds the Vue.js UI
+2. **Backend builder** (uv) builds the pure-Python wheel
+3. **Runtime**: minimal image with the wheel, the frontend dist, and
+   the `otel`, `postgres`, `sql`, `sql-sqlite` and `mcp` extras, so OTLP
+   tracing, a Postgres artifact store (`STRATA_ARTIFACT_METADATA_DSN`),
+   SQL cells over DuckDB or SQLite and the `/mcp` endpoint
+   (`STRATA_MCP_ENABLED=true`) work without building your own image

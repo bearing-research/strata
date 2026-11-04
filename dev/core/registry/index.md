@@ -1,0 +1,245 @@
+# Artifacts & Model Registry
+
+Every materialized result in Strata is an immutable, versioned **artifact**
+with content-addressed provenance. The registry layer adds the pointers and
+history that turn the artifact store into a lightweight model registry:
+**names**, **aliases**, **tags**, an append-only **audit**, and optional
+**approval gates** - all in the artifact store's own metadata database
+(SQLite, or Postgres with `STRATA_ARTIFACT_METADATA_DSN`), no extra services.
+
+## Names
+
+A name is a mutable, human-readable pointer to one artifact version:
+
+```python
+client.materialize(inputs=[...], transform=..., name="taxi/tip-model")
+client.set_name("taxi/tip-model", artifact_id, version)
+resolved = client.resolve_name("taxi/tip-model")
+```
+
+A named version is also kept: the store's retention sweep collects only what
+nothing holds, and an unnamed result is a cache entry that may be computed again
+later. See [Cleaning up the Core artifact store](https://bearingresearch.com/strata/dev/dev/deployment/lifecycle/#cleaning-up-the-core-artifact-store).
+
+Slash-namespaced names (`team/dataset/raw`) are the natural convention and
+fully supported. A name tracks "the latest blessed build of this line";
+every move is audited.
+
+## Aliases
+
+Aliases are intent pointers *on a name* - the post-stages registry model
+(champion/candidate rather than Staging/Production enums):
+
+```python
+client.set_alias("taxi/tip-model", "champion", artifact_id, version)
+client.set_alias("taxi/tip-model", "candidate", new_id, new_version)
+client.resolve_alias("taxi/tip-model", "champion")
+```
+
+A name can hold any number of aliases. Aliases may pin an **older**
+version (an old champion stays fetchable after the name moves on), and an aliased
+artifact is protected from garbage collection. Setting an alias to the
+version it already points at is a **no-op** - idempotent promote cells
+re-run without spamming history.
+
+In the artifact CLI, `name@alias` works anywhere a reference does:
+
+```bash
+strata artifact show taxi/tip-model@champion
+strata artifact lineage taxi/tip-model@champion
+strata artifact pull taxi/tip-model@champion --to model.arrow
+```
+
+## Tags
+
+Key/value facts about one artifact version - recorded at promote time,
+queryable later:
+
+```python
+client.set_tag(artifact_id, version, "mae", "1.226")
+client.set_tag(artifact_id, version, "trained_at_snapshot", str(snapshot))
+client.get_tags(artifact_id, version)
+```
+
+## Audit
+
+Every name, alias, and tag mutation lands in an append-only audit table -
+written **in the same transaction** as the mutation, so a change can never
+land unrecorded. The audit answers "what did champion point to before?":
+
+```bash
+$ strata artifact audit taxi/tip-model
+2026-06-07 06:01  alias_set         taxi/tip-model@champion  4861a747@v1 -> e3ea60b6@v1
+2026-06-07 06:01  alias_approved    taxi/tip-model@champion
+2026-06-07 06:01  alias_request_set taxi/tip-model@champion
+```
+
+Entries carry the actor (principal id when authenticated), the action, and
+the from → to versions. `GET /v1/registry/audit` serves the same data; the
+SDK exposes `get_registry_audit(name=..., artifact_id=...)`.
+
+Publishing an artifact, withdrawing a publication and changing its credits
+(authors or identifiers, `PATCH /v1/publications/{token}`) are recorded in the
+same log, as `publish`, `withdraw` and `credit` with the publication's id (the
+SHA-256 of its token, never the token) in `value`.
+
+### Following the store
+
+Something that reacts to changes, such as a platform mirroring a registry or a
+feed of promotions, reads `GET /v1/events?since=<seq>&limit=<n>`. It returns
+the same entries **oldest first** after `since`, with `next` set to the last
+`seq` returned, so passing `next` back pages through every event exactly once,
+including those that land between two reads. `limit` is at most 1000. Scoping
+matches the audit: a principal sees its tenant, `admin:*` and personal mode see
+the whole store.
+
+```json
+{"events": [{"seq": 41, "action": "publish", "artifact_id": "fig", "to_version": 1,
+             "key": "token", "value": "…", "actor": "ana", "tenant": "", "at": 1757900000.0}],
+ "next": 41}
+```
+
+## Approval gates
+
+Protect aliases whose moves should require a human:
+
+```bash
+STRATA_REGISTRY_PROTECTED_ALIASES=champion,production
+```
+
+Moves (and deletes) of protected aliases return **202 pending** instead of
+applying. Deleting an alias (`DELETE /v1/names/{name}/aliases/{alias}`) is a
+personal-mode route and answers 403 in service mode, so there only moves
+reach the queue. The queue is visible, and approval applies the move with the
+approver as the audit actor - atomically with the pending-consumption, so
+a crash can never swallow an approval. An approve and a reject of the same
+change cannot both succeed: whichever commits first consumes it, and the other
+answers `404`:
+
+```python
+client.list_pending_changes()
+client.approve_alias_change("taxi/tip-model", "champion")
+client.reject_alias_change("taxi/tip-model", "champion")
+```
+
+```bash
+strata artifact pending          # the review queue, from the CLI
+```
+
+If a pending change's target artifact disappears before approval, the
+approve fails cleanly and the pending entry stays for an explicit reject.
+Unprotected aliases apply immediately; the default is no gating.
+
+**Authorization (service mode).** Under principal auth (trusted proxy or API
+keys), approve and reject require the `admin:registry` scope, and approval
+enforces separation of duty - the requester cannot self-approve their own
+move unless they hold the `admin:*` break-glass scope. The audit log is
+tenant-scoped: a principal reads only its own tenant's history (`admin:*`
+sees the whole store). In personal mode (single operator, no auth) these
+gates are inert. Resolving names/aliases is a tenant-scoped read in service
+mode; *publishing* them (`set_name` / `set_alias`, or `name=` on a
+materialize) requires opting into
+`service_writes_enabled` and holding the `artifacts:write` scope - see
+[Service Mode → shared research store](https://bearingresearch.com/strata/dev/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
+
+## The promotion flow, end to end
+
+The shape this is designed for - a notebook training pipeline whose last
+cell promotes through the registry:
+
+```python
+# promote cell
+model_art = client.put(
+    inputs=[features_uri], transform=..., data=model_bytes, name="taxi/tip-model"
+)
+client.set_tag(model_art.artifact_id, model_art.version, "mae", f"{mae:.4f}")
+move = client.set_alias("taxi/tip-model", "champion", model_art.artifact_id, model_art.version)
+print(move.get("status", "applied"))  # "applied" | "pending" | "unchanged"
+```
+
+New data lands in the lake → the [`@table` annotation](https://bearingresearch.com/strata/dev/dev/notebook/annotations/#table)
+makes the training cells stale → the pipeline re-runs → promote proposes the
+challenger → a human approves → and the whole history is reconstructible:
+
+```bash
+strata artifact lineage taxi/tip-model@champion
+# model <- features <- scan <- table file://...#nyc.trips @ snapshot 2558063...
+strata artifact audit taxi/tip-model
+strata artifact verify    # every blob exists and matches its digest; Arrow ones their rows
+strata artifact gc --dry-run   # what the retention sweep would collect
+```
+
+## In the notebook (the registry dashboard)
+
+Everything above also has a UI - the registry is a first-class surface in the
+notebook, so promotion and approvals don't have to be code. The dashboard shows
+in both deployment modes, and describes whichever store the cells write to: with
+`STRATA_NOTEBOOK_REMOTE_STORE_URL` set, that is the team's store rather than the
+local one.
+
+!!! tip "New to it? Start with the walkthrough"
+    For a click-by-click guide - publish from a cell → promote → approve →
+    lineage - see [**Registry Dashboard**](https://bearingresearch.com/strata/dev/dev/notebook/registry-dashboard/).
+    The rest of this section is the reference for what each piece does.
+
+**Publishing.** Inside a cell, the [ambient `strata`
+client](https://bearingresearch.com/strata/dev/dev/notebook/cells/#the-ambient-strata-client) publishes with a name:
+
+```python
+art = strata.put(
+    inputs=[],
+    transform={"ref": "train-tip-model@v1"},
+    data={"coef": model.coef_.tolist(), "intercept": [float(model.intercept_)]},
+    name="taxi/tip-model",
+)
+```
+
+`data` is stored as Arrow, so it takes a `dict`, a `pa.Table`, a pandas or
+polars DataFrame, or Arrow IPC `bytes`. An estimator object is not one of
+those: publish the numbers that define it (coefficients, metrics, a path to
+the weights) rather than the fitted object. `strata.materialize(…, name=…)`
+publishes the same way for work the server builds.
+
+The artifact lands in the registry and is **stamped with the cell that produced
+it**, so it shows up right under that cell.
+
+**Per-cell strip.** Below a cell that published, a compact strip shows what it
+put into the registry - `⬡ taxi/tip-model v3  ★champion  mae=1.98` - with a
+`[Promote▾]` menu (champion / candidate) and a **View lineage** button. Promote
+where you trained the model, without leaving the cell.
+
+**Registry tab.** The bottom drawer has a **Registry** tab:
+
+- a **pending-approval** banner with **Approve / Reject** - the human gate, in
+  the UI (a protected-alias move queues here);
+- a **names table** - each name with its alias chips (`★champion=v1`, `candidate=v2`),
+  latest version, tags, and `[Promote▾]`;
+- a collapsible **audit** timeline.
+
+**Promote feedback.** Setting an alias toasts the result: `✓ taxi/tip-model →
+champion` when it applies, or `⏳ champion change pending approval` when the
+alias is protected - at which point the pending banner appears for someone to
+approve. Unprotected aliases (candidate) apply immediately.
+
+**Lineage.** The **View lineage** button (strip or names table) opens the provenance chain -
+`model ← features ← scan ← table @ snapshot` - the same lineage the CLI prints,
+as an interactive view.
+
+So the same promote → gate → approve → audit loop the SDK/CLI drives is a few
+clicks in the notebook, backed by the identical audited routes.
+
+## Storage & durability
+
+Registry state lives in the same database as artifact metadata:
+`artifacts.sqlite` under the artifact directory (WAL mode), or the Postgres
+database named by `STRATA_ARTIFACT_METADATA_DSN`, with `strata migrate` to
+carry an existing SQLite store across. Each mutation is one transaction.
+Everything commits before the API responds; the audit is in-transaction with
+its mutation; server restarts are non-events. The `strata artifact` CLI reads
+the server's configured store directly, server up or down; `--artifact-dir`
+points it at one local SQLite store instead. Every subcommand that reports
+(all but `pull`, `archive` and `unpublish`) takes `--format human|json`;
+`list` filters with `--state` and caps rows with
+`--limit` (default 50), `audit` takes `--limit` too, `lineage` stops at
+`--max-depth` (default 10), and `--tenant` scopes name and alias resolution on
+a store several tenants share.
