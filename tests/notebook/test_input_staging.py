@@ -16,6 +16,7 @@ import pytest
 
 from strata.notebook import each
 from strata.notebook.artifact_integration import BLOB_COPY_CHUNK_BYTES
+from strata.notebook.cell_paths import batch
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
@@ -148,7 +149,9 @@ class TestBoundedMemory:
         out = tmp_path / "out"
         out.mkdir()
 
-        spec = CellExecutor(session)._materialize_artifact_to_dir(uri, out, "x")
+        spec = batch.materialize_artifact_to_dir(
+            session, CellExecutor(session)._batch_context(), uri, out, "x"
+        )
 
         assert json.loads((out / spec["file"]).read_bytes()) == 1
 
@@ -158,7 +161,8 @@ class TestBoundedMemory:
         uri = f"strata://artifact/{_id(session, 'a', 'x')}@v=1"
         _gone(session, monkeypatch, _id(session, "a", "x"))
 
-        assert CellExecutor(session)._materialize_artifact_to_dir(uri, tmp_path, "x") is None
+        context = CellExecutor(session)._batch_context()
+        assert batch.materialize_artifact_to_dir(session, context, uri, tmp_path, "x") is None
 
 
 class TestFailures:

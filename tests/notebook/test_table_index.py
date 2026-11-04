@@ -13,6 +13,7 @@ import pytest
 
 from strata.config import StrataConfig
 from strata.notebook import table_index
+from strata.notebook.cell_paths import batch as batch_path
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
@@ -195,13 +196,13 @@ class TestATableCell:
         session = _session(tmp_path, {"c1": source, "c2": "n = snap\n"})
         pinned = table.current_snapshot().snapshot_id
         executor = CellExecutor(session)
-        check = executor._batch_service_cache_check
+        check = batch_path.batch_service_cache_check
 
-        async def moved_first(cell_id, *args, **kwargs):
+        async def moved_first(*args, **kwargs):
             table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
-            return await check(cell_id, *args, **kwargs)
+            return await check(*args, **kwargs)
 
-        monkeypatch.setattr(executor, "_batch_service_cache_check", moved_first)
+        monkeypatch.setattr(batch_path, "batch_service_cache_check", moved_first)
         notebook_id = session.notebook_state.id
         batch = await ws._run_partition_batch(
             session=session,

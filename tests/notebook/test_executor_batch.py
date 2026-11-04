@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from strata.notebook.cell_paths import batch
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
@@ -289,10 +290,8 @@ async def test_the_parents_own_work_is_not_charged_to_a_cell(tmp_path: Path, mon
     session = _make_session_with_cells(tmp_path, [("c1", "x = 1\n")])
     specs = _populate_consumed_vars([_cell_spec("c1", "x = 1\n")], session)
 
-    import strata.notebook.executor as executor_module
-
     class _Clock:
-        """The executor's ``time`` with a wall clock the test can move forward."""
+        """The batch path's ``time`` with a wall clock the test can move forward."""
 
         offset = 0.0
 
@@ -303,10 +302,10 @@ async def test_the_parents_own_work_is_not_charged_to_a_cell(tmp_path: Path, mon
             return time.time() + self.offset
 
     clock = _Clock()
-    monkeypatch.setattr(executor_module, "time", clock)
+    monkeypatch.setattr(batch, "time", clock)
 
     executor = CellExecutor(session)
-    real_cache_check = executor._batch_service_cache_check
+    real_cache_check = batch.batch_service_cache_check
 
     async def slow_cache_check(*args, **kwargs):
         # An hour of the parent's time passes, far past the cell timeout, with
@@ -315,7 +314,7 @@ async def test_the_parents_own_work_is_not_charged_to_a_cell(tmp_path: Path, mon
         clock.offset += 3600.0
         return await real_cache_check(*args, **kwargs)
 
-    monkeypatch.setattr(executor, "_batch_service_cache_check", slow_cache_check)
+    monkeypatch.setattr(batch, "batch_service_cache_check", slow_cache_check)
 
     result = await executor.execute_batch(specs, cell_timeout_seconds=600.0)
 

@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from vestigo.provenance import TransformSpec, derive_subkey
 
-from strata.notebook.cell_paths import fanout
+from strata.notebook.cell_paths import batch, fanout
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
@@ -261,8 +261,14 @@ class TestBatch:
     """Canonical materialization; a pull whenever that fails."""
 
     async def _check(self, session, cell_id, tmp_path):
-        return await CellExecutor(session)._batch_service_cache_check(
-            cell_id, tmp_path, executed_sources={}, provenance={}, use_cache=True
+        return await batch.batch_service_cache_check(
+            session,
+            CellExecutor(session)._batch_context(),
+            cell_id,
+            tmp_path,
+            executed_sources={},
+            provenance={},
+            use_cache=True,
         )
 
     async def test_a_key_with_no_row_asks_the_team_store(self, tmp_path, pulls):
