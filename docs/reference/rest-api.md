@@ -333,6 +333,20 @@ instead of typing a filesystem path. Available in both modes; requires
 `notebook:read` under principal auth. On a multi-tenant server the scan root is
 `<notebook_storage_dir>/<tenant>/` (the whole root for `admin:*`).
 
+### Samples
+
+```
+GET /v1/notebooks/samples
+POST /v1/notebooks/samples/{name}/open
+```
+
+`GET` returns `{ "samples": [{ "name", "title", "description" }] }`, the notebooks
+bundled with Strata, and requires `notebook:read` under principal auth. `POST` copies
+one into the caller's storage root under a fresh name, as a notebook with its own id,
+and opens the copy. It responds as [Open Notebook](#open-notebook) does, once the
+copy's environment is synced and warmed, and requires `notebook:write`. An unknown name
+is a 404.
+
 ### Validate Recent Notebooks
 
 ```

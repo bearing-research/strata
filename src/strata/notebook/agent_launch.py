@@ -146,17 +146,22 @@ class _OpenError(RuntimeError):
 
 
 def _open_session(server_url: str, notebook_dir: Path) -> str:
-    """``POST /v1/notebooks/open`` for *notebook_dir*; return its ``session_id``.
+    """``POST /v1/notebooks/open`` for *notebook_dir*; return its ``session_id``."""
+    return _post_for_session(
+        f"{server_url}/v1/notebooks/open", {"path": str(notebook_dir)}, server_url
+    )
+
+
+def _post_for_session(
+    url: str, body: dict[str, str] | None, server_url: str, *, timeout: float = 60.0
+) -> str:
+    """POST to a route that opens a notebook; return its ``session_id``.
 
     Raises :class:`_OpenError` carrying the server's ``detail``, e.g. the 400 a
     reused server gives when the notebook is outside its storage root.
     """
     try:
-        response = httpx.post(
-            f"{server_url}/v1/notebooks/open",
-            json={"path": str(notebook_dir)},
-            timeout=60.0,
-        )
+        response = httpx.post(url, json=body, timeout=timeout)
     except httpx.HTTPError as exc:
         raise _OpenError(f"cannot reach {server_url}: {exc}") from exc
     if response.is_error:

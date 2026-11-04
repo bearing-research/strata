@@ -2361,7 +2361,7 @@ function initializeWebSocket() {
         totalArtifactBytes: p.total_artifact_bytes || 0,
         cellProfiles: (p.cell_profiles || []).map((cp: any) => ({
           cellId: cp.cell_id,
-          cellName: cp.cell_name,
+          cellName: cellMap.value.get(cp.cell_id)?.annotations?.name ?? cp.cell_name,
           status: cp.status,
           durationMs: cp.duration_ms ?? null,
           cacheHit: cp.cache_hit,

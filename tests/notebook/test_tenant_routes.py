@@ -233,6 +233,14 @@ class TestTenantStorage:
         assert response.status_code == 200, response.text
         assert (server.notebook_storage_dir / "acme" / "fresh" / "notebook.toml").is_file()
 
+    def test_a_sample_lands_in_the_openers_tenant_dir(self, server, monkeypatch):
+        monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
+
+        response = _client().post("/v1/notebooks/samples/caching/open", headers=_headers("acme"))
+
+        assert response.status_code == 200, response.text
+        assert (server.notebook_storage_dir / "acme" / "caching" / "notebook.toml").is_file()
+
     def test_an_admin_sees_every_tenants_notebooks(self, acme_notebook):
         listed = _client().get("/v1/notebooks/discover", headers=_headers("ops", "admin:*"))
 

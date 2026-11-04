@@ -516,6 +516,35 @@ async function discoverNotebooks(): Promise<DiscoverNotebooksResponse> {
   return readJson<DiscoverNotebooksResponse>(resp)
 }
 
+export interface NotebookSample {
+  name: string
+  title: string
+  description: string
+}
+
+async function listSamples(): Promise<NotebookSample[]> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/samples`)
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to list samples')
+  }
+  return (await readJson<{ samples: NotebookSample[] }>(resp)).samples
+}
+
+async function openSample(name: string): Promise<NotebookSessionPayload> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/samples/${encodeURIComponent(name)}/open`,
+    {
+      method: 'POST',
+      // A new venv is synced and warmed before this returns.
+      timeoutMs: 600_000,
+    },
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to open sample')
+  }
+  return readJson<NotebookSessionPayload>(resp)
+}
+
 async function validateRecentNotebooks(paths: string[]): Promise<{ valid: string[] }> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/recents/validate`, {
     method: 'POST',
@@ -1551,6 +1580,8 @@ export function useStrata() {
     fetchStream,
     openNotebook,
     discoverNotebooks,
+    listSamples,
+    openSample,
     createNotebook,
     importNotebook,
     renameNotebook,

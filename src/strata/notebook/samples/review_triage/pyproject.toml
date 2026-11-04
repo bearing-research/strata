@@ -1,0 +1,13 @@
+[project]
+name = "review-triage"
+version = "0.1.0"
+description = "Demo: schema-constrained prompt output with @output_schema"
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+    "pandas>=2.0.0",
+]
+
+[tool.uv]

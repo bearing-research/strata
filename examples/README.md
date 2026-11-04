@@ -34,6 +34,7 @@ strata run examples/iris_classification
 
 | Notebook | What it shows |
 |---|---|
+| [`caching/`](caching/) | A two-minute tutorial: what the cache saves, and what an edit runs again. |
 | [`pandas_basics/`](pandas_basics/) | Linear Pandas pipeline: load, select, group, summarize. Smallest end-to-end notebook. |
 | [`iris_classification/`](iris_classification/) | sklearn classifier on the Iris dataset. Shows how artifacts flow between cells. |
 | [`titanic_ml/`](titanic_ml/) | Survival prediction end-to-end: load, feature-engineer, train, score. |

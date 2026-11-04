@@ -79,9 +79,10 @@ class TestMarkdownCellExecution:
         result = asyncio.run(executor.execute_cell("md_cell", body))
 
         assert result.success is True
-        # cache_hit is the structural tell that the fast path ran (no uv
-        # subprocess spawned), not a wall-clock measurement.
-        assert result.cache_hit is True
+        # The structural tell that the fast path ran (no uv subprocess spawned), not a
+        # wall-clock measurement. Nothing was found in a cache, so it isn't a hit.
+        assert result.execution_method == "not_run"
+        assert result.cache_hit is False
         assert result.display_outputs == []
         assert result.display_output is None
         # start_time is wall-clock, so the markdown branch must subtract via

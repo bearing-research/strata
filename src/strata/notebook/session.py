@@ -2374,8 +2374,13 @@ class NotebookSession:
         cache_misses = 0
         total_artifact_bytes = 0
 
+        from strata.notebook.languages import get_language_executor
+
         cell_profiles = []
         for cell in self.notebook_state.cells:
+            # Nothing runs, so there is nothing to time or to have saved.
+            if get_language_executor(cell.language).skips_execution_provenance:
+                continue
             history = self.execution_history.get(cell.id, [])
             last_duration = history[-1].duration_ms if history else None
             is_cached = history[-1].cache_hit if history else cell.cache_hit

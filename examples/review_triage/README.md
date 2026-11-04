@@ -16,7 +16,7 @@ you're iterating on the shape of the output.
 ## Cells
 
 1. `reviews.py`: hand-picked list of customer reviews
-2. `triage.py`: prompt cell with `@output_schema` enforcing
+2. `triage.prompt`: prompt cell with `@output_schema` enforcing
    `{sentiment, priority, tags}` per review
 3. `summary.py`: pandas aggregation of the structured results
 

@@ -31,6 +31,7 @@ from strata.notebook.cli import (
     validate_main,
 )
 from strata.notebook.cli import run_main as _run_main_direct
+from strata.notebook.tutorial import add_tutorial_arguments, tutorial_main
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -699,6 +700,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     add_agent_arguments(agent_parser)
     agent_parser.set_defaults(func=_dispatch_agent)
+
+    tutorial_parser = subparsers.add_parser(
+        "tutorial",
+        help="Open a copy of a bundled sample notebook, or list them",
+        description=(
+            "Copy a sample that ships with Strata into the notebook storage directory "
+            "under a fresh name, open it, and print its URL. With no name, list the "
+            "samples. Starts a server if none is running."
+        ),
+    )
+    add_tutorial_arguments(tutorial_parser)
+    tutorial_parser.set_defaults(func=tutorial_main)
 
     watch_parser = subparsers.add_parser(
         "watch",

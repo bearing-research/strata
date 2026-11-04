@@ -1,0 +1,14 @@
+[project]
+name = "caching"
+version = "0.1.0"
+description = "A two-minute tutorial: what the cache saves, and what an edit re-runs"
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.9.0",
+]
+
+[tool.uv]

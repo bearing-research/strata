@@ -123,6 +123,8 @@ EXPECTED_ROUTES = [
     ("/v1/notebooks/import-snapshot", "POST", 1),
     ("/v1/notebooks/open", "POST", 1),
     ("/v1/notebooks/recents/validate", "POST", 1),
+    ("/v1/notebooks/samples", "GET", 1),
+    ("/v1/notebooks/samples/{name}/open", "POST", 1),
     ("/v1/notebooks/sessions", "GET", 1),
     ("/v1/notebooks/sessions/{session_id}", "GET", 1),
     ("/v1/notebooks/{notebook_id}", "DELETE", 1),

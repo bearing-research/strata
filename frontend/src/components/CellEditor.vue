@@ -321,6 +321,8 @@ const executionMethodLabel = computed(() => {
       return 'warm'
     case 'cold':
       return 'cold'
+    case 'not_run':
+      return ''
     default:
       return props.cell.executorName
   }

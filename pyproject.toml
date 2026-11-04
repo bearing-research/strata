@@ -227,7 +227,7 @@ module-name = "strata"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["examples/", "experiments/", "tests/contract/cellgraph/scenarios/"]
+extend-exclude = ["examples/", "experiments/", "src/strata/notebook/samples/", "tests/contract/cellgraph/scenarios/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
@@ -241,6 +241,7 @@ python = ".venv"
 # and fixture injection; ty can model neither.
 [tool.ty.src]
 include = ["src", "packages/strata-client/src", "packages/strata-pool/src"]
+exclude = ["src/strata/notebook/samples"]
 
 [tool.ty.rules]
 # Optional deps (ADBC drivers) use guarded imports

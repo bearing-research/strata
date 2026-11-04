@@ -1,0 +1,15 @@
+[project]
+name = "pandas-basics"
+version = "0.1.0"
+description = "Core pandas operations: create, filter, group, merge"
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+    "pandas>=2.0.0",
+    "numpy>=2.0.0",
+    "pytest>=9.1.1",
+]
+
+[tool.uv]
