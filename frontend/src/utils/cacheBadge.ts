@@ -31,9 +31,9 @@ export function isCachedAgain(previous: string | undefined, next: string): boole
 /** The fields of a result that is current again; one that was a hit keeps what it saved. */
 export function cachedAgainFields(
   output: { cacheHit?: boolean; cacheSavedMs?: number },
-  lastRunMs: number | undefined,
+  lastGotMs: number | undefined,
 ): { cacheHit: true; cacheSavedMs: number | undefined } {
-  return { cacheHit: true, cacheSavedMs: output.cacheHit ? output.cacheSavedMs : lastRunMs }
+  return { cacheHit: true, cacheSavedMs: output.cacheHit ? output.cacheSavedMs : lastGotMs }
 }
 
 /**
@@ -44,10 +44,10 @@ export function cacheFieldsAfterSync(
   serverCacheHit: boolean | undefined,
   status: string,
   previous: { cacheHit?: boolean; cacheSavedMs?: number; cacheLoadMs?: number } | undefined,
-  lastRunMs: number | undefined,
+  lastGotMs: number | undefined,
 ): { cacheHit?: true; cacheSavedMs?: number; cacheLoadMs?: number } {
   const cacheLoadMs = previous?.cacheLoadMs
-  if (serverCacheHit) return { ...cachedAgainFields(previous ?? {}, lastRunMs), cacheLoadMs }
+  if (serverCacheHit) return { ...cachedAgainFields(previous ?? {}, lastGotMs), cacheLoadMs }
   if (status === 'stale' && previous?.cacheHit) {
     return { cacheHit: true, cacheSavedMs: previous.cacheSavedMs, cacheLoadMs }
   }

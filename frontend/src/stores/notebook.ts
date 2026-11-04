@@ -1002,7 +1002,8 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
     serverCell.cache_hit,
     localCell.status,
     previousOutput,
-    localCell.durationMs,
+    // Not durationMs: after a page load that is gone, and on a hit it is the load time.
+    localCell.lastGot?.ms,
   )
   if (cacheFields.cacheHit) {
     // A cell that displays nothing still has a result, as in `cell_output`.
@@ -2000,7 +2001,7 @@ function initializeWebSocket() {
       const cell = cellMap.value.get(cellId)
 
       if (cell?.output && !cell.output.error && isCachedAgain(previousStatus, status)) {
-        Object.assign(cell.output, cachedAgainFields(cell.output, cell.durationMs))
+        Object.assign(cell.output, cachedAgainFields(cell.output, cell.lastGot?.ms))
       }
 
       // A new run: drop the previous run's stream buffer. Run-all, cascade

@@ -86,6 +86,16 @@ test('a result the server did not get from the cache is not a hit', () => {
   assert.deepEqual(cacheFieldsAfterSync(false, 'idle', undefined, 9), {})
 })
 
+test('a hit found on a freshly loaded page says what the server recorded it saved', () => {
+  const fields = cacheFieldsAfterSync(true, 'ready', undefined, 2700)
+  assert.equal(cacheBadgeLabel(fields.cacheSavedMs, fields.cacheLoadMs), 'cached · saved 2.7s')
+})
+
+test('a hit the server recorded as saving nothing reads plain cached after a page load', () => {
+  const fields = cacheFieldsAfterSync(true, 'ready', undefined, 0)
+  assert.equal(cacheBadgeLabel(fields.cacheSavedMs, fields.cacheLoadMs), 'cached')
+})
+
 test('a hit found on a page with no earlier output says nothing of a saving', () => {
   assert.deepEqual(cacheFieldsAfterSync(true, 'ready', undefined, undefined), {
     cacheHit: true,
