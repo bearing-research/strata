@@ -180,7 +180,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **The table viewer no longer shows NaN and infinity as `null`.** JSON cannot carry
   them, so a column holding `inf` read `null` and a range ending there read `1.5 – null`.
   Pages, previews and min/max now send `"NaN"`, `"inf"` and `"-inf"`. A pandas NaN is
-  stored as a null, so it still reads `null`. (#PRNUM)
+  stored as a null, so it still reads `null`. (#1404)
 - **A markdown cell no longer reads as a cache hit.** Run All gave markdown cells a
   `cached` badge and counted them in the profiler's hits and rows, so a first run said
   `4 cached`. Nothing runs for one, so it now has no badge and is not counted. (#1402)
