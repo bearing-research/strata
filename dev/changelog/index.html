@@ -4047,6 +4047,8 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A DAG label stays off its own edge.</strong> An edge running down and to the left no longer
+  passes through its variable name. (#1413)</li>
 <li><strong>A cell can keep what <code>strata.put</code> and <code>strata.materialize</code> return.</strong> A later cell
   reading the handle failed with "failed to store output artifacts", because the handle
   pickled the run's checkpoint pipe. It now leaves the run's pipe and token behind, and
