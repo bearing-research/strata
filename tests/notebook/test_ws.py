@@ -235,7 +235,7 @@ async def test_notebook_sync_includes_causality_and_staleness(temp_notebook):
 
     state = fake.frames_of("notebook_state")[-1]["payload"]
     root = next(cell for cell in state["cells"] if cell["id"] == "root")
-    assert root["status"] == "idle"
+    assert root["status"] == "stale"
     assert "staleness_reasons" in root
     assert root["causality"]["reason"] == "self"
 

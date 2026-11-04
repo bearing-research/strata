@@ -37,6 +37,10 @@ exhaustive commit history.
   shrinks to a thin rail and the cells take its width. A typical cell header is
   one row, with `leaf` and the execution method in the status dot's tooltip. DAG edge
   labels no longer overlap. (#1395)
+- **An edited cell reads stale, and undoing the edit brings it back.** A cell
+  that ran and was then edited read `idle` while it went on showing that run's
+  output. It now reads `stale · source changed`, and reverting the edit returns
+  it and the cells below it to `ready`, shown as cached. (#1397)
 - **A cell's inputs no longer pass through server memory.** An upstream value streams
   from the store into the run in 1 MiB chunks, so a 1 GB frame adds about 1 MB to the
   server's memory instead of 1 GB, per consuming cell per run. (#1383)

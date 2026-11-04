@@ -737,8 +737,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "init": {
@@ -1260,8 +1262,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "O": {

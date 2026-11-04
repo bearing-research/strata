@@ -19,3 +19,19 @@ export function cacheBadgeLabel(
 export function cacheBadgeTitle(loadMs: number | null | undefined): string {
   return loadMs ? `Result loaded from cache in ${loadMs}ms` : 'Result loaded from cache'
 }
+
+/**
+ * A stale cell back to ready without a run: an edit was undone, so its stored result is current
+ * again, and it reads as a hit. A run goes through `running`, so it never lands here.
+ */
+export function isCachedAgain(previous: string | undefined, next: string): boolean {
+  return previous === 'stale' && next === 'ready'
+}
+
+/** The fields of a result that is current again; one that was a hit keeps what it saved. */
+export function cachedAgainFields(
+  output: { cacheHit?: boolean; cacheSavedMs?: number },
+  lastRunMs: number | undefined,
+): { cacheHit: true; cacheSavedMs: number | undefined } {
+  return { cacheHit: true, cacheSavedMs: output.cacheHit ? output.cacheSavedMs : lastRunMs }
+}

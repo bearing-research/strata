@@ -497,8 +497,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     },
     "u1": {
@@ -969,8 +971,10 @@
       "tables": []
      },
      "staleness": {
-      "reasons": [],
-      "status": "idle"
+      "reasons": [
+       "self"
+      ],
+      "status": "stale"
      }
     }
    },
