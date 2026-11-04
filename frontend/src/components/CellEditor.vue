@@ -26,6 +26,7 @@ import {
 import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useCodemirror } from '../composables/useCodemirror'
 import { useNotebook } from '../stores/notebook'
+import { cellReads } from '../utils/cellReads'
 import CellArtifactStrip from './CellArtifactStrip.vue'
 import DataTable from './DataTable.vue'
 import WidgetCell from './WidgetCell.vue'
@@ -61,6 +62,7 @@ const emit = defineEmits<{
 
 const {
   notebook,
+  dagEdges,
   connected,
   environmentMutationActive,
   environmentLastAction,
@@ -85,6 +87,8 @@ const {
   addVariant,
   cancelCellWebSocket,
 } = useNotebook()
+
+const reads = computed(() => cellReads(props.cell.id, props.cell.references, dagEdges.value))
 
 const variantGroup = computed(() => {
   if (!props.cell.variantGroup) return null
@@ -934,8 +938,8 @@ function outputKey(output: CellOutput, index: number): string {
             >
               shadows
             </span>
-            <span v-if="cell.upstreamIds.length" class="cell-vars">
-              reads: <code>{{ cell.references.join(', ') }}</code>
+            <span v-if="reads.length" class="cell-vars">
+              reads: <code>{{ reads.join(', ') }}</code>
             </span>
             <!-- Runtime: worker, mounts, timeout, env, annotations, cache. -->
             <div class="cell-meta-runtime">
