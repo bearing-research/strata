@@ -36,6 +36,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (#1381)
 
 ### Changed
+- **The docs look like the app, and publish themselves for agents.** The theme uses the
+  app's blue, diamond and JetBrains Mono. Installation now comes first under "Start here".
+  Each page is published as Markdown beside its HTML, with a **Copy page as Markdown**
+  button, and `llms.txt` and `llms-full.txt` are built with the docs. Links now use
+  `bearingresearch.com/strata`. (#1408)
 - **README, repo metadata and `CONTRIBUTING.md`.** The README leads with coding agents and
   drops the long feature list, which stays in the docs. Package URLs use
   `bearingresearch.com/strata/`, and there is now a `CONTRIBUTING.md`. (#1403)
@@ -3886,7 +3891,7 @@ cell.featurize(cell.trips)…` - `cell.X` is any def or input after the cell
   warnings in both human and JSON output. Strata also warns when two of a cell's
   outputs **share a mutable object** (the optimizer-over-a-model footgun: stored
   as separate artifacts they decouple downstream). New
-  [Stateful objects & value semantics](https://bearing-research.github.io/strata/latest/notebook/concepts/)
+  [Stateful objects & value semantics](https://bearingresearch.com/strata/latest/notebook/concepts/)
   docs cover the one-cell training pattern.
 
 - **Variant sweep mode.** A variant group can now run in **sweep mode**
@@ -4484,7 +4489,7 @@ rw` opt out automatically.
 #### Versioned docs
 
 - Documentation site is now version-aware via `mike`. Visit
-  `https://bearing-research.github.io/strata/` - the version dropdown
+  `https://bearingresearch.com/strata/` - the version dropdown
   in the header lets readers pick `latest` (always the current
   release) or a pinned version (`0.2.0`, `0.1.0`, ...). Pre-release
   preview lives under `dev`.

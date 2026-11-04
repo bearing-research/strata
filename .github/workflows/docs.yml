@@ -12,6 +12,8 @@ on:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      - 'docs_hooks/**'
+      - 'docs_overrides/**'
       # Included in a docs page via pymdownx.snippets; without this the
       # published page keeps serving the old README.
       - 'packages/*/README.md'
@@ -21,6 +23,8 @@ on:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      - 'docs_hooks/**'
+      - 'docs_overrides/**'
       # Included in a docs page via pymdownx.snippets; without this the
       # published page keeps serving the old README.
       - 'packages/*/README.md'
@@ -60,7 +64,9 @@ jobs:
 
       - name: Validate build (PRs)
         if: github.event_name == 'pull_request'
-        run: uv run mkdocs build --strict
+        run: |
+          uv run mkdocs build --strict
+          test -s site/llms.txt && test -s site/llms-full.txt && test -s site/index.md
 
       - name: Configure git for mike
         if: github.event_name == 'push'

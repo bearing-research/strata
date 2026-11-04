@@ -1,3 +1,7 @@
+---
+description: Install Strata, and the commands it gives you.
+---
+
 # Installation
 
 ## Prerequisites

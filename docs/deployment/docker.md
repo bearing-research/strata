@@ -1,3 +1,7 @@
+---
+description: Run Strata in Docker with Compose.
+---
+
 # Docker Deployment
 
 ## Prerequisites

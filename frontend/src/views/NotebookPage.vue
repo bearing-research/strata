@@ -882,7 +882,7 @@ function goHome() {
             <p class="cells-empty-hint">
               Or browse the
               <a
-                href="https://bearing-research.github.io/strata/latest/notebook/examples/"
+                href="https://bearingresearch.com/strata/latest/notebook/examples/"
                 target="_blank"
                 rel="noopener"
               >

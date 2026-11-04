@@ -30,4 +30,4 @@ agent's scratchpad live with `strata agent ./scratch`, which starts a server
 scoped to the project; plain `strata watch ./scratch` only works against a server
 whose `STRATA_NOTEBOOK_STORAGE_DIR` covers the project.
 
-See [Driving a notebook with a coding agent](https://bearing-research.github.io/strata/latest/notebook/agent/).
+See [Driving a notebook with a coding agent](https://bearingresearch.com/strata/latest/notebook/agent/).
