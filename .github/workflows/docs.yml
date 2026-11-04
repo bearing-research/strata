@@ -67,6 +67,7 @@ jobs:
         run: |
           uv run mkdocs build --strict
           test -s site/llms.txt && test -s site/llms-full.txt && test -s site/index.md
+          test -s site/notebook/cells/index.html
 
       # mike changes site_url, so only a real deploy shows what a published link will read.
       - name: Check versioned links (PRs)

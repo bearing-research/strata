@@ -47,7 +47,7 @@ your upstream cell produced, not a mock. If the cell source itself raises, every
 test that requests `cell` reports a clear *setup* error rather than an opaque
 collection failure.
 
-A [`# @per_variant`](annotations.md#fan-out-run-a-downstream-cell-once-per-variant)
+A [`# @per_variant`](../guides/cells/loops-and-variants.md#fan-out-run-a-downstream-cell-once-per-variant)
 cell is tested once per variant, each session binding the value that variant's
 instance reads, and each case is named for its variant the way pytest names a
 parametrized one: `test_score[logreg]`, `test_score[rf]`.
@@ -117,7 +117,7 @@ Results are saved to `.strata/runtime.json` and **rehydrate when you reopen the
 notebook**, so you see the last run's pass/fail and the stale badge immediately,
 without re-running. (Test *source* lives in the committed `cells/<id>.test.py`;
 the *results* are runtime state under `.strata/`, like the rest of
-[`runtime.json`](concepts.md).)
+[`runtime.json`](../concepts/caching.md).)
 
 ## Over WebSocket
 
@@ -177,5 +177,5 @@ plugin, so the same cell tests can drive a CI or pre-commit check later.
 
 ---
 
-**See also:** [Cell Types](cells.md) · [Cell Annotations](annotations.md) ·
+**See also:** [Cell Types](../guides/cells/index.md) · [Cell Annotations](../reference/annotations/index.md) ·
 [`pandas_basics` example](../examples/pandas_basics.md)

@@ -198,7 +198,7 @@ People appear once each. A step run by someone listed as an author points at
 that author's node (the ORCID when one is given, as a bare id or a link), and an
 author listed twice is credited once.
 
-A step that read a URL through [`@fetch`](annotations.md#fetch) names it as
+A step that read a URL through [`@fetch`](../reference/annotations/python.md#fetch) names it as
 an input. On the page it appears under "External inputs" with the digest of the
 bytes read, when they were retrieved, and when the reading step ran. In the
 crate it is a `File` whose `@id` is the URL, with that `sha256` and the
@@ -206,7 +206,7 @@ retrieval time as `sdDatePublished`. The digest describes what was read, and
 the URL may serve something else now. A step stored before retrieval times were
 recorded shows only when it ran.
 
-A Snowflake or BigQuery cell with [`# @cache snapshot`](annotations.md#cache),
+A Snowflake or BigQuery cell with [`# @cache snapshot`](../reference/annotations/sql.md#cache),
 published or upstream of what is, shows the moment of the warehouse state it
 read ("Warehouse state as of") and how long the warehouse keeps that state
 ("Queryable until"). Until then a reader with access to the warehouse can run
@@ -279,7 +279,7 @@ the whole table in memory; neither the manifest nor the crate then lists one.
 The limit is fixed, so it never makes one publication's archive differ between
 builds.
 
-A [`# @output_dir`](annotations.md#output_dir) folder's published bytes are its
+A [`# @output_dir`](../reference/annotations/python.md#output_dir) folder's published bytes are its
 manifest, the list of its files (`artifact.bin`, JSON), which `/p/<token>/data`
 serves. The bundle holds the files themselves under `folder/`, at their paths in
 the folder, each with its own digest in the manifest's `additional_files` and
@@ -438,7 +438,7 @@ version id a different computation took there) lands as a copy under a fresh
 id, `<id>@import=<8 hex>`, in the caller's tenant. Each copy keeps its
 provenance hash, and the CLI points every descendant's lineage edges at the
 ids its ancestors landed on, so the published page resolves every step.
-A [`# @output_dir`](annotations.md#output_dir) folder in the chain goes with
+A [`# @output_dir`](../reference/annotations/python.md#output_dir) folder in the chain goes with
 every file its version names, each before the manifest. A file the target
 already holds (`GET /v1/artifacts/by-provenance/{hash}` finds it with the same
 digest) is not uploaded again, and when a file lands under another version or a

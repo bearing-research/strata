@@ -53,7 +53,7 @@ statement of an indented block leaves a `pass` behind.
 - **Non-Python `%%` cell magics** (`%%R`, `%%ruby`, `%%javascript`,
   `%%html`, `%%latex`, `%%svg`, `%%markdown`). Dropped.
 - **`%%sql`.** Dropped - convert by hand to a Strata
-  [SQL cell](cells.md#sql-cells) if you want it back.
+  [SQL cell](../guides/cells/sql.md#sql-cells) if you want it back.
 - **REPL-inspection magics** (`%who`, `%whos`, `%lsmagic`, `%history`,
   `%alias`, etc.). Dropped; no Strata equivalent.
 
@@ -138,7 +138,7 @@ clean `400` or `409` with `detail` set. An upload over the cap is a
 | Raw             | Skipped; counted in the report                               |
 
 A notebook whose kernel language is R (IRkernel) imports its code
-cells as [R cells](cells.md) as written: no magic, shell or `;`
+cells as [R cells](../guides/cells/index.md) as written: no magic, shell or `;`
 translation and no dependency capture. Install the packages it loads
 in system R or with renv.
 
