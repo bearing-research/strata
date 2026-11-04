@@ -110,7 +110,7 @@ async def test_cell_list_hands_the_source_preview_over_as_text(monkeypatch):
         app.vm.cell_order = ["c1"]
         app._rebuild_cells()
         await pilot.pause()
-        label = app.query_one("#cells", DataTable).get_cell_at(Coordinate(0, 1))
+        label = app.query_one("#cells", DataTable).get_cell_at(Coordinate(0, 2))
         assert isinstance(label, Text)
         assert "df[col]" in label.plain
 
