@@ -328,8 +328,8 @@ the end, no `display()` needed: the harness auto-displays it.
 
 ## 8. Take the tutorial
 
-Strata ships a few sample notebooks, so there is nothing to clone. One is a two-minute
-tutorial on what the cache saves:
+Strata ships sample notebooks that run without an API key, so there is nothing to clone.
+One is a two-minute tutorial on what the cache saves:
 
 ```bash
 strata tutorial           # list the samples
