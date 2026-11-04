@@ -3450,6 +3450,9 @@ parameter settings that produced the outputs below them - read from the
 notebook's persisted control values. Cells marked <code># @app hide</code> are
 omitted, matching the live app view; prompt-cell responses stay excluded
 for the same privacy reason as a regular export.</p>
+<p>Each cell's outputs carry the app view's quiet line, read from the notebook's
+own files: when the result was computed, in UTC, and how long it took or what a
+hit saved. The snapshot has no <strong>lineage</strong> link, since nothing behind it could answer one.</p>
 <p>In the UI, the notebook's <strong>Export</strong> menu offers <strong>App snapshot</strong>
 alongside Markdown and HTML.</p>
 <h2 id="what-gets-rendered">What gets rendered<a class="headerlink" href="#what-gets-rendered" title="Permanent link">&para;</a></h2>

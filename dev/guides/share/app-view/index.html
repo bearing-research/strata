@@ -3072,6 +3072,11 @@ but viewers can still drive widgets - combined with <strong>⚡ Live</strong> th
 <p>Add <code># @app hide</code> to a cell to keep it out of the app view (e.g. a setup cell
 whose output is noise). Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.</p>
+<p>Under each cell's outputs is one quiet line, such as <code>Computed Nov 4, 2026, 9:33 AM
+· from cache, saved 14.5s · lineage</code>. It says when the result was computed, which
+a cache hit does not change, and what this result cost: how long the run took, or
+what the hit saved. <strong>lineage</strong> opens the cells it came from. A hit that took longer
+to load than the run did reads plain <code>from cache</code>, as its badge in the editor does.</p>
 <h2 id="embedding-the-app-view-in-another-site">Embedding the app view in another site<a class="headerlink" href="#embedding-the-app-view-in-another-site" title="Permanent link">&para;</a></h2>
 <p>The app view can be dropped into another page - a dashboard, wiki, or internal
 portal - as an <code>&lt;iframe&gt;</code>. Pick <strong>Embed</strong> from the notebook's <strong>Export</strong> menu to

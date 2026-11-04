@@ -3360,6 +3360,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#read-an-artifacts-lineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read an Artifact's Lineage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#promote-an-artifact" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4911,6 +4922,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#read-an-artifacts-lineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read an Artifact's Lineage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#promote-an-artifact" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -5994,10 +6016,15 @@ notebook's own store rather than the server's. <code>store/artifacts</code> take
 <code>offset</code>, <code>state</code>, <code>sort</code> and <code>order</code>. Each row also has <code>cell_id</code>, <code>cell_name</code>
 and <code>output</code> (all <code>null</code> for a row no cell produced), and the response has
 <code>notebook_name</code>.</p>
-<h3 id="promote-an-artifact">Promote an Artifact<a class="headerlink" href="#promote-an-artifact" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-78-1" name="__codelineno-78-1" href="#__codelineno-78-1"></a>POST /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/promote
+<h3 id="read-an-artifacts-lineage">Read an Artifact's Lineage<a class="headerlink" href="#read-an-artifacts-lineage" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-78-1" name="__codelineno-78-1" href="#__codelineno-78-1"></a>GET /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/lineage
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-79-1" name="__codelineno-79-1" href="#__codelineno-79-1"></a><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team/churn_model"</span><span class="p">,</span><span class="w"> </span><span class="nt">"alias"</span><span class="p">:</span><span class="w"> </span><span class="s2">"candidate"</span><span class="p">,</span><span class="w"> </span><span class="nt">"tags"</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span><span class="w"> </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">}</span>
+<p><code>GET /v1/artifacts/{id}/v/{n}/lineage</code> over the notebook's own store, which is
+where a cell's results and displays are. It takes <code>max_depth</code>.</p>
+<h3 id="promote-an-artifact">Promote an Artifact<a class="headerlink" href="#promote-an-artifact" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-79-1" name="__codelineno-79-1" href="#__codelineno-79-1"></a>POST /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/promote
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-80-1" name="__codelineno-80-1" href="#__codelineno-80-1"></a><span class="p">{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team/churn_model"</span><span class="p">,</span><span class="w"> </span><span class="nt">"alias"</span><span class="p">:</span><span class="w"> </span><span class="s2">"candidate"</span><span class="p">,</span><span class="w"> </span><span class="nt">"tags"</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span><span class="w"> </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">}</span>
 </code></pre></div>
 <p>Copies one of the notebook's artifacts, and the chain that produced it, into
 the team store and names it there. <code>name</code> is optional: without it the chain is
@@ -6010,7 +6037,7 @@ team store is configured, <code>404</code> for an artifact the notebook's store 
 hold, <code>502</code> when the team store refuses or cannot be reached.</p>
 <h2 id="export">Export<a class="headerlink" href="#export" title="Permanent link">&para;</a></h2>
 <h3 id="export-notebook">Export Notebook<a class="headerlink" href="#export-notebook" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-80-1" name="__codelineno-80-1" href="#__codelineno-80-1"></a>GET /v1/notebooks/{session_id}/export?fmt={zip,snapshot,markdown,html}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-81-1" name="__codelineno-81-1" href="#__codelineno-81-1"></a>GET /v1/notebooks/{session_id}/export?fmt={zip,snapshot,markdown,html}
 </code></pre></div>
 <p>One endpoint, four output formats:</p>
 <table>
@@ -6042,15 +6069,15 @@ hold, <code>502</code> when the team store refuses or cannot be reached.</p>
 <p>Markdown and HTML renderings additionally accept <code>include_inactive_variants=true</code> to stack all variants of every group, and <code>app_view=true</code> to render only what the read-only app view shows (widgets, markdown and display outputs, with no sources or console). Prompt-cell responses are intentionally excluded from rendered formats (see <a href="../../notebook/export/">Export</a>).</p>
 <h4 id="snapshots">Snapshots<a class="headerlink" href="#snapshots" title="Permanent link">&para;</a></h4>
 <p>A snapshot is the ZIP plus what a reader and a machine each need:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-81-1" name="__codelineno-81-1" href="#__codelineno-81-1"></a>outputs/&lt;cell id&gt;/0.png          each display output as a file
-<a id="__codelineno-81-2" name="__codelineno-81-2" href="#__codelineno-81-2"></a>outputs/&lt;cell id&gt;/console.json   stdout / stderr
-<a id="__codelineno-81-3" name="__codelineno-81-3" href="#__codelineno-81-3"></a>artifacts.json                   per-cell provenance, timings, and every ready
-<a id="__codelineno-81-4" name="__codelineno-81-4" href="#__codelineno-81-4"></a>                                 cell's artifacts with their content digests
-<a id="__codelineno-81-5" name="__codelineno-81-5" href="#__codelineno-81-5"></a>                                 (an output folder's entries include each file
-<a id="__codelineno-81-6" name="__codelineno-81-6" href="#__codelineno-81-6"></a>                                 version its manifest names)
-<a id="__codelineno-81-7" name="__codelineno-81-7" href="#__codelineno-81-7"></a>artifacts/&lt;id&gt;@v=&lt;n&gt;             the bytes, for whichever were included
-<a id="__codelineno-81-8" name="__codelineno-81-8" href="#__codelineno-81-8"></a>fetch/&lt;sha256&gt;/&lt;file&gt;            with include=all, the bytes each @fetch last read
-<a id="__codelineno-81-9" name="__codelineno-81-9" href="#__codelineno-81-9"></a>fetch/index.json                 with include=all, which URL served which bytes
+<div class="highlight"><pre><span></span><code><a id="__codelineno-82-1" name="__codelineno-82-1" href="#__codelineno-82-1"></a>outputs/&lt;cell id&gt;/0.png          each display output as a file
+<a id="__codelineno-82-2" name="__codelineno-82-2" href="#__codelineno-82-2"></a>outputs/&lt;cell id&gt;/console.json   stdout / stderr
+<a id="__codelineno-82-3" name="__codelineno-82-3" href="#__codelineno-82-3"></a>artifacts.json                   per-cell provenance, timings, and every ready
+<a id="__codelineno-82-4" name="__codelineno-82-4" href="#__codelineno-82-4"></a>                                 cell's artifacts with their content digests
+<a id="__codelineno-82-5" name="__codelineno-82-5" href="#__codelineno-82-5"></a>                                 (an output folder's entries include each file
+<a id="__codelineno-82-6" name="__codelineno-82-6" href="#__codelineno-82-6"></a>                                 version its manifest names)
+<a id="__codelineno-82-7" name="__codelineno-82-7" href="#__codelineno-82-7"></a>artifacts/&lt;id&gt;@v=&lt;n&gt;             the bytes, for whichever were included
+<a id="__codelineno-82-8" name="__codelineno-82-8" href="#__codelineno-82-8"></a>fetch/&lt;sha256&gt;/&lt;file&gt;            with include=all, the bytes each @fetch last read
+<a id="__codelineno-82-9" name="__codelineno-82-9" href="#__codelineno-82-9"></a>fetch/index.json                 with include=all, which URL served which bytes
 </code></pre></div>
 <p><code>include</code> chooses how much travels:</p>
 <table>
@@ -6091,30 +6118,30 @@ without its URL.</p>
 --include all</code>.</p>
 <h2 id="runtime">Runtime<a class="headerlink" href="#runtime" title="Permanent link">&para;</a></h2>
 <h3 id="get-server-runtime-config">Get Server Runtime Config<a class="headerlink" href="#get-server-runtime-config" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-82-1" name="__codelineno-82-1" href="#__codelineno-82-1"></a>GET /v1/notebooks/config
+<div class="highlight"><pre><span></span><code><a id="__codelineno-83-1" name="__codelineno-83-1" href="#__codelineno-83-1"></a>GET /v1/notebooks/config
 </code></pre></div>
 <p>Returns deployment mode, available Python versions, and default paths for the
 server as a whole. Not notebook-scoped. <code>workers_panel</code> is <code>shown</code> or <code>hidden</code>
 (<code>STRATA_NOTEBOOK_WORKERS_PANEL</code>); the open and create responses carry the same
 keys.</p>
 <h3 id="update-notebook-default-timeout">Update Notebook Default Timeout<a class="headerlink" href="#update-notebook-default-timeout" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-83-1" name="__codelineno-83-1" href="#__codelineno-83-1"></a>PUT /v1/notebooks/{session_id}/timeout
+<div class="highlight"><pre><span></span><code><a id="__codelineno-84-1" name="__codelineno-84-1" href="#__codelineno-84-1"></a>PUT /v1/notebooks/{session_id}/timeout
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-84-1" name="__codelineno-84-1" href="#__codelineno-84-1"></a><span class="p">{</span>
-<a id="__codelineno-84-2" name="__codelineno-84-2" href="#__codelineno-84-2"></a><span class="w">  </span><span class="nt">"timeout"</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span>
-<a id="__codelineno-84-3" name="__codelineno-84-3" href="#__codelineno-84-3"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-85-1" name="__codelineno-85-1" href="#__codelineno-85-1"></a><span class="p">{</span>
+<a id="__codelineno-85-2" name="__codelineno-85-2" href="#__codelineno-85-2"></a><span class="w">  </span><span class="nt">"timeout"</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span>
+<a id="__codelineno-85-3" name="__codelineno-85-3" href="#__codelineno-85-3"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>timeout</code> is seconds (0 &lt; t ≤ 86400) or <code>null</code> to clear back to the system
 default. Returns the new timeout and the refreshed cell list.</p>
 <h3 id="update-notebook-default-env">Update Notebook Default Env<a class="headerlink" href="#update-notebook-default-env" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-85-1" name="__codelineno-85-1" href="#__codelineno-85-1"></a>PUT /v1/notebooks/{session_id}/env
+<div class="highlight"><pre><span></span><code><a id="__codelineno-86-1" name="__codelineno-86-1" href="#__codelineno-86-1"></a>PUT /v1/notebooks/{session_id}/env
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-86-1" name="__codelineno-86-1" href="#__codelineno-86-1"></a><span class="p">{</span>
-<a id="__codelineno-86-2" name="__codelineno-86-2" href="#__codelineno-86-2"></a><span class="w">  </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-86-3" name="__codelineno-86-3" href="#__codelineno-86-3"></a><span class="w">    </span><span class="nt">"OPENAI_API_KEY"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sk-..."</span><span class="p">,</span>
-<a id="__codelineno-86-4" name="__codelineno-86-4" href="#__codelineno-86-4"></a><span class="w">    </span><span class="nt">"LOG_LEVEL"</span><span class="p">:</span><span class="w"> </span><span class="s2">"info"</span>
-<a id="__codelineno-86-5" name="__codelineno-86-5" href="#__codelineno-86-5"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-86-6" name="__codelineno-86-6" href="#__codelineno-86-6"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-87-1" name="__codelineno-87-1" href="#__codelineno-87-1"></a><span class="p">{</span>
+<a id="__codelineno-87-2" name="__codelineno-87-2" href="#__codelineno-87-2"></a><span class="w">  </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-87-3" name="__codelineno-87-3" href="#__codelineno-87-3"></a><span class="w">    </span><span class="nt">"OPENAI_API_KEY"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sk-..."</span><span class="p">,</span>
+<a id="__codelineno-87-4" name="__codelineno-87-4" href="#__codelineno-87-4"></a><span class="w">    </span><span class="nt">"LOG_LEVEL"</span><span class="p">:</span><span class="w"> </span><span class="s2">"info"</span>
+<a id="__codelineno-87-5" name="__codelineno-87-5" href="#__codelineno-87-5"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-87-6" name="__codelineno-87-6" href="#__codelineno-87-6"></a><span class="p">}</span>
 </code></pre></div>
 <p>Replaces the <code>[env]</code> block in <code>notebook.toml</code>. Sensitive values (keys matching
 <code>KEY</code>/<code>SECRET</code>/<code>TOKEN</code>/<code>PASSWORD</code>/<code>CREDENTIAL</code>) are blanked on disk but kept
@@ -6126,30 +6153,30 @@ sensitive name, or one fetched from the secret manager, is sent as
 <code>env_overrides</code>). Send that marker back to keep a key's current value; any other
 value replaces it.</p>
 <h3 id="update-secret-manager-config">Update Secret Manager Config<a class="headerlink" href="#update-secret-manager-config" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-87-1" name="__codelineno-87-1" href="#__codelineno-87-1"></a>PUT /v1/notebooks/{session_id}/secret-manager/config
+<div class="highlight"><pre><span></span><code><a id="__codelineno-88-1" name="__codelineno-88-1" href="#__codelineno-88-1"></a>PUT /v1/notebooks/{session_id}/secret-manager/config
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-88-1" name="__codelineno-88-1" href="#__codelineno-88-1"></a><span class="p">{</span>
-<a id="__codelineno-88-2" name="__codelineno-88-2" href="#__codelineno-88-2"></a><span class="w">  </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"infisical"</span><span class="p">,</span>
-<a id="__codelineno-88-3" name="__codelineno-88-3" href="#__codelineno-88-3"></a><span class="w">  </span><span class="nt">"project_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-project-id"</span><span class="p">,</span>
-<a id="__codelineno-88-4" name="__codelineno-88-4" href="#__codelineno-88-4"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dev"</span><span class="p">,</span>
-<a id="__codelineno-88-5" name="__codelineno-88-5" href="#__codelineno-88-5"></a><span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/"</span><span class="p">,</span>
-<a id="__codelineno-88-6" name="__codelineno-88-6" href="#__codelineno-88-6"></a><span class="w">  </span><span class="nt">"base_url"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
-<a id="__codelineno-88-7" name="__codelineno-88-7" href="#__codelineno-88-7"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-89-1" name="__codelineno-89-1" href="#__codelineno-89-1"></a><span class="p">{</span>
+<a id="__codelineno-89-2" name="__codelineno-89-2" href="#__codelineno-89-2"></a><span class="w">  </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"infisical"</span><span class="p">,</span>
+<a id="__codelineno-89-3" name="__codelineno-89-3" href="#__codelineno-89-3"></a><span class="w">  </span><span class="nt">"project_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-project-id"</span><span class="p">,</span>
+<a id="__codelineno-89-4" name="__codelineno-89-4" href="#__codelineno-89-4"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dev"</span><span class="p">,</span>
+<a id="__codelineno-89-5" name="__codelineno-89-5" href="#__codelineno-89-5"></a><span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/"</span><span class="p">,</span>
+<a id="__codelineno-89-6" name="__codelineno-89-6" href="#__codelineno-89-6"></a><span class="w">  </span><span class="nt">"base_url"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-89-7" name="__codelineno-89-7" href="#__codelineno-89-7"></a><span class="p">}</span>
 </code></pre></div>
 <p>Persists the <code>[secret_manager]</code> block to <code>notebook.toml</code> and immediately
 refetches. An empty payload (all fields null) removes the block:
 "disconnect from secret manager". Credentials are never part of this payload;
 they must be exported in the server's shell environment.</p>
 <h3 id="refresh-secret-manager">Refresh Secret Manager<a class="headerlink" href="#refresh-secret-manager" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-89-1" name="__codelineno-89-1" href="#__codelineno-89-1"></a>POST /v1/notebooks/{session_id}/secret-manager/refresh
+<div class="highlight"><pre><span></span><code><a id="__codelineno-90-1" name="__codelineno-90-1" href="#__codelineno-90-1"></a>POST /v1/notebooks/{session_id}/secret-manager/refresh
 </code></pre></div>
 <p>Re-fetches secrets from the configured manager and merges them into env.
 Never returns 500 on fetch failure, the error surfaces in
 <code>env_fetch_error</code> so the UI can display it next to the Refresh button.</p>
 <h2 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h2>
 <h3 id="server-logs">Server logs<a class="headerlink" href="#server-logs" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-90-1" name="__codelineno-90-1" href="#__codelineno-90-1"></a>GET /v1/logs
-<a id="__codelineno-90-2" name="__codelineno-90-2" href="#__codelineno-90-2"></a>GET /v1/logs/stream
+<div class="highlight"><pre><span></span><code><a id="__codelineno-91-1" name="__codelineno-91-1" href="#__codelineno-91-1"></a>GET /v1/logs
+<a id="__codelineno-91-2" name="__codelineno-91-2" href="#__codelineno-91-2"></a>GET /v1/logs/stream
 </code></pre></div>
 <p><code>GET /v1/logs</code> returns a snapshot of the in-memory log ring buffer (the most
 recent <code>limit</code> matches, oldest first; pass the returned <code>cursor</code> back as
@@ -6160,9 +6187,9 @@ Powers the web UI <strong>Logs</strong> page.</p>
 <p>The buffer is server-wide, so under principal auth both routes require
 <code>admin:*</code> (403 otherwise). Without principal auth they stay open.</p>
 <h3 id="artifacts-listing">Artifacts listing<a class="headerlink" href="#artifacts-listing" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-91-1" name="__codelineno-91-1" href="#__codelineno-91-1"></a>GET /v1/artifacts
-<a id="__codelineno-91-2" name="__codelineno-91-2" href="#__codelineno-91-2"></a>GET /v1/artifacts/stats
-<a id="__codelineno-91-3" name="__codelineno-91-3" href="#__codelineno-91-3"></a>GET /v1/artifacts/usage
+<div class="highlight"><pre><span></span><code><a id="__codelineno-92-1" name="__codelineno-92-1" href="#__codelineno-92-1"></a>GET /v1/artifacts
+<a id="__codelineno-92-2" name="__codelineno-92-2" href="#__codelineno-92-2"></a>GET /v1/artifacts/stats
+<a id="__codelineno-92-3" name="__codelineno-92-3" href="#__codelineno-92-3"></a>GET /v1/artifacts/usage
 </code></pre></div>
 <p><code>GET /v1/artifacts</code> (personal mode only) lists stored artifacts, with optional
 <code>limit</code>, <code>offset</code>, <code>state</code>, <code>name_prefix</code>, <code>since</code> (epoch seconds), <code>sort</code>
@@ -6184,17 +6211,17 @@ mode refuses a caller with no tenant (400), a non-admin naming another tenant
 authenticated caller the only possible answer is every tenant's at once.</p>
 <h2 id="core-api">Core API<a class="headerlink" href="#core-api" title="Permanent link">&para;</a></h2>
 <h3 id="materialize">Materialize<a class="headerlink" href="#materialize" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-92-1" name="__codelineno-92-1" href="#__codelineno-92-1"></a>POST /v1/materialize
+<div class="highlight"><pre><span></span><code><a id="__codelineno-93-1" name="__codelineno-93-1" href="#__codelineno-93-1"></a>POST /v1/materialize
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-93-1" name="__codelineno-93-1" href="#__codelineno-93-1"></a><span class="p">{</span>
-<a id="__codelineno-93-2" name="__codelineno-93-2" href="#__codelineno-93-2"></a><span class="w">  </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"file:///warehouse#db.events"</span><span class="p">],</span>
-<a id="__codelineno-93-3" name="__codelineno-93-3" href="#__codelineno-93-3"></a><span class="w">  </span><span class="nt">"transform"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-93-4" name="__codelineno-93-4" href="#__codelineno-93-4"></a><span class="w">    </span><span class="nt">"executor"</span><span class="p">:</span><span class="w"> </span><span class="s2">"scan@v1"</span><span class="p">,</span>
-<a id="__codelineno-93-5" name="__codelineno-93-5" href="#__codelineno-93-5"></a><span class="w">    </span><span class="nt">"params"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"columns"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"id"</span><span class="p">,</span><span class="w"> </span><span class="s2">"value"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
-<a id="__codelineno-93-6" name="__codelineno-93-6" href="#__codelineno-93-6"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-93-7" name="__codelineno-93-7" href="#__codelineno-93-7"></a><span class="w">  </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"stream"</span><span class="p">,</span>
-<a id="__codelineno-93-8" name="__codelineno-93-8" href="#__codelineno-93-8"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my_result"</span>
-<a id="__codelineno-93-9" name="__codelineno-93-9" href="#__codelineno-93-9"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-94-1" name="__codelineno-94-1" href="#__codelineno-94-1"></a><span class="p">{</span>
+<a id="__codelineno-94-2" name="__codelineno-94-2" href="#__codelineno-94-2"></a><span class="w">  </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"file:///warehouse#db.events"</span><span class="p">],</span>
+<a id="__codelineno-94-3" name="__codelineno-94-3" href="#__codelineno-94-3"></a><span class="w">  </span><span class="nt">"transform"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-94-4" name="__codelineno-94-4" href="#__codelineno-94-4"></a><span class="w">    </span><span class="nt">"executor"</span><span class="p">:</span><span class="w"> </span><span class="s2">"scan@v1"</span><span class="p">,</span>
+<a id="__codelineno-94-5" name="__codelineno-94-5" href="#__codelineno-94-5"></a><span class="w">    </span><span class="nt">"params"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"columns"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"id"</span><span class="p">,</span><span class="w"> </span><span class="s2">"value"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-94-6" name="__codelineno-94-6" href="#__codelineno-94-6"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-94-7" name="__codelineno-94-7" href="#__codelineno-94-7"></a><span class="w">  </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"stream"</span><span class="p">,</span>
+<a id="__codelineno-94-8" name="__codelineno-94-8" href="#__codelineno-94-8"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my_result"</span>
+<a id="__codelineno-94-9" name="__codelineno-94-9" href="#__codelineno-94-9"></a><span class="p">}</span>
 </code></pre></div>
 <p>A table with no snapshots yet streams zero rows with the table's schema
 (projected by <code>columns</code>). Nothing read from it is reused: each request is a
@@ -6205,7 +6232,7 @@ miss, as is a transform that takes the table as an input.</p>
 unreadable, or a plan that failed) answers 4xx with the planner's message;
 the request never becomes a pending build.</p>
 <h3 id="get-stream">Get Stream<a class="headerlink" href="#get-stream" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-94-1" name="__codelineno-94-1" href="#__codelineno-94-1"></a>GET /v1/streams/{stream_id}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-95-1" name="__codelineno-95-1" href="#__codelineno-95-1"></a>GET /v1/streams/{stream_id}
 </code></pre></div>
 <p>Returns Arrow IPC stream. With an artifact store, the response carries
 <code>X-Arrow-Row-Count</code> and <code>X-Strata-Artifact-Uri</code>, the canonical
@@ -6219,13 +6246,13 @@ held). Deleting the canonical artifact first gives a published or pinned
 superseded one its own copy of the bytes. Read the header to keep the canonical
 one.</p>
 <h3 id="health">Health<a class="headerlink" href="#health" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-95-1" name="__codelineno-95-1" href="#__codelineno-95-1"></a>GET /health
+<div class="highlight"><pre><span></span><code><a id="__codelineno-96-1" name="__codelineno-96-1" href="#__codelineno-96-1"></a>GET /health
 </code></pre></div>
 <p>Readiness (<code>GET /health/ready</code>) and per-dependency checks (<code>GET /health/dependencies</code>)
 are covered in <a href="../../deployment/observability/#health-endpoints">Observability</a>.</p>
 <h3 id="metrics">Metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-96-1" name="__codelineno-96-1" href="#__codelineno-96-1"></a>GET /metrics
-<a id="__codelineno-96-2" name="__codelineno-96-2" href="#__codelineno-96-2"></a>GET /metrics/prometheus
+<div class="highlight"><pre><span></span><code><a id="__codelineno-97-1" name="__codelineno-97-1" href="#__codelineno-97-1"></a>GET /metrics
+<a id="__codelineno-97-2" name="__codelineno-97-2" href="#__codelineno-97-2"></a>GET /metrics/prometheus
 </code></pre></div>
 <p>Both are unauthenticated, for scrapers. Under principal auth
 <code>/metrics/prometheus</code> leaves out the per-table series, since table names are

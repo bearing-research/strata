@@ -5409,6 +5409,12 @@ Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
 whose output is noise). Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.
 
+Under each cell's outputs is one quiet line, such as `Computed Nov 4, 2026, 9:33 AM
+· from cache, saved 14.5s · lineage`. It says when the result was computed, which
+a cache hit does not change, and what this result cost: how long the run took, or
+what the hit saved. **lineage** opens the cells it came from. A hit that took longer
+to load than the run did reads plain `from cache`, as its badge in the editor does.
+
 ## Embedding the app view in another site
 
 The app view can be dropped into another page - a dashboard, wiki, or internal
@@ -6037,6 +6043,10 @@ parameter settings that produced the outputs below them - read from the
 notebook's persisted control values. Cells marked `# @app hide` are
 omitted, matching the live app view; prompt-cell responses stay excluded
 for the same privacy reason as a regular export.
+
+Each cell's outputs carry the app view's quiet line, read from the notebook's
+own files: when the result was computed, in UTC, and how long it took or what a
+hit saved. The snapshot has no **lineage** link, since nothing behind it could answer one.
 
 In the UI, the notebook's **Export** menu offers **App snapshot**
 alongside Markdown and HTML.
@@ -12077,6 +12087,15 @@ notebook's own store rather than the server's. `store/artifacts` takes `limit`,
 `offset`, `state`, `sort` and `order`. Each row also has `cell_id`, `cell_name`
 and `output` (all `null` for a row no cell produced), and the response has
 `notebook_name`.
+
+### Read an Artifact's Lineage
+
+```
+GET /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/lineage
+```
+
+`GET /v1/artifacts/{id}/v/{n}/lineage` over the notebook's own store, which is
+where a cell's results and displays are. It takes `max_depth`.
 
 ### Promote an Artifact
 
