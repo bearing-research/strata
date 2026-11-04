@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import anyio.to_thread
 
 from strata.notebook.cell_paths.context import (
+    OutputNotSaved,
     RemoteExecutionError,
     _mount_sync_failure_result,
     _refused_result,
@@ -414,8 +415,9 @@ async def run_r_cell(
                         build_env=str(result.get("build_env") or ""),
                         hardware=result.get("hardware") or {},
                         collected=collected,
+                        run_outputs=exec_result.outputs,
                     )
-                except TableWriteError as exc:
+                except (TableWriteError, OutputNotSaved) as exc:
                     stored_ok, store_error = False, str(exc)
                 if not stored_ok:
                     logger.error(

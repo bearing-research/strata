@@ -70,9 +70,11 @@ from strata.notebook.cell_paths.cell_tests import (
 from strata.notebook.cell_paths.context import (
     _ARTIFACT_EXT_BY_CONTENT_TYPE,
     DEFAULT_CELL_TIMEOUT_SECONDS,
+    OutputNotSaved,
     PathContext,
     RemoteExecutionError,
     cell_timeout_message,
+    output_not_saved,
 )
 from strata.notebook.cell_paths.context import (
     _mount_sync_failure_result as _mount_sync_failure_result,
@@ -1713,8 +1715,9 @@ class CellExecutor:
                             collected=collected,
                             local_run=local_run,
                             stochastic=prov.annotations.stochastic,
+                            run_outputs=exec_result.outputs,
                         )
-                    except TableWriteError as exc:
+                    except (TableWriteError, OutputNotSaved) as exc:
                         stored_ok, store_error = False, str(exc)
                     await self._close_open_run(cell_id)
                     if not stored_ok:
@@ -4703,11 +4706,16 @@ class CellExecutor:
         collected: dict[str, bytes | Exception] | None = None,
         local_run: LocalRun | None = None,
         stochastic: bool = False,
+        run_outputs: dict[str, Any] | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
         With ``store_leaf_outputs``, a leaf cell's variables are stored too, best-effort.
         *collected* holds folders already collected by :meth:`_collect_output_dirs`.
+        *run_outputs* is what the harness reported, which says why a value left no file.
+
+        Raises:
+            OutputNotSaved: a variable another cell reads left no file.
 
         With ``variant`` set, ids get an ``@variant={name}`` suffix so fan-out
         instances do not collide. With a *local_run*, the outputs become its ``final``
@@ -4831,8 +4839,8 @@ class CellExecutor:
                     safe,
                     output_dir,
                 )
-                all_stored = False
-                break
+                artifact_mgr.discard_cell_outputs(staged)
+                raise output_not_saved(var_name, run_outputs)
 
             try:
                 blob_data = read_run_file(output_dir, output_file.name)
