@@ -2157,7 +2157,7 @@ def _batch_fakes(tmp_path, *, consumed=(), displays=(), console=None, wired=("x"
 
     fields = {
         "harness_path": Path("harness.py"),
-        "harness_env": lambda extra: dict(extra),
+        "harness_env": dict,
         "work_dir_fields": lambda: {"work_dir": "work"},
         "run_token": run_token,
         "compute_provenance": compute_provenance,

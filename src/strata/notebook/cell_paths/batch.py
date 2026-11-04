@@ -189,7 +189,6 @@ async def run_batch(
         )
 
     completed = False
-    end_reason = "subprocess_died"
     failed_cell_id: str | None = None
     proc: asyncio.subprocess.Process | None = None
 
