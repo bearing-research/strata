@@ -37,7 +37,23 @@ function tableLabel(uri: string): string {
   return rest
 }
 
-export function lineageToTree(graph: LineageGraph, rootUri: string): LineageTreeNode {
+const CELL_OUTPUT = /_cell_([^_]+)_var_([^@]+)/
+
+/** A cell's output by its cell's name and the output: every one has the same transform. */
+function cellOutputLabel(uri: string, cellName?: (cellId: string) => string | undefined) {
+  const match = CELL_OUTPUT.exec(uri)
+  if (!match) return null
+  const [, cellId, output] = match
+  const display = /^__display__(\d+)/.exec(output)
+  const shown = display ? `display ${display[1]}` : output
+  return `${cellName?.(cellId) || cellId} · ${shown}`
+}
+
+export function lineageToTree(
+  graph: LineageGraph,
+  rootUri: string,
+  cellName?: (cellId: string) => string | undefined,
+): LineageTreeNode {
   const nodeByUri = new Map(graph.nodes.map((n) => [n.uri, n]))
   const inputsOf = new Map<string, string[]>()
   for (const e of graph.edges) {
@@ -54,7 +70,11 @@ export function lineageToTree(graph: LineageGraph, rootUri: string): LineageTree
     // A fetch is named by its URL: it has no transform, and "artifact" would
     // claim it came from this store.
     const label =
-      type === 'table' ? tableLabel(uri) : type === 'fetch' ? uri : (n?.transform_ref ?? 'artifact')
+      type === 'table'
+        ? tableLabel(uri)
+        : type === 'fetch'
+          ? uri
+          : (cellOutputLabel(uri, cellName) ?? n?.transform_ref ?? 'artifact')
     const children = (inputsOf.get(uri) ?? []).filter((u) => !seen.has(u)).map((u) => build(u))
     return {
       uri,

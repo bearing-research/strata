@@ -188,6 +188,8 @@ export interface CellOutput {
   /** Strata artifact reference */
   artifactUri?: string
   /** Whether this came from cache */
+  /** When the run behind this output stored it, in epoch seconds. */
+  computedAt?: number
   cacheHit?: boolean
   /** Cache load time in ms (for displaying "⚡ cached · 5ms") */
   cacheLoadMs?: number
@@ -251,6 +253,8 @@ export interface Cell {
   provenanceHash?: string
   /** Last execution timestamp */
   lastRunAt?: number
+  /** How the latest result came to be, for the app view's provenance line. */
+  lastGot?: { cacheHit: boolean; ms: number }
   /** Execution duration in ms */
   durationMs?: number
   /** Whether this cell is frozen (skip invalidation, pinned artifact) */

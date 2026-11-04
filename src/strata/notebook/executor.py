@@ -5435,6 +5435,7 @@ class CellExecutor:
             display_uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
             stored_display = dict(display_output)
             stored_display["artifact_uri"] = display_uri
+            stored_display["computed_at"] = artifact_version.created_at
             stored_displays.append(stored_display)
 
         return stored_displays

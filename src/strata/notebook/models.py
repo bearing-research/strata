@@ -575,6 +575,9 @@ class CellOutput(BaseModel):
     width: int | None = Field(default=None, description="Display width in pixels")
     height: int | None = Field(default=None, description="Display height in pixels")
     error: str | None = Field(default=None, description="Error message if serialization failed")
+    computed_at: float | None = Field(
+        default=None, description="When the run behind this output stored it, in epoch seconds"
+    )
 
 
 class InputWeight(BaseModel):

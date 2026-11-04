@@ -78,6 +78,10 @@ notebook's persisted control values. Cells marked `# @app hide` are
 omitted, matching the live app view; prompt-cell responses stay excluded
 for the same privacy reason as a regular export.
 
+Each cell's outputs carry the app view's quiet line, read from the notebook's
+own files: when the result was computed, in UTC, and how long it took or what a
+hit saved. The snapshot has no **lineage** link, since nothing behind it could answer one.
+
 In the UI, the notebook's **Export** menu offers **App snapshot**
 alongside Markdown and HTML.
 

@@ -295,6 +295,29 @@ def persist_cell_execution_sample(
     save_runtime_state(notebook_dir, state)
 
 
+def how_last_got(samples: list[dict[str, Any]]) -> tuple[bool, int] | None:
+    """``(cache_hit, ms)`` for a cell's latest sample: what a hit saved, or what a run took.
+
+    A hit prices as ``NotebookSession.last_hit_saved_ms`` does, and saved nothing when it took
+    longer to load than the run did, the badge's rule. ``None`` with no timed sample.
+    """
+    last_run_ms = 0
+    saved_ms = 0
+    for sample in samples:
+        duration_ms = sample.get("duration_ms")
+        if sample.get("cache_hit"):
+            saved_ms = sample.get("team_saved_ms") or sample.get("hit_run_ms") or last_run_ms
+        elif duration_ms is not None:
+            saved_ms = last_run_ms = int(duration_ms)
+    if not samples:
+        return None
+    latest = samples[-1]
+    latest_ms = latest.get("duration_ms")
+    if latest.get("cache_hit"):
+        return True, int(saved_ms) if saved_ms >= (latest_ms or 0) else 0
+    return None if latest_ms is None else (False, int(latest_ms))
+
+
 def persist_cell_widget_values(
     notebook_dir: Path,
     cell_id: str,

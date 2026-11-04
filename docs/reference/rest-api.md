@@ -922,6 +922,15 @@ the registry's store, next to the row's `tenant` (`null` for the default
 tenant). A personal server or an `admin:*` caller gets every tenant's names,
 so one name can have a row per tenant, each with that tenant's readers.
 
+### Read an Artifact's Lineage
+
+```
+GET /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/lineage
+```
+
+`GET /v1/artifacts/{id}/v/{n}/lineage` over the notebook's own store, which is
+where a cell's results and displays are. It takes `max_depth`.
+
 ### Promote an Artifact
 
 ```

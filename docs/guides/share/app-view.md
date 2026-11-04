@@ -11,6 +11,12 @@ Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
 whose output is noise). Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.
 
+Under each cell's outputs is one quiet line, such as `Computed Nov 4, 2026, 9:33 AM
+· from cache, saved 14.5s · lineage`. It says when the result was computed, which
+a cache hit does not change, and what this result cost: how long the run took, or
+what the hit saved. **lineage** opens the cells it came from. A hit that took longer
+to load than the run did reads plain `from cache`, as its badge in the editor does.
+
 ## Embedding the app view in another site
 
 The app view can be dropped into another page - a dashboard, wiki, or internal

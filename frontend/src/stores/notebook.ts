@@ -35,6 +35,7 @@ import type {
   WidgetSpec,
 } from '../types/notebook'
 import { cachedAgainFields, cacheFieldsAfterSync, isCachedAgain } from '../utils/cacheBadge'
+import { lastGotOf } from '../utils/provenanceLine'
 import { useStrata } from '../composables/useStrata'
 import type {
   AliasMoveResult,
@@ -836,6 +837,7 @@ function parseDisplayOutputPayload(
       typeof raw.artifact_uri === 'string' && raw.artifact_uri.trim()
         ? raw.artifact_uri
         : fallbackArtifactUri || undefined,
+    computedAt: typeof raw.computed_at === 'number' ? raw.computed_at : undefined,
   }
 
   if (contentType === 'arrow/ipc') {
@@ -902,6 +904,11 @@ function parseDisplayOutputPayloads(
   return raw
     .map((entry) => parseDisplayOutputPayload(entry, fallbackArtifactUri))
     .filter((entry): entry is CellOutput => Boolean(entry))
+}
+
+function parseLastGot(raw: any): Cell['lastGot'] {
+  if (!raw || typeof raw.ms !== 'number') return undefined
+  return { cacheHit: Boolean(raw.cache_hit), ms: raw.ms }
 }
 
 function applyDisplayOutputsToCell(
@@ -990,6 +997,7 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
     serverCell.display_output,
     typeof serverCell.artifact_uri === 'string' ? serverCell.artifact_uri : null,
   )
+  localCell.lastGot = parseLastGot(serverCell.last_got) ?? localCell.lastGot
   const cacheFields = cacheFieldsAfterSync(
     serverCell.cache_hit,
     localCell.status,
@@ -1263,6 +1271,7 @@ function parseBackendCellPayload(raw: any): Cell {
     downstreamIds: raw.downstream_ids || [],
     defines: raw.defines || [],
     references: raw.references || [],
+    lastGot: parseLastGot(raw.last_got),
     inputs: [],
     isLeaf: raw.is_leaf || false,
     stalenessReasons: supportsStalenessDetail(raw.status)
@@ -1776,15 +1785,25 @@ const lineageRows = ref<Array<LineageTreeNode & { depth: number }>>([])
 const lineageLoading = ref(false)
 const lineageError = ref<string | null>(null)
 
-async function openLineageAction(artifactId: string, version: number, title: string) {
+/** With a session, reads that notebook's own store, where a cell's outputs are. */
+async function openLineageAction(
+  artifactId: string,
+  version: number,
+  title: string,
+  sessionId?: string,
+) {
   lineageOpen.value = true
   lineageTitle.value = title
   lineageRows.value = []
   lineageError.value = null
   lineageLoading.value = true
   try {
-    const graph = await useStrata().getLineage(artifactId, version)
-    lineageRows.value = flattenLineage(lineageToTree(graph, graph.artifact_uri))
+    const graph = sessionId
+      ? await useStrata().getNotebookLineage(sessionId, artifactId, version)
+      : await useStrata().getLineage(artifactId, version)
+    lineageRows.value = flattenLineage(
+      lineageToTree(graph, graph.artifact_uri, (id) => cellMap.value.get(id)?.annotations?.name),
+    )
   } catch (err) {
     lineageError.value = err instanceof Error ? err.message : 'Failed to load lineage'
   } finally {
@@ -2057,6 +2076,7 @@ function initializeWebSocket() {
         cell.streamBuffer = undefined
         cell.streamAttempt = undefined
         cell.durationMs = p.duration_ms
+        cell.lastGot = lastGotOf(p.cache_hit, p.saved_ms, p.duration_ms)
         cell.displayOutputs = displayOutputs
         if (p.artifact_uris !== undefined) cell.artifactUris = parseArtifactUris(p.artifact_uris)
         // Console lives on the Cell, not output.scalar, to keep the display

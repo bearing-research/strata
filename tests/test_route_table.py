@@ -129,6 +129,7 @@ EXPECTED_ROUTES = [
     ("/v1/notebooks/sessions/{session_id}", "GET", 1),
     ("/v1/notebooks/{notebook_id}", "DELETE", 1),
     ("/v1/notebooks/{notebook_id}/artifacts", "GET", 1),
+    ("/v1/notebooks/{notebook_id}/artifacts/{artifact_id}/v/{version}/lineage", "GET", 1),
     ("/v1/notebooks/{notebook_id}/artifacts/{artifact_id}/v/{version}/promote", "POST", 1),
     ("/v1/notebooks/{notebook_id}/cells", "GET", 1),
     ("/v1/notebooks/{notebook_id}/cells", "POST", 1),
