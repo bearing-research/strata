@@ -20,7 +20,10 @@ test('a hit says what it saved', () => {
 })
 
 test('a hit with nothing known saved does not claim a saving', () => {
-  assert.equal(provenanceLine(100, { cacheHit: true, ms: 0 }, when), 'Computed Nov 4, 9:15 AM · from cache')
+  assert.equal(
+    provenanceLine(100, { cacheHit: true, ms: 0 }, when),
+    'Computed Nov 4, 9:15 AM · from cache',
+  )
 })
 
 test('a part that is not known is left out', () => {

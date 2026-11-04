@@ -83,7 +83,11 @@ test('a cell output reads as its cell and output, since every one has the same t
   const named = (id: string) => (id === 'load' ? 'Load data' : undefined)
   const label = (u: string, name?: (id: string) => string | undefined) =>
     lineageToTree(
-      { artifact_uri: u, nodes: [{ uri: u, type: 'artifact', transform_ref: 'notebook/cell@v1' }], edges: [] } as never,
+      {
+        artifact_uri: u,
+        nodes: [{ uri: u, type: 'artifact', transform_ref: 'notebook/cell@v1' }],
+        edges: [],
+      } as never,
       u,
       name,
     ).label
