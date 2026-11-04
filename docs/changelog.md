@@ -171,6 +171,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A result known not to match reads stale, and going back reads cached.** A cell
+  whose environment or declared outside input changed read idle while it went on
+  showing the old result. It now reads `stale · environment changed` or
+  `stale · input changed`, and undoing the change returns it to cached. Idle now means
+  no result, or no way to tell, as with an input that cannot be read. (#1401)
 - **A cache hit shows the console of the run it stands for.** Edit a cell, run the
   edit and undo the edit, and the cell read `ready` with the edit's value and
   console. It now reads `stale` until it runs, and running it brings back the first
