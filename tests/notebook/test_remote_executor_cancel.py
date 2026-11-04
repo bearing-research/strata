@@ -12,6 +12,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
+from strata.notebook.cell_paths.dispatch import cancel_url
 from strata.notebook.remote_executor import _run_harness, create_notebook_executor_app
 
 
@@ -225,26 +226,17 @@ class TestCancelUrlMapping:
         ],
     )
     def test_every_endpoint_shape_maps_to_the_same_cancel_url(self, executor_url):
-        from strata.notebook.executor import CellExecutor
-
-        assert (
-            CellExecutor._cancel_url(None, executor_url, "b1")
-            == "http://worker:9000/v1/executions/b1/cancel"
-        )
+        assert cancel_url(executor_url, "b1") == "http://worker:9000/v1/executions/b1/cancel"
 
     def test_a_path_prefix_is_preserved(self):
         """A pool facade fronts many workers under one host."""
-        from strata.notebook.executor import CellExecutor
-
         assert (
-            CellExecutor._cancel_url(None, "http://pool/machines/m7/v1/execute", "b1")
+            cancel_url("http://pool/machines/m7/v1/execute", "b1")
             == "http://pool/machines/m7/v1/executions/b1/cancel"
         )
 
     def test_query_and_fragment_are_dropped(self):
-        from strata.notebook.executor import CellExecutor
-
         assert (
-            CellExecutor._cancel_url(None, "http://worker:9000/v1/execute?x=1#f", "b1")
+            cancel_url("http://worker:9000/v1/execute?x=1#f", "b1")
             == "http://worker:9000/v1/executions/b1/cancel"
         )
