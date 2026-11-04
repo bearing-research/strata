@@ -1,9 +1,18 @@
 <script setup lang="ts">
 import * as dagre from '@dagrejs/dagre'
-import { computed, reactive, ref } from 'vue'
+import { PanelBottom, PanelRight } from '@lucide/vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import { LABEL_HEIGHT, labelAnchor, placeEdgeLabels } from '../utils/dagLabels'
+import { dagLineage, edgeOnLineage } from '../utils/dagLineage'
+import { panToCenter, viewBox as dagViewBox } from '../utils/dagViewport'
 import type { Cell, CellId } from '../types/notebook'
+
+defineProps<{ docked?: boolean }>()
+defineEmits<{ toggleDock: [] }>()
+
+// Held by the page, so moving the graph between the drawer and the dock keeps it.
+const selected = defineModel<CellId | null>('selected', { default: null })
 
 const { notebook, orderedCells, dagEdges } = useNotebook()
 
@@ -176,6 +185,33 @@ const layout = computed(() => {
 const nodes = computed(() => layout.value.nodes)
 const edges = computed(() => layout.value.edges)
 
+// A selected cell that was deleted or left the graph selects nothing.
+const activeSelection = computed(() =>
+  nodes.value.some((n) => n.id === selected.value) ? selected.value : null,
+)
+const lineage = computed(() =>
+  activeSelection.value
+    ? dagLineage(
+        activeSelection.value,
+        edges.value.map((e) => ({ from: e.from.id, to: e.to.id })),
+      )
+    : null,
+)
+
+function nodeDimmed(id: CellId): boolean {
+  if (!lineage.value) return false
+  return (
+    id !== activeSelection.value &&
+    !lineage.value.ancestors.has(id) &&
+    !lineage.value.descendants.has(id)
+  )
+}
+
+function edgeDimmed(e: EdgeLayout): boolean {
+  if (!lineage.value || !activeSelection.value) return false
+  return !edgeOnLineage({ from: e.from.id, to: e.to.id }, activeSelection.value, lineage.value)
+}
+
 const svgWidth = computed(() => {
   if (nodes.value.length === 0) return 240
   let maxX = 0
@@ -194,12 +230,59 @@ const pan = reactive({ x: 0, y: 0 })
 const zoom = ref(1)
 const isPanning = ref(false)
 const panStart = reactive({ x: 0, y: 0, panX: 0, panY: 0 })
+// A click ends every pan, so one that moved doesn't select.
+const panned = ref(false)
+const PAN_SLOP_PX = 3
+
+const viewportEl = ref<HTMLElement | null>(null)
+const panel = reactive({ width: 0, height: 0 })
 
 const viewBox = computed(() => {
-  const w = svgWidth.value / zoom.value
-  const h = svgHeight.value / zoom.value
-  return `${-pan.x / zoom.value} ${-pan.y / zoom.value} ${w} ${h}`
+  // Before the first measure, the whole graph.
+  if (!panel.width || !panel.height) return `0 0 ${svgWidth.value} ${svgHeight.value}`
+  const box = dagViewBox({
+    graphWidth: svgWidth.value,
+    graphHeight: svgHeight.value,
+    panelWidth: panel.width,
+    panelHeight: panel.height,
+    zoom: zoom.value,
+    panX: pan.x,
+    panY: pan.y,
+  })
+  return `${box.x} ${box.y} ${box.width} ${box.height}`
 })
+
+// Moving to the dock remounts this, and a narrower panel can leave the selection off screen.
+function centerSelection() {
+  const node = nodes.value.find((n) => n.id === activeSelection.value)
+  if (!node) return
+  const { panX, panY } = panToCenter(
+    {
+      graphWidth: svgWidth.value,
+      graphHeight: svgHeight.value,
+      panelWidth: panel.width,
+      panelHeight: panel.height,
+      zoom: zoom.value,
+    },
+    node,
+  )
+  pan.x = panX
+  pan.y = panY
+}
+
+let panelObserver: ResizeObserver | null = null
+onMounted(() => {
+  if (!viewportEl.value) return
+  let first = true
+  panelObserver = new ResizeObserver(([entry]) => {
+    panel.width = entry.contentRect.width
+    panel.height = entry.contentRect.height
+    if (first) centerSelection()
+    first = false
+  })
+  panelObserver.observe(viewportEl.value)
+})
+onUnmounted(() => panelObserver?.disconnect())
 
 function onWheel(e: WheelEvent) {
   e.preventDefault()
@@ -211,6 +294,7 @@ function onWheel(e: WheelEvent) {
 function onMouseDown(e: MouseEvent) {
   if (e.button !== 0) return
   isPanning.value = true
+  panned.value = false
   panStart.x = e.clientX
   panStart.y = e.clientY
   panStart.panX = pan.x
@@ -219,6 +303,12 @@ function onMouseDown(e: MouseEvent) {
 
 function onMouseMove(e: MouseEvent) {
   if (!isPanning.value) return
+  if (
+    Math.abs(e.clientX - panStart.x) > PAN_SLOP_PX ||
+    Math.abs(e.clientY - panStart.y) > PAN_SLOP_PX
+  ) {
+    panned.value = true
+  }
   pan.x = panStart.panX + (e.clientX - panStart.x)
   pan.y = panStart.panY + (e.clientY - panStart.y)
 }
@@ -231,6 +321,19 @@ function resetView() {
   pan.x = 0
   pan.y = 0
   zoom.value = 1
+}
+
+function selectNode(cellId: CellId) {
+  selected.value = cellId
+  scrollToCell(cellId)
+}
+
+function onNodeClick(cellId: CellId) {
+  if (!panned.value) selectNode(cellId)
+}
+
+function clearSelection() {
+  if (!panned.value) selected.value = null
 }
 
 function scrollToCell(cellId: CellId) {
@@ -299,15 +402,30 @@ function edgePath(points: { x: number; y: number }[]): string {
   <div class="dag-panel">
     <div class="dag-header">
       <span>Cell DAG</span>
-      <button class="dag-reset" title="Reset zoom" @click.stop="resetView">Reset</button>
+      <div class="dag-actions">
+        <button class="dag-reset" title="Reset zoom" @click.stop="resetView">Reset</button>
+        <button
+          class="dag-reset dag-dock-toggle"
+          data-testid="dag-dock-toggle"
+          :aria-label="
+            docked ? 'Move the graph to the bottom drawer' : 'Dock the graph on the right'
+          "
+          :title="docked ? 'Move the graph to the bottom drawer' : 'Dock the graph on the right'"
+          @click.stop="$emit('toggleDock')"
+        >
+          <PanelBottom v-if="docked" /><PanelRight v-else />
+        </button>
+      </div>
     </div>
     <div
+      ref="viewportEl"
       class="dag-viewport"
       @wheel="onWheel"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
       @mouseleave="onMouseUp"
+      @click="clearSelection"
     >
       <svg
         width="100%"
@@ -334,6 +452,7 @@ function edgePath(points: { x: number; y: number }[]): string {
         <path
           v-for="(e, i) in edges"
           :key="'e' + i"
+          :class="{ 'dag-dimmed': edgeDimmed(e) }"
           :d="edgePath(e.points)"
           fill="none"
           stroke="var(--text-muted)"
@@ -347,6 +466,7 @@ function edgePath(points: { x: number; y: number }[]): string {
         <template v-for="(e, i) in edges" :key="'el' + i">
           <text
             v-if="e.label"
+            :class="{ 'dag-dimmed': edgeDimmed(e) }"
             :x="e.label.x"
             :y="e.label.y + LABEL_HEIGHT - 2"
             fill="var(--cat-surface2)"
@@ -358,7 +478,19 @@ function edgePath(points: { x: number; y: number }[]): string {
         </template>
 
         <!-- Nodes -->
-        <g v-for="n in nodes" :key="n.id" class="dag-node" @dblclick.stop="scrollToCell(n.id)">
+        <g
+          v-for="n in nodes"
+          :key="n.id"
+          class="dag-node"
+          :class="{ 'dag-selected': n.id === activeSelection, 'dag-dimmed': nodeDimmed(n.id) }"
+          :data-testid="`dag-node-${n.id}`"
+          role="button"
+          tabindex="0"
+          :aria-label="`Go to ${n.fullLabel}, and show what it connects to`"
+          :aria-pressed="n.id === activeSelection"
+          @click.stop="onNodeClick(n.id)"
+          @keydown.enter.prevent="selectNode(n.id)"
+        >
           <!-- Stacked-card hint: the group has other variants -->
           <template v-if="n.variantSiblings > 0">
             <rect
@@ -385,6 +517,7 @@ function edgePath(points: { x: number; y: number }[]): string {
             />
           </template>
           <rect
+            class="dag-node-box"
             :x="n.x - n.width / 2"
             :y="n.y - nodeHeight / 2"
             :width="n.width"
@@ -461,6 +594,16 @@ function edgePath(points: { x: number; y: number }[]): string {
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border-subtle);
 }
+.dag-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dag-dock-toggle {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+}
 .dag-reset {
   font-size: 10px;
   padding: 2px 6px;
@@ -498,5 +641,15 @@ function edgePath(points: { x: number; y: number }[]): string {
 }
 .dag-node:hover rect {
   filter: brightness(1.3);
+}
+.dag-node:focus-visible {
+  outline: none;
+}
+.dag-node:focus-visible .dag-node-box,
+.dag-selected .dag-node-box {
+  stroke-width: 3;
+}
+.dag-dimmed {
+  opacity: 0.25;
 }
 </style>
