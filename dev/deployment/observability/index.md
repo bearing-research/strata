@@ -153,9 +153,11 @@ notebook:
   `GET /v1/logs` (snapshot) and `GET /v1/logs/stream` (Server-Sent Events).
   The buffer holds every tenant's records, so under principal auth both need
   `admin:*`.
-- **Artifacts** (`/artifacts`) - a sortable, filterable list of stored
-  artifacts with summary stats. Backed by `GET /v1/artifacts` (with `since` /
-  sort / order filters) and `GET /v1/artifacts/stats`.
+- **Server store** (`/artifacts`) - a sortable, filterable list of the server's
+  stored artifacts with summary stats. Backed by `GET /v1/artifacts` (with
+  `since` / sort / order filters) and `GET /v1/artifacts/stats`. Notebook results
+  aren't in it: each notebook has its own store, listed by **Artifacts** in the
+  notebook's menu (`GET /v1/notebooks/{session_id}/store/artifacts`).
 
 In service mode `GET /v1/artifacts/stats` and `GET /v1/artifacts/usage`
 report the caller's own tenant (an `admin:*` caller sees the whole store, or

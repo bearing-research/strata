@@ -922,6 +922,19 @@ the registry's store, next to the row's `tenant` (`null` for the default
 tenant). A personal server or an `admin:*` caller gets every tenant's names,
 so one name can have a row per tenant, each with that tenant's readers.
 
+### List a Notebook's Store
+
+```
+GET /v1/notebooks/{session_id}/store/artifacts
+GET /v1/notebooks/{session_id}/store/stats
+```
+
+The same answers as `GET /v1/artifacts` and `GET /v1/artifacts/stats`, over the
+notebook's own store rather than the server's. `store/artifacts` takes `limit`,
+`offset`, `state`, `sort` and `order`. Each row also has `cell_id`, `cell_name`
+and `output` (all `null` for a row no cell produced), and the response has
+`notebook_name`.
+
 ### Promote an Artifact
 
 ```

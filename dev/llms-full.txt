@@ -12065,6 +12065,19 @@ the registry's store, next to the row's `tenant` (`null` for the default
 tenant). A personal server or an `admin:*` caller gets every tenant's names,
 so one name can have a row per tenant, each with that tenant's readers.
 
+### List a Notebook's Store
+
+```
+GET /v1/notebooks/{session_id}/store/artifacts
+GET /v1/notebooks/{session_id}/store/stats
+```
+
+The same answers as `GET /v1/artifacts` and `GET /v1/artifacts/stats`, over the
+notebook's own store rather than the server's. `store/artifacts` takes `limit`,
+`offset`, `state`, `sort` and `order`. Each row also has `cell_id`, `cell_name`
+and `output` (all `null` for a row no cell produced), and the response has
+`notebook_name`.
+
 ### Promote an Artifact
 
 ```
@@ -15720,9 +15733,11 @@ notebook:
   `GET /v1/logs` (snapshot) and `GET /v1/logs/stream` (Server-Sent Events).
   The buffer holds every tenant's records, so under principal auth both need
   `admin:*`.
-- **Artifacts** (`/artifacts`) - a sortable, filterable list of stored
-  artifacts with summary stats. Backed by `GET /v1/artifacts` (with `since` /
-  sort / order filters) and `GET /v1/artifacts/stats`.
+- **Server store** (`/artifacts`) - a sortable, filterable list of the server's
+  stored artifacts with summary stats. Backed by `GET /v1/artifacts` (with
+  `since` / sort / order filters) and `GET /v1/artifacts/stats`. Notebook results
+  aren't in it: each notebook has its own store, listed by **Artifacts** in the
+  notebook's menu (`GET /v1/notebooks/{session_id}/store/artifacts`).
 
 In service mode `GET /v1/artifacts/stats` and `GET /v1/artifacts/usage`
 report the caller's own tenant (an `admin:*` caller sees the whole store, or

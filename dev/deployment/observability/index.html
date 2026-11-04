@@ -3387,9 +3387,11 @@ notebook:</p>
   <code>GET /v1/logs</code> (snapshot) and <code>GET /v1/logs/stream</code> (Server-Sent Events).
   The buffer holds every tenant's records, so under principal auth both need
   <code>admin:*</code>.</li>
-<li><strong>Artifacts</strong> (<code>/artifacts</code>) - a sortable, filterable list of stored
-  artifacts with summary stats. Backed by <code>GET /v1/artifacts</code> (with <code>since</code> /
-  sort / order filters) and <code>GET /v1/artifacts/stats</code>.</li>
+<li><strong>Server store</strong> (<code>/artifacts</code>) - a sortable, filterable list of the server's
+  stored artifacts with summary stats. Backed by <code>GET /v1/artifacts</code> (with
+  <code>since</code> / sort / order filters) and <code>GET /v1/artifacts/stats</code>. Notebook results
+  aren't in it: each notebook has its own store, listed by <strong>Artifacts</strong> in the
+  notebook's menu (<code>GET /v1/notebooks/{session_id}/store/artifacts</code>).</li>
 </ul>
 <p>In service mode <code>GET /v1/artifacts/stats</code> and <code>GET /v1/artifacts/usage</code>
 report the caller's own tenant (an <code>admin:*</code> caller sees the whole store, or
