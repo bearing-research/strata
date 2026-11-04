@@ -70,12 +70,11 @@ def test_a_cell_reads_as_its_state(cell, state):
 
 def test_the_terminal_keeps_to_the_state_table():
     design = (Path(__file__).parents[2] / "frontend" / "DESIGN.md").read_text()
+    rows = [[c.strip() for c in r.split("|")] for r in design.splitlines() if r.startswith("|")]
     for state, (glyph, color) in CELL_STATES.items():
-        row = f"| {state} | "
-        assert any(
-            r.startswith(row) and r.endswith(f"| `{glyph}` | `{color}` |")
-            for r in design.splitlines()
-        )
+        # The first table with this state's name in its first column is the one with the glyphs.
+        row = next(r for r in rows if r[1] == state)
+        assert row[-3:-1] == [f"`{glyph}`", f"`{color}`"]
     glyphs = [glyph for glyph, _ in CELL_STATES.values()]
     assert len(set(glyphs)) == len(glyphs)
 

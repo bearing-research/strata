@@ -39,16 +39,20 @@ test('a run in flight says so, even with an annotation error since', () => {
 test('DESIGN.md names every state with its token, icon and label', () => {
   const design = readFileSync(new URL('../../DESIGN.md', import.meta.url), 'utf8')
   const style = readFileSync(new URL('../style.css', import.meta.url), 'utf8')
+  const rows = design
+    .split('\n')
+    .filter((line) => line.startsWith('|'))
+    .map((line) => line.split('|').map((part) => part.trim()))
   for (const [state, { label, icon }] of Object.entries(CELL_STATES)) {
-    const row = design.split('\n').find((line) => line.startsWith(`| ${state} |`))
+    const row = rows.find((cells) => cells[1] === state)
     assert.ok(row, `no row for ${state}`)
     assert.ok(row.includes(`\`--state-${state}\``), `${state}: token`)
     const names = Object.entries(lucide).flatMap(([name, value]) => (value === icon ? [name] : []))
     assert.ok(
-      names.some((name) => row.includes(`\`${name}\``)),
+      names.some((name) => row.some((cell) => cell.startsWith(`\`${name}\``))),
       `${state}: icon`,
     )
-    assert.ok(row.includes(`| ${label} |`), `${state}: label`)
+    assert.ok(row.includes(label), `${state}: label`)
     assert.ok(style.includes(`--state-${state}: `), `${state}: color token`)
     assert.ok(style.includes(`--state-${state}-tint: `), `${state}: tint token`)
     assert.ok(style.includes(`.state-${state} {`), `${state}: class`)
