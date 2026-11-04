@@ -1109,16 +1109,20 @@ matplotlib figures) render **inline** - using the terminal's graphics protocol
 (kitty / iTerm2 / Sixel) where available, degrading to Unicode half-blocks
 otherwise.
 
-Cell status glyphs:
+Cell states, each a glyph you can read without its color, and its word in the
+time column except `idle` and `ready`, which show the last run's time:
 
-| Glyph | Status |
+| Glyph | State |
 | --- | --- |
 | `○` | idle |
-| `▶` | running |
-| `✓` | ready |
-| `✗` | error |
-| `⊘` | stale |
 | `…` | queued |
+| `▶` | running |
+| `↗` | dispatching to a worker |
+| `✓` | ready |
+| `◆` | cached |
+| `⊘` | stale |
+| `✗` | error |
+| `■` | blocked by an annotation error |
 
 ## Watching a re-run
 

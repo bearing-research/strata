@@ -3487,12 +3487,13 @@ cached artifact rather than the 20-row preview - and image outputs (e.g.
 matplotlib figures) render <strong>inline</strong> - using the terminal's graphics protocol
 (kitty / iTerm2 / Sixel) where available, degrading to Unicode half-blocks
 otherwise.</p>
-<p>Cell status glyphs:</p>
+<p>Cell states, each a glyph you can read without its color, and its word in the
+time column except <code>idle</code> and <code>ready</code>, which show the last run's time:</p>
 <table>
 <thead>
 <tr>
 <th>Glyph</th>
-<th>Status</th>
+<th>State</th>
 </tr>
 </thead>
 <tbody>
@@ -3501,24 +3502,36 @@ otherwise.</p>
 <td>idle</td>
 </tr>
 <tr>
+<td><code>…</code></td>
+<td>queued</td>
+</tr>
+<tr>
 <td><code>▶</code></td>
 <td>running</td>
+</tr>
+<tr>
+<td><code>↗</code></td>
+<td>dispatching to a worker</td>
 </tr>
 <tr>
 <td><code>✓</code></td>
 <td>ready</td>
 </tr>
 <tr>
-<td><code>✗</code></td>
-<td>error</td>
+<td><code>◆</code></td>
+<td>cached</td>
 </tr>
 <tr>
 <td><code>⊘</code></td>
 <td>stale</td>
 </tr>
 <tr>
-<td><code>…</code></td>
-<td>queued</td>
+<td><code>✗</code></td>
+<td>error</td>
+</tr>
+<tr>
+<td><code>■</code></td>
+<td>blocked by an annotation error</td>
 </tr>
 </tbody>
 </table>
