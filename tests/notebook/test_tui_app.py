@@ -829,7 +829,12 @@ async def test_time_column_widens_for_a_live_timing_update(monkeypatch):
                     "payload": {
                         "name": "NB",
                         "cells": [
-                            {"id": "a", "name": "load", "source": "import time\n", "status": "ready"}
+                            {
+                                "id": "a",
+                                "name": "load",
+                                "source": "import time\n",
+                                "status": "ready",
+                            }
                         ],
                     },
                 }
