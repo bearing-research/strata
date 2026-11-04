@@ -510,12 +510,6 @@ async def dispatch_http(
         input_file_handles.append(handle)
         files.append((file_name, (file_name, handle, "application/octet-stream")))
 
-    for spec in input_specs.values():
-        _add_file(str(spec["file"]))
-        # Ship the injected blobs alongside the module descriptor.
-        for inj in (spec.get("injected") or {}).values():
-            _add_file(str(inj["file"]))
-
     timeout = max(timeout_seconds + 5.0, 30.0)
     headers = {
         EXECUTOR_PROTOCOL_HEADER: EXECUTOR_PROTOCOL_VERSION,
@@ -560,6 +554,12 @@ async def dispatch_http(
                 f.write(chunk)
 
     try:
+        for spec in input_specs.values():
+            _add_file(str(spec["file"]))
+            # Ship the injected blobs alongside the module descriptor.
+            for inj in (spec.get("injected") or {}).values():
+                _add_file(str(inj["file"]))
+
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 async with client.stream(
@@ -600,11 +600,14 @@ async def dispatch_http(
             await asyncio.shield(cancel_remote_execution(executor_url, build_id, worker_token))
             raise
         except httpx.TimeoutException as exc:
+            # The worker may never see this connection drop, and would finish the cell for nobody.
+            await cancel_remote_execution(executor_url, build_id, worker_token)
             raise RemoteExecutionError(
                 context.timeout_message(cell_id, timeout_seconds),
                 remote_error_code="TIMEOUT",
             ) from exc
         except httpx.HTTPError as exc:
+            await cancel_remote_execution(executor_url, build_id, worker_token)
             raise RemoteExecutionError(
                 f"Remote executor request failed for worker '{worker_spec.name}': {exc}",
                 remote_error_code="REQUEST_FAILED",
@@ -665,6 +668,7 @@ async def dispatch_signed(
     if not executor_url:
         raise RuntimeError(f"Executor worker '{worker_spec.name}' is missing config.url")
 
+    worker_token = _resolve_worker_token(worker_spec)
     base_url = str(worker_spec.config.strata_url or "").strip() or state.config.server_url
     principal = get_principal()
     tenant_id = principal.tenant if principal is not None else None
@@ -675,6 +679,7 @@ async def dispatch_signed(
     trace_context = current_trace_context()
     artifact_version: int | None = None
     failure_recorded = False
+    submitted = False
 
     def _mark_failed(message: str, error_code: str) -> None:
         nonlocal failure_recorded
@@ -701,6 +706,11 @@ async def dispatch_signed(
 
     async def _fail(message: str, error_code: str) -> None:
         await anyio.to_thread.run_sync(_mark_failed, message, error_code)
+
+    async def _stop_worker() -> None:
+        """Ask the worker to stop, if it was ever asked to start."""
+        if submitted:
+            await cancel_remote_execution(executor_url, build_id, worker_token)
 
     staged_input_specs, input_artifacts = await anyio.to_thread.run_sync(
         functools.partial(
@@ -845,7 +855,6 @@ async def dispatch_signed(
         ).to_dict()
 
         manifest_execute_url = execute_manifest_url(executor_url)
-        worker_token = _resolve_worker_token(worker_spec)
         headers = {**trace_context}
         if worker_token:
             headers["Authorization"] = f"Bearer {worker_token}"
@@ -878,6 +887,7 @@ async def dispatch_signed(
         async with relay:
             with receiving:
                 try:
+                    submitted = True
                     async with httpx.AsyncClient(
                         timeout=max(timeout_seconds + 10.0, 30.0)
                     ) as client:
@@ -907,10 +917,11 @@ async def dispatch_signed(
         # Shielded: inside a cancellation an unshielded await is cancelled before the build
         # is failed or the worker hears.
         await asyncio.shield(_fail("Notebook manifest execution cancelled", "CANCELLED"))
-        await asyncio.shield(cancel_remote_execution(executor_url, build_id, worker_token))
+        await asyncio.shield(_stop_worker())
         raise
     except httpx.TimeoutException as exc:
         await _fail("Notebook manifest execution timed out", "TIMEOUT")
+        await _stop_worker()
         raise RemoteExecutionError(
             context.timeout_message(cell_id, timeout_seconds),
             remote_build_state="failed",
@@ -921,6 +932,7 @@ async def dispatch_signed(
             f"Remote executor request failed for worker '{worker_spec.name}': {exc}",
             "REQUEST_FAILED",
         )
+        await _stop_worker()
         raise RemoteExecutionError(
             f"Remote executor request failed for worker '{worker_spec.name}': {exc}",
             remote_build_state="failed",
@@ -928,6 +940,7 @@ async def dispatch_signed(
         ) from exc
     except Exception as exc:
         await _fail(str(exc), "SETUP_FAILED")
+        await _stop_worker()
         raise RemoteExecutionError(
             f"Remote executor setup failed for worker '{worker_spec.name}': {exc}",
             remote_build_state="failed",
@@ -1097,7 +1110,8 @@ async def await_accepted_job(
 
     Queueing, booting and env pulls count against
     ``worker_provisioning_timeout_seconds``; the cell's timeout starts when
-    the job reports ``running``. Either deadline cancels the job. The job URL
+    the job reports ``running``. Either deadline cancels the job, as does a
+    poll that fails or cannot be read. The job URL
     answers ``{"state": ...}`` (``queued``/``provisioning``/``starting``,
     ``running``, then ``finished``/``failed`` with ``status_code`` and
     ``result`` or ``error``); that response is handled as a synchronous one.
@@ -1165,10 +1179,19 @@ async def await_accepted_job(
                     remote_build_state="failed",
                     remote_error_code="JOB_STATUS_FAILED",
                 )
-            job = reply.json()
-            state = str(job.get("state", ""))
-            if state in ("finished", "failed"):
+            try:
+                job = reply.json()
+                state = str(job.get("state", ""))
                 status_code = int(job.get("status_code") or (200 if state == "finished" else 502))
+            except (ValueError, TypeError, AttributeError) as exc:
+                await cancel()
+                raise RemoteExecutionError(
+                    f"Remote executor '{worker_spec.name}' answered its job status with "
+                    "something Strata cannot read",
+                    remote_build_state="failed",
+                    remote_error_code="JOB_STATUS_FAILED",
+                ) from exc
+            if state in ("finished", "failed"):
                 content = job.get("result")
                 if content is None:
                     content = {"detail": job.get("error") or f"job {state}"}

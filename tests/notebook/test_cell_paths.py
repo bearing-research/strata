@@ -3941,6 +3941,30 @@ class TestPythonHarness:
         assert result["error"] == python.UV_NOT_FOUND_MESSAGE
         assert spawned.spawn is None
 
+    async def test_a_process_that_cannot_start_leaves_no_pipe_open(
+        self, spawned, tmp_path, monkeypatch
+    ):
+        real_pipe = os.pipe
+        ends = []
+
+        def pipe():
+            ends.extend(real_pipe())
+            return ends[0], ends[1]
+
+        async def cannot_start(*_cmd, **_kwargs):
+            raise OSError("no such file")
+
+        monkeypatch.setattr(python.os, "pipe", pipe)
+        monkeypatch.setattr(python.asyncio, "create_subprocess_exec", cannot_start)
+
+        with pytest.raises(OSError, match="no such file"):
+            await self._run(tmp_path, on_event=self._on_event)
+
+        assert len(ends) == 2
+        for end in ends:
+            with pytest.raises(OSError, match="Bad file descriptor"):
+                os.fstat(end)
+
     async def test_the_event_pipe_reaches_the_harness_and_the_relay(self, spawned, tmp_path):
         await self._run(tmp_path, on_event=self._on_event)
 
