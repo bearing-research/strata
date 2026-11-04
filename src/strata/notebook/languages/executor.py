@@ -277,8 +277,7 @@ class _MarkdownExecutor:
             cell_id=cell_id,
             success=True,
             duration_ms=duration_ms,
-            execution_method="cached",
-            cache_hit=True,
+            execution_method="not_run",
         )
 
     def reopen_identity(self, cell: CellState, session: Any) -> str | None:

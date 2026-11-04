@@ -1,0 +1,13 @@
+notebook_id = "caching-tutorial-001"
+name = "Tutorial: what the cache saves"
+created_at = 2026-11-03 00:00:00+00:00
+updated_at = 2026-11-03 00:00:00+00:00
+cells = [
+    { id = "step1", file = "step1.md", language = "markdown", order = 0 },
+    { id = "load", file = "load.py", language = "python", order = 1 },
+    { id = "step2", file = "step2.md", language = "markdown", order = 2 },
+    { id = "summarize", file = "summarize.py", language = "python", order = 3 },
+    { id = "step3", file = "step3.md", language = "markdown", order = 4 },
+    { id = "plot", file = "plot.py", language = "python", order = 5 },
+    { id = "step4", file = "step4.md", language = "markdown", order = 6 },
+]

@@ -92,6 +92,7 @@ _WRITE_ROUTES = frozenset(
     {
         ("POST", "/v1/notebooks/open"),
         ("POST", "/v1/notebooks/create"),
+        ("POST", "/v1/notebooks/samples/{name}/open"),
         ("POST", "/v1/notebooks/import"),
         ("POST", "/v1/notebooks/import-snapshot"),
         ("POST", "/v1/notebooks/{notebook_id}/quiesce"),

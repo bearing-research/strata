@@ -326,27 +326,27 @@ Use `display(x)` for **multiple** outputs in one cell (each call
 adds a new render below the cell). For one trailing expression at
 the end, no `display()` needed: the harness auto-displays it.
 
-## 8. Try an example
+## 8. Take the tutorial
 
-The repo ships 18 example notebooks covering every cell type. To
-browse them in the UI, stop the running server first (Ctrl+C), then
-point the storage root at `examples/`:
+Strata ships a few sample notebooks, so there is nothing to clone. One is a two-minute
+tutorial on what the cache saves:
 
 ```bash
-strata-notebook --notebook-dir ./examples
-# equivalently: STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-notebook
+strata tutorial           # list the samples
+strata tutorial caching   # open a copy and print its URL
 ```
 
-(For Docker, in `docker-compose.yml` replace the
-`strata-notebooks:/tmp/strata-notebooks` volume with
-`./examples:/tmp/strata-notebooks` and add `UV_PYTHON_DOWNLOADS=automatic`
-under `environment:`. The image ships Python 3.13 only and the examples
-pin 3.12 or 3.14, so uv has to fetch those.)
+Each open copies the sample into your storage directory under a fresh name, so you can
+edit it freely. It uses the server on `:8765`, or starts one if none is running (pass
+`--server` for another address). The first open builds the copy's environment before it
+returns, so it takes a little longer.
 
-Every example is also rendered into the docs site so you can read
-the cells before deciding which to open. See the
-[Examples catalog](../notebook/examples.md) for the full list,
-grouped by feature.
+**Open a sample** on the home page does the same thing, and is the way in if your server
+runs in Docker.
+
+The repo's `examples/` directory holds many more, one for each cell type. Every example
+is rendered into the docs site, so you can read the cells before deciding which to open.
+See the [Examples catalog](../notebook/examples.md) for the full list, grouped by feature.
 
 ## Cell operations
 

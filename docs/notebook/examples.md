@@ -25,6 +25,7 @@ the directory you want under your existing storage root instead:
 
 | Notebook | What you'll see |
 | --- | --- |
+| [`caching`](../examples/caching.md) | A two-minute tutorial: what the cache saves, and what an edit runs again. `strata tutorial caching` opens a copy. |
 | [`iris_classification`](../examples/iris_classification.md) | End-to-end ML in seven cells: load → split → train → evaluate → plot. The canonical "multi-cell DAG with caching" demo. |
 | [`pandas_basics`](../examples/pandas_basics.md) | Core DataFrame operations and rich display outputs. |
 | [`titanic_ml`](../examples/titanic_ml.md) | Feature engineering plus comparison of two classifiers, closer to a real ML workflow. |

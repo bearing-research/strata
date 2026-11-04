@@ -48,6 +48,7 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
 )
 from strata.notebook.quiesce import NotebookQuiesced
+from strata.notebook.samples import SAMPLES, copy_sample, get_sample
 from strata.notebook.scopes import (
     NOTEBOOK_SCOPE_READ,
     required_scope_for_route,
@@ -808,6 +809,44 @@ class PromoteArtifactRequest(BaseModel):
 # --- Endpoints ---
 
 
+async def _open_with_synced_environment(
+    notebook_path: Path, timing: NotebookTimingRecorder
+) -> NotebookSession:
+    """Open a session and wait for its environment, so a client can run cells at once."""
+    reuse_existing, opened_by = _reuse_open_session_by_path()
+    with timing.phase("session_open"):
+        # Make room before this notebook's processes start.
+        await _session_manager.relieve_memory_pressure()
+        session = _session_manager.open_notebook(
+            notebook_path,
+            reuse_existing=reuse_existing,
+            opened_by=opened_by,
+            defer_initial_venv_sync=True,
+            timing=timing,
+        )
+    with timing.phase("session_secrets"):
+        await session.refresh_secrets_async()
+    # ``uv sync`` and the ``renv`` restore run as an environment job, off the event
+    # loop. Awaited, so a client can run cells as soon as open returns.
+    if (
+        session.environment_sync_state == "pending"
+        and not session.has_active_environment_mutation()
+    ):
+        with timing.phase("session_env_sync"):
+            try:
+                await session.submit_environment_job(action="sync")
+            except Exception as exc:
+                logger.exception("Failed to start the environment sync for %s", notebook_path)
+                session.environment_sync_state = "failed"
+                session.environment_sync_error = f"Failed to start notebook environment sync: {exc}"
+                session.environment_sync_notice = None
+            job_task = session.wait_for_environment_job_task()
+            if job_task is not None:
+                # Shielded: a client that hangs up must not cancel the sync.
+                await asyncio.shield(job_task)
+    return session
+
+
 @router.post("/open")
 async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONResponse:
     """Open a notebook directory and return its state, session ID and DAG.
@@ -822,39 +861,7 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
             if not notebook_path.exists():
                 raise HTTPException(status_code=404, detail="Notebook directory not found")
 
-        reuse_existing, opened_by = _reuse_open_session_by_path()
-        with timing.phase("session_open"):
-            # Make room before this notebook's processes start.
-            await _session_manager.relieve_memory_pressure()
-            session = _session_manager.open_notebook(
-                notebook_path,
-                reuse_existing=reuse_existing,
-                opened_by=opened_by,
-                defer_initial_venv_sync=True,
-                timing=timing,
-            )
-        with timing.phase("session_secrets"):
-            await session.refresh_secrets_async()
-        # ``uv sync`` and the ``renv`` restore run as an environment job, off the event
-        # loop. Awaited, so a client can run cells as soon as open returns.
-        if (
-            session.environment_sync_state == "pending"
-            and not session.has_active_environment_mutation()
-        ):
-            with timing.phase("session_env_sync"):
-                try:
-                    await session.submit_environment_job(action="sync")
-                except Exception as exc:
-                    logger.exception("Failed to start the environment sync for %s", notebook_path)
-                    session.environment_sync_state = "failed"
-                    session.environment_sync_error = (
-                        f"Failed to start notebook environment sync: {exc}"
-                    )
-                    session.environment_sync_notice = None
-                job_task = session.wait_for_environment_job_task()
-                if job_task is not None:
-                    # Shielded: a client that hangs up must not cancel the sync.
-                    await asyncio.shield(job_task)
+        session = await _open_with_synced_environment(notebook_path, timing)
 
         with timing.phase("serialize"):
             data = session.serialize_notebook_state()
@@ -1589,6 +1596,78 @@ def _discover_notebooks(
 
     results.sort(key=sort_key, reverse=True)
     return results
+
+
+# A fresh venv imports slowly; past this the first run just pays for it itself.
+_WARM_TIMEOUT_SECONDS = 120.0
+
+
+@router.get("/samples")
+async def list_samples() -> dict:
+    """List the notebooks bundled with Strata."""
+    return {
+        "samples": [
+            {"name": sample.name, "title": sample.title, "description": sample.description}
+            for sample in SAMPLES
+        ]
+    }
+
+
+async def _warm_environment(python: Path, modules: tuple[str, ...]) -> None:
+    """Import ``modules`` once, so a first run's timings are its cells, not a new venv's imports."""
+    process = await asyncio.create_subprocess_exec(
+        str(python),
+        "-c",
+        "import " + ", ".join(modules),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        returncode = await asyncio.wait_for(process.wait(), timeout=_WARM_TIMEOUT_SECONDS)
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        logger.warning("Warming %s timed out", python)
+        return
+    if returncode != 0:
+        logger.warning("Warming %s exited with %s", python, returncode)
+
+
+@router.post("/samples/{name}/open")
+async def open_sample(name: str, request: Request) -> JSONResponse:
+    """Copy a bundled sample into the storage root under a fresh name and open the copy."""
+    timing = NotebookTimingRecorder()
+    sample = get_sample(name)
+    if sample is None:
+        raise HTTPException(status_code=404, detail=f"No sample named {name!r}")
+    root = _get_caller_storage_root(request) or _get_notebook_storage_root()
+    if root is None:
+        raise HTTPException(
+            status_code=400, detail="Notebook storage root is not configured on this server"
+        )
+    try:
+        with timing.phase("copy_sample"):
+            notebook_dir = await asyncio.to_thread(copy_sample, sample, root)
+        session = await _open_with_synced_environment(notebook_dir, timing)
+        if session.venv_python is not None:
+            with timing.phase("warm_environment"):
+                await _warm_environment(session.venv_python, sample.warm_imports)
+        with timing.phase("serialize"):
+            data = session.serialize_notebook_state()
+            data["session_id"] = session.id
+            data["path"] = str(session.path)
+            data["dag"] = _format_dag(session)
+            data.update(_serialize_notebook_runtime_config(request))
+        return _timed_json_response(
+            data,
+            timing=timing,
+            route_name="notebook_open_sample",
+            log_context=str(notebook_dir),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
 
 
 @router.get("/discover")

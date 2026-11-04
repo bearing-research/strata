@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { Diamond, FolderOpen, Notebook, Plus, RotateCw, X } from '@lucide/vue'
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Diamond, FolderOpen, GraduationCap, Notebook, Plus, RotateCw, X } from '@lucide/vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   useStrata,
   type DiscoveredNotebook,
   type ImportNotebookResponse,
+  type NotebookSample,
 } from '../composables/useStrata'
 import { preloadNotebookRoute } from '../router'
 import { useRecentNotebooks } from '../stores/recentNotebooks'
 import { primePrefetchedNotebookSession } from '../utils/notebookSessionPrefetch'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
+import { storedNotInRecents } from '../utils/storedNotebooks'
 import ImportReportModal from '../components/ImportReportModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 
@@ -26,6 +28,10 @@ const selectedPythonVersion = ref('')
 const pythonSelectionFixed = ref(true)
 const showNewForm = ref(false)
 const showOpenForm = ref(false)
+const showSampleForm = ref(false)
+const samples = ref<NotebookSample[]>([])
+const samplesError = ref<string | null>(null)
+const openingSample = ref(false)
 const discoveredNotebooks = ref<DiscoveredNotebook[]>([])
 const discoveryRoot = ref<string | null>(null)
 const discoveryLoading = ref(false)
@@ -44,6 +50,10 @@ const importResult = ref<ImportNotebookResponse | null>(null)
 // clear the hover only at zero.
 const dragDepth = ref(0)
 const isDragHovering = ref(false)
+
+const otherStoredNotebooks = computed(() =>
+  storedNotInRecents(discoveredNotebooks.value, recentNotebooks.value),
+)
 
 async function pruneStaleRecents() {
   // Recents in localStorage outlive deleted notebooks; drop the paths the
@@ -99,6 +109,7 @@ onMounted(async () => {
   } catch (e) {
     console.warn('Failed to load notebook config, using fallback parent path', e)
   }
+  void loadDiscoveredNotebooks()
   // Last, so a slow best-effort check doesn't gate the page.
   await pruneStaleRecents()
 })
@@ -307,6 +318,39 @@ async function openNotebook(path?: string) {
   }
 }
 
+// Refresh on open, like the notebook scan above.
+watch(showSampleForm, async (visible) => {
+  if (!visible) return
+  samplesError.value = null
+  try {
+    samples.value = await strata.listSamples()
+  } catch (e: any) {
+    samplesError.value = e.message || 'Failed to list samples'
+  }
+})
+
+async function openSample(name: string) {
+  loading.value = true
+  openingSample.value = true
+  dismissError()
+  void preloadNotebookRoute()
+  try {
+    const data = await strata.openSample(name)
+    primePrefetchedNotebookSession(data)
+    record(data.name, data.path || '', data.session_id)
+    await router.push({
+      name: 'notebook',
+      params: { sessionId: data.session_id },
+      query: data.path ? { path: data.path } : {},
+    })
+  } catch (e: any) {
+    error.value = e.message || 'Failed to open sample'
+  } finally {
+    loading.value = false
+    openingSample.value = false
+  }
+}
+
 function dismissError() {
   error.value = null
   failedRecentPath.value = null
@@ -431,6 +475,16 @@ function formatTime(ts: number): string {
           </div>
           <div class="action-hint" v-if="!importing">or drop a .ipynb anywhere</div>
         </div>
+        <div
+          class="action-card"
+          data-testid="action-open-sample"
+          @click="showSampleForm = true"
+          @mouseenter="void preloadNotebookRoute()"
+          @focusin="void preloadNotebookRoute()"
+        >
+          <div class="action-icon"><GraduationCap /></div>
+          <div class="action-label">Open a sample</div>
+        </div>
       </div>
 
       <input
@@ -552,6 +606,29 @@ function formatTime(ts: number): string {
         </div>
       </div>
 
+      <!-- Sample form -->
+      <div v-if="showSampleForm" class="form-card" data-testid="open-sample-form">
+        <h3>Open a sample</h3>
+        <p class="form-help sample-help">Opens a copy, so you can edit it freely.</p>
+        <div v-if="samplesError" class="discovery-error">{{ samplesError }}</div>
+        <ul v-else class="discovery-list" data-testid="open-sample-list">
+          <li
+            v-for="sample in samples"
+            :key="sample.name"
+            class="discovery-item"
+            :class="{ disabled: loading }"
+            :data-testid="`open-sample-${sample.name}`"
+            @click="!loading && openSample(sample.name)"
+          >
+            <div class="discovery-name">{{ sample.title }}</div>
+            <div class="sample-description">{{ sample.description }}</div>
+          </li>
+        </ul>
+        <div class="form-actions">
+          <button class="btn btn-secondary" @click="showSampleForm = false">Cancel</button>
+        </div>
+      </div>
+
       <!-- Recent notebooks -->
       <div v-if="recentNotebooks.length > 0" class="recent-section">
         <div class="recent-header">
@@ -595,10 +672,35 @@ function formatTime(ts: number): string {
         </div>
       </div>
 
+      <!-- Notebooks in the storage directory -->
+      <div v-if="otherStoredNotebooks.length > 0" class="recent-section stored-section">
+        <div class="recent-header">
+          <h3 class="section-title">In the storage directory</h3>
+        </div>
+        <div class="recent-list" data-testid="stored-notebook-list">
+          <div
+            v-for="nb in otherStoredNotebooks"
+            :key="nb.path"
+            class="recent-item"
+            data-testid="stored-notebook"
+            @click="openNotebook(nb.path)"
+          >
+            <div class="recent-info">
+              <span class="recent-name">{{ nb.name || nb.path.split('/').pop() }}</span>
+              <span class="recent-path">{{ nb.path }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Loading overlay -->
       <div v-if="loading" class="loading-overlay" data-testid="home-loading">
         <div class="spinner"></div>
-        <span>Loading notebook...</span>
+        <span>{{
+          openingSample
+            ? 'Copying the sample and preparing its environment…'
+            : 'Loading notebook...'
+        }}</span>
       </div>
     </div>
 
@@ -939,6 +1041,17 @@ function formatTime(ts: number): string {
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 500;
+}
+.sample-description {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.sample-help {
+  margin: -8px 0 12px;
+}
+.stored-section {
+  margin-top: 24px;
 }
 .discovery-path {
   color: var(--text-muted);
