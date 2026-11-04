@@ -348,7 +348,8 @@ class NotebookTUI(App[None]):
 
     async def on_mount(self) -> None:
         table = self.query_one("#cells", DataTable)
-        self._col_keys = list(table.add_columns(" ", "cell", "time"))
+        # Time before the label, which clips: it is where a cache hit shows, at any width.
+        self._col_keys = list(table.add_columns(" ", "time", "cell"))
         self.query_one("#output-table", DataTable).display = False
         self._set_connection("connecting…")
         self.run_worker(self._bootstrap(), name="bootstrap", exclusive=True)
@@ -640,7 +641,7 @@ class NotebookTUI(App[None]):
         for cid in self.vm.cell_order:
             cell = self.vm.cells[cid]
             table.add_row(
-                _glyph(cell.status), _literal(self._cell_label(cell)), _time_str(cell), key=cid
+                _glyph(cell.status), _time_str(cell), _literal(self._cell_label(cell)), key=cid
             )
         if self.vm.cell_order:
             if self._selected not in self.vm.cells:
@@ -669,7 +670,7 @@ class NotebookTUI(App[None]):
         if not self._col_keys:
             return
         table = self.query_one("#cells", DataTable)
-        status_col, cell_col, time_col = self._col_keys
+        status_col, time_col, cell_col = self._col_keys
         # update_width=True, or columns keep their pre-run width and clip later
         # values ("cached" -> "cach").
         try:

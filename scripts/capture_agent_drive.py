@@ -66,8 +66,6 @@ async def _run(work_dir: Path) -> list[Path]:
                     break
             if not app._session_id:
                 raise SystemExit("the TUI never connected; nothing to capture")
-            for _ in range(3):
-                await pilot.press("ctrl+right")
 
             async def settle(what: str, ready, tries: int = 60) -> None:
                 """Wait until the TUI's own model satisfies *ready*, then snapshot.

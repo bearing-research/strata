@@ -760,6 +760,51 @@ async def test_data_viewer_ignores_keys_when_hidden(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("width", [80, 132])
+async def test_a_cache_hit_shows_beside_a_long_label_at_the_default_split(monkeypatch, width):
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(width, 30)) as pilot:
+        source = "stats = df.groupby('species', observed=True).mean()\n"
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "name": "NB",
+                        "cells": [{"id": "a", "name": "summarize", "source": source}],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "cell_output",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "cell_id": "a",
+                        "duration_ms": 38,
+                        "cache_hit": True,
+                        "outputs": [],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+
+        assert "cached" in app.export_screenshot()
+
+
+@pytest.mark.asyncio
 async def test_time_column_widens_for_a_live_timing_update(monkeypatch):
     """A `cached` or `412ms` timing arriving after the snapshot is not clipped.
 
@@ -789,7 +834,7 @@ async def test_time_column_widens_for_a_live_timing_update(monkeypatch):
         await pilot.pause()
 
         table = app.query_one("#cells", DataTable)
-        time_col = list(table.columns.values())[2]
+        time_col = list(table.columns.values())[1]
         assert time_col.content_width == len("time")  # nothing has run yet
 
         app._dispatch(
