@@ -2579,9 +2579,10 @@ with <a href="../../notebook/annotations/#nocache"><code># @nocache</code></a>.<
 <p>Edit the loader, say, change <code>time.sleep(2)</code> to <code>time.sleep(1)</code>.
 Strata re-analyzes the source and computes a new provenance hash, so
 the loader's cached result no longer matches its source and the cell
-returns to <strong>idle</strong>. The summary and plot cells flip <strong>stale</strong>: they
-referenced <code>df</code>, which is no longer the cached value. (Hover
-<strong>Why stale?</strong> on either to see the reason - here, <code>upstream</code>.)</p>
+flips <strong>stale</strong>. So do the summary and plot cells: they referenced
+<code>df</code>, which is no longer the cached value. (Hover <strong>Why stale?</strong> on
+any of them to see the reason: <code>source changed</code> on the loader,
+<code>upstream changed</code> on the others.)</p>
 <p>Now press <span class="keys"><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span> on the plot cell. Strata walks back through
 the stale upstream cells and runs loader → summary → plot in
 topological order, with a live progress strip showing which cell is

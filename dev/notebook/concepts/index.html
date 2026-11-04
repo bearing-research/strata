@@ -2744,17 +2744,17 @@ per artifact.</p>
 <li>The environment (<code>uv.lock</code>, or an <code>@env</code> it declares) changed</li>
 <li>A declared outside input moved: a mounted file, an <code>@table</code> snapshot, an <code>@fetch</code> URL's bytes, an <code>@dataset</code> alias</li>
 </ul>
-<p>A cell that still has a result and whose upstream moved reads <strong>stale · upstream changed</strong>. A cell whose own source, environment or declared outside input changed has nothing that matches, so it reads <strong>idle</strong> until it runs, and the cells downstream of it read stale. The <code>@fetch</code> and <code>@dataset</code> checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the <code>@table</code> catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.</p>
+<p>A cell that still has a result and whose upstream moved reads <strong>stale · upstream changed</strong>. A cell you edited after it ran reads <strong>stale · source changed</strong>, and undoing the edit brings it back to <strong>ready</strong>, shown as cached, along with the cells downstream of it. A cell whose environment or declared outside input changed has nothing that matches, so it reads <strong>idle</strong> until it runs, and the cells downstream of it read stale. The <code>@fetch</code> and <code>@dataset</code> checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the <code>@table</code> catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.</p>
 <p>The <strong>causality chain</strong> explains why a cell is stale. Each good run saves the parts its key was built from (source, environment, upstream outputs and outside inputs), and the chain lists the parts that differ now: "the source of X changed", "upstream X changed", "mount <code>raw</code> changed". An input that cannot be read now is reported as that. When the record cannot explain the change, for example a run from before parts were saved, the chain says it is incomplete rather than guessing.</p>
 <h2 id="cell-status-lifecycle">Cell Status Lifecycle<a class="headerlink" href="#cell-status-lifecycle" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>idle ──→ running ──→ ready ──→ stale
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>              └───→ error
 </code></pre></div>
 <ul>
-<li><strong>idle</strong>: no current result: never executed, its own source, environment or a declared outside input changed since it ran, or, after a reopen, a leaf cell that keeps no record of its run (<code># @nocache</code>, or a read-write mount)</li>
+<li><strong>idle</strong>: no current result: never executed, its environment or a declared outside input changed since it ran, or, after a reopen, a leaf cell that keeps no record of its run (<code># @nocache</code>, or a read-write mount)</li>
 <li><strong>running</strong>: currently executing. If an upstream cell is edited while it runs, it stays running and finishes <strong>stale</strong>, since it read the old value.</li>
 <li><strong>ready</strong>: last execution succeeded (or was a cache hit), artifact is current</li>
-<li><strong>stale</strong>: it has a result, but something upstream has moved, or Run All skipped it because a cell it reads from failed</li>
+<li><strong>stale</strong>: it has a result, but its source was edited since, something upstream has moved, or Run All skipped it because a cell it reads from failed</li>
 <li><strong>error</strong>: last execution failed. The traceback and the console output before it are kept against the source that failed, so <code>strata cell show</code>, the MCP view, a reopen, a snapshot and an export all still report them. The error stands until the cell is edited or runs successfully (a cache hit counts).</li>
 </ul>
 
