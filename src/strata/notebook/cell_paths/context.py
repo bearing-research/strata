@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
+from strata.notebook.execution_result import CellExecutionResult
+from strata.notebook.models import MountMode, MountSpec
+from strata.notebook.mounts import MountWrite
+
 if TYPE_CHECKING:
-    from strata.notebook.execution_result import CellExecutionResult
     from strata.notebook.executor import _CellProvenance
     from strata.notebook.executor_host import ExecutorHost
+    from strata.notebook.harness_user import LocalExecutionRefused
     from strata.notebook.models import NotebookState
-    from strata.notebook.mounts import MountWrite
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -72,3 +80,77 @@ def _writes_entry(writes: list[MountWrite]) -> dict[str, Any] | None:
         "principal": caller_principal_id(),
         "mounts": [write.model_dump() for write in writes],
     }
+
+
+class RemoteExecutionError(RuntimeError):
+    """Execution failure with structured remote metadata for notebook UX."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        remote_build_state: str | None = None,
+        remote_error_code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.remote_build_state = remote_build_state
+        self.remote_error_code = remote_error_code
+
+
+def _store_failure_result(
+    result: CellExecutionResult, store_error: str | None
+) -> CellExecutionResult:
+    """A single run that succeeded and could not store its outputs."""
+    return CellExecutionResult(
+        cell_id=result.cell_id,
+        success=False,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        outputs=result.outputs,
+        duration_ms=result.duration_ms,
+        error=store_error
+        or "Cell executed successfully but failed to store output artifacts. Check server logs.",
+        execution_method=result.execution_method,
+    )
+
+
+def _mount_sync_failure_result(result: CellExecutionResult, exc: Exception) -> CellExecutionResult:
+    """A single run that succeeded and could not sync its read-write mounts back."""
+    return CellExecutionResult(
+        cell_id=result.cell_id,
+        success=False,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        outputs=result.outputs,
+        duration_ms=result.duration_ms,
+        error=f"Cell executed successfully but failed to sync read-write mounts: {exc}",
+        execution_method=result.execution_method,
+        mutation_warnings=result.mutation_warnings,
+    )
+
+
+def _worker_mount_writes(result: Any, mount_specs: list[MountSpec]) -> list[MountWrite]:
+    """What a remote worker reports it wrote, for the cell's own read-write mounts only.
+
+    The report comes from another machine, perhaps another Strata version: an entry that
+    does not parse, or names a mount this cell does not have, is dropped.
+    """
+    raw = result.get("mount_writes") if isinstance(result, dict) else None
+    if not isinstance(raw, list):
+        return []
+    rw = {m.name: m.uri for m in mount_specs if m.mode == MountMode.READ_WRITE}
+    writes: list[MountWrite] = []
+    for entry in raw:
+        try:
+            write = MountWrite.model_validate(entry)
+        except ValidationError:
+            logger.warning("Ignoring a malformed mount write report from a worker")
+            continue
+        if rw.get(write.mount) == write.uri:
+            writes.append(write)
+    return writes
+
+
+def _refused_result(exc: LocalExecutionRefused) -> dict[str, Any]:
+    """A harness result for cell code this host would not start."""
+    return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}

@@ -34,7 +34,6 @@ from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 
 import anyio.to_thread
 import httpx
-from pydantic import ValidationError
 from vestigo import checkpoint_files
 from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 from vestigo.build_store import get_build_store
@@ -60,7 +59,13 @@ from strata.notebook.cell_paths.cell_tests import (
 from strata.notebook.cell_paths.cell_tests import (
     _variant_test_run as _variant_test_run,
 )
-from strata.notebook.cell_paths.context import PathContext
+from strata.notebook.cell_paths.context import PathContext, RemoteExecutionError
+from strata.notebook.cell_paths.context import (
+    _mount_sync_failure_result as _mount_sync_failure_result,
+)
+from strata.notebook.cell_paths.context import _refused_result as _refused_result
+from strata.notebook.cell_paths.context import _store_failure_result as _store_failure_result
+from strata.notebook.cell_paths.context import _worker_mount_writes as _worker_mount_writes
 from strata.notebook.cell_paths.context import _writes_entry as _writes_entry
 from strata.notebook.cell_paths.context import artifact_content_type as _artifact_content_type
 from strata.notebook.cell_paths.context import effective_worker_name as effective_worker_name
@@ -73,6 +78,7 @@ from strata.notebook.cell_paths.loop import _loop_folders as _loop_folders
 from strata.notebook.cell_paths.loop import _loop_run_token as _loop_run_token
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.cell_paths.prompt import run_prompt_cell
+from strata.notebook.cell_paths.r import RContext, run_r_cell, run_r_harness
 from strata.notebook.cell_paths.sql import run_sql_cell
 from strata.notebook.cell_paths.widget import run_widget_cell
 from strata.notebook.credentials import CredentialResolver
@@ -97,7 +103,7 @@ from strata.notebook.harness_user import (
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.keys import cell_key
 from strata.notebook.layout import WORK_DIR
-from strata.notebook.lifeline import lifeline_command, lifeline_handoff
+from strata.notebook.lifeline import lifeline_handoff
 from strata.notebook.local_runs import (
     EVENTS_DRAIN_SECONDS,
     RESTORE_DIR,
@@ -514,38 +520,6 @@ class BatchExecutionResult:
     end_reason: str = "complete"  # "complete" | "cell_error" | "persist_failed" | "subprocess_died"
 
 
-def _store_failure_result(
-    result: CellExecutionResult, store_error: str | None
-) -> CellExecutionResult:
-    """A single run that succeeded and could not store its outputs."""
-    return CellExecutionResult(
-        cell_id=result.cell_id,
-        success=False,
-        stdout=result.stdout,
-        stderr=result.stderr,
-        outputs=result.outputs,
-        duration_ms=result.duration_ms,
-        error=store_error
-        or "Cell executed successfully but failed to store output artifacts. Check server logs.",
-        execution_method=result.execution_method,
-    )
-
-
-def _mount_sync_failure_result(result: CellExecutionResult, exc: Exception) -> CellExecutionResult:
-    """A single run that succeeded and could not sync its read-write mounts back."""
-    return CellExecutionResult(
-        cell_id=result.cell_id,
-        success=False,
-        stdout=result.stdout,
-        stderr=result.stderr,
-        outputs=result.outputs,
-        duration_ms=result.duration_ms,
-        error=f"Cell executed successfully but failed to sync read-write mounts: {exc}",
-        execution_method=result.execution_method,
-        mutation_warnings=result.mutation_warnings,
-    )
-
-
 # Module-level so a test can make polling immediate.
 _JOB_POLL_SECONDS = 1.0
 
@@ -569,21 +543,6 @@ def _queue_report(job: dict[str, Any]) -> tuple[int | None, str | None]:
     return position, detail
 
 
-class RemoteExecutionError(RuntimeError):
-    """Execution failure with structured remote metadata for notebook UX."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        remote_build_state: str | None = None,
-        remote_error_code: str | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.remote_build_state = remote_build_state
-        self.remote_error_code = remote_error_code
-
-
 def _team_cache_publish_policy(config: Any) -> str:
     """What the team cache offers outward: ``all``, ``promoted`` or ``off``.
 
@@ -591,28 +550,6 @@ def _team_cache_publish_policy(config: Any) -> str:
     missing setting means the pre-existing behaviour.
     """
     return str(getattr(config, "notebook_team_cache_publish", "all") or "all")
-
-
-def _worker_mount_writes(result: Any, mount_specs: list[MountSpec]) -> list[MountWrite]:
-    """What a remote worker reports it wrote, for the cell's own read-write mounts only.
-
-    The report comes from another machine, perhaps another Strata version: an entry that
-    does not parse, or names a mount this cell does not have, is dropped.
-    """
-    raw = result.get("mount_writes") if isinstance(result, dict) else None
-    if not isinstance(raw, list):
-        return []
-    rw = {m.name: m.uri for m in mount_specs if m.mode == MountMode.READ_WRITE}
-    writes: list[MountWrite] = []
-    for entry in raw:
-        try:
-            write = MountWrite.model_validate(entry)
-        except ValidationError:
-            logger.warning("Ignoring a malformed mount write report from a worker")
-            continue
-        if rw.get(write.mount) == write.uri:
-            writes.append(write)
-    return writes
 
 
 def _worker_mount_bytes(result: Any, mount_specs: list[MountSpec]) -> dict[str, int | None]:
@@ -2301,6 +2238,35 @@ class CellExecutor:
             use_cache=use_cache,
         )
 
+    def _r_context(self) -> RContext:
+        return RContext(
+            materialize_upstreams=self._materialize_upstreams,
+            compute_provenance=self._compute_cell_provenance,
+            remote_execution_metadata=self._remote_execution_metadata,
+            find_or_pull_outputs=self._find_or_pull_outputs,
+            validate_output_hit=self._validate_output_hit,
+            promote_reverted_outputs=self._promote_reverted_outputs,
+            moved=self._moved,
+            table_write_refusal=self._table_write_refusal,
+            load_input_blobs=self._load_input_blobs,
+            dispatch_http_executor=self._dispatch_http_executor,
+            prepare_mounts=self._prepare_mounts,
+            write_manifest=self._write_manifest,
+            run_r_harness=self._run_r_harness,
+            parse_result=self._parse_result,
+            collect_output_dirs_off_loop=self._collect_output_dirs_off_loop,
+            keep_failed_output_dirs=self._keep_failed_output_dirs,
+            store_outputs=self._store_outputs,
+            push_to_team_store=self._push_to_team_store,
+            store_result_displays=self._store_result_displays,
+            sync_back_mounts=self._mount_resolver.sync_back,
+            store_console_outputs=self._store_console_outputs,
+            store_mount_writes=self._store_mount_writes,
+            record_good_run=self._record_good_run,
+            received_output_files=self._received_output_files,
+            folder_listings=self._folder_listings,
+        )
+
     async def _execute_r_cell(
         self,
         cell_id: str,
@@ -2311,456 +2277,17 @@ class CellExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
-        """R cell pipeline: provenance, upstreams, cache check, ``Rscript`` harness, persist.
-
-        Runs locally (warm pool, then cold ``Rscript``) or on an HTTP executor
-        worker. Cache, mounts and storage are shared with Python: they key off
-        provenance hashes and file extensions, which the R harness produces identically.
-        """
-        remote_metadata: dict[str, str] = {}
-        # Nothing a worker uploaded for an earlier run belongs to this one.
-        self._received_output_files.pop(cell_id, None)
-        self._folder_listings.pop(cell_id, None)
-        try:
-            cell = self.session.notebook_state.get_cell(cell_id)
-
-            if materialize_upstreams:
-                await self._materialize_upstreams(cell_id)
-
-            prov = await self._compute_cell_provenance(cell_id, source)
-            source_hash = prov.source_hash
-            runtime_env = prov.runtime_env
-            env_hash = prov.env_hash
-            input_hashes = prov.input_hashes
-            provenance_hash = prov.provenance_hash
-            if prov.annotations.datasets:
-                return CellExecutionResult(
-                    cell_id=cell_id,
-                    success=False,
-                    error="@dataset is not supported on R cells; read the dataset in a "
-                    "Python cell upstream",
-                    execution_method="error",
-                )
-            # harness.R binds no table names, so the cell would run without what it declared.
-            if prov.annotations.tables:
-                return CellExecutionResult(
-                    cell_id=cell_id,
-                    success=False,
-                    error="@table is not supported on R cells; read the table in a "
-                    "Python cell upstream",
-                    execution_method="error",
-                )
-            # As in Python: an unchecked fetch fails the run, and each fetched file arrives as a
-            # read-only mount that harness.R binds to its name as a path string.
-            if prov.fetch_error is not None:
-                return CellExecutionResult(
-                    cell_id=cell_id,
-                    success=False,
-                    error=prov.fetch_error,
-                    error_code=prov.fetch_error_code,
-                    execution_method="error",
-                )
-            worker_spec = resolve_worker_spec(self.session.notebook_state, prov.effective_worker)
-            remote = (
-                worker_spec
-                if worker_spec is not None and is_http_executor_worker(worker_spec)
-                else None
-            )
-            if (
-                worker_spec is not None
-                and remote is None
-                and worker_spec.backend != WorkerBackendType.LOCAL
-            ):
-                return CellExecutionResult(
-                    cell_id=cell_id,
-                    success=False,
-                    error=f"R cells run locally or on an executor worker; worker "
-                    f"'{worker_spec.name}' is neither",
-                    execution_method="error",
-                )
-            if remote is not None and prov.fetched:
-                return CellExecutionResult(
-                    cell_id=cell_id,
-                    success=False,
-                    error="@fetch on an R cell is read on this machine; run the cell "
-                    "locally or fetch in a Python cell upstream",
-                    execution_method="error",
-                )
-            remote_metadata = self._remote_execution_metadata(worker_spec)
-            mount_specs = [
-                *prov.mount_specs,
-                *(
-                    MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
-                    for name, path in prov.fetched.items()
-                ),
-            ]
-
-            if prov.has_rw_mount:
-                use_cache = False
-            if prov.annotations.nocache:
-                use_cache = False
-
-            logger.info(
-                "execute_r_cell %s: source_hash=%s env_hash=%s provenance=%s",
-                cell_id,
-                source_hash[:12],
-                env_hash[:12],
-                provenance_hash[:12],
-            )
-
-            artifact_mgr = self.session.get_artifact_manager()
-            consumed_vars = (
-                self.session.dag.consumed_variables.get(cell_id, set())
-                if self.session.dag
-                else set()
-            )
-
-            cached_artifact = None
-            if cell is not None:
-                current_display_outputs = cell.display_outputs or (
-                    [cell.display_output] if cell.display_output is not None else []
-                )
-            else:
-                current_display_outputs = []
-            # Same gate as Python: ungated replay makes ``# @nocache`` and force/rerun no-ops
-            # for a leaf cell.
-            cached_display_outputs = (
-                self.session.resolve_cached_display_outputs(
-                    cell_id,
-                    provenance_hash,
-                    current_display_outputs,
-                )
-                if (cell is not None and use_cache)
-                else []
-            )
-            team_pull: TeamPull | None = None
-            if use_cache:
-                cached_artifact, team_pull = await self._find_or_pull_outputs(
-                    cell_id,
-                    provenance_hash,
-                    consumed_vars,
-                    source_hash=source_hash,
-                    source=source,
-                    env_hash=env_hash,
-                )
-
-            notebook_id = self.session.notebook_state.id
-            if use_cache and cached_artifact is not None and consumed_vars:
-                cached_artifact, cached_display_outputs = self._validate_output_hit(
-                    cell,
-                    cell_id,
-                    provenance_hash,
-                    consumed_vars,
-                    prov.annotations.table_writes,
-                    cached_artifact,
-                    current_display_outputs,
-                    cached_display_outputs,
-                )
-            # A leaf's displays, promoted as a variable's above. An R leaf with only a console
-            # is not cached, so it has nothing to promote.
-            elif (
-                use_cache
-                and cell is not None
-                and not consumed_vars
-                and not cached_display_outputs
-                and self._promote_reverted_outputs(
-                    cell_id, provenance_hash, [], [], len(current_display_outputs)
-                )
-            ):
-                cached_display_outputs = self.session.resolve_cached_display_outputs(
-                    cell_id, provenance_hash, current_display_outputs
-                )
-
-            if cached_artifact is not None or (not consumed_vars and cached_display_outputs):
-                # After the promotion above, which carries the console.
-                cached_console = self.session.resolve_cached_console(cell_id, provenance_hash)
-                duration_ms = (time.time() - start_time) * 1000
-                if cell:
-                    cell.cache_hit = True
-                    cell.display_outputs = list(cached_display_outputs)
-                    cell.display_output = (
-                        cached_display_outputs[-1] if cached_display_outputs else None
-                    )
-                    for var_name in consumed_vars:
-                        canonical_id = artifact_mgr.cell_artifact_id(cell_id, var_name)
-                        canonical_art = artifact_mgr.artifact_store.get_latest_version(
-                            canonical_id,
-                        )
-                        if canonical_art:
-                            uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
-                            cell.artifact_uris[var_name] = uri
-                            cell.artifact_uri = uri
-                cached_result = CellExecutionResult(
-                    cell_id=cell_id,
-                    success=True,
-                    outputs={},
-                    **hit_console(
-                        cached_console,
-                        shows_this_key=(
-                            cell is not None and cell.last_provenance_hash == provenance_hash
-                        ),
-                    ),
-                    display_outputs=[output.model_dump() for output in cached_display_outputs],
-                    display_output=(
-                        cached_display_outputs[-1].model_dump() if cached_display_outputs else None
-                    ),
-                    duration_ms=duration_ms,
-                    cache_hit=True,
-                    artifact_uri=(
-                        f"strata://artifact/{cached_artifact.id}@v={cached_artifact.version}"
-                        if cached_artifact is not None
-                        else (
-                            cached_display_outputs[-1].artifact_uri
-                            if cached_display_outputs
-                            else None
-                        )
-                    ),
-                    execution_method="cached",
-                    team_cache_principal=team_pull.principal if team_pull else None,
-                    team_cache_build_env=team_pull.build_env if team_pull else "",
-                    team_cache_saved_ms=team_pull.saved_ms if team_pull else 0,
-                    team_cache_promotion=team_pull.promotion if team_pull else None,
-                    from_team_cache=team_pull is not None,
-                ).apply_remote_metadata(**remote_metadata)
-                self.session.record_successful_execution_provenance(
-                    cell_id,
-                    provenance_hash,
-                    source_hash,
-                    env_hash,
-                    table_reads=prov.table_reads,
-                    reads=prov.reads(*self._moved(cell_id)),
-                    key_parts=prov.key_parts,
-                )
-                self.session.apply_execution_result_metadata(cell_id, cached_result)
-                return cached_result
-
-            refusal = self._table_write_refusal(source)
-            if refusal is not None:
-                return CellExecutionResult(
-                    cell_id=cell_id, success=False, error=refusal, execution_method="error"
-                )
-            with tempfile.TemporaryDirectory() as tmpdir:
-                output_dir = Path(tmpdir)
-                # Off the loop: an input folder can hold gigabytes.
-                input_specs = await anyio.to_thread.run_sync(
-                    self._load_input_blobs, cell_id, output_dir
-                )
-                result_output_dir = output_dir
-                if remote is not None:
-                    remote_build_id = (
-                        f"nbbuild-{uuid.uuid4().hex[:12]}"
-                        if worker_transport(remote) == "signed"
-                        else None
-                    )
-                    remote_metadata = self._remote_execution_metadata(
-                        remote, remote_build_id=remote_build_id
-                    )
-                    with trace_span(
-                        "notebook.dispatch",
-                        worker=remote.name,
-                        build_id=remote_build_id,
-                        notebook_id=notebook_id,
-                        cell_id=cell_id,
-                    ):
-                        (
-                            result,
-                            result_output_dir,
-                            execution_method,
-                            resolved_mounts,
-                        ) = await self._dispatch_http_executor(
-                            remote,
-                            source,
-                            input_specs,
-                            mount_specs,
-                            output_dir,
-                            runtime_env,
-                            timeout_seconds,
-                            remote_build_id=remote_build_id,
-                            cell_id=cell_id,
-                            cell_provenance_hash=provenance_hash,
-                            language="r",
-                        )
-                    if remote_build_id and remote_metadata.get("remote_transport") == "signed":
-                        remote_metadata["remote_build_state"] = "ready"
-                else:
-                    resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
-                    # Keyed on the listing it reads, which the cache check's may predate.
-                    prov = prov.over_mounts(resolved_mounts)
-                    provenance_hash = prov.provenance_hash
-                    manifest_path = self._write_manifest(
-                        source,
-                        input_specs,
-                        output_dir,
-                        runtime_env,
-                        resolved_mounts,
-                    )
-
-                    # Warm R pool first (prepaid Rscript startup + renv activation), cold harness as
-                    # fallback; mirrors _dispatch_local.
-                    result = None
-                    execution_method = "cold"
-                    r_pool = self.session.r_warm_pool
-                    if r_pool is not None:
-                        from strata.notebook.pool import PooledCellExecutor
-
-                        pool_result = await PooledCellExecutor.execute_with_pool(
-                            r_pool,
-                            manifest_path,
-                            self.session.path,
-                            timeout_seconds,
-                        )
-                        if pool_result is not None:
-                            result = pool_result
-                            execution_method = "warm"
-                    if result is None:
-                        result = await self._run_r_harness(manifest_path, timeout_seconds)
-
-                duration_ms = (time.time() - start_time) * 1000
-                exec_result = self._parse_result(
-                    cell_id, result, duration_ms, execution_method
-                ).apply_remote_metadata(**remote_metadata)
-                collected = await self._collect_output_dirs_off_loop(
-                    cell_id, source, result_output_dir
-                )
-                if not exec_result.success:
-                    self._keep_failed_output_dirs(
-                        cell_id, source, result_output_dir, provenance_hash, env_hash, collected
-                    )
-
-                if exec_result.success:
-                    store_error = None
-                    try:
-                        stored_ok = self._store_outputs(
-                            cell_id,
-                            result_output_dir,
-                            provenance_hash,
-                            input_hashes,
-                            source_hash=source_hash,
-                            source=source,
-                            env_hash=env_hash,
-                            # Reported by whatever ran the cell; empty for a local run.
-                            build_env=str(result.get("build_env") or ""),
-                            hardware=result.get("hardware") or {},
-                            collected=collected,
-                        )
-                    except TableWriteError as exc:
-                        stored_ok, store_error = False, str(exc)
-                    if not stored_ok:
-                        logger.error(
-                            "R cell %s executed OK but artifact storage failed.",
-                            cell_id,
-                        )
-                        exec_result = _store_failure_result(exec_result, store_error)
-
-                    if stored_ok:
-                        await self._push_to_team_store(cell_id=cell_id)
-
-                    if exec_result.success:
-                        self._store_result_displays(
-                            exec_result,
-                            result_output_dir,
-                            provenance_hash,
-                            input_hashes,
-                            source_hash=source_hash,
-                            source=source,
-                            env_hash=env_hash,
-                        )
-                        # So a hit replays this run's. An R leaf with only a console isn't
-                        # cached, and a record would read it as ready.
-                        if (
-                            not prov.has_rw_mount
-                            and not prov.annotations.nocache
-                            and (consumed_vars or exec_result.display_outputs)
-                        ):
-                            self._store_console_outputs(
-                                cell_id,
-                                provenance_hash,
-                                exec_result.stdout,
-                                exec_result.stderr,
-                                input_hashes,
-                                source_hash=source_hash,
-                                source=source,
-                                env_hash=env_hash,
-                                display_count=len(exec_result.display_outputs),
-                                duration_ms=exec_result.duration_ms,
-                            )
-
-                    # A worker syncs its own and reports what was written in its result.
-                    mount_writes = _worker_mount_writes(result, mount_specs)
-                    if exec_result.success and resolved_mounts:
-                        try:
-                            mount_writes = await self._mount_resolver.sync_back(resolved_mounts)
-                        except Exception as exc:
-                            logger.exception(
-                                "Failed to sync-back RW mounts for R cell %s",
-                                cell_id,
-                            )
-                            exec_result = _mount_sync_failure_result(exec_result, exc)
-                    if exec_result.success:
-                        self._store_mount_writes(
-                            cell_id,
-                            provenance_hash,
-                            mount_writes,
-                            source_hash=source_hash,
-                            source=source,
-                            env_hash=env_hash,
-                        )
-                        self._record_good_run(
-                            cell_id, provenance_hash, source_hash, env_hash, prov, mount_writes
-                        )
-
-                self.session.persist_display_outputs(
-                    cell_id,
-                    exec_result.display_outputs if exec_result.success else None,
-                )
-                self.session.apply_execution_result_metadata(cell_id, exec_result)
-                return exec_result
-
-        except asyncio.CancelledError:
-            if self._received_output_files.get(cell_id):
-                # Cancelled mid-run: keep what the worker already uploaded, as on a loss.
-                self._keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
-            raise
-        except RemoteExecutionError as e:
-            duration_ms = (time.time() - start_time) * 1000
-            if self._received_output_files.get(cell_id):
-                # No result came back, so what the worker uploaded is all there is.
-                self._keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
-            error_result = CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                duration_ms=duration_ms,
-                error=str(e),
-            ).apply_remote_metadata(
-                **remote_metadata,
-                remote_build_state=e.remote_build_state,
-                remote_error_code=e.remote_error_code,
-            )
-            self.session.persist_display_outputs(cell_id, None)
-            self.session.apply_execution_result_metadata(cell_id, error_result)
-            return error_result
-        except TimeoutError:
-            duration_ms = (time.time() - start_time) * 1000
-            timeout_result = CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                duration_ms=duration_ms,
-                error=f"R cell execution timed out after {timeout_seconds}s",
-            ).apply_remote_metadata(**remote_metadata)
-            self.session.persist_display_outputs(cell_id, None)
-            self.session.apply_execution_result_metadata(cell_id, timeout_result)
-            return timeout_result
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-            error_result = CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                duration_ms=duration_ms,
-                error=f"R execution failed: {e}",
-            )
-            self.session.persist_display_outputs(cell_id, None)
-            self.session.apply_execution_result_metadata(cell_id, error_result)
-            return error_result
+        """Run an R cell (see ``cell_paths/r.py``)."""
+        return await run_r_cell(
+            self.session,
+            self._r_context(),
+            cell_id,
+            source,
+            timeout_seconds,
+            start_time,
+            materialize_upstreams=materialize_upstreams,
+            use_cache=use_cache,
+        )
 
     async def _dispatch_execution(
         self,
@@ -6155,83 +5682,14 @@ class CellExecutor:
         manifest_path: Path,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        """Run the R harness via ``Rscript``, mirroring ``_run_harness``.
-
-        ``cwd`` is the notebook directory so ``.Rprofile`` activates the
-        project's renv library.
-        """
-        try:
-            harness_user = resolve_harness_user()
-        except LocalExecutionRefused as exc:
-            return _refused_result(exc)
-        rscript = shutil.which("Rscript")
-        if rscript is None:
-            return {
-                "success": False,
-                "error": (
-                    "Rscript not found on PATH. Install R "
-                    "(https://cran.r-project.org/) and reopen the notebook."
-                ),
-                "stderr": "",
-                "stdout": "",
-                "variables": {},
-            }
-
-        cmd = lifeline_command([rscript, str(self.r_harness_path), str(manifest_path)])
-
-        from strata.notebook.process_tree import (
-            subprocess_kwargs_for_new_group,
-            terminate_subprocess_tree,
+        """Run the R harness (see ``cell_paths/r.py``)."""
+        return await run_r_harness(
+            self.session.path,
+            self.r_harness_path,
+            self._harness_env,
+            manifest_path,
+            timeout_seconds,
         )
-
-        hand_over(manifest_path.parent, harness_user)
-        lifeline_fds, lifeline_vars = lifeline_handoff()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(self.session.path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=identity_env(self._harness_env(lifeline_vars), harness_user),
-            pass_fds=lifeline_fds,
-            **spawn_kwargs(harness_user),
-            **subprocess_kwargs_for_new_group(),
-        )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout_seconds,
-            )
-        except asyncio.CancelledError:
-            logger.info(
-                "R cell execution cancelled; terminating Rscript pid=%s",
-                proc.pid,
-            )
-            try:
-                await asyncio.shield(terminate_subprocess_tree(proc))
-            except Exception:
-                logger.exception(
-                    "Failed to terminate cancelled Rscript subprocess tree pid=%s",
-                    proc.pid,
-                )
-            raise
-        except TimeoutError:
-            await terminate_subprocess_tree(proc)
-            raise TimeoutError()
-
-        result_path = manifest_path.parent / "harness-result.json"
-        if not result_path.exists():
-            stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
-            return {
-                "success": False,
-                "error": (
-                    stderr_text.strip() or "Rscript exited without producing a result manifest"
-                ),
-                "stderr": stderr_text,
-                "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
-                "variables": {},
-            }
-        return json.loads(read_run_file(result_path.parent, result_path.name))
 
     # ------------------------------------------------------------------
     # Loop cell execution (sequential, fresh subprocess per iteration)
@@ -7252,11 +6710,6 @@ _ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {
     "module/cell-instance": ".cell_instance.pickle",
     output_dirs.CONTENT_TYPE: output_dirs.EXTENSION,
 }
-
-
-def _refused_result(exc: LocalExecutionRefused) -> dict[str, Any]:
-    """A harness result for cell code this host would not start."""
-    return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}
 
 
 def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecutionResult:
