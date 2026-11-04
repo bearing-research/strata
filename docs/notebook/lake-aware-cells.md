@@ -286,8 +286,8 @@ the whole run, Run All included, and running a cell's tests asks too. A ready
 cell is left out, since its run is a cache hit, unless its stored result has
 since been collected.
 
-![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](../assets/read-confirm-light.png#only-light)
-![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](../assets/read-confirm-dark.png#only-dark)
+![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 27.5 MB onto local, from table rides (lake:taxi.rides), up to 27.5 MB, followed by the host's message and Cancel and Run buttons.](../assets/read-confirm-light.png#only-light)
+![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 27.5 MB onto local, from table rides (lake:taxi.rides), up to 27.5 MB, followed by the host's message and Cancel and Run buttons.](../assets/read-confirm-dark.png#only-dark)
 
 A Run is kept per cell, machine and inputs (the mount listings, table snapshots
 and fetch URLs), so a rerun on the same machine does not ask again, while new
