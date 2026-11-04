@@ -21,6 +21,9 @@ from pyarrow import ipc
 
 _DEFAULT_TIMEOUT = 300.0
 
+# The running cell's client, which an Artifact kept from an earlier cell reads through.
+_run_client: StrataClient | None = None
+
 
 # ---------------------------------------------------------------------------
 # Arrow IPC (mirrors strata.client._convert_to_arrow_ipc)
@@ -107,10 +110,21 @@ class Artifact:
     def uri(self) -> str:
         return f"strata://artifact/{self.artifact_id}@v={self.version}"
 
+    def __getstate__(self) -> dict[str, Any]:
+        # A later cell can keep this. The client holds the run's pipe and token, which end
+        # with the run: the pipe cannot be pickled and the token must not reach the store.
+        return {**self.__dict__, "_client": None}
+
     def to_arrow(self) -> pa.Table:
         data = self._stream_data
         if data is None:
-            data = self._client._fetch_artifact_bytes(self.artifact_id, self.version)
+            client = self._client or _run_client
+            if client is None:
+                raise RuntimeError(
+                    f"{self.uri} was kept from another cell, and this cell has no strata client "
+                    "to read it with."
+                )
+            data = client._fetch_artifact_bytes(self.artifact_id, self.version)
         if not data:
             return pa.table({})
         return ipc.open_stream(pa.BufferReader(data)).read_all()
@@ -161,6 +175,8 @@ class StrataClient:
         # The run's checkpoint channel (``run_channel.RunChannel``); None where the cell
         # runs without one, such as on a remote worker.
         self._channel = channel
+        global _run_client
+        _run_client = self
 
     def _stamp_cell(self, artifact: Artifact, name: str | None) -> None:
         """Tag a named artifact with the originating cell; best effort, errors swallowed."""

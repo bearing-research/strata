@@ -189,6 +189,10 @@ exhaustive commit history.
 ### Fixed
 - **A DAG label stays off its own edge.** An edge running down and to the left no longer
   passes through its variable name. (#1413)
+- **A cell can keep what `strata.put` and `strata.materialize` return.** A later cell
+  reading the handle failed with "failed to store output artifacts", because the handle
+  pickled the run's checkpoint pipe. It now leaves the run's pipe and token behind, and
+  reads through the running cell's client. (#1412)
 - **The browser tab shows Strata's diamond.** The app never linked a tab icon, and the
   file it shipped was the Vite template's logo. (#1406)
 - **The table viewer no longer shows NaN and infinity as `null`.** JSON cannot carry

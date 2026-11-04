@@ -7,8 +7,11 @@ strata. Only offline pieces are covered here; the wire protocol is tested live.
 from __future__ import annotations
 
 import importlib.util
+import pickle
+import sys
 from pathlib import Path
 
+import cloudpickle
 import pandas as pd
 import pyarrow as pa
 import pytest
@@ -19,6 +22,8 @@ def _load_shim():
     path = Path("src/strata/notebook/notebook_client.py")
     spec = importlib.util.spec_from_file_location("_nb_client_under_test", path)
     module = importlib.util.module_from_spec(spec)
+    # Registered as the harness registers it, so a pickled Artifact finds its class.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -98,6 +103,38 @@ def test_materialize_rejects_non_stream_mode(shim):
     c = shim.StrataClient(base_url="http://x")
     with pytest.raises(ValueError, match="mode='stream'"):
         c.materialize([], {"executor": "scan@v1", "params": {}}, mode="artifact")
+
+
+def test_a_kept_artifact_leaves_the_runs_pipe_and_token_behind(shim, monkeypatch, tmp_path):
+    with (tmp_path / "pipe").open("w") as pipe:
+        run = shim.StrataClient(
+            base_url="http://x", headers={shim.RUN_TOKEN_HEADER: "run-secret"}, channel=pipe
+        )
+        blob = cloudpickle.dumps(shim.Artifact(run, "id-9", 3))
+    assert b"run-secret" not in blob
+
+    kept = pickle.loads(blob)
+    assert kept.uri == "strata://artifact/id-9@v=3"
+
+    # The cell that reads it reads through its own client, not the run that made it.
+    later = shim.StrataClient(base_url="http://later")
+    fetched = []
+
+    def fetch(artifact_id, version):
+        fetched.append((artifact_id, version))
+        return b""
+
+    monkeypatch.setattr(later, "_fetch_artifact_bytes", fetch)
+    assert kept.to_arrow().num_rows == 0
+    assert fetched == [("id-9", 3)]
+
+
+def test_a_kept_artifact_says_why_it_cannot_read_without_a_client(shim, monkeypatch):
+    blob = cloudpickle.dumps(shim.Artifact(shim.StrataClient(base_url="http://x"), "id-9", 3))
+    monkeypatch.setattr(shim, "_run_client", None)
+
+    with pytest.raises(RuntimeError, match="kept from another cell"):
+        pickle.loads(blob).to_arrow()
 
 
 def test_stamp_cell_is_noop_without_cell_or_name(shim):
