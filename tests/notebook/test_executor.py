@@ -1353,7 +1353,7 @@ class Person:
                 principal_id=None,
             )
             for uri in (staged["x"]["uri"], staged["x"]["injected"]["helper"]["uri"]):
-                record = store.get_artifact(*executor._parse_artifact_uri(uri))
+                record = store.get_artifact(*executor.session.parse_artifact_uri(uri))
                 assert record is not None
                 assert record.tenant == tenant
 

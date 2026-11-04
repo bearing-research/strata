@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from vestigo.provenance import derive_subkey
 import strata.notebook.cell_paths
 from strata.notebook import each
 from strata.notebook.annotations import LoopAnnotation
-from strata.notebook.cell_paths import cell_tests, fanout, loop, r
+from strata.notebook.cell_paths import batch, cell_tests, fanout, loop, r
 from strata.notebook.cell_paths.cell_tests import CellTestsContext, run_cell_tests
 from strata.notebook.cell_paths.context import (
     PathContext,
@@ -32,9 +33,10 @@ from strata.notebook.cell_paths.widget import run_widget_cell
 from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.executor import CellExecutor
 from strata.notebook.harness_user import LocalExecutionRefused
-from strata.notebook.models import MountMode, WorkerBackendType
+from strata.notebook.models import CellOutput, MountMode, WorkerBackendType
 from strata.notebook.mounts import MountWrite
 from strata.notebook.parser import parse_notebook
+from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.session import NotebookSession
 from strata.notebook.table_writes import TableWriteError
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -2058,3 +2060,718 @@ class TestRHarness:
             await self._run(tmp_path)
 
         assert spawned.terminated == [spawned.proc]
+
+
+def _batch_prov(*, nocache=False):
+    prov = SimpleNamespace(
+        provenance_hash="prov",
+        source_hash="source",
+        env_hash="env",
+        input_hashes=["input"],
+        annotations=SimpleNamespace(nocache=nocache, table_writes=[]),
+        table_reads=[],
+        key_parts={},
+        reads=lambda *_args: {},
+    )
+    prov.rekeyed = lambda: prov
+    return prov
+
+
+def _batch_art(artifact_id="art", version=3, content_type="json/object"):
+    return SimpleNamespace(id=artifact_id, version=version, params={"content_type": content_type})
+
+
+def _batch_fakes(tmp_path, *, consumed=(), displays=(), console=None, wired=("x",), **overrides):
+    """A host and a context with nothing behind them, and a record of what they were asked."""
+    seen = SimpleNamespace(
+        recorded=[],
+        stored=[],
+        consoles=[],
+        display_stores=[],
+        persisted=[],
+        pushed=[],
+        written=[],
+        tokens=[],
+        outputs={},
+        blobs={},
+        latest={},
+    )
+    seen.cell = SimpleNamespace(
+        source="edited",
+        upstream_ids=[],
+        artifact_uris={},
+        artifact_uri=None,
+        cache_hit=False,
+        display_outputs=[],
+        display_output=None,
+        last_provenance_hash=None,
+    )
+    seen.cells = {"c": seen.cell}
+
+    def record(cell_id, provenance_hash, *args, **kwargs):
+        seen.recorded.append((cell_id, provenance_hash))
+        seen.cell.last_provenance_hash = provenance_hash
+
+    host = SimpleNamespace(
+        path=tmp_path,
+        venv_python="python",
+        environment_execution_block_message=lambda: "not ready",
+        notebook_state=SimpleNamespace(get_cell=seen.cells.get),
+        dag=SimpleNamespace(consumed_variables={"c": set(consumed)}),
+        wired_variables=lambda _cell, _upstream: set(wired),
+        get_artifact_manager=lambda: SimpleNamespace(
+            cell_artifact_id=lambda cell_id, var: f"{cell_id}.{var}",
+            artifact_store=SimpleNamespace(
+                read_blob=lambda artifact_id, _version: seen.blobs.get(artifact_id),
+                get_latest_version=seen.latest.get,
+                get_artifact=lambda artifact_id, _version: seen.latest.get(artifact_id),
+            ),
+        ),
+        resolve_cached_display_outputs=lambda *_args: list(displays),
+        resolve_cached_console=lambda *_args: console,
+        record_successful_execution_provenance=record,
+        persist_display_outputs=lambda cell_id, outputs: seen.persisted.append((cell_id, outputs)),
+    )
+
+    @contextmanager
+    def run_token(timeout):
+        seen.tokens.append(timeout)
+        yield "token"
+
+    async def compute_provenance(*_args):
+        return _batch_prov()
+
+    async def pull_from_team_store(**_kwargs):
+        return None
+
+    async def push_to_team_store(cell_id):
+        seen.pushed.append(cell_id)
+
+    def store_outputs(*args, **kwargs):
+        seen.stored.append((args, kwargs))
+        return True
+
+    def write_input_file(path, *_args):
+        seen.written.append(path)
+        return True
+
+    fields = {
+        "harness_path": Path("harness.py"),
+        "harness_env": lambda extra: dict(extra),
+        "work_dir_fields": lambda: {"work_dir": "work"},
+        "run_token": run_token,
+        "compute_provenance": compute_provenance,
+        "canonical_output": lambda _cell, var, _hash: seen.outputs.get(var),
+        "input_refs": lambda _cell: {},
+        "moved": lambda _cell: ({}, {}),
+        "promote_reverted_outputs": lambda *_args: None,
+        "promote_reverted_leaf": lambda *_args: None,
+        "pull_from_team_store": pull_from_team_store,
+        "push_to_team_store": push_to_team_store,
+        "store_outputs": store_outputs,
+        "store_console_outputs": lambda *args, **kwargs: seen.consoles.append((args, kwargs)),
+        "store_display_outputs": lambda *_args, **_kwargs: [],
+        "write_input_file": write_input_file,
+    }
+    return host, batch.BatchContext(**{**fields, **overrides}), seen
+
+
+def _frame(frame_type, **payload):
+    return {"type": frame_type, "payload": payload}
+
+
+def _frame_bytes(*frames):
+    return b"".join(
+        frame if isinstance(frame, bytes) else (json.dumps(frame) + "\n").encode()
+        for frame in frames
+    )
+
+
+class TestBatchServiceLoop:
+    """The loop over the harness's frames, with the parent's answers faked."""
+
+    @pytest.fixture
+    def serve(self, monkeypatch, tmp_path):
+        seen = SimpleNamespace(
+            responses=[],
+            results={},
+            events=[],
+            started=[],
+            terminated=[],
+            check={"cache_hit": False, "provenance_hash": "prov"},
+            persist={"ok": True, "uri": "", "display_outputs": []},
+        )
+
+        async def check(*_args, **_kwargs):
+            return dict(seen.check)
+
+        async def persist(*_args, **_kwargs):
+            return dict(seen.persist)
+
+        async def terminate(proc):
+            seen.terminated.append(proc)
+
+        monkeypatch.setattr(batch, "batch_service_cache_check", check)
+        monkeypatch.setattr(batch, "batch_service_persist", persist)
+        monkeypatch.setattr(batch, "terminate_subprocess_tree", terminate)
+
+        async def on_cell_event(result):
+            seen.events.append(result)
+
+        async def on_cell_start(cell_id):
+            seen.started.append(cell_id)
+
+        async def run(*frames, reader=None, watchdog_state=None):
+            if reader is None:
+                reader = asyncio.StreamReader()
+                reader.feed_data(_frame_bytes(*frames))
+                reader.feed_eof()
+            host, context, _ = _batch_fakes(tmp_path)
+            return await batch.batch_service_loop(
+                host,
+                context,
+                reader,
+                seen.responses.append,
+                seen.results,
+                tmp_path,
+                executed_sources={},
+                provenance={},
+                use_cache=True,
+                on_cell_event=on_cell_event,
+                on_cell_start=on_cell_start,
+                watchdog_state=watchdog_state,
+            )
+
+        seen.run = run
+        return seen
+
+    @staticmethod
+    def _watchdog():
+        return {
+            "active_cell_id": None,
+            "active_started_at": None,
+            "active_timeout": 1000.0,
+            "timed_out": False,
+            "timeout_cell_id": None,
+            "proc": None,
+        }
+
+    async def test_a_frame_it_cannot_read_is_skipped(self, serve):
+        ended = await serve.run(b"not json\n", _frame("batch_end", reason="complete"))
+
+        assert ended == ("complete", None)
+
+    async def test_it_announces_a_cell_as_it_starts(self, serve):
+        await serve.run(_frame("cell_start", cell_id="c"))
+
+        assert serve.started == ["c"]
+
+    async def test_a_good_persist_keeps_what_the_cell_took(self, serve):
+        await serve.run(_frame("persist", cell_id="c", stdout="out", duration_ms=5.0))
+
+        result = serve.results["c"]
+        assert (result.status, result.stdout, result.duration_ms) == ("ok", "out", 5.0)
+        assert serve.events == [result]
+
+    async def test_a_failed_persist_keeps_what_the_cell_printed(self, serve):
+        serve.persist = {"ok": False, "error": "no"}
+
+        await serve.run(_frame("persist", cell_id="c", stdout="out", stderr="err", duration_ms=5.0))
+
+        result = serve.results["c"]
+        assert result.status == "persist_failed"
+        assert (result.error, result.stdout, result.stderr) == ("no", "out", "err")
+        assert result.duration_ms == 5.0
+
+    @pytest.mark.parametrize(
+        "ending",
+        [
+            _frame("persist", cell_id="c"),
+            _frame("cell_output", cache_hit=True),
+            _frame("cell_error", cell_id="c", error="no"),
+        ],
+        ids=["persist", "hit", "error"],
+    )
+    async def test_a_finished_cell_closes_the_watchdog_window(self, serve, ending):
+        watchdog = self._watchdog()
+
+        await serve.run(
+            _frame("cell_start", cell_id="c"),
+            _frame("cache_check", cell_id="c"),
+            ending,
+            watchdog_state=watchdog,
+        )
+
+        assert watchdog["active_cell_id"] is None
+        assert watchdog["active_started_at"] is None
+
+    async def test_a_hit_carries_its_team_pull_and_console_but_the_harness_does_not(self, serve):
+        pull = object()
+        serve.check = {"cache_hit": True, "team_pull": pull, "replaces_console": True}
+        serve.check["hit_run_ms"] = 7
+
+        await serve.run(
+            _frame("cell_start", cell_id="c"),
+            _frame("cache_check", cell_id="c"),
+            _frame("cell_output", cache_hit=True),
+        )
+
+        result = serve.results["c"]
+        assert result.team_pull is pull
+        assert (result.replaces_console, result.hit_run_ms) == (True, 7)
+        assert set(serve.responses[0]) == {"cache_hit", "input_uris"}
+
+    async def test_an_oversized_frame_ends_the_harness(self, serve):
+        reader = asyncio.StreamReader(limit=8)
+        reader.feed_data(b"x" * 100 + b"\n")
+        reader.feed_eof()
+        proc = object()
+
+        ended = await serve.run(reader=reader, watchdog_state={**self._watchdog(), "proc": proc})
+
+        assert ended == ("subprocess_died", None)
+        assert serve.terminated == [proc]
+
+
+URI = "strata://artifact/art@v=3"
+
+
+class TestBatchInputs:
+    """What goes into the batch's directory for the harness to read."""
+
+    async def test_it_stages_only_wired_variables_from_outside_the_batch(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path, wired=("x", "z"))
+        seen.cell.upstream_ids = ["outside", "inside"]
+        seen.cells["outside"] = SimpleNamespace(
+            artifact_uris={"x": URI, "y": "strata://artifact/other@v=1"}
+        )
+        seen.cells["inside"] = SimpleNamespace(
+            upstream_ids=[], artifact_uris={"z": "strata://artifact/inside@v=1"}
+        )
+        for artifact_id in ("art", "other", "inside"):
+            seen.latest[artifact_id] = _batch_art(artifact_id)
+
+        staged = batch.batch_resolve_upstream_inputs(
+            host, context, [{"cell_id": "c"}, {"cell_id": "inside"}], tmp_path
+        )
+
+        assert staged == {"x": {"content_type": "json/object", "file": "__upstream__/x.json"}}
+
+    async def test_a_failed_write_is_not_staged(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path, write_input_file=lambda *_args: False)
+        seen.cell.upstream_ids = ["outside"]
+        seen.cells["outside"] = SimpleNamespace(artifact_uris={"x": URI})
+        seen.latest["art"] = _batch_art()
+
+        staged = batch.batch_resolve_upstream_inputs(host, context, [{"cell_id": "c"}], tmp_path)
+
+        assert staged == {}
+
+    async def test_a_missing_artifact_is_not_written(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path)
+
+        assert batch.materialize_artifact_to_dir(host, context, URI, tmp_path, "x") is None
+        assert seen.written == []
+
+    async def test_a_mixed_case_name_gets_its_collision_proof_file(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path)
+        seen.latest["art"] = _batch_art()
+
+        spec = batch.materialize_artifact_to_dir(host, context, URI, tmp_path, "Widget")
+
+        assert spec["file"] == f"{safe_filename_stem('Widget')}.json"
+        assert spec["file"] != "Widget.json"
+        assert seen.written == [tmp_path / spec["file"]]
+
+    async def test_a_cell_is_told_only_the_inputs_wired_to_it(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path)
+        seen.cell.upstream_ids = ["outside"]
+        seen.cells["outside"] = SimpleNamespace(
+            artifact_uris={"x": URI, "y": "strata://artifact/other@v=1"}
+        )
+
+        assert batch.upstream_artifact_uris(host, context, "c") == {"x": {"uri": URI}}
+
+    async def test_a_uri_that_is_not_a_versioned_artifact_is_refused(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path)
+        seen.latest["art"] = _batch_art()
+
+        with pytest.raises(RuntimeError, match="got 'strata://artifact/art'"):
+            batch.materialize_artifact_to_dir(host, context, "strata://artifact/art", tmp_path, "x")
+
+        assert seen.written == []
+
+
+class TestBatchCacheCheck:
+    """A cache check's answer, and what it leaves on the cell."""
+
+    @staticmethod
+    async def _check(host, context, tmp_path, *, provenance=None):
+        return await batch.batch_service_cache_check(
+            host,
+            context,
+            "c",
+            tmp_path,
+            executed_sources={"c": "ran"},
+            provenance={"c": _batch_prov()} if provenance is None else provenance,
+            use_cache=True,
+        )
+
+    async def test_a_hit_names_its_outputs_on_the_cell(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path, consumed=("x",))
+        seen.outputs["x"] = _batch_art()
+        seen.blobs["art"] = b"bytes"
+
+        answer = await self._check(host, context, tmp_path)
+
+        assert answer["cache_hit"] is True
+        assert answer["cached_outputs"] == {"x": {"content_type": "json/object", "file": "x.json"}}
+        assert (tmp_path / "c" / "x.json").read_bytes() == b"bytes"
+        assert seen.cell.cache_hit is True
+        assert seen.cell.artifact_uris == {"x": URI}
+        assert seen.cell.artifact_uri == URI
+
+    async def test_a_missing_blob_is_a_miss(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path, consumed=("x",))
+        seen.outputs["x"] = _batch_art()
+
+        answer = await self._check(host, context, tmp_path)
+
+        assert answer == {"cache_hit": False, "provenance_hash": "prov"}
+        assert seen.cell.cache_hit is False
+
+    async def test_a_hit_replays_its_displays(self, tmp_path):
+        models = [CellOutput(content_type="json/object", bytes=n) for n in (1, 2)]
+        host, context, seen = _batch_fakes(tmp_path, consumed=("x",), displays=models)
+        seen.outputs["x"] = _batch_art()
+        for index in range(2):
+            seen.latest[f"c.__display__{index}"] = _batch_art(f"d{index}")
+            seen.blobs[f"d{index}"] = b"shown"
+        seen.blobs["art"] = b"bytes"
+
+        answer = await self._check(host, context, tmp_path)
+
+        assert [d["file"] for d in answer["cached_displays"]] == [
+            "__display__0.json",
+            "__display__1.json",
+        ]
+        assert seen.cell.display_outputs == models
+        assert seen.cell.display_output == models[1]
+
+    async def test_a_display_with_no_blob_is_left_out(self, tmp_path):
+        models = [CellOutput(content_type="json/object")]
+        console = SimpleNamespace(stdout="", stderr="", run_ms=0)
+        host, context, seen = _batch_fakes(tmp_path, displays=models, console=console)
+        seen.latest["c.__display__0"] = _batch_art("d0")
+
+        answer = await self._check(host, context, tmp_path)
+
+        assert answer["cache_hit"] is True
+        assert answer["cached_displays"] == []
+
+    async def test_a_hit_answers_with_its_console(self, tmp_path):
+        console = SimpleNamespace(stdout="out", stderr="err", run_ms=9)
+        host, context, _ = _batch_fakes(tmp_path, console=console)
+
+        answer = await self._check(host, context, tmp_path)
+
+        assert (answer["stdout"], answer["stderr"]) == ("out", "err")
+        assert (answer["replaces_console"], answer["hit_run_ms"]) == (True, 9)
+
+    @pytest.mark.parametrize(("last", "replaces"), [("prov", False), ("other", True)])
+    async def test_with_no_console_kept_a_hit_compares_the_key_before_recording(
+        self, tmp_path, last, replaces
+    ):
+        host, context, seen = _batch_fakes(tmp_path, consumed=("x",))
+        seen.outputs["x"] = _batch_art()
+        seen.blobs["art"] = b"bytes"
+        seen.cell.last_provenance_hash = last
+
+        answer = await self._check(host, context, tmp_path)
+
+        assert answer["replaces_console"] is replaces
+        assert seen.recorded == [("c", "prov")]
+
+    async def test_a_provenance_failure_is_a_miss(self, tmp_path):
+        async def raises(*_args):
+            raise RuntimeError("no")
+
+        host, context, _ = _batch_fakes(tmp_path, compute_provenance=raises)
+
+        answer = await self._check(host, context, tmp_path, provenance={})
+
+        assert answer == {"cache_hit": False, "provenance_hash": ""}
+
+    async def test_a_team_pull_is_read_back_as_a_hit(self, tmp_path):
+        pull = object()
+
+        async def pull_from_team_store(**_kwargs):
+            seen.outputs["x"] = _batch_art()
+            return pull
+
+        host, context, seen = _batch_fakes(
+            tmp_path, consumed=("x",), pull_from_team_store=pull_from_team_store
+        )
+        seen.blobs["art"] = b"bytes"
+
+        answer = await self._check(host, context, tmp_path)
+
+        assert answer["cache_hit"] is True
+        assert answer["team_pull"] is pull
+        assert "x" in answer["cached_outputs"]
+
+
+class TestBatchPersist:
+    """A persist's answer, and what it records."""
+
+    @pytest.fixture
+    def exported(self, monkeypatch):
+        seen = []
+
+        def export(host, cell_id, source, *_args):
+            seen.append(source)
+
+        monkeypatch.setattr(batch, "write_module_export_outputs", export)
+        return seen
+
+    @staticmethod
+    async def _persist(host, context, tmp_path, *, provenance=None, **payload):
+        (tmp_path / "c").mkdir(exist_ok=True)
+        return await batch.batch_service_persist(
+            host,
+            context,
+            {"cell_id": "c", **payload},
+            tmp_path,
+            executed_sources={"c": "ran"},
+            provenance={"c": _batch_prov()} if provenance is None else provenance,
+        )
+
+    async def test_no_output_directory_is_refused(self, tmp_path, exported):
+        host, context, _ = _batch_fakes(tmp_path)
+
+        answer = await batch.batch_service_persist(
+            host,
+            context,
+            {"cell_id": "c"},
+            tmp_path,
+            executed_sources={},
+            provenance={"c": _batch_prov()},
+        )
+
+        assert answer == {"ok": False, "error": "output dir missing for c"}
+        assert exported == []
+
+    async def test_no_cache_check_is_refused(self, tmp_path, exported):
+        host, context, seen = _batch_fakes(tmp_path)
+
+        answer = await self._persist(host, context, tmp_path, provenance={})
+
+        assert answer == {"ok": False, "error": "no cache check for c"}
+        assert seen.stored == []
+
+    async def test_an_export_that_raises_is_refused(self, tmp_path, monkeypatch):
+        def export(*_args):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(batch, "write_module_export_outputs", export)
+        host, context, seen = _batch_fakes(tmp_path)
+
+        answer = await self._persist(host, context, tmp_path)
+
+        assert answer == {"ok": False, "error": "module export raised: boom"}
+        assert seen.stored == []
+
+    async def test_it_records_the_source_that_ran_not_an_edit(self, tmp_path, exported):
+        host, context, seen = _batch_fakes(tmp_path)
+
+        await self._persist(host, context, tmp_path)
+
+        assert exported == ["ran"]
+        assert seen.stored[0][1]["source"] == "ran"
+        assert seen.consoles[0][1]["source"] == "ran"
+
+    async def test_nocache_stores_no_console(self, tmp_path, exported):
+        host, context, seen = _batch_fakes(tmp_path)
+
+        answer = await self._persist(
+            host, context, tmp_path, provenance={"c": _batch_prov(nocache=True)}
+        )
+
+        assert answer["ok"] is True
+        assert seen.consoles == []
+        assert len(seen.stored) == 1
+
+    async def test_stored_displays_reach_the_cell_the_console_and_the_ack(self, tmp_path, exported):
+        stored = [{"content_type": "json/object", "bytes": n} for n in (1, 2)]
+        host, context, seen = _batch_fakes(
+            tmp_path, store_display_outputs=lambda *_args, **_kwargs: stored
+        )
+
+        answer = await self._persist(
+            host, context, tmp_path, display_outputs=[{"file": "d"}], duration_ms=5.0
+        )
+
+        assert answer["display_outputs"] == stored
+        assert seen.consoles[0][1]["display_count"] == 2
+        assert seen.cell.display_outputs == [CellOutput(**d) for d in stored]
+        assert seen.cell.display_output == CellOutput(**stored[1])
+        assert seen.persisted == [("c", stored)]
+
+    async def test_no_displays_clears_what_was_persisted(self, tmp_path, exported):
+        host, context, seen = _batch_fakes(tmp_path)
+
+        await self._persist(host, context, tmp_path)
+
+        assert seen.persisted == [("c", None)]
+
+
+class TestRunBatch:
+    """What the harness is started with, with a real frame pipe and no process behind it."""
+
+    USER = object()
+
+    @pytest.fixture
+    def harness(self, monkeypatch):
+        seen = SimpleNamespace(
+            frames=[],
+            hangs=False,
+            spawned=[],
+            handed=[],
+            terminated=[],
+            sent=[],
+            writer=None,
+        )
+
+        def close_writer():
+            if seen.writer is not None:
+                os.close(seen.writer)
+                seen.writer = None
+
+        async def wait():
+            # Lets the frame pipe's transport see its EOF and close before the test ends.
+            for _ in range(5):
+                await asyncio.sleep(0)
+
+        async def create_subprocess_exec(*cmd, **kwargs):
+            manifest = Path(cmd[3])
+            seen.spawned.append((cmd, kwargs))
+            seen.tmpdir = manifest.parent
+            seen.manifest = json.loads(manifest.read_text())
+            seen.writer = os.dup(kwargs["pass_fds"][0])
+            os.write(seen.writer, _frame_bytes(*seen.frames))
+            if not seen.hangs:
+                close_writer()
+            output = asyncio.StreamReader()
+            output.feed_eof()
+            seen.proc = SimpleNamespace(
+                pid=1,
+                stdin=SimpleNamespace(write=seen.sent.append, close=lambda: None),
+                stdout=output,
+                stderr=output,
+                wait=wait,
+            )
+            return seen.proc
+
+        async def terminate(proc):
+            seen.terminated.append(proc)
+            close_writer()
+
+        monkeypatch.setattr(batch.asyncio, "create_subprocess_exec", create_subprocess_exec)
+        monkeypatch.setattr(batch, "terminate_subprocess_tree", terminate)
+        monkeypatch.setattr(batch, "resolve_harness_user", lambda: self.USER)
+        monkeypatch.setattr(batch, "hand_over", lambda path, user: seen.handed.append((path, user)))
+        monkeypatch.setattr(batch, "identity_env", lambda env, user: {"env": env, "user": user})
+        monkeypatch.setattr(batch, "spawn_kwargs", lambda user: {"spawned_as": user})
+        monkeypatch.setattr(batch, "lifeline_handoff", lambda: ((), {"LIFE": "1"}))
+        yield seen
+        close_writer()
+
+    @staticmethod
+    async def _run(tmp_path, *, host=None, batch_timeout=60.0, cell_timeout=60.0, **kwargs):
+        (tmp_path / ".strata").mkdir(exist_ok=True)
+        fake_host, context, seen = _batch_fakes(tmp_path)
+        ran = await asyncio.wait_for(
+            batch.run_batch(
+                host or fake_host,
+                context,
+                [{"cell_id": "c", "source": "ran"}],
+                use_cache=True,
+                batch_timeout_seconds=batch_timeout,
+                cell_timeout_seconds=cell_timeout,
+                **kwargs,
+            ),
+            timeout=30,
+        )
+        return ran, seen
+
+    async def test_no_interpreter_runs_nothing(self, tmp_path, harness):
+        host, _, _ = _batch_fakes(tmp_path)
+        host.venv_python = None
+
+        ran, _ = await self._run(tmp_path, host=host)
+
+        assert harness.spawned == []
+        assert (ran.cell_results[0].status, ran.cell_results[0].error) == (
+            "cell_error",
+            "not ready",
+        )
+        assert (ran.failed_cell_id, ran.end_reason) == ("c", "cell_error")
+
+    async def test_it_starts_the_harness_as_the_harness_user(self, tmp_path, harness):
+        harness.frames = [_frame("batch_end", reason="complete")]
+
+        ran, seen = await self._run(tmp_path, batch_timeout=9.0)
+
+        assert ran.completed is True
+        ((cmd, kwargs),) = harness.spawned
+        assert cmd[1:3] == ("harness.py", "--batch")
+        assert harness.tmpdir.parent == tmp_path / ".strata"
+        assert harness.manifest["work_dir"] == "work"
+        assert harness.manifest["run_token_on_stdin"] is True
+        assert harness.handed == [(harness.tmpdir, self.USER)]
+        assert kwargs["env"]["user"] is self.USER
+        assert kwargs["env"]["env"]["LIFE"] == "1"
+        assert kwargs["spawned_as"] is self.USER
+        assert seen.tokens == [9.0]
+        assert harness.sent == [b"token\n"]
+
+    async def test_the_batch_directory_is_removed_after(self, tmp_path, harness):
+        await self._run(tmp_path)
+
+        assert harness.tmpdir.parent == tmp_path / ".strata"
+        assert not harness.tmpdir.exists()
+
+    async def test_it_announces_each_cell(self, tmp_path, harness):
+        harness.frames = [_frame("cell_start", cell_id="c")]
+        started = []
+
+        async def on_cell_start(cell_id):
+            started.append(cell_id)
+
+        await self._run(tmp_path, on_cell_start=on_cell_start)
+
+        assert started == ["c"]
+
+    async def test_the_batch_timeout_ends_the_process_tree(self, tmp_path, harness):
+        harness.hangs = True
+
+        ran, _ = await self._run(tmp_path, batch_timeout=0.01)
+
+        assert harness.terminated == [harness.proc]
+        assert (ran.completed, ran.end_reason) == (False, "subprocess_died")
+
+    async def test_a_cell_timeout_names_the_cell_and_reports_it(self, tmp_path, harness):
+        harness.frames = [_frame("cell_start", cell_id="c")]
+        harness.hangs = True
+        events = []
+
+        async def on_cell_event(result):
+            events.append(result)
+
+        ran, _ = await self._run(tmp_path, cell_timeout=0.01, on_cell_event=on_cell_event)
+
+        assert harness.terminated == [harness.proc]
+        assert (ran.end_reason, ran.failed_cell_id) == ("cell_timeout", "c")
+        assert events == [ran.cell_results[0]]
+        assert events[0].status == "cell_error"
+        assert events[0].error == batch.cell_timeout_message(0.01)

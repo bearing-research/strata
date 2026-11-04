@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from strata.notebook import output_dirs
 from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.models import MountMode, MountSpec
 from strata.notebook.mounts import MountWrite
@@ -154,3 +155,46 @@ def _worker_mount_writes(result: Any, mount_specs: list[MountSpec]) -> list[Moun
 def _refused_result(exc: LocalExecutionRefused) -> dict[str, Any]:
     """A harness result for cell code this host would not start."""
     return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}
+
+
+# Fallback when no ``# @timeout`` or override applies. Generous because I/O-bound
+# cells are common; a hung cell still dies here and the UI can interrupt sooner.
+# Mirrors ``StrataConfig.scan_timeout_seconds``.
+DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
+
+
+def cell_timeout_message(timeout_seconds: float, *, set_by: str | None = None) -> str:
+    """A timed-out-cell error that names the remedy.
+
+    ``set_by`` is where the limit came from: ``"annotation"``, ``"notebook"``
+    (notebook.toml), or ``None`` for the default or CLI flag. A lever that a higher
+    one overrides is not offered, since raising it would change nothing.
+    """
+    if set_by == "annotation":
+        return (
+            f"Cell execution timed out after {timeout_seconds}s, the limit the cell's "
+            f"'# @timeout' annotation sets. Raise it there; the annotation overrides "
+            f"notebook.toml and 'strata run --timeout'."
+        )
+    if set_by == "notebook":
+        return (
+            f"Cell execution timed out after {timeout_seconds}s, the limit 'timeout' in "
+            f"notebook.toml sets. Raise it there or add a '# @timeout <seconds>' "
+            f"annotation to the cell; both override 'strata run --timeout'."
+        )
+    return (
+        f"Cell execution timed out after {timeout_seconds}s. Raise the limit with a "
+        f"'# @timeout <seconds>' annotation on the cell, a 'timeout' key in "
+        f"notebook.toml, or 'strata run --timeout <seconds>' for a one-off run."
+    )
+
+
+_ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {
+    "arrow/ipc": ".arrow",
+    "json/object": ".json",
+    "pickle/object": ".pickle",
+    "module/import": ".module.json",
+    "module/cell": ".cell_module.json",
+    "module/cell-instance": ".cell_instance.pickle",
+    output_dirs.CONTENT_TYPE: output_dirs.EXTENSION,
+}

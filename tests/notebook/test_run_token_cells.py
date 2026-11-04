@@ -20,6 +20,7 @@ import pytest
 from strata.auth.principal import principal_context
 from strata.auth.run_tokens import RUN_TOKEN_HEADER, grant_for
 from strata.config import StrataConfig
+from strata.notebook.cell_paths import batch as batch_path
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.pool import PooledCellExecutor
@@ -45,6 +46,7 @@ def server(tmp_path, monkeypatch):
         rate_limit_enabled=False,
     )
     monkeypatch.setattr("strata.notebook.executor.resolve_harness_user", lambda: None)
+    monkeypatch.setattr("strata.notebook.cell_paths.batch.resolve_harness_user", lambda: None)
     monkeypatch.setattr("strata.notebook.pool.resolve_harness_user", lambda: None)
     with run_server(config) as base:
         yield base
@@ -227,11 +229,11 @@ class TestATokenLivesAsLongAsItsHarness:
     ):
         now = self._clock(monkeypatch)
         session = _session(tmp_path, "x = 1\n")
-        staging = CellExecutor._batch_resolve_upstream_inputs
+        staging = batch_path.batch_resolve_upstream_inputs
 
-        def slow_staging(self, *args, **kwargs):
+        def slow_staging(*args, **kwargs):
             now[0] += 600.0 + 61.0  # staging large inputs took a batch timeout and more
-            return staging(self, *args, **kwargs)
+            return staging(*args, **kwargs)
 
         minted: list[str | None] = []
         mint = CellExecutor._run_token
@@ -249,7 +251,7 @@ class TestATokenLivesAsLongAsItsHarness:
             live.append(all(t is not None and grant_for(t) is not None for t in minted))
             return await spawn(*args, **kwargs)
 
-        monkeypatch.setattr(CellExecutor, "_batch_resolve_upstream_inputs", slow_staging)
+        monkeypatch.setattr(batch_path, "batch_resolve_upstream_inputs", slow_staging)
         monkeypatch.setattr(CellExecutor, "_run_token", recording)
         monkeypatch.setattr(asyncio, "create_subprocess_exec", spawning)
 

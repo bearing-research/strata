@@ -26,10 +26,10 @@ import tempfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Mapping
-from contextlib import ExitStack, contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 
 import anyio.to_thread
@@ -49,6 +49,14 @@ from strata.notebook import console_relay, each, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotation_validation import blocking_diagnostic
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
+from strata.notebook.cell_paths.batch import (
+    BatchCellResult,
+    BatchContext,
+    BatchExecutionResult,
+    run_batch,
+)
+from strata.notebook.cell_paths.batch import _drain_stream as _drain_stream
+from strata.notebook.cell_paths.batch import _refused_batch as _refused_batch
 from strata.notebook.cell_paths.cell_tests import (
     CellTestsContext,
     run_cell_tests,
@@ -59,7 +67,13 @@ from strata.notebook.cell_paths.cell_tests import (
 from strata.notebook.cell_paths.cell_tests import (
     _variant_test_run as _variant_test_run,
 )
-from strata.notebook.cell_paths.context import PathContext, RemoteExecutionError
+from strata.notebook.cell_paths.context import (
+    _ARTIFACT_EXT_BY_CONTENT_TYPE,
+    DEFAULT_CELL_TIMEOUT_SECONDS,
+    PathContext,
+    RemoteExecutionError,
+    cell_timeout_message,
+)
 from strata.notebook.cell_paths.context import (
     _mount_sync_failure_result as _mount_sync_failure_result,
 )
@@ -67,7 +81,9 @@ from strata.notebook.cell_paths.context import _refused_result as _refused_resul
 from strata.notebook.cell_paths.context import _store_failure_result as _store_failure_result
 from strata.notebook.cell_paths.context import _worker_mount_writes as _worker_mount_writes
 from strata.notebook.cell_paths.context import _writes_entry as _writes_entry
-from strata.notebook.cell_paths.context import artifact_content_type as _artifact_content_type
+from strata.notebook.cell_paths.context import (
+    artifact_content_type as _artifact_content_type,  # noqa: F401
+)
 from strata.notebook.cell_paths.context import effective_worker_name as effective_worker_name
 from strata.notebook.cell_paths.context import no_interpreter_message as _no_interpreter_message
 from strata.notebook.cell_paths.fanout import FanoutContext, run_each_cell, run_fanout_cell
@@ -98,9 +114,7 @@ from strata.notebook.harness_user import (
     read_run_file,
     resolve_harness_user,
     spawn_kwargs,
-    write_run_file,
 )
-from strata.notebook.immutability import MutationWarning
 from strata.notebook.keys import cell_key
 from strata.notebook.layout import WORK_DIR
 from strata.notebook.lifeline import lifeline_handoff
@@ -115,7 +129,6 @@ from strata.notebook.local_runs import (
 )
 from strata.notebook.models import (
     CellLanguage,
-    CellOutput,
     CellStatus,
     CellTestResult,
     DatasetSpec,
@@ -139,11 +152,6 @@ from strata.notebook.mounts import (
     parse_mount_uri,
     resolve_cell_mounts,
     weigh_mount_sync,
-)
-from strata.notebook.process_tree import (
-    SUBPROCESS_LINE_LIMIT,
-    subprocess_kwargs_for_new_group,
-    terminate_subprocess_tree,
 )
 from strata.notebook.provenance import (
     compute_source_hash,
@@ -206,38 +214,6 @@ if TYPE_CHECKING:
     from strata.notebook.pool import WarmProcessPool
 
 logger = logging.getLogger(__name__)
-
-# Fallback when no ``# @timeout`` or override applies. Generous because I/O-bound
-# cells are common; a hung cell still dies here and the UI can interrupt sooner.
-# Mirrors ``StrataConfig.scan_timeout_seconds``.
-DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
-
-
-def cell_timeout_message(timeout_seconds: float, *, set_by: str | None = None) -> str:
-    """A timed-out-cell error that names the remedy.
-
-    ``set_by`` is where the limit came from: ``"annotation"``, ``"notebook"``
-    (notebook.toml), or ``None`` for the default or CLI flag. A lever that a higher
-    one overrides is not offered, since raising it would change nothing.
-    """
-    if set_by == "annotation":
-        return (
-            f"Cell execution timed out after {timeout_seconds}s, the limit the cell's "
-            f"'# @timeout' annotation sets. Raise it there; the annotation overrides "
-            f"notebook.toml and 'strata run --timeout'."
-        )
-    if set_by == "notebook":
-        return (
-            f"Cell execution timed out after {timeout_seconds}s, the limit 'timeout' in "
-            f"notebook.toml sets. Raise it there or add a '# @timeout <seconds>' "
-            f"annotation to the cell; both override 'strata run --timeout'."
-        )
-    return (
-        f"Cell execution timed out after {timeout_seconds}s. Raise the limit with a "
-        f"'# @timeout <seconds>' annotation on the cell, a 'timeout' key in "
-        f"notebook.toml, or 'strata run --timeout <seconds>' for a one-off run."
-    )
-
 
 # Well-known module → PyPI package name mappings where they differ.
 _MODULE_TO_PACKAGE: dict[str, str] = {
@@ -483,41 +459,6 @@ class _CellProvenance:
         if self.read_confirmation is not None:
             entry["confirmation"] = self.read_confirmation
         return entry
-
-
-@dataclass(kw_only=True)
-class BatchCellResult:
-    """Per-cell outcome inside a batched run-all execution."""
-
-    cell_id: str
-    status: str  # "ok" | "cache_hit" | "cell_error" | "persist_failed" | "not_run"
-    error: str | None = None
-    traceback: str | None = None
-    stdout: str = ""
-    stderr: str = ""
-    # Enough payload for ws._execute_run_all to fan out cell_output frames without going
-    # back to the harness or the store.
-    outputs: dict[str, Any] = field(default_factory=dict)
-    display_outputs: list[dict[str, Any]] = field(default_factory=list)
-    cache_hit: bool = False
-    mutation_warnings: list[MutationWarning] = field(default_factory=list)
-    # None when the cell's time is unknown (it never started, or was killed): not 0,
-    # which would price its later cache hits at nothing.
-    duration_ms: float | None = None
-    # Set on a hit the team store served; ws prices the hit from it.
-    team_pull: TeamPull | None = None
-    replaces_console: bool = False
-    hit_run_ms: int = 0
-
-
-@dataclass(kw_only=True)
-class BatchExecutionResult:
-    """Outcome of one ``CellExecutor.execute_batch``: which cells still need single-cell runs."""
-
-    cell_results: list[BatchCellResult]
-    completed: bool  # True if batch_end with reason=complete
-    failed_cell_id: str | None = None
-    end_reason: str = "complete"  # "complete" | "cell_error" | "persist_failed" | "subprocess_died"
 
 
 # Module-level so a test can make polling immediate.
@@ -3634,18 +3575,6 @@ class CellExecutor:
 
         return staged_specs, input_artifacts
 
-    def _parse_artifact_uri(self, input_uri: str) -> tuple[str, int]:
-        """Parse a canonical artifact URI into (artifact_id, version)."""
-        import re
-
-        match = re.fullmatch(r"strata://artifact/([^@]+)@v=(\d+)", input_uri)
-        if match is None:
-            raise RuntimeError(
-                "Signed notebook executor transport only supports artifact inputs, "
-                f"got {input_uri!r}"
-            )
-        return match.group(1), int(match.group(2))
-
     # ------------------------------------------------------------------
     # ①½ Resolve mounts
     # ------------------------------------------------------------------
@@ -5579,6 +5508,7 @@ class CellExecutor:
 
         # New process group so cancel can signal the whole descendant tree (DataLoader
         # workers, multiprocessing pools); ``proc.kill()`` alone leaks children.
+
         from strata.notebook.process_tree import (
             subprocess_kwargs_for_new_group,
             terminate_subprocess_tree,
@@ -5810,6 +5740,26 @@ class CellExecutor:
     # Run-all batching
     # ------------------------------------------------------------------
 
+    def _batch_context(self) -> BatchContext:
+        return BatchContext(
+            harness_path=self.harness_path,
+            harness_env=self._harness_env,
+            work_dir_fields=self._work_dir_fields,
+            run_token=self._run_token,
+            compute_provenance=self._compute_cell_provenance,
+            canonical_output=self._canonical_output,
+            input_refs=self._input_refs,
+            moved=self._moved,
+            promote_reverted_outputs=self._promote_reverted_outputs,
+            promote_reverted_leaf=self._promote_reverted_leaf,
+            pull_from_team_store=self._pull_from_team_store,
+            push_to_team_store=self._push_to_team_store,
+            store_outputs=self._store_outputs,
+            store_console_outputs=self._store_console_outputs,
+            store_display_outputs=self._store_display_outputs,
+            write_input_file=self._write_input_file,
+        )
+
     async def _run_batch(
         self,
         cell_specs: list[dict[str, Any]],
@@ -5821,851 +5771,18 @@ class CellExecutor:
         on_cell_start: Callable[[str], Awaitable[None]] | None = None,
         provenance: Mapping[str, _CellProvenance] | None = None,
     ) -> BatchExecutionResult:
-        """Run a sequence of cells in one harness subprocess (see ``execute_batch``).
-
-        Per-cell stdout/stderr attribution is not implemented.
-        """
-        # As in single-cell: no interpreter, no run.
-        venv_python = self.session.venv_python
-        if venv_python is None:
-            return _refused_batch(cell_specs, _no_interpreter_message(self.session))
-
-        try:
-            harness_user = resolve_harness_user()
-        except LocalExecutionRefused as exc:
-            # The run-all dispatcher doesn't batch on a refusing host (single-cell still serves
-            # cache hits), so only a direct batch call gets here.
-            return _refused_batch(cell_specs, str(exc))
-
-        batch_tmpdir = Path(
-            tempfile.mkdtemp(
-                prefix=f"strata_batch_{uuid.uuid4().hex[:8]}_",
-                dir=str(self.session.path / ".strata"),
-            )
+        """Run a sequence of cells in one harness subprocess (see ``cell_paths/batch.py``)."""
+        return await run_batch(
+            self.session,
+            self._batch_context(),
+            cell_specs,
+            use_cache=use_cache,
+            batch_timeout_seconds=batch_timeout_seconds,
+            cell_timeout_seconds=cell_timeout_seconds,
+            on_cell_event=on_cell_event,
+            on_cell_start=on_cell_start,
+            provenance=provenance,
         )
-        manifest_path = batch_tmpdir / "batch_manifest.json"
-
-        # Pipe pairs: frame_r/w (harness -> parent), resp_r/w (parent -> harness).
-        frame_r, frame_w = os.pipe()
-        resp_r, resp_w = os.pipe()
-
-        cell_results: dict[str, BatchCellResult] = {}
-        for spec in cell_specs:
-            cell_results[spec["cell_id"]] = BatchCellResult(
-                cell_id=spec["cell_id"],
-                status="not_run",
-            )
-
-        completed = False
-        end_reason = "subprocess_died"
-        failed_cell_id: str | None = None
-        proc: asyncio.subprocess.Process | None = None
-
-        with ExitStack() as token_scope:
-            try:
-                upstream_inputs = self._batch_resolve_upstream_inputs(cell_specs, batch_tmpdir)
-                # One token for the batch: Run All acts as whoever started it, and each
-                # cell's scans count under it by cell id. Minted after the inputs are
-                # staged, since the batch's timeout runs from the spawn.
-                run_token = token_scope.enter_context(self._run_token(batch_timeout_seconds))
-                manifest = {
-                    "cells": cell_specs,
-                    "upstream_inputs": upstream_inputs,
-                    **self._work_dir_fields(),
-                }
-                manifest["run_token_on_stdin"] = True
-                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-                lifeline_fds, lifeline_vars = lifeline_handoff()
-                env = identity_env(
-                    self._harness_env(
-                        {
-                            "STRATA_BATCH_FRAME_FD": str(frame_w),
-                            "STRATA_BATCH_RESP_FD": str(resp_r),
-                            "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
-                            **lifeline_vars,
-                        }
-                    ),
-                    harness_user,
-                )
-                hand_over(batch_tmpdir, harness_user)
-
-                # New process group so a timeout SIGKILL reaches every descendant. Mirrors
-                # _run_harness.
-                proc = await asyncio.create_subprocess_exec(
-                    str(venv_python),
-                    str(self.harness_path),
-                    "--batch",
-                    str(manifest_path),
-                    env=env,
-                    pass_fds=(frame_w, resp_r, *lifeline_fds),
-                    stdin=asyncio.subprocess.PIPE if run_token is not None else None,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=str(self.session.path),
-                    **spawn_kwargs(harness_user),
-                    **subprocess_kwargs_for_new_group(),
-                )
-
-                if run_token is not None:
-                    assert proc.stdin is not None
-                    proc.stdin.write(f"{run_token}\n".encode())
-                    proc.stdin.close()
-
-                # Close the parent's copies of harness-side fds so EOF detection works on exit.
-                os.close(frame_w)
-                os.close(resp_r)
-                frame_w = -1  # mark already-closed for finally
-                resp_r = -1
-
-                # Drain stdout/stderr concurrently to prevent pipe-buffer deadlock (no per-cell
-                # attribution).
-                assert proc.stdout is not None
-                assert proc.stderr is not None
-                stdout_task = asyncio.create_task(_drain_stream(proc.stdout))
-                stderr_task = asyncio.create_task(_drain_stream(proc.stderr))
-
-                # The default 64 KiB limit would make readline() raise on any frame embedding a big
-                # stdout capture or display payload, aborting the batch.
-                loop = asyncio.get_running_loop()
-                frame_reader = asyncio.StreamReader(limit=SUBPROCESS_LINE_LIMIT, loop=loop)
-                frame_protocol = asyncio.StreamReaderProtocol(frame_reader, loop=loop)
-                frame_file = os.fdopen(frame_r, "rb")
-                frame_r = -1  # ownership transferred to file
-                await loop.connect_read_pipe(lambda: frame_protocol, frame_file)
-
-                # Sync os.write: the kernel pipe buffer absorbs our small JSON responses.
-                resp_w_fd = resp_w
-                resp_w = -1  # ownership transferred
-
-                def send_response(payload: dict) -> None:
-                    line = (json.dumps(payload) + "\n").encode("utf-8")
-                    os.write(resp_w_fd, line)
-
-                # Per-cell watchdog, integrated into the service loop's readline via wait_for (no
-                # separate task). On timeout the loop records the cell and SIGKILLs the harness;
-                # readline then returns "" and the loop exits. Cells with explicit timeouts aren't
-                # batchable, so the default applies to every cell.
-                watchdog_state: dict[str, Any] = {
-                    "active_cell_id": None,
-                    "active_started_at": None,
-                    "active_timeout": cell_timeout_seconds,
-                    "timed_out": False,
-                    "timeout_cell_id": None,
-                    "proc": proc,
-                }
-
-                try:
-                    end_reason, failed_cell_id = await asyncio.wait_for(
-                        self._batch_service_loop(
-                            frame_reader,
-                            send_response,
-                            cell_results,
-                            batch_tmpdir,
-                            # Sources frozen at partition time: ``cell.source`` can change under a
-                            # running batch, and hashing it would file outputs under the edit's key.
-                            executed_sources={
-                                str(spec.get("cell_id", "")): str(spec.get("source", ""))
-                                for spec in cell_specs
-                            },
-                            provenance=dict(provenance or {}),
-                            use_cache=use_cache,
-                            on_cell_event=on_cell_event,
-                            on_cell_start=on_cell_start,
-                            watchdog_state=watchdog_state,
-                        ),
-                        timeout=batch_timeout_seconds,
-                    )
-                    completed = end_reason == "complete"
-                except TimeoutError:
-                    # SIGTERM the whole tree; proc.kill() alone would leak user-spawned children.
-                    await terminate_subprocess_tree(proc)
-                    end_reason = "subprocess_died"
-                    completed = False
-                finally:
-                    # Close the response fd so a still-live harness sees EOF.
-                    try:
-                        os.close(resp_w_fd)
-                    except OSError:
-                        pass
-
-                # A watchdog kill ends the loop as "subprocess_died"; override with the timeout
-                # details so the dispatcher sees which cell hung.
-                if watchdog_state["timed_out"] and watchdog_state["timeout_cell_id"]:
-                    timed_out_id = watchdog_state["timeout_cell_id"]
-                    timed_out_result = BatchCellResult(
-                        cell_id=timed_out_id,
-                        status="cell_error",
-                        error=cell_timeout_message(watchdog_state["active_timeout"]),
-                    )
-                    cell_results[timed_out_id] = timed_out_result
-                    if on_cell_event is not None:
-                        await on_cell_event(timed_out_result)
-                    end_reason = "cell_timeout"
-                    failed_cell_id = timed_out_id
-                    completed = False
-
-                await proc.wait()
-                await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-            except asyncio.CancelledError:
-                # As _run_harness: a cancelled run (a closed socket) must not leave the
-                # harness running the user's code, unreaped.
-                if proc is not None:
-                    logger.info(
-                        "Batch execution cancelled; terminating harness subprocess tree pid=%s",
-                        proc.pid,
-                    )
-                    await asyncio.shield(terminate_subprocess_tree(proc))
-                raise
-            finally:
-                for fd in (frame_w, resp_r, frame_r, resp_w):
-                    if fd >= 0:
-                        try:
-                            os.close(fd)
-                        except OSError:
-                            pass
-                shutil.rmtree(batch_tmpdir, ignore_errors=True)
-
-        return BatchExecutionResult(
-            cell_results=list(cell_results.values()),
-            completed=completed,
-            failed_cell_id=failed_cell_id,
-            end_reason=end_reason,
-        )
-
-    async def _batch_service_loop(
-        self,
-        frame_reader: asyncio.StreamReader,
-        send_response: Callable[[dict], None],
-        cell_results: dict[str, BatchCellResult],
-        batch_tmpdir: Path,
-        *,
-        executed_sources: dict[str, str],
-        provenance: dict[str, _CellProvenance],
-        use_cache: bool,
-        on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
-        on_cell_start: Callable[[str], Awaitable[None]] | None = None,
-        watchdog_state: dict[str, Any] | None = None,
-    ) -> tuple[str, str | None]:
-        """Read frames and service requests until ``batch_end``.
-
-        Returns ``(end_reason, failed_cell_id)``. ``on_cell_event`` is awaited
-        after each ``BatchCellResult`` is recorded, ``on_cell_start`` on each
-        ``cell_start``.
-        """
-        active_cell_id: str | None = None
-        end_reason = "subprocess_died"
-        failed_cell_id: str | None = None
-        team_pulls: dict[str, TeamPull] = {}
-        hit_consoles: dict[str, tuple[bool, int]] = {}
-
-        async def _record(cell_id: str, result: BatchCellResult) -> None:
-            cell_results[cell_id] = result
-            if on_cell_event is not None:
-                await on_cell_event(result)
-
-        async def _serviced[T](request: Awaitable[T]) -> T:
-            """Await the parent's answer to a harness request off the cell's clock.
-
-            The time is the parent's (cache lookup, store write), so the window
-            start moves forward by it; otherwise a slow cache check under load
-            times out a cell whose code has not started.
-            """
-            began = time.time()
-            try:
-                return await request
-            finally:
-                if watchdog_state is not None and watchdog_state.get("active_started_at"):
-                    watchdog_state["active_started_at"] += time.time() - began
-
-        async def _abort_oversized_frame() -> None:
-            # A frame exceeded even SUBPROCESS_LINE_LIMIT. Terminate the harness tree (or it
-            # leaks) and let the loop exit as subprocess_died.
-            logger.error(
-                "Batch harness emitted a frame over the %d-byte line limit; aborting the batch",
-                SUBPROCESS_LINE_LIMIT,
-            )
-            if watchdog_state is not None:
-                try:
-                    await terminate_subprocess_tree(watchdog_state["proc"])
-                except Exception:
-                    logger.exception("Failed terminating batch harness after oversized frame")
-
-        while True:
-            # Cap readline at the active cell's remaining timeout; on expiry, SIGKILL the
-            # harness, record cell_error and exit.
-            if watchdog_state is not None and watchdog_state.get("active_started_at"):
-                # Set whenever active_started_at is; cast for the type checker.
-                started = cast(float, watchdog_state["active_started_at"])
-                timeout = cast(float, watchdog_state["active_timeout"])
-                remaining = timeout - (time.time() - started)
-                if remaining <= 0:
-                    watchdog_state["timed_out"] = True
-                    watchdog_state["timeout_cell_id"] = watchdog_state["active_cell_id"]
-                    try:
-                        await terminate_subprocess_tree(watchdog_state["proc"])
-                    except Exception:
-                        pass
-                    break
-                try:
-                    line = await asyncio.wait_for(frame_reader.readline(), timeout=remaining)
-                except TimeoutError:
-                    watchdog_state["timed_out"] = True
-                    watchdog_state["timeout_cell_id"] = watchdog_state["active_cell_id"]
-                    try:
-                        await terminate_subprocess_tree(watchdog_state["proc"])
-                    except Exception:
-                        pass
-                    break
-                except ValueError:
-                    await _abort_oversized_frame()
-                    break
-            else:
-                try:
-                    line = await frame_reader.readline()
-                except ValueError:
-                    await _abort_oversized_frame()
-                    break
-            if not line:
-                # Pipe closed without batch_end: the subprocess died.
-                break
-            try:
-                frame = json.loads(line)
-            except json.JSONDecodeError:
-                logger.warning("Batch harness emitted unparseable frame: %r", line[:200])
-                continue
-
-            ftype = frame.get("type")
-            payload = frame.get("payload") or {}
-
-            if ftype == "cell_start":
-                active_cell_id = payload.get("cell_id")
-                # Before the watchdog window opens: the announcement is the parent's time.
-                if on_cell_start is not None and active_cell_id:
-                    await on_cell_start(active_cell_id)
-                # Watchdog window: from cell_start until a completion frame (cache_hit output,
-                # cell_error, or persist).
-                if watchdog_state is not None and active_cell_id:
-                    watchdog_state["active_cell_id"] = active_cell_id
-                    watchdog_state["active_started_at"] = time.time()
-            elif ftype == "cache_check":
-                response = await _serviced(
-                    self._batch_service_cache_check(
-                        payload.get("cell_id", ""),
-                        batch_tmpdir,
-                        executed_sources=executed_sources,
-                        provenance=provenance,
-                        use_cache=use_cache,
-                    )
-                )
-                # Parent-side only: the harness has no use for it and it isn't JSON.
-                team_pull = response.pop("team_pull", None)
-                if team_pull is not None:
-                    team_pulls[payload.get("cell_id", "")] = team_pull
-                hit_consoles[payload.get("cell_id", "")] = (
-                    response.pop("replaces_console", False),
-                    response.pop("hit_run_ms", 0),
-                )
-                # Answered once here instead of at each cache-check return; the cell's ambient
-                # client needs it to name what it promotes.
-                response["input_uris"] = self._upstream_artifact_uris(payload.get("cell_id", ""))
-                send_response(response)
-            elif ftype == "persist":
-                response = await _serviced(
-                    self._batch_service_persist(
-                        payload,
-                        batch_tmpdir,
-                        executed_sources=executed_sources,
-                        provenance=provenance,
-                    )
-                )
-                cell_id_pl = payload["cell_id"]
-                if response.get("ok"):
-                    # Prefer post-persist display metadata (carries artifact_uri) over the harness's
-                    # pre-persist payload, as single-cell does.
-                    display_outputs = response.get("display_outputs") or (
-                        payload.get("display_outputs") or []
-                    )
-                    await _record(
-                        cell_id_pl,
-                        BatchCellResult(
-                            cell_id=cell_id_pl,
-                            status="ok",
-                            stdout=payload.get("stdout", ""),
-                            stderr=payload.get("stderr", ""),
-                            outputs=payload.get("outputs") or {},
-                            display_outputs=display_outputs,
-                            mutation_warnings=payload.get("mutation_warnings") or [],
-                            duration_ms=payload.get("duration_ms"),
-                        ),
-                    )
-                else:
-                    # Persist rejected: the harness sees persist_err and ends with
-                    # reason="persist_failed". Record it so the dispatcher doesn't report "not_run".
-                    await _record(
-                        cell_id_pl,
-                        BatchCellResult(
-                            cell_id=cell_id_pl,
-                            status="persist_failed",
-                            error=response.get("error"),
-                            stdout=payload.get("stdout", ""),
-                            stderr=payload.get("stderr", ""),
-                            duration_ms=payload.get("duration_ms"),
-                        ),
-                    )
-                send_response(response)
-                # Close the watchdog window so idle time between cells doesn't trip it.
-                if watchdog_state is not None:
-                    watchdog_state["active_cell_id"] = None
-                    watchdog_state["active_started_at"] = None
-            elif ftype == "cell_output":
-                if payload.get("cache_hit") and active_cell_id:
-                    await _record(
-                        active_cell_id,
-                        BatchCellResult(
-                            cell_id=active_cell_id,
-                            status="cache_hit",
-                            cache_hit=True,
-                            stdout=payload.get("stdout", ""),
-                            stderr=payload.get("stderr", ""),
-                            outputs=payload.get("outputs") or {},
-                            display_outputs=payload.get("display_outputs") or [],
-                            duration_ms=payload.get("duration_ms"),
-                            team_pull=team_pulls.get(active_cell_id),
-                            replaces_console=hit_consoles[active_cell_id][0],
-                            hit_run_ms=hit_consoles[active_cell_id][1],
-                        ),
-                    )
-                if watchdog_state is not None:
-                    watchdog_state["active_cell_id"] = None
-                    watchdog_state["active_started_at"] = None
-            elif ftype == "cell_error":
-                cell_id = payload.get("cell_id", "")
-                await _record(
-                    cell_id,
-                    BatchCellResult(
-                        cell_id=cell_id,
-                        status="cell_error",
-                        error=payload.get("error"),
-                        traceback=payload.get("traceback"),
-                        stdout=payload.get("stdout", ""),
-                        stderr=payload.get("stderr", ""),
-                        duration_ms=payload.get("duration_ms"),
-                    ),
-                )
-                if watchdog_state is not None:
-                    watchdog_state["active_cell_id"] = None
-                    watchdog_state["active_started_at"] = None
-            elif ftype == "batch_end":
-                end_reason = payload.get("reason", "complete")
-                failed_cell_id = payload.get("failed_cell_id")
-                break
-
-        return end_reason, failed_cell_id
-
-    def _batch_resolve_upstream_inputs(
-        self,
-        cell_specs: list[dict[str, Any]],
-        batch_tmpdir: Path,
-    ) -> dict[str, dict[str, str]]:
-        """Materialize artifacts of cells upstream of the batch into batch_tmpdir.
-
-        The harness seeds its namespace from these. Variables produced inside
-        the batch must not be included.
-        """
-        batch_cell_ids = {spec["cell_id"] for spec in cell_specs}
-        inputs: dict[str, dict[str, str]] = {}
-        upstream_dir = batch_tmpdir / "__upstream__"
-        upstream_dir.mkdir(parents=True, exist_ok=True)
-
-        for spec in cell_specs:
-            cell_id = spec["cell_id"]
-            cell = self.session.notebook_state.get_cell(cell_id)
-            if cell is None:
-                continue
-            for upstream_id in cell.upstream_ids:
-                if upstream_id in batch_cell_ids:
-                    continue
-                upstream_cell = self.session.notebook_state.get_cell(upstream_id)
-                if upstream_cell is None:
-                    continue
-                wired = self.session.wired_variables(cell_id, upstream_id)
-                for var_name, uri in upstream_cell.artifact_uris.items():
-                    if var_name in inputs or var_name not in wired:
-                        continue
-                    spec_dict = self._materialize_artifact_to_dir(uri, upstream_dir, var_name)
-                    if spec_dict is not None:
-                        inputs[var_name] = spec_dict
-
-        # Paths are relative to batch_tmpdir (the harness deserializes with
-        # output_dir=batch_tmpdir).
-        return {
-            name: {
-                "content_type": spec["content_type"],
-                "file": f"__upstream__/{spec['file']}",
-            }
-            for name, spec in inputs.items()
-        }
-
-    def _materialize_artifact_to_dir(
-        self,
-        uri: str,
-        target_dir: Path,
-        var_name: str,
-    ) -> dict[str, str] | None:
-        """Write an artifact's blob to ``target_dir/<var><ext>``; return the spec or None."""
-        artifact_id, version = self._parse_artifact_uri(uri)
-        if not artifact_id:
-            return None
-        artifact_mgr = self.session.get_artifact_manager()
-        art = artifact_mgr.artifact_store.get_artifact(artifact_id, version)
-        if art is None:
-            return None
-        content_type = _artifact_content_type(art)
-        ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
-        file_name = f"{safe_filename_stem(var_name)}{ext}"
-        if not self._write_input_file(target_dir / file_name, artifact_id, version, content_type):
-            return None
-        return {"content_type": content_type, "file": file_name}
-
-    def _upstream_artifact_uris(self, cell_id: str) -> dict[str, dict[str, str]]:
-        """The inputs this cell reads, as the manifest's ``{variable: {"uri": ...}}``.
-
-        ``strata.promote`` needs inputs named as the cell names them. A batch has
-        no per-cell manifest, but in-batch upstreams have persisted by the time a
-        cell checks its cache, so the map is built here.
-        """
-        cell = self.session.notebook_state.get_cell(cell_id)
-        if cell is None:
-            return {}
-        inputs: dict[str, dict[str, str]] = {}
-        for upstream_id in cell.upstream_ids:
-            upstream = self.session.notebook_state.get_cell(upstream_id)
-            if upstream is None:
-                continue
-            wired = self.session.wired_variables(cell_id, upstream_id)
-            for var_name, uri in upstream.artifact_uris.items():
-                if var_name in wired:
-                    inputs.setdefault(var_name, {"uri": uri})
-        return inputs
-
-    def _materialize_batch_cache_hit(
-        self,
-        cell: Any,
-        cell_id: str,
-        provenance_hash: str,
-        consumed_vars: set[str] | list[str],
-        cell_output_dir: Path,
-    ) -> dict[str, dict[str, str]] | None:
-        """Write every consumed variable's cached bytes where the harness reads.
-
-        ``None`` as soon as one is missing or does not match this cell's hash: a
-        partial hit is a miss. Separate so it can be retried after a team pull.
-        """
-        artifact_mgr = self.session.get_artifact_manager()
-        cached_outputs: dict[str, dict[str, str]] = {}
-        for var_name in consumed_vars:
-            canonical_art = self._canonical_output(cell_id, var_name, provenance_hash)
-            if canonical_art is None:
-                return None
-            blob = artifact_mgr.artifact_store.read_blob(canonical_art.id, canonical_art.version)
-            if blob is None:
-                return None
-            content_type = _artifact_content_type(canonical_art)
-            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
-            file_name = f"{safe_filename_stem(var_name)}{ext}"
-            write_run_file(cell_output_dir, file_name, blob)
-            cached_outputs[var_name] = {
-                "content_type": content_type,
-                "file": file_name,
-            }
-            # Populate artifact_uris, as single-cell does, so later batch cells key on them.
-            uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
-            cell.artifact_uris[var_name] = uri
-            cell.artifact_uri = uri
-        return cached_outputs
-
-    async def _batch_service_cache_check(
-        self,
-        cell_id: str,
-        batch_tmpdir: Path,
-        *,
-        executed_sources: dict[str, str],
-        provenance: dict[str, _CellProvenance],
-        use_cache: bool,
-    ) -> dict[str, Any]:
-        """Service a ``cache_check`` request from the batch harness.
-
-        On a hit, writes cached blobs to ``batch_tmpdir/<cell_id>/{var}{ext}`` and
-        sets ``cell.artifact_uris`` and ``display_outputs`` as single-cell does. The
-        provenance checked replaces the cell's entry in *provenance*, for its persist.
-        """
-        cell = self.session.notebook_state.get_cell(cell_id)
-        if cell is None:
-            return {"cache_hit": False, "provenance_hash": ""}
-
-        # The partition's source, not the session's: a mid-batch edit must not decide whether
-        # this run is a hit.
-        source = executed_sources.get(cell_id, cell.source)
-        base = provenance.get(cell_id)
-        try:
-            # Over the inputs as they are now: the cells before it in the batch persisted.
-            prov = (
-                base.rekeyed()
-                if base is not None
-                else await self._compute_cell_provenance(cell_id, source)
-            )
-        except Exception as exc:
-            logger.warning("Batch cache_check provenance failed for %s: %s", cell_id, exc)
-            return {"cache_hit": False, "provenance_hash": ""}
-        provenance[cell_id] = prov
-
-        provenance_hash = prov.provenance_hash
-        # ``# @nocache`` marks an effect the artifact doesn't capture (a write, a POST, a
-        # clock read); Run All must not serve it from cache either.
-        if not use_cache or prov.annotations.nocache:
-            return {"cache_hit": False, "provenance_hash": provenance_hash}
-
-        cell_output_dir = batch_tmpdir / cell_id
-        cell_output_dir.mkdir(parents=True, exist_ok=True)
-        artifact_mgr = self.session.get_artifact_manager()
-        consumed_vars = (
-            self.session.dag.consumed_variables.get(cell_id, set())
-            if self.session.dag is not None
-            else set()
-        )
-
-        # Hydrate cached displays the way single-cell does
-        # (session.resolve_cached_display_outputs): rich models when every artifact exists
-        # with matching provenance, else []. Their blobs then go to the per-cell tmpdir.
-        existing_display_outputs = cell.display_outputs or (
-            [cell.display_output] if cell.display_output is not None else []
-        )
-        # A revert finds its outputs under an older version, as a single run does; promoted
-        # first so everything below reads them as latest.
-        if consumed_vars:
-            self._promote_reverted_outputs(
-                cell_id,
-                provenance_hash,
-                consumed_vars,
-                prov.annotations.table_writes,
-                len(existing_display_outputs),
-            )
-        elif self.session.resolve_cached_console(cell_id, provenance_hash) is None:
-            self._promote_reverted_leaf(cell_id, provenance_hash, len(existing_display_outputs))
-        cached_display_models = self.session.resolve_cached_display_outputs(
-            cell_id, provenance_hash, existing_display_outputs
-        )
-        cached_displays: list[dict[str, Any]] = []
-        for index, cached in enumerate(cached_display_models):
-            display_artifact_id = artifact_mgr.cell_artifact_id(cell_id, f"__display__{index}")
-            display_art = artifact_mgr.artifact_store.get_latest_version(display_artifact_id)
-            if display_art is None:
-                continue  # Should not happen: the helper validated existence.
-            blob = artifact_mgr.artifact_store.read_blob(display_art.id, display_art.version)
-            if blob is None:
-                continue
-            content_type = _artifact_content_type(display_art)
-            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
-            file_name = f"__display__{index}{ext}"
-            write_run_file(cell_output_dir, file_name, blob)
-            meta = cached.model_dump()
-            meta["file"] = file_name
-            cached_displays.append(meta)
-
-        # A leaf's record is its console (empty when it printed nothing), as in single-cell;
-        # without one, or any cached display, there is nothing to serve, so run it.
-        cached_console = self.session.resolve_cached_console(cell_id, provenance_hash)
-        if not consumed_vars and not cached_displays and cached_console is None:
-            return {"cache_hit": False, "provenance_hash": provenance_hash}
-
-        cached_outputs = self._materialize_batch_cache_hit(
-            cell, cell_id, provenance_hash, consumed_vars, cell_output_dir
-        )
-        team_pull: TeamPull | None = None
-        if cached_outputs is None and consumed_vars:
-            # Team cache tier, in single-run order: only after a local miss. A pull writes each
-            # variable under its canonical local id, so the same probe decides afterwards.
-            team_pull = await self._pull_from_team_store(
-                cell_id=cell_id,
-                provenance_hash=provenance_hash,
-                consumed_vars=set(consumed_vars),
-                source_hash=prov.source_hash,
-                source=source,
-                env_hash=prov.env_hash,
-                input_versions=self._input_refs(cell_id),
-            )
-            if team_pull is not None:
-                cached_outputs = self._materialize_batch_cache_hit(
-                    cell, cell_id, provenance_hash, consumed_vars, cell_output_dir
-                )
-        if cached_outputs is None:
-            return {"cache_hit": False, "provenance_hash": provenance_hash}
-
-        cell.cache_hit = True
-        if cached_display_models:
-            cell.display_outputs = list(cached_display_models)
-            cell.display_output = cached_display_models[-1]
-        # Before the record below moves the cell's last key on to this one.
-        console = hit_console(
-            cached_console, shows_this_key=cell.last_provenance_hash == provenance_hash
-        )
-        # As a single-cell hit does, so the table index names the reads behind these outputs.
-        self.session.record_successful_execution_provenance(
-            cell_id,
-            provenance_hash,
-            prov.source_hash,
-            prov.env_hash,
-            table_reads=prov.table_reads,
-            reads=prov.reads(*self._moved(cell_id)),
-            key_parts=prov.key_parts,
-        )
-
-        return {
-            "cache_hit": True,
-            "provenance_hash": provenance_hash,
-            "cached_outputs": cached_outputs,
-            "cached_displays": cached_displays,
-            "stdout": console.get("stdout", ""),
-            "stderr": console.get("stderr", ""),
-            "replaces_console": console["replaces_console"],
-            "hit_run_ms": console.get("hit_run_ms", 0),
-            "team_pull": team_pull,
-        }
-
-    async def _batch_service_persist(
-        self,
-        payload: dict[str, Any],
-        batch_tmpdir: Path,
-        *,
-        executed_sources: dict[str, str],
-        provenance: dict[str, _CellProvenance],
-    ) -> dict[str, Any]:
-        """Service a ``persist`` request from the batch harness.
-
-        Uses the single-cell chain (``write_module_export_outputs``,
-        ``_store_outputs``, ``_store_display_outputs``).
-        """
-        cell_id = payload.get("cell_id", "")
-        cell = self.session.notebook_state.get_cell(cell_id)
-        if cell is None:
-            return {"ok": False, "error": f"cell {cell_id} not found"}
-
-        cell_output_dir = batch_tmpdir / cell_id
-        if not cell_output_dir.exists():
-            return {"ok": False, "error": f"output dir missing for {cell_id}"}
-
-        # Everything recorded describes the run, so read the source that ran: hashing an edit
-        # made mid-batch would file outputs under the wrong key (green on reopen, wrong bytes).
-        executed_source = executed_sources.get(cell_id, cell.source)
-        # The key the cache check looked up: resolving again could see a table that moved
-        # since the run's snapshot was pinned.
-        prov = provenance.get(cell_id)
-        if prov is None:
-            return {"ok": False, "error": f"no cache check for {cell_id}"}
-
-        provenance_hash = prov.provenance_hash
-        source_hash = prov.source_hash
-        env_hash = prov.env_hash
-        input_hashes = prov.input_hashes
-
-        # Module export writes synthetic .cell_module.json / .cell_instance.pickle for
-        # top-level defs/classes; _store_outputs picks them up. An error string means a
-        # consumed def/class can't be exported safely: refuse to persist and signal the
-        # harness so the cell errors, as single-cell does.
-        try:
-            module_export_error = write_module_export_outputs(
-                self.session,
-                cell_id,
-                executed_source,
-                cell_output_dir,
-                provenance_hash,
-                {},  # outputs dict; module export reads from AST, not this
-            )
-        except Exception as exc:
-            return {"ok": False, "error": f"module export raised: {exc}"}
-        if module_export_error:
-            return {"ok": False, "error": f"module export rejected: {module_export_error}"}
-
-        try:
-            stored_ok = self._store_outputs(
-                cell_id,
-                cell_output_dir,
-                provenance_hash,
-                input_hashes,
-                source_hash=source_hash,
-                source=executed_source,
-                env_hash=env_hash,
-            )
-        except (UnsafeRunFile, TableWriteError) as exc:
-            return {"ok": False, "error": str(exc)}
-
-        # Carry the post-persist metadata (with artifact_uri) in the ack so the dispatcher
-        # broadcasts the URI-bearing version, as single-cell does.
-        display_outputs_meta = payload.get("display_outputs") or []
-        persisted_displays: list[dict[str, Any]] = []
-        if display_outputs_meta:
-            try:
-                persisted_displays = self._store_display_outputs(
-                    cell_id,
-                    cell_output_dir,
-                    provenance_hash,
-                    input_hashes,
-                    display_outputs_meta,
-                    source_hash=source_hash,
-                    source=cell.source,
-                    env_hash=env_hash,
-                )
-            except Exception as exc:
-                logger.warning("Batch display persist failed for %s: %s", cell_id, exc)
-
-        if not stored_ok:
-            return {"ok": False, "error": "store_outputs returned False"}
-
-        # Stored as in single-cell. Rerun All stores it too, or the next Run All replays an
-        # older run's; only ``# @nocache`` stores none.
-        if not prov.annotations.nocache:
-            self._store_console_outputs(
-                cell_id,
-                provenance_hash,
-                payload.get("stdout", ""),
-                payload.get("stderr", ""),
-                input_hashes,
-                source_hash=source_hash,
-                source=executed_source,
-                env_hash=env_hash,
-                display_count=len(persisted_displays),
-                duration_ms=float(payload.get("duration_ms") or 0.0),
-            )
-
-        # Offer it to the team, as a single run does. Inert unless configured, and it
-        # swallows its own failures: a shared-cache problem must not fail a finished cell.
-        await self._push_to_team_store(cell_id=cell_id)
-
-        # Record provenance + execution as single-cell does.
-        try:
-            self.session.record_successful_execution_provenance(
-                cell_id,
-                provenance_hash,
-                source_hash,
-                env_hash,
-                table_reads=prov.table_reads,
-                reads=prov.reads(*self._moved(cell_id)),
-                key_parts=prov.key_parts,
-            )
-        except Exception:
-            pass
-
-        # So a later cache check finds rich CellOutput objects. The dispatcher does this too,
-        # but direct execute_batch calls (tests, REPL) need it here.
-        if persisted_displays:
-            cell.display_outputs = [CellOutput(**d) for d in persisted_displays]
-            cell.display_output = cell.display_outputs[-1]
-        # Persist to runtime.json, as single-cell does, or the display is lost on reopen.
-        self.session.persist_display_outputs(cell_id, persisted_displays or None)
-
-        uri = cell.artifact_uri or ""
-        return {"ok": True, "uri": uri, "display_outputs": persisted_displays}
 
 
 # ---------------------------------------------------------------------------
@@ -6699,38 +5816,6 @@ _OUTPUT_VARIABLE = re.compile(r"_var_([^@]+)")
 def _fenced_result(exc: RunFenced) -> dict[str, Any]:
     """A harness result for a run whose attempt lost its build mid-cell."""
     return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}
-
-
-_ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {
-    "arrow/ipc": ".arrow",
-    "json/object": ".json",
-    "pickle/object": ".pickle",
-    "module/import": ".module.json",
-    "module/cell": ".cell_module.json",
-    "module/cell-instance": ".cell_instance.pickle",
-    output_dirs.CONTENT_TYPE: output_dirs.EXTENSION,
-}
-
-
-def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecutionResult:
-    """A batch result for cells this session would not start, each with *error*."""
-    return BatchExecutionResult(
-        cell_results=[
-            BatchCellResult(cell_id=spec["cell_id"], status="cell_error", error=error)
-            for spec in cell_specs
-        ],
-        completed=False,
-        failed_cell_id=cell_specs[0]["cell_id"] if cell_specs else None,
-        end_reason="cell_error",
-    )
-
-
-async def _drain_stream(stream: asyncio.StreamReader) -> None:
-    """Read and discard ``stream`` until EOF, so chatty native code cannot fill the pipe."""
-    while True:
-        chunk = await stream.read(4096)
-        if not chunk:
-            return
 
 
 # ---------------------------------------------------------------------------

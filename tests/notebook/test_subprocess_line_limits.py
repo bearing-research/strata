@@ -79,14 +79,15 @@ async def test_batch_service_loop_survives_oversized_frame(tmp_path):
     """A frame past even the raised limit ends the batch as subprocess_died instead of aborting
     run-all and leaking the harness subprocess.
     """
-    from strata.notebook.executor import CellExecutor
+    from strata.notebook.cell_paths import batch
 
     class _OverflowReader:
         async def readline(self):
             raise ValueError("Separator is found, but chunk is longer than limit")
 
-    end_reason, failed_cell_id = await CellExecutor._batch_service_loop(
-        SimpleNamespace(),  # self is untouched before the overflow abort
+    end_reason, failed_cell_id = await batch.batch_service_loop(
+        SimpleNamespace(),  # the host and context are untouched before the overflow abort
+        SimpleNamespace(),
         _OverflowReader(),
         lambda payload: None,
         {},
