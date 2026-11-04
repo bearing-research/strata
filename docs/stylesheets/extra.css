@@ -1,0 +1,25 @@
+/* The app's blue, --cat-blue in frontend/src/style.css. */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #1e66f5;
+  --md-primary-fg-color--light: #4a85f7;
+  --md-primary-fg-color--dark: #1a56cf;
+  --md-accent-fg-color: #1e66f5;
+  --md-accent-fg-color--transparent: #1e66f51a;
+  --md-typeset-a-color: #1e66f5;
+}
+
+/* Light enough here that the header's text has to be dark. */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #89b4fa;
+  --md-primary-fg-color--light: #a6c8fb;
+  --md-primary-fg-color--dark: #6d9ff0;
+  --md-primary-bg-color: #1e1e2e;
+  --md-primary-bg-color--light: #1e1e2eb3;
+  --md-accent-fg-color: #89b4fa;
+  --md-accent-fg-color--transparent: #89b4fa1a;
+  --md-typeset-a-color: #89b4fa;
+}
+
+.md-content__button.copied {
+  color: var(--md-accent-fg-color);
+}

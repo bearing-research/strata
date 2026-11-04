@@ -37,7 +37,7 @@ provider = "infisical"
 project_id = "7301e122-565d-491d-9082-056504381782"
 ```
 
-That `project_id` is the example author's project; replace it with your own Infisical project's id. Strata logs in with credentials from the environment of the shell that starts the server, never from the notebook: export `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET` (a Machine Identity with read access to the project, recommended) or `INFISICAL_TOKEN` (a service token), plus `INFISICAL_HOST` for a self-hosted Infisical. See [Secrets](https://bearing-research.github.io/strata/latest/notebook/secrets/) for the full setup. Without those credentials the Runtime panel shows a fetch error; keys typed into the panel still work, or remove the `[secret_manager]` block to stop the fetch.
+That `project_id` is the example author's project; replace it with your own Infisical project's id. Strata logs in with credentials from the environment of the shell that starts the server, never from the notebook: export `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET` (a Machine Identity with read access to the project, recommended) or `INFISICAL_TOKEN` (a service token), plus `INFISICAL_HOST` for a self-hosted Infisical. See [Secrets](https://bearingresearch.com/strata/latest/notebook/secrets/) for the full setup. Without those credentials the Runtime panel shows a fetch error; keys typed into the panel still work, or remove the `[secret_manager]` block to stop the fetch.
 
 ## Paper vs live
 

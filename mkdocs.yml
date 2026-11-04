@@ -1,36 +1,47 @@
 site_name: Strata
-site_url: https://bearing-research.github.io/strata/
+site_url: https://bearingresearch.com/strata/
 site_description: "A notebook built for coding agents: every result cached, versioned, and visible to the human watching"
 repo_url: https://github.com/bearing-research/strata
 repo_name: bearing-research/strata
 
 theme:
   name: material
+  custom_dir: docs_overrides
+  favicon: assets/favicon.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
   features:
     - navigation.sections
-    - navigation.expand
     - navigation.tabs
     - navigation.top
     - content.code.copy
     - search.highlight
     - search.suggest
   icon:
+    logo: strata/diamond
     repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/copy-markdown.js
 
 markdown_extensions:
   - admonition
@@ -60,12 +71,14 @@ plugins:
 
 hooks:
   - docs_hooks/export_examples.py
+  - docs_hooks/llms_txt.py
 
 nav:
   - Home: index.md
   - Changelog: changelog.md
   - Notebook:
     - Start here:
+      - Installation: getting-started/installation.md
       - Quickstart - Web UI: getting-started/notebook.md
       - Quickstart - Terminal (TUI): notebook/tui.md
       - Quickstart - Coding agent: notebook/agent.md
@@ -100,7 +113,6 @@ nav:
     - Worker Relay Protocol: reference/worker-connect.md
     - notebook.toml Schema: reference/notebook-toml.md
   - Deployment:
-    - Installation: getting-started/installation.md
     - Configuration: reference/configuration.md
     - Deployment Modes: deployment/modes.md
     - Service Mode: deployment/service-mode.md

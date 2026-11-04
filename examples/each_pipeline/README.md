@@ -58,7 +58,7 @@ export STRATA_CATALOGS='{"lake": {"type": "rest", "uri": "https://catalog.exampl
 
 Glue and SQL catalogs work the same way for the write. To keep the keys out of the
 setting, see
-[named credentials](https://bearing-research.github.io/strata/latest/reference/notebook-toml/#named-credentials).
+[named credentials](https://bearingresearch.com/strata/latest/reference/notebook-toml/#named-credentials).
 `sync` refuses a table Strata did not write, so point it at a new table or one this
 notebook owns.
 
