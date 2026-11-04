@@ -4010,6 +4010,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A table's columns line up, and a null reads as a null.</strong> A numeric column's
+  header, stats and cells now right-align together, a null among them. Nulls reach
+  the viewer as nulls, not as empty strings, and the Stats row no longer goes blank
+  for a table holding an all-null column. (#1399)</li>
 <li><strong>Run All records what each cell cost, and a cache hit says what it saved.</strong> Run
   All recorded 0 for every cell, so the profiler read "0ms" and later hits were
   priced at nothing. A hit's badge now reads <code>cached · saved 2.1s</code>, with the load
