@@ -2937,7 +2937,7 @@
 <ol>
 <li><code>cell_status</code> with <code>status: "running"</code> starts a run: clear the cell's stdout and stderr. A <code>running</code> frame that carries <code>remote_build_state</code> only moves a remote cell's badge between <code>starting</code> and <code>running</code> during the run; leave the console as it is.</li>
 <li><code>cell_console</code> appends <code>text</code> to its <code>stream</code>; a frame with <code>chunk_seq: 0</code> first clears that stream.</li>
-<li><code>cell_output</code> and <code>cell_error</code> that carry <code>stdout</code> / <code>stderr</code> strings replace the console with them. The <code>cell_output</code> of a cache hit that replays no console carries the cell's last console, as <code>notebook_state</code> does.</li>
+<li><code>cell_output</code> and <code>cell_error</code> that carry <code>stdout</code> / <code>stderr</code> strings replace the console with them. A cache hit carries the console of the run behind it. A hit with no such record, such as one pulled from a team store, carries the cell's console as <code>notebook_state</code> holds it: kept if it came from this same key, otherwise empty.</li>
 </ol>
 <p>A cell run as an upstream inside another cell's run may get its console and result without a <code>running</code> frame; rule 3 still leaves the right console. In <code>notebook_state</code>, a running cell's <code>console_stdout</code> / <code>console_stderr</code> hold what this run has shown so far (empty until it prints); any other cell's hold its last run's console.</p>
 <h3 id="cascade">Cascade<a class="headerlink" href="#cascade" title="Permanent link">&para;</a></h3>
