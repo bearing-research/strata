@@ -41,7 +41,7 @@ function tableLabel(uri: string): string {
 const CELL_OUTPUT = /_cell_([^_]+)_var_([^@]+)/
 
 /** A cell's output by its cell's name and the output: every one has the same transform. */
-function cellOutputLabel(uri: string, cellName?: (cellId: string) => string | undefined) {
+function cellOutputLabel(uri: string, cellName?: (cellId: string) => string | null | undefined) {
   const match = CELL_OUTPUT.exec(uri)
   if (!match) return null
   const [, cellId, output] = match
@@ -51,7 +51,7 @@ function cellOutputLabel(uri: string, cellName?: (cellId: string) => string | un
 export function lineageToTree(
   graph: LineageGraph,
   rootUri: string,
-  cellName?: (cellId: string) => string | undefined,
+  cellName?: (cellId: string) => string | null | undefined,
 ): LineageTreeNode {
   const nodeByUri = new Map(graph.nodes.map((n) => [n.uri, n]))
   const inputsOf = new Map<string, string[]>()
