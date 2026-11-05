@@ -189,6 +189,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A failed cell's traceback starts at the cell.** The frames of Strata's own harness
+  before the cell's first frame are gone, library frames after it stay, and the error line
+  prints once. **Full traceback** under the error keeps the whole thing for a bug report.
+  Cold, warm and Run All failures now read the same: a warm run printed the error line
+  twice, a cold one and Run All showed only that line in the browser, and a syntax error
+  chained two tracebacks. A loop or `@each` failure says which iteration or item. (#PRNUM)
 - **A fresh notebook no longer logs warnings about nothing.** A table an upstream cell has
   yet to write is an ordinary state, so its unresolved fingerprint logs at debug; a catalog
   that cannot answer still warns. A warm worker gets 60 seconds to start, not 10: its first

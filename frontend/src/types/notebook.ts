@@ -197,6 +197,10 @@ export interface CellOutput {
   cacheSavedMs?: number
   /** Error message if failed */
   error?: string
+  /** The failure from the cell's first frame on; ends with the error line. */
+  traceback?: string
+  /** The same with the harness frames that led to the cell, for a bug report. */
+  tracebackFull?: string
 }
 
 /** One control declared by a widget cell (from the backend `widget` block). */
