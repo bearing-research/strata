@@ -6,6 +6,7 @@ the next run writes again; a cache hit writes nothing. Each snapshot names the r
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -13,14 +14,25 @@ import pyarrow as pa
 import pytest
 from pyiceberg.exceptions import NoSuchTableError
 
-from strata.iceberg.catalog import SUMMARY_ARTIFACT_ID, SUMMARY_PROVENANCE, SUMMARY_VERSION
+from strata.iceberg.catalog import (
+    SUMMARY_ARTIFACT_ID,
+    SUMMARY_PROVENANCE,
+    SUMMARY_VERSION,
+    IcebergWriter,
+)
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import CellStatus, TableWriteSpec
 from strata.notebook.parser import parse_notebook
 from strata.notebook.provenance import compute_source_hash
 from strata.notebook.session import NotebookSession
-from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+from strata.notebook.writer import (
+    add_cell_to_notebook,
+    create_notebook,
+    set_variant_mode,
+    write_cell,
+)
+from tests.notebook.conftest import skip_if_no_r_arrow
 
 windows = pytest.mark.skipif(
     sys.platform == "win32", reason="pyiceberg's local warehouse paths fail on Windows"
@@ -64,6 +76,14 @@ def _session(tmp_path: Path, source: str, reader: str | None = None) -> Notebook
     session = NotebookSession(parse_notebook(nb), nb)
     session.refresh_environment_runtime()
     return session
+
+
+def _catalog(warehouse: Path):
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    return SqlCatalog(
+        "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
+    )
 
 
 async def _run(session: NotebookSession, source: str, cell_id: str = "w"):
@@ -153,6 +173,200 @@ class TestAWritingCell:
         assert again.cache_hit
         assert _rows(warehouse) == [(1, 10)]
         assert len(_load(warehouse).snapshots()) == 1
+
+    async def test_a_hit_on_a_deleted_warehouse_writes_it_again(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        source = _source(uri, '{"id": [1], "v": [10]}')
+        session = _session(tmp_path, source)
+        assert (await _run(session, source)).success
+        shutil.rmtree(warehouse)
+
+        again = await _run(session, source)
+
+        assert again.success, again.error
+        assert not again.cache_hit
+        assert _rows(warehouse) == [(1, 10)]
+
+    async def test_a_hit_on_a_dropped_table_writes_it_again(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        source = _source(uri, '{"id": [1], "v": [10]}')
+        session = _session(tmp_path, source)
+        assert (await _run(session, source)).success
+        _catalog(warehouse).drop_table("lab.readings")
+
+        again = await _run(session, source)
+
+        assert not again.cache_hit
+        assert _rows(warehouse) == [(1, 10)]
+
+    async def test_a_catalog_that_cannot_answer_keeps_the_hit(self, tmp_path, monkeypatch):
+        warehouse, uri = _warehouse(tmp_path)
+        source = _source(uri, '{"id": [1], "v": [10]}')
+        session = _session(tmp_path, source)
+        assert (await _run(session, source)).success
+
+        def unreachable(*_args):
+            raise OSError("no route to catalog")
+
+        monkeypatch.setattr(IcebergWriter, "table_exists", unreachable)
+        again = await _run(session, source)
+
+        assert again.cache_hit
+        assert len(_load(warehouse).snapshots()) == 1
+
+    async def test_a_second_table_gone_runs_the_cell(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        other = f"file://{warehouse}#lab.other"
+        source = (
+            f"# @write_table b {other} append\n"
+            + _source(uri, '{"id": [1], "v": [10]}')
+            + "b = rows\n"
+        )
+        session = _session(tmp_path, source)
+        assert (await _run(session, source)).success
+        _catalog(warehouse).drop_table("lab.readings")
+
+        again = await _run(session, source)
+
+        assert not again.cache_hit
+        assert _rows(warehouse) == [(1, 10)]
+        # The cell runs whole: the table that stayed gets its append a second time.
+        assert _catalog(warehouse).load_table("lab.other").scan().to_arrow().num_rows == 2
+
+    async def test_looking_at_a_deleted_warehouse_does_not_create_it(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        source = _source(uri, '{"id": [1], "v": [10]}')
+        session = _session(tmp_path, source)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("w", source)).success
+        shutil.rmtree(warehouse)
+
+        assert await executor._written_table_gone(source)
+        assert not warehouse.exists()
+
+    async def test_run_all_writes_a_deleted_warehouse_again(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        source = _source(uri, '{"id": [1], "v": [10]}')
+        session = _session(tmp_path, source)
+        specs = [
+            {
+                "cell_id": "w",
+                "source": source,
+                "consumed_vars": sorted(session.dag.consumed_variables.get("w", set())),
+                "env": {},
+                "mount_manifest": {},
+                "source_hash": "",
+                "env_hash": "",
+            }
+        ]
+        assert (await CellExecutor(session).execute_batch(specs)).completed
+        assert (await CellExecutor(session).execute_batch(specs)).cell_results[0].cache_hit
+        assert _rows(warehouse) == [(1, 10)]
+        shutil.rmtree(warehouse)
+
+        again = await CellExecutor(session).execute_batch(specs)
+
+        assert again.completed
+        assert not again.cell_results[0].cache_hit
+        assert _rows(warehouse) == [(1, 10)]
+
+    async def test_a_loop_writes_a_deleted_warehouse_again(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        seed = "state = 0\n"
+        source = (
+            f"# @loop max_iter=1 carry=state\n# @write_table rows {uri} append\n"
+            "import pyarrow as pa\nstate = state + 1\nrows = pa.table({'id': [state], 'v': [0]})\n"
+        )
+        nb = create_notebook(tmp_path, "Writes")
+        add_cell_to_notebook(nb, "s", None)
+        write_cell(nb, "s", seed)
+        add_cell_to_notebook(nb, "w", "s")
+        write_cell(nb, "w", source)
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        assert (await CellExecutor(session).execute_cell("s", seed)).success
+        assert (await CellExecutor(session).execute_cell("w", source)).success
+        assert (await CellExecutor(session).execute_cell("w", source)).cache_hit
+        shutil.rmtree(warehouse)
+
+        again = await CellExecutor(session).execute_cell("w", source)
+
+        assert again.success, again.error
+        assert not again.cache_hit
+        assert _rows(warehouse) == [(1, 0)]
+
+    async def test_an_each_cell_writes_a_deleted_warehouse_from_its_instances(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        (raw / "one.txt").write_text("1")
+        log = tmp_path / "ran.log"
+        source = (
+            f"# @mount raw {raw.as_uri()} ro\n# @each path in raw\n"
+            f"# @write_table rows {uri} sync on=id\n"
+            "import pyarrow as pa\n"
+            f"open({str(log)!r}, 'a').write('ran')\n"
+            "rows = pa.table({'id': [int(path.read_text())], 'v': [1]})\n"
+        )
+        session = _session(tmp_path, source)
+        assert (await _run(session, source)).success
+        assert (await _run(session, source)).cache_hit
+        log.unlink()
+        shutil.rmtree(warehouse)
+
+        again = await _run(session, source)
+
+        assert again.success, again.error
+        assert not log.exists()
+        assert _rows(warehouse) == [(1, 1)]
+
+    async def test_a_per_variant_cell_writes_every_variant_again(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        cell = (
+            f"# @per_variant\n# @write_table rows {uri} append\n"
+            "import pyarrow as pa\nrows = pa.table({'id': [val], 'v': [val]})\n"
+        )
+        nb = create_notebook(tmp_path, "Writes")
+        cells = {
+            "a": "# @variant g one\nval = 1\n",
+            "b": "# @variant g two\nval = 2\n",
+            "c": cell,
+        }
+        after = None
+        for cell_id, source in cells.items():
+            add_cell_to_notebook(nb, cell_id, after)
+            write_cell(nb, cell_id, source)
+            after = cell_id
+        set_variant_mode(nb, "g", "sweep")
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        assert (await CellExecutor(session).execute_cell("c", cell)).success
+        assert _rows(warehouse) == [(1, 1), (2, 2)]
+        shutil.rmtree(warehouse)
+
+        again = await CellExecutor(session).execute_cell("c", cell)
+
+        assert again.success, again.error
+        assert _rows(warehouse) == [(1, 1), (2, 2)]
+
+    @skip_if_no_r_arrow
+    async def test_an_r_cell_writes_a_deleted_warehouse_again(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        source = f"# @write_table rows {uri} append\nrows <- data.frame(id = 1L, v = 10L)\n"
+        nb = create_notebook(tmp_path, "Writes")
+        add_cell_to_notebook(nb, "w", None, language="r")
+        write_cell(nb, "w", source)
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        assert (await _run(session, source)).success
+        assert (await _run(session, source)).cache_hit
+        shutil.rmtree(warehouse)
+
+        again = await _run(session, source)
+
+        assert again.success, again.error
+        assert not again.cache_hit
+        assert _rows(warehouse) == [(1, 10)]
 
     async def test_a_reader_goes_stale_after_each_write(self, tmp_path):
         warehouse, uri = _warehouse(tmp_path)

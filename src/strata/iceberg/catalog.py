@@ -641,6 +641,18 @@ class IcebergWriter:
             Path(warehouse_path).mkdir(parents=True, exist_ok=True)
         return self._catalogs._get_catalog(warehouse_path), table_id
 
+    def table_exists(self, table_uri: str) -> bool:
+        """Whether the table is there, creating no warehouse to find out."""
+        named, _ = named_catalog(table_uri, self._catalogs.config)
+        if named is None:
+            warehouse_path, _ = self._catalogs.parse_table_uri(
+                in_notebook(table_uri, self._catalogs._notebook)
+            )
+            if warehouse_path and "://" not in warehouse_path and not Path(warehouse_path).exists():
+                return False
+        catalog, table_id = self._table_id(table_uri)
+        return catalog.table_exists(table_id)
+
     def write(
         self,
         table_uri: str,

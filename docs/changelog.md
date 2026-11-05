@@ -598,6 +598,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A cached cell writes its table again if the table is gone.** A cell whose `@write_table` target
+  was deleted, or whose warehouse was, stayed a cache hit and wrote nothing, so the table stayed
+  missing while the cell read ready. A hit on a writing cell now checks each table it writes, and
+  if one no longer exists the cell runs and writes again. This applies on every path: Python, R,
+  `@each`, `@per_variant`, loops and Run All. A catalog that can't be reached leaves the hit
+  standing, since running again could append twice. (#PRNUM)
 - **A cell refused before it runs takes its old results down.** A failed `@fetch` check, an
   unresolved `@dataset` or `@table`, a refused `@write_table`, an R cell asking for what R can't do,
   or a second run of a running build returned its error and left the last run's displays on screen,

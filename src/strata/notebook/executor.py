@@ -184,6 +184,7 @@ from strata.notebook.table_writes import (
     TableWriteError,
     authorize_table_writes,
     write_cell_tables,
+    written_table_gone,
 )
 from strata.notebook.team_store import (
     TeamPull,
@@ -1204,19 +1205,38 @@ class CellExecutor:
             return artifact_mgr.find_cached(provenance_hash), None
         first_key = derive_subkey(provenance_hash, sorted(consumed_vars)[0])
         cached = artifact_mgr.find_cached(first_key)
-        if cached is not None:
-            return cached, None
-        team_pull = await self._pull_from_team_store(
-            cell_id=cell_id,
-            provenance_hash=provenance_hash,
-            consumed_vars=consumed_vars,
-            source_hash=source_hash,
-            source=source,
-            env_hash=env_hash,
-            input_versions=self._input_refs(cell_id, variant),
-            variant=variant,
+        team_pull: TeamPull | None = None
+        if cached is None:
+            team_pull = await self._pull_from_team_store(
+                cell_id=cell_id,
+                provenance_hash=provenance_hash,
+                consumed_vars=consumed_vars,
+                source_hash=source_hash,
+                source=source,
+                env_hash=env_hash,
+                input_versions=self._input_refs(cell_id, variant),
+                variant=variant,
+            )
+            cached = artifact_mgr.find_cached(first_key) if team_pull is not None else None
+        # An instance's table is settled once, for all of them, by its fan-out.
+        if cached is not None and variant is None and await self._written_table_gone(source):
+            return None, None
+        return cached, team_pull
+
+    async def _written_table_gone(self, source: str) -> bool:
+        """Whether a hit on *source* would claim rows in a table that no longer exists."""
+        specs = parse_annotations(source).table_writes
+        if not specs:
+            return False
+        return await anyio.to_thread.run_sync(
+            functools.partial(
+                written_table_gone,
+                specs,
+                config=self._lake_config(),
+                env=dict(self.session.notebook_state.env),
+                notebook=self.session.path,
+            )
         )
-        return (artifact_mgr.find_cached(first_key) if team_pull is not None else None), team_pull
 
     def _validate_output_hit(
         self,
@@ -1443,6 +1463,7 @@ class CellExecutor:
             execute_python_cell=self._execute_python_cell,
             moved=self._moved,
             promote_reverted_outputs=self._promote_reverted_outputs,
+            written_table_gone=self._written_table_gone,
             store_console_outputs=self._store_console_outputs,
             prepare_mounts=self._prepare_mounts,
             input_refs=self._input_refs,
@@ -3745,6 +3766,7 @@ class CellExecutor:
                 manifest_tables=self._manifest_tables,
                 moved=self._moved,
                 promote_reverted_outputs=self._promote_reverted_outputs,
+                written_table_gone=self._written_table_gone,
                 canonical_output=self._canonical_output,
                 table_write_refusal=self._table_write_refusal,
                 prepare_mounts=self._prepare_mounts,
@@ -3847,6 +3869,7 @@ class CellExecutor:
             input_refs=self._input_refs,
             moved=self._moved,
             promote_reverted_outputs=self._promote_reverted_outputs,
+            written_table_gone=self._written_table_gone,
             promote_reverted_leaf=self._promote_reverted_leaf,
             pull_from_team_store=self._pull_from_team_store,
             push_to_team_store=self._push_to_team_store,

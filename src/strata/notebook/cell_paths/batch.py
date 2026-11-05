@@ -103,6 +103,7 @@ class BatchContext:
     input_refs: Callable[[str], dict[str, str]]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     promote_reverted_outputs: Callable[..., int | None]
+    written_table_gone: Callable[[str], Awaitable[bool]]
     promote_reverted_leaf: Callable[..., Any]
     pull_from_team_store: Callable[..., Awaitable[Any]]
     push_to_team_store: Callable[..., Awaitable[None]]
@@ -777,7 +778,7 @@ async def batch_service_cache_check(
     provenance_hash = prov.provenance_hash
     # ``# @nocache`` marks an effect the artifact doesn't capture (a write, a POST, a
     # clock read); Run All must not serve it from cache either.
-    if not use_cache or prov.annotations.nocache:
+    if not use_cache or prov.annotations.nocache or await context.written_table_gone(source):
         return {"cache_hit": False, "provenance_hash": provenance_hash}
 
     cell_output_dir = batch_tmpdir / cell_id

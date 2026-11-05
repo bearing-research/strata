@@ -41,6 +41,7 @@ class FanoutContext:
     execute_python_cell: Callable[..., Awaitable[CellExecutionResult]]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     promote_reverted_outputs: Callable[..., int | None]
+    written_table_gone: Callable[[str], Awaitable[bool]]
     store_console_outputs: Callable[..., None]
     prepare_mounts: Callable[..., Awaitable[dict[str, ResolvedMount]]]
     input_refs: Callable[[str], dict[str, str]]
@@ -115,6 +116,9 @@ async def run_fanout_cell(
     # Mounts, tables, fetches and the env are the cell's, not a variant's: resolved once,
     # so every instance sees the same snapshot and a mount is listed once.
     base = await context.compute_provenance(cell_id, source)
+    # Decided once: the first variant to run would bring the table back for the rest.
+    if use_cache and await context.written_table_gone(source):
+        use_cache = False
 
     results = await _run_fanout_instances(
         host,
@@ -301,6 +305,7 @@ async def run_each_cell(
     if (
         use_cache
         and consumed
+        and not await context.written_table_gone(source)
         and context.promote_reverted_outputs(
             cell_id, base.provenance_hash, consumed, annotations.table_writes, 0
         )
