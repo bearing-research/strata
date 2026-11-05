@@ -1,4 +1,4 @@
-# Deployment Modes
+# Deployment modes
 
 Strata's `deployment_mode` is `personal` or `service`. A personal server
 has exactly one user; a service-mode server serves many, each with their
@@ -35,7 +35,7 @@ shared?). The flags that follow are the consequences.
   Reads are tenant-scoped and ACL-gated; writes are off by default
   (routed through server-side transforms), or authenticated clients
   can publish directly to a shared store with `service_writes_enabled`.
-  See [Service Mode](service-mode.md).
+  See [Service mode](service-mode.md).
 
 ## Setting the mode
 
@@ -116,7 +116,7 @@ machine callers of a proxied server go through the proxy too. API keys
 (`STRATA_AUTH_MODE=api_key`) are a separate auth mode, for a server no
 proxy fronts; a trusted-proxy server ignores them.
 
-See [Service Mode](service-mode.md) for the full story:
+See [Service mode](service-mode.md) for the full story:
 
 - The trusted-proxy header contract.
 - The shipped demo stack (`docker-compose.service.yml` + nginx
@@ -135,7 +135,7 @@ shapes:
   service-mode store; see
   [Connecting a notebook to the shared store](../guides/share/team-store.md#connecting-a-notebook-to-the-shared-store).
 - **One shared server in service mode**, where every request carries the
-  caller's identity and scopes. See [Service Mode](service-mode.md).
+  caller's identity and scopes. See [Service mode](service-mode.md).
 
 ## Coherence enforcement
 

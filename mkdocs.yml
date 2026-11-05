@@ -77,23 +77,23 @@ hooks:
 
 nav:
   - Get started:
-    - Overview: index.md
+    - Strata: index.md
     - Install: getting-started/installation.md
     - Your first notebook: getting-started/notebook.md
-    - With a coding agent: notebook/agent.md
+    - Use a coding agent: notebook/agent.md
     - Terminal viewer: notebook/tui.md
     - Coming from Jupyter: notebook/import.md
     - Example gallery: notebook/examples.md
   - Guides:
     - Cells:
-      - Overview: guides/cells/index.md
-      - Python: guides/cells/python.md
-      - SQL: guides/cells/sql.md
-      - R: guides/cells/r.md
-      - Prompt: guides/cells/prompt.md
-      - Widget: guides/cells/widget.md
+      - Cell kinds: guides/cells/index.md
+      - Python cells: guides/cells/python.md
+      - SQL cells: guides/cells/sql.md
+      - R cells: guides/cells/r.md
+      - Prompt cells: guides/cells/prompt.md
+      - Widget cells: guides/cells/widget.md
       - Loops and variants: guides/cells/loops-and-variants.md
-      - Tests: notebook/testing.md
+      - Cell unit tests: notebook/testing.md
     - Data:
       - Mounts: guides/data/mounts.md
       - Lake and Iceberg: notebook/lake-aware-cells.md
@@ -102,21 +102,21 @@ nav:
     - Compute:
       - Workers: notebook/workers.md
       - Worker pool: notebook/worker-pool.md
-      - SSH: guides/compute/ssh.md
+      - Run cells over SSH: guides/compute/ssh.md
       - Environment: notebook/environment.md
       - Secrets: notebook/secrets.md
     - Share:
       - App view: guides/share/app-view.md
-      - Publish: notebook/publishing.md
+      - Publish an artifact: notebook/publishing.md
       - Export and import: notebook/export.md
       - Team store: guides/share/team-store.md
       - Registry dashboard: notebook/registry-dashboard.md
     - Agents:
-      - MCP: notebook/mcp.md
+      - MCP server: notebook/mcp.md
       - CLI authoring: notebook/agent-authoring.md
-      - Scratchpad: notebook/scratchpad.md
+      - Agent scratchpad: notebook/scratchpad.md
     - Library:
-      - Quickstart: getting-started/core.md
+      - Library quickstart: getting-started/core.md
       - Artifacts and registry: core/registry.md
   - Concepts:
     - How caching works: concepts/caching.md
@@ -127,31 +127,31 @@ nav:
     - Features: concepts/features.md
   - Reference:
     - Annotations:
-      - Index: reference/annotations/index.md
-      - Python: reference/annotations/python.md
-      - SQL: reference/annotations/sql.md
-      - R: reference/annotations/r.md
-      - Prompt: reference/annotations/prompt.md
-      - Loops and variants: reference/annotations/loops-and-variants.md
-      - Widget and app view: reference/annotations/widget.md
+      - Annotations: reference/annotations/index.md
+      - Python annotations: reference/annotations/python.md
+      - SQL annotations: reference/annotations/sql.md
+      - R annotations: reference/annotations/r.md
+      - Prompt annotations: reference/annotations/prompt.md
+      - Loop and variant annotations: reference/annotations/loops-and-variants.md
+      - Widget and app view annotations: reference/annotations/widget.md
     - CLI: notebook/cli.md
     - notebook.toml: reference/notebook-toml.md
     - Configuration: reference/configuration.md
-    - REST: reference/rest-api.md
-    - WebSocket: reference/websocket.md
+    - REST API: reference/rest-api.md
+    - WebSocket protocol: reference/websocket.md
     - Notebook client protocol: reference/notebook-protocol.md
     - Executor protocol: reference/executor-protocol.md
-    - Worker relay: reference/worker-connect.md
-    - Keyboard: notebook/keyboard.md
+    - Worker relay protocol: reference/worker-connect.md
+    - Keyboard shortcuts: notebook/keyboard.md
   - Deploy:
-    - Modes: deployment/modes.md
+    - Deployment modes: deployment/modes.md
     - Service mode: deployment/service-mode.md
     - Docker: deployment/docker.md
     - Fly.io: deployment/fly.md
-    - Codespaces: deployment/codespaces.md
+    - GitHub Codespaces: deployment/codespaces.md
     - Operations: deployment/lifecycle.md
     - Observability: deployment/observability.md
-    - Privacy: deployment/privacy.md
+    - Privacy and sharing: deployment/privacy.md
 
 exclude_docs: |
   internal/

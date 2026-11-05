@@ -1,6 +1,6 @@
 # Loops and variants
 
-## Loop Cells
+## Loop cells
 
 A loop cell is a regular Python cell with a `# @loop` annotation. The body runs N times, with a **carry variable** threaded between iterations. Each iteration's state is stored as its own artifact, so you can inspect any intermediate step.
 
@@ -121,7 +121,7 @@ A loop cell runs on the notebook's own server, never on a [remote worker](../../
 
 Reach for loop cells when **being able to inspect or fork from iteration k matters**. That's the feature you're paying for.
 
-## Variant Cells
+## Variant cells
 
 Variant cells let you keep multiple alternative implementations of the
 same DAG slot side by side and switch between them. The canonical use
