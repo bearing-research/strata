@@ -61,6 +61,8 @@ def _upgrade_refused(exc: Exception) -> bool:
 
 def _state_cell(cell: CellView) -> Text:
     """The cell list's state column. The glyph tells the states apart; the color only repeats it."""
+    if cell.language == "markdown":
+        return Text("")
     state = cell_state(cell)
     return Text(state_glyph(state), style=CELL_STATES[state][1] if state in CELL_STATES else "")
 

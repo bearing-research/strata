@@ -933,6 +933,51 @@ class TestLoop:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("variables", "message"),
+        [
+            ({"state": {"content_type": "json/object"}}, "without a 'file' entry"),
+            (
+                {"state": {"content_type": "json/object", "file": "gone.json"}},
+                "carry file not produced by harness: gone.json",
+            ),
+        ],
+    )
+    async def test_a_carry_with_no_file_is_a_failed_result(
+        self, tmp_path, monkeypatch, variables, message
+    ):
+        self._reach_the_harness(monkeypatch)
+
+        async def harness(*_args, **_kwargs):
+            return {
+                "success": True,
+                "stdout": "said",
+                "stderr": "warned",
+                "variables": variables,
+                "mutation_warnings": ["careful"],
+            }
+
+        kept = []
+        folders = tmp_path / "folders"
+        folders.mkdir()
+        result = await self._run(
+            tmp_path,
+            self._context(
+                run_harness=harness,
+                keep_failed_output_dirs=lambda *args: kept.append(args),
+            ),
+            folders=folders,
+        )
+
+        assert result.success is False
+        assert message in result.error
+        assert result.error.startswith("Loop cell iter 0 ")
+        assert (result.stdout, result.stderr) == ("said", "warned")
+        assert result.mutation_warnings == ["careful"]
+        assert result.execution_method == "loop"
+        assert len(kept) == 1
+
+    @pytest.mark.asyncio
     async def test_an_rw_mount_is_refused_before_anything_is_keyed(self, tmp_path):
         async def rw_mount(_specs):
             return [], True

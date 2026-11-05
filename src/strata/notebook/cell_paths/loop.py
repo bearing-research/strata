@@ -9,7 +9,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -176,6 +176,17 @@ def _set_loop_artifact_uris(
     cell.artifact_uri = carry_uri
 
 
+@dataclass
+class _LoopRun:
+    """What a failure anywhere in the loop still reports."""
+
+    stdout: list[str] = field(default_factory=list)
+    stderr: list[str] = field(default_factory=list)
+    mutation_warnings: list[MutationWarning] = field(default_factory=list)
+    # Until the outputs are current; after that a folder is not a failed run's to keep.
+    keep_failed: Callable[[], None] | None = None
+
+
 async def run_loop_cell(
     host: ExecutorHost,
     context: LoopContext,
@@ -196,6 +207,51 @@ async def run_loop_cell(
     output, stored with an ``@iter=k`` suffix. ``# @output_dir`` folders live
     under *folders* for the whole loop, each stored after every iteration too.
     """
+    run = _LoopRun()
+    try:
+        return await _run_loop(
+            host,
+            context,
+            run,
+            cell_id,
+            source,
+            loop,
+            timeout_seconds,
+            start_time,
+            materialize_upstreams=materialize_upstreams,
+            use_cache=use_cache,
+            folders=folders,
+        )
+    except Exception as exc:
+        logger.exception("Loop cell %s failed", cell_id)
+        if run.keep_failed is not None:
+            run.keep_failed()
+        return CellExecutionResult(
+            cell_id=cell_id,
+            success=False,
+            error=f"Loop execution failed: {exc}",
+            stdout="".join(run.stdout),
+            stderr="".join(run.stderr),
+            duration_ms=(time.time() - start_time) * 1000,
+            execution_method="loop",
+            mutation_warnings=run.mutation_warnings,
+        )
+
+
+async def _run_loop(
+    host: ExecutorHost,
+    context: LoopContext,
+    run: _LoopRun,
+    cell_id: str,
+    source: str,
+    loop: LoopAnnotation,
+    timeout_seconds: float,
+    start_time: float,
+    *,
+    materialize_upstreams: bool,
+    use_cache: bool,
+    folders: Path | None,
+) -> CellExecutionResult:
     annotations = parse_annotations(source)
     effective_worker = effective_worker_name(host.notebook_state, cell_id, annotations.worker)
     if effective_worker != "local":
@@ -346,9 +402,9 @@ async def run_loop_cell(
     from strata.notebook.runtime_state import persist_cell_loop_run
 
     persist_cell_loop_run(host.path, cell_id, loop_run)
-    combined_stdout: list[str] = []
-    combined_stderr: list[str] = []
-    all_mutation_warnings: list[MutationWarning] = []
+    combined_stdout = run.stdout
+    combined_stderr = run.stderr
+    all_mutation_warnings = run.mutation_warnings
     final_display_files: dict[str, bytes] = {}
     context.folder_listings.pop(cell_id, None)
 
@@ -369,6 +425,21 @@ async def run_loop_cell(
     def keep_failed() -> None:
         if folders is not None:
             context.keep_failed_output_dirs(cell_id, source, folders, cell_provenance, env_hash)
+
+    run.keep_failed = keep_failed
+
+    def no_carry_file(error: str) -> CellExecutionResult:
+        keep_failed()
+        return CellExecutionResult(
+            cell_id=cell_id,
+            success=False,
+            error=error,
+            stdout="".join(combined_stdout),
+            stderr="".join(combined_stderr),
+            duration_ms=(time.time() - start_time) * 1000,
+            execution_method="loop",
+            mutation_warnings=all_mutation_warnings,
+        )
 
     for k in range(loop.max_iter):
         with tempfile.TemporaryDirectory(prefix=f"strata_loop_iter_{k}_") as tmpdir:
@@ -425,6 +496,7 @@ async def run_loop_cell(
                         stderr="".join(combined_stderr),
                         duration_ms=duration_ms,
                         execution_method="loop",
+                        mutation_warnings=all_mutation_warnings,
                     )
 
             combined_stdout.append(result.get("stdout", ""))
@@ -496,14 +568,13 @@ async def run_loop_cell(
             new_content_type = str(carry_meta.get("content_type", "pickle/object"))
             new_carry_file = carry_meta.get("file")
             if not isinstance(new_carry_file, str):
-                raise RuntimeError(
-                    f"Loop cell iter {k} produced carry metadata without "
-                    f"a 'file' entry: {carry_meta}"
+                return no_carry_file(
+                    f"Loop cell iter {k} produced carry metadata without a 'file' entry: "
+                    f"{carry_meta}"
                 )
-            new_carry_path = output_dir / new_carry_file
-            if not new_carry_path.exists():
-                raise RuntimeError(
-                    f"Loop cell iter {k} carry file not produced by harness: {new_carry_path}"
+            if not (output_dir / new_carry_file).exists():
+                return no_carry_file(
+                    f"Loop cell iter {k} carry file not produced by harness: {new_carry_file}"
                 )
             new_carry_blob = read_run_file(output_dir, new_carry_file)
 
@@ -711,9 +782,11 @@ async def run_loop_cell(
                 stderr="".join(combined_stderr),
                 duration_ms=(time.time() - start_time) * 1000,
                 execution_method="loop",
+                mutation_warnings=all_mutation_warnings,
             )
 
     stored = artifact_mgr.finalize_cell_outputs(staged)
+    run.keep_failed = None
     canonical_artifact = stored[0]
     canonical_uri = f"strata://artifact/{canonical_artifact.id}@v={canonical_artifact.version}"
     # Downstream provenance hashes these, as for any other cell's consumed outputs.

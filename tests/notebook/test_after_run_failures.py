@@ -128,6 +128,9 @@ def _fail(monkeypatch, name: str, outcome: Exception | bool, calls: list[str]) -
     monkeypatch.setattr(_owner(name), name, failing)
 
 
+WARNING = {"var_name": "x", "suggestion": "rebind it"}
+
+
 def _team_store_breaks(monkeypatch, error: BaseException = RuntimeError("no team")) -> list[str]:
     """The team cache is on, and publishing raises *error*. Returns the cells offered."""
     offered: list[str] = []
@@ -513,17 +516,108 @@ class TestLoop:
 
         assert _after_run(steps) == ["_store_display_outputs", "_store_console_outputs"]
 
-    async def test_a_display_failure_leaves_execute_cell_as_an_exception(
+    @staticmethod
+    def _warn_each_iteration(monkeypatch, *, then=None):
+        """The harness reports a mutation warning each run; *then* is raised from run 2 on."""
+        real = CellExecutor._run_harness
+        runs = []
+
+        async def warning(self, *args, **kwargs):
+            runs.append(True)
+            if then is not None and len(runs) > 1:
+                raise then
+            result = await real(self, *args, **kwargs)
+            result["mutation_warnings"] = [WARNING]
+            return result
+
+        monkeypatch.setattr(CellExecutor, "_run_harness", warning)
+
+    async def test_a_display_failure_is_a_failed_result_with_its_console(
         self, tmp_path, monkeypatch, steps
     ):
-        session = await self._session(tmp_path)
+        loop = (
+            "# @loop max_iter=2 carry=state\n"
+            "state = state + 1\n"
+            'print("said")\n'
+            'display(Markdown("d"))\n'
+        )
+        session = _session(tmp_path, ("s", "python", self.SEED), ("l", "python", loop))
+        await CellExecutor(session).execute_cell("s", self.SEED)
         _fail(monkeypatch, "_store_display_outputs", RuntimeError("no display"), steps)
+        self._warn_each_iteration(monkeypatch)
 
-        with pytest.raises(RuntimeError, match="no display"):
-            await CellExecutor(session).execute_cell("l", self.LOOP)
+        result = await CellExecutor(session).execute_cell("l", loop)
 
+        assert not result.success
+        assert result.error == "Loop execution failed: no display"
+        assert result.stdout.count("said") == 2
+        assert result.mutation_warnings == [WARNING, WARNING]
         # Finalized before the displays, so the outputs stay current.
         assert _latest(session, "l", "state") == 1
+
+    async def test_folders_of_a_finished_loop_are_not_kept_as_a_failed_run(
+        self, tmp_path, monkeypatch, steps
+    ):
+        loop = (
+            "# @loop max_iter=1 carry=state\n"
+            "# @output_dir out\n"
+            "state = state + 1\n"
+            "(out / 'a').write_text('a')\n"
+            'display(Markdown("d"))\n'
+        )
+        session = _session(tmp_path, ("s", "python", self.SEED), ("l", "python", loop))
+        await CellExecutor(session).execute_cell("s", self.SEED)
+        _fail(monkeypatch, "_store_display_outputs", RuntimeError("no display"), steps)
+        kept = []
+        monkeypatch.setattr(
+            CellExecutor, "_keep_failed_output_dirs", lambda self, *args: kept.append(args)
+        )
+
+        result = await CellExecutor(session).execute_cell("l", loop)
+
+        assert result.error == "Loop execution failed: no display"
+        assert kept == []
+
+    async def test_a_failure_mid_loop_keeps_its_folders_and_console(
+        self, tmp_path, monkeypatch, steps
+    ):
+        loop = (
+            "# @loop max_iter=3 carry=state\n"
+            "# @output_dir out\n"
+            "state = state + 1\n"
+            "(out / 'a').write_text('a')\n"
+            'print("said")\n'
+        )
+        session = _session(tmp_path, ("s", "python", self.SEED), ("l", "python", loop))
+        await CellExecutor(session).execute_cell("s", self.SEED)
+        self._warn_each_iteration(monkeypatch, then=RuntimeError("no process"))
+        kept = []
+        monkeypatch.setattr(
+            CellExecutor, "_keep_failed_output_dirs", lambda self, *args: kept.append(args)
+        )
+
+        result = await CellExecutor(session).execute_cell("l", loop)
+
+        assert result.error == "Loop execution failed: no process"
+        assert result.stdout.count("said") == 1
+        assert result.mutation_warnings == [WARNING]
+        assert len(kept) == 1
+
+    async def test_a_cancel_is_still_a_cancel(self, tmp_path, monkeypatch, steps):
+        session = await self._session(tmp_path)
+        self._warn_each_iteration(monkeypatch, then=asyncio.CancelledError())
+
+        with pytest.raises(asyncio.CancelledError):
+            await CellExecutor(session).execute_cell("l", self.LOOP)
+
+    async def test_a_timeout_keeps_the_mutation_warnings(self, tmp_path, monkeypatch, steps):
+        session = await self._session(tmp_path)
+        self._warn_each_iteration(monkeypatch, then=TimeoutError())
+
+        result = await CellExecutor(session).execute_cell("l", self.LOOP)
+
+        assert "timed out" in result.error
+        assert result.mutation_warnings == [WARNING]
 
     async def test_a_failed_table_write_discards_what_it_staged(self, tmp_path, monkeypatch, steps):
         seed = "import pyarrow as pa\nrows = pa.table({'id': [0]})\n"
@@ -535,10 +629,12 @@ class TestLoop:
         session = _session(tmp_path, ("s", "python", seed), ("l", "python", loop))
         await CellExecutor(session).execute_cell("s", seed)
         _fail(monkeypatch, "_write_cell_tables", TableWriteError("no table"), steps)
+        self._warn_each_iteration(monkeypatch)
 
         result = await CellExecutor(session).execute_cell("l", loop)
 
         assert result.error == "no table"
+        assert result.mutation_warnings == [WARNING]
         assert _latest(session, "l", "rows") is None
         manager = session.get_artifact_manager()
         staged = manager.artifact_store.get_artifact(manager.cell_artifact_id("l", "rows"), 1)

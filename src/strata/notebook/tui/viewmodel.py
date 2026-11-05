@@ -85,6 +85,9 @@ def cell_state(cell: CellView) -> str:
 
     A status this client does not know passes through, and shows as unknown.
     """
+    # It never runs, so the status the server keeps for it says nothing to a reader.
+    if cell.language == "markdown":
+        return "idle"
     if cell.status == "running":
         return "dispatching" if cell.remote_worker else "running"
     if cell.status == "queued":
