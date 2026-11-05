@@ -733,3 +733,29 @@ class TestEach:
         assert not result.success
         assert result.error == reported
         assert _latest(session, "e", "out") is None
+
+
+class TestARefusedRun:
+    @pytest.mark.parametrize(
+        ("language", "shows", "edited"),
+        [
+            pytest.param("python", 'display(Markdown("d"))\n', 'display(Markdown("e"))\n', id="py"),
+            pytest.param("r", "plot(1)\n", "plot(2)\n", id="r", marks=skip_if_no_r),
+        ],
+    )
+    async def test_it_takes_the_old_displays_down_and_its_error_outlives_the_session(
+        self, tmp_path, monkeypatch, language, shows, edited
+    ):
+        session = _session(tmp_path, ("c", language, shows))
+        first = await CellExecutor(session).execute_cell("c", shows)
+        assert len(first.display_outputs) == 1
+        monkeypatch.setattr(CellExecutor, "_table_write_refusal", lambda _self, _source: "refused")
+
+        session.notebook_state.get_cell("c").source = edited
+        result = await CellExecutor(session).execute_cell("c", edited)
+
+        assert result.error == "refused"
+        assert session.notebook_state.get_cell("c").display_outputs == []
+        reopened = NotebookSession(parse_notebook(session.path), session.path)
+        assert reopened.notebook_state.get_cell("c").display_outputs == []
+        assert "refused" in reopened.notebook_state.get_cell("c").error
