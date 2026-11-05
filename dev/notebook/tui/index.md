@@ -1,4 +1,4 @@
-# Terminal Viewer (TUI)
+# Terminal viewer
 
 `strata-notebook-tui` is a **read-only terminal spectator** for a live notebook
 session. It attaches to a running `strata-notebook` server over the same
@@ -233,5 +233,5 @@ strata-notebook-tui [--session ID | --notebook PATH] [--server URL]
 
 No auth flags are needed: a personal server has one user. Point at a
 non-default server with `--server` (or the `STRATA_TUI_SERVER` environment
-variable). See [Privacy & Sharing](https://bearingresearch.com/strata/dev/deployment/privacy/) for who can reach
+variable). See [Privacy and sharing](https://bearingresearch.com/strata/dev/deployment/privacy/) for who can reach
 a notebook.

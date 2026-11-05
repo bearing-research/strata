@@ -1,4 +1,4 @@
-# Cell Unit Tests
+# Cell unit tests
 
 Every Python cell can carry **its own `pytest` tests** - written right next to
 the cell, run against the cell's real outputs, with per-test pass/fail surfaced
@@ -128,7 +128,7 @@ clients and automation can run them too:
 - receive **`cell_test_status`** (running → done) and **`cell_test_results`**
   (per-test outcomes, counts, durations).
 
-See the [WebSocket Protocol reference](https://bearingresearch.com/strata/dev/reference/websocket/) for the frame
+See the [WebSocket protocol reference](https://bearingresearch.com/strata/dev/reference/websocket/) for the frame
 shapes.
 
 ## From the CLI, REST and MCP
@@ -177,5 +177,5 @@ plugin, so the same cell tests can drive a CI or pre-commit check later.
 
 ---
 
-**See also:** [Cell Types](https://bearingresearch.com/strata/dev/guides/cells/) · [Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) ·
+**See also:** [Cell kinds](https://bearingresearch.com/strata/dev/guides/cells/) · [Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) ·
 [`pandas_basics` example](https://bearingresearch.com/strata/dev/examples/pandas_basics/)

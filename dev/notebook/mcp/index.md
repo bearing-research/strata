@@ -1,4 +1,4 @@
-# MCP Server
+# MCP server
 
 Strata Notebook can expose a **running notebook session** to an external coding
 agent (Claude Code, and any other [Model Context
@@ -127,7 +127,7 @@ details stay in the server log.
 | `add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)` | Register a remote executor worker so cells can run on it. Refused where the server manages worker definitions (service mode, or `STRATA_NOTEBOOK_WORKERS_EDITABLE=false`), as are `remove_worker` and `connect_ssh_worker`. |
 | `set_default_worker(session_id, name?)` | Set the notebook's default worker (`name` omitted/`local` clears it). |
 | `remove_worker(session_id, name)` | Remove a notebook-scoped worker. |
-| `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to)). |
+| `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Workers](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to)). |
 | `disconnect_ssh_worker(session_id, name, stop_remote?)` | Close an SSH worker's tunnel and unregister it. |
 | `lineage(session_id, cell_id, variable, max_depth?)` | The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. For one instance of a `# @per_variant` cell, name it `variable@variant=<name>` (for example `score@variant=triple`); the error on a bare name lists the stored ones. `variable` may be `__mount__<name>`, what a run wrote through its `rw` mount `<name>`. |
 | `promote(session_id, cell_id, variable, name, alias?, tags?)` | Copy the output **and everything behind it** into the team's store, under a name colleagues can ask for. Mints no public link. A protected alias comes back `pending`. Needs `STRATA_NOTEBOOK_REMOTE_STORE_URL`. |

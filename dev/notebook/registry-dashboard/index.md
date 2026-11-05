@@ -1,4 +1,4 @@
-# Registry Dashboard
+# Registry dashboard
 
 The registry dashboard is the **UI for promoting models and approving changes**
 right inside the notebook - so promotion doesn't have to be code. It surfaces
@@ -18,10 +18,10 @@ the same names / aliases / tags / audit / lineage that the
     The forwarding happens on the server, not in the page, because the
     credentials do: `notebook_remote_store_headers` is the trusted-proxy
     identity the server holds. See
-    [Service Mode → shared research store](https://bearingresearch.com/strata/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
+    [Service mode → shared research store](https://bearingresearch.com/strata/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store).
 
 This page is a step-by-step walkthrough. For the concepts (what a name, alias,
-tag, or approval gate *is*), see [Artifacts & Model Registry](https://bearingresearch.com/strata/dev/core/registry/).
+tag, or approval gate *is*), see [Artifacts and registry](https://bearingresearch.com/strata/dev/core/registry/).
 
 ## What you'll build
 
@@ -185,9 +185,9 @@ root.](https://bearingresearch.com/strata/dev/assets/registry-lineage-dark.png#o
 
 ## See also
 
-- [Artifacts & Model Registry](https://bearingresearch.com/strata/dev/core/registry/) - the concepts and the
+- [Artifacts and registry](https://bearingresearch.com/strata/dev/core/registry/) - the concepts and the
   SDK/CLI that drive the same registry.
 - [The ambient `strata` client](https://bearingresearch.com/strata/dev/guides/cells/python/#the-ambient-strata-client) - how cells
   publish.
-- [Lake-Aware Cells](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/) - the `@table` flow that makes a
+- [Lake and Iceberg](https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/) - the `@table` flow that makes a
   training cell stale so you *re-promote* when new data lands.

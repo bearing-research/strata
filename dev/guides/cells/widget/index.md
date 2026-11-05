@@ -1,4 +1,4 @@
-# Widget Cells
+# Widget cells
 
 A **widget cell** is a declarative control panel - one control per line - that
 feeds values into the DAG. Drag a slider or pick from a dropdown, and the cells

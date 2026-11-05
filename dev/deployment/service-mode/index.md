@@ -1,4 +1,4 @@
-# Service Mode
+# Service mode
 
 Service mode is what you run when more than one person uses Strata
 through a network. It's the right mode when:

@@ -1,6 +1,6 @@
 # The DAG and staleness
 
-## DAG and Variable Analysis
+## DAG and variable analysis
 
 Each cell's source code is analyzed via Python's AST to extract:
 
@@ -15,7 +15,7 @@ The DAG builder connects references to producers:
 
 The DAG is rebuilt automatically on every cell source change.
 
-## Cell Execution Flow
+## Cell execution flow
 
 When you run a cell, this happens:
 
@@ -33,7 +33,7 @@ When you run a cell, this happens:
 6. **Store outputs**: Each consumed variable becomes an artifact
 7. **Broadcast**: WebSocket sends status, output, and console messages to the UI
 
-## Cascade Execution
+## Cascade execution
 
 When a cell's upstream dependencies aren't ready, the **cascade planner** generates an execution plan:
 
@@ -62,7 +62,7 @@ A cell that still has a result and whose upstream moved reads **stale · upstrea
 
 The **causality chain** explains why a cell is stale. Each good run saves the parts its key was built from (source, environment, upstream outputs and outside inputs), and the chain lists the parts that differ now: "the source of X changed", "upstream X changed", "mount `raw` changed". An input that cannot be read now is reported as that. When the record cannot explain the change, for example a run from before parts were saved, the chain says it is incomplete rather than guessing.
 
-## Cell Status Lifecycle
+## Cell status lifecycle
 
 ```
 idle ──→ running ──→ ready ──→ stale

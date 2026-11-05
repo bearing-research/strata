@@ -1,4 +1,4 @@
-# Fly.io Deployment
+# Fly.io
 
 This page deploys Strata on [Fly.io](https://fly.io) as a single-tenant, personal-mode server, from the template `fly.example.toml` at the repository root.
 
@@ -19,7 +19,7 @@ This page deploys Strata on [Fly.io](https://fly.io) as a single-tenant, persona
     an auth proxy, anything with sensitive data, anything you'd be
     upset about a stranger writing to. For those, use
     [service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) with the trusted-proxy auth
-    pattern instead. See [Deployment Modes](https://bearingresearch.com/strata/dev/deployment/modes/) for the full
+    pattern instead. See [Deployment modes](https://bearingresearch.com/strata/dev/deployment/modes/) for the full
     comparison.
 
 ## Prerequisites

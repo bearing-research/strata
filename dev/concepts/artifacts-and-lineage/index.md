@@ -118,7 +118,7 @@ trained_model = model
 For a large handoff, export a **checkpoint** instead of a live object: save a
 `state_dict` (or a file path) from the training cell and load it downstream with
 explicit `map_location` - see the device/placement guidance in
-[Distributed Workers](https://bearingresearch.com/strata/dev/notebook/workers/).
+[Workers](https://bearingresearch.com/strata/dev/notebook/workers/).
 
 ## Serialization
 

@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#authoring-notebooks-programmatically" class="md-skip">
+        <a href="#cli-authoring" class="md-skip">
           Skip to content
         </a>
       
@@ -460,7 +460,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Strata
   
 
     
@@ -544,7 +544,7 @@
   <span class="md-ellipsis">
     
   
-    With a coding agent
+    Use a coding agent
   
 
     
@@ -775,7 +775,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Cell kinds
   
 
     
@@ -803,7 +803,7 @@
   <span class="md-ellipsis">
     
   
-    Python
+    Python cells
   
 
     
@@ -831,7 +831,7 @@
   <span class="md-ellipsis">
     
   
-    SQL
+    SQL cells
   
 
     
@@ -859,7 +859,7 @@
   <span class="md-ellipsis">
     
   
-    R
+    R cells
   
 
     
@@ -887,7 +887,7 @@
   <span class="md-ellipsis">
     
   
-    Prompt
+    Prompt cells
   
 
     
@@ -915,7 +915,7 @@
   <span class="md-ellipsis">
     
   
-    Widget
+    Widget cells
   
 
     
@@ -971,7 +971,7 @@
   <span class="md-ellipsis">
     
   
-    Tests
+    Cell unit tests
   
 
     
@@ -1293,7 +1293,7 @@
   <span class="md-ellipsis">
     
   
-    SSH
+    Run cells over SSH
   
 
     
@@ -1468,7 +1468,7 @@
   <span class="md-ellipsis">
     
   
-    Publish
+    Publish an artifact
   
 
     
@@ -1645,7 +1645,7 @@
   <span class="md-ellipsis">
     
   
-    MCP
+    MCP server
   
 
     
@@ -1880,7 +1880,7 @@
   <span class="md-ellipsis">
     
   
-    Scratchpad
+    Agent scratchpad
   
 
     
@@ -1971,7 +1971,7 @@
   <span class="md-ellipsis">
     
   
-    Quickstart
+    Library quickstart
   
 
     
@@ -2373,7 +2373,7 @@
   <span class="md-ellipsis">
     
   
-    Index
+    Annotations
   
 
     
@@ -2401,7 +2401,7 @@
   <span class="md-ellipsis">
     
   
-    Python
+    Python annotations
   
 
     
@@ -2429,7 +2429,7 @@
   <span class="md-ellipsis">
     
   
-    SQL
+    SQL annotations
   
 
     
@@ -2457,7 +2457,7 @@
   <span class="md-ellipsis">
     
   
-    R
+    R annotations
   
 
     
@@ -2485,7 +2485,7 @@
   <span class="md-ellipsis">
     
   
-    Prompt
+    Prompt annotations
   
 
     
@@ -2513,7 +2513,7 @@
   <span class="md-ellipsis">
     
   
-    Loops and variants
+    Loop and variant annotations
   
 
     
@@ -2541,7 +2541,7 @@
   <span class="md-ellipsis">
     
   
-    Widget and app view
+    Widget and app view annotations
   
 
     
@@ -2661,7 +2661,7 @@
   <span class="md-ellipsis">
     
   
-    REST
+    REST API
   
 
     
@@ -2689,7 +2689,7 @@
   <span class="md-ellipsis">
     
   
-    WebSocket
+    WebSocket protocol
   
 
     
@@ -2773,7 +2773,7 @@
   <span class="md-ellipsis">
     
   
-    Worker relay
+    Worker relay protocol
   
 
     
@@ -2801,7 +2801,7 @@
   <span class="md-ellipsis">
     
   
-    Keyboard
+    Keyboard shortcuts
   
 
     
@@ -2888,7 +2888,7 @@
   <span class="md-ellipsis">
     
   
-    Modes
+    Deployment modes
   
 
     
@@ -3000,7 +3000,7 @@
   <span class="md-ellipsis">
     
   
-    Codespaces
+    GitHub Codespaces
   
 
     
@@ -3084,7 +3084,7 @@
   <span class="md-ellipsis">
     
   
-    Privacy
+    Privacy and sharing
   
 
     
@@ -3282,7 +3282,7 @@
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.56 18H3.44C2.65 18 2 17.37 2 16.59V7.41C2 6.63 2.65 6 3.44 6h17.12c.79 0 1.44.63 1.44 1.41v9.18c0 .78-.65 1.41-1.44 1.41M3.44 6.94c-.26 0-.48.21-.48.47v9.19c0 .25.22.46.48.46h17.12c.26 0 .48-.21.48-.46V7.41c0-.26-.22-.47-.48-.47zm1.45 8.25V8.81h1.92l1.92 2.35 1.92-2.35h1.93v6.38h-1.93v-3.66l-1.92 2.35-1.92-2.35v3.66zm12.01 0-2.9-3.1h1.94V8.81h1.92v3.28h1.93z"/></svg>
 </button>
 
-<h1 id="authoring-notebooks-programmatically">Authoring Notebooks Programmatically<a class="headerlink" href="#authoring-notebooks-programmatically" title="Permanent link">&para;</a></h1>
+<h1 id="cli-authoring">CLI authoring<a class="headerlink" href="#cli-authoring" title="Permanent link">&para;</a></h1>
 <p>A Strata notebook is a <strong>plain-text directory</strong> - TOML config plus one
 source file per cell. Anything that can write files can author one: a
 script, a code generator, or a coding agent (Claude Code, Codex, …). No
@@ -3351,7 +3351,7 @@ fields alone. Don't overwrite it with the minimal template above; the
 minimum is what <em>you</em> must provide when writing from scratch, not what
 the scaffold looks like.</p>
 <p>The full schema (env, workers, mounts, connections, AI config) is
-<a href="../../reference/notebook-toml/">notebook.toml Schema</a>. Rules that matter
+<a href="../../reference/notebook-toml/">notebook.toml</a>. Rules that matter
 when writing it by hand:</p>
 <ul>
 <li><strong><code>notebook_id</code></strong> - any stable, unique string. The server generates
@@ -3409,7 +3409,7 @@ value is an immutable, content-addressed artifact.</p>
 <h2 id="per-cell-configuration-annotations-not-toml">Per-cell configuration: annotations, not TOML<a class="headerlink" href="#per-cell-configuration-annotations-not-toml" title="Permanent link">&para;</a></h2>
 <p>Cell-level settings are <code># @</code> comment lines at the top of the cell
 source - they always win over anything persisted elsewhere. The full
-surface is <a href="../../reference/annotations/">Cell Annotations</a>; the most common:</p>
+surface is <a href="../../reference/annotations/">Annotations</a>; the most common:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @name revenue_model     ← stable display name</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># @timeout 120            ← per-cell timeout (seconds)</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># @worker gpu-box         ← run on a named worker</span>

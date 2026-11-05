@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#distributed-workers" class="md-skip">
+        <a href="#workers" class="md-skip">
           Skip to content
         </a>
       
@@ -460,7 +460,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Strata
   
 
     
@@ -544,7 +544,7 @@
   <span class="md-ellipsis">
     
   
-    With a coding agent
+    Use a coding agent
   
 
     
@@ -775,7 +775,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Cell kinds
   
 
     
@@ -803,7 +803,7 @@
   <span class="md-ellipsis">
     
   
-    Python
+    Python cells
   
 
     
@@ -831,7 +831,7 @@
   <span class="md-ellipsis">
     
   
-    SQL
+    SQL cells
   
 
     
@@ -859,7 +859,7 @@
   <span class="md-ellipsis">
     
   
-    R
+    R cells
   
 
     
@@ -887,7 +887,7 @@
   <span class="md-ellipsis">
     
   
-    Prompt
+    Prompt cells
   
 
     
@@ -915,7 +915,7 @@
   <span class="md-ellipsis">
     
   
-    Widget
+    Widget cells
   
 
     
@@ -971,7 +971,7 @@
   <span class="md-ellipsis">
     
   
-    Tests
+    Cell unit tests
   
 
     
@@ -1597,7 +1597,7 @@
   <span class="md-ellipsis">
     
   
-    SSH
+    Run cells over SSH
   
 
     
@@ -1772,7 +1772,7 @@
   <span class="md-ellipsis">
     
   
-    Publish
+    Publish an artifact
   
 
     
@@ -1947,7 +1947,7 @@
   <span class="md-ellipsis">
     
   
-    MCP
+    MCP server
   
 
     
@@ -2003,7 +2003,7 @@
   <span class="md-ellipsis">
     
   
-    Scratchpad
+    Agent scratchpad
   
 
     
@@ -2094,7 +2094,7 @@
   <span class="md-ellipsis">
     
   
-    Quickstart
+    Library quickstart
   
 
     
@@ -2496,7 +2496,7 @@
   <span class="md-ellipsis">
     
   
-    Index
+    Annotations
   
 
     
@@ -2524,7 +2524,7 @@
   <span class="md-ellipsis">
     
   
-    Python
+    Python annotations
   
 
     
@@ -2552,7 +2552,7 @@
   <span class="md-ellipsis">
     
   
-    SQL
+    SQL annotations
   
 
     
@@ -2580,7 +2580,7 @@
   <span class="md-ellipsis">
     
   
-    R
+    R annotations
   
 
     
@@ -2608,7 +2608,7 @@
   <span class="md-ellipsis">
     
   
-    Prompt
+    Prompt annotations
   
 
     
@@ -2636,7 +2636,7 @@
   <span class="md-ellipsis">
     
   
-    Loops and variants
+    Loop and variant annotations
   
 
     
@@ -2664,7 +2664,7 @@
   <span class="md-ellipsis">
     
   
-    Widget and app view
+    Widget and app view annotations
   
 
     
@@ -2784,7 +2784,7 @@
   <span class="md-ellipsis">
     
   
-    REST
+    REST API
   
 
     
@@ -2812,7 +2812,7 @@
   <span class="md-ellipsis">
     
   
-    WebSocket
+    WebSocket protocol
   
 
     
@@ -2896,7 +2896,7 @@
   <span class="md-ellipsis">
     
   
-    Worker relay
+    Worker relay protocol
   
 
     
@@ -2924,7 +2924,7 @@
   <span class="md-ellipsis">
     
   
-    Keyboard
+    Keyboard shortcuts
   
 
     
@@ -3011,7 +3011,7 @@
   <span class="md-ellipsis">
     
   
-    Modes
+    Deployment modes
   
 
     
@@ -3123,7 +3123,7 @@
   <span class="md-ellipsis">
     
   
-    Codespaces
+    GitHub Codespaces
   
 
     
@@ -3207,7 +3207,7 @@
   <span class="md-ellipsis">
     
   
-    Privacy
+    Privacy and sharing
   
 
     
@@ -3528,7 +3528,7 @@
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.56 18H3.44C2.65 18 2 17.37 2 16.59V7.41C2 6.63 2.65 6 3.44 6h17.12c.79 0 1.44.63 1.44 1.41v9.18c0 .78-.65 1.41-1.44 1.41M3.44 6.94c-.26 0-.48.21-.48.47v9.19c0 .25.22.46.48.46h17.12c.26 0 .48-.21.48-.46V7.41c0-.26-.22-.47-.48-.47zm1.45 8.25V8.81h1.92l1.92 2.35 1.92-2.35h1.93v6.38h-1.93v-3.66l-1.92 2.35-1.92-2.35v3.66zm12.01 0-2.9-3.1h1.94V8.81h1.92v3.28h1.93z"/></svg>
 </button>
 
-<h1 id="distributed-workers">Distributed Workers<a class="headerlink" href="#distributed-workers" title="Permanent link">&para;</a></h1>
+<h1 id="workers">Workers<a class="headerlink" href="#workers" title="Permanent link">&para;</a></h1>
 <p>Strata Notebook can dispatch individual cells to remote machines via the <strong>executor protocol</strong>. A worker is any HTTP endpoint that accepts cell source code and inputs, runs them, and returns the outputs. You bring the compute; Strata handles the routing, serialization, and caching.</p>
 <h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────┐    multipart POST     ┌──────────────────────┐
@@ -3548,7 +3548,7 @@
 </ol>
 <p>Cells run in <strong>the notebook's locked environment</strong> on a <code>strata-worker</code> of this version or later: Strata sends the notebook's <code>uv.lock</code> with the cell, and the worker builds that environment once per lock (with <code>uv</code>, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as <code>locked_environments</code> in <code>/health</code>, and says <code>false</code> when <code>uv</code> is not on its <code>PATH</code>. A worker that answers without it (an older <code>strata-worker</code>, one without <code>uv</code>, or a custom worker; a <code>404</code> on <code>/health</code> counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a <code>5xx</code> on <code>/health</code>) is refused for a notebook that has a <code>uv.lock</code>, rather than running the cell in an environment its provenance would not describe. Either way the worker process does <strong>not</strong> require a uv-managed env - it can be pip-installed into a plain Docker image. See <a href="../../reference/executor-protocol/#the-environment-block">the <code>environment</code> block</a> for <code>STRATA_WORKER_ENV_ROOT</code> and a prebuilt-environment registry.</p>
 <p>R cells work the same way with the notebook's <code>renv.lock</code>: the worker restores it with <code>renv</code> into one library per lock and R build, reuses it for every later R cell with that lock, and runs the cell with that library first on R's library path. It advertises this as <code>locked_r_environments</code>, <code>true</code> when its R can load <code>renv</code>; a notebook with an <code>renv.lock</code> is refused on a worker that cannot be asked, as above. See <a href="../../reference/executor-protocol/#the-r-environment-block">the R <code>environment</code> block</a>.</p>
-<p>For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the <a href="../../reference/executor-protocol/">Executor Protocol</a> reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use <code>strata-worker</code>.</p>
+<p>For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the <a href="../../reference/executor-protocol/">Executor protocol</a> reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use <code>strata-worker</code>.</p>
 <h2 id="quick-start-run-a-worker-locally">Quick start: run a worker locally<a class="headerlink" href="#quick-start-run-a-worker-locally" title="Permanent link">&para;</a></h2>
 <p>Start by getting a worker running on your own machine. This verifies your install before you spend time on a cloud deploy, and the same <code># @worker name</code> annotation works against both local and cloud workers.</p>
 <p><strong>1. Start the worker:</strong></p>
@@ -3640,7 +3640,7 @@ to, and the cell runs in-process while appearing to be configured.</p>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>strata-worker<span class="w"> </span>--connect<span class="w"> </span>wss://relay.example.com/connect
 </code></pre></div>
 <p>Register the worker at the URL the relay gives it, for example <code>config.url = "https://relay.example.com/w/abc/v1/execute"</code>, with <code>token_env</code> naming the worker token as usual. The relay token is read only from the environment, never from a flag, because the cells the worker runs could read its command line; it is removed from the environment at startup like the worker token. The worker reconnects with backoff when the connection drops, and exits with status 1 if the relay refuses the token.</p>
-<p>Strata does not ship a relay. A relay is a small service that accepts the worker's WebSocket and forwards HTTP requests over it; the <a href="../../reference/worker-connect/">Worker Relay Protocol</a> specifies it. A <code>signed</code> worker still fetches its inputs and posts its console to the server's signed URLs directly, so it needs outbound reach to them; a <code>direct</code> worker needs only the relay.</p>
+<p>Strata does not ship a relay. A relay is a small service that accepts the worker's WebSocket and forwards HTTP requests over it; the <a href="../../reference/worker-connect/">Worker relay protocol</a> specifies it. A <code>signed</code> worker still fetches its inputs and posts its console to the server's signed URLs directly, so it needs outbound reach to them; a <code>direct</code> worker needs only the relay.</p>
 <h2 id="run-cells-on-a-machine-you-can-ssh-to">Run cells on a machine you can SSH to<a class="headerlink" href="#run-cells-on-a-machine-you-can-ssh-to" title="Permanent link">&para;</a></h2>
 <p>This has its own page now: <a href="../../guides/compute/ssh/">Run cells over SSH</a>.</p>
 <h2 id="deploy-to-the-cloud">Deploy to the cloud<a class="headerlink" href="#deploy-to-the-cloud" title="Permanent link">&para;</a></h2>
@@ -3885,7 +3885,7 @@ image installs the previous release. Building it inside a checkout does not
 pick up local worker changes; build a wheel for that. The container refuses to start
 without <code>STRATA_WORKER_TOKEN</code>, since it binds <code>0.0.0.0</code>; the pool mints one per
 machine, and you set it yourself to run the image by hand.</p>
-<p>See <a href="../worker-pool/">Worker Pool</a> for machine types, dispatch, the HTTP
+<p>See <a href="../worker-pool/">Worker pool</a> for machine types, dispatch, the HTTP
 service, and the isolation model.</p>
 <h2 id="registering-workers">Registering workers<a class="headerlink" href="#registering-workers" title="Permanent link">&para;</a></h2>
 <p>Workers live in <code>notebook.toml</code> under <code>[[workers]]</code>. You can add them through the <strong>Workers panel</strong> under <strong>Notebook settings</strong> in the sidebar (which writes the same TOML) or edit the file directly:</p>

@@ -1,4 +1,4 @@
-# Strata
+# Strata { .landing-title }
 
 **Strata is a notebook your coding agent can drive, and everything it computes stays.**
 
@@ -16,7 +16,7 @@ session updates. Captured from a real run, not a mock-up.*
 
     Hand a notebook to Claude Code and watch it build through MCP tools.
 
-    [With a coding agent →](https://bearingresearch.com/strata/dev/notebook/agent/)
+    [Use a coding agent →](https://bearingresearch.com/strata/dev/notebook/agent/)
 
 -   **Web UI**
 

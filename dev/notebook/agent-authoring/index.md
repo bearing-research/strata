@@ -1,4 +1,4 @@
-# Authoring Notebooks Programmatically
+# CLI authoring
 
 A Strata notebook is a **plain-text directory** - TOML config plus one
 source file per cell. Anything that can write files can author one: a
@@ -87,7 +87,7 @@ minimum is what *you* must provide when writing from scratch, not what
 the scaffold looks like.
 
 The full schema (env, workers, mounts, connections, AI config) is
-[notebook.toml Schema](https://bearingresearch.com/strata/dev/reference/notebook-toml/). Rules that matter
+[notebook.toml](https://bearingresearch.com/strata/dev/reference/notebook-toml/). Rules that matter
 when writing it by hand:
 
 - **`notebook_id`** - any stable, unique string. The server generates
@@ -153,7 +153,7 @@ Practical consequences for generated code:
 
 Cell-level settings are `# @` comment lines at the top of the cell
 source - they always win over anything persisted elsewhere. The full
-surface is [Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/); the most common:
+surface is [Annotations](https://bearingresearch.com/strata/dev/reference/annotations/); the most common:
 
 ```python
 # @name revenue_model     ← stable display name

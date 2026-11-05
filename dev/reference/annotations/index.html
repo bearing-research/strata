@@ -27,7 +27,7 @@
     
     
       
-        <title>Index - Strata</title>
+        <title>Annotations - Strata</title>
       
     
     
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Index
+              Annotations
             
           </span>
         </div>
@@ -460,7 +460,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Strata
   
 
     
@@ -544,7 +544,7 @@
   <span class="md-ellipsis">
     
   
-    With a coding agent
+    Use a coding agent
   
 
     
@@ -767,7 +767,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Cell kinds
   
 
     
@@ -795,7 +795,7 @@
   <span class="md-ellipsis">
     
   
-    Python
+    Python cells
   
 
     
@@ -823,7 +823,7 @@
   <span class="md-ellipsis">
     
   
-    SQL
+    SQL cells
   
 
     
@@ -851,7 +851,7 @@
   <span class="md-ellipsis">
     
   
-    R
+    R cells
   
 
     
@@ -879,7 +879,7 @@
   <span class="md-ellipsis">
     
   
-    Prompt
+    Prompt cells
   
 
     
@@ -907,7 +907,7 @@
   <span class="md-ellipsis">
     
   
-    Widget
+    Widget cells
   
 
     
@@ -963,7 +963,7 @@
   <span class="md-ellipsis">
     
   
-    Tests
+    Cell unit tests
   
 
     
@@ -1279,7 +1279,7 @@
   <span class="md-ellipsis">
     
   
-    SSH
+    Run cells over SSH
   
 
     
@@ -1451,7 +1451,7 @@
   <span class="md-ellipsis">
     
   
-    Publish
+    Publish an artifact
   
 
     
@@ -1623,7 +1623,7 @@
   <span class="md-ellipsis">
     
   
-    MCP
+    MCP server
   
 
     
@@ -1679,7 +1679,7 @@
   <span class="md-ellipsis">
     
   
-    Scratchpad
+    Agent scratchpad
   
 
     
@@ -1767,7 +1767,7 @@
   <span class="md-ellipsis">
     
   
-    Quickstart
+    Library quickstart
   
 
     
@@ -2188,7 +2188,7 @@
   <span class="md-ellipsis">
     
   
-    Index
+    Annotations
   
 
     
@@ -2206,7 +2206,7 @@
   <span class="md-ellipsis">
     
   
-    Index
+    Annotations
   
 
     
@@ -2246,7 +2246,7 @@
   <a href="#precedence-rules" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Precedence Rules
+        Precedence rules
       
     </span>
   </a>
@@ -2276,7 +2276,7 @@
   <span class="md-ellipsis">
     
   
-    Python
+    Python annotations
   
 
     
@@ -2304,7 +2304,7 @@
   <span class="md-ellipsis">
     
   
-    SQL
+    SQL annotations
   
 
     
@@ -2332,7 +2332,7 @@
   <span class="md-ellipsis">
     
   
-    R
+    R annotations
   
 
     
@@ -2360,7 +2360,7 @@
   <span class="md-ellipsis">
     
   
-    Prompt
+    Prompt annotations
   
 
     
@@ -2388,7 +2388,7 @@
   <span class="md-ellipsis">
     
   
-    Loops and variants
+    Loop and variant annotations
   
 
     
@@ -2416,7 +2416,7 @@
   <span class="md-ellipsis">
     
   
-    Widget and app view
+    Widget and app view annotations
   
 
     
@@ -2536,7 +2536,7 @@
   <span class="md-ellipsis">
     
   
-    REST
+    REST API
   
 
     
@@ -2564,7 +2564,7 @@
   <span class="md-ellipsis">
     
   
-    WebSocket
+    WebSocket protocol
   
 
     
@@ -2648,7 +2648,7 @@
   <span class="md-ellipsis">
     
   
-    Worker relay
+    Worker relay protocol
   
 
     
@@ -2676,7 +2676,7 @@
   <span class="md-ellipsis">
     
   
-    Keyboard
+    Keyboard shortcuts
   
 
     
@@ -2763,7 +2763,7 @@
   <span class="md-ellipsis">
     
   
-    Modes
+    Deployment modes
   
 
     
@@ -2875,7 +2875,7 @@
   <span class="md-ellipsis">
     
   
-    Codespaces
+    GitHub Codespaces
   
 
     
@@ -2959,7 +2959,7 @@
   <span class="md-ellipsis">
     
   
-    Privacy
+    Privacy and sharing
   
 
     
@@ -3021,7 +3021,7 @@
   <a href="#precedence-rules" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Precedence Rules
+        Precedence rules
       
     </span>
   </a>
@@ -3176,7 +3176,7 @@
 </tbody>
 </table>
 </div>
-<p>R cells take a subset of these: see <a href="r/">R cell annotations</a>.</p>
+<p>R cells take a subset of these: see <a href="r/">R annotations</a>.</p>
 <h2 id="how-annotations-are-read">How annotations are read<a class="headerlink" href="#how-annotations-are-read" title="Permanent link">&para;</a></h2>
 <p>Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, filesystem mounts, and cache behavior, without separate configuration UI. The cell source is the single source of truth.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># @name Train Classifier</span>
@@ -3199,7 +3199,7 @@ error that names the line and why, such as <code>timeout_not_numeric</code> or
 anyway would compute, and cache, something other than what the source declares.
 <code>strata validate</code> reports the same errors before you run.</p>
 <p>In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to <code>strata cell add/edit</code>, or splice a single directive without touching the body: <code>strata cell annotate &lt;notebook_dir&gt; &lt;cell_id&gt; --set worker=gpu-box --unset timeout</code> (see the <a href="../../notebook/cli/#authoring-cells-and-dependencies-cell-addeditrmmv-dep">CLI</a>).</p>
-<h2 id="precedence-rules">Precedence Rules<a class="headerlink" href="#precedence-rules" title="Permanent link">&para;</a></h2>
+<h2 id="precedence-rules">Precedence rules<a class="headerlink" href="#precedence-rules" title="Permanent link">&para;</a></h2>
 <p>When the same setting is configured at multiple levels, the most specific wins:</p>
 <table>
 <thead>

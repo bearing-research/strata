@@ -1,4 +1,4 @@
-# SQL Cells
+# SQL cells
 
 A SQL cell sends a query to a connected database via ADBC (DuckDB through its own driver) and stores the result as an Arrow Table artifact. Like Python and prompt cells, SQL cells participate in the DAG, cache by provenance hash, and surface their output to downstream cells.
 

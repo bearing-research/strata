@@ -1,7 +1,7 @@
-# SQL Cell Annotations
+# SQL annotations
 
 A cell with `language = "sql"` runs a query through a declared connection.
-See [SQL Cells](https://bearingresearch.com/strata/dev/guides/cells/sql/#sql-cells) for the full feature walkthrough; this
+See [SQL cells](https://bearingresearch.com/strata/dev/guides/cells/sql/#sql-cells) for the full feature walkthrough; this
 section is the per-annotation reference.
 
 ## `@sql`
@@ -113,7 +113,7 @@ snapshots to read again: a query that reads a mount or a table in the
 connection's own database file is refused, naming it. An Iceberg snapshot stays
 queryable until the catalog's maintenance expires it, which Strata cannot see,
 so no horizon is recorded. Per-driver
-freshness probe details are in [SQL Cells](https://bearingresearch.com/strata/dev/guides/cells/sql/#per-driver-freshness).
+freshness probe details are in [SQL cells](https://bearingresearch.com/strata/dev/guides/cells/sql/#per-driver-freshness).
 
 ## `@name`
 

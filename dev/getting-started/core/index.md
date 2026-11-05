@@ -1,4 +1,4 @@
-# Core API Quickstart
+# Library quickstart
 
 Strata Core is the programmatic materialization and artifact layer. Use this when you want the `materialize()` API, artifact caching, lineage tracking, or snapshot-aware Iceberg table scanning, without the notebook UI on top.
 
@@ -163,5 +163,5 @@ directory ([output folders](https://bearingresearch.com/strata/dev/reference/ann
 ## What's next
 
 - [Configuration](https://bearingresearch.com/strata/dev/reference/configuration/): all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)
-- [Deployment Modes](https://bearingresearch.com/strata/dev/deployment/modes/): `personal` vs `service` mode and the auth boundary
+- [Deployment modes](https://bearingresearch.com/strata/dev/deployment/modes/): `personal` vs `service` mode and the auth boundary
 - [REST API](https://bearingresearch.com/strata/dev/reference/rest-api/): the HTTP routes, including the `/v1/materialize` and `/v1/streams` endpoints this page calls into

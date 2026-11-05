@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#notebooktoml-schema" class="md-skip">
+        <a href="#notebooktoml" class="md-skip">
           Skip to content
         </a>
       
@@ -460,7 +460,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Strata
   
 
     
@@ -544,7 +544,7 @@
   <span class="md-ellipsis">
     
   
-    With a coding agent
+    Use a coding agent
   
 
     
@@ -767,7 +767,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Cell kinds
   
 
     
@@ -795,7 +795,7 @@
   <span class="md-ellipsis">
     
   
-    Python
+    Python cells
   
 
     
@@ -823,7 +823,7 @@
   <span class="md-ellipsis">
     
   
-    SQL
+    SQL cells
   
 
     
@@ -851,7 +851,7 @@
   <span class="md-ellipsis">
     
   
-    R
+    R cells
   
 
     
@@ -879,7 +879,7 @@
   <span class="md-ellipsis">
     
   
-    Prompt
+    Prompt cells
   
 
     
@@ -907,7 +907,7 @@
   <span class="md-ellipsis">
     
   
-    Widget
+    Widget cells
   
 
     
@@ -963,7 +963,7 @@
   <span class="md-ellipsis">
     
   
-    Tests
+    Cell unit tests
   
 
     
@@ -1279,7 +1279,7 @@
   <span class="md-ellipsis">
     
   
-    SSH
+    Run cells over SSH
   
 
     
@@ -1451,7 +1451,7 @@
   <span class="md-ellipsis">
     
   
-    Publish
+    Publish an artifact
   
 
     
@@ -1623,7 +1623,7 @@
   <span class="md-ellipsis">
     
   
-    MCP
+    MCP server
   
 
     
@@ -1679,7 +1679,7 @@
   <span class="md-ellipsis">
     
   
-    Scratchpad
+    Agent scratchpad
   
 
     
@@ -1767,7 +1767,7 @@
   <span class="md-ellipsis">
     
   
-    Quickstart
+    Library quickstart
   
 
     
@@ -2177,7 +2177,7 @@
   <span class="md-ellipsis">
     
   
-    Index
+    Annotations
   
 
     
@@ -2205,7 +2205,7 @@
   <span class="md-ellipsis">
     
   
-    Python
+    Python annotations
   
 
     
@@ -2233,7 +2233,7 @@
   <span class="md-ellipsis">
     
   
-    SQL
+    SQL annotations
   
 
     
@@ -2261,7 +2261,7 @@
   <span class="md-ellipsis">
     
   
-    R
+    R annotations
   
 
     
@@ -2289,7 +2289,7 @@
   <span class="md-ellipsis">
     
   
-    Prompt
+    Prompt annotations
   
 
     
@@ -2317,7 +2317,7 @@
   <span class="md-ellipsis">
     
   
-    Loops and variants
+    Loop and variant annotations
   
 
     
@@ -2345,7 +2345,7 @@
   <span class="md-ellipsis">
     
   
-    Widget and app view
+    Widget and app view annotations
   
 
     
@@ -2717,7 +2717,7 @@
   <span class="md-ellipsis">
     
   
-    REST
+    REST API
   
 
     
@@ -2745,7 +2745,7 @@
   <span class="md-ellipsis">
     
   
-    WebSocket
+    WebSocket protocol
   
 
     
@@ -2829,7 +2829,7 @@
   <span class="md-ellipsis">
     
   
-    Worker relay
+    Worker relay protocol
   
 
     
@@ -2857,7 +2857,7 @@
   <span class="md-ellipsis">
     
   
-    Keyboard
+    Keyboard shortcuts
   
 
     
@@ -2944,7 +2944,7 @@
   <span class="md-ellipsis">
     
   
-    Modes
+    Deployment modes
   
 
     
@@ -3056,7 +3056,7 @@
   <span class="md-ellipsis">
     
   
-    Codespaces
+    GitHub Codespaces
   
 
     
@@ -3140,7 +3140,7 @@
   <span class="md-ellipsis">
     
   
-    Privacy
+    Privacy and sharing
   
 
     
@@ -3411,7 +3411,7 @@
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.56 18H3.44C2.65 18 2 17.37 2 16.59V7.41C2 6.63 2.65 6 3.44 6h17.12c.79 0 1.44.63 1.44 1.41v9.18c0 .78-.65 1.41-1.44 1.41M3.44 6.94c-.26 0-.48.21-.48.47v9.19c0 .25.22.46.48.46h17.12c.26 0 .48-.21.48-.46V7.41c0-.26-.22-.47-.48-.47zm1.45 8.25V8.81h1.92l1.92 2.35 1.92-2.35h1.93v6.38h-1.93v-3.66l-1.92 2.35-1.92-2.35v3.66zm12.01 0-2.9-3.1h1.94V8.81h1.92v3.28h1.93z"/></svg>
 </button>
 
-<h1 id="notebooktoml-schema">notebook.toml Schema<a class="headerlink" href="#notebooktoml-schema" title="Permanent link">&para;</a></h1>
+<h1 id="notebooktoml">notebook.toml<a class="headerlink" href="#notebooktoml" title="Permanent link">&para;</a></h1>
 <p><code>notebook.toml</code> is the <strong>committed</strong> configuration for a notebook. It declares the cells, their metadata, the per-notebook environment, mounts, workers, database connections, and any AI/secret-manager wiring. The file is human-editable and git-diffable; the matching backend writer round-trips it so external edits survive UI saves.</p>
 <p>Runtime state - display outputs, per-cell provenance hashes, console snapshots, <code>uv sync</code> timestamps - lives in <code>.strata/runtime.json</code>, <strong>not</strong> here. <code>notebook.toml</code> only changes on structural edits (add/remove/reorder a cell, change a worker/timeout/env/mounts/AI settings), plus one narrow exception for <a href="#cells-cell-registry">who last edited a cell</a>.</p>
 <p>The schema is defined in <code>src/strata/notebook/models.py::NotebookToml</code> and the round-tripping rules in <code>src/strata/notebook/writer.py</code>.</p>
@@ -3765,7 +3765,7 @@ by its snapshot.</p>
 <tr>
 <td><code>config</code></td>
 <td>table</td>
-<td>Backend-specific. For <code>"executor"</code>: <code>url</code>, <code>transport</code> (<code>"direct"</code> push, the default, or <code>"signed"</code> pull-model), <code>token</code> (literal - dev only), <code>token_env</code> (env var name - preferred), and for <code>"signed"</code> an optional <code>strata_url</code>, the server address the worker uses for the manifest's URLs (default: the server's own URL). See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
+<td>Backend-specific. For <code>"executor"</code>: <code>url</code>, <code>transport</code> (<code>"direct"</code> push, the default, or <code>"signed"</code> pull-model), <code>token</code> (literal - dev only), <code>token_env</code> (env var name - preferred), and for <code>"signed"</code> an optional <code>strata_url</code>, the server address the worker uses for the manifest's URLs (default: the server's own URL). See <a href="../../notebook/workers/">Workers</a>.</td>
 </tr>
 </tbody>
 </table>
@@ -3987,7 +3987,7 @@ wins over a server catalog of the same name, as a notebook's workers do.</p>
 <li>Cell-level <code>worker</code> / <code>timeout</code> / <code>env</code> in <code>[[cells]]</code></li>
 <li>Notebook-level <code>worker</code> / <code>timeout</code> / <code>env</code> in the top-level table</li>
 </ol>
-<p>Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See <a href="../annotations/">Cell Annotations</a>.</p>
+<p>Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See <a href="../annotations/">Annotations</a>.</p>
 <h2 id="what-lives-elsewhere">What lives elsewhere<a class="headerlink" href="#what-lives-elsewhere" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

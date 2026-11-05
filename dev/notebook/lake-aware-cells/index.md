@@ -1,4 +1,4 @@
-# Lake-Aware Cells
+# Lake and Iceberg
 
 A **lake-aware cell** is a notebook cell that takes an Iceberg table as a
 versioned input via the [`@table`](https://bearingresearch.com/strata/dev/reference/annotations/python/#table) annotation. The
@@ -349,6 +349,6 @@ result turns out to be cached may still ask; asking is the safe direction.
 ## See also
 
 - [`@table` annotation reference](https://bearingresearch.com/strata/dev/reference/annotations/python/#table) - the syntax surface.
-- [Cell Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) - all per-cell annotations.
+- [Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) - all per-cell annotations.
 - [Core Quickstart](https://bearingresearch.com/strata/dev/getting-started/core/) - `client.materialize` and
   `scan@v1` from the SDK directly, without the notebook.

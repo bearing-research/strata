@@ -1,4 +1,4 @@
-# Docker Deployment
+# Docker
 
 ## Prerequisites
 
@@ -9,7 +9,7 @@
 - ~1.5 GB of disk for the first build; subsequent rebuilds reuse the
   layer cache.
 
-## Quick Start
+## Quick start
 
 ```bash
 docker compose up -d --build
@@ -126,7 +126,7 @@ it expects, so a DNS-rebinding page cannot drive it.
   - STRATA_ALLOWED_HOSTS=devbox.lan
 ```
 
-See [Configuration Reference](https://bearingresearch.com/strata/dev/reference/configuration/) for all options.
+See [Configuration](https://bearingresearch.com/strata/dev/reference/configuration/) for all options.
 
 ## Prebuilt image
 

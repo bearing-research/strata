@@ -1,11 +1,11 @@
-# Keyboard Shortcuts
+# Keyboard shortcuts
 
 Press **?** anywhere in the notebook (outside a code editor or text field) to
 show the shortcuts modal.
 
 On macOS, read ++ctrl++ as ++cmd++ in the shortcuts below.
 
-## Editor Shortcuts
+## Editor shortcuts
 
 | Shortcut | Action |
 |----------|--------|
@@ -19,21 +19,21 @@ The editor also carries CodeMirror's default keymap: ++ctrl+slash++ toggles a
 comment, ++ctrl+bracket-left++ / ++ctrl+bracket-right++ change indentation,
 and ++alt+arrow-up++ / ++alt+arrow-down++ move the current line.
 
-## Notebook Shortcuts
+## Notebook shortcuts
 
 | Shortcut | Action |
 |----------|--------|
 | ++question++ | Show or hide the keyboard shortcuts modal |
 | ++escape++ | Close the shortcuts modal, or an open menu |
 
-## Panel Shortcuts
+## Panel shortcuts
 
 | Shortcut | Where | Action |
 |----------|-------|--------|
 | ++enter++ | Inspect panel input | Evaluate the expression |
 | ++ctrl+enter++ | Tests panel | Run the cell's tests |
 
-## Cell Actions (Buttons)
+## Cell actions (buttons)
 
 These are icons in the cell gutter, visible on hover. Each one's tooltip gives
 its name:
