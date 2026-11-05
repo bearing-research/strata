@@ -1172,6 +1172,59 @@ function goHome() {
   order: 2;
 }
 
+/* A phone can't hold both on one row: the name above, what acts on it below. */
+@media (max-width: 600px) {
+  .header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .header-left {
+    flex: 1 1 0;
+  }
+
+  .header-right {
+    display: contents;
+  }
+
+  .header > .header-right > * {
+    order: 2;
+  }
+
+  .header > .header-right > .theme-toggle,
+  .header > .header-right > .connection {
+    order: 0;
+  }
+
+  .header:has(.header-left)::after {
+    content: '';
+    order: 1;
+    flex-basis: 100%;
+  }
+
+  /* Hung from the header, not their buttons, so a menu wider than the gap beside one stays on. */
+  .header {
+    position: relative;
+  }
+
+  .header :deep(.add-cell-menu),
+  .header :deep(.export-menu),
+  .header :deep(.overflow-menu) {
+    position: static;
+  }
+
+  .header :deep(.add-cell-dropdown),
+  .header :deep(.export-dropdown),
+  .header :deep(.overflow-dropdown) {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    min-width: 0;
+    white-space: normal;
+  }
+}
+
 @media (min-width: 981px) {
   .sidebar-rail {
     width: 40px;

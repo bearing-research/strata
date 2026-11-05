@@ -6,6 +6,7 @@
  *   2. hovering opens the actions without moving anything
  *   3. every action can be clicked, including those reaching over the cell below
  *   4. a keyboard reaches them too
+ *   5. the notebook header fits a phone: nothing overlaps or runs off the page, its menus included
  *
  * Exits non-zero on any failed assertion.
  *
@@ -115,6 +116,46 @@ async function main() {
     }
     if (!reached) failures.push('tabbing never reached a cell action')
     else if (!(await opens())) failures.push('a focused action stays hidden')
+
+    // 5. At a phone's width.
+    for (const width of [360, 390, 600]) {
+      await page.setViewportSize({ width, height: 800 })
+      const fit = await page.evaluate(() => {
+        const parts = [
+          ...document.querySelectorAll('header.header .logo, header.header .notebook-name'),
+          ...document.querySelectorAll('header.header .header-right > *'),
+        ].map((el) => el.getBoundingClientRect())
+        const overlaps = parts.some((a, i) =>
+          parts
+            .slice(i + 1)
+            .some(
+              (b) =>
+                a.left < b.right - 1 &&
+                b.left < a.right - 1 &&
+                a.top < b.bottom - 1 &&
+                b.top < a.bottom - 1,
+            ),
+        )
+        return { overlaps, scrollWidth: document.documentElement.scrollWidth }
+      })
+      if (fit.overlaps) failures.push(`the header's parts overlap at ${width}px`)
+      if (fit.scrollWidth > width) {
+        failures.push(`the page is ${fit.scrollWidth}px wide at ${width}px`)
+      }
+      for (const trigger of [
+        'add-cell-menu-trigger',
+        'export-menu-trigger',
+        'notebook-overflow-trigger',
+      ]) {
+        await page.locator('header.header').getByTestId(trigger).click()
+        const menu = await page.getByRole('menu').first().boundingBox()
+        if (!menu || menu.x < 0 || menu.x + menu.width > width) {
+          failures.push(`the ${trigger} menu runs off the page at ${width}px`)
+        }
+        await page.keyboard.press('Escape')
+        await page.mouse.click(1, 790)
+      }
+    }
   } finally {
     await browser.close()
   }
