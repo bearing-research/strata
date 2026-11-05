@@ -242,8 +242,8 @@ The matplotlib figure renders inline as a PNG.
 
 Press ++shift+enter++ on the loader cell again. The 2-second pause
 is gone, Strata returned the cached `df` instantly, and the cell
-header shows a **cached** badge with what it saved. Hover the cell to
-see the load time ("loaded in 5ms" or similar).
+header shows a **cached** badge with what it saved. The right of the
+header gives the load time ("loaded in 5ms" or similar).
 
 The cache is content-addressed: the cache key is a hash of the
 cell's source, its upstream artifacts, and the environment lockfile.

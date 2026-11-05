@@ -572,8 +572,8 @@ flagged and fails if run, and the panel offers no editor for them.
 
 **A host with its own machine picker can hide the panel.** Set
 `STRATA_NOTEBOOK_WORKERS_PANEL=hidden` and the notebook page leaves the Workers
-panel out. Cells still show their worker badge and health, `# @worker` still
-routes, and the host sets a notebook's default worker with
+panel out. A cell on a named or remote worker still shows its badge and health,
+`# @worker` still routes, and the host sets a notebook's default worker with
 `PUT /v1/notebooks/{id}/worker`.
 
 ## Authentication
