@@ -34,6 +34,20 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **A cell's header names its worker only when that says something.** A code cell on the
+  local default and every markdown cell lose the `worker: local` badge. A cell that names a
+  worker keeps it, and so does every code cell when the notebook's default is remote.
+  (#1445)
+- **The figure in a cell's header says what it measures:** `ran in 3.7s` for a run and
+  `loaded in 36ms` for a cache hit. (#1446)
+- **The notes panel shows plain text.** A note's title and preview drop their markdown, so
+  `Press **Run All** again` reads `Press Run All again`. (#1447)
+- **The `pandas_basics` sample opens without a warning.** Its computed columns go in a new
+  frame, `orders`, instead of redefining and mutating `sales`. (#1448)
+- **A table's toolbar fits a phone.** Below about 600px, Stats, Filter, CSV and Parquet
+  collapse into one menu, so the search box keeps its width. (#1450)
+- **The home page's cards fit their labels.** The column is wider, so each label and hint
+  takes one line; on a narrower page the cards wrap instead. (#1451)
 - **The docs read more consistently.** `strata tutorial caching` is step 1 of Your first
   notebook, every nav title matches its page's heading, headings use sentence case, and the
   landing page's title is styled. (#1449)
