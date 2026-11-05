@@ -572,7 +572,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     },
     "w3": {
@@ -834,7 +834,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     },
     "w3": {
@@ -1080,7 +1080,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     },
     "w3": {
@@ -1317,7 +1317,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     },
     "w3": {

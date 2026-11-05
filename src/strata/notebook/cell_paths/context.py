@@ -173,6 +173,15 @@ def _worker_mount_writes(result: Any, mount_specs: list[MountSpec]) -> list[Moun
     return writes
 
 
+def refused_run(host: ExecutorHost, result: CellExecutionResult) -> CellExecutionResult:
+    """A run refused before it started ends as any failure does: the old displays no longer
+    stand, and the error outlives the session.
+    """
+    host.persist_display_outputs(result.cell_id, None)
+    host.apply_execution_result_metadata(result.cell_id, result)
+    return result
+
+
 def _refused_result(exc: LocalExecutionRefused) -> dict[str, Any]:
     """A harness result for cell code this host would not start."""
     return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}
