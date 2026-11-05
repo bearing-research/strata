@@ -24,7 +24,10 @@ export function cellState(cell: {
   output?: { cacheHit?: boolean }
   annotationDiagnostics?: { severity: string }[]
   remoteWorkerName?: string
+  language?: string
 }): CellState {
+  // It never runs, so the status the server keeps for it says nothing to a reader.
+  if (cell.language === 'markdown') return 'idle'
   if (cell.status === 'running') return cell.remoteWorkerName ? 'dispatching' : 'running'
   if (cell.status === 'queued') return 'queued'
   if (cell.annotationDiagnostics?.some((d) => d.severity === 'error')) return 'blocked'

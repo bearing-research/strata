@@ -32,6 +32,12 @@ test('an annotation error blocks a cell, and a warning does not', () => {
   )
 })
 
+test('a markdown cell never reads as having a result, whatever status the server keeps', () => {
+  for (const status of ['idle', 'ready', 'stale', 'running', 'error']) {
+    assert.equal(cellState({ status, language: 'markdown' }), 'idle')
+  }
+})
+
 test('a run in flight says so, even with an annotation error since', () => {
   assert.equal(cellState({ status: 'running', annotationDiagnostics: BLOCKING }), 'running')
 })
