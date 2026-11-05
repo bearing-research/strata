@@ -38,7 +38,8 @@ source <- paste(readLines("stdin", warn = FALSE), collapse = "\n")
 #
 # - The op of a call (the function being called; see acceptance examples:
 #   ``y <- x + 1`` references only ``x``, not ``+``; ``df <- read_parquet(...)``
-#   should not reference ``read_parquet``).
+#   should not reference ``read_parquet``). A called name is kept apart, in
+#   ``called``: it matters only if another cell defines it.
 # - Args of ``library`` / ``require`` / ``requireNamespace`` /
 #   ``attachNamespace`` / ``loadNamespace``: those are package names,
 #   not free variables.
@@ -66,6 +67,8 @@ ASSIGN_RIGHT <- c("->", "->>")
 # Collect every name that's read inside ``expr``. Pure; returns a
 # character vector. The caller decides which of those names count as
 # cross-cell references via the "read-before-locally-defined" rule.
+called_names <- character(0)
+
 collect_reads <- function(expr) {
   if (is.name(expr)) {
     return(as.character(expr))
@@ -94,10 +97,15 @@ collect_reads <- function(expr) {
       if (length(expr) >= 2) return(collect_reads(expr[[2]]))
       return(character(0))
     }
+    # Operators and control flow (``+``, ``[``, ``if``) are not syntactic names.
+    if (identical(make.names(op_name), op_name)) {
+      called_names <<- c(called_names, op_name)
+    }
   }
-  # Default: skip op (the function-call name), recurse into args.
-  if (length(expr) < 2) return(character(0))
-  acc <- character(0)
+  # Default: the op's name is not a read, its args are. An op that is itself an
+  # expression, ``model$predict(x)`` or ``fs[[1]](x)``, is read like any other.
+  acc <- if (is.call(op)) collect_reads(op) else character(0)
+  if (length(expr) < 2) return(acc)
   for (i in 2:length(expr)) {
     acc <- c(acc, collect_reads(expr[[i]]))
   }
@@ -150,9 +158,11 @@ result <- tryCatch(
     parsed <- parse(text = source, keep.source = FALSE)
     defines <- character(0)
     references <- character(0)
+    called <- character(0)
     local_defs <- character(0)
     for (top_expr in parsed) {
       stmt <- process_statement(top_expr)
+      called <- c(called, setdiff(called_names, local_defs))
       # A read is a cross-cell reference iff the name hasn't been
       # locally defined yet in this cell. ``df <- df[complete.cases(df), ]``
       # at top level: local_defs is empty → ``df`` lands in references.
@@ -166,13 +176,15 @@ result <- tryCatch(
     }
     list(
       defines = unique(defines),
-      references = sort(unique(references))
+      references = sort(unique(references)),
+      called = sort(unique(called))
     )
   },
   error = function(e) {
     list(
       defines = character(0),
       references = character(0),
+      called = character(0),
       parse_error = conditionMessage(e)
     )
   }
@@ -183,13 +195,14 @@ result <- tryCatch(
 # ---------------------------------------------------------------------------
 
 if (has_jsonlite) {
-  # ``I()`` pins ``defines`` / ``references`` as arrays so a single-name
+  # ``I()`` pins ``defines`` / ``references`` / ``called`` as arrays so a single-name
   # cell (``c("df")``) round-trips as ``["df"]`` rather than the scalar
   # ``"df"`` that ``auto_unbox = TRUE`` would emit, which the Python side
   # then does ``list("df")`` and gets ``['d', 'f']``. ``parse_error``
   # is a true scalar string, so it stays auto-unboxed.
   result$defines <- I(result$defines)
   result$references <- I(result$references)
+  result$called <- I(result$called)
   cat(jsonlite::toJSON(result, auto_unbox = TRUE))
 } else {
   # Manual JSON emit: keep this in lockstep with what the Python
@@ -206,7 +219,8 @@ if (has_jsonlite) {
   }
   parts <- c(
     paste0("\"defines\":", emit_array(result$defines)),
-    paste0("\"references\":", emit_array(result$references))
+    paste0("\"references\":", emit_array(result$references)),
+    paste0("\"called\":", emit_array(result$called))
   )
   if (!is.null(result$parse_error)) {
     parts <- c(parts, paste0("\"parse_error\":", emit_string(result$parse_error)))

@@ -104,6 +104,8 @@ def _run_rscript(source: str) -> AnalyzedCell:
     return AnalyzedCell(
         defines=defines,
         references=references,
+        # ``mean``, ``read_parquet``: hidden unless a cell defines the name, which wires it.
+        builtin_references=list(payload.get("called") or []),
         mutation_defines=[],
     )
 
