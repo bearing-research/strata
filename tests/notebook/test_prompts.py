@@ -17,6 +17,7 @@ from strata.notebook.llm.prompts import (
     render_prompt_template,
     variable_to_text,
 )
+from strata.notebook.prompt_template import PromptTemplateError
 
 
 class TestVariableToText:
@@ -89,8 +90,35 @@ class TestRenderTemplate:
     def test_whitespace_inside_braces_is_tolerated(self):
         assert render_prompt_template("{{name}}", {"name": "Z"}) == "Z"
 
-    def test_missing_variable_leaves_literal(self):
-        assert render_prompt_template("{{ gone }}", {}) == "{{ gone }}"
+    def test_missing_variable_raises(self):
+        with pytest.raises(PromptTemplateError, match="gone"):
+            render_prompt_template("{{ gone }}", {})
+
+    def test_every_problem_is_named(self):
+        with pytest.raises(PromptTemplateError) as caught:
+            render_prompt_template("{{ gone }} {{ x | upper }} {% if %}", {"x": "v"})
+        assert all(part in str(caught.value) for part in ("gone", "x | upper", "{%"))
+
+    def test_a_key_error_inside_a_method_is_not_a_missing_input(self):
+        class Frame:
+            @property
+            def shape(self):
+                raise KeyError
+
+        with pytest.raises(PromptTemplateError) as caught:
+            render_prompt_template("{{ f.shape }}", {"f": Frame()})
+        assert "KeyError" in str(caught.value)
+        assert "no upstream cell" not in str(caught.value)
+
+    def test_escapes_render_as_the_literal_text(self):
+        out = render_prompt_template(r"\{{ a }} \{% b %} {{ a }}", {"a": "v"})
+        assert out == "{{ a }} {% b %} v"
+
+    def test_braces_in_a_value_are_not_read_as_a_template(self):
+        assert render_prompt_template("{{ a }}", {"a": "{{ b }} {% c"}) == "{{ b }} {% c"
+
+    def test_single_braces_are_text(self):
+        assert render_prompt_template('{"a": {"b": {{ x }}}}', {"x": 1}) == '{"a": {"b": 1}}'
 
     def test_attribute_access_is_substituted(self):
         out = render_prompt_template("{{ df.shape }}", {"df": pd.DataFrame({"a": [1, 2]})})
@@ -104,35 +132,41 @@ class TestRenderTemplate:
 
 
 class TestTemplateSecurity:
-    """Every unsafe expression is rejected, leaving the literal in place."""
+    """Every unsafe expression is refused, so nothing reaches the model."""
 
     def test_private_attribute_blocked(self):
         class Obj:
             def __init__(self):
                 self._secret = "nope"
 
-        assert render_prompt_template("{{ o._secret }}", {"o": Obj()}) == "{{ o._secret }}"
+        with pytest.raises(PromptTemplateError):
+            render_prompt_template("{{ o._secret }}", {"o": Obj()})
 
     def test_uncalled_callable_attribute_blocked(self):
-        assert render_prompt_template("{{ s.upper }}", {"s": "hi"}) == "{{ s.upper }}"
+        with pytest.raises(PromptTemplateError):
+            render_prompt_template("{{ s.upper }}", {"s": "hi"})
 
     def test_method_call_with_arguments_blocked(self):
         df = pd.DataFrame({"a": [1, 2, 3]})
-        assert render_prompt_template("{{ df.head(2) }}", {"df": df}) == "{{ df.head(2) }}"
+        with pytest.raises(PromptTemplateError):
+            render_prompt_template("{{ df.head(2) }}", {"df": df})
 
     def test_non_whitelisted_method_blocked(self):
         df = pd.DataFrame({"a": [1]})
-        assert render_prompt_template("{{ df.to_csv() }}", {"df": df}) == "{{ df.to_csv() }}"
+        with pytest.raises(PromptTemplateError):
+            render_prompt_template("{{ df.to_csv() }}", {"df": df})
 
     def test_call_on_plain_name_blocked(self):
-        assert render_prompt_template("{{ foo() }}", {"foo": lambda: "x"}) == "{{ foo() }}"
+        with pytest.raises(PromptTemplateError):
+            render_prompt_template("{{ foo() }}", {"foo": lambda: "x"})
 
     def test_arbitrary_expression_blocked(self):
-        assert render_prompt_template("{{ 1 + 1 }}", {}) == "{{ 1 + 1 }}"
+        with pytest.raises(PromptTemplateError):
+            render_prompt_template("{{ 1 + 1 }}", {})
 
 
 class TestEvaluatorRaises:
-    """The evaluator's own errors, which ``render_prompt_template`` swallows."""
+    """The evaluator's own errors, which ``render_prompt_template`` reports."""
 
     def test_missing_name_raises_keyerror(self):
         with pytest.raises(KeyError):

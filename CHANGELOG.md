@@ -24,6 +24,18 @@ exhaustive commit history.
   (#1372, #1374, #1378)
 
 ### Changed
+- **A prompt cell no longer sends text it could not fill in.** Before, anything
+  the template could not evaluate (`{{ x | upper }}`, `{% if x %}`, `{{ x['k'] }}`,
+  a name no cell defines) went to the model as written, and the paid answer was
+  stored as a success. These are now errors that keep the cell from running
+  (`prompt_template_invalid`, `prompt_input_undefined`), or that stop it before
+  the call when only a run can tell (`{{ x.y }}`). `\{{` and `\{%` write the
+  characters themselves.
+- **A prompt cell reads a Python object as its `str()`.** It used to see a
+  placeholder. The value is loaded in the notebook's environment, never in the
+  server, and an object with no text of its own (a default repr holding an
+  address) or no text form at all (an R object, a folder) fails the cell before
+  the call.
 - **DuckDB 2.0.** Strata now needs `duckdb>=2.0`. DuckDB 2.0 also applies its
   file-access lockdown to a catalog's HTTP requests, so a confined SQL cell in
   service mode may now reach its catalog's endpoint, and no other URL. SQL cells,

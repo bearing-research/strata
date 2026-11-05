@@ -90,6 +90,8 @@ def validate_cell_annotations(
             cell, notebook_state
         )
     analysis = analysis_with(cell, notebook_state, analysis)
+    if cell.language == CellLanguage.PROMPT and not analysis.structural_errors:
+        language_checks = _validate_prompt_inputs(analysis, cell.id)
     diagnostics = strata_diagnostics(
         analysis.cells[cell.id], language_checks, without_dag=bool(analysis.structural_errors)
     )
@@ -97,6 +99,23 @@ def validate_cell_annotations(
         # After the connection's, which the SQL analyzer reports.
         diagnostics += _validate_sql_tables(cell, notebook_state)
     return diagnostics
+
+
+def _validate_prompt_inputs(analysis: cg.Analysis, cell_id: str) -> list[AnnotationDiagnostic]:
+    """``prompt_input_undefined``: the template names what no other cell provides.
+
+    A Python cell finds this out by raising ``NameError``; a prompt would be a paid call.
+    """
+    wired = {edge.variable for edge in analysis.dag.edges if edge.to_cell_id == cell_id}
+    return [
+        AnnotationDiagnostic(
+            severity=DiagnosticSeverity.ERROR,
+            code="prompt_input_undefined",
+            message=f"`{{{{ {name} }}}}`: no other cell defines `{name}`.",
+        )
+        for name in analysis.cells[cell_id].references
+        if name not in wired
+    ]
 
 
 def _validate_worker(cell: CellState, notebook_state: NotebookState) -> list[AnnotationDiagnostic]:

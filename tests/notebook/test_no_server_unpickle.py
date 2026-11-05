@@ -91,8 +91,8 @@ def _fake_llm():
 
 class TestPromptCells:
     @pytest.mark.asyncio
-    async def test_object_input_is_a_placeholder_not_unpickled(self, tmp_path):
-        from strata.notebook.prompt_executor import _OBJECT_PLACEHOLDER, execute_prompt_cell
+    async def test_object_input_is_loaded_outside_the_server(self, tmp_path):
+        from strata.notebook.prompt_executor import execute_prompt_cell
 
         marker = tmp_path / "marker"
         session = _session(
@@ -111,14 +111,16 @@ class TestPromptCells:
                 session, "p1", "Describe {{ evil }}", _llm_config(), use_cache=False
             )
 
+        # The load ran, in another process: the marker holds a pid, not the server's.
+        assert marker.exists()
         assert not _server_unpickled(marker)
+        # ``exec`` returned None, which is what the pickle holds.
         assert result["success"] is True
-        assert calls[0][-1]["content"] == f"Describe {_OBJECT_PLACEHOLDER}"
-        assert "Not rendered: evil (Python object)" in result["stderr"]
+        assert calls[0][-1]["content"] == "Describe None"
 
     def test_cached_object_artifact_is_not_unpickled(self, tmp_path):
         """A cache hit reads the content type the artifact declares, which an import can forge."""
-        from strata.notebook.prompt_executor import _OBJECT_PLACEHOLDER, _parse_output
+        from strata.notebook.prompt_executor import ObjectInput, _parse_output
 
         marker = tmp_path / "marker"
         blob = pickle.dumps(_Marker(marker))
@@ -126,7 +128,7 @@ class TestPromptCells:
         value = _parse_output(blob, "pickle/object")
 
         assert not marker.exists()
-        assert value is _OBJECT_PLACEHOLDER
+        assert value == ObjectInput("pickle/object", blob)
 
     @pytest.mark.asyncio
     async def test_json_and_table_inputs_still_render(self, tmp_path):
