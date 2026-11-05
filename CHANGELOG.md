@@ -603,6 +603,11 @@ exhaustive commit history.
   worker and a cancel already did. A failed store keeps its mutation warnings, an R timeout names
   how to raise the limit, and a linked or unsafe output file reports its own message instead of
   "Execution failed". (#1434)
+- **A cell refused before it runs takes its old results down.** A failed `@fetch` check, an
+  unresolved `@dataset` or `@table`, a refused `@write_table`, an R cell asking for what R can't do,
+  or a second run of a running build returned its error and left the last run's displays on screen,
+  and the error was gone after reopening the notebook. These now end as any other failure does: the
+  displays and console clear, and the error is kept. (#1433)
 - **A pinned DuckDB SQL cell hits its cache without the catalog in service
   mode too.** There a `# @cache snapshot` cell over a catalog still loaded
   each pinned table before the cache check, since the cell's confinement

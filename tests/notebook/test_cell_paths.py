@@ -1748,6 +1748,37 @@ class TestR:
         assert calls.harness == []
         assert calls.dispatched == []
 
+    @pytest.mark.parametrize(
+        ("prov_fields", "worker", "overrides"),
+        [
+            pytest.param({"annotations": {"datasets": ["d"]}}, None, {}, id="dataset"),
+            pytest.param({"annotations": {"tables": ["t"]}}, None, {}, id="table"),
+            pytest.param({"fetch_error": "no sum"}, None, {}, id="fetch"),
+            pytest.param(
+                {"fetched": {"f": Path("f")}},
+                SimpleNamespace(name="w", backend=WorkerBackendType.EXECUTOR, transport="signed"),
+                {},
+                id="remote-fetch",
+            ),
+            pytest.param({}, SimpleNamespace(name="odd", backend="neither"), {}, id="worker"),
+            pytest.param(
+                {}, None, {"table_write_refusal": lambda _source: "no catalog"}, id="table-write"
+            ),
+        ],
+    )
+    async def test_a_refusal_ends_as_any_failure_does(
+        self, monkeypatch, prov_fields, worker, overrides
+    ):
+        host, context, calls = self._fakes(
+            monkeypatch, self._prov(**prov_fields), worker=worker, **overrides
+        )
+
+        result = await self._run(host, context)
+
+        assert result.success is False
+        assert calls.persisted == [("c", None)]
+        assert calls.applied == [("c", result)]
+
     async def test_a_fetch_that_failed_keeps_its_code(self, monkeypatch):
         prov = self._prov(fetch_error="no sum", fetch_error_code="fetch_unchecked")
         host, context, _calls = self._fakes(monkeypatch, prov)
@@ -3438,6 +3469,38 @@ class TestPython:
         assert result.error == "refused"
         assert result.execution_method == "error"
         assert calls.dispatched == []
+
+    @staticmethod
+    def _refuses(*_args, **_kwargs):
+        raise RunRefused("no")
+
+    @staticmethod
+    def _no_snapshot(*_args):
+        raise RuntimeError("no")
+
+    @pytest.mark.parametrize(
+        ("prov_fields", "overrides"),
+        [
+            pytest.param({"fetch_error": "no"}, {}, id="fetch"),
+            pytest.param({"dataset_error": "no"}, {}, id="dataset"),
+            pytest.param({}, {"manifest_tables": "_no_snapshot"}, id="tables"),
+            pytest.param({}, {"table_write_refusal": lambda _s: "no"}, id="table-write"),
+            pytest.param({}, {"local_runs": "_refuses"}, id="running"),
+        ],
+    )
+    async def test_a_refusal_ends_as_any_failure_does(self, monkeypatch, prov_fields, overrides):
+        if overrides.get("manifest_tables"):
+            overrides = {"manifest_tables": self._no_snapshot}
+        if overrides.get("local_runs"):
+            overrides = {"local_runs": lambda: SimpleNamespace(open=self._refuses)}
+        host, context, calls = self._fakes(monkeypatch, self._prov(**prov_fields), **overrides)
+
+        result = await self._run(host, context)
+
+        assert result.error == "no"
+        assert calls.dispatched == []
+        assert calls.persisted == [("c", None)]
+        assert calls.applied == [("c", result)]
 
     async def test_a_second_run_of_a_running_build_is_refused(self, monkeypatch):
         def refuse(**_kwargs):

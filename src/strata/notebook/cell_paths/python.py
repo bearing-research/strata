@@ -31,6 +31,7 @@ from strata.notebook.cell_paths.context import (
     _refused_result,
     _store_failure_result,
     _worker_mount_writes,
+    refused_run,
 )
 from strata.notebook.cell_paths.context import no_interpreter_message as _no_interpreter_message
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
@@ -361,20 +362,26 @@ async def run_python_cell(
         # A fetch that could not be checked, or whose bytes differ from its pin, fails the
         # cell before it runs: a cache hit would claim unverified bytes had not moved.
         if prov.fetch_error is not None:
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error=prov.fetch_error,
-                error_code=prov.fetch_error_code,
-                execution_method="error",
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.fetch_error,
+                    error_code=prov.fetch_error_code,
+                    execution_method="error",
+                ),
             )
         # Likewise a dataset the registry could not resolve or hand over.
         if prov.dataset_error is not None:
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error=prov.dataset_error,
-                execution_method="error",
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.dataset_error,
+                    execution_method="error",
+                ),
             )
         # Locally each fetch is a read-only mount of its cached bytes. A remote worker can't
         # see this machine's paths, so there the bytes travel as inputs (``_add_fetch_inputs``).
@@ -393,11 +400,14 @@ async def run_python_cell(
         try:
             manifest_tables = context.manifest_tables(prov.annotations.tables, prov.table_snapshots)
         except RuntimeError as e:
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error=str(e),
-                execution_method="error",
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=str(e),
+                    execution_method="error",
+                ),
             )
 
         # ③ Cache check for THIS cell.
@@ -555,8 +565,11 @@ async def run_python_cell(
         # ④ Cache miss: execute the cell.
         refusal = context.table_write_refusal(source)
         if refusal is not None:
-            return CellExecutionResult(
-                cell_id=cell_id, success=False, error=refusal, execution_method="error"
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id, success=False, error=refusal, execution_method="error"
+                ),
             )
         with (
             tempfile.TemporaryDirectory() as tmpdir,
@@ -636,8 +649,14 @@ async def run_python_cell(
                         )
                     )
                 except RunRefused as exc:
-                    return CellExecutionResult(
-                        cell_id=cell_id, success=False, error=str(exc), execution_method="error"
+                    return refused_run(
+                        host,
+                        CellExecutionResult(
+                            cell_id=cell_id,
+                            success=False,
+                            error=str(exc),
+                            execution_method="error",
+                        ),
                     )
                 context.open_runs[cell_id] = (
                     local_run,
