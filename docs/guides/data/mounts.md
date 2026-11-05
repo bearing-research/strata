@@ -44,8 +44,8 @@ pinned mount's, is not guessed. After a successful run, `.strata/reads/index.jso
 what each input moved and on which machine; see
 [What a run moved](../../notebook/lake-aware-cells.md#what-a-run-moved).
 
-![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 27.5 MB" beside its worker and cache badges.](../../assets/input-weight-light.png#only-light)
-![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 27.5 MB" beside its worker and cache badges.](../../assets/input-weight-dark.png#only-dark)
+![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 27.5 MB" beside its cache badge.](../../assets/input-weight-light.png#only-light)
+![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 27.5 MB" beside its cache badge.](../../assets/input-weight-dark.png#only-dark)
 
 Strata copies a remote mount in its own process, not the notebook's venv, so
 its filesystem library goes where Strata is installed: the `s3` extra for
