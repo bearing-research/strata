@@ -4466,6 +4466,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed_1">Fixed<a class="headerlink" href="#fixed_1" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell refused before it runs takes its old results down.</strong> A failed <code>@fetch</code> check, an
+  unresolved <code>@dataset</code> or <code>@table</code>, a refused <code>@write_table</code>, an R cell asking for what R can't do,
+  or a second run of a running build returned its error and left the last run's displays on screen,
+  and the error was gone after reopening the notebook. These now end as any other failure does: the
+  displays and console clear, and the error is kept. (#1433)</li>
 <li><strong>A pinned DuckDB SQL cell hits its cache without the catalog in service
   mode too.</strong> There a <code># @cache snapshot</code> cell over a catalog still loaded
   each pinned table before the cache check, since the cell's confinement
