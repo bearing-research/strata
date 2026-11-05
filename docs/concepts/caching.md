@@ -6,7 +6,7 @@
 *Edit one cell in `strata tutorial`: only the cells that read it run again, and the
 cell above keeps what it saved. Captured from a real run, not a mock-up.*
 
-## Caching and Provenance
+## Caching and provenance
 
 The provenance hash determines cache identity. It includes:
 

@@ -1,4 +1,4 @@
-# Prompt Cells
+# Prompt cells
 
 A prompt cell is a text template that gets rendered with upstream variable values, sent to an AI model, and the response stored as an artifact. Prompt cells participate in the DAG and cache by provenance exactly like Python cells: same inputs + same template + same model config = cache hit, no API call.
 

@@ -1,4 +1,4 @@
-# Python cell annotations
+# Python annotations
 
 These apply to Python cells, and most to other compute cells too.
 
@@ -204,7 +204,7 @@ downstream cells go stale, and the normal cascade
 machinery re-runs them** - no manual data-version
 bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
-[Lake-Aware Cells](../../notebook/lake-aware-cells.md).
+[Lake and Iceberg](../../notebook/lake-aware-cells.md).
 
 ```python
 # @table trips file:///data/warehouse#nyc.trips
@@ -526,7 +526,7 @@ either order, contradicts it: the cell does not run, and fails with
 annotation, the last line of each key is the one read, so `# @stochastic off`
 or a later `# @nocache` settles it.
 
-## Cross-Cell Ordering
+## Cross-cell ordering
 
 ### `@after`
 
@@ -556,7 +556,7 @@ The edge participates in upstream/downstream wiring and the topological
 order, but contributes no variable to `consumed_variables`, so it
 doesn't affect per-variable provenance hashes.
 
-## Notebook-Level Environment (Runtime Panel)
+## Notebook-level environment (runtime panel)
 
 Notebook-wide environment variables are set via the **Runtime panel** in the sidebar. These apply to all cells unless overridden by a cell-level `@env` annotation.
 

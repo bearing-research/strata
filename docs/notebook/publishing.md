@@ -1,4 +1,4 @@
-# Publishing an artifact
+# Publish an artifact
 
 A figure in a paper can carry a URL. Someone who opens it (a referee, a
 replicator, you in eighteen months) sees the result, the code that produced
