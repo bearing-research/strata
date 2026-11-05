@@ -1417,9 +1417,12 @@ class NotebookSession:
             data["causality"] = asdict(causality, dict_factory=skip_none)
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
-        got = how_last_got([asdict(s) for s in self.execution_history.get(cell.id, [])])
+        history = self.execution_history.get(cell.id, [])
+        got = how_last_got([asdict(s) for s in history])
         if got is not None:
             data["last_got"] = {"cache_hit": got[0], "ms": got[1]}
+            # ``ms`` is what a hit saved; this is what the run took or the hit loaded in.
+            data["last_duration_ms"] = int(history[-1].duration_ms or 0)
         # A viewer joining mid-run gets what the running cell has printed so far;
         # clients cleared the last run's console when this run started.
         live = console_relay.live_console(self.id, cell.id)

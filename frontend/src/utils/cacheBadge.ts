@@ -18,6 +18,20 @@ export function durationLabel(
 }
 
 /**
+ * What a cell's latest run took, or its latest hit loaded in, for a page with no frame to say so.
+ * A run's figure holds only while its result shows: not for a cell with none, or one that failed.
+ */
+export function restoredTimes(cell: {
+  status?: unknown
+  last_got?: { cache_hit?: unknown } | null
+  last_duration_ms?: unknown
+}): { runMs?: number; loadMs?: number } {
+  if (!cell.last_got || typeof cell.last_duration_ms !== 'number') return {}
+  if (cell.last_got.cache_hit) return { loadMs: cell.last_duration_ms }
+  return cell.status === 'ready' || cell.status === 'stale' ? { runMs: cell.last_duration_ms } : {}
+}
+
+/**
  * A cache hit's badge text: what it saved when that is known, never "saved 0ms".
  * Plain "cached" too when the load took longer than the run did: nothing was saved.
  */
@@ -59,8 +73,9 @@ export function cacheFieldsAfterSync(
   status: string,
   previous: { cacheHit?: boolean; cacheSavedMs?: number; cacheLoadMs?: number } | undefined,
   lastGotMs: number | undefined,
+  restoredLoadMs?: number,
 ): { cacheHit?: true; cacheSavedMs?: number; cacheLoadMs?: number } {
-  const cacheLoadMs = previous?.cacheLoadMs
+  const cacheLoadMs = previous?.cacheLoadMs ?? restoredLoadMs
   if (serverCacheHit) return { ...cachedAgainFields(previous ?? {}, lastGotMs), cacheLoadMs }
   if (status === 'stale' && previous?.cacheHit) {
     return { cacheHit: true, cacheSavedMs: previous.cacheSavedMs, cacheLoadMs }
