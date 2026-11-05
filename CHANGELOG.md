@@ -602,7 +602,7 @@ exhaustive commit history.
   unexpected failure on a remote worker now keeps the `@output_dir` files it had uploaded, as a lost
   worker and a cancel already did. A failed store keeps its mutation warnings, an R timeout names
   how to raise the limit, and a linked or unsafe output file reports its own message instead of
-  "Execution failed". (#PRNUM)
+  "Execution failed". (#1434)
 - **A pinned DuckDB SQL cell hits its cache without the catalog in service
   mode too.** There a `# @cache snapshot` cell over a catalog still loaded
   each pinned table before the cache check, since the cell's confinement
