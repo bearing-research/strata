@@ -78,27 +78,27 @@ cell or test that uses it errors with a note saying so, so do a scan or read in
 an upstream cell and test with its result.
 
 ![A Python cell with its results table above an open Tests panel: the test
-source, a green "2 passed" summary, and a tick beside each test name. The flask
-toggle on the cell's left rail carries a green 2/2
+source, a green "2 passed" summary, and a tick beside each test name. The cell's
+header carries a green tests 2/2
 badge.](https://bearingresearch.com/strata/dev/assets/cell-tests-light.png#only-light)
 ![A Python cell with its results table above an open Tests panel: the test
-source, a green "2 passed" summary, and a tick beside each test name. The flask
-toggle on the cell's left rail carries a green 2/2
+source, a green "2 passed" summary, and a tick beside each test name. The cell's
+header carries a green tests 2/2
 badge.](https://bearingresearch.com/strata/dev/assets/cell-tests-dark.png#only-dark)
 
 ### The health badge
 
-The flask toggle doubles as a status badge, so a cell's test health is visible
-without opening the panel:
+Once a cell's tests have run, a badge in its header shows their health without
+opening the panel. Click it to open the panel:
 
-| Badge                | Meaning                                                      |
-| -------------------- | ------------------------------------------------------------ |
-| green `4/4`          | all tests passed (passed / total)                            |
-| red `3/4`            | one or more **failed**                                       |
-| amber `3/4`          | **errored** - the cell source or test setup blew up          |
-| grey `3/4 · stale`   | the cell, its tests or its inputs changed since the last run |
-| `…`                  | the tests are running                                        |
-| amber `!`            | pytest is not installed in the notebook's environment        |
+| Badge                     | Meaning                                                      |
+| ------------------------- | ------------------------------------------------------------ |
+| green `tests 4/4`         | all tests passed (passed / total)                            |
+| red `tests 3/4`           | one or more **failed**                                       |
+| amber `tests 3/4`         | **errored** - the cell source or test setup blew up          |
+| grey `tests 3/4 · stale`  | the cell, its tests or its inputs changed since the last run |
+| `tests …`                 | the tests are running                                        |
+| amber `tests !`           | pytest is not installed in the notebook's environment        |
 
 Stale is computed from a fingerprint of `(cell source, test source, inputs)`,
 where the inputs are everything a run of the cell reads: upstream versions,
