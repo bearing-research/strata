@@ -191,7 +191,7 @@ exhaustive commit history.
   to save left a stored display behind with no value. A display that failed to store was
   still reported, with no file behind it. Displays now record the source that ran rather
   than an edit made during the batch, and a fan-out instance's output can be staged as an
-  input from outside the batch. (#PRNUM)
+  input from outside the batch. (#1432)
 - **A team store failure no longer fails your cell.** A problem offering finished outputs
   to the team store could fail a cell whose outputs were already saved, and stop a Run All
   partway. It's now logged and the run goes on, and one output that can't be offered no
