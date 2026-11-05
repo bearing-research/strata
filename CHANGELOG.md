@@ -606,7 +606,7 @@ exhaustive commit history.
   missing while the cell read ready. A hit on a writing cell now checks each table it writes, and
   if one no longer exists the cell runs and writes again. This applies on every path: Python, R,
   `@each`, `@per_variant`, loops and Run All. A catalog that can't be reached leaves the hit
-  standing, since running again could append twice. (#PRNUM)
+  standing, since running again could append twice. (#1437)
 - **A cell refused before it runs takes its old results down.** A failed `@fetch` check, an
   unresolved `@dataset` or `@table`, a refused `@write_table`, an R cell asking for what R can't do,
   or a second run of a running build returned its error and left the last run's displays on screen,
