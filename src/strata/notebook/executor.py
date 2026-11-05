@@ -1546,6 +1546,7 @@ class CellExecutor:
             store_console_outputs=self._store_console_outputs,
             store_mount_writes=self._store_mount_writes,
             record_good_run=self._record_good_run,
+            timeout_message=self._timeout_message,
             received_output_files=self._received_output_files,
             folder_listings=self._folder_listings,
         )
