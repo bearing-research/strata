@@ -41,7 +41,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   no time and almost no disk until something writes to it, and a write never reaches the
   store. An output folder's files, a loop's carry and a resumed run's files clone too, and a
   loop digests its carry when storing it instead of reading it back each iteration. Anything
-  else, another filesystem or an object store, is copied in chunks as before. (#PRNUM)
+  else, another filesystem or an object store, is copied in chunks as before. (#1443)
 - **The docs are reorganized into five tabs: Get started, Guides, Concepts, Reference and
   Deploy.** The home page is now a landing page, and its highlights moved to a Features
   page. The two longest pages are split, one per cell kind, and annotations gain a
