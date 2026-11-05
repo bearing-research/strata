@@ -3,9 +3,7 @@
 The orders differ and stay different: Python and R push before displays and reject a false
 store before either; batch stores displays first, rejects a false store after them, and pushes
 last; a loop has no ``_store_outputs`` and no push; ``@each`` does its instances by the Python
-path and then writes its manifests. Each failure is pinned as it is today, the ones that look
-like bugs included: a push that raises fails a finished single-cell run and takes a whole
-batch down, and a loop's display failure leaves ``execute_cell`` as an exception.
+path and then writes its manifests. Each failure is pinned here.
 """
 
 from __future__ import annotations
