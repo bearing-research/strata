@@ -35,7 +35,7 @@ exhaustive commit history.
 
 ### Changed
 - **The home page's cards fit their labels.** The column is wider, so each label and hint
-  takes one line; on a narrower page the cards wrap instead. (#PRNUM)
+  takes one line; on a narrower page the cards wrap instead. (#1451)
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:
