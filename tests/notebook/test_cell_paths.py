@@ -6,6 +6,7 @@ import ast
 import asyncio
 import json
 import os
+import time
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -2221,6 +2222,7 @@ def _batch_fakes(tmp_path, *, consumed=(), displays=(), console=None, wired=("x"
         resolve_cached_console=lambda *_args: console,
         record_successful_execution_provenance=record,
         persist_display_outputs=lambda cell_id, outputs: seen.persisted.append((cell_id, outputs)),
+        parse_artifact_uri=NotebookSession.parse_artifact_uri,
     )
 
     @contextmanager
@@ -2364,6 +2366,36 @@ class TestBatchServiceLoop:
         assert (result.status, result.stdout, result.duration_ms) == ("ok", "out", 5.0)
         assert serve.events == [result]
 
+    async def test_a_display_that_was_not_stored_is_not_reported(self, serve):
+        serve.persist = {"ok": True, "uri": "", "display_outputs": []}
+
+        await serve.run(_frame("persist", cell_id="c", display_outputs=[{"file": "d.png"}]))
+
+        assert serve.results["c"].status == "ok"
+        assert serve.results["c"].display_outputs == []
+
+    @pytest.mark.parametrize("expired", [True, False], ids=["expired", "while-waiting"])
+    async def test_a_timeout_goes_on_when_ending_the_harness_fails(
+        self, serve, monkeypatch, expired
+    ):
+        logged = []
+
+        async def terminate(_proc):
+            raise OSError("no such process")
+
+        monkeypatch.setattr(batch, "terminate_subprocess_tree", terminate)
+        monkeypatch.setattr(batch.logger, "exception", lambda *args: logged.append(args[0]))
+        watchdog = self._watchdog()
+        watchdog["active_cell_id"] = "c"
+        watchdog["active_started_at"] = time.time() - (2000.0 if expired else 999.99)
+        reader = asyncio.StreamReader()
+
+        ended = await serve.run(reader=reader, watchdog_state=watchdog)
+
+        assert watchdog["timed_out"] is True
+        assert ended is not None
+        assert logged == ["Failed terminating batch harness after a timeout"]
+
     async def test_a_failed_persist_keeps_what_the_cell_printed(self, serve):
         serve.persist = {"ok": False, "error": "no"}
 
@@ -2487,10 +2519,21 @@ class TestBatchInputs:
         host, context, seen = _batch_fakes(tmp_path)
         seen.latest["art"] = _batch_art()
 
-        with pytest.raises(RuntimeError, match="got 'strata://artifact/art'"):
+        with pytest.raises(ValueError, match="not a versioned artifact URI"):
             batch.materialize_artifact_to_dir(host, context, "strata://artifact/art", tmp_path, "x")
 
         assert seen.written == []
+
+    async def test_a_fan_out_instances_uri_is_staged(self, tmp_path):
+        host, context, seen = _batch_fakes(tmp_path)
+        seen.latest["nb_cell_c_var_x@variant=triple"] = _batch_art()
+
+        spec = batch.materialize_artifact_to_dir(
+            host, context, "strata://artifact/nb_cell_c_var_x@variant=triple@v=2", tmp_path, "x"
+        )
+
+        assert spec is not None
+        assert seen.written == [tmp_path / spec["file"]]
 
 
 class TestBatchCacheCheck:
@@ -2680,6 +2723,64 @@ class TestBatchPersist:
         assert exported == ["ran"]
         assert seen.stored[0][1]["source"] == "ran"
         assert seen.consoles[0][1]["source"] == "ran"
+
+    async def test_displays_record_the_source_that_ran_not_an_edit(self, tmp_path, exported):
+        asked = []
+
+        def store(*_args, **kwargs):
+            asked.append(kwargs["source"])
+            return []
+
+        host, context, _seen = _batch_fakes(tmp_path, store_display_outputs=store)
+
+        await self._persist(host, context, tmp_path, display_outputs=[{"file": "d"}])
+
+        assert asked == ["ran"]
+
+    async def test_a_display_store_that_fails_is_answered_with_no_displays(
+        self, tmp_path, exported
+    ):
+        def store(*_args, **_kwargs):
+            raise OSError("no display")
+
+        host, context, seen = _batch_fakes(tmp_path, store_display_outputs=store)
+
+        answer = await self._persist(host, context, tmp_path, display_outputs=[{"file": "d"}])
+
+        assert answer["ok"] is True
+        assert answer["display_outputs"] == []
+        assert seen.pushed
+
+    async def test_a_record_that_fails_is_logged_and_the_cell_stays_good(
+        self, tmp_path, exported, monkeypatch
+    ):
+        logged = []
+
+        def record(*_args, **_kwargs):
+            raise OSError("no record")
+
+        host, context, _seen = _batch_fakes(tmp_path)
+        host.record_successful_execution_provenance = record
+        monkeypatch.setattr(batch.logger, "exception", lambda *args: logged.append(args))
+
+        answer = await self._persist(host, context, tmp_path)
+
+        assert answer["ok"] is True
+        assert logged == [("Batch could not record the run of cell %s", "c")]
+
+    async def test_a_false_store_stores_no_displays(self, tmp_path, exported):
+        asked = []
+
+        host, context, _seen = _batch_fakes(
+            tmp_path,
+            store_outputs=lambda *_args, **_kwargs: False,
+            store_display_outputs=lambda *_args, **_kwargs: asked.append(True) or [],
+        )
+
+        answer = await self._persist(host, context, tmp_path, display_outputs=[{"file": "d"}])
+
+        assert answer["ok"] is False
+        assert asked == []
 
     async def test_nocache_stores_no_console(self, tmp_path, exported):
         host, context, seen = _batch_fakes(tmp_path)

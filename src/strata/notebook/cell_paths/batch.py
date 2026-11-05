@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import shutil
 import tempfile
 import time
@@ -119,16 +118,6 @@ async def _drain_stream(stream: asyncio.StreamReader) -> None:
         chunk = await stream.read(4096)
         if not chunk:
             return
-
-
-def _parse_artifact_uri(input_uri: str) -> tuple[str, int]:
-    """Parse a canonical artifact URI into (artifact_id, version)."""
-    match = re.fullmatch(r"strata://artifact/([^@]+)@v=(\d+)", input_uri)
-    if match is None:
-        raise RuntimeError(
-            f"Signed notebook executor transport only supports artifact inputs, got {input_uri!r}"
-        )
-    return match.group(1), int(match.group(2))
 
 
 def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecutionResult:
@@ -443,7 +432,7 @@ async def batch_service_loop(
                 try:
                     await terminate_subprocess_tree(watchdog_state["proc"])
                 except Exception:
-                    pass
+                    logger.exception("Failed terminating batch harness after a timeout")
                 break
             try:
                 line = await asyncio.wait_for(frame_reader.readline(), timeout=remaining)
@@ -453,7 +442,7 @@ async def batch_service_loop(
                 try:
                     await terminate_subprocess_tree(watchdog_state["proc"])
                 except Exception:
-                    pass
+                    logger.exception("Failed terminating batch harness after a timeout")
                 break
             except ValueError:
                 await _abort_oversized_frame()
@@ -525,11 +514,9 @@ async def batch_service_loop(
             )
             cell_id_pl = payload["cell_id"]
             if response.get("ok"):
-                # Prefer post-persist display metadata (carries artifact_uri) over the harness's
-                # pre-persist payload, as single-cell does.
-                display_outputs = response.get("display_outputs") or (
-                    payload.get("display_outputs") or []
-                )
+                # What was stored, as single-cell does: the harness's metadata names files with no
+                # artifact behind them, and a failed display store is an empty list here.
+                display_outputs = response["display_outputs"]
                 await _record(
                     cell_id_pl,
                     BatchCellResult(
@@ -662,9 +649,7 @@ def materialize_artifact_to_dir(
     var_name: str,
 ) -> dict[str, str] | None:
     """Write an artifact's blob to ``target_dir/<var><ext>``; return the spec or None."""
-    artifact_id, version = _parse_artifact_uri(uri)
-    if not artifact_id:
-        return None
+    artifact_id, version = host.parse_artifact_uri(uri)
     artifact_mgr = host.get_artifact_manager()
     art = artifact_mgr.artifact_store.get_artifact(artifact_id, version)
     if art is None:
@@ -956,6 +941,9 @@ async def batch_service_persist(
     except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
         return {"ok": False, "error": str(exc)}
 
+    if not stored_ok:
+        return {"ok": False, "error": STORE_FAILED}
+
     # Carry the post-persist metadata (with artifact_uri) in the ack so the dispatcher
     # broadcasts the URI-bearing version, as single-cell does.
     display_outputs_meta = payload.get("display_outputs") or []
@@ -969,14 +957,11 @@ async def batch_service_persist(
                 input_hashes,
                 display_outputs_meta,
                 source_hash=source_hash,
-                source=cell.source,
+                source=executed_source,
                 env_hash=env_hash,
             )
         except Exception as exc:
             logger.warning("Batch display persist failed for %s: %s", cell_id, exc)
-
-    if not stored_ok:
-        return {"ok": False, "error": STORE_FAILED}
 
     # Stored as in single-cell. Rerun All stores it too, or the next Run All replays an
     # older run's; only ``# @nocache`` stores none.
@@ -1010,7 +995,7 @@ async def batch_service_persist(
             key_parts=prov.key_parts,
         )
     except Exception:
-        pass
+        logger.exception("Batch could not record the run of cell %s", cell_id)
 
     # So a later cache check finds rich CellOutput objects. The dispatcher does this too,
     # but direct execute_batch calls (tests, REPL) need it here.
