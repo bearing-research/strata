@@ -189,6 +189,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Run All stores what happened, in the order it happened.** A cell whose outputs failed
+  to save left a stored display behind with no value. A display that failed to store was
+  still reported, with no file behind it. Displays now record the source that ran rather
+  than an edit made during the batch, and a fan-out instance's output can be staged as an
+  input from outside the batch. (#1432)
 - **A loop cell that fails reports it like any other cell.** A display that couldn't be
   stored, or an iteration whose carry file was missing, ended the request with an exception
   instead of a failed cell. It's now a failed result that keeps the loop's output and
@@ -604,6 +609,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   their own cell, and a list holding one keeps it instead of turning it into source text. A read
   through an expression, like `model$predict(x)` or `fs[[1]](x)`, now counts too. A cell calling a
   name another cell defines reruns once, because it now depends on that cell. (#1436)
+- **A cell that fails after running keeps what it printed and which worker ran it.** A failure in a
+  step after the run, such as storing displays, cleared the console and the mutation warnings. On R,
+  a failed store, a failed mount sync or any other failure also lost the worker's name. A timeout or
+  unexpected failure on a remote worker now keeps the `@output_dir` files it had uploaded, as a lost
+  worker and a cancel already did. A failed store keeps its mutation warnings, an R timeout names
+  how to raise the limit, and a linked or unsafe output file reports its own message instead of
+  "Execution failed". (#1434)
 - **A cell refused before it runs takes its old results down.** A failed `@fetch` check, an
   unresolved `@dataset` or `@table`, a refused `@write_table`, an R cell asking for what R can't do,
   or a second run of a running build returned its error and left the last run's displays on screen,
