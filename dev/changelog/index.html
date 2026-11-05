@@ -4051,6 +4051,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A failed cell's traceback starts at the cell.</strong> The frames of Strata's own harness
+  before the cell's first frame are gone, library frames after it stay, and the error line
+  prints once. <strong>Full traceback</strong> under the error keeps the whole thing for a bug report.
+  Cold, warm and Run All failures now read the same: a warm run printed the error line
+  twice, a cold one and Run All showed only that line in the browser, and a syntax error
+  chained two tracebacks. A loop or <code>@each</code> failure says which iteration or item. (#1444)</li>
 <li><strong>A fresh notebook no longer logs warnings about nothing.</strong> A table an upstream cell has
   yet to write is an ordinary state, so its unresolved fingerprint logs at debug; a catalog
   that cannot answer still warns. A warm worker gets 60 seconds to start, not 10: its first
