@@ -169,7 +169,10 @@ async function main() {
     for (const theme of THEMES) {
       const { context, page } = await loadNotebook(browser, baseUrl, lake.sessionId, theme)
       const rides = page.locator('.cell').filter({ hasText: '@table rides' })
+      // A cell's actions open on hover.
+      await rides.hover()
       await rides.locator('button[title="Run (Shift+Enter)"]').click()
+      await page.mouse.move(0, 0)
       await page.locator('.read-overlay').waitFor({ timeout: TIMEOUT_MS })
       await page.waitForTimeout(400)
       await shoot(page, 'read-confirm', outDir, theme)
@@ -229,7 +232,10 @@ async function main() {
           .locator('.cell')
           .filter({ has: page.locator('.tests-badge') })
           .first()
+        await cell.hover()
         await cell.locator('.tests-toggle').click()
+        // Off the cell, or its actions sit in the shot.
+        await page.mouse.move(0, 0)
         await page.locator('.tests-panel').waitFor({ timeout: TIMEOUT_MS })
         // Wait for a per-test row, not just the panel: an empty panel would
         // photograph as "tests exist but nothing ran", the opposite of the point.
