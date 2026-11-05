@@ -236,6 +236,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   run's console, displays and variables without executing anything. Hits on cells
   with downstream readers replay their console too, where they used to show nothing
   new, and a hit's saved time is the cost of the run it replays. (#1400)
+- **A loop no longer holds its carry in memory between iterations.** The server kept the seed and
+  each iteration's carry in memory for the whole loop, so a large checkpoint cost that much for
+  every iteration. Each iteration now copies it from the store in bounded chunks, and restoring a
+  checkpoint of files does the same. (#1438)
 - **A table's columns line up, and a null reads as a null.** A numeric column's
   header, stats and cells now right-align together, a null among them. Nulls reach
   the viewer as nulls, not as empty strings, and the Stats row no longer goes blank
@@ -603,10 +607,6 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
-- **A loop no longer holds its carry in memory between iterations.** The server kept the seed and
-  each iteration's carry in memory for the whole loop, so a large checkpoint cost that much for
-  every iteration. Each iteration now copies it from the store in bounded chunks, and restoring a
-  checkpoint of files does the same. (#1438)
 - **A cell that fails after running keeps what it printed and which worker ran it.** A failure in a
   step after the run, such as storing displays, cleared the console and the mutation warnings. On R,
   a failed store, a failed mount sync or any other failure also lost the worker's name. A timeout or
