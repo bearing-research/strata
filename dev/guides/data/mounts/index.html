@@ -3012,8 +3012,8 @@ total an upper bound ("up to 2.0 GB to read"). A size that is not known, such as
 pinned mount's, is not guessed. After a successful run, <code>.strata/reads/index.json</code> records
 what each input moved and on which machine; see
 <a href="../../../notebook/lake-aware-cells/#what-a-run-moved">What a run moved</a>.</p>
-<p><img alt="A cell that scans the table lake:taxi.rides, with a badge in its header reading &quot;reads up to 27.5 MB&quot; beside its worker and cache badges." src="../../../assets/input-weight-light.png#only-light" />
-<img alt="A cell that scans the table lake:taxi.rides, with a badge in its header reading &quot;reads up to 27.5 MB&quot; beside its worker and cache badges." src="../../../assets/input-weight-dark.png#only-dark" /></p>
+<p><img alt="A cell that scans the table lake:taxi.rides, with a badge in its header reading &quot;reads up to 27.5 MB&quot; beside its cache badge." src="../../../assets/input-weight-light.png#only-light" />
+<img alt="A cell that scans the table lake:taxi.rides, with a badge in its header reading &quot;reads up to 27.5 MB&quot; beside its cache badge." src="../../../assets/input-weight-dark.png#only-dark" /></p>
 <p>Strata copies a remote mount in its own process, not the notebook's venv, so
 its filesystem library goes where Strata is installed: the <code>s3</code> extra for
 <code>s3://</code> (<code>s3fs</code>), <code>gcs</code> for <code>gs://</code> (<code>gcsfs</code>) and <code>azure</code> for <code>az://</code>

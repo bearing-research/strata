@@ -4036,8 +4036,8 @@ only on the registry's workers, as service mode does. A notebook's own
 flagged and fails if run, and the panel offers no editor for them.</p>
 <p><strong>A host with its own machine picker can hide the panel.</strong> Set
 <code>STRATA_NOTEBOOK_WORKERS_PANEL=hidden</code> and the notebook page leaves the Workers
-panel out. Cells still show their worker badge and health, <code># @worker</code> still
-routes, and the host sets a notebook's default worker with
+panel out. A cell on a named or remote worker still shows its badge and health,
+<code># @worker</code> still routes, and the host sets a notebook's default worker with
 <code>PUT /v1/notebooks/{id}/worker</code>.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>By default the worker accepts any caller that can reach its URL. For any worker deployed to a public endpoint, set a bearer token so only your notebook server can dispatch cells.</p>

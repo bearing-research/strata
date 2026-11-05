@@ -3535,8 +3535,8 @@ drawer (click <strong>expand</strong>) shows the dependency.</p>
 <h2 id="4-re-run-for-cache-hits">4. Re-run for cache hits<a class="headerlink" href="#4-re-run-for-cache-hits" title="Permanent link">&para;</a></h2>
 <p>Press <span class="keys"><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span> on the loader cell again. The 2-second pause
 is gone, Strata returned the cached <code>df</code> instantly, and the cell
-header shows a <strong>cached</strong> badge with what it saved. Hover the cell to
-see the load time ("loaded in 5ms" or similar).</p>
+header shows a <strong>cached</strong> badge with what it saved. The right of the
+header gives the load time ("loaded in 5ms" or similar).</p>
 <p>The cache is content-addressed: the cache key is a hash of the
 cell's source, its upstream artifacts, and the environment lockfile.
 Re-running with the same three is a cache hit. No <code>@memoize</code>,
