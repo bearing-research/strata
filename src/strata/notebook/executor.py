@@ -2442,32 +2442,35 @@ class CellExecutor:
         if not consumed_vars:
             return
 
-        # Publishing from an environment that doesn't match ``uv.lock`` would stamp the
-        # artifact with the wrong environment, and first-writer-wins makes it everyone's
-        # answer. Refuse the publish, not the run: the result stays local, and a broken sync
-        # stays the owner's problem.
-        attestation_error = self.session.environment_attestation_error()
-        if attestation_error is not None:
-            logger.warning(
-                "Not publishing cell %s to the team store: %s, so its provenance "
-                "would describe an environment the result was not built in. "
-                "Re-run the environment sync.",
-                cell_id,
-                attestation_error,
-            )
-            return
-
-        store = TeamStore(str(base_url), self._ambient_strata_headers())
         try:
-            await publish_cell_outputs(
-                store,
-                self.session.get_artifact_manager(),
-                cell_id=cell_id,
-                consumed_vars=consumed_vars,
-                variant=variant,
-            )
-        finally:
-            await store.aclose()
+            # Publishing from an environment that doesn't match ``uv.lock`` would stamp the
+            # artifact with the wrong environment, and first-writer-wins makes it everyone's
+            # answer. Refuse the publish, not the run: the result stays local, and a broken sync
+            # stays the owner's problem.
+            attestation_error = self.session.environment_attestation_error()
+            if attestation_error is not None:
+                logger.warning(
+                    "Not publishing cell %s to the team store: %s, so its provenance "
+                    "would describe an environment the result was not built in. "
+                    "Re-run the environment sync.",
+                    cell_id,
+                    attestation_error,
+                )
+                return
+
+            store = TeamStore(str(base_url), self._ambient_strata_headers())
+            try:
+                await publish_cell_outputs(
+                    store,
+                    self.session.get_artifact_manager(),
+                    cell_id=cell_id,
+                    consumed_vars=consumed_vars,
+                    variant=variant,
+                )
+            finally:
+                await store.aclose()
+        except Exception:
+            logger.exception("Could not offer cell %s's outputs to the team store", cell_id)
 
     def _manifest_tables(
         self,
