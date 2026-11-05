@@ -9,6 +9,7 @@ import {
   durationLabel,
   formatDuration,
   isCachedAgain,
+  restoredTimes,
 } from './cacheBadge.ts'
 
 test('a hit with a known cost says what it saved', () => {
@@ -117,4 +118,26 @@ test('a stale cell back to ready does not pass the run off as a load', () => {
 test('no figure, no label', () => {
   assert.equal(durationLabel(null, null), '')
   assert.equal(durationLabel(0, {}), '')
+})
+
+test('a reloaded page gets back what the last run took or the last hit loaded in', () => {
+  const ran = { last_got: { cache_hit: false }, last_duration_ms: 2100 }
+  assert.deepEqual(restoredTimes({ ...ran, status: 'ready' }), { runMs: 2100 })
+  assert.deepEqual(restoredTimes({ ...ran, status: 'stale' }), { runMs: 2100 })
+
+  const hit = { status: 'ready', last_got: { cache_hit: true }, last_duration_ms: 12 }
+  assert.deepEqual(restoredTimes(hit), { loadMs: 12 })
+})
+
+test('a run claims no figure once its result is gone', () => {
+  const ran = { last_got: { cache_hit: false }, last_duration_ms: 2100 }
+  assert.deepEqual(restoredTimes({ ...ran, status: 'idle' }), {})
+  assert.deepEqual(restoredTimes({ ...ran, status: 'error' }), {})
+  assert.deepEqual(restoredTimes({ status: 'ready' }), {})
+})
+
+test('a live hit keeps its own load time over the restored one', () => {
+  const hit = { cacheHit: true, cacheSavedMs: 2000, cacheLoadMs: 11 }
+  assert.equal(cacheFieldsAfterSync(true, 'ready', hit, 2000, 99).cacheLoadMs, 11)
+  assert.equal(cacheFieldsAfterSync(true, 'ready', undefined, 2000, 99).cacheLoadMs, 99)
 })

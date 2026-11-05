@@ -34,7 +34,12 @@ import type {
   WorkerSpec,
   WidgetSpec,
 } from '../types/notebook'
-import { cachedAgainFields, cacheFieldsAfterSync, isCachedAgain } from '../utils/cacheBadge'
+import {
+  cachedAgainFields,
+  cacheFieldsAfterSync,
+  isCachedAgain,
+  restoredTimes,
+} from '../utils/cacheBadge'
 import { storedErrorOutput } from '../utils/storedError'
 import { lastGotOf } from '../utils/provenanceLine'
 import { useStrata } from '../composables/useStrata'
@@ -1000,12 +1005,15 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
   )
   localCell.output = storedErrorOutput(serverCell) ?? localCell.output
   localCell.lastGot = parseLastGot(serverCell.last_got) ?? localCell.lastGot
+  const restored = restoredTimes(serverCell)
+  localCell.durationMs ??= restored.runMs
   const cacheFields = cacheFieldsAfterSync(
     serverCell.cache_hit,
     localCell.status,
     previousOutput,
     // Not durationMs: after a page load that is gone, and on a hit it is the load time.
     localCell.lastGot?.ms,
+    restored.loadMs,
   )
   if (cacheFields.cacheHit) {
     // A cell that displays nothing still has a result, as in `cell_output`.

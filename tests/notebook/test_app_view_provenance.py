@@ -52,6 +52,7 @@ async def test_a_run_and_then_a_hit_read_right_with_no_server(tmp_path):
     assert re.search(r"Computed \d{4}-\d\d-\d\d \d\d:\d\d UTC · took ", _app_export(notebook_dir))
     payload = session.serialize_cell(session.notebook_state.get_cell("show"))
     assert payload["last_got"] == {"cache_hit": False, "ms": int(ran.duration_ms)}
+    assert payload["last_duration_ms"] == int(ran.duration_ms)
 
     hit = await executor.execute_cell("show", SHOW)
     assert hit.cache_hit
@@ -61,6 +62,7 @@ async def test_a_run_and_then_a_hit_read_right_with_no_server(tmp_path):
     assert " · from cache, saved " in _app_export(notebook_dir)
     payload = session.serialize_cell(session.notebook_state.get_cell("show"))
     assert payload["last_got"] == {"cache_hit": True, "ms": int(ran.duration_ms)}
+    assert payload["last_duration_ms"] == 1
 
 
 @pytest.mark.asyncio
