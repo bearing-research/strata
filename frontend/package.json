@@ -9,6 +9,7 @@
     "test": "node --test src/**/*.test.ts",
     "benchmark:notebook": "node scripts/bench-notebook-flows.mjs",
     "embed:smoke": "node scripts/embed-smoke.mjs",
+    "cell-layout:smoke": "node scripts/cell-layout-smoke.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "preview": "vite preview"
