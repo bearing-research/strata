@@ -58,7 +58,8 @@ def _session(tmp_path: Path) -> NotebookSession:
 def _assert_starts_at_the_cell(text: str, last_line: str) -> None:
     lines = text.strip().splitlines()
     assert lines[0] == "Traceback (most recent call last):"
-    assert lines[1].startswith('  File "<cell>", line 2')
+    assert lines[1].startswith('  File "<cell')
+    assert ", line 2, in <module>" in lines[1]
     assert lines[-1] == last_line
     assert text.count(last_line) == 1
     assert "harness" not in text and "pool_worker" not in text
@@ -144,14 +145,15 @@ async def _assert_every_failure_reads_the_same(executor: CellExecutor) -> None:
         assert result.error == expected
         _assert_starts_at_the_cell(result.traceback, expected)
         assert "harness" in result.traceback_full or "pool_worker" in result.traceback_full
+        assert CELLS[cell_id].splitlines()[1] in result.traceback
 
     result = await executor.execute_cell("lib", THROUGH_A_LIBRARY)
     assert "decoder.py" in result.traceback
     assert "harness" not in result.traceback and "pool_worker" not in result.traceback
 
     result = await executor.execute_cell("syntax", SYNTAX_ERROR)
-    assert result.error == "SyntaxError: invalid syntax (<cell>, line 2)"
-    assert result.traceback.startswith('  File "<cell>", line 2')
+    assert result.error == "SyntaxError: invalid syntax (<cell syntax>, line 2)"
+    assert result.traceback.startswith('  File "<cell syntax>", line 2')
     assert result.traceback.count("SyntaxError") == 1
     assert "During handling" not in result.traceback_full
 
@@ -189,6 +191,77 @@ class TestEveryPathAgrees:
         assert failed.error == "ZeroDivisionError: division by zero"
         _assert_starts_at_the_cell(failed.traceback, failed.error)
         assert "harness" in failed.traceback_full
+        assert "y = 1 / 0" in failed.traceback
+
+
+def _spec(cell_id: str, source: str, consumed: list[str] | None = None) -> dict:
+    return {
+        "cell_id": cell_id,
+        "source": source,
+        "consumed_vars": consumed or [],
+        "env": {},
+        "mount_manifest": {},
+        "source_hash": "",
+        "env_hash": "",
+    }
+
+
+class TestAFrameQuotesItsOwnCell:
+    """Line numbers are per cell, so a frame must never quote the running cell's line."""
+
+    # Line 4 of each is what a shared name would quote for the other's frame.
+    PICKLED = (
+        "def make(divisor):\n\n    def divide(x):\n        return x / divisor\n"
+        "    return divide\n\ndivide = make(0)\n"
+    )
+    CALLER = "a = 1\nb = 2\nc = 3\nd = 4\nresult = divide(1)\n"
+
+    def _two_cells(self, tmp_path: Path, first: str, second: str) -> NotebookSession:
+        notebook_dir = create_notebook(tmp_path, "Frames")
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", first)
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", second)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
+        return session
+
+    async def test_a_function_pickled_from_another_cell_quotes_nothing(self, tmp_path):
+        """Its source isn't in this process, and the running cell's line 4 is another line."""
+        executor = CellExecutor(self._two_cells(tmp_path, self.PICKLED, self.CALLER))
+
+        assert (await executor.execute_cell("up", self.PICKLED)).success
+        result = await executor.execute_cell("down", self.CALLER)
+
+        assert not result.success
+        assert 'File "<cell down>", line 5' in result.traceback
+        assert "result = divide(1)" in result.traceback
+        assert 'File "<cell up>", line 4, in divide' in result.traceback
+        assert "d = 4" not in result.traceback
+
+    async def test_a_function_exported_from_another_cell_quotes_its_line(self, tmp_path):
+        first = "# a note\n\n\ndef f(x):\n    return 1 / x\n"
+        second = "a = 1\nresult = f(0)\n"
+        executor = CellExecutor(self._two_cells(tmp_path, first, second))
+
+        assert (await executor.execute_cell("up", first)).success
+        result = await executor.execute_cell("down", second)
+
+        assert not result.success
+        assert "result = f(0)" in result.traceback
+        assert "return 1 / x" in result.traceback
+
+    async def test_cells_sharing_a_batch_quote_their_own_lines(self, tmp_path):
+        session = self._two_cells(tmp_path, self.PICKLED, self.CALLER)
+
+        result = await CellExecutor(session).execute_batch(
+            [_spec("up", self.PICKLED, ["divide"]), _spec("down", self.CALLER)]
+        )
+
+        failed = next(r for r in result.cell_results if r.cell_id == "down")
+        assert "result = divide(1)" in failed.traceback
+        assert "return x / divisor" in failed.traceback
+        assert "d = 4" not in failed.traceback
 
 
 async def test_a_loop_failure_says_which_iteration(tmp_path):

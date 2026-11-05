@@ -1268,6 +1268,35 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
         assert [m["origin"] for m in seen] == ["notebook", "run"]
 
     @pytest.mark.asyncio
+    async def test_an_http_executor_worker_quotes_the_failing_line(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+    ):
+        """The cell's id crosses to the worker, which compiles the cell under it."""
+        sample_notebook.notebook_state.workers = [
+            WorkerSpec(
+                name="gpu-http",
+                backend=WorkerBackendType.EXECUTOR,
+                runtime_id="gpu-http-a100",
+                config={"url": notebook_executor_server["execute_url"]},
+            )
+        ]
+        sample_notebook.notebook_state.worker = "gpu-http"
+        source = "a = 1\nb = 1 / 0\n"
+        cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        cell1.worker = "gpu-http"
+        cell1.source = source
+        sample_notebook.re_analyze_cell("cell1")
+
+        result = await CellExecutor(sample_notebook).execute_cell("cell1", source)
+
+        assert result.success is False
+        assert result.execution_method == "executor"
+        assert 'File "<cell cell1>", line 2' in result.traceback
+        assert "b = 1 / 0" in result.traceback
+
+    @pytest.mark.asyncio
     async def test_execute_supports_http_executor_worker_with_class_instances(
         self,
         tmp_path,

@@ -126,11 +126,14 @@ def deserialize_inputs(manifest: dict) -> dict[str, Any]:
     return inputs
 
 
-def _exec_with_display(source: str, namespace: dict) -> Any | None:
+def _exec_with_display(source: str, namespace: dict, cell_id: str | None) -> Any | None:
     """Execute source; if the last statement is a bare expression, eval and return it."""
     import ast as _ast
 
-    tree = _ast.parse(source, _traceback.CELL_FILENAME)
+    filename = _traceback.cell_filename(cell_id)
+    # Before the parse: a cell that doesn't parse has a line to quote too.
+    _traceback.remember_source(filename, source)
+    tree = _ast.parse(source, filename)
 
     if not tree.body:
         return None
@@ -140,13 +143,13 @@ def _exec_with_display(source: str, namespace: dict) -> Any | None:
         if len(tree.body) > 1:
             mod = _ast.Module(body=tree.body[:-1], type_ignores=[])
             _ast.fix_missing_locations(mod)
-            exec(compile(mod, _traceback.CELL_FILENAME, "exec"), namespace)  # noqa: S102
+            exec(compile(mod, filename, "exec"), namespace)  # noqa: S102
         expr = _ast.Expression(body=last.value)
         _ast.fix_missing_locations(expr)
-        result = eval(compile(expr, _traceback.CELL_FILENAME, "eval"), namespace)  # noqa: S307
+        result = eval(compile(expr, filename, "eval"), namespace)  # noqa: S307
         return result if result is not None else None
     else:
-        exec(compile(tree, _traceback.CELL_FILENAME, "exec"), namespace)  # noqa: S102
+        exec(compile(tree, filename, "exec"), namespace)  # noqa: S102
         return None
 
 
@@ -272,6 +275,7 @@ def execute_cell(
     loop_until_expr: str | None = None,
     stdout_capture: io.StringIO | None = None,
     stderr_capture: io.StringIO | None = None,
+    cell_id: str | None = None,
 ) -> tuple[dict, list[Any], str, str, list[dict], dict[str, Any] | None]:
     """Execute a cell; return outputs, displays, captured streams, mutations and loop state.
 
@@ -302,7 +306,7 @@ def execute_cell(
         )
 
         with display_capture.capture_side_effects():
-            _display_value = _exec_with_display(source, namespace)
+            _display_value = _exec_with_display(source, namespace, cell_id)
 
         loop_state: dict[str, Any] | None = None
         if loop_until_expr is not None:
@@ -528,7 +532,7 @@ def _run_one_batched_cell(
             try:
                 try:
                     with display_capture.capture_side_effects():
-                        display_value = _exec_with_display(source, namespace)
+                        display_value = _exec_with_display(source, namespace, cell_id)
                 except Exception as exc:
                     hint = _work_dir.hint(exc, manifest)
                     _send_frame(
@@ -884,6 +888,7 @@ def main():
                 loop_until_expr=loop_until_expr,
                 stdout_capture=stdout_buffer,
                 stderr_capture=stderr_buffer,
+                cell_id=manifest.get("strata_cell_id"),
             )
             # Reported here: inputs deserialize before console capture starts.
             if _ser.x64_was_enabled_here():
