@@ -449,14 +449,48 @@ write_rds <- function(value, output_dir, var_name) {
   )
 }
 
+holds_function <- function(value) {
+  is.function(value) ||
+    (is.list(value) && any(vapply(value, holds_function, logical(1))))
+}
+
+# A cell's function closes over the whole cell, data included. What is stored holds
+# what it names, and what those name, and no more.
+without_rest_of_cell <- function(fn) {
+  kept <- new.env(parent = globalenv())
+  pending <- list(fn)
+  while (length(pending) > 0L) {
+    current <- pending[[1L]]
+    pending[[1L]] <- NULL
+    named <- c(all.names(body(current)), unlist(lapply(formals(current), all.names)))
+    for (name in setdiff(intersect(named, ls(cell_env, all.names = TRUE)), ls(kept, all.names = TRUE))) {
+      found <- get(name, envir = cell_env)
+      if (is.function(found) && identical(environment(found), cell_env)) {
+        pending[[length(pending) + 1L]] <- found
+        environment(found) <- kept
+      }
+      assign(name, found, envir = kept)
+    }
+  }
+  environment(fn) <- kept
+  fn
+}
+
 serialize_value <- function(value, output_dir, var_name) {
+  if (is.function(value)) {
+    if (!is.primitive(value) && identical(environment(value), cell_env)) {
+      value <- without_rest_of_cell(value)
+    }
+    return(write_rds(value, output_dir, var_name))
+  }
   if (inherits(value, "data.frame")) {
     return(write_arrow(value, output_dir, var_name))
   }
   if (is.atomic(value) && !is.matrix(value) && !is.array(value)) {
     return(write_json(value, output_dir, var_name))
   }
-  if (is.list(value) && !is.object(value)) {
+  # JSON would turn a function into its source text.
+  if (is.list(value) && !is.object(value) && !holds_function(value)) {
     return(tryCatch(
       write_json(value, output_dir, var_name),
       error = function(e) write_rds(value, output_dir, var_name)
@@ -555,13 +589,6 @@ if (is.null(exec_error)) {
 
   for (var_name in emit_names) {
     value <- get(var_name, envir = cell_env)
-    # Skip functions: the Python side relies on `cloudpickle` for
-    # cell-defined classes/functions and there's no clean R equivalent
-    # for cross-language consumption. For Phase 1, functions don't
-    # serialize out of an R cell.
-    if (is.function(value)) {
-      next
-    }
     payload <- tryCatch(
       serialize_value(value, output_dir, var_name),
       error = function(e) {

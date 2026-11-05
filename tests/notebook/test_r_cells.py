@@ -553,3 +553,117 @@ async def test_renv_restore_populates_project_library_and_runs_cell(r_notebook_r
 
     assert result.success is True, result.error
     assert result.outputs["out"]["preview"] == '{"ok":true}'
+
+
+class TestFunctionsCrossCells:
+    @pytest.mark.asyncio
+    async def test_a_called_function_from_another_cell_runs(self, r_notebook):
+        define = "f <- function(x) x + 1\n"
+        call = "y <- f(2)\nprint(y)\n"
+        _, session = r_notebook(cells=[("c1", None, define, "r"), ("c2", "c1", call, "r")])
+
+        result = await CellExecutor(session).execute_cell("c2", call)
+
+        assert result.success, result.error
+        assert "3" in result.stdout
+        assert session.dag.consumed_variables["c1"] == {"f"}
+
+    @pytest.mark.asyncio
+    async def test_a_changed_function_makes_its_caller_stale(self, r_notebook):
+        call = "y <- f(2)\nprint(y)\n"
+        _, session = r_notebook(
+            cells=[("c1", None, "f <- function(x) x + 1\n", "r"), ("c2", "c1", call, "r")]
+        )
+        await CellExecutor(session).execute_cell("c2", call)
+
+        cell = session.notebook_state.get_cell("c1")
+        cell.source = "f <- function(x) x + 10\n"
+        session.re_analyze_cell("c1")
+        result = await CellExecutor(session).execute_cell("c2", call)
+
+        assert result.success, result.error
+        assert not result.cache_hit
+        assert "12" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_a_function_passed_by_name_is_stored_too(self, r_notebook):
+        call = "y <- sapply(1:2, f)\nprint(sum(y))\n"
+        _, session = r_notebook(
+            cells=[("c1", None, "f <- function(x) x * 2\n", "r"), ("c2", "c1", call, "r")]
+        )
+
+        result = await CellExecutor(session).execute_cell("c2", call)
+
+        assert result.success, result.error
+        assert "6" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_a_function_brings_what_it_names_and_nothing_else(self, r_notebook):
+        define = (
+            "rate <- 3\n"
+            "unrelated <- paste(rep('x', 1e6), collapse = '')\n"
+            "helper <- function(x) x * rate\n"
+            "f <- function(x) helper(x) + 1\n"
+        )
+        call = (
+            "print(f(2))\n"
+            "print(sort(ls(environment(f))))\n"
+            "print(identical(environment(get('helper', environment(f))), environment(f)))\n"
+        )
+        _, session = r_notebook(cells=[("c1", None, define, "r"), ("c2", "c1", call, "r")])
+        executor = CellExecutor(session)
+
+        first = await executor.execute_cell("c1", define)
+        result = await executor.execute_cell("c2", call)
+
+        assert first.success, first.error
+        assert first.outputs["f"]["bytes"] < 10_000
+        assert result.success, result.error
+        assert "7" in result.stdout
+        assert '"helper" "rate"' in result.stdout
+        assert "unrelated" not in result.stdout
+        assert "TRUE" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_a_default_argument_brings_what_it_names(self, r_notebook):
+        define = "rate <- 3\nf <- function(x, by = rate) x * by\n"
+        call = "print(f(2))\n"
+        _, session = r_notebook(cells=[("c1", None, define, "r"), ("c2", "c1", call, "r")])
+
+        result = await CellExecutor(session).execute_cell("c2", call)
+
+        assert result.success, result.error
+        assert "6" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_a_list_holding_a_function_stays_a_function(self, r_notebook):
+        define = "fs <- list(double = function(x) x * 2, n = 1)\n"
+        call = "print(fs$double(4))\n"
+        _, session = r_notebook(cells=[("c1", None, define, "r"), ("c2", "c1", call, "r")])
+
+        result = await CellExecutor(session).execute_cell("c2", call)
+
+        assert result.success, result.error
+        assert "8" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_a_python_cell_is_told_it_cannot_read_an_r_function(self, r_notebook):
+        call = "y = f(2)\n"
+        _, session = r_notebook(
+            cells=[("c1", None, "f <- function(x) x + 1\n", "r"), ("c2", "c1", call, "python")]
+        )
+
+        result = await CellExecutor(session).execute_cell("c2", call)
+
+        assert not result.success
+        assert "Cannot consume R-only artifact (variable 'f')" in result.error
+
+    @pytest.mark.asyncio
+    async def test_a_name_called_and_defined_as_data_elsewhere_still_runs(self, r_notebook):
+        call = "y <- c(1, 2)\nprint(sum(y))\n"
+        _, session = r_notebook(cells=[("c1", None, "c <- 5\n", "r"), ("c2", "c1", call, "r")])
+
+        result = await CellExecutor(session).execute_cell("c2", call)
+
+        assert result.success, result.error
+        assert "3" in result.stdout

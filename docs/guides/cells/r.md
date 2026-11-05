@@ -32,6 +32,15 @@ and machines without `Rscript` never start one.
 
 R execution and display are complete; remaining R polish is tracked on GitHub: [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
 
+## Functions
+
+A cell can call a function another cell defined, or pass it by name to `sapply` and the like. The function travels with what it names from its own cell, and the rest of that cell stays behind, so a function beside a large data frame stays small.
+
+Two limits:
+
+- Python cells can't read an R function.
+- Names read only inside a function's body aren't dependencies yet. If `g <- function() f(1)` needs `f` from another cell, call `f` at the top level of the cell too, or pass it to `g` as an argument.
+
 ## What you need today
 
 - R `>= 4.2` on `PATH` (Strata calls `Rscript`).

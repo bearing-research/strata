@@ -247,6 +247,40 @@ class TestIntegrationRealRscript:
         # No data references: the only inputs are the file path literal and the package.
         assert result.references == []
 
+    def test_a_called_name_is_kept_apart(self):
+        result = _RAnalyzer().analyze(_make_cell("y <- f(x) + g(1)\nh()"), session=None)
+        assert result.references == ["x"]
+        assert result.builtin_references == ["f", "g", "h"]
+
+    def test_operators_and_control_flow_are_not_called_names(self):
+        source = "if (a > 1) { b <- (a + 1)[1] } else for (i in x) print(i %in% x)"
+        result = _RAnalyzer().analyze(_make_cell(source), session=None)
+        assert result.builtin_references == ["print"]
+
+    def test_a_function_defined_first_in_the_cell_is_local(self):
+        result = _RAnalyzer().analyze(_make_cell("f <- function(x) x\ny <- f(1)"), session=None)
+        assert result.builtin_references == []
+
+    def test_a_call_before_its_definition_reads_the_upstream_one(self):
+        result = _RAnalyzer().analyze(_make_cell("f <- f(1)"), session=None)
+        assert result.builtin_references == ["f"]
+
+    @pytest.mark.parametrize(
+        "source", ["library(f)", "pkg::f(1)", "quote(f(1))", "g <- function() f(1)"]
+    )
+    def test_what_does_not_call_at_the_top_level_is_not_called(self, source):
+        result = _RAnalyzer().analyze(_make_cell(source), session=None)
+        assert "f" not in result.builtin_references
+
+    @pytest.mark.parametrize(
+        ("source", "read"),
+        [("y <- model$predict(x)", "model"), ("y <- fs[[1]](x)", "fs"), ("y <- g(h)(x)", "h")],
+    )
+    def test_an_op_that_is_an_expression_is_read(self, source, read):
+        result = _RAnalyzer().analyze(_make_cell(source), session=None)
+        assert read in result.references
+        assert "x" in result.references
+
     def test_namespace_access_not_a_reference(self):
         """``arrow::read_parquet(path)``: neither side of ``::`` is a reference."""
         cell = _make_cell("df <- arrow::read_parquet(path)")
