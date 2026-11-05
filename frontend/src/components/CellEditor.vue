@@ -38,7 +38,7 @@ import {
 } from '../utils/notebookWorkers'
 import { inputWeightBadge } from '../utils/inputWeights'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
-import { cacheBadgeLabel, cacheBadgeTitle } from '../utils/cacheBadge'
+import { cacheBadgeLabel, cacheBadgeTitle, durationLabel } from '../utils/cacheBadge'
 import { cellDotTitle } from '../utils/cellRunBadge'
 import { CELL_STATES, cellState } from '../utils/cellState'
 import { renderMarkdownToHtml } from '../utils/markdown'
@@ -287,13 +287,7 @@ const statusTitle = computed(() => {
   return stateInfo.value.label
 })
 
-const durationLabel = computed(() => {
-  if (!props.cell.durationMs) return ''
-  const ms = props.cell.durationMs
-  const time = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
-  if (props.cell.output?.cacheHit) return time
-  return `${time}`
-})
+const durationText = computed(() => durationLabel(props.cell.durationMs, props.cell.output))
 
 const canExplainStaleness = computed(() =>
   Boolean(props.cell.causality && (props.cell.status === 'idle' || props.cell.status === 'stale')),
@@ -1081,7 +1075,7 @@ function outputKey(output: CellOutput, index: number): string {
             </div>
           </div>
           <div class="cell-meta-actions">
-            <span v-if="durationLabel" class="duration">{{ durationLabel }}</span>
+            <span v-if="durationText" class="duration">{{ durationText }}</span>
             <button
               v-if="canExplainStaleness"
               class="causality-btn"

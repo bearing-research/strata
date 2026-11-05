@@ -6,6 +6,7 @@ import {
   cacheBadgeTitle,
   cachedAgainFields,
   cacheFieldsAfterSync,
+  durationLabel,
   formatDuration,
   isCachedAgain,
 } from './cacheBadge.ts'
@@ -102,4 +103,18 @@ test('a hit found on a page with no earlier output says nothing of a saving', ()
     cacheSavedMs: undefined,
     cacheLoadMs: undefined,
   })
+})
+
+test('a run says it ran and a hit says it loaded', () => {
+  assert.equal(durationLabel(3700, {}), 'ran in 3.7s')
+  assert.equal(durationLabel(36, { cacheHit: true, cacheLoadMs: 36 }), 'loaded in 36ms')
+})
+
+test('a stale cell back to ready does not pass the run off as a load', () => {
+  assert.equal(durationLabel(3700, { cacheHit: true }), '')
+})
+
+test('no figure, no label', () => {
+  assert.equal(durationLabel(null, null), '')
+  assert.equal(durationLabel(0, {}), '')
 })

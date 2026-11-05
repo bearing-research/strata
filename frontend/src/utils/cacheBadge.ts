@@ -4,6 +4,20 @@ export function formatDuration(ms: number): string {
 }
 
 /**
+ * The header's figure, saying what it measures. On a hit that is the load: a stale cell back to
+ * ready is a hit whose ``durationMs`` is still the run's, so that figure would say too much.
+ */
+export function durationLabel(
+  durationMs: number | null | undefined,
+  output: { cacheHit?: boolean; cacheLoadMs?: number } | null | undefined,
+): string {
+  if (output?.cacheHit) {
+    return output.cacheLoadMs ? `loaded in ${formatDuration(output.cacheLoadMs)}` : ''
+  }
+  return durationMs ? `ran in ${formatDuration(durationMs)}` : ''
+}
+
+/**
  * A cache hit's badge text: what it saved when that is known, never "saved 0ms".
  * Plain "cached" too when the load took longer than the run did: nothing was saved.
  */
