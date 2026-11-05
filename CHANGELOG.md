@@ -187,6 +187,10 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A loop cell that fails reports it like any other cell.** A display that couldn't be
+  stored, or an iteration whose carry file was missing, ended the request with an exception
+  instead of a failed cell. It's now a failed result that keeps the loop's output and
+  mutation warnings, and its `@output_dir` folders if the outputs hadn't saved yet. (#1431)
 - **A team store failure no longer fails your cell.** A problem offering finished outputs
   to the team store could fail a cell whose outputs were already saved, and stop a Run All
   partway. It's now logged and the run goes on, and one output that can't be offered no
