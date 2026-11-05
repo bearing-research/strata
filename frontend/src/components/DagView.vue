@@ -6,10 +6,10 @@ import { useNotebook } from '../stores/notebook'
 import { CELL_STATES, cellState, type CellState } from '../utils/cellState'
 import { LABEL_HEIGHT, labelAnchor, placeEdgeLabels } from '../utils/dagLabels'
 import { dagLineage, edgeOnLineage } from '../utils/dagLineage'
-import { panToCenter, viewBox as dagViewBox } from '../utils/dagViewport'
+import { DOCK_MIN_FIT_SCALE, panToCenter, viewBox as dagViewBox } from '../utils/dagViewport'
 import type { CellId } from '../types/notebook'
 
-defineProps<{ docked?: boolean }>()
+const props = defineProps<{ docked?: boolean }>()
 defineEmits<{ toggleDock: [] }>()
 
 // Held by the page, so moving the graph between the drawer and the dock keeps it.
@@ -239,6 +239,8 @@ const PAN_SLOP_PX = 3
 const viewportEl = ref<HTMLElement | null>(null)
 const panel = reactive({ width: 0, height: 0 })
 
+const minFitScale = computed(() => (props.docked ? DOCK_MIN_FIT_SCALE : undefined))
+
 const viewBox = computed(() => {
   // Before the first measure, the whole graph.
   if (!panel.width || !panel.height) return `0 0 ${svgWidth.value} ${svgHeight.value}`
@@ -250,11 +252,13 @@ const viewBox = computed(() => {
     zoom: zoom.value,
     panX: pan.x,
     panY: pan.y,
+    minFitScale: minFitScale.value,
   })
   return `${box.x} ${box.y} ${box.width} ${box.height}`
 })
 
-// Moving to the dock remounts this, and a narrower panel can leave the selection off screen.
+// Moving to the dock remounts this, and its narrower panel can leave the selection off screen.
+// The drawer shows the whole graph, so panning there would only push part of it out of view.
 function centerSelection() {
   const node = nodes.value.find((n) => n.id === activeSelection.value)
   if (!node) return
@@ -265,6 +269,7 @@ function centerSelection() {
       panelWidth: panel.width,
       panelHeight: panel.height,
       zoom: zoom.value,
+      minFitScale: minFitScale.value,
     },
     node,
   )
@@ -279,7 +284,7 @@ onMounted(() => {
   panelObserver = new ResizeObserver(([entry]) => {
     panel.width = entry.contentRect.width
     panel.height = entry.contentRect.height
-    if (first) centerSelection()
+    if (first && props.docked) centerSelection()
     first = false
   })
   panelObserver.observe(viewportEl.value)

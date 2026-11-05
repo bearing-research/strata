@@ -1,6 +1,7 @@
-// What part of the DAG a panel shows. A graph that fits is fitted; a wider one stays at a scale
-// its labels can be read at, and is panned, since an unreadable overview navigates nothing.
-export const MIN_FIT_SCALE = 0.8
+// What part of the DAG a panel shows. A graph that fits is fitted. The drawer is wide, so it always
+// fits the whole graph; the dock is narrow, so a wider graph stays at a scale its labels can be read
+// at, and is panned, since an unreadable overview navigates nothing.
+export const DOCK_MIN_FIT_SCALE = 0.8
 
 export interface DagView {
   graphWidth: number
@@ -10,11 +11,13 @@ export interface DagView {
   zoom: number
   panX: number
   panY: number
+  /** Omitted: fit the whole graph, however small that makes it. */
+  minFitScale?: number
 }
 
 export function viewScale(v: DagView): number {
   const fit = Math.min(v.panelWidth / v.graphWidth, v.panelHeight / v.graphHeight)
-  return Math.max(fit, MIN_FIT_SCALE) * v.zoom
+  return Math.max(fit, v.minFitScale ?? 0) * v.zoom
 }
 
 /** Centered across, and from the top when the graph is taller than the panel. */
