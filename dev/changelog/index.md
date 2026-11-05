@@ -603,6 +603,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **An R cell can call a function from another cell.** `y <- f(2)` did not count as reading `f`, so
+  the cell failed with "could not find function", and passing `f` by name failed the defining cell
+  with "failed to store output artifacts". Functions are now stored, with only what they name from
+  their own cell, and a list holding one keeps it instead of turning it into source text. A read
+  through an expression, like `model$predict(x)` or `fs[[1]](x)`, now counts too. A cell calling a
+  name another cell defines reruns once, because it now depends on that cell. (#1436)
 - **A cell that fails after running keeps what it printed and which worker ran it.** A failure in a
   step after the run, such as storing displays, cleared the console and the mutation warnings. On R,
   a failed store, a failed mount sync or any other failure also lost the worker's name. A timeout or

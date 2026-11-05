@@ -4471,6 +4471,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed_1">Fixed<a class="headerlink" href="#fixed_1" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An R cell can call a function from another cell.</strong> <code>y &lt;- f(2)</code> did not count as reading <code>f</code>, so
+  the cell failed with "could not find function", and passing <code>f</code> by name failed the defining cell
+  with "failed to store output artifacts". Functions are now stored, with only what they name from
+  their own cell, and a list holding one keeps it instead of turning it into source text. A read
+  through an expression, like <code>model$predict(x)</code> or <code>fs[[1]](x)</code>, now counts too. A cell calling a
+  name another cell defines reruns once, because it now depends on that cell. (#1436)</li>
 <li><strong>A cell that fails after running keeps what it printed and which worker ran it.</strong> A failure in a
   step after the run, such as storing displays, cleared the console and the mutation warnings. On R,
   a failed store, a failed mount sync or any other failure also lost the worker's name. A timeout or

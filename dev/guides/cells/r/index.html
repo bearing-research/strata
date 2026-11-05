@@ -947,6 +947,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-you-need-today" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3110,6 +3121,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-you-need-today" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3196,6 +3218,13 @@ respawns the pool. Adding the first R cell starts the pool, so a notebook
 that began as pure Python does not need reopening. Pure-Python notebooks
 and machines without <code>Rscript</code> never start one.</p>
 <p>R execution and display are complete; remaining R polish is tracked on GitHub: <a href="https://github.com/bearing-research/strata/issues/84">#84</a> (cross-language run-all batching).</p>
+<h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
+<p>A cell can call a function another cell defined, or pass it by name to <code>sapply</code> and the like. The function travels with what it names from its own cell, and the rest of that cell stays behind, so a function beside a large data frame stays small.</p>
+<p>Two limits:</p>
+<ul>
+<li>Python cells can't read an R function.</li>
+<li>Names read only inside a function's body aren't dependencies yet. If <code>g &lt;- function() f(1)</code> needs <code>f</code> from another cell, call <code>f</code> at the top level of the cell too, or pass it to <code>g</code> as an argument.</li>
+</ul>
 <h2 id="what-you-need-today">What you need today<a class="headerlink" href="#what-you-need-today" title="Permanent link">&para;</a></h2>
 <ul>
 <li>R <code>&gt;= 4.2</code> on <code>PATH</code> (Strata calls <code>Rscript</code>).</li>
