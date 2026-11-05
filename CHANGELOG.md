@@ -34,6 +34,8 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **A table's toolbar fits a phone.** Below about 600px, Stats, Filter, CSV and Parquet
+  collapse into one menu, so the search box keeps its width. (#PRNUM)
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:

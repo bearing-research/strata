@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowDown, ArrowUp, X } from '@lucide/vue'
+import { ArrowDown, ArrowUp, Ellipsis, X } from '@lucide/vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useStrata } from '../composables/useStrata'
 import { numericColumns } from '../utils/tableColumns'
@@ -61,6 +61,7 @@ const summaryByName = computed(() => Object.fromEntries(summary.value.map((s) =>
 
 const expanded = ref<Set<string>>(new Set())
 const showFilterForm = ref(false)
+const actionsOpen = ref(false)
 const draft = reactive({ col: '', op: 'contains', value: '', value2: '' })
 
 // Without a session and artifact (e.g. mock data), only the static preview.
@@ -265,7 +266,18 @@ onMounted(() => {
         type="search"
         placeholder="Search all columns…"
       />
-      <div class="toolbar-actions">
+      <button
+        type="button"
+        class="tool-btn toolbar-more"
+        :class="{ on: showStats || actionsOpen }"
+        aria-label="Table actions"
+        title="Table actions"
+        :aria-expanded="actionsOpen"
+        @click="actionsOpen = !actionsOpen"
+      >
+        <Ellipsis />
+      </button>
+      <div class="toolbar-actions" :class="{ open: actionsOpen }" @click="actionsOpen = false">
         <button class="tool-btn" :class="{ on: showStats }" @click="toggleStats">Stats</button>
         <button class="tool-btn" @click="showFilterForm = !showFilterForm">+ Filter</button>
         <a class="tool-btn" :href="exportUrl('csv')" download>CSV</a>
@@ -404,6 +416,27 @@ onMounted(() => {
 .toolbar-actions {
   display: flex;
   gap: 6px;
+}
+.toolbar-more {
+  display: none;
+}
+/* Below this the search box has no room beside the buttons. Inline rather than floating:
+   the table's rounded corners clip what leaves it, and a table can be one row tall. */
+@media (max-width: 600px) {
+  .data-table-toolbar {
+    flex-wrap: wrap;
+  }
+  .toolbar-more {
+    display: inline-flex;
+    align-items: center;
+  }
+  .toolbar-actions {
+    display: none;
+    flex-basis: 100%;
+  }
+  .toolbar-actions.open {
+    display: flex;
+  }
 }
 .tool-btn {
   background: var(--bg-input);
