@@ -3254,7 +3254,7 @@ details stay in the server log.</p>
 </tr>
 <tr>
 <td><code>get_cell(session_id, cell_id)</code></td>
-<td>One cell: source, status, outputs. For a widget cell, its controls and what each is set to.</td>
+<td>One cell: source, status, outputs. A failed cell has its <code>error</code> and <code>error_full</code>, the traceback from the cell's first frame and the one with the harness frames too. For a widget cell, its controls and what each is set to.</td>
 </tr>
 <tr>
 <td><code>save_cell_output(session_id, cell_id, index=-1)</code></td>
@@ -3278,7 +3278,7 @@ details stay in the server log.</p>
 </tr>
 <tr>
 <td><code>run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)</code></td>
-<td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live. With <code>confirm_reads</code>, a run over the server's read threshold returns <code>status: error</code>, <code>error_code: large_read</code> and the estimate in <code>reads</code> instead; <code>approve_reads</code> runs it.</td>
+<td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live. A cell that raised has its <code>traceback</code> and <code>traceback_full</code>. With <code>confirm_reads</code>, a run over the server's read threshold returns <code>status: error</code>, <code>error_code: large_read</code> and the estimate in <code>reads</code> instead; <code>approve_reads</code> runs it.</td>
 </tr>
 <tr>
 <td><code>cancel_cell(session_id, cell_id)</code></td>

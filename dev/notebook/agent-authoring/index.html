@@ -3462,8 +3462,8 @@ unknown workers, …) without calling any LLM.</p>
 </tr>
 </tbody>
 </table>
-<p><code>run --format json</code> reports per-cell <code>status</code>, <code>error</code> (and its <code>traceback</code>
-when the cell raised), and <code>cache_hit</code>,
+<p><code>run --format json</code> reports per-cell <code>status</code>, <code>error</code> (and its <code>traceback</code> and
+<code>traceback_full</code> when the cell raised), and <code>cache_hit</code>,
 and skips downstream cells when an upstream fails (<code>"reason": "upstream
 failed"</code>) - fix the first error and re-run; everything already correct is
 a cache hit.</p>

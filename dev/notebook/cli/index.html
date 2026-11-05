@@ -3448,7 +3448,8 @@ run.</p>
 finishes: <code>{"notebook", "success", "duration_ms", "cells": [...]}</code> with one
 entry per cell (<code>id</code>, <code>status</code> ∈ <code>ok|error|skipped</code>, <code>duration_ms</code>,
 <code>cache_hit</code>, plus <code>stdout</code> / <code>stderr</code> - truncated at 10k chars - and
-<code>error</code> / <code>reason</code> where applicable, <code>traceback</code> when the cell raised, and
+<code>error</code> / <code>reason</code> where applicable, <code>traceback</code> when the cell raised, starting
+at the cell's first frame, <code>traceback_full</code> with the harness frames too, and
 <code>error_code</code> when the failure has a stable name, such as <code>fetch_pin_mismatch</code>). A
 cache hit replays the stdout/stderr of the run behind it, cached by provenance
 along with its outputs (<code>--force</code> re-executes). A result pulled from a team store
@@ -3493,7 +3494,8 @@ digest computed from its bytes when the report is written. The ZIP export's
 </table>
 <p>CI scripts can branch on the exit code; the structured output stays parseable
 even when some cells failed (each failure produces a JSON object with
-<code>status: "error"</code>, its <code>error</code>, and the <code>traceback</code> when the cell raised).</p>
+<code>status: "error"</code>, its <code>error</code>, and <code>traceback</code> and <code>traceback_full</code> when the
+cell raised).</p>
 <h2 id="example-github-actions">Example: GitHub Actions<a class="headerlink" href="#example-github-actions" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">jobs</span><span class="p">:</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">notebooks</span><span class="p">:</span>
@@ -3597,6 +3599,8 @@ view. They open the notebook locally - no server, no env sync:</p>
 <p>Every <code>&lt;cell_id&gt;</code> here and below is the id from <code>notebook.toml</code> or <code>cell list</code>,
 not the cell's <code># @name</code>.</p>
 <p>Each takes <code>--format human|json</code> (JSON is the default - these are agent-first).
+A failed cell's JSON in <code>cell show</code> has <code>error</code>, the traceback from the cell's
+first frame, and <code>error_full</code>, with the harness frames too.
 The JSON shapes match the server's REST API (<code>GET /{id}/cells</code>, <code>GET /{id}/dag</code>),
 so a script written against the local CLI keeps working against a running
 server later. Exit codes follow the same contract as <code>run</code> / <code>validate</code>: <code>0</code>
@@ -3665,7 +3669,8 @@ $SID &lt;cell_id&gt; --rerun</code>). The server owns its venv, so the remote pa
 (<code>--no-sync</code> is a local-only flag), and <code>--rerun</code> / <code>--force</code> map to the
 server's run modes, so remote execution has the same three modes as local.</p>
 <p><code>--format json</code> (default) writes a single clean JSON object to <strong>stdout</strong> - the
-executor's logs go to stderr, so the stdout stream stays parseable:</p>
+executor's logs go to stderr, so the stdout stream stays parseable. A cell that
+raised has its <code>traceback</code> and <code>traceback_full</code>, as in <code>strata run</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>run<span class="w"> </span>nb<span class="w"> </span>featurize<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'{status, cache_hit, error}'</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>strata<span class="w"> </span>cell<span class="w"> </span><span class="nb">test</span><span class="w"> </span>nb<span class="w"> </span>featurize<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.cases[] | select(.outcome != "passed")'</span>
 </code></pre></div>
