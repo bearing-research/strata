@@ -136,7 +136,7 @@ function toggleInspect() {
   openInspect(props.cell.id)
 }
 
-// Cell unit tests (Python only). The toolbar button doubles as a health badge.
+// Cell unit tests (Python only).
 const notebookId = computed(() => (notebook as { sessionId?: string }).sessionId)
 
 /** The 20-row preview arrives as column-keyed dicts; the data grid renders
@@ -837,9 +837,6 @@ function outputKey(output: CellOutput, index: number): string {
           @click="toggleTests(cell.id)"
         >
           <FlaskConical />
-          <span v-if="testBadge" class="tests-badge" :class="`tests-badge--${testBadge.cls}`">
-            {{ testBadge.text }}
-          </span>
         </button>
       </div>
     </div>
@@ -1072,6 +1069,15 @@ function outputKey(output: CellOutput, index: number): string {
               >
                 <component :is="stateInfo.icon" /> {{ stateInfo.label }}
               </span>
+              <button
+                v-if="testBadge"
+                class="tests-badge"
+                :class="`tests-badge--${testBadge.cls}`"
+                :title="testBadge.title"
+                @click="toggleTests(cell.id)"
+              >
+                tests {{ testBadge.text }}
+              </button>
             </div>
           </div>
           <div class="cell-meta-actions">
@@ -2423,13 +2429,12 @@ function outputKey(output: CellOutput, index: number): string {
   position: relative;
 }
 .tests-badge {
-  margin-left: 3px;
-  padding: 0 4px;
-  border-radius: 8px;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 14px;
-  vertical-align: middle;
+  padding: 1px 6px;
+  border: none;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
 }
 .tests-badge--pass {
   background: var(--tint-success, rgba(60, 180, 90, 0.18));
@@ -2445,10 +2450,12 @@ function outputKey(output: CellOutput, index: number): string {
 }
 .tests-badge--stale {
   background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--text-muted);
 }
 .tests-badge--running {
   background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--accent-primary);
 }
 </style>
