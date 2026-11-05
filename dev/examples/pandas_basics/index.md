@@ -20,7 +20,7 @@ artifact, so edits stay fast and the DAG stays honest.
 |---|---|
 | `create_data` | Builds a small sales DataFrame as the root of the chain. |
 | `select_filter` | Column selection + boolean indexing. |
-| `add_columns` | Derived columns (`revenue = units * price`, `month`). |
+| `add_columns` | A new frame, `orders`, with derived columns (`revenue = units * price`, `month`). |
 | `groupby` | `groupby` + aggregate. |
 | `pivot` | Pivot from long to wide. |
 | `merge` | Join two DataFrames. |
@@ -41,13 +41,13 @@ Four cells ship with pytest tests next to them
 
 Tests run in the notebook's own venv and receive a `cell` fixture whose
 attributes are the cell's namespace **after it runs against its real
-upstream input**: so `cell.sales` is the actual DataFrame, `cell.revenue`
-a value it computed, `cell.my_func` a function it defined:
+upstream input**: so `cell.sales` is the actual DataFrame, `cell.orders`
+a frame it computed, `cell.my_func` a function it defined:
 
 ```python
 def test_revenue_is_units_times_price(cell):
-    expected = cell.sales["units"] * cell.sales["price"]
-    assert (cell.sales["revenue"] == expected).all()
+    expected = cell.orders["units"] * cell.orders["price"]
+    assert (cell.orders["revenue"] == expected).all()
 ```
 
 Open the Tests panel on a cell to run them, or send the `cell_run_tests`
@@ -119,11 +119,12 @@ high_value.head()
 
 ```python
 # @name Add computed columns
-sales["revenue"] = sales["units"] * sales["price"]
-sales["month"] = sales["date"].dt.to_period("M").astype(str)
+orders = sales.copy()
+orders["revenue"] = orders["units"] * orders["price"]
+orders["month"] = orders["date"].dt.to_period("M").astype(str)
 
-print(f"Total revenue: ${sales['revenue'].sum():,.2f}")
-sales[["date", "region", "product", "units", "price", "revenue", "month"]].head()
+print(f"Total revenue: ${orders['revenue'].sum():,.2f}")
+orders[["date", "region", "product", "units", "price", "revenue", "month"]].head()
 ```
 
 ## Revenue by region and product
@@ -133,7 +134,7 @@ sales[["date", "region", "product", "units", "price", "revenue", "month"]].head(
 ```python
 # @name Revenue by region and product
 region_product = (
-    sales.groupby(["region", "product"])["revenue"]
+    orders.groupby(["region", "product"])["revenue"]
     .agg(["sum", "mean", "count"])
     .round(2)
     .sort_values("sum", ascending=False)
@@ -148,7 +149,7 @@ print(region_product)
 
 ```python
 # @name Monthly revenue pivot
-monthly_pivot = sales.pivot_table(
+monthly_pivot = orders.pivot_table(
     values="revenue",
     index="month",
     columns="region",
@@ -173,7 +174,7 @@ region_info = pd.DataFrame(
 )
 
 region_summary = (
-    sales.groupby("region")["revenue"].sum().reset_index().merge(region_info, on="region")
+    orders.groupby("region")["revenue"].sum().reset_index().merge(region_info, on="region")
 )
 
 region_summary["pct_of_target"] = (
@@ -191,7 +192,7 @@ print(region_summary)
 # @name Top product per region
 # Top product by revenue in each region.
 top_products = (
-    sales.groupby(["region", "product"])["revenue"]
+    orders.groupby(["region", "product"])["revenue"]
     .sum()
     .reset_index()
     .sort_values("revenue", ascending=False)

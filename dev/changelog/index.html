@@ -3893,6 +3893,20 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell's header names its worker only when that says something.</strong> A code cell on the
+  local default and every markdown cell lose the <code>worker: local</code> badge. A cell that names a
+  worker keeps it, and so does every code cell when the notebook's default is remote.
+  (#1445)</li>
+<li><strong>The figure in a cell's header says what it measures:</strong> <code>ran in 3.7s</code> for a run and
+  <code>loaded in 36ms</code> for a cache hit. (#1446)</li>
+<li><strong>The notes panel shows plain text.</strong> A note's title and preview drop their markdown, so
+  <code>Press **Run All** again</code> reads <code>Press Run All again</code>. (#1447)</li>
+<li><strong>The <code>pandas_basics</code> sample opens without a warning.</strong> Its computed columns go in a new
+  frame, <code>orders</code>, instead of redefining and mutating <code>sales</code>. (#1448)</li>
+<li><strong>A table's toolbar fits a phone.</strong> Below about 600px, Stats, Filter, CSV and Parquet
+  collapse into one menu, so the search box keeps its width. (#1450)</li>
+<li><strong>The home page's cards fit their labels.</strong> The column is wider, so each label and hint
+  takes one line; on a narrower page the cards wrap instead. (#1451)</li>
 <li><strong>The docs read more consistently.</strong> <code>strata tutorial caching</code> is step 1 of Your first
   notebook, every nav title matches its page's heading, headings use sentence case, and the
   landing page's title is styled. (#1449)</li>
