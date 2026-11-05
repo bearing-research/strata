@@ -1,4 +1,4 @@
-# Prompt Cell Annotations
+# Prompt annotations
 
 Prompt cells (language `prompt`) accept an additional set of annotations that
 configure the AI call.

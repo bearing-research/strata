@@ -14,9 +14,9 @@ Strata Notebook has seven cell kinds:
 
 Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; each has its own page.
 
-See [The DAG and staleness](../../concepts/dag-and-staleness.md) for the execution model; see [Cell Annotations](../../reference/annotations/index.md) for the full per-annotation reference.
+See [The DAG and staleness](../../concepts/dag-and-staleness.md) for the execution model; see [Annotations](../../reference/annotations/index.md) for the full per-annotation reference.
 
-## Markdown Cells
+## Markdown cells
 
 Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.
 

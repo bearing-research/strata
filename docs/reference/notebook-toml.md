@@ -1,4 +1,4 @@
-# notebook.toml Schema
+# notebook.toml
 
 `notebook.toml` is the **committed** configuration for a notebook. It declares the cells, their metadata, the per-notebook environment, mounts, workers, database connections, and any AI/secret-manager wiring. The file is human-editable and git-diffable; the matching backend writer round-trips it so external edits survive UI saves.
 
@@ -289,7 +289,7 @@ token_env = "STRATA_FLY_WORKER_TOKEN"
 | `name` | string (required) | Worker name referenced in `# @worker <name>` annotations. Must match `[a-zA-Z0-9][a-zA-Z0-9._-]*`. |
 | `backend` | `"local"` \| `"executor"` | Default `"local"`. `"executor"` for HTTP workers; `"local"` for in-process. |
 | `runtime_id` | string \| absent | Stable fingerprint hashed into cell provenance. Bump to invalidate the cache for cells using this worker. |
-| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"direct"` push, the default, or `"signed"` pull-model), `token` (literal - dev only), `token_env` (env var name - preferred), and for `"signed"` an optional `strata_url`, the server address the worker uses for the manifest's URLs (default: the server's own URL). See [Distributed Workers](../notebook/workers.md). |
+| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"direct"` push, the default, or `"signed"` pull-model), `token` (literal - dev only), `token_env` (env var name - preferred), and for `"signed"` an optional `strata_url`, the server address the worker uses for the manifest's URLs (default: the server's own URL). See [Workers](../notebook/workers.md). |
 
 ## `[connections.<name>]` - Named database connections
 
@@ -420,7 +420,7 @@ When the same piece of metadata is declared in multiple places, the most specifi
 2. Cell-level `worker` / `timeout` / `env` in `[[cells]]`
 3. Notebook-level `worker` / `timeout` / `env` in the top-level table
 
-Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See [Cell Annotations](annotations/index.md).
+Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See [Annotations](annotations/index.md).
 
 ## What lives elsewhere
 
