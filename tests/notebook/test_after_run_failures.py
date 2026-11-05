@@ -391,7 +391,7 @@ class TestOnAWorker:
 
 
 class TestBatch:
-    """Store, displays, reject a false store, console, push last."""
+    """Store, reject a false store, displays, console, push last."""
 
     SOURCE = PYTHON[1]
     READER = PYTHON[2]
@@ -431,7 +431,9 @@ class TestBatch:
         assert steps[4:] == ["_store_outputs", "_store_console_outputs", "_push_to_team_store"]
         assert _latest(session, "v", "__display__0") == 1
 
-    async def test_a_false_store_is_rejected_after_the_displays(self, tmp_path, monkeypatch, steps):
+    async def test_a_false_store_is_rejected_before_the_displays(
+        self, tmp_path, monkeypatch, steps
+    ):
         _fail(monkeypatch, "_store_outputs", False, steps)
         session, running = await self._run(tmp_path)
 
@@ -440,9 +442,9 @@ class TestBatch:
         assert result.end_reason == "persist_failed"
         assert result.failed_cell_id == "v"
         assert self._first(result).error == STORE_FAILED
-        assert steps == ["_store_outputs", "_store_display_outputs"]
-        # The display outlives the cell's outputs.
-        assert _latest(session, "v", "__display__0") == 1
+        assert steps == ["_store_outputs"]
+        # No display outlives the cell's outputs.
+        assert _latest(session, "v", "__display__0") is None
         assert _latest(session, "v", "value") is None
 
     @pytest.mark.parametrize(
