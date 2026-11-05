@@ -189,6 +189,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Run All stores what happened, in the order it happened.** A cell whose outputs failed
+  to save left a stored display behind with no value. A display that failed to store was
+  still reported, with no file behind it. Displays now record the source that ran rather
+  than an edit made during the batch, and a fan-out instance's output can be staged as an
+  input from outside the batch. (#PRNUM)
 - **A worker is told to stop whenever Strata stops waiting for it.** A remote request that
   times out or drops, and a job status reply Strata cannot read, now cancel the job, so the
   machine isn't left computing for nobody. An unreadable status also reads as a job status
