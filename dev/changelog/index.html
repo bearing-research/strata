@@ -4047,6 +4047,14 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A fresh notebook no longer logs warnings about nothing.</strong> A table an upstream cell has
+  yet to write is an ordinary state, so its unresolved fingerprint logs at debug; a catalog
+  that cannot answer still warns. A warm worker gets 60 seconds to start, not 10: its first
+  start in a fresh environment compiles what it imports, 20 to 24 seconds with <code>pandas</code> and
+  <code>pyarrow</code> measured here, and it was killed for it. (#1439)</li>
+<li><strong><code>[[mounts]]</code> or <code>[[workers]]</code> appended by hand to a new <code>notebook.toml</code> is valid.</strong> The
+  scaffold wrote <code>mounts = []</code> and <code>workers = []</code>, and TOML refuses to define a key twice. An
+  empty section is now left out. (#1439)</li>
 <li><strong>Run All stores what happened, in the order it happened.</strong> A cell whose outputs failed
   to save left a stored display behind with no value. A display that failed to store was
   still reported, with no file behind it. Displays now record the source that ran rather

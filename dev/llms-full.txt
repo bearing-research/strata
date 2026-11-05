@@ -7018,8 +7018,8 @@ cells = [
 ```
 
 **What `strata new` writes is a superset of this.** The scaffold
-emits a UUID `notebook_id`, `created_at` / `updated_at` timestamps, and
-empty `workers = []` / `mounts = []` arrays. **Edit the generated file in
+emits a UUID `notebook_id` and `created_at` / `updated_at` timestamps.
+**Edit the generated file in
 place** - replace `cells = []` with your cell list and leave the other
 fields alone. Don't overwrite it with the minimal template above; the
 minimum is what *you* must provide when writing from scratch, not what
