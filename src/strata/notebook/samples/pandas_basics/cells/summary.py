@@ -1,7 +1,7 @@
 # @name Top product per region
 # Top product by revenue in each region.
 top_products = (
-    sales.groupby(["region", "product"])["revenue"]
+    orders.groupby(["region", "product"])["revenue"]
     .sum()
     .reset_index()
     .sort_values("revenue", ascending=False)

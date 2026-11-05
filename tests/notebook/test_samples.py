@@ -52,6 +52,13 @@ def test_a_copy_of_each_sample_reads_as_a_notebook_with_its_cells(sample, tmp_pa
     assert all(cell.source.strip() for cell in notebook.cells)
 
 
+@pytest.mark.parametrize("sample", SAMPLES, ids=lambda s: s.name)
+def test_no_sample_opens_with_a_warning(sample, tmp_path):
+    notebook_dir = copy_sample(sample, tmp_path)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    assert session.dag.shadow_warnings == {}
+
+
 def test_every_sample_runs_without_a_key():
     """A first run should not stop at a missing API key, and a prompt cell needs one."""
     for sample in SAMPLES:
