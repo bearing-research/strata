@@ -34,6 +34,7 @@ from strata.notebook.writer import (
     update_environment_metadata,
     update_notebook_connections,
     update_notebook_env,
+    update_notebook_mounts,
     update_notebook_timeout,
     update_notebook_worker,
     update_notebook_workers,
@@ -55,6 +56,29 @@ def test_create_notebook():
         assert (notebook_dir / "pyproject.toml").exists()
         assert (notebook_dir / "cells").exists()
         assert (notebook_dir / "cells").is_dir()
+
+
+def test_a_new_notebook_takes_array_tables_appended_by_hand(tmp_path):
+    notebook_dir = create_notebook(tmp_path, "New Notebook")
+
+    with (notebook_dir / "notebook.toml").open("a") as toml:
+        toml.write('\n[[mounts]]\nname = "data"\nuri = "file:///data"\n')
+        toml.write('\n[[workers]]\nname = "gpu"\nbackend = "executor"\n')
+
+    state = parse_notebook(notebook_dir)
+    assert [mount.name for mount in state.mounts] == ["data"]
+    assert [worker.name for worker in state.workers] == ["gpu"]
+
+
+def test_emptied_mounts_leave_no_section_behind(tmp_path):
+    notebook_dir = create_notebook(tmp_path, "New Notebook")
+    update_notebook_mounts(notebook_dir, [MountSpec(name="data", uri="file:///data")])
+    assert "[[mounts]]" in (notebook_dir / "notebook.toml").read_text()
+
+    update_notebook_mounts(notebook_dir, [])
+
+    assert "mounts" not in (notebook_dir / "notebook.toml").read_text()
+    assert parse_notebook(notebook_dir).mounts == []
 
 
 def test_create_notebook_project_mount_adds_pinned_ro_mount():

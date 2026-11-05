@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 
 import pytest
@@ -169,6 +170,52 @@ class TestFingerprintTables:
         assert snaps == {"events": None}
         assert fp1 != fp2
         assert fp1[0].startswith("events:table:empty:")
+
+    @pytest.mark.parametrize("name", ["db.later", "nosuchdb.later"])
+    def test_a_table_not_written_yet_is_not_a_warning(self, mini_warehouse, config, caplog, name):
+        uri = mini_warehouse["uri"].replace("db.events", name)
+        specs = [TableSpec(name="later", uri=uri)]
+
+        with caplog.at_level(logging.DEBUG, logger="strata.notebook.tables"):
+            fp1, snaps = fingerprint_tables(specs, config)
+            fp2, _ = fingerprint_tables(specs, config)
+
+        assert [r.levelname for r in caplog.records] == ["DEBUG", "DEBUG"]
+        assert "later" in caplog.text
+        # Still never a cache hit: the run decides.
+        assert fp1 != fp2 and fp1[0].startswith("later:table:unresolved:")
+        assert snaps == {}
+
+    def test_a_warehouse_not_made_yet_is_not_a_warning(self, tmp_path, config, caplog):
+        specs = [TableSpec(name="later", uri=f"file://{tmp_path / 'not-yet'}#db.later")]
+
+        with caplog.at_level(logging.DEBUG, logger="strata.notebook.tables"):
+            fps, _ = fingerprint_tables(specs, config)
+
+        assert [r.levelname for r in caplog.records] == ["DEBUG"]
+        assert fps[0].startswith("later:table:unresolved:")
+
+    def test_a_catalog_that_cannot_answer_is_a_warning(
+        self, mini_warehouse, config, caplog, monkeypatch
+    ):
+        def refused(self, table_uri):
+            raise OSError("connection refused")
+
+        monkeypatch.setattr("strata.iceberg.catalog.PyIcebergCatalog.load_table", refused)
+        specs = [TableSpec(name="events", uri=mini_warehouse["uri"])]
+
+        with caplog.at_level(logging.DEBUG, logger="strata.notebook.tables"):
+            fps, _ = fingerprint_tables(specs, config)
+
+        assert [r.levelname for r in caplog.records] == ["WARNING"]
+        assert "connection refused" in caplog.text
+        assert fps[0].startswith("events:table:unresolved:")
+
+    def test_a_table_not_there_still_fails_a_read_naming_it(self, mini_warehouse, config):
+        uri = mini_warehouse["uri"].replace("db.events", "db.later")
+        spec = TableSpec(name="later", uri=uri)
+        with pytest.raises(ValueError, match="cannot load table"):
+            resolve_table_snapshot(spec, config)
 
     def test_sorted_by_name(self, mini_warehouse, config):
         specs = [

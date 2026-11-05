@@ -51,6 +51,10 @@ def resolve_table_snapshot(
     return resolve_table_read(spec, config, env, notebook=notebook)[0]
 
 
+class TableNotThere(ValueError):
+    """The catalog answered: the table does not exist (yet)."""
+
+
 def resolve_table_read(
     spec: TableSpec,
     config: StrataConfig,
@@ -65,12 +69,16 @@ def resolve_table_read(
     if spec.snapshot_pin is not None:
         return spec.snapshot_pin, None, None
 
-    from strata.iceberg.catalog import PyIcebergCatalog
+    from pyiceberg.exceptions import NoSuchTableError
+
+    from strata.iceberg.catalog import PyIcebergCatalog, WarehouseNotFound
 
     try:
         # A provider per call: its catalog cache holds this notebook's secrets.
         catalog = PyIcebergCatalog(config, env, notebook=notebook)
         table = catalog.load_table(spec.uri)
+    except (NoSuchTableError, WarehouseNotFound) as e:
+        raise TableNotThere(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
     except Exception as e:
         raise ValueError(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
 
@@ -110,6 +118,11 @@ def fingerprint_tables(
     for spec in sorted(specs, key=lambda t: t.name):
         try:
             snapshot_id, size, location = resolve_table_read(spec, config, env, notebook=notebook)
+        except TableNotThere as e:
+            # Usual before an upstream cell first writes it; a run that still finds none says so.
+            logger.debug("table %s (%s) not there yet: %s", spec.name, spec.uri, e)
+            fingerprints.append(f"{spec.name}:table:unresolved:{random_fingerprint()}")
+            continue
         except ValueError as e:
             logger.warning(
                 "table fingerprint unresolved for %s (%s): %s",

@@ -28,7 +28,7 @@ def _session(tmp_path: Path, cells: list[tuple[str, str, str]], toml: str = "") 
         previous = cell_id
     if toml:
         path = notebook_dir / "notebook.toml"
-        path.write_text(path.read_text().replace("mounts = []\n", "") + toml)
+        path.write_text(path.read_text() + toml)
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
     session.refresh_environment_runtime()
     return session

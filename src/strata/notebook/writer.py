@@ -72,12 +72,13 @@ def _dump_notebook_toml(data: dict[str, Any], fp: Any) -> None:
 
     ``[[workers]]``, ``[[mounts]]`` and ``[[variant_group]]`` are written as
     hand-formatted blocks after the ``tomli_w`` output, matching the committed
-    example notebooks.
+    example notebooks. An empty one is left out: ``mounts = []`` would make a ``[[mounts]]``
+    appended by hand invalid TOML.
     """
     aot: dict[str, list[dict[str, Any]]] = {}
     for key in _ARRAY_OF_TABLES_SECTIONS:
         value = data.get(key)
-        if isinstance(value, list) and value:
+        if isinstance(value, list):
             aot[key] = value
             data = {k: v for k, v in data.items() if k != key}
 
