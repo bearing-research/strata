@@ -27,6 +27,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from strata.notebook.file_clone import clone_reader
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
 
 logger = logging.getLogger(__name__)
@@ -497,5 +498,8 @@ def materialize(
         reader = None if held is None else store.open_blob_reader(artifact_id, version)
         if reader is None:
             raise FileNotFoundError(f"output folder file {rel} is missing from the store")
-        with reader as src, open(target, "wb") as out:
-            shutil.copyfileobj(src, out, _CHUNK)
+        with reader as src:
+            if clone_reader(src, target):
+                continue
+            with open(target, "wb") as out:
+                shutil.copyfileobj(src, out, _CHUNK)

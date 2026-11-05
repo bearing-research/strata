@@ -34,6 +34,12 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **A cell's input is cloned from the store where the filesystem allows it.** A local blob
+  reaches the harness as a copy-on-write clone (APFS, btrfs, XFS with reflinks), which takes
+  no time and almost no disk until something writes to it, and a write never reaches the
+  store. An output folder's files, a loop's carry and a resumed run's files clone too, and a
+  loop digests its carry when storing it instead of reading it back each iteration. Anything
+  else, another filesystem or an object store, is copied in chunks as before. (#1443)
 - **A cell's header names its worker only when that says something.** A code cell on the
   local default and every markdown cell lose the `worker: local` badge. A cell that names a
   worker keeps it, and so does every code cell when the notebook's default is remote.

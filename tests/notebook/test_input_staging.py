@@ -6,6 +6,8 @@ goes on without that input, and only a missing ``@each`` item is raised.
 
 from __future__ import annotations
 
+import gzip
+import io
 import json
 import os
 import sys
@@ -18,6 +20,7 @@ from strata.notebook import each
 from strata.notebook.artifact_integration import BLOB_COPY_CHUNK_BYTES
 from strata.notebook.cell_paths import batch
 from strata.notebook.executor import CellExecutor
+from strata.notebook.file_clone import clone_file
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -50,6 +53,22 @@ def _blobs(session: NotebookSession):
 
 def _id(session: NotebookSession, cell_id: str, name: str, variant: str | None = None) -> str:
     return session.get_artifact_manager().cell_artifact_id(cell_id, name, variant=variant)
+
+
+class _NoFileno:
+    """A reader that is only ``read(size)``, as a blob store's contract promises."""
+
+    def __init__(self, data: bytes):
+        self.raw = io.BytesIO(data)
+
+    def read(self, size: int = -1) -> bytes:
+        return self.raw.read(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
 
 
 class _Failing:
@@ -103,6 +122,194 @@ class _Strict:
     def __exit__(self, *exc):
         if self.reader is not None:
             self.reader.close()
+
+
+class TestClone:
+    @staticmethod
+    def _latest(session: NotebookSession) -> tuple[str, int]:
+        manager = session.get_artifact_manager()
+        artifact_id = manager.cell_artifact_id("a", "x")
+        return artifact_id, manager.artifact_store.get_latest_version(artifact_id).version
+
+    async def test_a_cell_writing_to_its_input_never_reaches_the_store(self, tmp_path):
+        session = _session(tmp_path, ("a", "x = 'stored bytes'\n"), ("b", "print(x)\n"))
+        await _run(session, "a")
+        artifact_id, version = self._latest(session)
+        manager = session.get_artifact_manager()
+        stored = manager.load_artifact_data(artifact_id, version)
+        path = tmp_path / "input"
+
+        assert manager.copy_blob(artifact_id, version, path)
+
+        assert path.read_bytes() == stored
+        assert path.stat().st_nlink == 1
+        with path.open("r+b") as written:
+            written.write(b"cell was here")
+        assert manager.load_artifact_data(artifact_id, version) == stored
+
+    async def test_an_input_has_the_mode_of_a_new_file(self, tmp_path):
+        session = _session(tmp_path, ("a", "x = 'stored bytes'\n"), ("b", "print(x)\n"))
+        await _run(session, "a")
+        new_file = tmp_path / "new"
+        new_file.touch()
+        path = tmp_path / "input"
+
+        assert session.get_artifact_manager().copy_blob(*self._latest(session), path)
+
+        assert path.stat().st_mode == new_file.stat().st_mode
+
+    @staticmethod
+    def _needs_clones(tmp_path: Path) -> None:
+        source = tmp_path / "probe-source"
+        source.write_bytes(b"bytes")
+        with source.open("rb") as opened:
+            if not clone_file(opened.fileno(), tmp_path / "probe"):
+                pytest.skip("this filesystem has no clones")
+
+    def test_a_clone_has_the_times_of_a_new_file(self, tmp_path):
+        self._needs_clones(tmp_path)
+        source = tmp_path / "source"
+        source.write_bytes(b"old")
+        os.utime(source, (1_000_000_000, 1_000_000_000))
+        path = tmp_path / "clone"
+
+        with source.open("rb") as opened:
+            assert clone_file(opened.fileno(), path)
+
+        assert path.stat().st_mtime > source.stat().st_mtime
+
+    async def test_an_output_folders_files_clone_too(self, tmp_path, monkeypatch):
+        self._needs_clones(tmp_path)
+        session = _session(
+            tmp_path,
+            ("a", "# @output_dir out\n(out / 'f.txt').write_text('in a folder')\n"),
+            ("b", "print((out / 'f.txt').read_text())\n"),
+        )
+        await _run(session, "a")
+
+        def no_copy(*_args):
+            raise AssertionError("copied instead of cloning")
+
+        monkeypatch.setattr("strata.notebook.output_dirs.shutil.copyfileobj", no_copy)
+
+        result = await _run(session, "b")
+
+        assert "in a folder" in result.stdout
+
+    async def test_an_output_folders_files_copy_where_they_cannot_clone(
+        self, tmp_path, monkeypatch
+    ):
+        session = _session(
+            tmp_path,
+            ("a", "# @output_dir out\n(out / 'f.txt').write_text('in a folder')\n"),
+            ("b", "print((out / 'f.txt').read_text())\n"),
+        )
+        await _run(session, "a")
+        monkeypatch.setattr("strata.notebook.output_dirs.clone_reader", lambda *_args: False)
+
+        result = await _run(session, "b")
+
+        assert "in a folder" in result.stdout
+
+    async def test_a_filesystem_with_clones_reads_nothing(self, tmp_path, monkeypatch):
+        self._needs_clones(tmp_path)
+        session = _session(tmp_path, ("a", "x = 'stored bytes'\n"), ("b", "print(x)\n"))
+        await _run(session, "a")
+        manager = session.get_artifact_manager()
+        artifact_id, version = self._latest(session)
+        stored = manager.load_artifact_data(artifact_id, version)
+
+        def no_copy(*_args):
+            raise AssertionError("copied instead of cloning")
+
+        monkeypatch.setattr("strata.notebook.artifact_integration.shutil.copyfileobj", no_copy)
+        path = tmp_path / "input"
+        assert manager.copy_blob(artifact_id, version, path)
+        assert path.read_bytes() == stored
+
+    async def test_a_clone_that_fails_is_copied_instead(self, tmp_path, monkeypatch):
+        session = _session(tmp_path, ("a", "x = 'stored bytes'\n"), ("b", "print(x)\n"))
+        await _run(session, "a")
+        manager = session.get_artifact_manager()
+        artifact_id, version = self._latest(session)
+        monkeypatch.setattr(
+            "strata.notebook.artifact_integration.clone_reader", lambda *_args: False
+        )
+        path = tmp_path / "input"
+
+        assert manager.copy_blob(artifact_id, version, path)
+
+        assert path.read_bytes() == manager.load_artifact_data(artifact_id, version)
+
+    async def test_a_target_already_there_is_overwritten_as_before(self, tmp_path):
+        session = _session(tmp_path, ("a", "x = 'stored bytes'\n"), ("b", "print(x)\n"))
+        await _run(session, "a")
+        manager = session.get_artifact_manager()
+        artifact_id, version = self._latest(session)
+        path = tmp_path / "input"
+        path.write_bytes(b"old" * 1000)
+
+        assert manager.copy_blob(artifact_id, version, path)
+
+        assert path.read_bytes() == manager.load_artifact_data(artifact_id, version)
+
+    @pytest.mark.parametrize(
+        "reader",
+        [
+            lambda: io.BytesIO(b"from afar"),
+            lambda: _NoFileno(b"from afar"),
+            lambda: io.BufferedReader(io.BytesIO(b"from afar")),
+        ],
+        ids=["bytes", "read-only", "buffered-over-bytes"],
+    )
+    def test_a_reader_with_no_file_is_copied(self, tmp_path, monkeypatch, reader):
+        session = _session(tmp_path, ("a", "x = 1\n"))
+        manager = session.get_artifact_manager()
+        monkeypatch.setattr(manager.artifact_store, "open_blob_reader", lambda *_args: reader())
+        path = tmp_path / "input"
+
+        assert manager.copy_blob("a", 1, path)
+
+        assert path.read_bytes() == b"from afar"
+
+    def test_a_reader_over_a_file_is_not_the_files_bytes(self, tmp_path, monkeypatch):
+        """A gzip reader's ``fileno`` is the compressed file's: cloning that corrupts the input."""
+        packed = tmp_path / "packed.gz"
+        with gzip.open(packed, "wb") as writing:
+            writing.write(b"what it reads")
+        session = _session(tmp_path, ("a", "x = 1\n"))
+        manager = session.get_artifact_manager()
+        monkeypatch.setattr(
+            manager.artifact_store, "open_blob_reader", lambda *_args: gzip.open(packed, "rb")
+        )
+        path = tmp_path / "input"
+
+        assert manager.copy_blob("a", 1, path)
+
+        assert path.read_bytes() == b"what it reads"
+
+    def test_a_refused_clone_leaves_no_file(self, tmp_path):
+        path = tmp_path / "clone"
+        # Not a closed descriptor: the new file would take its number and clone itself.
+        read_end, write_end = os.pipe()
+        try:
+            assert clone_file(read_end, path) is False
+        finally:
+            os.close(read_end)
+            os.close(write_end)
+
+        assert not path.exists()
+
+    def test_a_refused_clone_leaves_a_file_already_there(self, tmp_path):
+        source = tmp_path / "source"
+        source.write_bytes(b"source")
+        path = tmp_path / "clone"
+        path.write_bytes(b"already there")
+
+        with source.open("rb") as opened:
+            assert clone_file(opened.fileno(), path) is False
+
+        assert path.read_bytes() == b"already there"
 
 
 class TestBoundedMemory:

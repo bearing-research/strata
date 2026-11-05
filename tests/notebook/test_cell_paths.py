@@ -1143,9 +1143,68 @@ class TestLoop:
 
         manager = SimpleNamespace(copy_ready_blob=copy_ready_blob)
 
-        digest = loop._write_carry(manager, ("a", 1), tmp_path / "x")
+        digest = loop._write_carry(manager, ("a", 1), tmp_path / "x", None)
 
         assert digest == hashlib.sha256(b"bytes").hexdigest()
+
+    def test_a_known_digest_is_not_read_again(self, tmp_path, monkeypatch):
+        def copy_ready_blob(_id, _version, path):
+            path.write_bytes(b"bytes")
+
+        def no_digest(*_args):
+            raise AssertionError("read the carry to digest it")
+
+        monkeypatch.setattr(loop.hashlib, "file_digest", no_digest)
+        manager = SimpleNamespace(copy_ready_blob=copy_ready_blob)
+
+        assert loop._write_carry(manager, ("a", 1), tmp_path / "x", "known") == "known"
+
+    def test_a_carry_replaces_the_seed_already_there(self, tmp_path):
+        """A clone cannot replace a file: left there, the carry is always a full copy."""
+        path = tmp_path / "x"
+        path.write_bytes(b"the seed")
+
+        def copy_ready_blob(_id, _version, target):
+            assert not target.exists()
+            target.write_bytes(b"the carry")
+
+        manager = SimpleNamespace(copy_ready_blob=copy_ready_blob)
+
+        loop._write_carry(manager, ("a", 1), path, None)
+
+        assert path.read_bytes() == b"the carry"
+
+    @pytest.mark.asyncio
+    async def test_each_iterations_key_chains_on_the_last_ones_bytes(self, seeded, monkeypatch):
+        source = "# @loop max_iter=3 carry=state\nstate = {'n': state['n'] + 1}\n"
+        session = seeded(source)
+        assert (await CellExecutor(session).execute_cell("seed", "state = {'n': 0}\n")).success
+        chained: dict[int, str] = {}
+        derive = loop.derive_subkey
+
+        def spying(*parts):
+            if len(parts) == 3 and parts[2].startswith("iter="):
+                chained[int(parts[2].removeprefix("iter="))] = parts[1]
+            return derive(*parts)
+
+        monkeypatch.setattr(loop, "derive_subkey", spying)
+        manager = session.get_artifact_manager()
+        stored: dict[int, bytes] = {}
+        stage = manager.store_cell_output
+
+        def store(**kwargs):
+            if kwargs["variable_name"] == "state":
+                stored[kwargs["iteration"]] = kwargs["blob_data"]
+            return stage(**kwargs)
+
+        monkeypatch.setattr(manager, "store_cell_output", store)
+
+        result = await CellExecutor(session).execute_cell("lp", source)
+
+        assert result.success, result.error
+        assert sorted(stored) == [0, 1, 2]
+        assert chained[1] == hashlib.sha256(stored[0]).hexdigest()
+        assert chained[2] == hashlib.sha256(stored[1]).hexdigest()
 
     @pytest.mark.asyncio
     async def test_a_carry_gone_before_the_next_iteration_fails_the_cell(self, seeded, monkeypatch):

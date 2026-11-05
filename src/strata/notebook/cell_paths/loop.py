@@ -443,6 +443,7 @@ async def _run_loop(
             mutation_warnings=all_mutation_warnings,
         )
 
+    prev_carry_hash: str | None = None
     for k in range(loop.max_iter):
         with tempfile.TemporaryDirectory(prefix=f"strata_loop_iter_{k}_") as tmpdir:
             output_dir = Path(tmpdir)
@@ -454,7 +455,7 @@ async def _run_loop(
             ext = _LOOP_CONTENT_TYPE_EXT.get(carry_content_type, ".pickle")
             carry_file = f"{loop.carry}{ext}"
             prev_carry_hash = await anyio.to_thread.run_sync(
-                _write_carry, artifact_mgr, carry, output_dir / carry_file
+                _write_carry, artifact_mgr, carry, output_dir / carry_file, prev_carry_hash
             )
             input_specs[loop.carry] = {
                 "content_type": carry_content_type,
@@ -627,6 +628,7 @@ async def _run_loop(
                 iteration=k,
                 extra_params={"loop_run": loop_run},
             )
+            prev_carry_hash = hashlib.sha256(new_carry_blob).hexdigest()
             # The next iteration copies it from the store: a checkpoint can be gigabytes.
             del new_carry_blob
             final_artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
@@ -914,9 +916,16 @@ def _seed_loop_folders(
         )
 
 
-def _write_carry(manager: Any, carry: tuple[str, int], path: Path) -> str:
-    """Copy the carry where the harness reads it, returning the digest of its bytes."""
+def _write_carry(manager: Any, carry: tuple[str, int], path: Path, digest: str | None) -> str:
+    """Copy the carry where the harness reads it, returning *digest*, or its bytes' if unknown.
+
+    Only the seed's is unknown; reading the carry each iteration would cost what a clone saved.
+    """
+    # The seed may be here already, and a clone cannot replace a file.
+    path.unlink(missing_ok=True)
     manager.copy_ready_blob(*carry, path)
+    if digest is not None:
+        return digest
     with path.open("rb") as written:
         return hashlib.file_digest(written, "sha256").hexdigest()
 
