@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight } from '@lucide/vue'
 import { computed, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { Cell, CellId } from '../types/notebook'
-import { notePreview } from '../utils/notePreview'
+import { noteHeading, notePreview } from '../utils/notePreview'
 
 const { orderedCells } = useNotebook()
 
@@ -13,19 +13,10 @@ interface NoteCard {
   preview: string
 }
 
-function firstMarkdownHeading(source: string): string | null {
-  for (const raw of source.split('\n')) {
-    const line = raw.trim()
-    const m = /^#+\s+(.+)$/.exec(line)
-    if (m) return m[1].trim()
-  }
-  return null
-}
-
 function cardFor(cell: Cell): NoteCard {
   // Title: ``# name`` annotation, then the first heading, then the cell ID prefix.
   const annotationName = cell.annotations?.name ?? null
-  const headingName = firstMarkdownHeading(cell.source)
+  const headingName = noteHeading(cell.source)
   const title = annotationName || headingName || cell.id.slice(0, 8)
   const preview = notePreview(cell.source) || '(empty)'
   return { id: cell.id, title, preview }
