@@ -1,4 +1,4 @@
-# R cell annotations
+# R annotations
 
 The same annotation parser handles both Python and R cells (`#`-prefixed comments at the top of the source). Supported on R cells:
 

@@ -487,6 +487,7 @@ class TestFailure:
 
         assert not result.success
         assert result.error == "Item 'bad' failed: ValueError: no"
+        assert result.traceback.startswith("Item 'bad' failed:\nTraceback")
         assert "ValueError: no" in result.traceback
         assert nb.ran() == ["bad", "good"]
         manager = nb.session.get_artifact_manager()

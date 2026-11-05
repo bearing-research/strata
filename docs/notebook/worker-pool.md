@@ -1,4 +1,4 @@
-# Worker Pool
+# Worker pool
 
 !!! info "This page is the `strata-pool` package README"
 
@@ -14,7 +14,7 @@
     `strata-worker` binary either way.
 
     If what you want is hardware you keep running and point cells at, see
-    [Distributed Workers](workers.md#worker-pools-a-different-layer), which
+    [Workers](workers.md#worker-pools-a-different-layer), which
     compares the two side by side.
 
 --8<-- "packages/strata-pool/README.md:body"

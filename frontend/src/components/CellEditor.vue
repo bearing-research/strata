@@ -1292,7 +1292,14 @@ function outputKey(output: CellOutput, index: number): string {
               {{ effectiveWorkerHealthLabel }}
             </span>
           </div>
-          <pre class="output-error-detail">{{ cell.output.error }}</pre>
+          <pre class="output-error-detail">{{ cell.output.traceback || cell.output.error }}</pre>
+          <details
+            v-if="cell.output.tracebackFull && cell.output.tracebackFull !== cell.output.traceback"
+            class="output-error-full"
+          >
+            <summary>Full traceback</summary>
+            <pre class="output-error-detail">{{ cell.output.tracebackFull }}</pre>
+          </details>
           <!-- R install needs a lockfile: without one, ``renv::install``
                writes into the system library, so show a read-only hint. -->
           <div
@@ -2225,6 +2232,16 @@ function outputKey(output: CellOutput, index: number): string {
   margin: 0;
   font-family: monospace;
   white-space: pre-wrap;
+}
+.output-error-full {
+  margin-top: 8px;
+}
+.output-error-full summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.output-error-full .output-error-detail {
+  margin-top: 4px;
 }
 .remote-error-summary {
   display: flex;

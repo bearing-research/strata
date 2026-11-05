@@ -1,4 +1,4 @@
-# Lake-Aware Cells
+# Lake and Iceberg
 
 A **lake-aware cell** is a notebook cell that takes an Iceberg table as a
 versioned input via the [`@table`](../reference/annotations/python.md#table) annotation. The
@@ -349,6 +349,6 @@ result turns out to be cached may still ask; asking is the safe direction.
 ## See also
 
 - [`@table` annotation reference](../reference/annotations/python.md#table) - the syntax surface.
-- [Cell Annotations](../reference/annotations/index.md) - all per-cell annotations.
+- [Annotations](../reference/annotations/index.md) - all per-cell annotations.
 - [Core Quickstart](../getting-started/core.md) - `client.materialize` and
   `scan@v1` from the SDK directly, without the notebook.
