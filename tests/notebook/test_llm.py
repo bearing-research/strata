@@ -19,6 +19,7 @@ from strata.notebook.llm import (
     resolve_llm_config,
     response_format_for,
 )
+from strata.notebook.prompt_template import PromptTemplateError
 
 
 class _FakeServerConfig:
@@ -348,9 +349,9 @@ class TestRenderPromptTemplate:
 
         value = _Mutating()
 
-        rendered = render_prompt_template("Unsafe: {{ obj.mutate() }}", {"obj": value})
+        with pytest.raises(PromptTemplateError, match="mutate"):
+            render_prompt_template("Unsafe: {{ obj.mutate() }}", {"obj": value})
 
-        assert rendered == "Unsafe: {{ obj.mutate() }}"
         assert value.called is False
 
 

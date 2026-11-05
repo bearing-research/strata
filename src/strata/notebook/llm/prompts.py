@@ -9,6 +9,8 @@ from __future__ import annotations
 import ast
 from typing import Any
 
+from strata.notebook.prompt_template import PromptTemplateError, parse_template
+
 
 def estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English text."""
@@ -132,19 +134,32 @@ def render_prompt_template(
     variables: dict[str, Any],
     max_tokens_per_var: int = 2000,
 ) -> str:
-    """Render a prompt template by replacing ``{{ var }}`` with text values."""
-    import re
+    """Render a prompt template by replacing ``{{ var }}`` with text values.
 
-    def _replace(match: re.Match) -> str:
-        expr = match.group(1).strip()
+    Values are not scanned again, so braces in one stay literal.
+
+    Raises:
+        PromptTemplateError: Naming every part that could not be filled in.
+    """
+    parts, problems = parse_template(template)
+    errors = [problem.message for problem in problems]
+    rendered: list[str] = []
+    for part in parts:
+        if isinstance(part, str):
+            rendered.append(part)
+            continue
+        if part.root not in variables:
+            errors.append(f"`{part.text}`: no upstream cell has produced `{part.root}`.")
+            continue
         try:
-            value = _resolve_prompt_expression(expr, variables)
-        except Exception:
-            return match.group(0)
+            value = _resolve_prompt_expression(part.expression, variables)
+        except Exception as exc:  # noqa: BLE001 - a property or allowed method can raise anything
+            errors.append(f"`{part.text}`: {type(exc).__name__}: {exc}")
         else:
-            return variable_to_text(value, max_tokens=max_tokens_per_var)
-
-    return re.sub(r"\{\{\s*([^}]+)\s*\}\}", _replace, template)
+            rendered.append(variable_to_text(value, max_tokens=max_tokens_per_var))
+    if errors:
+        raise PromptTemplateError("\n".join(errors))
+    return "".join(rendered)
 
 
 def _resolve_prompt_expression(expr: str, variables: dict[str, Any]) -> Any:

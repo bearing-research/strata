@@ -7,7 +7,6 @@ the output variable name from the ``@name`` annotation.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,44 +15,7 @@ from strata.notebook.annotations import (
     parse_annotation_directive,
     strip_leading_annotations,
 )
-
-_TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*(?:\([^)]*\))?)*)\s*\}\}")
-
-_BUILTINS = frozenset(
-    {
-        "True",
-        "False",
-        "None",
-        "print",
-        "len",
-        "range",
-        "str",
-        "int",
-        "float",
-        "list",
-        "dict",
-        "set",
-        "tuple",
-        "type",
-        "isinstance",
-        "sorted",
-        "enumerate",
-        "zip",
-        "map",
-        "filter",
-        "sum",
-        "min",
-        "max",
-        "abs",
-        "round",
-        "any",
-        "all",
-        "open",
-        "input",
-        "format",
-        "repr",
-    }
-)
+from strata.notebook.prompt_template import Placeholder, parse_template
 
 
 @dataclass
@@ -78,6 +40,8 @@ class PromptAnalysis:
     # Total attempts (1 + N-1 retries); ``None`` means the executor default.
     # Only applies with ``output_schema``.
     validate_retries: int | None = None
+    # ``(line in the cell's source, message)`` for what the template cannot express.
+    template_problems: list[tuple[int, str]] = field(default_factory=list)
 
 
 def analyze_prompt_cell(source: str) -> PromptAnalysis:
@@ -143,12 +107,18 @@ def analyze_prompt_cell(source: str) -> PromptAnalysis:
 
     result.template_body = strip_leading_annotations(source).strip()
 
+    parts, problems = parse_template(result.template_body)
+    body_start = source.find(result.template_body)
+    result.template_problems = [
+        (source.count("\n", 0, body_start + problem.offset) + 1, problem.message)
+        for problem in problems
+    ]
+
     refs: list[str] = []
-    for match in _TEMPLATE_VAR_RE.finditer(result.template_body):
-        expr = match.group(1)
-        root_var = expr.split(".")[0].split("(")[0]
-        if root_var and root_var not in _BUILTINS and root_var not in refs:
-            refs.append(root_var)
+    for part in parts:
+        # Builtins too: a template cannot call one, so a name like ``filter`` is an input.
+        if isinstance(part, Placeholder) and part.root not in refs:
+            refs.append(part.root)
 
     result.references = refs
     result.defines = [result.name]

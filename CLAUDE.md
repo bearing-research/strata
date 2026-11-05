@@ -305,7 +305,9 @@ next normal run (`strata.restore()` hands the parts back); a rerun starts fresh;
 `execute_cell(init=<release_id>)` branches from an accepted release under a
 derived provenance key.
 
-Prompt cells (`prompt_executor.py`): no subprocess; render `{{ var }}` template,
+Prompt cells (`prompt_executor.py`): no harness; render the `{{ var }}` template
+(`prompt_template.py`; what it cannot fill in is an error, never text for the model,
+and a pickled input's `str()` comes from `object_text_harness.py` in the venv),
 dispatch via `llm.chat_completion` (Anthropic native tool-use when
 `@output_schema` is set, otherwise OpenAI-compat), validate against schema with
 retry, store response as artifact. Provenance includes a schema fingerprint.

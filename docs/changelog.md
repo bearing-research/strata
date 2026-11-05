@@ -36,6 +36,18 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (#1381)
 
 ### Changed
+- **A prompt cell no longer sends text it could not fill in.** Before, anything
+  the template could not evaluate (`{{ x | upper }}`, `{% if x %}`, `{{ x['k'] }}`,
+  a name no cell defines) went to the model as written, and the paid answer was
+  stored as a success. These are now errors that keep the cell from running
+  (`prompt_template_invalid`, `prompt_input_undefined`), or that stop it before
+  the call when only a run can tell (`{{ x.y }}`). `\{{` and `\{%` write the
+  characters themselves.
+- **A prompt cell reads a Python object as its `str()`.** It used to see a
+  placeholder. The value is loaded in the notebook's environment, never in the
+  server, and an object with no text of its own (a default repr holding an
+  address) or no text form at all (an R object, a folder) fails the cell before
+  the call.
 - **cellgraph 0.4: every cell runs once more after the upgrade.** Strata now needs
   `cellgraph>=0.4,<0.5`. Its keys hash exactly what they cover, with each upstream
   output tagged by kind, so every cell's key changes once and each cell runs again
