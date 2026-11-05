@@ -4,6 +4,7 @@ import test from 'node:test'
 import type { WorkerCatalogEntry } from '../types/notebook.ts'
 import {
   remoteDispatchBadge,
+  showsWorkerBadge,
   applyWorkerHealth,
   workerAttentionReason,
   workerNeedsAttention,
@@ -296,4 +297,45 @@ test("a remote cell shows its dispatcher's sentence, else while queued its place
   )
   assert.equal(remoteDispatchBadge({ ...base, status: 'ready' }), null)
   assert.equal(remoteDispatchBadge({ ...base, remoteWorkerName: null }), null)
+})
+
+const annotated = (worker: string | null) => ({
+  worker,
+  timeout: null,
+  env: {},
+  mounts: [],
+})
+
+test('a code cell on the local default carries no worker badge', () => {
+  assert.equal(showsWorkerBadge({ language: 'python', worker: null }, null), false)
+  assert.equal(showsWorkerBadge({ language: 'python', worker: 'local' }, 'local'), false)
+  assert.equal(
+    showsWorkerBadge({ language: 'python', annotations: annotated(null), worker: null }, null),
+    false,
+  )
+})
+
+test('a cell that names a worker carries the badge', () => {
+  assert.equal(
+    showsWorkerBadge({ language: 'python', annotations: annotated('gpu'), worker: null }, null),
+    true,
+  )
+  assert.equal(
+    showsWorkerBadge({ language: 'python', annotations: annotated('local'), worker: null }, null),
+    true,
+  )
+  assert.equal(showsWorkerBadge({ language: 'python', worker: 'gpu' }, null), true)
+})
+
+test('every code cell carries the badge when the default is remote', () => {
+  assert.equal(showsWorkerBadge({ language: 'python', worker: 'gpu' }, 'gpu'), true)
+  assert.equal(showsWorkerBadge({ language: 'sql', worker: 'gpu' }, 'gpu'), true)
+})
+
+test('a markdown cell never carries the badge', () => {
+  assert.equal(showsWorkerBadge({ language: 'markdown', worker: 'gpu' }, 'gpu'), false)
+  assert.equal(
+    showsWorkerBadge({ language: 'markdown', annotations: annotated('gpu'), worker: null }, null),
+    false,
+  )
 })

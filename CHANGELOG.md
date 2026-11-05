@@ -34,6 +34,10 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **A cell's header names its worker only when that says something.** A code cell on the
+  local default and every markdown cell lose the `worker: local` badge. A cell that names a
+  worker keeps it, and so does every code cell when the notebook's default is remote.
+  (#PRNUM)
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:
