@@ -247,6 +247,7 @@ def write_snapshot(
             "execution_samples": list(cell_runtime.execution_samples) if cell_runtime else [],
             # Without these an imported red cell opens idle, console but no error.
             "error": cell_runtime.last_error if cell_runtime else None,
+            "error_full": cell_runtime.last_error_full if cell_runtime else None,
             "error_source_hash": cell_runtime.last_error_source_hash if cell_runtime else None,
             "outputs": outputs,
             # The persisted form for an importer to write back; `outputs` above

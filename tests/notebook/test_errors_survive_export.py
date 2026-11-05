@@ -74,6 +74,7 @@ def test_a_snapshot_round_trip_keeps_the_failure(failed, tmp_path):
 
     cell = parse_notebook(imported.notebook_dir).get_cell("diag")
     assert "ZeroDivisionError" in (cell.current_error() or "")
+    assert "harness.py" in (cell.error_full or "")
     assert "Checking snapshot 7" in cell.console_stdout
 
     # And the copy reads red, not idle, with nothing executed.

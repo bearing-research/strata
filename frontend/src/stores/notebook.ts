@@ -40,6 +40,7 @@ import {
   isCachedAgain,
   restoredTimes,
 } from '../utils/cacheBadge'
+import { storedErrorOutput } from '../utils/storedError'
 import { lastGotOf } from '../utils/provenanceLine'
 import { useStrata } from '../composables/useStrata'
 import type {
@@ -1002,6 +1003,7 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
     serverCell.display_output,
     typeof serverCell.artifact_uri === 'string' ? serverCell.artifact_uri : null,
   )
+  localCell.output = storedErrorOutput(serverCell) ?? localCell.output
   localCell.lastGot = parseLastGot(serverCell.last_got) ?? localCell.lastGot
   const restored = restoredTimes(serverCell)
   localCell.durationMs ??= restored.runMs
@@ -1305,6 +1307,7 @@ function parseBackendCellPayload(raw: any): Cell {
     typeof raw.artifact_uri === 'string' ? raw.artifact_uri : null,
   )
 
+  cell.output = storedErrorOutput(raw) ?? cell.output
   applySerializedExecutionMetadata(cell, raw)
 
   // Console lives on the Cell, not in the output, so @output_schema cells
