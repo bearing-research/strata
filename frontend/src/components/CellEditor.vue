@@ -35,6 +35,7 @@ import {
   summarizeRemoteExecutionIssue,
   workerTransportLabel,
   workerWarningForEntry,
+  showsWorkerBadge,
 } from '../utils/notebookWorkers'
 import { inputWeightBadge } from '../utils/inputWeights'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
@@ -926,7 +927,11 @@ function outputKey(output: CellOutput, index: number): string {
             </span>
             <!-- Runtime: worker, mounts, timeout, env, annotations, cache. -->
             <div class="cell-meta-runtime">
-              <span class="worker-badge" :title="`Worker: ${effectiveWorkerLabel}`">
+              <span
+                v-if="showsWorkerBadge(cell, notebook.worker)"
+                class="worker-badge"
+                :title="`Worker: ${effectiveWorkerLabel}`"
+              >
                 worker: {{ effectiveWorkerLabel }}
               </span>
               <span v-if="authorBadge" class="author-badge" :title="authorTooltip">
