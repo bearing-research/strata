@@ -508,6 +508,30 @@ class TestCheckpointFiles:
         ]
         assert steps == [1, 2, 3]
 
+    def test_a_resumed_runs_files_are_copied_not_held_whole(self, tmp_path: Path, monkeypatch):
+        session, executor = _notebook(tmp_path, TRAIN_FILES)
+        source = session.notebook_state.get_cell("train").source
+        _run(executor, "train", source)
+        _, _, releases = _ledger(session)
+        (build,) = _only_build(session, "train")
+        last = releases.bundles_of(build.build_id, "checkpoint")[-1]
+        files = {v.id for v in checkpoint_files.files_of(last.outputs).values()}
+        assert files
+        store = session.get_artifact_manager().artifact_store
+        read = store.read_blob
+        whole: list[str] = []
+
+        def recording(artifact_id, *args, **kwargs):
+            whole.append(artifact_id)
+            return read(artifact_id, *args, **kwargs)
+
+        monkeypatch.setattr(store, "read_blob", recording)
+
+        resumed = _run(executor, "train", source)
+
+        assert resumed.success is True, resumed.error
+        assert not files & set(whole)
+
     def test_a_file_outside_its_checkpoint_folder_is_not_released(self, tmp_path: Path):
         session, _ = _notebook(tmp_path)
         runs = LocalRuns(session.get_artifact_manager())

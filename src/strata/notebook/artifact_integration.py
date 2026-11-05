@@ -434,6 +434,16 @@ class NotebookArtifactManager:
             raise
         return True
 
+    def copy_ready_blob(self, artifact_id: str, version: int, path: Path) -> None:
+        """:meth:`copy_blob` of a version that must be there.
+
+        Raises:
+            ValueError: If the version is not ready, or has no blob.
+        """
+        self.ensure_readable(artifact_id, version)
+        if not self.copy_blob(artifact_id, version, path):
+            raise ValueError(f"Blob data not found for {artifact_id}@v={version}")
+
     def get_artifact_preview(self, artifact_id: str, version: int) -> dict[str, Any]:
         """Get artifact metadata and a data preview.
 

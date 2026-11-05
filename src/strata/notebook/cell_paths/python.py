@@ -223,7 +223,7 @@ def restore_manifest(
         for rel, version in files.items():
             target = output_dir / folder / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(artifact_mgr.load_artifact_data(version.id, version.version))
+            artifact_mgr.copy_ready_blob(version.id, version.version, target)
         restore["folder"] = folder
     parts: dict[str, dict[str, str]] = {}
     for version in bundle.outputs:

@@ -3318,7 +3318,9 @@ class TestLoopCellExecution:
         again = await executor.execute_cell("loop", loop)
         assert again.cache_hit is True
 
-    def test_a_start_from_seed_overtaken_by_a_duplicate_reads_its_canonical(self, loop_notebook):
+    def test_a_start_from_seed_overtaken_by_a_duplicate_reads_its_canonical(
+        self, loop_notebook, monkeypatch
+    ):
         """A seed version dedup overtook has no bytes of its own; the seed reads through it."""
         from vestigo.provenance import TransformSpec
 
@@ -3339,8 +3341,25 @@ class TestLoopCellExecution:
             store.finalize_artifact(artifact_id, version, "", 0, 10)
 
         loop = LoopAnnotation(max_iter=2, carry="state", start_from_cell="donor", start_from_iter=1)
-        blob, _ = _resolve_loop_seed(session, "loop", loop)
-        assert blob == b"seed-bytes"
+        carry, _ = _resolve_loop_seed(session, "loop", loop)
+        assert artifact_mgr.load_artifact_data(*carry) == b"seed-bytes"
+
+        monkeypatch.setattr(store, "blob_exists", lambda *_args: False)
+        with pytest.raises(ValueError, match="Loop seed blob missing"):
+            _resolve_loop_seed(session, "loop", loop)
+
+    def test_a_blob_not_ready_is_not_copied(self, loop_notebook, tmp_path):
+        from vestigo.provenance import TransformSpec
+
+        _, session = loop_notebook
+        artifact_mgr = session.get_artifact_manager()
+        store = artifact_mgr.artifact_store
+        spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
+        version = store.create_artifact("building", provenance_hash="p", transform_spec=spec)
+        store.write_blob("building", version, b"half")
+
+        with pytest.raises(ValueError, match="not found or not ready"):
+            artifact_mgr.copy_ready_blob("building", version, tmp_path / "x")
 
     @pytest.mark.asyncio
     async def test_loop_iteration_progress_callback_fires_per_iter(self, loop_notebook):
