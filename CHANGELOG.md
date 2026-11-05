@@ -208,6 +208,20 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A failed cell keeps its traceback through a reload.** A reload or a reopen showed a red
+  cell with no reason, and a later sync could wipe the traceback from an open page. The full
+  traceback is saved beside the trimmed one, so its section comes back too. (#1455)
+- **A traceback quotes the line that failed,** with Python's marker under the failing
+  expression. Each cell now compiles under its own name, so frames read `<cell ba3b7451>`
+  rather than `<cell>`, and a function defined in another cell quotes its own line, never
+  the running cell's. Remote workers get the cell id over the push route too. (#1456)
+- **A cell's header keeps its duration through a reload.** `ran in` and `loaded in` used to
+  disappear, leaving the cached badge with no time beside it. (#1457)
+- **The notebook header fits a phone.** Below 600px it takes two rows, and its menus span
+  the page instead of running off its left edge. (#1454)
+- **The CLI and MCP hand back both forms of a traceback.** `strata run` adds
+  `traceback_full`; `cell run` and `run_cell` add `traceback` and `traceback_full`;
+  `cell show` and `get_cell` add `error_full`. (#1458)
 - **A failed cell's traceback starts at the cell.** The frames of Strata's own harness
   before the cell's first frame are gone, library frames after it stay, and the error line
   prints once. **Full traceback** under the error keeps the whole thing for a bug report.
