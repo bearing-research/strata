@@ -607,6 +607,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   each iteration's carry in memory for the whole loop, so a large checkpoint cost that much for
   every iteration. Each iteration now copies it from the store in bounded chunks, and restoring a
   checkpoint of files does the same. (#1438)
+- **A cell that fails after running keeps what it printed and which worker ran it.** A failure in a
+  step after the run, such as storing displays, cleared the console and the mutation warnings. On R,
+  a failed store, a failed mount sync or any other failure also lost the worker's name. A timeout or
+  unexpected failure on a remote worker now keeps the `@output_dir` files it had uploaded, as a lost
+  worker and a cancel already did. A failed store keeps its mutation warnings, an R timeout names
+  how to raise the limit, and a linked or unsafe output file reports its own message instead of
+  "Execution failed". (#1434)
 - **A cell refused before it runs takes its old results down.** A failed `@fetch` check, an
   unresolved `@dataset` or `@table`, a refused `@write_table`, an R cell asking for what R can't do,
   or a second run of a running build returned its error and left the last run's displays on screen,

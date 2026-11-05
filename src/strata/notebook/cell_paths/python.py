@@ -40,6 +40,7 @@ from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
     HarnessUser,
     LocalExecutionRefused,
+    UnsafeRunFile,
     hand_over,
     identity_env,
     read_run_file,
@@ -265,6 +266,7 @@ async def run_python_cell(
     scoped to that variant.
     """
     remote_metadata: dict[str, str] = {}
+    exec_result: CellExecutionResult | None = None
     # Unset in the frame that dispatches a fan-out: each instance keeps what its worker
     # uploaded under its own key, so that frame has nothing to keep.
     provenance_hash: str | None = None
@@ -761,7 +763,7 @@ async def run_python_cell(
                         stochastic=prov.annotations.stochastic,
                         run_outputs=exec_result.outputs,
                     )
-                except (TableWriteError, OutputNotSaved) as exc:
+                except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
                     stored_ok, store_error = False, str(exc)
                 await context.close_open_run(cell_id)
                 if not stored_ok:
@@ -871,6 +873,11 @@ async def run_python_cell(
         return error_result
     except TimeoutError:
         duration_ms = (time.time() - start_time) * 1000
+        if provenance_hash is not None and context.received_output_files.get(cell_id):
+            # No result came back, so what the worker uploaded is all there is.
+            context.keep_failed_output_dirs(
+                cell_id, source, None, provenance_hash, env_hash, variant=fanout_variant
+            )
         timeout_result = CellExecutionResult(
             cell_id=cell_id,
             success=False,
@@ -882,11 +889,20 @@ async def run_python_cell(
         return timeout_result
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
+        if provenance_hash is not None and context.received_output_files.get(cell_id):
+            # No result came back, so what the worker uploaded is all there is.
+            context.keep_failed_output_dirs(
+                cell_id, source, None, provenance_hash, env_hash, variant=fanout_variant
+            )
+        # A step after the run failed: what the run printed still stands.
         error_result = CellExecutionResult(
             cell_id=cell_id,
             success=False,
+            stdout=exec_result.stdout if exec_result is not None else "",
+            stderr=exec_result.stderr if exec_result is not None else "",
             duration_ms=duration_ms,
             error=f"Execution failed: {e}",
+            mutation_warnings=exec_result.mutation_warnings if exec_result is not None else [],
         ).apply_remote_metadata(**remote_metadata)
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, error_result)
