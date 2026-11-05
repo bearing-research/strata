@@ -44,7 +44,7 @@ from strata.notebook.process_tree import (
     terminate_subprocess_tree,
 )
 from strata.notebook.provenance import safe_filename_stem
-from strata.notebook.table_writes import TableWriteError
+from strata.notebook.table_writes import TableWriteError, write_back_failed
 from strata.notebook.team_store import TeamPull
 
 if TYPE_CHECKING:
@@ -103,7 +103,7 @@ class BatchContext:
     input_refs: Callable[[str], dict[str, str]]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     promote_reverted_outputs: Callable[..., int | None]
-    written_table_gone: Callable[[str], Awaitable[bool]]
+    restore_gone_tables: Callable[[str, str], Awaitable[None]]
     promote_reverted_leaf: Callable[..., Any]
     pull_from_team_store: Callable[..., Awaitable[Any]]
     push_to_team_store: Callable[..., Awaitable[None]]
@@ -765,7 +765,7 @@ async def batch_service_cache_check(
     provenance_hash = prov.provenance_hash
     # ``# @nocache`` marks an effect the artifact doesn't capture (a write, a POST, a
     # clock read); Run All must not serve it from cache either.
-    if not use_cache or prov.annotations.nocache or await context.written_table_gone(source):
+    if not use_cache or prov.annotations.nocache:
         return {"cache_hit": False, "provenance_hash": provenance_hash}
 
     cell_output_dir = batch_tmpdir / cell_id
@@ -841,6 +841,15 @@ async def batch_service_cache_check(
             )
     if cached_outputs is None:
         return {"cache_hit": False, "provenance_hash": provenance_hash}
+    try:
+        await context.restore_gone_tables(cell_id, source)
+    except TableWriteError as exc:
+        # The harness fails the cell: running it would append to a table still there.
+        return {
+            "cache_hit": False,
+            "provenance_hash": provenance_hash,
+            "error": write_back_failed(exc),
+        }
 
     cell.cache_hit = True
     if cached_display_models:
