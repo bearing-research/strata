@@ -1130,6 +1130,8 @@ time column except `idle` and `ready`, which show the last run's time:
 | `✗` | error |
 | `■` | blocked by an annotation error |
 
+A markdown cell shows no glyph, since it never runs.
+
 ## Watching a re-run
 
 The last-run time is where caching becomes visible. Edit one cell and run: the
