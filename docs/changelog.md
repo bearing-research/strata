@@ -37,7 +37,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 - **The figure in a cell's header says what it measures:** `ran in 3.7s` for a run and
-  `loaded in 36ms` for a cache hit. (#PRNUM)
+  `loaded in 36ms` for a cache hit. (#1446)
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:
