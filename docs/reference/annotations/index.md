@@ -36,7 +36,7 @@
 
 </div>
 
-R cells take a subset of these: see [R cell annotations](r.md).
+R cells take a subset of these: see [R annotations](r.md).
 
 ## How annotations are read
 
@@ -67,7 +67,7 @@ anyway would compute, and cache, something other than what the source declares.
 
 In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to `strata cell add/edit`, or splice a single directive without touching the body: `strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout` (see the [CLI](../../notebook/cli.md#authoring-cells-and-dependencies-cell-addeditrmmv-dep)).
 
-## Precedence Rules
+## Precedence rules
 
 When the same setting is configured at multiple levels, the most specific wins:
 

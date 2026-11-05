@@ -1237,11 +1237,13 @@ class NotebookSession:
         had_error = cell.error is not None
         if result.success:
             cell.error = None
+            cell.error_full = None
             cell.error_source_hash = None
         else:
             # A Python traceback is the fuller form of the error message.
             detail = getattr(result, "traceback", None)
             cell.error = (detail or result.error or "").strip()
+            cell.error_full = (getattr(result, "traceback_full", None) or "").strip() or None
             cell.error_source_hash = compute_source_hash(cell.source)
         if cell.error is not None or had_error:
             # Runtime state, not notebook.toml. Written only when an error appears or
@@ -1252,6 +1254,7 @@ class NotebookSession:
                 self.path,
                 cell_id,
                 error=cell.error,
+                error_full=cell.error_full,
                 source_hash=cell.error_source_hash,
             )
         # Write on a real execution or a hit that says what to show, empty included. Any
@@ -1417,9 +1420,12 @@ class NotebookSession:
             data["causality"] = asdict(causality, dict_factory=skip_none)
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
-        got = how_last_got([asdict(s) for s in self.execution_history.get(cell.id, [])])
+        history = self.execution_history.get(cell.id, [])
+        got = how_last_got([asdict(s) for s in history])
         if got is not None:
             data["last_got"] = {"cache_hit": got[0], "ms": got[1]}
+            # ``ms`` is what a hit saved; this is what the run took or the hit loaded in.
+            data["last_duration_ms"] = int(history[-1].duration_ms or 0)
         # A viewer joining mid-run gets what the running cell has printed so far;
         # clients cleared the last run's console when this run started.
         live = console_relay.live_console(self.id, cell.id)

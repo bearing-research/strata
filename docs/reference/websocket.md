@@ -1,8 +1,8 @@
-# WebSocket Protocol
+# WebSocket protocol
 
 The notebook UI communicates with the backend via a WebSocket connection for real-time updates.
 
-For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, tenant gating, cold-start payload, grace window), start at the [Notebook Client Protocol](notebook-protocol.md) page; this page is the message-level reference.
+For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, tenant gating, cold-start payload, grace window), start at the [Notebook client protocol](notebook-protocol.md) page; this page is the message-level reference.
 
 Every frame type below corresponds to a member of `strata.notebook.protocol.MessageType` - that enum is the canonical source. If the tables here and the enum diverge, the enum wins.
 
@@ -33,9 +33,9 @@ All messages are JSON with this shape:
 
 `seq` and `ts` are present on server → client messages; the server doesn't require them on client → server. See [Sequence numbers](#sequence-numbers) below.
 
-## Client → Server Messages
+## Client → server messages
 
-### Cell Execution
+### Cell execution
 
 | Type                   | Payload                                  | Description                                                 |
 | ---------------------- | ---------------------------------------- | ----------------------------------------------------------- |
@@ -48,14 +48,14 @@ All messages are JSON with this shape:
 | `notebook_rerun_all`   | `{ "continue_on_error": true }`          | Re-execute every cell with cache off                        |
 | `read_confirm`         | `{ "prompt_id": "..." }`                 | Run what a `read_confirm_prompt` asked about. Each cell's yes is kept for its machine and inputs. Cancel sends nothing |
 
-### Cell Editing
+### Cell editing
 
 | Type                 | Payload                                                  | Description    |
 | -------------------- | -------------------------------------------------------- | -------------- |
 | `cell_source_update` | `{ "cell_id": "...", "source": "...", "force": false, "author": "..." }` | Source changed. Refused with `cell_locked` when someone else changed the cell moments ago, unless `force` is true. `author` is optional and used only without principal auth |
 | `cell_focus`         | `{ "cell_id": "...", "author": "..." }`                 | The cell this client is on, or `null`. Updates `presence` for everyone |
 
-### Cell Tests
+### Cell tests
 
 | Type             | Payload                                      | Description                                                                              |
 | ---------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -92,9 +92,9 @@ All messages are JSON with this shape:
 | `variant_add`        | `{ "group": "...", "author": "..." }` | Add a new variant cell, cloning the active. `author` is optional |
 | `widget_update`      | `{ "cell_id": "...", "values": { "<name>": <value> } }` | Set widget control value(s); re-materializes + stales downstream |
 
-## Server → Client Messages
+## Server → client messages
 
-### Cell Status
+### Cell status
 
 | Type                      | Payload                                                                                                                  | Description                                      |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
@@ -102,7 +102,7 @@ All messages are JSON with this shape:
 | `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...] }` | Execution result, including rich visible outputs. `outputs` maps each stored variable to its preview; `_` is the last displayed value. On a cache hit `duration_ms` is the load time, and `saved_ms` is what the hit saved (0 when no earlier run priced it). `artifact_uris` maps each stored variable to its artifact. `stdout` / `stderr` are the run's whole console and replace what `cell_console` built (see [Console](#console)). A remote run adds `remote_worker`, `remote_transport`, `remote_build_id` and `remote_build_state` |
 | `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed - clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. `kind: "notice"` is a provider-degradation message to show beside the stream, not part of its content. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "...", "chunk_seq": 0 }`                                                | Console output. Append `text` to the cell's console for `stream`. A remote cell's output arrives while it runs, numbered per stream by `chunk_seq` from 0: chunk 0 starts that stream's console for the run, so replace what the last run left. `chunk_seq` is `null` on console sent when the cell finishes: for a cell that streamed nothing (every local cell), that frame is the stream's whole console for the run (see [Console](#console)) |
-| `cell_error`              | `{ "cell_id": "...", "error": "...", "stdout": "...", "stderr": "...", "suggest_install": "...", "suggest_install_language": "python" }` | Execution error. `stdout` / `stderr` are the failed run's whole console and replace it, as on `cell_output`; a cell that failed before it ran (a fetch pin mismatch, a missing input) sends them empty. Only an internal server error carries neither, and leaves the console as it was. `error_code`, when present, is a stable name to branch on (`fetch_pin_mismatch`: a `# @fetch ... sha256=` pin no longer matches the URL's bytes). `suggest_install` names a missing package to offer installing, with `python` or `r` for which installer. A remote run adds the `remote_*` fields of `cell_output` plus `remote_error_code` |
+| `cell_error`              | `{ "cell_id": "...", "error": "...", "traceback": "...", "traceback_full": "...", "stdout": "...", "stderr": "...", "suggest_install": "...", "suggest_install_language": "python" }` | Execution error. `error` is one line (and any hint); `traceback`, when the cell raised, starts at the cell's first frame and ends with the error line, and `traceback_full` keeps the harness frames before it. `stdout` / `stderr` are the failed run's whole console and replace it, as on `cell_output`; a cell that failed before it ran (a fetch pin mismatch, a missing input) sends them empty. Only an internal server error carries neither, and leaves the console as it was. `error_code`, when present, is a stable name to branch on (`fetch_pin_mismatch`: a `# @fetch ... sha256=` pin no longer matches the URL's bytes). `suggest_install` names a missing package to offer installing, with `python` or `r` for which installer. A remote run adds the `remote_*` fields of `cell_output` plus `remote_error_code` |
 | `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "until_reached": false, "duration_ms": 128 }` | Per-iteration update from a `@loop` cell. `until_reached` is true on the iteration where `@loop_until` held |
 | `cell_inputs`             | `{ "cell_id": "...", "machine": "local", "inputs": [{ "kind": "mount", "name": "data", "uri": "s3://bucket/data", "bytes": 5368709120, "cached_bytes": 1073741824 }] }` | What a cell's `@mount`, `@table` and `@fetch` inputs weigh on `machine`, sent before a run reads them, and after a `cell_source_update` that changes its `@mount`, `@table`, `@fetch` or `@worker` lines, when the estimate differs from the cell's last; an empty `inputs` means it reads none now. `bytes` is a read-only remote mount's listing, a table snapshot's data files (an upper bound on what a scan reads) or a fetch's size; `cached_bytes` is what the machine already holds. Either is absent when not known: a pinned mount is not listed, and a pool's machine is not known before dispatch. On a remote worker, `cached_bytes` is the worker's own cache, which it reports through [`POST /v1/mount-cache/cached`](executor-protocol.md#post-v1mount-cachecached-optional). `credential` names a [named credential](notebook-toml.md#named-credentials) when the input reads through one. `rw` and `file://` mounts move nothing and are left out. `notebook_state` carries each cell's last estimate as `inputs` and `inputs_machine` |
 | `cell_variant_progress`   | `{ "cell_id": "...", "variant": "rf", "index": 1, "total": 3, "success": true, "duration_ms": 128, "error": null }`        | Per-variant update from a `# @per_variant` fan-out cell |

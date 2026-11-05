@@ -53,6 +53,7 @@ def test_remote_bundle_round_trip_failure(tmp_path):
         "mutation_warnings": [],
         "error": "boom",
         "traceback": "Traceback...",
+        "traceback_full": "Traceback... with the harness",
     }
 
     bundle_path = tmp_path / "bundle.tar"
@@ -64,6 +65,7 @@ def test_remote_bundle_round_trip_failure(tmp_path):
     assert unpacked["success"] is False
     assert unpacked["error"] == "boom"
     assert unpacked["traceback"] == "Traceback..."
+    assert unpacked["traceback_full"] == "Traceback... with the harness"
     manifest = json.loads((unpacked_dir / "harness-result.json").read_text(encoding="utf-8"))
     assert manifest["success"] is False
 

@@ -1,5 +1,5 @@
 # @name Monthly revenue pivot
-monthly_pivot = sales.pivot_table(
+monthly_pivot = orders.pivot_table(
     values="revenue",
     index="month",
     columns="region",

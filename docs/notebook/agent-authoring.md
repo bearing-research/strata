@@ -1,4 +1,4 @@
-# Authoring Notebooks Programmatically
+# CLI authoring
 
 A Strata notebook is a **plain-text directory** - TOML config plus one
 source file per cell. Anything that can write files can author one: a
@@ -87,7 +87,7 @@ minimum is what *you* must provide when writing from scratch, not what
 the scaffold looks like.
 
 The full schema (env, workers, mounts, connections, AI config) is
-[notebook.toml Schema](../reference/notebook-toml.md). Rules that matter
+[notebook.toml](../reference/notebook-toml.md). Rules that matter
 when writing it by hand:
 
 - **`notebook_id`** - any stable, unique string. The server generates
@@ -153,7 +153,7 @@ Practical consequences for generated code:
 
 Cell-level settings are `# @` comment lines at the top of the cell
 source - they always win over anything persisted elsewhere. The full
-surface is [Cell Annotations](../reference/annotations/index.md); the most common:
+surface is [Annotations](../reference/annotations/index.md); the most common:
 
 ```python
 # @name revenue_model     ← stable display name
@@ -189,8 +189,8 @@ unknown workers, …) without calling any LLM.
 | Reference that resolves to nothing (import? typo?) | `run` (NameError) |
 | Wrong logic, missing dependency in `pyproject.toml` | `run` |
 
-`run --format json` reports per-cell `status`, `error` (and its `traceback`
-when the cell raised), and `cache_hit`,
+`run --format json` reports per-cell `status`, `error` (and its `traceback` and
+`traceback_full` when the cell raised), and `cache_hit`,
 and skips downstream cells when an upstream fails (`"reason": "upstream
 failed"`) - fix the first error and re-run; everything already correct is
 a cache hit.

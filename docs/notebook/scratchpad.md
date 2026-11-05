@@ -1,4 +1,4 @@
-# The notebook as an agent's scratchpad
+# Agent scratchpad
 
 A coding agent working on *something else* (debugging your service, exploring a
 dataset, checking what a function returns) constantly needs to run a bit of
@@ -175,7 +175,7 @@ someone is watching, point the agent at that server instead: MCP, or
 
 ## Related
 
-- [Driving a notebook with a coding agent](agent.md): the other use case, where
+- [Use a coding agent](agent.md): the other use case, where
   the notebook is the point.
-- [MCP Server](mcp.md): the tool list and the endpoint's security model.
-- [Cell Annotations](../reference/annotations/index.md): `# @nocache` and the rest.
+- [MCP server](mcp.md): the tool list and the endpoint's security model.
+- [Annotations](../reference/annotations/index.md): `# @nocache` and the rest.

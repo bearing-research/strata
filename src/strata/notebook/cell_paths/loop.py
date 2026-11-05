@@ -521,7 +521,11 @@ async def _run_loop(
                     cell_id=cell_id,
                     success=False,
                     error=f"Loop cell iter {k} failed: {error_msg}",
-                    traceback=traceback_text,
+                    # What a reader sees in place of ``error``, so it says where too.
+                    traceback=(
+                        f"Loop cell iter {k} failed:\n{traceback_text}" if traceback_text else None
+                    ),
+                    traceback_full=result.get("traceback_full") or None,
                     stdout="".join(combined_stdout),
                     stderr="".join(combined_stderr),
                     duration_ms=duration_ms,

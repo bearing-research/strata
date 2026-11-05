@@ -1,4 +1,4 @@
-# Distributed Workers
+# Workers
 
 Strata Notebook can dispatch individual cells to remote machines via the **executor protocol**. A worker is any HTTP endpoint that accepts cell source code and inputs, runs them, and returns the outputs. You bring the compute; Strata handles the routing, serialization, and caching.
 
@@ -24,7 +24,7 @@ Cells run in **the notebook's locked environment** on a `strata-worker` of this 
 
 R cells work the same way with the notebook's `renv.lock`: the worker restores it with `renv` into one library per lock and R build, reuses it for every later R cell with that lock, and runs the cell with that library first on R's library path. It advertises this as `locked_r_environments`, `true` when its R can load `renv`; a notebook with an `renv.lock` is refused on a worker that cannot be asked, as above. See [the R `environment` block](../reference/executor-protocol.md#the-r-environment-block).
 
-For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the [Executor Protocol](../reference/executor-protocol.md) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
+For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the [Executor protocol](../reference/executor-protocol.md) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
 
 ## Quick start: run a worker locally
 
@@ -151,7 +151,7 @@ strata-worker --connect wss://relay.example.com/connect
 
 Register the worker at the URL the relay gives it, for example `config.url = "https://relay.example.com/w/abc/v1/execute"`, with `token_env` naming the worker token as usual. The relay token is read only from the environment, never from a flag, because the cells the worker runs could read its command line; it is removed from the environment at startup like the worker token. The worker reconnects with backoff when the connection drops, and exits with status 1 if the relay refuses the token.
 
-Strata does not ship a relay. A relay is a small service that accepts the worker's WebSocket and forwards HTTP requests over it; the [Worker Relay Protocol](../reference/worker-connect.md) specifies it. A `signed` worker still fetches its inputs and posts its console to the server's signed URLs directly, so it needs outbound reach to them; a `direct` worker needs only the relay.
+Strata does not ship a relay. A relay is a small service that accepts the worker's WebSocket and forwards HTTP requests over it; the [Worker relay protocol](../reference/worker-connect.md) specifies it. A `signed` worker still fetches its inputs and posts its console to the server's signed URLs directly, so it needs outbound reach to them; a `direct` worker needs only the relay.
 
 ## Run cells on a machine you can SSH to
 
@@ -418,7 +418,7 @@ pick up local worker changes; build a wheel for that. The container refuses to s
 without `STRATA_WORKER_TOKEN`, since it binds `0.0.0.0`; the pool mints one per
 machine, and you set it yourself to run the image by hand.
 
-See [Worker Pool](worker-pool.md) for machine types, dispatch, the HTTP
+See [Worker pool](worker-pool.md) for machine types, dispatch, the HTTP
 service, and the isolation model.
 
 ## Registering workers
@@ -572,8 +572,8 @@ flagged and fails if run, and the panel offers no editor for them.
 
 **A host with its own machine picker can hide the panel.** Set
 `STRATA_NOTEBOOK_WORKERS_PANEL=hidden` and the notebook page leaves the Workers
-panel out. Cells still show their worker badge and health, `# @worker` still
-routes, and the host sets a notebook's default worker with
+panel out. A cell on a named or remote worker still shows its badge and health,
+`# @worker` still routes, and the host sets a notebook's default worker with
 `PUT /v1/notebooks/{id}/worker`.
 
 ## Authentication

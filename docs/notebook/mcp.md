@@ -1,4 +1,4 @@
-# MCP Server
+# MCP server
 
 Strata Notebook can expose a **running notebook session** to an external coding
 agent (Claude Code, and any other [Model Context
@@ -105,13 +105,13 @@ details stay in the server log.
 | --- | --- |
 | `list_notebooks` | The sessions currently open on the server: `session_id`, `name`, `path`. |
 | `get_notebook(session_id)` | Every cell of a session, in order. |
-| `get_cell(session_id, cell_id)` | One cell: source, status, outputs. For a widget cell, its controls and what each is set to. |
+| `get_cell(session_id, cell_id)` | One cell: source, status, outputs. A failed cell has its `error` and `error_full`, the traceback from the cell's first frame and the one with the harness frames too. For a widget cell, its controls and what each is set to. |
 | `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session …`, which downloads and writes the file locally. |
 | `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. For a swept variable, each variant's cell and the name `lineage` takes for it. |
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |
-| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
+| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. A cell that raised has its `traceback` and `traceback_full`. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
 | `cancel_cell(session_id, cell_id)` | Cancel the cell's run, whoever started it, as the browser's stop button does: the run stops and the cell is left idle. A `run_cell` waiting on it returns `status: error` with `error_code: cancelled`. Returns `{cell_id, cancelled, status}`; `cancelled` is `false` when the cell was not running. |
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
@@ -127,7 +127,7 @@ details stay in the server log.
 | `add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)` | Register a remote executor worker so cells can run on it. Refused where the server manages worker definitions (service mode, or `STRATA_NOTEBOOK_WORKERS_EDITABLE=false`), as are `remove_worker` and `connect_ssh_worker`. |
 | `set_default_worker(session_id, name?)` | Set the notebook's default worker (`name` omitted/`local` clears it). |
 | `remove_worker(session_id, name)` | Remove a notebook-scoped worker. |
-| `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to)). |
+| `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to)). |
 | `disconnect_ssh_worker(session_id, name, stop_remote?)` | Close an SSH worker's tunnel and unregister it. |
 | `lineage(session_id, cell_id, variable, max_depth?)` | The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. For one instance of a `# @per_variant` cell, name it `variable@variant=<name>` (for example `score@variant=triple`); the error on a bare name lists the stored ones. `variable` may be `__mount__<name>`, what a run wrote through its `rw` mount `<name>`. |
 | `promote(session_id, cell_id, variable, name, alias?, tags?)` | Copy the output **and everything behind it** into the team's store, under a name colleagues can ask for. Mints no public link. A protected alias comes back `pending`. Needs `STRATA_NOTEBOOK_REMOTE_STORE_URL`. |

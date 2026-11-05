@@ -467,6 +467,8 @@ async def dispatch_http(
         "tenant": None,
         "principal": None,
         "origin": context.origin,
+        # Names the cell's frames in a traceback. Beside ``params``, which feed the hash.
+        "cell_id": cell_id,
         # ``str(sorted(...))`` byte format is load-bearing: cached transport hashes key off it.
         "provenance_hash": derive_subkey(source, str(sorted(input_specs))),
         "transform": {

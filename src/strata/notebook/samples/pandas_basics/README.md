@@ -20,7 +20,7 @@ artifact, so edits stay fast and the DAG stays honest.
 |---|---|
 | `create_data` | Builds a small sales DataFrame as the root of the chain. |
 | `select_filter` | Column selection + boolean indexing. |
-| `add_columns` | Derived columns (`revenue = units * price`, `month`). |
+| `add_columns` | A new frame, `orders`, with derived columns (`revenue = units * price`, `month`). |
 | `groupby` | `groupby` + aggregate. |
 | `pivot` | Pivot from long to wide. |
 | `merge` | Join two DataFrames. |
@@ -41,13 +41,13 @@ Four cells ship with pytest tests next to them
 
 Tests run in the notebook's own venv and receive a `cell` fixture whose
 attributes are the cell's namespace **after it runs against its real
-upstream input**: so `cell.sales` is the actual DataFrame, `cell.revenue`
-a value it computed, `cell.my_func` a function it defined:
+upstream input**: so `cell.sales` is the actual DataFrame, `cell.orders`
+a frame it computed, `cell.my_func` a function it defined:
 
 ```python
 def test_revenue_is_units_times_price(cell):
-    expected = cell.sales["units"] * cell.sales["price"]
-    assert (cell.sales["revenue"] == expected).all()
+    expected = cell.orders["units"] * cell.orders["price"]
+    assert (cell.orders["revenue"] == expected).all()
 ```
 
 Open the Tests panel on a cell to run them, or send the `cell_run_tests`

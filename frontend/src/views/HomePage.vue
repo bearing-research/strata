@@ -740,7 +740,7 @@ function formatTime(ts: number): string {
 
 .home-container {
   width: 100%;
-  max-width: 640px;
+  max-width: 800px;
 }
 
 .home-header {
@@ -832,12 +832,14 @@ function formatTime(ts: number): string {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 32px;
 }
 
 .action-card {
-  flex: 1;
+  /* Wide enough for its longest line, so a narrower page wraps cards, not their labels. */
+  flex: 1 1 180px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -863,12 +865,14 @@ function formatTime(ts: number): string {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .action-hint {
   font-size: 11px;
   color: var(--text-secondary);
   margin-top: 4px;
+  white-space: nowrap;
 }
 
 .action-card-disabled {

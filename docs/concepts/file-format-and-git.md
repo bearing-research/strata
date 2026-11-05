@@ -1,6 +1,6 @@
 # File format and git
 
-## Notebook File Format
+## Notebook file format
 
 Each notebook is a directory on disk:
 
@@ -46,7 +46,7 @@ language = "python"
 order = 1
 ```
 
-## Version Control
+## Version control
 
 Strata notebooks are designed to live in git. Unlike Jupyter `.ipynb`
 files, which co-mingle source, outputs, and execution counts in one

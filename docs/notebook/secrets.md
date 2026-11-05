@@ -1,4 +1,4 @@
-# Secret Manager Integration
+# Secrets
 
 Strata can pull environment variables from an external secret manager so API keys, database URLs, and other sensitive config don't have to be re-entered every time a notebook is reopened. Values fetched from the manager flow into the same `notebook.env` map the Runtime panel uses, so cells read them with plain `os.environ`, no notebook code changes.
 
@@ -115,8 +115,8 @@ Fix the cause (rotate the credential, check `project_id` / `environment` / `path
 - A cell on a `signed` worker receives the env in the manifest posted to the worker; the build and artifact rows the server keeps record only the names and a digest of the values.
 - If a cell **prints** an env var, its value is captured in the cell's console output and persisted in `.strata/console/` alongside stdout/stderr. Don't `print(os.environ)` in production notebooks.
 - Authenticating credentials (`INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` or `INFISICAL_TOKEN`) live in the process environment, set by whoever launches the server. Distribute them the same way you'd distribute any deploy secret (systemd unit, k8s secret, `.envrc` with direnv-allow, etc.) **not** in a committed file.
-- The Infisical host is the server's, in every mode: a notebook `base_url` other than `INFISICAL_HOST` (or the public default) is refused before any login, since the login would send the server's credentials there. A cloned notebook cannot point your personal server at its own host either. `project_id`, `environment` and `path` still come from the notebook, so every author can read whatever the server's machine identity can; scope it accordingly. See [Service Mode: A notebook's secret manager](../deployment/service-mode.md#a-notebooks-secret-manager).
-- By default a cell subprocess inherits the server's whole environment, so a cell can read those credentials too. On a server other people run cells on, set `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` and `STRATA_NOTEBOOK_HARNESS_USER`; see [Service Mode: What a cell can read](../deployment/service-mode.md#what-a-cell-can-read). The notebook's own `[env]`, including fetched secrets, still reaches its cells.
+- The Infisical host is the server's, in every mode: a notebook `base_url` other than `INFISICAL_HOST` (or the public default) is refused before any login, since the login would send the server's credentials there. A cloned notebook cannot point your personal server at its own host either. `project_id`, `environment` and `path` still come from the notebook, so every author can read whatever the server's machine identity can; scope it accordingly. See [Service mode: A notebook's secret manager](../deployment/service-mode.md#a-notebooks-secret-manager).
+- By default a cell subprocess inherits the server's whole environment, so a cell can read those credentials too. On a server other people run cells on, set `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` and `STRATA_NOTEBOOK_HARNESS_USER`; see [Service mode: What a cell can read](../deployment/service-mode.md#what-a-cell-can-read). The notebook's own `[env]`, including fetched secrets, still reaches its cells.
 
 ## Limits
 

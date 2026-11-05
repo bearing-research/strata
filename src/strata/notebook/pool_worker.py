@@ -60,6 +60,7 @@ _client_mod = _load_local_module("notebook_client.py", "_nb_client")
 _channel = _load_local_module("run_channel.py", "_nb_run_channel")
 _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 _work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
+_traceback = _load_local_module("cell_traceback.py", "_nb_cell_traceback")
 
 # Harness-injected names excluded from mutation fingerprinting (the ``display``
 # buffer grows every run and would read as an in-place mutation).
@@ -103,15 +104,14 @@ def warm_imports(imports: list[str]) -> None:
 # --- Cell execution (mirrors harness.py) ---
 
 
-def _exec_with_display(source: str, namespace: dict) -> Any | None:
+def _exec_with_display(source: str, namespace: dict, cell_id: str | None) -> Any | None:
     """Execute source; if the last statement is a bare expression, eval and return it."""
     import ast as _ast
 
-    try:
-        tree = _ast.parse(source)
-    except SyntaxError:
-        exec(source, namespace)
-        return None
+    filename = _traceback.cell_filename(cell_id)
+    # Before the parse: a cell that doesn't parse has a line to quote too.
+    _traceback.remember_source(filename, source)
+    tree = _ast.parse(source, filename)
 
     if not tree.body:
         return None
@@ -121,13 +121,13 @@ def _exec_with_display(source: str, namespace: dict) -> Any | None:
         if len(tree.body) > 1:
             mod = _ast.Module(body=tree.body[:-1], type_ignores=[])
             _ast.fix_missing_locations(mod)
-            exec(compile(mod, "<cell>", "exec"), namespace)
+            exec(compile(mod, filename, "exec"), namespace)
         expr = _ast.Expression(body=last.value)
         _ast.fix_missing_locations(expr)
-        result = eval(compile(expr, "<cell>", "eval"), namespace)
+        result = eval(compile(expr, filename, "eval"), namespace)
         return result if result is not None else None
     else:
-        exec(source, namespace)
+        exec(compile(tree, filename, "exec"), namespace)
         return None
 
 
@@ -315,7 +315,9 @@ def execute_harness(manifest: dict) -> dict:
             sys.stderr = stderr_buf
 
             with display_capture.capture_side_effects():
-                _display_value = _exec_with_display(source, namespace)
+                _display_value = _exec_with_display(
+                    source, namespace, manifest.get("strata_cell_id")
+                )
 
         sys.stdout = old_stdout
         sys.stderr = old_stderr
@@ -366,17 +368,14 @@ def execute_harness(manifest: dict) -> dict:
         }
 
     except Exception as e:
-        import traceback
-
         sys.stdout = old_stdout
         sys.stderr = old_stderr
-        _work_dir.hint(e, manifest)
         return {
             "success": False,
             "variables": {},
             "stdout": stdout_buf.getvalue(),
             "stderr": stderr_buf.getvalue(),
-            "error": f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+            **_traceback.failure_fields(e, _work_dir.hint(e, manifest)),
             "mutation_warnings": [],
         }
     finally:

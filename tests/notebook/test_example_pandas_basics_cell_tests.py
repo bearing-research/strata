@@ -23,25 +23,25 @@ def _src(file_stem: str) -> str:
 
 
 @pytest.fixture(scope="module")
-def upstream_sales():
-    """Build the `sales` frame as create-data → add-columns would."""
+def upstream_frames():
+    """Build the `sales` and `orders` frames as create-data → add-columns would."""
     ns0: dict = {}
     exec(_src("create_data"), ns0)  # noqa: S102 (trusted example source)
     sales_raw = ns0["sales"]
     ns1 = {"sales": sales_raw.copy()}
     exec(_src("add_columns"), ns1)  # noqa: S102 (trusted example source)
-    return sales_raw, ns1["sales"]
+    return sales_raw, ns1["orders"]
 
 
-def test_pandas_basics_cell_tests_pass(upstream_sales, tmp_path):
-    sales_raw, sales_with_revenue = upstream_sales
+def test_pandas_basics_cell_tests_pass(upstream_frames, tmp_path):
+    sales_raw, orders = upstream_frames
 
     # (cell-id, cell-file, inputs); inputs mirror each cell's upstream edge.
     plan = [
         ("create-data", "create_data", {}),
         ("add-columns", "add_columns", {"sales": sales_raw.copy()}),
         ("select-filter", "select_filter", {"sales": sales_raw.copy()}),
-        ("summary", "summary", {"sales": sales_with_revenue.copy()}),
+        ("summary", "summary", {"orders": orders.copy()}),
     ]
 
     for cell_id, cell_file, inputs in plan:

@@ -41,7 +41,7 @@ Ask the agent for an analysis and watch the cells arrive. Open
 **The notebook is the deliverable.** `strata agent` scaffolds the notebook,
 starts the server, and writes the `.mcp.json` and `CLAUDE.md` the agent needs.
 You keep the result.
-[Driving a notebook with a coding agent →](https://bearingresearch.com/strata/latest/notebook/agent/)
+[Use a coding agent →](https://bearingresearch.com/strata/latest/notebook/agent/)
 
 **The notebook is a scratchpad.** An agent working on something else runs its
 throwaway Python in a cached cell instead of `python -c`, so the snippet from

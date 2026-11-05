@@ -1,4 +1,4 @@
-# Import
+# Coming from Jupyter
 
 `strata import` converts a Jupyter `.ipynb` file into a Strata
 notebook directory, or unpacks a [snapshot](#importing-a-snapshot) back
@@ -239,7 +239,7 @@ importer doesn't call `uv add` itself, that's slow, networked, and
 partial-failure-prone. In personal mode that sync builds any dependency
 without a wheel, running its build code as you before any cell runs, so
 read what an untrusted notebook installs first (see
-[Environment Management](environment.md#how-it-works)).
+[Environment](environment.md#how-it-works)).
 
 ## The import report
 

@@ -1,4 +1,4 @@
-# Examples
+# Example gallery
 
 Every notebook under `examples/` in the repo demonstrates a specific
 Strata capability. Each example is also rendered into the docs site

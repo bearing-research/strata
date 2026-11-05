@@ -19,6 +19,21 @@ export function effectiveWorkerNameForCell(cell: {
   return cell.annotations?.worker || cell.worker || 'local'
 }
 
+/**
+ * Whether a cell's header names its worker: when the cell chose one, or the notebook's default
+ * is remote. Running where every cell runs says nothing, and a markdown cell does not run.
+ */
+export function showsWorkerBadge(
+  cell: { language: string; annotations?: CellAnnotations; worker: string | null },
+  notebookWorker: string | null | undefined,
+): boolean {
+  if (cell.language === 'markdown') return false
+  const notebookDefault = notebookWorker || 'local'
+  if (cell.annotations?.worker || notebookDefault !== 'local') return true
+  // ``cell.worker`` is resolved on the server, so it differs only for a cell's own choice.
+  return (cell.worker || 'local') !== notebookDefault
+}
+
 export function resolveEffectiveWorkerEntry(
   availableWorkers: WorkerCatalogEntry[],
   workerName: string | null | undefined,

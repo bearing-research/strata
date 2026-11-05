@@ -4,7 +4,7 @@ hide:
   - toc
 ---
 
-# Strata
+# Strata { .landing-title }
 
 **Strata is a notebook your coding agent can drive, and everything it computes stays.**
 
@@ -22,7 +22,7 @@ session updates. Captured from a real run, not a mock-up.*
 
     Hand a notebook to Claude Code and watch it build through MCP tools.
 
-    [With a coding agent →](notebook/agent.md)
+    [Use a coding agent →](notebook/agent.md)
 
 -   **Web UI**
 
@@ -88,8 +88,8 @@ See [Install](getting-started/installation.md) for full details.
 inputs and its environment. The step an agent ran ten turns ago is a cache hit now, and
 an edit re-runs only the cells below it.
 
-![A browser on the tutorial notebook over five moments: nothing has run; Run All computes every cell; Run All again and every code cell is a cache hit showing the time it saved; one cell is edited, so it and the chart below read stale while the load cell stays cached; Run All again, and only those two run while the load cell still reads cached, saved 2.7s.](assets/cache-payoff-light.gif#only-light)
-![A browser on the tutorial notebook over five moments: nothing has run; Run All computes every cell; Run All again and every code cell is a cache hit showing the time it saved; one cell is edited, so it and the chart below read stale while the load cell stays cached; Run All again, and only those two run while the load cell still reads cached, saved 2.7s.](assets/cache-payoff-dark.gif#only-dark)
+![A browser on the tutorial notebook over five moments: nothing has run; Run All computes every cell; Run All again and every code cell is a cache hit showing the time it saved; one cell is edited, so it and the chart below read stale while the load cell stays cached; Run All again, and only those two run while the load cell still reads cached, saved 2.1s.](assets/cache-payoff-light.gif#only-light)
+![A browser on the tutorial notebook over five moments: nothing has run; Run All computes every cell; Run All again and every code cell is a cache hit showing the time it saved; one cell is edited, so it and the chart below read stale while the load cell stays cached; Run All again, and only those two run while the load cell still reads cached, saved 2.1s.](assets/cache-payoff-dark.gif#only-dark)
 
 *Edit one cell in `strata tutorial`: only the cells that read it run again, and the
 cell above keeps what it saved. Captured from a real run, not a mock-up.*

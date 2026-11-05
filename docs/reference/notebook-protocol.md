@@ -1,9 +1,9 @@
-# Notebook Client Protocol
+# Notebook client protocol
 
 A single reference for writing a non-Vue client (TUI, scripting, third-party
 integration) against the notebook backend. The deeper per-endpoint and
-per-frame details live in [REST API Reference](rest-api.md) and
-[WebSocket Protocol](websocket.md); this page is the orientation map plus the
+per-frame details live in [REST API](rest-api.md) and
+[WebSocket protocol](websocket.md); this page is the orientation map plus the
 load-bearing rules that aren't obvious from either of those individually.
 
 If you want exhaustive request/response shapes, the live OpenAPI document at
@@ -183,13 +183,13 @@ What this means for a client:
   `console_stdout` / `console_stderr` hold the last 64 KiB of what it has
   streamed so far, and the `cell_console` frames after it append. A running
   local cell's console is empty there; it arrives with the result. The full
-  console rules are in [WebSocket Protocol](websocket.md#console).
+  console rules are in [WebSocket protocol](websocket.md#console).
 - **Sequence numbers continue across reconnects.** Every server-to-client
   message carries a `seq` from a per-notebook counter. The counter doesn't
   reset on reconnect; if you see a large gap, that's expected - treat it as
   a hint to drop local in-flight state and replace from `notebook_state`.
 
-See [WebSocket Protocol → Reconnection semantics](websocket.md#reconnection-semantics)
+See [WebSocket protocol → Reconnection semantics](websocket.md#reconnection-semantics)
 for the message-level detail.
 
 ## Session lifetime and `session_closed`
@@ -254,7 +254,7 @@ then does the same. The terminal viewer reads the `403` directly.
 
 ## Message types
 
-The full list of WS frame types lives on the [WebSocket Protocol](websocket.md)
+The full list of WS frame types lives on the [WebSocket protocol](websocket.md)
 page. **Every type corresponds to a member of
 `strata.notebook.protocol.MessageType`** - that enum is the canonical
 source. A non-Vue client can enumerate the full set by iterating it:
@@ -359,11 +359,11 @@ edits exactly as before. `0` turns the lock off.
 
 ## Where to go next
 
-- [REST API Reference](rest-api.md) - the notebook routes and core client
+- [REST API](rest-api.md) - the notebook routes and core client
   routes with request / response shapes.
-- [WebSocket Protocol](websocket.md) - every C→S and S→C frame with
+- [WebSocket protocol](websocket.md) - every C→S and S→C frame with
   payload shapes.
-- [notebook.toml Schema](notebook-toml.md) - what the on-disk config
+- [notebook.toml](notebook-toml.md) - what the on-disk config
   looks like.
 - [Configuration](configuration.md) - the server-side knobs
   (deployment mode, auth mode, storage root, …).

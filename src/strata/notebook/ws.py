@@ -2791,6 +2791,8 @@ async def _run_partition_batch(
             duration_ms=result.duration_ms or 0.0,
             cache_hit=result.cache_hit,
             error=result.error,
+            traceback=result.traceback,
+            traceback_full=result.traceback_full,
             execution_method="batch" if not result.cache_hit else "cached",
             mutation_warnings=result.mutation_warnings,
             replaces_console=result.replaces_console,
@@ -3427,6 +3429,10 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
             payload["display"] = result.display_output
     else:
         payload["error"] = result.error
+        if result.traceback:
+            payload["traceback"] = result.traceback
+        if result.traceback_full:
+            payload["traceback_full"] = result.traceback_full
         if result.error_code:
             payload["error_code"] = result.error_code
         if result.suggest_install:

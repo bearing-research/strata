@@ -101,8 +101,10 @@ class CellView(BaseModel):
     outputs: list[OutputView]
     console_stdout: str
     console_stderr: str
-    # Last failure, only while the source is unchanged since.
+    # Last failure, only while the source is unchanged since. ``error_full`` keeps the
+    # harness frames, for a bug report.
     error: str | None = None
+    error_full: str | None = None
     test: CellTestView | None = None
     # Empty for older cells and on a personal server with no declared author.
     created_by: str = ""
@@ -155,6 +157,9 @@ class RunResult(BaseModel):
     error: str | None = None
     # A stable name for the failure, e.g. ``fetch_pin_mismatch``; ``None`` when it has none.
     error_code: str | None = None
+    # From the cell's first frame; ``traceback_full`` keeps the harness frames, for a bug report.
+    traceback: str | None = None
+    traceback_full: str | None = None
     stdout: str = ""
     stderr: str = ""
 
@@ -163,6 +168,11 @@ class RunResult(BaseModel):
     @classmethod
     def _truncate_console(cls, value: str) -> str:
         return _cap_console(value)
+
+    @field_validator("traceback", "traceback_full")
+    @classmethod
+    def _truncate_traceback(cls, value: str | None) -> str | None:
+        return _cap_console(value) if value else value
 
 
 class CancelResult(BaseModel):
@@ -516,6 +526,8 @@ class LocalNotebookOps:
             duration_ms=result.duration_ms,
             error=result.error,
             error_code=result.error_code,
+            traceback=result.traceback,
+            traceback_full=result.traceback_full,
             stdout=result.stdout,
             stderr=result.stderr,
         )
@@ -1269,6 +1281,7 @@ def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
         console_stdout=data.get("console_stdout") or "",
         console_stderr=data.get("console_stderr") or "",
         error=_cap_console(data["error"]) if data.get("error") else None,
+        error_full=_cap_console(data["error_full"]) if data.get("error_full") else None,
         test=_test_view_from_wire(test) if test else None,
         created_by=data.get("created_by") or "",
         updated_by=data.get("updated_by") or "",
@@ -1320,6 +1333,8 @@ def _run_result_from_wire(data: dict[str, Any]) -> RunResult:
         duration_ms=data.get("duration_ms", 0.0),
         error=data.get("error"),
         error_code=data.get("error_code"),
+        traceback=data.get("traceback"),
+        traceback_full=data.get("traceback_full"),
         stdout=data.get("stdout") or "",
         stderr=data.get("stderr") or "",
     )

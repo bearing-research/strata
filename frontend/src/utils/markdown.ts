@@ -24,8 +24,8 @@ const md = new MarkdownIt({
   linkify: true,
   // Smart quotes break copy-paste of code identifiers in prose.
   typographer: false,
-  // Single newlines become <br> so existing outputs don't reflow.
-  breaks: true,
+  // Wrapped source lines join, as in CommonMark, GitHub files and Jupyter.
+  breaks: false,
 })
 
 // Links open in a new tab with noopener/noreferrer.

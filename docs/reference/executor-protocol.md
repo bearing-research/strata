@@ -1,8 +1,8 @@
-# Executor Protocol
+# Executor protocol
 
 The executor protocol is the HTTP contract between Strata's notebook orchestrator and remote workers. Anyone can implement it to bring custom compute (GPUs, alternative engines, sandboxed environments). The reference implementation is `strata-worker` from `strata.notebook.remote_executor`.
 
-This page is the canonical specification. The [Distributed Workers](../notebook/workers.md) page covers deployment and registration; this one covers wire format.
+This page is the canonical specification. The [Workers](../notebook/workers.md) page covers deployment and registration; this one covers wire format.
 
 ## Versioning
 
@@ -164,6 +164,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
   "protocol_version": "v1",
   "build_id": "notebook-3f2a9c1b7e04",
   "origin": "notebook",
+  "cell_id": "ba3b7451",
   "transform": {
     "ref": "notebook_cell@v1",
     "params": {
@@ -193,6 +194,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | --- | --- | --- |
 | `protocol_version` | string (required) | Must be `"v1"`. |
 | `origin` | string | `"notebook"` for a cell run from an open notebook, `"run"` for a headless `strata run`. A dispatcher can queue interactive cells first; a worker can ignore it. |
+| `cell_id` | string | The cell being run. The reference worker compiles the source as `<cell {cell_id}>`, so a traceback says which cell a frame is from. |
 | `transform.ref` | string (required) | Must be `"notebook_cell@v1"` for the notebook executor. |
 | `transform.params.source` | string (required) | The cell Python source to execute. |
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
@@ -603,7 +605,7 @@ The minimum surface is `POST /v1/execute` + `GET /health`. The reference Python 
 
 A custom worker doesn't have to run Python - it just has to accept the `notebook_cell@v1` envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the `strata-worker` script is the path of least resistance.
 
-A worker the server cannot reach can dial out instead: `strata-worker --connect` carries these same requests over one outbound WebSocket to a relay, which presents the worker at an ordinary URL. The [Worker Relay Protocol](worker-connect.md) specifies the framing a relay implements.
+A worker the server cannot reach can dial out instead: `strata-worker --connect` carries these same requests over one outbound WebSocket to a relay, which presents the worker at an ordinary URL. The [Worker relay protocol](worker-connect.md) specifies the framing a relay implements.
 
 ## Core transform executors
 

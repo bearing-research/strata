@@ -43,6 +43,7 @@ _client_mod = _load_local_module("notebook_client.py", "_nb_client")
 _channel = _load_local_module("run_channel.py", "_nb_run_channel")
 _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 _work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
+_traceback = _load_local_module("cell_traceback.py", "_nb_cell_traceback")
 
 # Harness-injected, not user inputs: excluded from mutation fingerprinting.
 _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
@@ -125,15 +126,14 @@ def deserialize_inputs(manifest: dict) -> dict[str, Any]:
     return inputs
 
 
-def _exec_with_display(source: str, namespace: dict) -> Any | None:
+def _exec_with_display(source: str, namespace: dict, cell_id: str | None) -> Any | None:
     """Execute source; if the last statement is a bare expression, eval and return it."""
     import ast as _ast
 
-    try:
-        tree = _ast.parse(source)
-    except SyntaxError:
-        exec(source, namespace)  # noqa: S102
-        return None
+    filename = _traceback.cell_filename(cell_id)
+    # Before the parse: a cell that doesn't parse has a line to quote too.
+    _traceback.remember_source(filename, source)
+    tree = _ast.parse(source, filename)
 
     if not tree.body:
         return None
@@ -143,13 +143,13 @@ def _exec_with_display(source: str, namespace: dict) -> Any | None:
         if len(tree.body) > 1:
             mod = _ast.Module(body=tree.body[:-1], type_ignores=[])
             _ast.fix_missing_locations(mod)
-            exec(compile(mod, "<cell>", "exec"), namespace)  # noqa: S102
+            exec(compile(mod, filename, "exec"), namespace)  # noqa: S102
         expr = _ast.Expression(body=last.value)
         _ast.fix_missing_locations(expr)
-        result = eval(compile(expr, "<cell>", "eval"), namespace)  # noqa: S307
+        result = eval(compile(expr, filename, "eval"), namespace)  # noqa: S307
         return result if result is not None else None
     else:
-        exec(source, namespace)  # noqa: S102
+        exec(compile(tree, filename, "exec"), namespace)  # noqa: S102
         return None
 
 
@@ -185,11 +185,15 @@ def no_client_hint(exc: BaseException, manifest: dict) -> str | None:
     """Why ``strata`` is undefined on a worker, in place of a bare ``NameError``."""
     if manifest.get("strata_url") or not isinstance(exc, NameError) or exc.name != "strata":
         return None
-    return (
+    text = (
         "A cell on a worker has no ambient `strata` client, so it cannot scan or read "
         "artifacts through the notebook's server. Do that in a cell that runs on the "
         "server and use its result here."
     )
+    # So the traceback carries it too.
+    if hasattr(exc, "add_note"):
+        exc.add_note(text)
+    return text
 
 
 def read_run_token(manifest: dict) -> None:
@@ -238,12 +242,6 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
     return client
 
 
-def _error_text(exc: Exception) -> str:
-    """A cell's failure as one reads it: ``str(KeyError("MAX"))`` alone says only ``'MAX'``."""
-    text = str(exc)
-    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
-
-
 def close_client(client: Any) -> None:
     """Close an injected ambient client, swallowing teardown errors."""
     if client is None:
@@ -277,6 +275,7 @@ def execute_cell(
     loop_until_expr: str | None = None,
     stdout_capture: io.StringIO | None = None,
     stderr_capture: io.StringIO | None = None,
+    cell_id: str | None = None,
 ) -> tuple[dict, list[Any], str, str, list[dict], dict[str, Any] | None]:
     """Execute a cell; return outputs, displays, captured streams, mutations and loop state.
 
@@ -307,7 +306,7 @@ def execute_cell(
         )
 
         with display_capture.capture_side_effects():
-            _display_value = _exec_with_display(source, namespace)
+            _display_value = _exec_with_display(source, namespace, cell_id)
 
         loop_state: dict[str, Any] | None = None
         if loop_until_expr is not None:
@@ -533,7 +532,7 @@ def _run_one_batched_cell(
             try:
                 try:
                     with display_capture.capture_side_effects():
-                        display_value = _exec_with_display(source, namespace)
+                        display_value = _exec_with_display(source, namespace, cell_id)
                 except Exception as exc:
                     hint = _work_dir.hint(exc, manifest)
                     _send_frame(
@@ -541,8 +540,7 @@ def _run_one_batched_cell(
                         "cell_error",
                         {
                             "cell_id": cell_id,
-                            "error": f"{_error_text(exc)}\n{hint}" if hint else _error_text(exc),
-                            "traceback": traceback.format_exc(),
+                            **_traceback.failure_fields(exc, hint),
                             "duration_ms": _elapsed_ms(started),
                             "stdout": stdout_capture.getvalue(),
                             "stderr": stderr_capture.getvalue(),
@@ -762,7 +760,8 @@ def _emit_tainted_cell_error(
         {
             "cell_id": cell_id,
             "error": str(exc),
-            "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            # The message says what happened; no frame of it is the cell's.
+            "traceback_full": "".join(traceback.format_exception(exc)),
             "stdout": "",
             "stderr": "",
         },
@@ -889,6 +888,7 @@ def main():
                 loop_until_expr=loop_until_expr,
                 stdout_capture=stdout_buffer,
                 stderr_capture=stderr_buffer,
+                cell_id=manifest.get("strata_cell_id"),
             )
             # Reported here: inputs deserialize before console capture starts.
             if _ser.x64_was_enabled_here():
@@ -938,8 +938,7 @@ def main():
         hint = _work_dir.hint(e, manifest) or no_client_hint(e, manifest)
         result = {
             "success": False,
-            "error": f"{_error_text(e)}\n{hint}" if hint else _error_text(e),
-            "traceback": traceback.format_exc(),
+            **_traceback.failure_fields(e, hint),
             "variables": {},
             "stdout": stdout_buffer.getvalue() or stdout_text,
             "stderr": stderr_buffer.getvalue() or stderr_text,

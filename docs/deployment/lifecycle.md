@@ -1,8 +1,8 @@
-# Operations & Lifecycle
+# Operations
 
 This page covers the operational disk-and-state story: where notebook data lives, how big it gets, how to back it up, how to move it, and how to clean up.
 
-If you're configuring caps and tuning, see [Configuration](../reference/configuration.md). If you're shipping to production, see [Deployment Modes](modes.md).
+If you're configuring caps and tuning, see [Configuration](../reference/configuration.md). If you're shipping to production, see [Deployment modes](modes.md).
 
 ## Where everything lives
 

@@ -3813,6 +3813,7 @@ class CellExecutor:
                 stderr=stderr,
                 error=error_msg,
                 traceback=result.get("traceback") or None,
+                traceback_full=result.get("traceback_full") or None,
                 duration_ms=duration_ms,
                 execution_method=execution_method,
                 suggest_install=suggest_pkg,

@@ -232,8 +232,7 @@ async function main() {
           .locator('.cell')
           .filter({ has: page.locator('.tests-badge') })
           .first()
-        await cell.hover()
-        await cell.locator('.tests-toggle').click()
+        await cell.locator('.tests-badge').click()
         // Off the cell, or its actions sit in the shot.
         await page.mouse.move(0, 0)
         await page.locator('.tests-panel').waitFor({ timeout: TIMEOUT_MS })

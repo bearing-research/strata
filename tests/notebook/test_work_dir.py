@@ -146,6 +146,7 @@ class TestAPathBesideTheNotebook:
 
         assert not result.success
         assert "read it as ../data.csv" in result.error
+        assert "read it as ../data.csv" in result.traceback
 
     @pytest.mark.integration
     @pytest.mark.warm_pool
@@ -157,6 +158,7 @@ class TestAPathBesideTheNotebook:
 
         assert result.execution_method == "warm"
         assert "read it as ../data.csv" in result.error
+        assert "read it as ../data.csv" in result.traceback
 
     async def test_a_batch_cell_says_so_too(self, tmp_path):
         session = _session(tmp_path)
@@ -174,6 +176,7 @@ class TestAPathBesideTheNotebook:
 
         (failed,) = result.cell_results
         assert "read it as ../data.csv" in (failed.error or "")
+        assert "read it as ../data.csv" in (failed.traceback or "")
 
     async def test_a_path_missing_everywhere_gets_no_hint(self, tmp_path):
         session = _session(tmp_path)

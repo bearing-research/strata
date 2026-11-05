@@ -1,13 +1,13 @@
-# Headless Runner
+# CLI
 
 `strata run` executes every cell in a notebook directory without starting the
 server or opening the UI. Useful for CI, scheduled jobs, and sanity-checking
 that a notebook still works after a dependency bump.
 
 For rendering a notebook to a shareable markdown or HTML file (without
-executing anything), see [Export](export.md) and its `strata export`
+executing anything), see [Export and import](export.md) and its `strata export`
 sibling command. For converting an existing Jupyter `.ipynb` into a
-Strata notebook directory, see [Import from Jupyter](import.md) and
+Strata notebook directory, see [Coming from Jupyter](import.md) and
 its `strata import` sibling.
 
 It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
@@ -44,7 +44,8 @@ run.
 finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
 entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
 `cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
-`error` / `reason` where applicable, `traceback` when the cell raised, and
+`error` / `reason` where applicable, `traceback` when the cell raised, starting
+at the cell's first frame, `traceback_full` with the harness frames too, and
 `error_code` when the failure has a stable name, such as `fetch_pin_mismatch`). A
 cache hit replays the stdout/stderr of the run behind it, cached by provenance
 along with its outputs (`--force` re-executes). A result pulled from a team store
@@ -66,7 +67,7 @@ not listed. An output stored before digests were recorded gets its
 digest computed from its bytes when the report is written. The ZIP export's
 `provenance.json` lists the same `outputs` per cell.
 
-### Exit Codes
+### Exit codes
 
 | Code | Meaning                                                        |
 | ---- | -------------------------------------------------------------- |
@@ -76,7 +77,8 @@ digest computed from its bytes when the report is written. The ZIP export's
 
 CI scripts can branch on the exit code; the structured output stays parseable
 even when some cells failed (each failure produces a JSON object with
-`status: "error"`, its `error`, and the `traceback` when the cell raised).
+`status: "error"`, its `error`, and `traceback` and `traceback_full` when the
+cell raised).
 
 ## Example: GitHub Actions
 
@@ -101,7 +103,7 @@ jobs:
 `--format json` emits a single structured result object, so downstream steps
 can parse per-cell status without screen-scraping.
 
-## What Gets Run
+## What gets run
 
 Every cell in the notebook executes in topological order, exactly as if you
 had clicked **Run All** in the UI. Cached artifacts are reused, the first run
@@ -112,7 +114,7 @@ Passing `--force` skips each cell's cache lookup, so every cell re-executes
 (nothing cached is deleted), which is what you usually want in CI if you're testing that the code *still produces*
 the expected artifacts.
 
-## What Does Not Happen
+## What does not happen
 
 - **No server starts.** No ports are bound; no UI is served.
 - **No WebSocket broadcasts.** Progress is written to stdout only.
@@ -123,7 +125,7 @@ the expected artifacts.
   never asks: `strata run` and `strata cell run` (`--server` included) go
   ahead, and `.strata/reads/index.json` records the read as `not_asked`.
 
-## Environment & Secrets
+## Environment & secrets
 
 `strata run` reads the notebook's `[env]` and `[secret_manager]` blocks the
 same way the server does. Secret-manager credentials (e.g.
@@ -160,7 +162,7 @@ intended) and its `diagnostics` with `severity` / `code` / `message` /
 The intended loop for scripts and coding agents: **write files → validate →
 fix → run**. Validation is cheap enough to call after every edit; `strata
 run` is the expensive step. See
-[Authoring Notebooks Programmatically](agent-authoring.md).
+[CLI authoring](agent-authoring.md).
 
 ## `strata new`
 
@@ -207,6 +209,8 @@ Every `<cell_id>` here and below is the id from `notebook.toml` or `cell list`,
 not the cell's `# @name`.
 
 Each takes `--format human|json` (JSON is the default - these are agent-first).
+A failed cell's JSON in `cell show` has `error`, the traceback from the cell's
+first frame, and `error_full`, with the harness frames too.
 The JSON shapes match the server's REST API (`GET /{id}/cells`, `GET /{id}/dag`),
 so a script written against the local CLI keeps working against a running
 server later. Exit codes follow the same contract as `run` / `validate`: `0`
@@ -295,7 +299,8 @@ $SID <cell_id> --rerun`). The server owns its venv, so the remote path never syn
 server's run modes, so remote execution has the same three modes as local.
 
 `--format json` (default) writes a single clean JSON object to **stdout** - the
-executor's logs go to stderr, so the stdout stream stays parseable:
+executor's logs go to stderr, so the stdout stream stays parseable. A cell that
+raised has its `traceback` and `traceback_full`, as in `strata run`:
 
 ```bash
 strata cell run nb featurize --format json | jq '{status, cache_hit, error}'
@@ -383,7 +388,7 @@ Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
 run/test`), this is the full agent surface - and **all of it** works either
 offline against a directory or `--server/--session` against a running server. An
 MCP server wrapping the same operations is also available; see
-[MCP Server](mcp.md), or [`strata agent`](agent.md) for the one-command on-ramp
+[MCP server](mcp.md), or [`strata agent`](agent.md) for the one-command on-ramp
 that stands it up and points a coding agent at a live session.
 
 ## Workers (`strata worker`)

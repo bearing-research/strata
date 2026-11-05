@@ -61,6 +61,56 @@ def test_the_failure_is_still_there_after_a_reopen(tmp_path: Path):
     assert view.status == CellStatus.ERROR.value
 
 
+def test_a_reopened_cell_serves_both_tracebacks(tmp_path: Path):
+    """The browser restores a failed cell from these two fields: no frame replays it."""
+    notebook_dir = _notebook(tmp_path)
+    _run(notebook_dir, FAILING)
+
+    reopened = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    wire = reopened.notebook_state.get_cell("c1").serialize()
+
+    assert "ZeroDivisionError" in wire["error"]
+    assert "harness.py" not in wire["error"]
+    assert "ZeroDivisionError" in wire["error_full"]
+    assert "harness.py" in wire["error_full"]
+
+
+def test_an_agent_reads_both_tracebacks_after_a_reopen(tmp_path: Path):
+    notebook_dir = _notebook(tmp_path)
+    _run(notebook_dir, FAILING)
+
+    view = LocalNotebookOps(notebook_dir).get_cell("c1")
+
+    assert "harness.py" not in view.error
+    assert "harness.py" in view.error_full
+
+
+async def test_an_agents_run_hands_back_both_tracebacks(tmp_path: Path):
+    notebook_dir = _notebook(tmp_path)
+
+    ops = LocalNotebookOps(notebook_dir)
+    ops._session.refresh_environment_runtime()
+
+    result = await ops.run_cell("c1")
+
+    assert result.status == "error"
+    assert result.error == "ZeroDivisionError: division by zero"
+    assert result.traceback.rstrip().endswith(result.error)
+    assert "harness.py" not in result.traceback
+    assert "harness.py" in result.traceback_full
+
+
+def test_a_run_that_succeeds_clears_both_tracebacks(tmp_path: Path):
+    notebook_dir = _notebook(tmp_path)
+    _run(notebook_dir, FAILING)
+    _run(notebook_dir, FIXED)
+
+    reopened = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    cell = reopened.notebook_state.get_cell("c1")
+    assert cell.error is None
+    assert cell.error_full is None
+
+
 def test_an_unrelated_change_does_not_erase_the_failure(tmp_path: Path):
     """Adding a cell elsewhere recomputes staleness for the whole notebook.
 
@@ -99,6 +149,7 @@ def test_editing_the_cell_drops_the_error(tmp_path: Path):
     assert session.notebook_state.get_cell("c1").status != CellStatus.ERROR
     assert cell.current_error() is None
     assert cell.serialize()["error"] is None
+    assert cell.serialize()["error_full"] is None
 
     # Every agent-facing surface projects through that wire dict, so none of
     # them can hand back the obsolete traceback either.

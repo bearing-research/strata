@@ -3,6 +3,16 @@ import test from 'node:test'
 
 import { renderMarkdownToHtml } from './markdown.ts'
 
+test('a wrapped source line joins the line before it', () => {
+  const html = renderMarkdownToHtml('one sentence\nwrapped in source')
+  assert.match(html, /<p>one sentence\nwrapped in source<\/p>/)
+  assert.doesNotMatch(html, /<br/)
+})
+
+test('two trailing spaces still force a line break', () => {
+  assert.match(renderMarkdownToHtml('first  \nsecond'), /first<br>\nsecond/)
+})
+
 test('renderMarkdownToHtml renders basic markdown blocks', () => {
   const html = renderMarkdownToHtml(`# Title
 

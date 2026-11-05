@@ -40,6 +40,27 @@ exhaustive commit history.
   store. An output folder's files, a loop's carry and a resumed run's files clone too, and a
   loop digests its carry when storing it instead of reading it back each iteration. Anything
   else, another filesystem or an object store, is copied in chunks as before. (#1443)
+- **A cell's header names its worker only when that says something.** A code cell on the
+  local default and every markdown cell lose the `worker: local` badge. A cell that names a
+  worker keeps it, and so does every code cell when the notebook's default is remote.
+  (#1445)
+- **The figure in a cell's header says what it measures:** `ran in 3.7s` for a run and
+  `loaded in 36ms` for a cache hit. (#1446)
+- **The notes panel shows plain text.** A note's title and preview drop their markdown, so
+  `Press **Run All** again` reads `Press Run All again`. (#1447)
+- **The `pandas_basics` sample opens without a warning.** Its computed columns go in a new
+  frame, `orders`, instead of redefining and mutating `sales`. (#1448)
+- **A table's toolbar fits a phone.** Below about 600px, Stats, Filter, CSV and Parquet
+  collapse into one menu, so the search box keeps its width. (#1450)
+- **The home page's cards fit their labels.** The column is wider, so each label and hint
+  takes one line; on a narrower page the cards wrap instead. (#1451)
+- **The docs read more consistently.** `strata tutorial caching` is step 1 of Your first
+  notebook, every nav title matches its page's heading, headings use sentence case, and the
+  landing page's title is styled. (#1449)
+- **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
+  outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
+  Jupyter do. A notebook that relied on a single newline for a line break renders differently:
+  end the line with two spaces or a backslash to keep the break. (#1442)
 - **The docs are reorganized into five tabs: Get started, Guides, Concepts, Reference and
   Deploy.** The home page is now a landing page, and its highlights moved to a Features
   page. The two longest pages are split, one per cell kind, and annotations gain a
@@ -193,6 +214,26 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A failed cell keeps its traceback through a reload.** A reload or a reopen showed a red
+  cell with no reason, and a later sync could wipe the traceback from an open page. The full
+  traceback is saved beside the trimmed one, so its section comes back too. (#1455)
+- **A traceback quotes the line that failed,** with Python's marker under the failing
+  expression. Each cell now compiles under its own name, so frames read `<cell ba3b7451>`
+  rather than `<cell>`, and a function defined in another cell quotes its own line, never
+  the running cell's. Remote workers get the cell id over the push route too. (#1456)
+- **A cell's header keeps its duration through a reload.** `ran in` and `loaded in` used to
+  disappear, leaving the cached badge with no time beside it. (#1457)
+- **The notebook header fits a phone.** Below 600px it takes two rows, and its menus span
+  the page instead of running off its left edge. (#1454)
+- **The CLI and MCP hand back both forms of a traceback.** `strata run` adds
+  `traceback_full`; `cell run` and `run_cell` add `traceback` and `traceback_full`;
+  `cell show` and `get_cell` add `error_full`. (#1458)
+- **A failed cell's traceback starts at the cell.** The frames of Strata's own harness
+  before the cell's first frame are gone, library frames after it stay, and the error line
+  prints once. **Full traceback** under the error keeps the whole thing for a bug report.
+  Cold, warm and Run All failures now read the same: a warm run printed the error line
+  twice, a cold one and Run All showed only that line in the browser, and a syntax error
+  chained two tracebacks. A loop or `@each` failure says which iteration or item. (#1444)
 - **A fresh notebook no longer logs warnings about nothing.** A table an upstream cell has
   yet to write is an ordinary state, so its unresolved fingerprint logs at debug; a catalog
   that cannot answer still warns. A warm worker gets 60 seconds to start, not 10: its first

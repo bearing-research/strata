@@ -789,6 +789,10 @@ class CellState(BaseModel):
             "which withholds it once the source it happened to has changed."
         ),
     )
+    error_full: str | None = Field(
+        default=None,
+        description="``error`` with the harness frames a traceback hides, for a bug report",
+    )
     error_source_hash: str | None = Field(
         default=None,
         exclude=True,
@@ -905,6 +909,8 @@ class CellState(BaseModel):
         # Hash only when there is an error to gate.
         if data.get("error") is not None:
             data["error"] = self.current_error()
+        if data.get("error") is None:
+            data["error_full"] = None
 
         # Drives the "module" pill and the module_export_blocked tooltip.
         if self.language == CellLanguage.PYTHON:

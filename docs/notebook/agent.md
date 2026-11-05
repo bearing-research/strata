@@ -1,4 +1,4 @@
-# Driving a notebook with a coding agent
+# Use a coding agent
 
 `strata agent <notebook-dir>` is a one-command on-ramp: it stands up everything
 a coding agent (Claude Code) needs to drive a **live** Strata notebook, and
@@ -260,9 +260,9 @@ If it can't, stop it and let `strata agent` start one scoped to your notebook.
 
 ## Related
 
-- [The notebook as an agent's scratchpad](scratchpad.md): the other use case,
+- [Agent scratchpad](scratchpad.md): the other use case,
   where the notebook is disposable rather than the deliverable.
-- [MCP Server](mcp.md): the full tool list and the endpoint's security model.
-- [Terminal Viewer (TUI)](tui.md): the live spectator `strata agent` attaches.
+- [MCP server](mcp.md): the full tool list and the endpoint's security model.
+- [Terminal viewer](tui.md): the live spectator `strata agent` attaches.
 - [Authoring Programmatically](agent-authoring.md): the same ops as a Python API.
-- [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to): running cells on a remote box over SSH.
+- [Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to): running cells on a remote box over SSH.

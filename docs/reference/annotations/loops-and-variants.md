@@ -1,4 +1,4 @@
-# Loop Cell Annotations
+# Loop and variant annotations
 
 A Python cell carrying `@loop` is executed iteratively. The body runs once per
 iteration and the `carry` variable threads state between them.

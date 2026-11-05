@@ -57,6 +57,8 @@ class CellExecutionResult:
     # The harness's formatted traceback, kept apart from ``error`` so the UI's one-line
     # pill stays one line.
     traceback: str | None = None
+    # With the harness frames that lead to the cell, which ``traceback`` leaves out.
+    traceback_full: str | None = None
     cache_hit: bool = False
     artifact_uri: str | None = None
     execution_method: str = "cold"  # cold, warm, cached

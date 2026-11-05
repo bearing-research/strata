@@ -1,8 +1,8 @@
-# Environment Management
+# Environment
 
 Each notebook has its own isolated Python environment managed by [uv](https://docs.astral.sh/uv/).
 
-## How It Works
+## How it works
 
 When you create a notebook, Strata:
 
@@ -20,7 +20,7 @@ A hash of the lockfiles (`uv.lock`, plus `renv.lock` when the notebook has one) 
 
 A cell sent to a [remote worker](workers.md) runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.
 
-## Python Version
+## Python version
 
 At notebook creation time, you can select a Python version from the versions configured on the server. The first one listed is the default.
 
@@ -29,7 +29,7 @@ To change it later, click **Requested Python** in the Environment panel. Strata 
 !!! note
     The available versions come from the server's `STRATA_NOTEBOOK_PYTHON_VERSIONS`. Unset, they are the Python versions `uv` reports as installed on the server that Strata supports, with the server's own version included. A `UV_PYTHON` set in the server's environment does not apply to a notebook's `uv` commands; `requires-python` decides its interpreter.
 
-## Installing Packages
+## Installing packages
 
 ### From the UI
 
@@ -69,7 +69,7 @@ Conda-style `environment.yaml` files are supported on a best-effort basis. Strat
 
 Click **Export** to download the current dependencies as `requirements.txt`.
 
-## Environment Operations
+## Environment operations
 
 All environment mutations run as **async jobs** with seven actions:
 
@@ -89,7 +89,7 @@ The UI shows:
 - Recent operation history (persisted across server restarts)
 - Resolved package count and lockfile hash
 
-## Cache Invalidation
+## Cache invalidation
 
 When you install or remove a package:
 
@@ -101,7 +101,7 @@ When you install or remove a package:
 !!! info "Switching back"
     If you remove a package and then re-add it (returning to the same `uv.lock`), the original provenance hashes match again and cells get **cache hits**. This is free by construction, no special logic needed.
 
-## Missing Package Detection
+## Missing package detection
 
 When a cell fails with `ModuleNotFoundError`, Strata detects the missing package and offers a one-click install button:
 
@@ -110,7 +110,7 @@ ModuleNotFoundError: No module named 'pandas'
 → [Install pandas]
 ```
 
-## File Layout
+## File layout
 
 ```
 my_notebook/

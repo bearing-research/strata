@@ -1,4 +1,4 @@
-# Python Cells
+# Python cells
 
 The default. A Python cell is just Python source: assignments at module scope become the cell's outputs, and free variables become inputs pulled from upstream cells.
 

@@ -1,4 +1,4 @@
-# Configuration Reference
+# Configuration
 
 Strata is configured via environment variables (prefixed with `STRATA_`) or a `[tool.strata]` section in `pyproject.toml`.
 
@@ -70,7 +70,7 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_MAX_FETCH_WORKERS`     | `32`    | Max threads in fetch pool       |
 | `STRATA_FETCH_TIMEOUT_SECONDS` | `60.0`  | Per-fetch timeout               |
 
-## Resource Limits
+## Resource limits
 
 | Variable                      | Default              | Description                         |
 | ----------------------------- | -------------------- | ----------------------------------- |
@@ -83,7 +83,7 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_MAX_EQUALITY_DELETE_ROWS` | `10000000` | Iceberg equality delete rows a row group may need in memory; a scan over it is refused, pointing at compaction |
 | `STRATA_STREAM_STATE_TTL_SECONDS` | `300.0`          | How long a completed/abandoned stream's state lingers before cleanup. A `mode="stream"` miss whose stream is never fetched in that time is marked `failed`, and the same request later computes it again |
 
-## QoS (Two-Tier Admission)
+## QoS (two-tier admission)
 
 | Variable                         | Default            | Description                                |
 | -------------------------------- | ------------------ | ------------------------------------------ |
@@ -174,7 +174,7 @@ is a REST or Hive one (a `type` other than `sql`, or a `uri` starting with
 `http` or `thrift`), a table URI cannot name a warehouse at all; the request is
 a 400, and the table is addressed as `<namespace>.<table>` in that catalog.
 
-## S3 Storage
+## S3 storage
 
 Credentials for the S3 blob backend (`STRATA_ARTIFACT_BLOB_BACKEND=s3`, which
 needs the `s3` extra). The same settings read lake tables on S3: a table named by an `s3://` warehouse
@@ -189,7 +189,7 @@ a MinIO lake needs only `STRATA_S3_ENDPOINT_URL` and its keys here.
 | `STRATA_S3_SECRET_KEY`   | `None`  | Secret key (falls back to AWS_SECRET_ACCESS_KEY) |
 | `STRATA_S3_ANONYMOUS`    | `false` | Use anonymous access                             |
 
-## GCS Storage
+## GCS storage
 
 Credentials for the GCS blob backend (`STRATA_ARTIFACT_BLOB_BACKEND=gcs`, which
 needs the `gcs` extra). Unset credentials fall back to Application Default
@@ -210,7 +210,7 @@ overrides the one Strata derives.
 | `STRATA_GCS_ANONYMOUS`          | `false` | Use anonymous access (public buckets, emulators)                 |
 | `STRATA_GCS_ENDPOINT_OVERRIDE`  | `None`  | Custom endpoint (fake-gcs-server and similar)                    |
 
-## Azure Storage
+## Azure storage
 
 Credentials for the Azure blob backend (`STRATA_ARTIFACT_BLOB_BACKEND=azure`).
 Supply at least one of connection string, account key, SAS token, or default
@@ -257,7 +257,7 @@ with either.
 | `STRATA_AZURE_USE_DEFAULT_CREDENTIAL` | `false` | Use `DefaultAzureCredential` (managed identity)    |
 | `STRATA_AZURE_ENDPOINT_URL`           | `None`  | Custom endpoint (Azurite emulator)                 |
 
-## Artifact Storage
+## Artifact storage
 
 | Variable                          | Default     | Description                      |
 | --------------------------------- | ----------- | -------------------------------- |
@@ -366,7 +366,7 @@ writing build rows directly.
 | `STRATA_PRINCIPAL_HEADER`            | `X-Strata-Principal` | Header for user identity             |
 | `STRATA_SCOPES_HEADER`               | `X-Strata-Scopes`    | Header for permission scopes         |
 | `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND` | `true`               | Return 404 instead of 403            |
-| `STRATA_SERVICE_WRITES_ENABLED`      | `false`              | **Preview.** Opt-in: let authenticated clients write/publish in service mode (`put`, `set_name`, `set_alias`, tags), scoped to the caller's tenant and gated by the `artifacts:write` scope. Requires `trusted_proxy` auth (enforced at startup). Default keeps service mode read-only. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
+| `STRATA_SERVICE_WRITES_ENABLED`      | `false`              | **Preview.** Opt-in: let authenticated clients write/publish in service mode (`put`, `set_name`, `set_alias`, tags), scoped to the caller's tenant and gated by the `artifacts:write` scope. Requires `trusted_proxy` auth (enforced at startup). Default keeps service mode read-only. See [Service mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
 
 ### Access control rules
 
@@ -529,7 +529,7 @@ polls the store every half second while the cell runs and sends the chunks to
 the notebook's sockets in order. Single-node deployments neither write nor
 poll; there the console goes straight from the log route to the sockets.
 
-## Multi-Tenancy
+## Multi-tenancy
 
 | Variable                       | Default       | Description                           |
 | ------------------------------ | ------------- | ------------------------------------- |
@@ -537,7 +537,7 @@ poll; there the console goes straight from the log route to the sockets.
 | `STRATA_TENANT_HEADER`         | `X-Tenant-ID` | Header for tenant identification      |
 | `STRATA_REQUIRE_TENANT_HEADER` | `false`       | Require tenant header on all requests |
 
-## Transforms & Builds
+## Transforms & builds
 
 Server-side transform execution and the async build runner (service mode / the
 artifact build pipeline). Transforms are also configured via the
@@ -607,7 +607,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 
 | Variable                            | Default                     | Description                                                    |
 | ----------------------------------- | --------------------------- | -------------------------------------------------------------- |
-| `STRATA_NOTEBOOK_STORAGE_DIR`       | `~/.strata/notebooks`       | Default notebook storage directory. (Pre-2026-05 default was `/tmp/strata-notebooks`; see [Operations & Lifecycle](../deployment/lifecycle.md#notebook-storage-location) for the migration note.) |
+| `STRATA_NOTEBOOK_STORAGE_DIR`       | `~/.strata/notebooks`       | Default notebook storage directory. (Pre-2026-05 default was `/tmp/strata-notebooks`; see [Operations](../deployment/lifecycle.md#notebook-storage-location) for the migration note.) |
 | `STRATA_NOTEBOOK_PYTHON_VERSIONS`   | every uv-installed minor matching Strata's `requires-python` | Available Python versions for new notebooks (JSON array or comma-separated list). Falls back to the server's own minor when uv is unavailable. |
 | `STRATA_NOTEBOOK_ENV_BACKEND`       | `uv`                        | How notebook Python environments are kept. `uv`: each notebook has its own `.venv`. `shared`: notebooks with the same `uv.lock` and interpreter build share one environment, and each notebook's `.venv` is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. R libraries are shared the same way, one per `renv.lock` and R build, with `renv/library` a symlink. POSIX only. See [Shared environments](../notebook/environment.md#shared-environments). |
 | `STRATA_NOTEBOOK_SHARED_ENV_DIR`    | `envs` beside `STRATA_NOTEBOOK_STORAGE_DIR` | Where shared environments live, one directory per lockfile and interpreter. |
@@ -616,7 +616,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 | `STRATA_NOTEBOOK_WORKERS_EDITABLE` | `true` | `false` keeps a personal server's remote cells on its [server-managed workers](../notebook/workers.md#server-managed-workers): a notebook's own `[[workers]]` are ignored (listed as not allowed in the Workers panel, flagged on a cell that names one), a cell on one fails, and the panel offers no editor for the notebook's own workers. For a host that admits, places, meters or audits every remote run through its own registry. Service mode is always this way. |
 | `STRATA_NOTEBOOK_OBJECT_CODEC` | `cloudpickle` | How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: `cloudpickle` (stdlib `pickle` if cloudpickle is not installed) or `pickle`. Any other value fails the cell's serialization. Environment only. |
 | `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` | `3` | How many earlier values of each cell output a notebook's own store keeps beside the current one, so reverting a recent edit is still a cache hit. Older ones are pruned each time the server opens the notebook, an already-open one included. `0` turns pruning off and keeps every value. |
-| `STRATA_NOTEBOOK_REMOTE_STORE_URL`  | `None`                      | Point the ambient `strata` client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup, because the registry routes would forward to themselves. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
+| `STRATA_NOTEBOOK_REMOTE_STORE_URL`  | `None`                      | Point the ambient `strata` client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup, because the registry routes would forward to themselves. See [Service mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
 | `STRATA_NOTEBOOK_REMOTE_STORE_HEADERS` | `{}`                     | Auth headers the ambient client attaches when pointed at a remote store (e.g. the trusted-proxy identity/token). JSON object; set via env so secrets stay out of committed config. |
 | `STRATA_NOTEBOOK_REMOTE_STORE_FORWARD_PRINCIPAL` | `true` | With a caller's principal in context (service mode), send its id as `X-Strata-Principal` to the remote store in place of the one in the static headers, so team-cache attribution, promotions and registry approvals from a shared server name the member. `false` keeps the static identity for every request. |
 | `STRATA_NOTEBOOK_TEAM_CACHE_ENABLED` | `false`                    | Consult the remote store on a **local cache miss**, so a colleague's expensive cell becomes your instant result. Distinct from the URL above, which only redirects a cell's ambient client (explicit publish). Opt-in because it is a behaviour change, not only a performance one: it puts bytes another machine produced into your local store. Requires `STRATA_NOTEBOOK_REMOTE_STORE_URL`; enabling it without one is rejected at startup rather than left silently inert. |
@@ -641,7 +641,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 | `STRATA_NOTEBOOK_MAX_SESSIONS` | `50` | Most notebooks open at once. Beyond it the least recently used is closed, with a tab connected or not. |
 | `STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB` | unset (off) | When the host's available memory (`MemAvailable` in `/proc/meminfo`) is below this many MB, the least recently used open notebook is closed, one at a time, until it is above or nothing idle is left. Checked every minute and before each open. Linux only: elsewhere it logs a warning once and does nothing. |
 | `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` | `[]` (everything) | Which of the server's environment variables a cell subprocess is given. A cell is arbitrary Python, so when it is unset (the default, and right on a laptop) every member who can run a cell can read `STRATA_NOTEBOOK_REMOTE_STORE_HEADERS`, `STRATA_PROXY_TOKEN`, worker tokens and every data-source credential the server holds. Entries are exact names or a prefix written with a trailing `*`; the essentials a subprocess cannot start without (`PATH`, `HOME`, `TMPDIR`, `UV_*`, `PYTHON*`, `R_*`, …) are always included, minus credential-looking names (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `CREDENTIAL`), `UV_PUBLISH_*`, `UV_INDEX_*_USERNAME` and the index URLs that can embed a login (`UV_INDEX`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`, `UV_INDEX_*_URL`), and `STRATA_*` is dropped unless named exactly. A name listed exactly always passes. A cell's own `[env]` and mount credentials travel in the manifest rather than the process environment, so the list stays short. Applies to every process that runs cell code: the cold, R and batch harnesses, the warm pool worker, the inspect REPL and cell tests. Not isolation on its own: a cell running as the server's user can read `/proc/<server pid>/environ`; see `STRATA_NOTEBOOK_HARNESS_USER`. |
-| `STRATA_NOTEBOOK_HARNESS_USER` | `None` | The OS user cell code runs as. In **service mode**, a cell that would run on the server's own host is refused unless this is set, or the cell is assigned a server-managed worker on another machine. Cache hits are still served. Setting it needs the server to run as root, so it can switch users, and the harness user must be able to read the notebook directories, their `.venv`s and the interpreter behind them (install uv-managed Pythons outside `/root`, e.g. `UV_PYTHON_INSTALL_DIR=/opt/uv-python`). POSIX only. On Linux, a process a cell leaves running is stopped before the next run, which kills every other process of that user too, so give it to this server's cells alone. One harness user serves every tenant, so it is not a tenant isolation boundary: per-tenant isolation needs separate servers or containers. In personal mode nothing is refused, and the user applies only when set. See [Service Mode → What a cell can read](../deployment/service-mode.md#what-a-cell-can-read). |
+| `STRATA_NOTEBOOK_HARNESS_USER` | `None` | The OS user cell code runs as. In **service mode**, a cell that would run on the server's own host is refused unless this is set, or the cell is assigned a server-managed worker on another machine. Cache hits are still served. Setting it needs the server to run as root, so it can switch users, and the harness user must be able to read the notebook directories, their `.venv`s and the interpreter behind them (install uv-managed Pythons outside `/root`, e.g. `UV_PYTHON_INSTALL_DIR=/opt/uv-python`). POSIX only. On Linux, a process a cell leaves running is stopped before the next run, which kills every other process of that user too, so give it to this server's cells alone. One harness user serves every tenant, so it is not a tenant isolation boundary: per-tenant isolation needs separate servers or containers. In personal mode nothing is refused, and the user applies only when set. See [Service mode → What a cell can read](../deployment/service-mode.md#what-a-cell-can-read). |
 | `STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES` | `2147483648` (2 GiB) | Per-file cap when reading a remote worker's output bundle; a larger member fails the cell rather than being read into memory. Environment only. Values that don't parse, or are `<= 0`, fall back to the default. |
 
 ## TUI
@@ -672,7 +672,7 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | --------------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |
 | `STRATA_WORKER_TOKEN`             | `None`               | Optional bearer token. When set, the worker's `/v1/*` execution endpoints require `Authorization: Bearer <token>`. `/health` stays open. See [Workers § Authentication](../notebook/workers.md#authentication). |
 | `STRATA_WORKER_LAUNCH_ID`         | `None`               | Reported as `launch_id` in `/health`. Strata sets it, over stdin, on a worker it [launches over SSH](../notebook/workers.md#run-cells-on-a-machine-you-can-ssh-to) and connects only when the worker answering through the tunnel reports it; there is no reason to set it yourself. |
-| `STRATA_WORKER_CONNECT_TOKEN`     | `None`               | The token `strata-worker --connect` presents to the relay as `Authorization: Bearer <token>` on its WebSocket handshake. Read once at startup and removed from the environment. Unrelated to `STRATA_WORKER_TOKEN`, which still guards each request. See [Worker Relay Protocol](worker-connect.md). |
+| `STRATA_WORKER_CONNECT_TOKEN`     | `None`               | The token `strata-worker --connect` presents to the relay as `Authorization: Bearer <token>` on its WebSocket handshake. Read once at startup and removed from the environment. Unrelated to `STRATA_WORKER_TOKEN`, which still guards each request. See [Worker relay protocol](worker-connect.md). |
 | `STRATA_WORKER_MAX_INPUT_BYTES`   | `2147483648` (2 GiB) | Per-input download cap for the pull-model (`/v1/execute-manifest`). Reject inputs larger than this with 413, as soon as the count passes it. Inputs stream to disk, so this bounds disk use, not memory. |
 | `STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS` | `5` | How often a worker on the `signed` transport checks a running cell's [`# @output_dir`](annotations/python.md#output_dir) folders, sending each file to the server once its size and mtime held from one check to the next. |
 | `STRATA_WORKER_ALLOWED_HOSTS`     | _(empty)_            | Comma-separated hosts whose manifest URLs skip the private-address check, e.g. `build.internal,.svc.cluster.local`. A leading dot is a suffix (anchored on the dot, so `.example.com` does not match `evil-example.com`); anything else must match exactly. Matched on the name, so listing a host is trust in whoever controls its DNS. Prefer this over `STRATA_WORKER_ALLOW_LOCAL_HOSTS` in production. |
@@ -685,7 +685,7 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 
 The worker's input downloads, result uploads and log forwarding connect only to an address that passed the private-address check, and they connect directly: `HTTPS_PROXY` and the other proxy variables are ignored, because through a proxy the proxy would resolve the name and the check would say nothing about where it connects. A worker that can reach its store only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`, under which nothing is checked and the proxy variables apply. See the SSRF defenses in the [executor protocol](executor-protocol.md).
 
-## Rate Limiting
+## Rate limiting
 
 | Variable                       | Default  | Description                    |
 | ------------------------------ | -------- | ------------------------------ |

@@ -1,4 +1,4 @@
-# Privacy & Sharing Model
+# Privacy and sharing
 
 A personal server has one user, so it checks no identity: anyone who
 can reach it can list, open and execute every notebook under the
@@ -100,7 +100,7 @@ one venv, one storage volume per user) but the isolation is total.
 Per-user containers behind a routing proxy is a reasonable
 implementation.
 
-This is the same answer you'd get from JupyterHub, Marimo Cloud, or
+This is the same answer you'd get from JupyterHub, marimo Cloud, or
 any other notebook tool: hard-private = separate instances.
 
 ## Future direction: per-notebook ACLs

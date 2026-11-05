@@ -35,10 +35,11 @@ import {
   summarizeRemoteExecutionIssue,
   workerTransportLabel,
   workerWarningForEntry,
+  showsWorkerBadge,
 } from '../utils/notebookWorkers'
 import { inputWeightBadge } from '../utils/inputWeights'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
-import { cacheBadgeLabel, cacheBadgeTitle } from '../utils/cacheBadge'
+import { cacheBadgeLabel, cacheBadgeTitle, durationLabel } from '../utils/cacheBadge'
 import { cellDotTitle } from '../utils/cellRunBadge'
 import { CELL_STATES, cellState } from '../utils/cellState'
 import { renderMarkdownToHtml } from '../utils/markdown'
@@ -136,7 +137,7 @@ function toggleInspect() {
   openInspect(props.cell.id)
 }
 
-// Cell unit tests (Python only). The toolbar button doubles as a health badge.
+// Cell unit tests (Python only).
 const notebookId = computed(() => (notebook as { sessionId?: string }).sessionId)
 
 /** The 20-row preview arrives as column-keyed dicts; the data grid renders
@@ -287,13 +288,7 @@ const statusTitle = computed(() => {
   return stateInfo.value.label
 })
 
-const durationLabel = computed(() => {
-  if (!props.cell.durationMs) return ''
-  const ms = props.cell.durationMs
-  const time = ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`
-  if (props.cell.output?.cacheHit) return time
-  return `${time}`
-})
+const durationText = computed(() => durationLabel(props.cell.durationMs, props.cell.output))
 
 const canExplainStaleness = computed(() =>
   Boolean(props.cell.causality && (props.cell.status === 'idle' || props.cell.status === 'stale')),
@@ -837,9 +832,6 @@ function outputKey(output: CellOutput, index: number): string {
           @click="toggleTests(cell.id)"
         >
           <FlaskConical />
-          <span v-if="testBadge" class="tests-badge" :class="`tests-badge--${testBadge.cls}`">
-            {{ testBadge.text }}
-          </span>
         </button>
       </div>
     </div>
@@ -929,7 +921,11 @@ function outputKey(output: CellOutput, index: number): string {
             </span>
             <!-- Runtime: worker, mounts, timeout, env, annotations, cache. -->
             <div class="cell-meta-runtime">
-              <span class="worker-badge" :title="`Worker: ${effectiveWorkerLabel}`">
+              <span
+                v-if="showsWorkerBadge(cell, notebook.worker)"
+                class="worker-badge"
+                :title="`Worker: ${effectiveWorkerLabel}`"
+              >
                 worker: {{ effectiveWorkerLabel }}
               </span>
               <span v-if="authorBadge" class="author-badge" :title="authorTooltip">
@@ -1072,10 +1068,19 @@ function outputKey(output: CellOutput, index: number): string {
               >
                 <component :is="stateInfo.icon" /> {{ stateInfo.label }}
               </span>
+              <button
+                v-if="testBadge"
+                class="tests-badge"
+                :class="`tests-badge--${testBadge.cls}`"
+                :title="testBadge.title"
+                @click="toggleTests(cell.id)"
+              >
+                tests {{ testBadge.text }}
+              </button>
             </div>
           </div>
           <div class="cell-meta-actions">
-            <span v-if="durationLabel" class="duration">{{ durationLabel }}</span>
+            <span v-if="durationText" class="duration">{{ durationText }}</span>
             <button
               v-if="canExplainStaleness"
               class="causality-btn"
@@ -1281,7 +1286,14 @@ function outputKey(output: CellOutput, index: number): string {
               {{ effectiveWorkerHealthLabel }}
             </span>
           </div>
-          <pre class="output-error-detail">{{ cell.output.error }}</pre>
+          <pre class="output-error-detail">{{ cell.output.traceback || cell.output.error }}</pre>
+          <details
+            v-if="cell.output.tracebackFull && cell.output.tracebackFull !== cell.output.traceback"
+            class="output-error-full"
+          >
+            <summary>Full traceback</summary>
+            <pre class="output-error-detail">{{ cell.output.tracebackFull }}</pre>
+          </details>
           <!-- R install needs a lockfile: without one, ``renv::install``
                writes into the system library, so show a read-only hint. -->
           <div
@@ -2215,6 +2227,16 @@ function outputKey(output: CellOutput, index: number): string {
   font-family: monospace;
   white-space: pre-wrap;
 }
+.output-error-full {
+  margin-top: 8px;
+}
+.output-error-full summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.output-error-full .output-error-detail {
+  margin-top: 4px;
+}
 .remote-error-summary {
   display: flex;
   align-items: center;
@@ -2423,13 +2445,12 @@ function outputKey(output: CellOutput, index: number): string {
   position: relative;
 }
 .tests-badge {
-  margin-left: 3px;
-  padding: 0 4px;
-  border-radius: 8px;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 14px;
-  vertical-align: middle;
+  padding: 1px 6px;
+  border: none;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
 }
 .tests-badge--pass {
   background: var(--tint-success, rgba(60, 180, 90, 0.18));
@@ -2445,10 +2466,12 @@ function outputKey(output: CellOutput, index: number): string {
 }
 .tests-badge--stale {
   background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--text-muted);
 }
 .tests-badge--running {
   background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
   color: var(--accent-primary);
 }
 </style>

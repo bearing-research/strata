@@ -1,4 +1,4 @@
-# Cell Unit Tests
+# Cell unit tests
 
 Every Python cell can carry **its own `pytest` tests** - written right next to
 the cell, run against the cell's real outputs, with per-test pass/fail surfaced
@@ -78,27 +78,27 @@ cell or test that uses it errors with a note saying so, so do a scan or read in
 an upstream cell and test with its result.
 
 ![A Python cell with its results table above an open Tests panel: the test
-source, a green "2 passed" summary, and a tick beside each test name. The flask
-toggle on the cell's left rail carries a green 2/2
+source, a green "2 passed" summary, and a tick beside each test name. The cell's
+header carries a green tests 2/2
 badge.](../assets/cell-tests-light.png#only-light)
 ![A Python cell with its results table above an open Tests panel: the test
-source, a green "2 passed" summary, and a tick beside each test name. The flask
-toggle on the cell's left rail carries a green 2/2
+source, a green "2 passed" summary, and a tick beside each test name. The cell's
+header carries a green tests 2/2
 badge.](../assets/cell-tests-dark.png#only-dark)
 
 ### The health badge
 
-The flask toggle doubles as a status badge, so a cell's test health is visible
-without opening the panel:
+Once a cell's tests have run, a badge in its header shows their health without
+opening the panel. Click it to open the panel:
 
-| Badge                | Meaning                                                      |
-| -------------------- | ------------------------------------------------------------ |
-| green `4/4`          | all tests passed (passed / total)                            |
-| red `3/4`            | one or more **failed**                                       |
-| amber `3/4`          | **errored** - the cell source or test setup blew up          |
-| grey `3/4 · stale`   | the cell, its tests or its inputs changed since the last run |
-| `…`                  | the tests are running                                        |
-| amber `!`            | pytest is not installed in the notebook's environment        |
+| Badge                     | Meaning                                                      |
+| ------------------------- | ------------------------------------------------------------ |
+| green `tests 4/4`         | all tests passed (passed / total)                            |
+| red `tests 3/4`           | one or more **failed**                                       |
+| amber `tests 3/4`         | **errored** - the cell source or test setup blew up          |
+| grey `tests 3/4 · stale`  | the cell, its tests or its inputs changed since the last run |
+| `tests …`                 | the tests are running                                        |
+| amber `tests !`           | pytest is not installed in the notebook's environment        |
 
 Stale is computed from a fingerprint of `(cell source, test source, inputs)`,
 where the inputs are everything a run of the cell reads: upstream versions,
@@ -128,7 +128,7 @@ clients and automation can run them too:
 - receive **`cell_test_status`** (running → done) and **`cell_test_results`**
   (per-test outcomes, counts, durations).
 
-See the [WebSocket Protocol reference](../reference/websocket.md) for the frame
+See the [WebSocket protocol reference](../reference/websocket.md) for the frame
 shapes.
 
 ## From the CLI, REST and MCP
@@ -177,5 +177,5 @@ plugin, so the same cell tests can drive a CI or pre-commit check later.
 
 ---
 
-**See also:** [Cell Types](../guides/cells/index.md) · [Cell Annotations](../reference/annotations/index.md) ·
+**See also:** [Cell kinds](../guides/cells/index.md) · [Annotations](../reference/annotations/index.md) ·
 [`pandas_basics` example](../examples/pandas_basics.md)

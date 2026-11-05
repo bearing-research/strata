@@ -860,6 +860,7 @@ def create_notebook_executor_app(
                 cell_id=cell_id,
             ):
                 return await _stage_and_run(
+                    cell_id=cell_id,
                     source=source,
                     timeout_seconds=timeout_seconds,
                     raw_inputs=raw_inputs,
@@ -896,6 +897,7 @@ def create_notebook_executor_app(
         language: str = "python",
         mutation_defines: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
+        cell_id: str | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
         if gpu is not None:
             # Set in both: the manifest env reaches the cell's own CUDA init, the process
@@ -970,6 +972,7 @@ def create_notebook_executor_app(
                 # recapture and left @table names undefined.
                 "mutation_defines": list(mutation_defines or []),
                 "tables": tables or {},
+                "strata_cell_id": cell_id,
                 # Only when a reader forwards it (``_drain`` posts chunks to log_url);
                 # otherwise the bundle carries the console at the end.
                 "stream_console": log_url is not None,
@@ -1130,6 +1133,7 @@ def create_notebook_executor_app(
         language: str = "python",
         mutation_defines: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
+        cell_id: str | None = None,
     ) -> Response:
         async def _write_uploaded_input(
             var_name: str,
@@ -1162,6 +1166,7 @@ def create_notebook_executor_app(
             language=language,
             mutation_defines=mutation_defines,
             tables=tables,
+            cell_id=cell_id,
         )
         if isinstance(result, JSONResponse):
             return result
@@ -1308,6 +1313,7 @@ def create_notebook_executor_app(
             runtime_env=runtime_env,
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
+            cell_id=str(metadata.get("cell_id") or "") or None,
             trace_carrier=dict(http_request.headers),
             mutation_defines=metadata.get("mutation_defines"),
             tables=metadata.get("tables"),
@@ -1385,6 +1391,7 @@ def create_notebook_executor_app(
             runtime_env=runtime_env,
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
+            cell_id=str(metadata.get("cell_id") or "") or None,
             trace_carrier=dict(http_request.headers),
             environment=params.get("environment"),
             language=str(params.get("language") or "python"),

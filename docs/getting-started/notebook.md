@@ -1,4 +1,4 @@
-# Notebook Quickstart
+# Your first notebook
 
 Strata Notebook is an interactive notebook with content-addressed
 caching, automatic dependency tracking, and cascade execution. This
@@ -22,17 +22,23 @@ and plot with per-cell timings.](../assets/notebook-anatomy-dark.png#only-dark)
 
 The pipeline below is the one in that screenshot.
 
-## 1. Start the server
+## 1. Take the tutorial
+
+Strata ships sample notebooks that run without an API key, so there is nothing to clone.
+Start with the two-minute one on what the cache saves.
 
 === "uv (recommended)"
 
     Install the CLI from PyPI into a uv-managed tool environment, then
-    run it:
+    open the tutorial:
 
     ```bash
     uv tool install "strata-notebook[mcp,tui]"
-    strata-notebook
+    strata tutorial caching
     ```
+
+    Open the URL it prints. Requires [uv](https://docs.astral.sh/uv/);
+    plain `pip install` is not supported.
 
     The `mcp` and `tui` extras are for `strata agent` and `strata watch`
     (see [What's next](#whats-next)); the web UI needs neither. SQL
@@ -40,10 +46,6 @@ The pipeline below is the one in that screenshot.
     for example
     `uv tool install "strata-notebook[mcp,tui,sql,sql-duckdb,sql-sqlite]"`;
     without it a notebook that holds a SQL cell does not open.
-    Personal mode is the default (single-user, writes enabled); no
-    config needed for a local run. Re-run `strata-notebook` to start it
-    again on later sessions. Requires [uv](https://docs.astral.sh/uv/);
-    plain `pip install` is not supported.
 
 === "Docker"
 
@@ -55,6 +57,9 @@ The pipeline below is the one in that screenshot.
     writes enabled). See [Docker deployment](../deployment/docker.md)
     for details.
 
+    Open [http://localhost:8765](http://localhost:8765) and pick
+    **Open a sample** on the home page.
+
 === "From source (one-time setup)"
 
     Clone the repo, then install it and build the frontend:
@@ -64,22 +69,29 @@ The pipeline below is the one in that screenshot.
     cd frontend && npm ci && npm run build && cd ..
     ```
 
-    Run the server (this is the command you'll re-run on subsequent
-    sessions):
+    Then open the tutorial:
 
     ```bash
-    uv run strata-notebook
+    uv run strata tutorial caching
     ```
 
-    Personal mode is the default now; no env vars needed for a
-    local single-user run. The npm step above is one-time setup,
+    Open the URL it prints. The npm step above is one-time setup,
     not part of the recurring start command.
 
-Open [http://localhost:8765](http://localhost:8765).
+`strata tutorial caching` copies the sample into your storage directory under a fresh
+name, so you can edit it freely. It uses the server on `:8765`, or starts one if none is
+running and keeps it until you press ++ctrl+c++ (pass `--server` for another address).
+The first open builds the copy's environment before it returns, so it takes a little
+longer. `strata tutorial` alone lists the samples.
+
+The rest of this page builds a pipeline of your own. Leave that server running. On later
+sessions, start one with `strata-notebook` (`uv run strata-notebook` from source). Personal
+mode is the default (single-user, writes enabled), so a local run needs no configuration.
 
 ## 2. Create a notebook
 
-Click **New Notebook** on the landing page. Pick a name, a parent
+Click **New Notebook** on the home page at
+[http://localhost:8765](http://localhost:8765). Pick a name, a parent
 directory under the notebook storage root, and a Python version.
 Strata creates a directory containing `notebook.toml`, a per-notebook
 `pyproject.toml`, and a `cells/` folder.
@@ -115,8 +127,8 @@ re-add it with the kind you want.
 | Kind | What it's for |
 | --- | --- |
 | **Python** | Regular Python code. Most cells. |
-| **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. Needs the `sql` extra and a driver extra (see [Installation](installation.md)). |
-| **R** | R code - stats and tidyverse. See [Cell Types](../guides/cells/index.md). |
+| **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. Needs the `sql` extra and a driver extra (see [Install](installation.md)). |
+| **R** | R code - stats and tidyverse. See [Cell kinds](../guides/cells/index.md). |
 | **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
 | **Widget** | A declarative control panel - one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
 | **Markdown** | Prose between cells. Rendered as HTML; not part of the DAG. |
@@ -131,8 +143,8 @@ line:
 | **Variant** | `# @variant group name` - several cells share one DAG slot, for A/B-ing implementations of the same step. |
 
 Library, mount, and worker shapes are annotation-driven too. See
-[Cell Types](../guides/cells/index.md) for the full surface and
-[Cell Annotations](../reference/annotations/index.md) for every annotation.
+[Cell kinds](../guides/cells/index.md) for the full surface and
+[Annotations](../reference/annotations/index.md) for every annotation.
 
 ## 3. Walk through a pipeline
 
@@ -230,8 +242,8 @@ The matplotlib figure renders inline as a PNG.
 
 Press ++shift+enter++ on the loader cell again. The 2-second pause
 is gone, Strata returned the cached `df` instantly, and the cell
-header shows a **cached** badge alongside the duration ("cached ·
-5ms" or similar).
+header shows a **cached** badge with what it saved. The right of the
+header gives the load time ("loaded in 5ms" or similar).
 
 The cache is content-addressed: the cache key is a hash of the
 cell's source, its upstream artifacts, and the environment lockfile.
@@ -326,28 +338,6 @@ Use `display(x)` for **multiple** outputs in one cell (each call
 adds a new render below the cell). For one trailing expression at
 the end, no `display()` needed: the harness auto-displays it.
 
-## 8. Take the tutorial
-
-Strata ships sample notebooks that run without an API key, so there is nothing to clone.
-One is a two-minute tutorial on what the cache saves:
-
-```bash
-strata tutorial           # list the samples
-strata tutorial caching   # open a copy and print its URL
-```
-
-Each open copies the sample into your storage directory under a fresh name, so you can
-edit it freely. It uses the server on `:8765`, or starts one if none is running (pass
-`--server` for another address). The first open builds the copy's environment before it
-returns, so it takes a little longer.
-
-**Open a sample** on the home page does the same thing, and is the way in if your server
-runs in Docker.
-
-The repo's `examples/` directory holds many more, one for each cell type. Every example
-is rendered into the docs site, so you can read the cells before deciding which to open.
-See the [Examples catalog](../notebook/examples.md) for the full list, grouped by feature.
-
 ## Cell operations
 
 | Action | How |
@@ -362,15 +352,15 @@ See the [Examples catalog](../notebook/examples.md) for the full list, grouped b
 
 ## What's next
 
-- [Driving a notebook with a coding agent](../notebook/agent.md): hand this notebook to Claude Code and watch it build, in a browser or a terminal - one command sets it up
+- [Use a coding agent](../notebook/agent.md): hand this notebook to Claude Code and watch it build, in a browser or a terminal - one command sets it up
 - [Agent scratchpad](../notebook/scratchpad.md): the other way round - an agent working on something else using a notebook as **cached** throwaway compute instead of temp scripts; installs as a one-command plugin
-- [Terminal viewer (TUI)](../notebook/tui.md) to watch this notebook live from a terminal with `strata watch ./my-notebook`
+- [Terminal viewer](../notebook/tui.md) to watch this notebook live from a terminal with `strata watch ./my-notebook`
 - [Concepts](../concepts/caching.md) for how the DAG, caching, and cascade work
-- [Cell Types](../guides/cells/index.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
-- [Cell Annotations](../reference/annotations/index.md) for `@worker`, `@mount`, `@loop`, and friends
-- [Distributed Workers](../notebook/workers.md) for `# @worker gpu-fly` and dispatching to remote compute
-- [Import from Jupyter](../notebook/import.md) for `strata import nb.ipynb`
-- [Export](../notebook/export.md) for sharing a notebook as a single self-contained markdown or HTML file, or as a snapshot bundle (state and artifacts) that imports back
-- [Environment Management](../notebook/environment.md) for package management and Python versions
-- [Comparison with Jupyter, Marimo, Pluto](../notebook/comparison.md)
-- [Keyboard Shortcuts](../notebook/keyboard.md)
+- [Cell kinds](../guides/cells/index.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
+- [Annotations](../reference/annotations/index.md) for `@worker`, `@mount`, `@loop`, and friends
+- [Workers](../notebook/workers.md) for `# @worker gpu-fly` and dispatching to remote compute
+- [Coming from Jupyter](../notebook/import.md) for `strata import nb.ipynb`
+- [Export and import](../notebook/export.md) for sharing a notebook as a single self-contained markdown or HTML file, or as a snapshot bundle (state and artifacts) that imports back
+- [Environment](../notebook/environment.md) for package management and Python versions
+- [How Strata compares](../notebook/comparison.md)
+- [Keyboard shortcuts](../notebook/keyboard.md)

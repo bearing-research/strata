@@ -1,4 +1,4 @@
-# Artifacts & Model Registry
+# Artifacts and registry
 
 Every materialized result in Strata is an immutable, versioned **artifact**
 with content-addressed provenance. The registry layer adds the pointers and
@@ -140,7 +140,7 @@ gates are inert. Resolving names/aliases is a tenant-scoped read in service
 mode; *publishing* them (`set_name` / `set_alias`, or `name=` on a
 materialize) requires opting into
 `service_writes_enabled` and holding the `artifacts:write` scope - see
-[Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
+[Service mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
 
 ## The promotion flow, end to end
 
@@ -179,7 +179,7 @@ local one.
 
 !!! tip "New to it? Start with the walkthrough"
     For a click-by-click guide - publish from a cell → promote → approve →
-    lineage - see [**Registry Dashboard**](../notebook/registry-dashboard.md).
+    lineage - see [**Registry dashboard**](../notebook/registry-dashboard.md).
     The rest of this section is the reference for what each piece does.
 
 **Publishing.** Inside a cell, the [ambient `strata`

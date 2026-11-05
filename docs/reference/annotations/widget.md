@@ -1,4 +1,4 @@
-# Widget and App View Annotations
+# Widget and app view annotations
 
 ## `@live`
 
