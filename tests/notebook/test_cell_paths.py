@@ -104,6 +104,10 @@ def test_a_path_does_not_get_the_executor(path):
     assert executor_uses(path.read_text()) == []
 
 
+async def _table_is_there(_source):
+    return False
+
+
 def _raises(error: Exception):
     def raises(*_args, **_kwargs):
         raise error
@@ -893,6 +897,7 @@ class TestLoop:
             "manifest_tables": lambda *_args: {},
             "moved": unused,
             "promote_reverted_outputs": unused,
+            "written_table_gone": _table_is_there,
             "canonical_output": unused,
             "table_write_refusal": lambda _source: None,
             "prepare_mounts": no_mounts,
@@ -1225,6 +1230,7 @@ class TestFanout:
             "execute_python_cell": execute_python_cell,
             "moved": lambda _cell_id: ({}, {}),
             "promote_reverted_outputs": lambda *_args: None,
+            "written_table_gone": _table_is_there,
             "store_console_outputs": lambda *_args, **_kwargs: None,
             "prepare_mounts": nothing,
             "input_refs": lambda _cell_id: {"in": "strata://artifact/in@v=1"},
@@ -2345,6 +2351,7 @@ def _batch_fakes(tmp_path, *, consumed=(), displays=(), console=None, wired=("x"
         "input_refs": lambda _cell: {},
         "moved": lambda _cell: ({}, {}),
         "promote_reverted_outputs": lambda *_args: None,
+        "written_table_gone": _table_is_there,
         "promote_reverted_leaf": lambda *_args: None,
         "pull_from_team_store": pull_from_team_store,
         "push_to_team_store": push_to_team_store,

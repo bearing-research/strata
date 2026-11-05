@@ -220,6 +220,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   harness process that can't start, leaked open files in the server. (#1426)
 - **A DAG label stays off its own edge.** An edge running down and to the left no longer
   passes through its variable name. (#1413)
+- **A cached cell writes its table again if the table is gone.** A cell whose `@write_table` target
+  was deleted, or whose warehouse was, stayed a cache hit and wrote nothing, so the table stayed
+  missing while the cell read ready. A hit on a writing cell now checks each table it writes, and
+  if one no longer exists the cell runs and writes again. This applies on every path: Python, R,
+  `@each`, `@per_variant`, loops and Run All. A catalog that can't be reached leaves the hit
+  standing, since running again could append twice. (#1437)
 - **A cell can keep what `strata.put` and `strata.materialize` return.** A later cell
   reading the handle failed with "failed to store output artifacts", because the handle
   pickled the run's checkpoint pipe. It now leaves the run's pipe and token behind, and

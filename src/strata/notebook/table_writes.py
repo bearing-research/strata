@@ -12,6 +12,7 @@ earlier ones keep their new snapshot and the next run writes them again.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
     from strata.iceberg.catalog import TableWrite
+
+logger = logging.getLogger(__name__)
 
 
 class TableWriteError(RuntimeError):
@@ -157,6 +160,25 @@ def _table(spec: TableWriteSpec, output: StagedOutput | None) -> pa.Table:
         return arrow_table_from_ipc(output.blob, ref)
     except ValueError as exc:
         raise TableWriteError(f"@write_table {spec.variable} {spec.table}: {exc}") from exc
+
+
+def written_table_gone(
+    specs: list[TableWriteSpec], *, config: Any, env: dict[str, str], notebook: Path
+) -> bool:
+    """Whether a table these writes went to no longer exists.
+
+    A catalog that cannot answer counts as there: running again could append twice.
+    """
+    from strata.iceberg.catalog import IcebergWriter, PyIcebergCatalog
+
+    writer = IcebergWriter(PyIcebergCatalog(config, env, notebook=notebook))
+    for spec in specs:
+        try:
+            if not writer.table_exists(spec.table):
+                return True
+        except Exception as exc:
+            logger.warning("Could not check that table %s still exists: %s", spec.table, exc)
+    return False
 
 
 def write_cell_tables(

@@ -52,6 +52,7 @@ class LoopContext:
     promote_reverted_outputs: Callable[..., int | None]
     canonical_output: Callable[[str, str, str], Any]
     table_write_refusal: Callable[[str], str | None]
+    written_table_gone: Callable[[str], Awaitable[bool]]
     prepare_mounts: Callable[..., Awaitable[dict[str, Any]]]
     load_input_blobs: Callable[..., dict[str, Any]]
     keep_failed_output_dirs: Callable[..., None]
@@ -333,7 +334,7 @@ async def _run_loop(
             error=str(exc),
             execution_method="loop",
         )
-    if use_cache:
+    if use_cache and not await context.written_table_gone(source):
         cached = _cached_loop_result(
             host, context, cell_id, loop, cell_provenance, start_time, annotations.table_writes
         )
