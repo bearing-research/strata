@@ -42,6 +42,7 @@ class CellRuntime:
     # Last failure and the source hash it applies to, so a later process
     # (offline CLI, reopen) can read it without re-running.
     last_error: str | None = None
+    last_error_full: str | None = None
     last_error_source_hash: str | None = None
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
@@ -224,6 +225,7 @@ def persist_cell_error(
     cell_id: str,
     *,
     error: str | None,
+    error_full: str | None,
     source_hash: str | None,
 ) -> None:
     """Record (or clear) what a cell's last run failed with.
@@ -234,6 +236,7 @@ def persist_cell_error(
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
     entry.last_error = error or None
+    entry.last_error_full = error_full if error else None
     entry.last_error_source_hash = source_hash if error else None
     save_runtime_state(notebook_dir, state)
 

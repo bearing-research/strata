@@ -606,6 +606,7 @@ def _write_runtime_state(
         entry.execution_samples = list(cell.get("execution_samples") or [])
         # Older snapshots omit the error pair.
         entry.last_error = cell.get("error") or None
+        entry.last_error_full = cell.get("error_full") if entry.last_error else None
         entry.last_error_source_hash = cell.get("error_source_hash") if entry.last_error else None
         entry.display_outputs = [
             {**output, "artifact_uri": rewrite_uri(output.get("artifact_uri"))}
