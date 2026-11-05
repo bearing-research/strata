@@ -189,6 +189,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Run All stores what happened, in the order it happened.** A cell whose outputs failed
+  to save left a stored display behind with no value. A display that failed to store was
+  still reported, with no file behind it. Displays now record the source that ran rather
+  than an edit made during the batch, and a fan-out instance's output can be staged as an
+  input from outside the batch. (#1432)
 - **A loop cell that fails reports it like any other cell.** A display that couldn't be
   stored, or an iteration whose carry file was missing, ended the request with an exception
   instead of a failed cell. It's now a failed result that keeps the loop's output and
