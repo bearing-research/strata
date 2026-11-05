@@ -27,6 +27,7 @@ from strata.notebook.cell_paths.context import (
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
+    UnsafeRunFile,
     hand_over,
     identity_env,
     read_run_file,
@@ -75,6 +76,7 @@ class RContext:
     store_console_outputs: Callable[..., Any]
     store_mount_writes: Callable[..., None]
     record_good_run: Callable[..., None]
+    timeout_message: Callable[[str, float], str]
     # Cross-path state, the same dicts the executor holds, by cell id. A worker's uploads
     # land in the first as they arrive; a run clears the cell's entries as it starts.
     received_output_files: dict[str, Any]
@@ -99,6 +101,7 @@ async def run_r_cell(
     provenance hashes and file extensions, which the R harness produces identically.
     """
     remote_metadata: dict[str, str] = {}
+    exec_result: CellExecutionResult | None = None
     # Nothing a worker uploaded for an earlier run belongs to this one.
     context.received_output_files.pop(cell_id, None)
     context.folder_listings.pop(cell_id, None)
@@ -417,14 +420,16 @@ async def run_r_cell(
                         collected=collected,
                         run_outputs=exec_result.outputs,
                     )
-                except (TableWriteError, OutputNotSaved) as exc:
+                except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
                     stored_ok, store_error = False, str(exc)
                 if not stored_ok:
                     logger.error(
                         "R cell %s executed OK but artifact storage failed.",
                         cell_id,
                     )
-                    exec_result = _store_failure_result(exec_result, store_error)
+                    exec_result = _store_failure_result(
+                        exec_result, store_error
+                    ).apply_remote_metadata(**remote_metadata)
 
                 if stored_ok:
                     await context.push_to_team_store(cell_id=cell_id)
@@ -469,7 +474,9 @@ async def run_r_cell(
                             "Failed to sync-back RW mounts for R cell %s",
                             cell_id,
                         )
-                        exec_result = _mount_sync_failure_result(exec_result, exc)
+                        exec_result = _mount_sync_failure_result(
+                            exec_result, exc
+                        ).apply_remote_metadata(**remote_metadata)
                 if exec_result.success:
                     context.store_mount_writes(
                         cell_id,
@@ -515,23 +522,33 @@ async def run_r_cell(
         return error_result
     except TimeoutError:
         duration_ms = (time.time() - start_time) * 1000
+        if context.received_output_files.get(cell_id):
+            # No result came back, so what the worker uploaded is all there is.
+            context.keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
         timeout_result = CellExecutionResult(
             cell_id=cell_id,
             success=False,
             duration_ms=duration_ms,
-            error=f"R cell execution timed out after {timeout_seconds}s",
+            error=context.timeout_message(cell_id, timeout_seconds),
         ).apply_remote_metadata(**remote_metadata)
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, timeout_result)
         return timeout_result
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
+        if context.received_output_files.get(cell_id):
+            # No result came back, so what the worker uploaded is all there is.
+            context.keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
+        # A step after the run failed: what the run printed still stands.
         error_result = CellExecutionResult(
             cell_id=cell_id,
             success=False,
+            stdout=exec_result.stdout if exec_result is not None else "",
+            stderr=exec_result.stderr if exec_result is not None else "",
             duration_ms=duration_ms,
             error=f"R execution failed: {e}",
-        )
+            mutation_warnings=exec_result.mutation_warnings if exec_result is not None else [],
+        ).apply_remote_metadata(**remote_metadata)
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, error_result)
         return error_result

@@ -183,12 +183,12 @@ class TestAFinishedRunThatFails:
         assert failed.duration_ms == run.duration_ms
         assert failed.execution_method == run.execution_method
 
-    def test_a_store_failure_keeps_the_run_but_not_its_mutation_warnings(self):
+    def test_a_store_failure_keeps_the_run_and_its_mutation_warnings(self):
         failed = _store_failure_result(self._run(), "no table")
 
         self._assert_kept(failed)
         assert failed.error == "no table"
-        assert failed.mutation_warnings == []
+        assert failed.mutation_warnings == [{"variable": "x"}]
 
     def test_a_store_failure_with_no_reason_says_so(self):
         assert _store_failure_result(self._run(), None).error == STORE_FAILED
@@ -260,16 +260,15 @@ class TestPythonAndR:
         assert "_push_to_team_store" not in steps
 
     @pytest.mark.parametrize(("language", "source", "reader", "prefix"), LANGUAGES)
-    async def test_an_unsafe_run_file_is_a_general_failure(
+    async def test_an_unsafe_run_file_is_this_cells_error(
         self, tmp_path, monkeypatch, steps, language, source, reader, prefix
     ):
-        """Not caught at the store as batch does: it reaches the path's outer handler."""
         _fail(monkeypatch, "_store_outputs", UnsafeRunFile("a link"), steps)
 
         _, result = await self._run(tmp_path, language, source, reader)
 
         assert not result.success
-        assert result.error == f"{prefix}{'E' if prefix == '' else 'e'}xecution failed: a link"
+        assert result.error == "a link"
         assert "_push_to_team_store" not in steps
 
     @pytest.mark.parametrize(("language", "source", "reader", "prefix"), LANGUAGES)
@@ -336,14 +335,14 @@ class TestPythonAndR:
 
 class TestOnAWorker:
     @pytest.mark.parametrize(
-        ("language", "source", "worker"),
+        ("language", "source"),
         [
-            pytest.param("python", "x = 1\n", "remote", id="python-names-its-worker"),
-            pytest.param("r", "x <- 1\n", None, id="r-does-not", marks=skip_if_no_r),
+            pytest.param("python", "x = 1\n", id="python"),
+            pytest.param("r", "x <- 1\n", id="r", marks=skip_if_no_r),
         ],
     )
-    async def test_a_false_store(
-        self, tmp_path, monkeypatch, steps, notebook_executor_server, language, source, worker
+    async def test_a_false_store_names_its_worker(
+        self, tmp_path, monkeypatch, steps, notebook_executor_server, language, source
     ):
         session = _session(tmp_path, ("v", language, source))
         session.notebook_state.workers = [
@@ -360,7 +359,7 @@ class TestOnAWorker:
 
         assert result.error == STORE_FAILED
         assert result.execution_method == "executor"
-        assert result.remote_worker == worker
+        assert result.remote_worker == "remote"
 
     async def test_an_embedded_workers_mount_sync_failure_names_it(self, tmp_path, monkeypatch):
         data = tmp_path / "data"
@@ -587,7 +586,7 @@ class TestEach:
         [
             ("_store_outputs", False, STORE_FAILED),
             ("_store_outputs", TableWriteError("no table"), "no table"),
-            ("_store_outputs", UnsafeRunFile("a link"), "Execution failed: a link"),
+            ("_store_outputs", UnsafeRunFile("a link"), "a link"),
             ("_store_display_outputs", RuntimeError("no display"), "Execution failed: no display"),
         ],
         ids=["false", "table", "unsafe", "display"],

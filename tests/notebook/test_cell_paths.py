@@ -20,6 +20,7 @@ from strata.notebook.annotations import LoopAnnotation
 from strata.notebook.cell_paths import batch, cell_tests, fanout, loop, python, r
 from strata.notebook.cell_paths.cell_tests import CellTestsContext, run_cell_tests
 from strata.notebook.cell_paths.context import (
+    STORE_FAILED,
     PathContext,
     RemoteExecutionError,
     artifact_content_type,
@@ -100,6 +101,13 @@ def test_there_are_paths_to_check():
 @pytest.mark.parametrize("path", PATHS, ids=lambda path: path.stem)
 def test_a_path_does_not_get_the_executor(path):
     assert executor_uses(path.read_text()) == []
+
+
+def _raises(error: Exception):
+    def raises(*_args, **_kwargs):
+        raise error
+
+    return raises
 
 
 PROVENANCE = SimpleNamespace(
@@ -1582,8 +1590,10 @@ class TestR:
                 success=result.get("success", True),
                 error=result.get("error"),
                 stdout="printed",
+                stderr="warned",
                 display_outputs=result.get("display_outputs", []),
                 execution_method=method,
+                mutation_warnings=[{"variable": "x"}],
             )
 
         async def collect(*_args):
@@ -1623,6 +1633,7 @@ class TestR:
             "store_console_outputs": lambda *args, **kwargs: calls.consoles.append((args, kwargs)),
             "store_mount_writes": lambda *_args, **_kwargs: None,
             "record_good_run": lambda *args: calls.good.append(args),
+            "timeout_message": lambda _cell_id, seconds: f"timed out after {seconds}",
             "received_output_files": {},
             "folder_listings": {},
         }
@@ -1960,7 +1971,7 @@ class TestR:
 
         result = await self._run(host, context)
 
-        assert result.error == "R cell execution timed out after 7.0s"
+        assert result.error == "timed out after 7.0"
         assert result.remote_worker == "here"
         assert calls.persisted == [("c", None)]
         assert calls.applied == [("c", result)]
@@ -1976,6 +1987,89 @@ class TestR:
         assert result.error == "R execution failed: boom"
         assert calls.persisted == [("c", None)]
         assert calls.applied == [("c", result)]
+
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            pytest.param(TimeoutError(), "timed out after 7.0", id="timeout"),
+            pytest.param(RuntimeError("boom"), "R execution failed: boom", id="other"),
+        ],
+    )
+    @pytest.mark.parametrize("uploaded", [True, False])
+    async def test_a_failed_dispatch_keeps_the_worker_and_its_uploads(
+        self, monkeypatch, error, message, uploaded
+    ):
+        received = {}
+
+        async def fails(*_args, **_kwargs):
+            if uploaded:
+                received["c"] = ["part"]
+            raise error
+
+        host, context, calls = self._fakes(
+            monkeypatch,
+            worker=self._worker(),
+            dispatch_http_executor=fails,
+            received_output_files=received,
+        )
+
+        result = await self._run(host, context)
+
+        assert result.error == message
+        assert result.remote_worker == "w"
+        assert calls.kept == ([("c", "src", None, "prov", "env")] if uploaded else [])
+
+    @pytest.mark.parametrize(
+        ("store_outputs", "message"),
+        [
+            pytest.param(lambda *_a, **_k: False, STORE_FAILED, id="false"),
+            pytest.param(_raises(TableWriteError("no table")), "no table", id="table"),
+            pytest.param(_raises(UnsafeRunFile("a link")), "a link", id="unsafe"),
+        ],
+    )
+    async def test_a_failed_store_keeps_the_worker(self, monkeypatch, store_outputs, message):
+        host, context, _calls = self._fakes(
+            monkeypatch, worker=self._worker(), store_outputs=store_outputs
+        )
+
+        result = await self._run(host, context)
+
+        assert result.error == message
+        assert result.stdout == "printed"
+        assert result.remote_worker == "w"
+
+    async def test_a_failed_mount_sync_keeps_the_worker(self, monkeypatch):
+        async def dispatch(*args, **_kwargs):
+            return {"success": True}, args[4], "executor", {"m": "mounted"}
+
+        async def sync_back(_mounts):
+            raise OSError("read only")
+
+        host, context, _calls = self._fakes(
+            monkeypatch,
+            worker=self._worker(),
+            dispatch_http_executor=dispatch,
+            sync_back_mounts=sync_back,
+        )
+
+        result = await self._run(host, context)
+
+        assert "failed to sync read-write mounts: read only" in result.error
+        assert result.remote_worker == "w"
+
+    async def test_a_step_after_the_run_keeps_what_it_printed(self, monkeypatch):
+        host, context, _calls = self._fakes(
+            monkeypatch,
+            worker=self._worker(),
+            store_result_displays=_raises(RuntimeError("no display")),
+        )
+
+        result = await self._run(host, context)
+
+        assert result.error == "R execution failed: no display"
+        assert (result.stdout, result.stderr) == ("printed", "warned")
+        assert result.mutation_warnings == [{"variable": "x"}]
+        assert result.remote_worker == "w"
 
 
 class TestRHarness:
@@ -3654,6 +3748,59 @@ class TestPython:
         assert result.remote_worker == "w"
         assert calls.persisted == [("c", None)]
         assert calls.applied == [("c", result)]
+
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            pytest.param(TimeoutError(), "timed out after 7.0", id="timeout"),
+            pytest.param(ValueError("bad"), "Execution failed: bad", id="other"),
+        ],
+    )
+    @pytest.mark.parametrize("uploaded", [True, False])
+    async def test_a_failed_dispatch_keeps_what_the_worker_uploaded(
+        self, monkeypatch, error, message, uploaded
+    ):
+        host, context, calls = self._fakes(monkeypatch, worker=self.HTTP)
+
+        async def dispatch_execution(*_args, **_kwargs):
+            if uploaded:
+                context.received_output_files["c"] = ["up"]
+            raise error
+
+        context = replace(context, dispatch_execution=dispatch_execution)
+
+        result = await self._run(host, context, variant="v")
+
+        assert result.error == message
+        if uploaded:
+            assert calls.kept[0][0][:3] == ("c", self.SOURCE, None)
+            assert calls.kept[0][1] == {"variant": "v"}
+        else:
+            assert calls.kept == []
+
+    async def test_an_unsafe_file_at_the_store_is_named_and_closes_the_run(self, monkeypatch):
+        host, context, calls = self._fakes(
+            monkeypatch, store_outputs=_raises(UnsafeRunFile("a link"))
+        )
+
+        result = await self._run(host, context)
+
+        assert result.error == "a link"
+        assert calls.closed == ["c"]
+        assert calls.pushed == []
+
+    async def test_a_step_after_the_run_keeps_what_it_printed(self, monkeypatch):
+        host, context, _calls = self._fakes(
+            monkeypatch,
+            result={"success": True, "stdout": "printed", "mutation_warnings": [{"variable": "x"}]},
+            store_result_displays=_raises(RuntimeError("no display")),
+        )
+
+        result = await self._run(host, context)
+
+        assert result.error == "Execution failed: no display"
+        assert (result.stdout, result.stderr) == ("printed", "warned")
+        assert result.mutation_warnings == [{"variable": "x"}]
 
 
 class TestPythonDispatchLocal:

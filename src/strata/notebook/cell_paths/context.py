@@ -133,6 +133,7 @@ def _store_failure_result(
         duration_ms=result.duration_ms,
         error=store_error or STORE_FAILED,
         execution_method=result.execution_method,
+        mutation_warnings=result.mutation_warnings,
     )
 
 
