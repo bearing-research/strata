@@ -164,6 +164,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
   "protocol_version": "v1",
   "build_id": "notebook-3f2a9c1b7e04",
   "origin": "notebook",
+  "cell_id": "ba3b7451",
   "transform": {
     "ref": "notebook_cell@v1",
     "params": {
@@ -193,6 +194,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | --- | --- | --- |
 | `protocol_version` | string (required) | Must be `"v1"`. |
 | `origin` | string | `"notebook"` for a cell run from an open notebook, `"run"` for a headless `strata run`. A dispatcher can queue interactive cells first; a worker can ignore it. |
+| `cell_id` | string | The cell being run. The reference worker compiles the source as `<cell {cell_id}>`, so a traceback says which cell a frame is from. |
 | `transform.ref` | string (required) | Must be `"notebook_cell@v1"` for the notebook executor. |
 | `transform.params.source` | string (required) | The cell Python source to execute. |
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |

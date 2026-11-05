@@ -17,6 +17,7 @@ import base64
 import hashlib
 import io
 import json
+import linecache
 import logging
 import math
 import os
@@ -1847,6 +1848,13 @@ def _ensure_cell_module(
         # resolve. module_name folds in the injected identity for a distinct cache key.
         if injected:
             module.__dict__.update(injected)
+        # So a traceback through this cell's code can quote it: no file holds this source.
+        linecache.cache[module_name] = (  # type: ignore[assignment]
+            len(module_source),
+            None,
+            module_source.splitlines(keepends=True),
+            module_name,
+        )
         exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
     module.__dict__[_CELL_MODULE_SOURCE_ATTR] = module_source
     module.__dict__[_CELL_MODULE_FLAG_ATTR] = True
