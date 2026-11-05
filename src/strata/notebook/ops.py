@@ -101,8 +101,10 @@ class CellView(BaseModel):
     outputs: list[OutputView]
     console_stdout: str
     console_stderr: str
-    # Last failure, only while the source is unchanged since.
+    # Last failure, only while the source is unchanged since. ``error_full`` keeps the
+    # harness frames, for a bug report.
     error: str | None = None
+    error_full: str | None = None
     test: CellTestView | None = None
     # Empty for older cells and on a personal server with no declared author.
     created_by: str = ""
@@ -1279,6 +1281,7 @@ def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
         console_stdout=data.get("console_stdout") or "",
         console_stderr=data.get("console_stderr") or "",
         error=_cap_console(data["error"]) if data.get("error") else None,
+        error_full=_cap_console(data["error_full"]) if data.get("error_full") else None,
         test=_test_view_from_wire(test) if test else None,
         created_by=data.get("created_by") or "",
         updated_by=data.get("updated_by") or "",

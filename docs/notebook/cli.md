@@ -209,6 +209,8 @@ Every `<cell_id>` here and below is the id from `notebook.toml` or `cell list`,
 not the cell's `# @name`.
 
 Each takes `--format human|json` (JSON is the default - these are agent-first).
+A failed cell's JSON in `cell show` has `error`, the traceback from the cell's
+first frame, and `error_full`, with the harness frames too.
 The JSON shapes match the server's REST API (`GET /{id}/cells`, `GET /{id}/dag`),
 so a script written against the local CLI keeps working against a running
 server later. Exit codes follow the same contract as `run` / `validate`: `0`
