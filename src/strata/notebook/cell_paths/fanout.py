@@ -203,10 +203,14 @@ def _finish_fanout(
     stdout = "\n".join(f"[variant={name}]\n{r.stdout}" for name, r in results if r.stdout)
     stderr = "\n".join(f"[variant={name}]\n{r.stderr}" for name, r in results if r.stderr)
     failure_traceback = None
+    failure_traceback_full = None
     if failures:
         first_name, first = failures[0]
         error = f"{instance_noun} '{first_name}' failed: {first.error}"
-        failure_traceback = first.traceback
+        # What a reader sees in place of ``error``, so it says which too.
+        if first.traceback:
+            failure_traceback = f"{instance_noun} '{first_name}' failed:\n{first.traceback}"
+        failure_traceback_full = first.traceback_full
     if error is not None:
         aggregate = CellExecutionResult(
             cell_id=cell_id,
@@ -216,6 +220,7 @@ def _finish_fanout(
             duration_ms=duration_ms,
             error=error,
             traceback=failure_traceback,
+            traceback_full=failure_traceback_full,
             execution_method="fanout",
         )
     else:

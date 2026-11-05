@@ -2197,7 +2197,12 @@ function initializeWebSocket() {
             updateWorkerHealth(workerName, 'healthy')
           }
         }
-        cell.output = { contentType: 'json/object', error }
+        cell.output = {
+          contentType: 'json/object',
+          error,
+          traceback: p.traceback || undefined,
+          tracebackFull: p.traceback_full || undefined,
+        }
         cell.suggestInstall = p.suggest_install || undefined
         cell.suggestInstallLanguage =
           p.suggest_install_language === 'r'
