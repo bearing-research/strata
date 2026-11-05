@@ -34,6 +34,9 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **The docs read more consistently.** `strata tutorial caching` is step 1 of Your first
+  notebook, every nav title matches its page's heading, headings use sentence case, and the
+  landing page's title is styled. (#PRNUM)
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:

@@ -1,15 +1,15 @@
-# REST API Reference
+# REST API
 
 This page documents the **notebook** REST surface, mounted under `/v1/notebooks`, plus the core routes a client meets most: materialize, streams, health and metrics ([Core API](#core-api)), and the log buffer and artifact listing ([Observability](#observability)). It does not list every route. The rest are documented with their feature:
 
 - Registry and names (`/v1/registry/*`, `/v1/names*`): [Registry](../core/registry.md)
 - Publications (`/v1/artifacts/{id}/v/{n}/publish`, `/v1/publications*`, `/p/*`): [Publishing](../notebook/publishing.md)
-- Admin, debug and cache routes (`/v1/admin/*`, `/v1/debug/*`, `/v1/cache/*`): [Service Mode](../deployment/service-mode.md) and [Observability](../deployment/observability.md)
-- Garbage collection (`POST /v1/artifacts/gc`): [Operations & Lifecycle](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store)
+- Admin, debug and cache routes (`/v1/admin/*`, `/v1/debug/*`, `/v1/cache/*`): [Service mode](../deployment/service-mode.md) and [Observability](../deployment/observability.md)
+- Garbage collection (`POST /v1/artifacts/gc`): [Operations](../deployment/lifecycle.md#cleaning-up-the-core-artifact-store)
 
 For materializing from Python, see the [Library Quickstart](../getting-started/core.md). The live OpenAPI schema ([below](#canonical-machine-readable-spec)) lists every route.
 
-The remote-worker contract - `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` - is documented separately on the [Executor Protocol](executor-protocol.md) page. Those endpoints live on a different process (`strata-worker`), not the main server.
+The remote-worker contract - `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` - is documented separately on the [Executor protocol](executor-protocol.md) page. Those endpoints live on a different process (`strata-worker`), not the main server.
 
 !!! note "Session ID vs Notebook ID"
 Route parameters use the **session ID** (a UUID generated when the notebook is opened), not the persistent `notebook_id` from `notebook.toml`. The session ID is returned by the `open` and `create` endpoints.
@@ -40,7 +40,7 @@ Authentication depends on `deployment_mode`:
 
 Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret; under `api_key`, a valid bearer key. The exceptions are the health and metrics endpoints, the signed build-transport routes (the signature is the credential) and public publication reads. A notebook cell's ambient client sends `X-Strata-Run-Token` instead, a token for its run that reaches only the client's own routes (see [the ambient client](../guides/cells/python.md#the-ambient-strata-client)). Two further restrictions narrow what each endpoint accepts:
 
-**Personal-mode-only endpoints.** These four return `403 Forbidden` outside personal mode. They expose either a filesystem delete or the in-memory session table, neither of which fits a multi-tenant service deployment. Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service Mode](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
+**Personal-mode-only endpoints.** These four return `403 Forbidden` outside personal mode. They expose either a filesystem delete or the in-memory session table, neither of which fits a multi-tenant service deployment. Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service mode](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
 
 | Endpoint | Why personal-mode-only |
 | --- | --- |
@@ -146,11 +146,11 @@ Every request gets an `X-Request-ID` response header (and the same value is echo
 
 ### Tenancy
 
-In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service Mode](../deployment/service-mode.md) for the full contract.
+In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service mode](../deployment/service-mode.md) for the full contract.
 
-## Notebook Lifecycle
+## Notebook lifecycle
 
-### Create Notebook
+### Create notebook
 
 ```
 POST /v1/notebooks/create
@@ -177,7 +177,7 @@ starting another environment job or deleting the notebook answers `409` with
 until `environment_job.status` is `completed` (or `failed`). `POST
 /v1/notebooks/import` behaves the same way.
 
-### Open Notebook
+### Open notebook
 
 ```
 POST /v1/notebooks/open
@@ -200,7 +200,7 @@ session, in service mode only one the same principal opened. Before opening, whe
 it, idle sessions are closed (see
 [Session lifetime](notebook-protocol.md#session-lifetime-and-session_closed)).
 
-### Close Notebook Session
+### Close notebook session
 
 ```
 POST /v1/notebooks/{session_id}/close
@@ -215,7 +215,7 @@ environment job is in progress. Needs `notebook:write`, the scope `open` needs.
 {"closed": true, "session_id": "…", "path": "/path/to/notebook"}
 ```
 
-### Import Jupyter Notebook
+### Import Jupyter notebook
 
 ```
 POST /v1/notebooks/import
@@ -235,10 +235,10 @@ the result. Returns the same notebook state shape as `POST
 /v1/notebooks/create` plus an `import_report` field with the
 converter's per-cell findings (translated magics, captured deps,
 warnings, full report markdown). See
-[Import from Jupyter](../notebook/import.md) for the magic
+[Coming from Jupyter](../notebook/import.md) for the magic
 translation table and limitations.
 
-### Import Snapshot
+### Import snapshot
 
 ```
 POST /v1/notebooks/import-snapshot
@@ -270,7 +270,7 @@ A zip that is not a snapshot is a 400; a snapshot exported before format 2,
 which lacked the artifact records an import needs, is refused with a request
 to export it again.
 
-### Delete Notebook
+### Delete notebook
 
 ```
 DELETE /v1/notebooks/{session_id}
@@ -279,7 +279,7 @@ DELETE /v1/notebooks/{session_id}
 Deletes the notebook directory and closes the session; connected clients get
 `session_closed` with `reason: "deleted"`.
 
-### Quiesce and Release
+### Quiesce and release
 
 ```
 POST /v1/notebooks/{session_id}/quiesce
@@ -320,7 +320,7 @@ satisfies it); personal mode allows them. The project `{path}` is resolved
 inside the storage root like any other notebook path. Holds live in the server
 process and do not survive a restart.
 
-### Discover Notebooks
+### Discover notebooks
 
 ```
 GET /v1/notebooks/discover
@@ -347,7 +347,7 @@ and opens the copy. It responds as [Open Notebook](#open-notebook) does, once th
 copy's environment is synced and warmed, and requires `notebook:write`. An unknown name
 is a 404.
 
-### Validate Recent Notebooks
+### Validate recent notebooks
 
 ```
 POST /v1/notebooks/recents/validate
@@ -362,7 +362,7 @@ hold a `notebook.toml` and lie inside the caller's notebook root (the tenant's
 folder on a multi-tenant server); any other path is left out like a missing
 one. The UI uses it to prune its recent-notebooks list. Needs `notebook:write`.
 
-### Delete Notebook By Path
+### Delete notebook by path
 
 ```
 POST /v1/notebooks/delete-by-path
@@ -378,7 +378,7 @@ Deletes a notebook directory by filesystem path. Personal mode only (`403` in
 service mode). An open session on the path is closed first; `409` while it runs
 a cell or an environment job.
 
-### Rename Notebook
+### Rename notebook
 
 ```
 PUT /v1/notebooks/{session_id}/name
@@ -392,7 +392,7 @@ PUT /v1/notebooks/{session_id}/name
 
 ## Sessions
 
-### List Sessions
+### List sessions
 
 ```
 GET /v1/notebooks/sessions
@@ -400,7 +400,7 @@ GET /v1/notebooks/sessions
 
 Returns `{ "sessions": [{ "session_id", "name", "path", ... }] }`.
 
-### Get Session
+### Get session
 
 ```
 GET /v1/notebooks/sessions/{session_id}
@@ -410,13 +410,13 @@ Returns full notebook state (same shape as `open`). Used for page refresh reconn
 
 ## Cells
 
-### List Cells
+### List cells
 
 ```
 GET /v1/notebooks/{session_id}/cells
 ```
 
-### Add Cell
+### Add cell
 
 ```
 POST /v1/notebooks/{session_id}/cells
@@ -432,7 +432,7 @@ POST /v1/notebooks/{session_id}/cells
 
 `language` may be `python`, `prompt`, `markdown`, `sql`, `r`, or `widget`. Defaults to `python`. An `after_cell_id` the notebook does not have is a `400`. `author` is honored only without principal auth, as on [Update Cell Source](#update-cell-source).
 
-### Update Cell Source
+### Update cell source
 
 ```
 PUT /v1/notebooks/{session_id}/cells/{cell_id}
@@ -452,13 +452,13 @@ with **409** and `code: cell_locked`, naming the holder; `force: true` takes it
 over. `author` is honored only without principal auth, where there is no
 authenticated caller to credit.
 
-### Delete Cell
+### Delete cell
 
 ```
 DELETE /v1/notebooks/{session_id}/cells/{cell_id}
 ```
 
-### Reorder Cells
+### Reorder cells
 
 ```
 PUT /v1/notebooks/{session_id}/cells/reorder
@@ -470,7 +470,7 @@ PUT /v1/notebooks/{session_id}/cells/reorder
 }
 ```
 
-### Execute Cell (REST)
+### Execute cell (REST)
 
 ```
 POST /v1/notebooks/{session_id}/cells/{cell_id}/execute?mode=normal
@@ -498,7 +498,7 @@ For interactive use, prefer the WebSocket `cell_execute` message. The REST endpo
 A run cancelled before it finishes returns `200` with `"status": "error"` and
 `"error_code": "cancelled"`.
 
-### Cancel Cell (REST)
+### Cancel cell (REST)
 
 ```
 POST /v1/notebooks/{session_id}/cells/{cell_id}/cancel
@@ -511,7 +511,7 @@ like the frame. Returns `{ "cell_id", "cancelled", "status" }`. `cancelled` is
 `false` when no run of the cell was in flight; a finished cell keeps its state,
 and `status` says what it is. An unknown cell returns `404`.
 
-### Run Cell Tests (REST)
+### Run cell tests (REST)
 
 ```
 POST /v1/notebooks/{session_id}/cells/{cell_id}/tests
@@ -525,7 +525,7 @@ cell or one with no test source returns `400`. The REST twin of the WebSocket
 `cell_run_tests` message, for clients (the CLI, agents) that don't drive a
 socket.
 
-### Set Cell Tests (REST)
+### Set cell tests (REST)
 
 ```
 PUT /v1/notebooks/{session_id}/cells/{cell_id}/tests
@@ -539,7 +539,7 @@ Writes the committed `cells/{cell_id}.test.py` and returns the updated cell.
 Python cells only (`400` otherwise). The authoring twin of the `POST` above,
 which runs them.
 
-### List Loop Cell Iterations
+### List loop cell iterations
 
 ```
 GET /v1/notebooks/{session_id}/cells/{cell_id}/iterations?variable=<name>
@@ -554,7 +554,7 @@ Returns `{ "cell_id", "variable", "iterations": [{ "iteration", "artifact_uri",
 "artifact_id", "version", "content_type", "byte_size", "row_count",
 "created_at" }] }`.
 
-### Browse a Cell's Table Output
+### Browse a cell's table output
 
 ```
 GET /v1/notebooks/{session_id}/cells/{cell_id}/data?artifact_uri=<uri>
@@ -577,7 +577,7 @@ URI the display output carries.
 - `export` downloads the same filtered and sorted view as `fmt=csv` or
   `fmt=parquet`.
 
-### Get a Display Output's Bytes
+### Get a display output's bytes
 
 ```
 GET /v1/notebooks/{session_id}/cells/{cell_id}/outputs/{index}/blob
@@ -589,7 +589,7 @@ the resolved index in `X-Strata-Output-Index`. A type Strata does not render
 `application/octet-stream`. What `strata cell output --out`
 and the MCP `save_cell_output` tool read.
 
-### Read a Cell's Output Folder
+### Read a cell's output folder
 
 ```
 GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}
@@ -618,7 +618,7 @@ the answer is `404`; neither route takes an artifact URI.
 
 ## Variants
 
-### Add a Variant
+### Add a variant
 
 ```
 POST /v1/notebooks/{session_id}/variant-groups/{group_id}/variants
@@ -627,7 +627,7 @@ POST /v1/notebooks/{session_id}/variant-groups/{group_id}/variants
 Adds a sibling variant to an existing group. Returns `new_variant_name`,
 `new_cell_id`, `variant_groups` and `cells`.
 
-### Switch Variant or Mode
+### Switch variant or mode
 
 ```
 PUT /v1/notebooks/{session_id}/variant-groups/{group_id}
@@ -652,13 +652,13 @@ Returns edges, roots, leaves, and topological order.
 
 ## Environment
 
-### List Dependencies
+### List dependencies
 
 ```
 GET /v1/notebooks/{session_id}/dependencies
 ```
 
-### Add Dependency
+### Add dependency
 
 ```
 POST /v1/notebooks/{session_id}/dependencies
@@ -670,19 +670,19 @@ POST /v1/notebooks/{session_id}/dependencies
 }
 ```
 
-### Remove Dependency
+### Remove dependency
 
 ```
 DELETE /v1/notebooks/{session_id}/dependencies/{package_name}
 ```
 
-### Get Environment State
+### Get environment state
 
 ```
 GET /v1/notebooks/{session_id}/environment
 ```
 
-### Sync Environment
+### Sync environment
 
 ```
 POST /v1/notebooks/{session_id}/environment/sync
@@ -695,13 +695,13 @@ the full environment payload plus `lockfile_changed`, `operation_log`
 For long syncs prefer the background `POST /environment/jobs` path, this
 endpoint blocks the request until the sync finishes.
 
-### Get Current Environment Job
+### Get current environment job
 
 ```
 GET /v1/notebooks/{session_id}/environment/jobs/current
 ```
 
-### Start Environment Job
+### Start environment job
 
 ```
 POST /v1/notebooks/{session_id}/environment/jobs
@@ -720,7 +720,7 @@ Actions: `add`, `remove` and `r_add` (each needs `package`), `sync`, `import`,
 
 For `import`, send exactly one of `requirements` or `environment_yaml`.
 
-### Change Python Version
+### Change Python version
 
 ```
 PUT /v1/notebooks/{session_id}/python-version
@@ -736,7 +736,7 @@ with the job (`200` and `accepted: false` when the notebook is already on that
 version); progress arrives as `environment_job_progress` frames. A version
 not in the server's `available_python_versions` is a `400`.
 
-### List R Packages
+### List R packages
 
 ```
 GET /v1/notebooks/{session_id}/r-packages
@@ -744,19 +744,19 @@ GET /v1/notebooks/{session_id}/r-packages
 
 The packages installed in the notebook's `renv` project library.
 
-### Export Requirements
+### Export requirements
 
 ```
 GET /v1/notebooks/{session_id}/environment/requirements.txt
 ```
 
-### Import Requirements
+### Import requirements
 
 ```
 POST /v1/notebooks/{session_id}/environment/requirements.txt
 ```
 
-### Preview Requirements Import
+### Preview requirements import
 
 ```
 POST /v1/notebooks/{session_id}/environment/requirements.txt/preview
@@ -768,7 +768,7 @@ POST /v1/notebooks/{session_id}/environment/requirements.txt/preview
 POST /v1/notebooks/{session_id}/environment/environment.yaml
 ```
 
-### Preview environment.yaml Import
+### Preview environment.yaml import
 
 ```
 POST /v1/notebooks/{session_id}/environment/environment.yaml/preview
@@ -776,7 +776,7 @@ POST /v1/notebooks/{session_id}/environment/environment.yaml/preview
 
 ## Workers
 
-### List Workers
+### List workers
 
 ```
 GET /v1/notebooks/{session_id}/workers
@@ -785,7 +785,7 @@ GET /v1/notebooks/{session_id}/workers
 Each remote worker carries its `/health` result, reused for 5 seconds.
 `?refresh=true` probes every worker again instead of reusing it.
 
-### Update Notebook Worker
+### Update notebook worker
 
 ```
 PUT /v1/notebooks/{session_id}/worker
@@ -797,7 +797,7 @@ PUT /v1/notebooks/{session_id}/worker
 }
 ```
 
-### Update Worker Catalog
+### Update worker catalog
 
 ```
 PUT /v1/notebooks/{session_id}/workers
@@ -808,7 +808,7 @@ Replaces the notebook's `[[workers]]`. A worker named `local` is refused with
 `STRATA_NOTEBOOK_WORKERS_EDITABLE=false`, the server manages workers and the
 request is refused with `403`.
 
-### SSH Workers
+### SSH workers
 
 ```
 GET    /v1/notebooks/{session_id}/workers/ssh
@@ -830,7 +830,7 @@ live status; `DELETE` closes the tunnel and removes the registration. See
 
 ## Mounts
 
-### Update Notebook Mounts
+### Update notebook mounts
 
 ```
 PUT /v1/notebooks/{session_id}/mounts
@@ -838,7 +838,7 @@ PUT /v1/notebooks/{session_id}/mounts
 
 ## Connections
 
-### List Notebook Connections
+### List notebook connections
 
 ```
 GET /v1/notebooks/{session_id}/connections
@@ -858,7 +858,7 @@ Returns:
 }
 ```
 
-### Replace Notebook Connections
+### Replace notebook connections
 
 ```
 PUT /v1/notebooks/{session_id}/connections
@@ -890,7 +890,7 @@ Returns:
 }
 ```
 
-### Enumerate Connection Schema
+### Enumerate connection schema
 
 ```
 GET /v1/notebooks/{session_id}/connections/{name}/schema
@@ -905,7 +905,7 @@ failures are visible to the UI.
 
 ## Artifacts
 
-### List a Notebook's Published Artifacts
+### List a notebook's published artifacts
 
 ```
 GET /v1/notebooks/{session_id}/artifacts
@@ -922,7 +922,7 @@ the registry's store, next to the row's `tenant` (`null` for the default
 tenant). A personal server or an `admin:*` caller gets every tenant's names,
 so one name can have a row per tenant, each with that tenant's readers.
 
-### List a Notebook's Store
+### List a notebook's store
 
 ```
 GET /v1/notebooks/{session_id}/store/artifacts
@@ -935,7 +935,7 @@ notebook's own store rather than the server's. `store/artifacts` takes `limit`,
 and `output` (all `null` for a row no cell produced), and the response has
 `notebook_name`.
 
-### Read an Artifact's Lineage
+### Read an artifact's lineage
 
 ```
 GET /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/lineage
@@ -944,7 +944,7 @@ GET /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/lineage
 `GET /v1/artifacts/{id}/v/{n}/lineage` over the notebook's own store, which is
 where a cell's results and displays are. It takes `max_depth`.
 
-### Promote an Artifact
+### Promote an artifact
 
 ```
 POST /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/promote
@@ -966,7 +966,7 @@ hold, `502` when the team store refuses or cannot be reached.
 
 ## Export
 
-### Export Notebook
+### Export notebook
 
 ```
 GET /v1/notebooks/{session_id}/export?fmt={zip,snapshot,markdown,html}
@@ -981,7 +981,7 @@ One endpoint, four output formats:
 | `markdown`   | Single-file rendering for sharing / docs ingestion. Same engine as `strata export`.                      |
 | `html`       | Standalone HTML with embedded CSS + Pygments syntax highlighting.                                        |
 
-Markdown and HTML renderings additionally accept `include_inactive_variants=true` to stack all variants of every group, and `app_view=true` to render only what the read-only app view shows (widgets, markdown and display outputs, with no sources or console). Prompt-cell responses are intentionally excluded from rendered formats (see [Export](../notebook/export.md)).
+Markdown and HTML renderings additionally accept `include_inactive_variants=true` to stack all variants of every group, and `app_view=true` to render only what the read-only app view shows (widgets, markdown and display outputs, with no sources or console). Prompt-cell responses are intentionally excluded from rendered formats (see [Export and import](../notebook/export.md)).
 
 #### Snapshots
 
@@ -1026,7 +1026,7 @@ The same bundle offline: `strata export <path> --to snapshot --out snap.zip
 
 ## Runtime
 
-### Get Server Runtime Config
+### Get server runtime config
 
 ```
 GET /v1/notebooks/config
@@ -1037,7 +1037,7 @@ server as a whole. Not notebook-scoped. `workers_panel` is `shown` or `hidden`
 (`STRATA_NOTEBOOK_WORKERS_PANEL`); the open and create responses carry the same
 keys.
 
-### Update Notebook Default Timeout
+### Update notebook default timeout
 
 ```
 PUT /v1/notebooks/{session_id}/timeout
@@ -1052,7 +1052,7 @@ PUT /v1/notebooks/{session_id}/timeout
 `timeout` is seconds (0 < t ≤ 86400) or `null` to clear back to the system
 default. Returns the new timeout and the refreshed cell list.
 
-### Update Notebook Default Env
+### Update notebook default env
 
 ```
 PUT /v1/notebooks/{session_id}/env
@@ -1078,7 +1078,7 @@ sensitive name, or one fetched from the secret manager, is sent as
 `env_overrides`). Send that marker back to keep a key's current value; any other
 value replaces it.
 
-### Update Secret Manager Config
+### Update secret manager config
 
 ```
 PUT /v1/notebooks/{session_id}/secret-manager/config
@@ -1099,7 +1099,7 @@ refetches. An empty payload (all fields null) removes the block:
 "disconnect from secret manager". Credentials are never part of this payload;
 they must be exported in the server's shell environment.
 
-### Refresh Secret Manager
+### Refresh secret manager
 
 ```
 POST /v1/notebooks/{session_id}/secret-manager/refresh
@@ -1186,7 +1186,7 @@ A transform's table inputs take every URI form `scan@v1` reads (`file://`,
 unreadable, or a plan that failed) answers 4xx with the planner's message;
 the request never becomes a pending build.
 
-### Get Stream
+### Get stream
 
 ```
 GET /v1/streams/{stream_id}

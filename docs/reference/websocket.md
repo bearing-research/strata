@@ -1,8 +1,8 @@
-# WebSocket Protocol
+# WebSocket protocol
 
 The notebook UI communicates with the backend via a WebSocket connection for real-time updates.
 
-For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, tenant gating, cold-start payload, grace window), start at the [Notebook Client Protocol](notebook-protocol.md) page; this page is the message-level reference.
+For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, tenant gating, cold-start payload, grace window), start at the [Notebook client protocol](notebook-protocol.md) page; this page is the message-level reference.
 
 Every frame type below corresponds to a member of `strata.notebook.protocol.MessageType` - that enum is the canonical source. If the tables here and the enum diverge, the enum wins.
 
@@ -33,9 +33,9 @@ All messages are JSON with this shape:
 
 `seq` and `ts` are present on server → client messages; the server doesn't require them on client → server. See [Sequence numbers](#sequence-numbers) below.
 
-## Client → Server Messages
+## Client → server messages
 
-### Cell Execution
+### Cell execution
 
 | Type                   | Payload                                  | Description                                                 |
 | ---------------------- | ---------------------------------------- | ----------------------------------------------------------- |
@@ -48,14 +48,14 @@ All messages are JSON with this shape:
 | `notebook_rerun_all`   | `{ "continue_on_error": true }`          | Re-execute every cell with cache off                        |
 | `read_confirm`         | `{ "prompt_id": "..." }`                 | Run what a `read_confirm_prompt` asked about. Each cell's yes is kept for its machine and inputs. Cancel sends nothing |
 
-### Cell Editing
+### Cell editing
 
 | Type                 | Payload                                                  | Description    |
 | -------------------- | -------------------------------------------------------- | -------------- |
 | `cell_source_update` | `{ "cell_id": "...", "source": "...", "force": false, "author": "..." }` | Source changed. Refused with `cell_locked` when someone else changed the cell moments ago, unless `force` is true. `author` is optional and used only without principal auth |
 | `cell_focus`         | `{ "cell_id": "...", "author": "..." }`                 | The cell this client is on, or `null`. Updates `presence` for everyone |
 
-### Cell Tests
+### Cell tests
 
 | Type             | Payload                                      | Description                                                                              |
 | ---------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -92,9 +92,9 @@ All messages are JSON with this shape:
 | `variant_add`        | `{ "group": "...", "author": "..." }` | Add a new variant cell, cloning the active. `author` is optional |
 | `widget_update`      | `{ "cell_id": "...", "values": { "<name>": <value> } }` | Set widget control value(s); re-materializes + stales downstream |
 
-## Server → Client Messages
+## Server → client messages
 
-### Cell Status
+### Cell status
 
 | Type                      | Payload                                                                                                                  | Description                                      |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |

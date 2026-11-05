@@ -1,4 +1,4 @@
-# Cell Unit Tests
+# Cell unit tests
 
 Every Python cell can carry **its own `pytest` tests** - written right next to
 the cell, run against the cell's real outputs, with per-test pass/fail surfaced
@@ -128,7 +128,7 @@ clients and automation can run them too:
 - receive **`cell_test_status`** (running → done) and **`cell_test_results`**
   (per-test outcomes, counts, durations).
 
-See the [WebSocket Protocol reference](../reference/websocket.md) for the frame
+See the [WebSocket protocol reference](../reference/websocket.md) for the frame
 shapes.
 
 ## From the CLI, REST and MCP
@@ -177,5 +177,5 @@ plugin, so the same cell tests can drive a CI or pre-commit check later.
 
 ---
 
-**See also:** [Cell Types](../guides/cells/index.md) · [Cell Annotations](../reference/annotations/index.md) ·
+**See also:** [Cell kinds](../guides/cells/index.md) · [Annotations](../reference/annotations/index.md) ·
 [`pandas_basics` example](../examples/pandas_basics.md)

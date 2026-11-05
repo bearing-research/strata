@@ -2,7 +2,7 @@
 description: Install Strata, and the commands it gives you.
 ---
 
-# Installation
+# Install
 
 ## Prerequisites
 
@@ -53,7 +53,7 @@ and the server is running by the time the browser tab opens. No local
 toolchain needed. See [Codespaces](../deployment/codespaces.md) for what
 the devcontainer provisions.
 
-## Docker (Easiest)
+## Docker (easiest)
 
 No local toolchain required:
 
@@ -66,7 +66,7 @@ Open [http://localhost:8765](http://localhost:8765) in your browser.
 Releases after 0.9.0 also publish the image as `ghcr.io/bearing-research/strata:<version>`;
 see [Docker → Prebuilt image](../deployment/docker.md#prebuilt-image).
 
-## From Source
+## From source
 
 ### 1. Install dependencies
 
@@ -125,27 +125,27 @@ and call `strata-notebook` / `strata` / `strata-worker` directly.
 | Command | What it does |
 | --- | --- |
 | `uv run strata-notebook` | Start the HTTP server (notebook UI + REST API). Same as `uv run python -m strata`. |
-| `uv run strata run <notebook-dir>` | Headless notebook execution for CI / scheduled runs. See [Headless Runner](../notebook/cli.md). |
-| `uv run strata validate <notebook-dir>` | Static checks (schema, annotations, DAG) without executing. See [Headless Runner](../notebook/cli.md#strata-validate). |
-| `uv run strata tutorial [name]` | Copy a bundled sample into the notebook storage directory under a fresh name, open it and print its URL, starting a server if none is running. With no name, list the samples. See [Quickstart](notebook.md#8-take-the-tutorial). |
-| `uv run strata new <name>` | Scaffold a notebook directory. See [Headless Runner](../notebook/cli.md#strata-new). |
+| `uv run strata run <notebook-dir>` | Headless notebook execution for CI / scheduled runs. See [CLI](../notebook/cli.md). |
+| `uv run strata validate <notebook-dir>` | Static checks (schema, annotations, DAG) without executing. See [CLI](../notebook/cli.md#strata-validate). |
+| `uv run strata tutorial [name]` | Copy a bundled sample into the notebook storage directory under a fresh name, open it and print its URL, starting a server if none is running. With no name, list the samples. See [Quickstart](notebook.md#1-take-the-tutorial). |
+| `uv run strata new <name>` | Scaffold a notebook directory. See [CLI](../notebook/cli.md#strata-new). |
 | `uv run strata cell <action>`, `strata dag`, `strata status`, `strata dep <action>` | Agent-facing notebook tooling: inspect (`cell list/show`, `dag`, `status`), save a display output such as a plot to a file (`cell output`), execute (`cell run/test`), cancel a server run (`cell cancel`, `--server/--session` only), and author (`cell add/edit/rm/mv/annotate`, `cell pin-fetch`, `dep add/rm`) - offline against a directory or `--server/--session` against a running server. See [Notebook CLI](../notebook/cli.md#inspecting-a-notebook-cell-dag-status). |
-| `uv run strata worker <action>` | Manage a notebook's workers: `ls`, `add`/`rm`/`default` (local, edits `notebook.toml`), and `add-ssh`/`rm-ssh` (provision + tunnel a worker over SSH, against a running server). See [Distributed Workers](../notebook/workers.md#run-cells-on-a-machine-you-can-ssh-to). |
-| `uv run strata agent <notebook-dir>` | One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the `.mcp.json` + `CLAUDE.md` the agent needs, and attach the TUI (skip it with `--no-tui` and watch in the web UI instead). Then run `claude` in the notebook directory to drive it live. Needs the `[mcp]` extra, plus `[tui]` unless you pass `--no-tui`. See [Driving a notebook with a coding agent](../notebook/agent.md). |
-| `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot), or write a portable snapshot zip with `--to snapshot`. See [Export](../notebook/export.md). |
-| `uv run strata import <file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory, or unpack a snapshot zip back into one. See [Import](../notebook/import.md). |
+| `uv run strata worker <action>` | Manage a notebook's workers: `ls`, `add`/`rm`/`default` (local, edits `notebook.toml`), and `add-ssh`/`rm-ssh` (provision + tunnel a worker over SSH, against a running server). See [Workers](../notebook/workers.md#run-cells-on-a-machine-you-can-ssh-to). |
+| `uv run strata agent <notebook-dir>` | One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the `.mcp.json` + `CLAUDE.md` the agent needs, and attach the TUI (skip it with `--no-tui` and watch in the web UI instead). Then run `claude` in the notebook directory to drive it live. Needs the `[mcp]` extra, plus `[tui]` unless you pass `--no-tui`. See [Use a coding agent](../notebook/agent.md). |
+| `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot), or write a portable snapshot zip with `--to snapshot`. See [Export and import](../notebook/export.md). |
+| `uv run strata import <file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory, or unpack a snapshot zip back into one. See [Coming from Jupyter](../notebook/import.md). |
 | `uv run strata artifact <cmd> [--artifact-dir DIR]` | Inspect the server's configured artifact store (its metadata DSN and blob backend included) without a running server, or one local SQLite store with `--artifact-dir`: `list`, `show <ref>`, `lineage <ref>` (renders model ← features ← scan ← table @ snapshot), `pull <ref> --to FILE`, `audit [name]` (registry history), `pending` (approval queue), `verify`, `gc` (collect what nothing holds, least recently used first; `--dry-run` to preview, `--max-bytes`, `--max-idle-days`, `--min-idle-seconds`). Also publishes and moves results: `publish` / `unpublish` (a link anyone can open), `promote` (copy an artifact and its chain to the team store and name it there), `export` (write a tabular artifact into an Iceberg table), `archive` (a self-contained bundle: page, bytes, manifest, README). `<ref>` is a name, `id@v=N`, or bare id. |
 | `uv run strata migrate --to-dsn <dsn>` | Copy artifact-store metadata from SQLite to Postgres. Setting `STRATA_ARTIFACT_METADATA_DSN` alone starts an empty store; this carries an existing one across. Metadata only: blobs are configured separately. |
 | `uv run strata apikey <cmd>` | Mint, list and revoke API keys for a server running with `auth_mode="api_key"`: `create`, `list` (never shows secrets), `revoke <id>`. |
 | `uv run strata env gc` | Remove shared environments no notebook links to. Only relevant with the shared environment backend. See [Environments](../notebook/environment.md). |
-| `uv run strata watch [dir\|--session]` | Attach the read-only terminal viewer to a live notebook session without writing any config (unlike `strata agent`). Needs the `[tui]` extra. See [Terminal Viewer](../notebook/tui.md). |
-| `uv run strata-notebook-tui` | Read-only terminal viewer that attaches to a running notebook session. Needs the `[tui]` extra. See [Terminal Viewer](../notebook/tui.md). |
-| `strata-worker --port 9000` | Start a remote worker for `# @worker` cells. It binds `127.0.0.1` unless `STRATA_WORKER_TOKEN` is set (then `0.0.0.0`) or `--host` says otherwise. Run the installed binary (for example `.venv/bin/strata-worker`), not through `uv run`, whose process would keep `STRATA_WORKER_TOKEN` readable to cells. With `--connect wss://...` it binds no port and dials out to a relay instead. See [Distributed Workers](../notebook/workers.md). |
+| `uv run strata watch [dir\|--session]` | Attach the read-only terminal viewer to a live notebook session without writing any config (unlike `strata agent`). Needs the `[tui]` extra. See [Terminal viewer](../notebook/tui.md). |
+| `uv run strata-notebook-tui` | Read-only terminal viewer that attaches to a running notebook session. Needs the `[tui]` extra. See [Terminal viewer](../notebook/tui.md). |
+| `strata-worker --port 9000` | Start a remote worker for `# @worker` cells. It binds `127.0.0.1` unless `STRATA_WORKER_TOKEN` is set (then `0.0.0.0`) or `--host` says otherwise. Run the installed binary (for example `.venv/bin/strata-worker`), not through `uv run`, whose process would keep `STRATA_WORKER_TOKEN` readable to cells. With `--connect wss://...` it binds no port and dials out to a relay instead. See [Workers](../notebook/workers.md). |
 
 In a checkout with the venv activated (`source .venv/bin/activate`),
 you can drop the prefix too.
 
-## Development Commands
+## Development commands
 
 ```bash
 # Sync with all optional extras - matches CI. Required for the test
