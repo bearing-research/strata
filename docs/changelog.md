@@ -37,7 +37,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 - **The notes panel shows plain text.** A note's title and preview drop their markdown, so
-  `Press **Run All** again` reads `Press Run All again`. (#PRNUM)
+  `Press **Run All** again` reads `Press Run All again`. (#1447)
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:
