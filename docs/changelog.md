@@ -603,7 +603,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   with "failed to store output artifacts". Functions are now stored, with only what they name from
   their own cell, and a list holding one keeps it instead of turning it into source text. A read
   through an expression, like `model$predict(x)` or `fs[[1]](x)`, now counts too. A cell calling a
-  name another cell defines reruns once, because it now depends on that cell. (#PRNUM)
+  name another cell defines reruns once, because it now depends on that cell. (#1436)
 - **A cell refused before it runs takes its old results down.** A failed `@fetch` check, an
   unresolved `@dataset` or `@table`, a refused `@write_table`, an R cell asking for what R can't do,
   or a second run of a running build returned its error and left the last run's displays on screen,
