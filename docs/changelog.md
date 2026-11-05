@@ -39,7 +39,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:
-  end the line with two spaces or a backslash to keep the break. (#PRNUM)
+  end the line with two spaces or a backslash to keep the break. (#1442)
 - **The docs are reorganized into five tabs: Get started, Guides, Concepts, Reference and
   Deploy.** The home page is now a landing page, and its highlights moved to a Features
   page. The two longest pages are split, one per cell kind, and annotations gain a
