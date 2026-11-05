@@ -2850,8 +2850,6 @@ class NotebookSession:
             notebook_dir=self.path,
             pool_size=_session_setting("notebook_warm_pool_size"),
             worker_command=[rscript, str(pool_worker), str(self.path)],
-            # R startup + renv activation can take far longer than Python's warm-up.
-            ready_timeout_seconds=60.0,
         )
         try:
             task = asyncio.get_running_loop().create_task(self.r_warm_pool.start())

@@ -187,6 +187,14 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A fresh notebook no longer logs warnings about nothing.** A table an upstream cell has
+  yet to write is an ordinary state, so its unresolved fingerprint logs at debug; a catalog
+  that cannot answer still warns. A warm worker gets 60 seconds to start, not 10: its first
+  start in a fresh environment compiles what it imports, 20 to 24 seconds with `pandas` and
+  `pyarrow` measured here, and it was killed for it. (#1439)
+- **`[[mounts]]` or `[[workers]]` appended by hand to a new `notebook.toml` is valid.** The
+  scaffold wrote `mounts = []` and `workers = []`, and TOML refuses to define a key twice. An
+  empty section is now left out. (#1439)
 - **Run All stores what happened, in the order it happened.** A cell whose outputs failed
   to save left a stored display behind with no value. A display that failed to store was
   still reported, with no file behind it. Displays now record the source that ran rather

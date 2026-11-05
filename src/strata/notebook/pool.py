@@ -62,7 +62,7 @@ class WarmProcessPool:
         pool_size: int = 2,
         python_executable: str | Path = "python",
         worker_command: list[str] | None = None,
-        ready_timeout_seconds: float = 10.0,
+        ready_timeout_seconds: float = 60.0,
     ):
         """Initialize the warm process pool.
 
@@ -70,8 +70,9 @@ class WarmProcessPool:
             python_executable: Ignored when ``worker_command`` is given.
             worker_command: Full worker argv; defaults to the Python pool worker. The
                 R pool passes ``[Rscript, pool_worker.R, notebook_dir]``.
-            ready_timeout_seconds: Wait for the worker's "ready" line. R workers pay
-                renv activation at startup, so their pools pass a larger value.
+            ready_timeout_seconds: Wait for the worker's "ready" line. Long, because nothing
+                waits on it and a first start is slow: Python compiles a fresh environment's
+                modules, R activates renv.
         """
         self.notebook_dir = Path(notebook_dir)
         self.pool_size = pool_size
