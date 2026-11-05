@@ -744,7 +744,6 @@ function outputKey(output: CellOutput, index: number): string {
       {
         'cell-prompt': cell.language === 'prompt',
         'cell-markdown': cell.language === 'markdown',
-        'cell-folded': folded,
       },
     ]"
     data-testid="notebook-cell"
@@ -758,7 +757,6 @@ function outputKey(output: CellOutput, index: number): string {
       <div class="cell-actions">
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"
-          class="keeps-when-folded"
           title="Run (Shift+Enter)"
           aria-label="Run"
           :disabled="!connected || environmentMutationActive"
@@ -812,7 +810,6 @@ function outputKey(output: CellOutput, index: number): string {
         <button
           :title="folded ? 'Expand cell' : 'Collapse cell'"
           :aria-label="folded ? 'Expand cell' : 'Collapse cell'"
-          class="keeps-when-folded"
           :class="{ active: folded }"
           @click="folded = !folded"
         >
@@ -1429,6 +1426,7 @@ function outputKey(output: CellOutput, index: number): string {
 
 <style scoped>
 .cell {
+  position: relative;
   display: flex;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
@@ -1438,6 +1436,8 @@ function outputKey(output: CellOutput, index: number): string {
 }
 .cell:hover {
   border-color: var(--accent-lavender);
+  /* Its actions can reach over the cells below. */
+  z-index: 1;
 }
 .cell.state-running,
 .cell.state-dispatching,
@@ -1450,6 +1450,7 @@ function outputKey(output: CellOutput, index: number): string {
 }
 
 .cell-gutter {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1473,18 +1474,27 @@ function outputKey(output: CellOutput, index: number): string {
   }
 }
 
+/* Over the gutter, not in it: the whole column would hold a short cell open at its height. */
 .cell-actions {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  right: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
+  max-height: 0;
+  overflow: hidden;
   opacity: 0;
+  background: var(--bg-elevated);
+  border-radius: 0 0 6px 6px;
   transition: opacity 0.15s;
 }
-/* The rest of the column would hold a collapsed cell open at its full height. */
-.cell-folded .cell-actions > :not(.keeps-when-folded) {
-  display: none;
-}
-.cell:hover .cell-actions {
+.cell:hover .cell-actions,
+.cell-actions:has(:focus-visible) {
+  max-height: none;
+  overflow: visible;
   opacity: 1;
 }
 .cell-actions button {
