@@ -604,7 +604,7 @@ exhaustive commit history.
 - **A loop no longer holds its carry in memory between iterations.** The server kept the seed and
   each iteration's carry in memory for the whole loop, so a large checkpoint cost that much for
   every iteration. Each iteration now copies it from the store in bounded chunks, and restoring a
-  checkpoint of files does the same. (#PRNUM)
+  checkpoint of files does the same. (#1438)
 - **A cell refused before it runs takes its old results down.** A failed `@fetch` check, an
   unresolved `@dataset` or `@table`, a refused `@write_table`, an R cell asking for what R can't do,
   or a second run of a running build returned its error and left the last run's displays on screen,
