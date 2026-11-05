@@ -8,7 +8,7 @@ region_info = pd.DataFrame(
 )
 
 region_summary = (
-    sales.groupby("region")["revenue"].sum().reset_index().merge(region_info, on="region")
+    orders.groupby("region")["revenue"].sum().reset_index().merge(region_info, on="region")
 )
 
 region_summary["pct_of_target"] = (

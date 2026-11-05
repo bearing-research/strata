@@ -36,6 +36,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (#1381)
 
 ### Changed
+- **The `pandas_basics` sample opens without a warning.** Its computed columns go in a new
+  frame, `orders`, instead of redefining and mutating `sales`. (#PRNUM)
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:

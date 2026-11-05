@@ -1,6 +1,7 @@
 # @name Add computed columns
-sales["revenue"] = sales["units"] * sales["price"]
-sales["month"] = sales["date"].dt.to_period("M").astype(str)
+orders = sales.copy()
+orders["revenue"] = orders["units"] * orders["price"]
+orders["month"] = orders["date"].dt.to_period("M").astype(str)
 
-print(f"Total revenue: ${sales['revenue'].sum():,.2f}")
-sales[["date", "region", "product", "units", "price", "revenue", "month"]].head()
+print(f"Total revenue: ${orders['revenue'].sum():,.2f}")
+orders[["date", "region", "product", "units", "price", "revenue", "month"]].head()
