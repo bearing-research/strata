@@ -62,6 +62,7 @@ class BatchCellResult:
     status: str  # "ok" | "cache_hit" | "cell_error" | "persist_failed" | "not_run"
     error: str | None = None
     traceback: str | None = None
+    traceback_full: str | None = None
     stdout: str = ""
     stderr: str = ""
     # Enough payload for ws._execute_run_all to fan out cell_output frames without going
@@ -579,6 +580,7 @@ async def batch_service_loop(
                     status="cell_error",
                     error=payload.get("error"),
                     traceback=payload.get("traceback"),
+                    traceback_full=payload.get("traceback_full"),
                     stdout=payload.get("stdout", ""),
                     stderr=payload.get("stderr", ""),
                     duration_ms=payload.get("duration_ms"),
