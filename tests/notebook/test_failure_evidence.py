@@ -75,6 +75,31 @@ def test_a_reopened_cell_serves_both_tracebacks(tmp_path: Path):
     assert "harness.py" in wire["error_full"]
 
 
+def test_an_agent_reads_both_tracebacks_after_a_reopen(tmp_path: Path):
+    notebook_dir = _notebook(tmp_path)
+    _run(notebook_dir, FAILING)
+
+    view = LocalNotebookOps(notebook_dir).get_cell("c1")
+
+    assert "harness.py" not in view.error
+    assert "harness.py" in view.error_full
+
+
+async def test_an_agents_run_hands_back_both_tracebacks(tmp_path: Path):
+    notebook_dir = _notebook(tmp_path)
+
+    ops = LocalNotebookOps(notebook_dir)
+    ops._session.refresh_environment_runtime()
+
+    result = await ops.run_cell("c1")
+
+    assert result.status == "error"
+    assert result.error == "ZeroDivisionError: division by zero"
+    assert result.traceback.rstrip().endswith(result.error)
+    assert "harness.py" not in result.traceback
+    assert "harness.py" in result.traceback_full
+
+
 def test_a_run_that_succeeds_clears_both_tracebacks(tmp_path: Path):
     notebook_dir = _notebook(tmp_path)
     _run(notebook_dir, FAILING)

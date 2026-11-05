@@ -105,13 +105,13 @@ details stay in the server log.
 | --- | --- |
 | `list_notebooks` | The sessions currently open on the server: `session_id`, `name`, `path`. |
 | `get_notebook(session_id)` | Every cell of a session, in order. |
-| `get_cell(session_id, cell_id)` | One cell: source, status, outputs. For a widget cell, its controls and what each is set to. |
+| `get_cell(session_id, cell_id)` | One cell: source, status, outputs. A failed cell has its `error` and `error_full`, the traceback from the cell's first frame and the one with the harness frames too. For a widget cell, its controls and what each is set to. |
 | `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session …`, which downloads and writes the file locally. |
 | `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. For a swept variable, each variant's cell and the name `lineage` takes for it. |
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |
-| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
+| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. A cell that raised has its `traceback` and `traceback_full`. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
 | `cancel_cell(session_id, cell_id)` | Cancel the cell's run, whoever started it, as the browser's stop button does: the run stops and the cell is left idle. A `run_cell` waiting on it returns `status: error` with `error_code: cancelled`. Returns `{cell_id, cancelled, status}`; `cancelled` is `false` when the cell was not running. |
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |

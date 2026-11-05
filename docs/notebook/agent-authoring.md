@@ -189,8 +189,8 @@ unknown workers, …) without calling any LLM.
 | Reference that resolves to nothing (import? typo?) | `run` (NameError) |
 | Wrong logic, missing dependency in `pyproject.toml` | `run` |
 
-`run --format json` reports per-cell `status`, `error` (and its `traceback`
-when the cell raised), and `cache_hit`,
+`run --format json` reports per-cell `status`, `error` (and its `traceback` and
+`traceback_full` when the cell raised), and `cache_hit`,
 and skips downstream cells when an upstream fails (`"reason": "upstream
 failed"`) - fix the first error and re-run; everything already correct is
 a cache hit.
