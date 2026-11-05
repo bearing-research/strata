@@ -505,7 +505,10 @@ class TestPublishPolicy:
         """Run one gate; report whether it reached the shared store."""
         from strata.notebook import executor as executor_module
 
+        reached = []
+
         def _sentinel(*_args, **_kwargs):
+            reached.append(True)
             raise self._Reached()
 
         monkeypatch.setattr(executor_module, "TeamStore", _sentinel)
@@ -522,11 +525,12 @@ class TestPublishPolicy:
             )
         else:
             call = executor_module.CellExecutor._push_to_team_store(executor, cell_id="c1")
+        # The push swallows what a store raises, so the record is what tells.
         try:
             asyncio.run(call)
         except self._Reached:
-            return True
-        return False
+            pass
+        return bool(reached)
 
     @pytest.mark.parametrize(
         "policy,offers,pulls",
