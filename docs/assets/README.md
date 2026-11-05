@@ -27,14 +27,14 @@ result alongside that change.
 | `registry-promote-strip-{light,dark}.png` | Web UI | Registry dashboard, step 3 |
 | `registry-tab-{light,dark}.png` | Web UI | Registry dashboard, step 5 |
 | `registry-lineage-{light,dark}.png` | Web UI | Registry dashboard, step 7 |
-| `publication-page-{light,dark}.png` | Published page | Publishing an artifact |
+| `publication-page-{light,dark}.png` | Published page | Publish an artifact |
 | `input-weight-{light,dark}.png` | Web UI | Annotations, `@mount` (what a cell reads) |
 | `output-dir-{light,dark}.png` | Web UI | Annotations, `@output_dir` |
-| `read-confirm-{light,dark}.png` | Web UI | Lake-aware cells, asking before a large read |
+| `read-confirm-{light,dark}.png` | Web UI | Lake and Iceberg, asking before a large read |
 | `workers-panel-{light,dark}.png` | Web UI | Remote workers, registering workers |
 | `web-agent-live-{light,dark}.gif` | Web UI + CLI | Docs home, `README.md` |
 | `tui-layout.svg` | TUI | Terminal viewer |
-| `tui-agent-running.svg` | TUI | Driving a notebook with a coding agent |
+| `tui-agent-running.svg` | TUI | Use a coding agent |
 | `tui-cache-payoff.gif` | TUI | Terminal viewer, watching a re-run |
 | `tui-agent-live.gif` | TUI | Terminal viewer (watching a coding agent) |
 | `agent-demo.gif` | Screen recording | Not yet recorded - see below |

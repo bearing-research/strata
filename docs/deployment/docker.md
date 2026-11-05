@@ -2,7 +2,7 @@
 description: Run Strata in Docker with Compose.
 ---
 
-# Docker Deployment
+# Docker
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ description: Run Strata in Docker with Compose.
 - ~1.5 GB of disk for the first build; subsequent rebuilds reuse the
   layer cache.
 
-## Quick Start
+## Quick start
 
 ```bash
 docker compose up -d --build
@@ -130,7 +130,7 @@ it expects, so a DNS-rebinding page cannot drive it.
   - STRATA_ALLOWED_HOSTS=devbox.lan
 ```
 
-See [Configuration Reference](../reference/configuration.md) for all options.
+See [Configuration](../reference/configuration.md) for all options.
 
 ## Prebuilt image
 

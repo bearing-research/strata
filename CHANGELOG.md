@@ -34,8 +34,9 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
-- **The `pandas_basics` sample opens without a warning.** Its computed columns go in a new
-  frame, `orders`, instead of redefining and mutating `sales`. (#1448)
+- **The docs read more consistently.** `strata tutorial caching` is step 1 of Your first
+  notebook, every nav title matches its page's heading, headings use sentence case, and the
+  landing page's title is styled. (#1449)
 - **A wrapped line in a markdown cell no longer breaks.** Markdown cells and `Markdown(...)`
   outputs now join wrapped source lines into one paragraph, as CommonMark, GitHub files and
   Jupyter do. A notebook that relied on a single newline for a line break renders differently:
@@ -193,6 +194,12 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A failed cell's traceback starts at the cell.** The frames of Strata's own harness
+  before the cell's first frame are gone, library frames after it stay, and the error line
+  prints once. **Full traceback** under the error keeps the whole thing for a bug report.
+  Cold, warm and Run All failures now read the same: a warm run printed the error line
+  twice, a cold one and Run All showed only that line in the browser, and a syntax error
+  chained two tracebacks. A loop or `@each` failure says which iteration or item. (#1444)
 - **A fresh notebook no longer logs warnings about nothing.** A table an upstream cell has
   yet to write is an ordinary state, so its unresolved fingerprint logs at debug; a catalog
   that cannot answer still warns. A warm worker gets 60 seconds to start, not 10: its first
