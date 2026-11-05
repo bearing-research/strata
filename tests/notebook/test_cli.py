@@ -833,6 +833,8 @@ class TestRunJsonConsoleOutput:
         assert cell["status"] == "error"
         assert cell["traceback"].startswith("Traceback (most recent call last):")
         assert cell["traceback"].rstrip().endswith("ZeroDivisionError: division by zero")
+        assert "harness" not in cell["traceback"]
+        assert "harness" in cell["traceback_full"]
 
 
 def test_cell_timeout_message_names_the_remedy():

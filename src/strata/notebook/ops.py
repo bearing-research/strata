@@ -155,6 +155,9 @@ class RunResult(BaseModel):
     error: str | None = None
     # A stable name for the failure, e.g. ``fetch_pin_mismatch``; ``None`` when it has none.
     error_code: str | None = None
+    # From the cell's first frame; ``traceback_full`` keeps the harness frames, for a bug report.
+    traceback: str | None = None
+    traceback_full: str | None = None
     stdout: str = ""
     stderr: str = ""
 
@@ -163,6 +166,11 @@ class RunResult(BaseModel):
     @classmethod
     def _truncate_console(cls, value: str) -> str:
         return _cap_console(value)
+
+    @field_validator("traceback", "traceback_full")
+    @classmethod
+    def _truncate_traceback(cls, value: str | None) -> str | None:
+        return _cap_console(value) if value else value
 
 
 class CancelResult(BaseModel):
@@ -516,6 +524,8 @@ class LocalNotebookOps:
             duration_ms=result.duration_ms,
             error=result.error,
             error_code=result.error_code,
+            traceback=result.traceback,
+            traceback_full=result.traceback_full,
             stdout=result.stdout,
             stderr=result.stderr,
         )
@@ -1320,6 +1330,8 @@ def _run_result_from_wire(data: dict[str, Any]) -> RunResult:
         duration_ms=data.get("duration_ms", 0.0),
         error=data.get("error"),
         error_code=data.get("error_code"),
+        traceback=data.get("traceback"),
+        traceback_full=data.get("traceback_full"),
         stdout=data.get("stdout") or "",
         stderr=data.get("stderr") or "",
     )

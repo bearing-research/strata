@@ -44,7 +44,8 @@ run.
 finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
 entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
 `cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
-`error` / `reason` where applicable, `traceback` when the cell raised, and
+`error` / `reason` where applicable, `traceback` when the cell raised, starting
+at the cell's first frame, `traceback_full` with the harness frames too, and
 `error_code` when the failure has a stable name, such as `fetch_pin_mismatch`). A
 cache hit replays the stdout/stderr of the run behind it, cached by provenance
 along with its outputs (`--force` re-executes). A result pulled from a team store
@@ -76,7 +77,8 @@ digest computed from its bytes when the report is written. The ZIP export's
 
 CI scripts can branch on the exit code; the structured output stays parseable
 even when some cells failed (each failure produces a JSON object with
-`status: "error"`, its `error`, and the `traceback` when the cell raised).
+`status: "error"`, its `error`, and `traceback` and `traceback_full` when the
+cell raised).
 
 ## Example: GitHub Actions
 
@@ -295,7 +297,8 @@ $SID <cell_id> --rerun`). The server owns its venv, so the remote path never syn
 server's run modes, so remote execution has the same three modes as local.
 
 `--format json` (default) writes a single clean JSON object to **stdout** - the
-executor's logs go to stderr, so the stdout stream stays parseable:
+executor's logs go to stderr, so the stdout stream stays parseable. A cell that
+raised has its `traceback` and `traceback_full`, as in `strata run`:
 
 ```bash
 strata cell run nb featurize --format json | jq '{status, cache_hit, error}'

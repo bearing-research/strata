@@ -424,6 +424,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
                 entry["error"] = result.error or "cell failed"
                 if result.traceback:
                     entry["traceback"] = result.traceback
+                if result.traceback_full:
+                    entry["traceback_full"] = result.traceback_full
                 if result.error_code:
                     entry["error_code"] = result.error_code
                 failed_cells.add(cell_id)

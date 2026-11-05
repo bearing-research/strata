@@ -295,10 +295,19 @@ async def test_remote_run_cell_maps_and_passes_mode():
 @pytest.mark.asyncio
 async def test_remote_run_cell_error_status_maps_to_error():
     handler = lambda req: httpx.Response(  # noqa: E731
-        200, json={"cell_id": "c1", "status": "error", "error": "boom"}
+        200,
+        json={
+            "cell_id": "c1",
+            "status": "error",
+            "error": "boom",
+            "traceback": "trimmed",
+            "traceback_full": "full",
+        },
     )
     result = await _exec_remote(handler).run_cell("c1")
     assert result.status == "error" and result.error == "boom"
+    assert result.traceback == "trimmed"
+    assert result.traceback_full == "full"
 
 
 @pytest.mark.asyncio
