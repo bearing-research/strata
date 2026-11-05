@@ -272,7 +272,7 @@ exhaustive commit history.
   still there is left alone, so an `append` target never gets its rows twice. If that write
   fails, the cell fails with the reason. This applies on every path: Python, R, `@each`,
   `@per_variant`, loops and Run All. A catalog that can't be reached leaves the hit standing.
-  (#1437, #PRNUM)
+  (#1437, #1462)
 - **A cell can keep what `strata.put` and `strata.materialize` return.** A later cell
   reading the handle failed with "failed to store output artifacts", because the handle
   pickled the run's checkpoint pipe. It now leaves the run's pipe and token behind, and
