@@ -1,4 +1,4 @@
-# R Cells
+# R cells
 
 R is a first-class notebook language alongside Python. R cells run R source via the system `Rscript`, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as `arrow/ipc`: a `pandas.DataFrame` produced by a Python cell becomes a `data.frame` in the next R cell; an R `data.frame` (or `tibble`) becomes a `pandas.DataFrame` in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged `r_only=true` - a downstream Python cell that consumes one fails with a structured `StrataRArtifactError` rather than a confusing `NameError`.
 
@@ -58,4 +58,4 @@ An R cell whose harness can't find `Rscript` on `PATH` returns a clean cell-leve
 
 ## R-cell annotations
 
-See [R cell annotations](../../reference/annotations/r.md).
+See [R annotations](../../reference/annotations/r.md).

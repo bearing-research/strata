@@ -1,4 +1,4 @@
-# Export
+# Export and import
 
 `strata export` renders a notebook directory to a single self-contained
 file, markdown or HTML, for sharing or archiving. The exported file

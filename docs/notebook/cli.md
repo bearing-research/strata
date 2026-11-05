@@ -1,13 +1,13 @@
-# Headless Runner
+# CLI
 
 `strata run` executes every cell in a notebook directory without starting the
 server or opening the UI. Useful for CI, scheduled jobs, and sanity-checking
 that a notebook still works after a dependency bump.
 
 For rendering a notebook to a shareable markdown or HTML file (without
-executing anything), see [Export](export.md) and its `strata export`
+executing anything), see [Export and import](export.md) and its `strata export`
 sibling command. For converting an existing Jupyter `.ipynb` into a
-Strata notebook directory, see [Import from Jupyter](import.md) and
+Strata notebook directory, see [Coming from Jupyter](import.md) and
 its `strata import` sibling.
 
 It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
@@ -66,7 +66,7 @@ not listed. An output stored before digests were recorded gets its
 digest computed from its bytes when the report is written. The ZIP export's
 `provenance.json` lists the same `outputs` per cell.
 
-### Exit Codes
+### Exit codes
 
 | Code | Meaning                                                        |
 | ---- | -------------------------------------------------------------- |
@@ -101,7 +101,7 @@ jobs:
 `--format json` emits a single structured result object, so downstream steps
 can parse per-cell status without screen-scraping.
 
-## What Gets Run
+## What gets run
 
 Every cell in the notebook executes in topological order, exactly as if you
 had clicked **Run All** in the UI. Cached artifacts are reused, the first run
@@ -112,7 +112,7 @@ Passing `--force` skips each cell's cache lookup, so every cell re-executes
 (nothing cached is deleted), which is what you usually want in CI if you're testing that the code *still produces*
 the expected artifacts.
 
-## What Does Not Happen
+## What does not happen
 
 - **No server starts.** No ports are bound; no UI is served.
 - **No WebSocket broadcasts.** Progress is written to stdout only.
@@ -123,7 +123,7 @@ the expected artifacts.
   never asks: `strata run` and `strata cell run` (`--server` included) go
   ahead, and `.strata/reads/index.json` records the read as `not_asked`.
 
-## Environment & Secrets
+## Environment & secrets
 
 `strata run` reads the notebook's `[env]` and `[secret_manager]` blocks the
 same way the server does. Secret-manager credentials (e.g.
@@ -160,7 +160,7 @@ intended) and its `diagnostics` with `severity` / `code` / `message` /
 The intended loop for scripts and coding agents: **write files → validate →
 fix → run**. Validation is cheap enough to call after every edit; `strata
 run` is the expensive step. See
-[Authoring Notebooks Programmatically](agent-authoring.md).
+[CLI authoring](agent-authoring.md).
 
 ## `strata new`
 
@@ -383,7 +383,7 @@ Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
 run/test`), this is the full agent surface - and **all of it** works either
 offline against a directory or `--server/--session` against a running server. An
 MCP server wrapping the same operations is also available; see
-[MCP Server](mcp.md), or [`strata agent`](agent.md) for the one-command on-ramp
+[MCP server](mcp.md), or [`strata agent`](agent.md) for the one-command on-ramp
 that stands it up and points a coding agent at a live session.
 
 ## Workers (`strata worker`)
