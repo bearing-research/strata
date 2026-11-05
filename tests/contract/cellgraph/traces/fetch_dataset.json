@@ -285,7 +285,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     },
     "f1": {
@@ -378,7 +378,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     }
    },
@@ -502,7 +502,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     },
     "f1": {
@@ -585,7 +585,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     }
    },
@@ -706,7 +706,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     },
     "f1": {
@@ -799,7 +799,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     }
    },
@@ -916,7 +916,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     },
     "f1": {
@@ -1009,7 +1009,7 @@
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "error"
      }
     }
    },

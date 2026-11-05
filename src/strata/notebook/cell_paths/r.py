@@ -23,6 +23,7 @@ from strata.notebook.cell_paths.context import (
     _refused_result,
     _store_failure_result,
     _worker_mount_writes,
+    refused_run,
 )
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
@@ -115,31 +116,40 @@ async def run_r_cell(
         input_hashes = prov.input_hashes
         provenance_hash = prov.provenance_hash
         if prov.annotations.datasets:
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error="@dataset is not supported on R cells; read the dataset in a "
-                "Python cell upstream",
-                execution_method="error",
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error="@dataset is not supported on R cells; read the dataset in a "
+                    "Python cell upstream",
+                    execution_method="error",
+                ),
             )
         # harness.R binds no table names, so the cell would run without what it declared.
         if prov.annotations.tables:
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error="@table is not supported on R cells; read the table in a "
-                "Python cell upstream",
-                execution_method="error",
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error="@table is not supported on R cells; read the table in a "
+                    "Python cell upstream",
+                    execution_method="error",
+                ),
             )
         # As in Python: an unchecked fetch fails the run, and each fetched file arrives as a
         # read-only mount that harness.R binds to its name as a path string.
         if prov.fetch_error is not None:
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error=prov.fetch_error,
-                error_code=prov.fetch_error_code,
-                execution_method="error",
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.fetch_error,
+                    error_code=prov.fetch_error_code,
+                    execution_method="error",
+                ),
             )
         worker_spec = resolve_worker_spec(host.notebook_state, prov.effective_worker)
         remote = (
@@ -152,20 +162,26 @@ async def run_r_cell(
             and remote is None
             and worker_spec.backend != WorkerBackendType.LOCAL
         ):
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error=f"R cells run locally or on an executor worker; worker "
-                f"'{worker_spec.name}' is neither",
-                execution_method="error",
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=f"R cells run locally or on an executor worker; worker "
+                    f"'{worker_spec.name}' is neither",
+                    execution_method="error",
+                ),
             )
         if remote is not None and prov.fetched:
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error="@fetch on an R cell is read on this machine; run the cell "
-                "locally or fetch in a Python cell upstream",
-                execution_method="error",
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error="@fetch on an R cell is read on this machine; run the cell "
+                    "locally or fetch in a Python cell upstream",
+                    execution_method="error",
+                ),
             )
         remote_metadata = context.remote_execution_metadata(worker_spec)
         mount_specs = [
@@ -309,8 +325,11 @@ async def run_r_cell(
 
         refusal = context.table_write_refusal(source)
         if refusal is not None:
-            return CellExecutionResult(
-                cell_id=cell_id, success=False, error=refusal, execution_method="error"
+            return refused_run(
+                host,
+                CellExecutionResult(
+                    cell_id=cell_id, success=False, error=refusal, execution_method="error"
+                ),
             )
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)

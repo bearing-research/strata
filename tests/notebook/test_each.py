@@ -1178,6 +1178,36 @@ class TestOtherSurfaces:
 
         assert nb.ran() == ["10"]
 
+    @pytest.mark.parametrize(
+        ("ending", "reader"),
+        [
+            pytest.param("", (), id="leaf"),
+            pytest.param("out = val\n", ("seen = dict(out)\n",), id="consumed"),
+        ],
+    )
+    async def test_a_reverted_per_variant_cell_replays_each_console(self, tmp_path, ending, reader):
+        log = tmp_path / "ran.log"
+        prints = "# @per_variant\n" + _logs(log, "val") + "print('{}', val)\n" + ending
+        nb = Notebook(
+            tmp_path,
+            "# @variant g one\nval = 1\n",
+            "# @variant g two\nval = 2\n",
+            prints.format("first"),
+            *reader,
+        )
+        set_variant_mode(nb.session.path, "g", "sweep")
+        nb.session = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        nb.session.refresh_environment_runtime()
+        await nb.good("c")
+        assert "second" in (await nb.good("c", prints.format("second"))).stdout
+        nb.ran()
+
+        result = await nb.good("c", prints.format("first"))
+
+        assert nb.ran() == []
+        assert "first 1" in result.stdout and "first 2" in result.stdout
+        assert "second" not in result.stdout
+
     async def test_a_remote_worker_is_refused(self, tmp_path):
         cell = "# @worker gpu\n# @each s in samples\nout = s\n"
         nb = Notebook(tmp_path, "samples = [1]\n", cell, READER)
