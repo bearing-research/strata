@@ -10,12 +10,15 @@ batch down, and a loop's display failure leaves ``execute_cell`` as an exception
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from strata.notebook import executor as executor_module
 from strata.notebook.cell_paths import fanout
 from strata.notebook.executor import (
     CellExecutionResult,
@@ -123,6 +126,37 @@ def _fail(monkeypatch, name: str, outcome: Exception | bool, calls: list[str]) -
             return outcome
 
     monkeypatch.setattr(_owner(name), name, failing)
+
+
+def _team_store_breaks(monkeypatch, error: BaseException = RuntimeError("no team")) -> list[str]:
+    """The team cache is on, and publishing raises *error*. Returns the cells offered."""
+    offered: list[str] = []
+
+    async def no_pull(self, **_kwargs):
+        return None
+
+    async def publish(_store, _manager, *, cell_id, **_kwargs):
+        offered.append(cell_id)
+        raise error
+
+    real = CellExecutor._lake_config
+
+    def lake_config(self):
+        config = real(self)
+        return SimpleNamespace(
+            **{
+                **vars(config),
+                "notebook_team_cache_enabled": True,
+                "notebook_team_cache_publish": "all",
+                "notebook_remote_store_url": "http://team",
+            }
+        )
+
+    monkeypatch.setattr(CellExecutor, "_lake_config", lake_config)
+    monkeypatch.setattr(CellExecutor, "_pull_from_team_store", no_pull)
+    monkeypatch.setattr(executor_module, "publish_cell_outputs", publish)
+    monkeypatch.setattr(NotebookSession, "environment_attestation_error", lambda self: None)
+    return offered
 
 
 class TestAFinishedRunThatFails:
@@ -253,17 +287,23 @@ class TestPythonAndR:
         assert _latest(session, "v", "value") == 1
 
     @pytest.mark.parametrize(("language", "source", "reader", "prefix"), LANGUAGES)
-    async def test_a_push_that_raises_fails_a_cell_whose_outputs_stay(
+    async def test_a_push_that_raises_leaves_the_cell_finished(
         self, tmp_path, monkeypatch, steps, language, source, reader, prefix
     ):
-        _fail(monkeypatch, "_push_to_team_store", RuntimeError("no team"), steps)
+        offered = _team_store_breaks(monkeypatch)
 
         session, result = await self._run(tmp_path, language, source, reader)
 
-        assert not result.success
-        assert result.error == f"{prefix}{'E' if prefix == '' else 'e'}xecution failed: no team"
-        assert "_store_display_outputs" not in steps
+        assert offered == ["v"]
+        assert result.success, result.error
+        assert "_store_display_outputs" in steps
         assert _latest(session, "v", "value") == 1
+
+    async def test_a_cancel_during_the_push_is_still_a_cancel(self, tmp_path, monkeypatch, steps):
+        _team_store_breaks(monkeypatch, asyncio.CancelledError())
+
+        with pytest.raises(asyncio.CancelledError):
+            await self._run(tmp_path, "python", PYTHON[1], PYTHON[2])
 
     @pytest.mark.parametrize(
         ("language", "assign"),
@@ -434,17 +474,18 @@ class TestBatch:
         assert _latest(session, "v", "value") == 1
         assert _latest(session, "v", "__display__0") is None
 
-    async def test_a_push_that_raises_takes_the_batch_down(self, tmp_path, monkeypatch, steps):
-        _fail(monkeypatch, "_push_to_team_store", RuntimeError("no team"), steps)
+    async def test_a_push_that_raises_leaves_the_batch_running(self, tmp_path, monkeypatch, steps):
+        offered = _team_store_breaks(monkeypatch)
         session, running = await self._run(tmp_path)
 
-        with pytest.raises(RuntimeError, match="no team"):
-            await running
+        result = await running
 
+        assert result.completed
+        assert self._first(result).status == "ok"
+        assert offered
         assert _latest(session, "v", "value") == 1
-        assert _latest(session, "v", "__display__0") == 1
-        # The cell after it never ran.
-        assert steps.count("_store_outputs") == 1
+        # The cell after it ran too.
+        assert steps.count("_store_outputs") == 2
 
 
 class TestLoop:
@@ -550,9 +591,8 @@ class TestEach:
             ("_store_outputs", TableWriteError("no table"), "no table"),
             ("_store_outputs", UnsafeRunFile("a link"), "Execution failed: a link"),
             ("_store_display_outputs", RuntimeError("no display"), "Execution failed: no display"),
-            ("_push_to_team_store", RuntimeError("no team"), "Execution failed: no team"),
         ],
-        ids=["false", "table", "unsafe", "display", "push"],
+        ids=["false", "table", "unsafe", "display"],
     )
     async def test_an_item_that_fails_stops_the_manifests(
         self, tmp_path, monkeypatch, steps, step, outcome, error
@@ -567,6 +607,17 @@ class TestEach:
         assert result.error == f"Item 'x' failed: {error}"
         assert "_store_each_manifests" not in steps
         assert _latest(session, "e", "out") is None
+
+    async def test_a_push_that_raises_leaves_the_item_good(self, tmp_path, monkeypatch, steps):
+        session = await self._session(tmp_path)
+        steps.clear()
+        offered = _team_store_breaks(monkeypatch)
+
+        result = await CellExecutor(session).execute_cell("e", self.SOURCE)
+
+        assert result.success, result.error
+        assert offered
+        assert "_store_each_manifests" in steps
 
     @pytest.mark.parametrize(
         ("error", "reported"),

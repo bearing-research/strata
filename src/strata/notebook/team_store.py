@@ -460,32 +460,36 @@ async def publish_cell_outputs(
     Reads back the *local* store's artifacts (not the harness temp files), so what
     is published is exactly what a pull must reproduce, with the stored provenance
     key. Not all-or-nothing: a partial publish just means the next person
-    recomputes. Returns how many variables landed. Never raises.
+    recomputes, so a variable that fails is logged and the rest are still offered.
+    Returns how many variables landed.
     """
     published = 0
     for var in sorted(consumed_vars):
-        artifact_id = artifact_mgr.cell_artifact_id(cell_id, var, variant=variant)
-        stored = artifact_mgr.artifact_store.get_latest_version(artifact_id)
-        if stored is None or stored.state not in ("ready", "superseded"):
-            continue
-        content_type = _spec_param(stored, "content_type")
-        blob = artifact_mgr.artifact_store.read_blob(artifact_id, stored.version)
-        if blob is None:
-            continue
-        if content_type == output_dirs.CONTENT_TYPE:
-            blob = await _offer_folder_files(store, artifact_mgr, stored.id, blob)
+        try:
+            artifact_id = artifact_mgr.cell_artifact_id(cell_id, var, variant=variant)
+            stored = artifact_mgr.artifact_store.get_latest_version(artifact_id)
+            if stored is None or stored.state not in ("ready", "superseded"):
+                continue
+            content_type = _spec_param(stored, "content_type")
+            blob = artifact_mgr.artifact_store.read_blob(artifact_id, stored.version)
             if blob is None:
                 continue
-        if await store.publish(
-            stored.provenance_hash,
-            blob,
-            content_type=content_type,
-            variable_name=var,
-            build_env=_spec_param(stored, "build_env"),
-            build_duration_ms=_spec_int(stored, "build_duration_ms"),
-            env_hash=_spec_param(stored, "env_hash"),
-        ):
-            published += 1
+            if content_type == output_dirs.CONTENT_TYPE:
+                blob = await _offer_folder_files(store, artifact_mgr, stored.id, blob)
+                if blob is None:
+                    continue
+            if await store.publish(
+                stored.provenance_hash,
+                blob,
+                content_type=content_type,
+                variable_name=var,
+                build_env=_spec_param(stored, "build_env"),
+                build_duration_ms=_spec_int(stored, "build_duration_ms"),
+                env_hash=_spec_param(stored, "env_hash"),
+            ):
+                published += 1
+        except Exception:
+            logger.exception("Could not publish %s of cell %s to the team store", var, cell_id)
 
     if published:
         logger.info(

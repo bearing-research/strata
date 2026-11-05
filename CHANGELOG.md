@@ -192,6 +192,10 @@ exhaustive commit history.
   still reported, with no file behind it. Displays now record the source that ran rather
   than an edit made during the batch, and a fan-out instance's output can be staged as an
   input from outside the batch. (#PRNUM)
+- **A team store failure no longer fails your cell.** A problem offering finished outputs
+  to the team store could fail a cell whose outputs were already saved, and stop a Run All
+  partway. It's now logged and the run goes on, and one output that can't be offered no
+  longer stops the others. (#1427)
 - **A worker is told to stop whenever Strata stops waiting for it.** A remote request that
   times out or drops, and a job status reply Strata cannot read, now cancel the job, so the
   machine isn't left computing for nobody. An unreadable status also reads as a job status
