@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -904,7 +905,8 @@ class TestLoop:
 
     @staticmethod
     def _reach_the_harness(monkeypatch):
-        monkeypatch.setattr(loop, "_resolve_loop_seed", lambda *_args: (b"{}", "json/object"))
+        monkeypatch.setattr(loop, "_resolve_loop_seed", lambda *_args: (("seed", 1), "json/object"))
+        monkeypatch.setattr(loop, "_write_carry", lambda *_args: "digest")
         monkeypatch.setattr(
             "strata.notebook.runtime_state.persist_cell_loop_run", lambda *_args: None
         )
@@ -1051,19 +1053,17 @@ class TestLoop:
         store = SimpleNamespace(
             get_latest_version=lambda artifact_id: SimpleNamespace(
                 state="ready", version=1, params={"content_type": "json/object"}
-            )
+            ),
+            blob_exists=lambda *_args: True,
         )
-        manager = SimpleNamespace(
-            artifact_store=store,
-            load_artifact_data=lambda artifact_id, _version: artifact_id.encode(),
-        )
+        manager = SimpleNamespace(artifact_store=store)
         host = SimpleNamespace(
             notebook_state=SimpleNamespace(id="n", get_cell=cells.get),
             get_artifact_manager=lambda: manager,
             wired_variables=lambda _cell, upstream: {"state"} if upstream == "definer" else set(),
         )
-        blob, content_type = loop._resolve_loop_seed(host, "c", self.LOOP)
-        assert blob == b"nb_n_cell_definer_var_state"
+        carry, content_type = loop._resolve_loop_seed(host, "c", self.LOOP)
+        assert carry == ("nb_n_cell_definer_var_state", 1)
         assert content_type == "json/object"
 
     @pytest.fixture
@@ -1079,6 +1079,73 @@ class TestLoop:
             return session
 
         return make
+
+    @pytest.mark.asyncio
+    async def test_a_carry_is_copied_and_read_whole_only_to_store_the_final_state(
+        self, seeded, monkeypatch
+    ):
+        source = "# @loop max_iter=3 carry=state\nstate = {'n': state['n'] + 1}\n"
+        session = seeded(source)
+        assert (await CellExecutor(session).execute_cell("seed", "state = {'n': 0}\n")).success
+        store = session.get_artifact_manager().artifact_store
+        read = store.read_blob
+        whole: list[str] = []
+
+        def recording(artifact_id, *args, **kwargs):
+            whole.append(artifact_id)
+            return read(artifact_id, *args, **kwargs)
+
+        monkeypatch.setattr(store, "read_blob", recording)
+
+        result = await CellExecutor(session).execute_cell("lp", source)
+
+        assert result.success, result.error
+        carries = [name for name in whole if "_var_state" in name]
+        assert carries == [session.get_artifact_manager().cell_artifact_id("lp", "state", 2)]
+        final = session.get_artifact_manager().cell_artifact_id("lp", "state")
+        latest = store.get_latest_version(final)
+        assert json.loads(read(final, latest.version)) == {"n": 3}
+
+    def test_a_seed_with_no_blob_is_named(self):
+        store = SimpleNamespace(
+            get_latest_version=lambda _id: SimpleNamespace(state="ready", version=2, params={}),
+            blob_exists=lambda *_args: False,
+        )
+        manager = SimpleNamespace(artifact_store=store)
+        cells = {"c": SimpleNamespace(upstream_ids=["d"]), "d": SimpleNamespace()}
+        host = SimpleNamespace(
+            notebook_state=SimpleNamespace(id="n", get_cell=cells.get),
+            get_artifact_manager=lambda: manager,
+            wired_variables=lambda *_args: {"state"},
+        )
+
+        with pytest.raises(
+            ValueError, match="Loop seed blob missing for nb_n_cell_d_var_state@v=2"
+        ):
+            loop._resolve_loop_seed(host, "c", self.LOOP)
+
+    def test_a_carrys_digest_is_of_its_bytes(self, tmp_path):
+        def copy_ready_blob(_id, _version, path):
+            path.write_bytes(b"bytes")
+
+        manager = SimpleNamespace(copy_ready_blob=copy_ready_blob)
+
+        digest = loop._write_carry(manager, ("a", 1), tmp_path / "x")
+
+        assert digest == hashlib.sha256(b"bytes").hexdigest()
+
+    @pytest.mark.asyncio
+    async def test_a_carry_gone_before_the_next_iteration_fails_the_cell(self, seeded, monkeypatch):
+        source = "# @loop max_iter=2 carry=state\nstate = {'n': state['n'] + 1}\n"
+        session = seeded(source)
+        assert (await CellExecutor(session).execute_cell("seed", "state = {'n': 0}\n")).success
+        manager = session.get_artifact_manager()
+        monkeypatch.setattr(manager, "copy_blob", lambda *_args: False)
+
+        result = await CellExecutor(session).execute_cell("lp", source)
+
+        assert not result.success
+        assert "Blob data not found" in result.error
 
     @pytest.mark.asyncio
     async def test_the_final_carry_records_what_it_read(self, seeded):
@@ -3064,6 +3131,30 @@ class TestPythonInputs:
 
         assert restore["parts"]["x"]["uri"] == "strata://artifact/nb_n_cell_c_var_x@v=2"
         assert restore["sequence"] == 4
+
+    def test_a_checkpoint_file_is_copied_to_its_place_in_the_folder(self, tmp_path, monkeypatch):
+        copied = []
+        version = SimpleNamespace(id="file", version=3, params={"manifest": False})
+        host = SimpleNamespace(
+            get_artifact_manager=lambda: SimpleNamespace(
+                release_store=SimpleNamespace(
+                    bundle=lambda _id: SimpleNamespace(
+                        release=SimpleNamespace(state="accepted", sequence=1), outputs=[]
+                    )
+                ),
+                copy_ready_blob=lambda *args: copied.append(args),
+            )
+        )
+        monkeypatch.setattr(
+            python.checkpoint_files, "files_of", lambda _outputs: {"model/w.bin": version}
+        )
+        run = SimpleNamespace(restores_from="r1", resumed_from="r1")
+
+        restore = python.restore_manifest(host, lambda *_args: None, run, tmp_path)
+
+        target = tmp_path / restore["folder"] / "model" / "w.bin"
+        assert copied == [("file", 3, target)]
+        assert target.parent.is_dir()
 
     def test_a_release_that_was_not_accepted_is_not_restored(self, tmp_path):
         run = SimpleNamespace(restores_from="r1", resumed_from="r1")

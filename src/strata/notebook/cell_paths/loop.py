@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio.to_thread
 from vestigo.provenance import derive_subkey
 
 from strata.notebook import output_dirs
@@ -368,7 +369,7 @@ async def _run_loop(
     carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
 
     try:
-        carry_blob, carry_content_type = _resolve_loop_seed(host, cell_id, loop)
+        carry, carry_content_type = _resolve_loop_seed(host, cell_id, loop)
         if folders is not None:
             _seed_loop_folders(host, loop, annotations.output_dirs, folders)
     except ValueError as exc:
@@ -451,7 +452,9 @@ async def _run_loop(
 
             ext = _LOOP_CONTENT_TYPE_EXT.get(carry_content_type, ".pickle")
             carry_file = f"{loop.carry}{ext}"
-            (output_dir / carry_file).write_bytes(carry_blob)
+            prev_carry_hash = await anyio.to_thread.run_sync(
+                _write_carry, artifact_mgr, carry, output_dir / carry_file
+            )
             input_specs[loop.carry] = {
                 "content_type": carry_content_type,
                 "file": carry_file,
@@ -606,7 +609,6 @@ async def _run_loop(
 
             # Chains through the previous iteration's carry bytes so identical chains are
             # detectable.
-            prev_carry_hash = hashlib.sha256(carry_blob).hexdigest()
             iter_provenance = derive_subkey(source_hash, prev_carry_hash, f"iter={k}")
 
             artifact = artifact_mgr.store_cell_output(
@@ -620,6 +622,8 @@ async def _run_loop(
                 iteration=k,
                 extra_params={"loop_run": loop_run},
             )
+            # The next iteration copies it from the store: a checkpoint can be gigabytes.
+            del new_carry_blob
             final_artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
             if folders is not None:
                 for name in folder_names:
@@ -642,7 +646,7 @@ async def _run_loop(
                         extra_params={"loop_run": loop_run},
                     )
 
-            carry_blob = new_carry_blob
+            carry = (artifact.id, artifact.version)
             carry_content_type = new_content_type
 
             iter_duration_ms = (time.time() - start_time) * 1000
@@ -683,6 +687,7 @@ async def _run_loop(
     loop_input_versions = context.input_refs(cell_id)
 
     # Staged, then finalized with the extra outputs below so all become current together.
+    carry_blob = artifact_mgr.load_artifact_data(*carry)
     staged = [
         artifact_mgr.stage_cell_output(
             cell_id=cell_id,
@@ -904,12 +909,19 @@ def _seed_loop_folders(
         )
 
 
+def _write_carry(manager: Any, carry: tuple[str, int], path: Path) -> str:
+    """Copy the carry where the harness reads it, returning the digest of its bytes."""
+    manager.copy_ready_blob(*carry, path)
+    with path.open("rb") as written:
+        return hashlib.file_digest(written, "sha256").hexdigest()
+
+
 def _resolve_loop_seed(
     host: ExecutorHost,
     cell_id: str,
     loop: LoopAnnotation,
-) -> tuple[bytes, str]:
-    """Resolve the iter-0 carry seed as ``(blob_bytes, content_type)``.
+) -> tuple[tuple[str, int], str]:
+    """Resolve the iter-0 carry seed as ``((artifact_id, version), content_type)``.
 
     From ``# @loop start_from=<cell>@iter=<k>``, else the latest artifact of
     the upstream cell defining the carry. Raises ``ValueError`` if neither exists.
@@ -946,10 +958,9 @@ def _resolve_loop_seed(
                 f"latest run did not reach iteration {loop.start_from_iter}. Run that "
                 f"cell through iteration {loop.start_from_iter} first."
             )
-        blob = artifact_mgr.artifact_store.read_blob(artifact_id, artifact.version)
-        if blob is None:
+        if not artifact_mgr.artifact_store.blob_exists(artifact_id, artifact.version):
             raise ValueError(f"Loop seed blob missing for {artifact_id}@v={artifact.version}.")
-        return blob, artifact_content_type(artifact)
+        return (artifact_id, artifact.version), artifact_content_type(artifact)
 
     cell = host.notebook_state.get_cell(cell_id)
     if cell is None:
@@ -964,8 +975,11 @@ def _resolve_loop_seed(
         artifact = artifact_mgr.artifact_store.get_latest_version(upstream_artifact_id)
         if artifact is None or artifact.state not in ("ready", "superseded"):
             continue
-        blob = artifact_mgr.load_artifact_data(upstream_artifact_id, artifact.version)
-        return blob, artifact_content_type(artifact)
+        if not artifact_mgr.artifact_store.blob_exists(upstream_artifact_id, artifact.version):
+            raise ValueError(
+                f"Loop seed blob missing for {upstream_artifact_id}@v={artifact.version}."
+            )
+        return (upstream_artifact_id, artifact.version), artifact_content_type(artifact)
 
     raise ValueError(
         f"Cannot resolve loop carry '{loop.carry}': no upstream cell "
