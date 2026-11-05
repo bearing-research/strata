@@ -30,6 +30,7 @@ from strata.artifact.graph import cell_definition, link_reconstructed
 from strata.artifact.retention import requirements
 from strata.artifact.upgrades import complete_upgrade
 from strata.auth.principal import get_principal
+from strata.notebook.file_clone import clone_reader
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
 
@@ -419,16 +420,20 @@ class NotebookArtifactManager:
             raise ValueError(f"Artifact {artifact_id}@v={version} not found or not ready")
 
     def copy_blob(self, artifact_id: str, version: int, path: Path) -> bool:
-        """Copy a version's blob to *path* in bounded chunks; ``False`` if it has none.
+        """Copy a version's blob to *path*; ``False`` if it has none.
 
-        A copy that fails leaves no file.
+        A clone where the store's file and the filesystem allow it, else in bounded chunks. A
+        copy that fails leaves no file.
         """
         reader = self.artifact_store.open_blob_reader(artifact_id, version)
         if reader is None:
             return False
         try:
-            with reader as source, path.open("wb") as target:
-                shutil.copyfileobj(source, target, BLOB_COPY_CHUNK_BYTES)
+            with reader as source:
+                if clone_reader(source, path):
+                    return True
+                with path.open("wb") as target:
+                    shutil.copyfileobj(source, target, BLOB_COPY_CHUNK_BYTES)
         except Exception:
             path.unlink(missing_ok=True)
             raise
