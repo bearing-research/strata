@@ -270,7 +270,7 @@ exhaustive commit history.
   so one variant replaced another's, and the fan-out never gathered them. Each variant's are now
   stored under that variant, and the cell shows them all, by variant name, after a run, a
   cache hit or a reopen. Each is named in the web UI and the TUI, and carries `variant` in
-  `strata cell show --format json` and MCP's `get_cell`. (#PRNUM)
+  `strata cell show --format json` and MCP's `get_cell`. (#1464)
 - **A cached cell writes its table again if the table is gone.** A cell whose `@write_table` target
   was deleted, or whose warehouse was, stayed a cache hit and wrote nothing, so the table stayed
   missing while the cell read ready. A hit on a writing cell now checks each table it writes, and
