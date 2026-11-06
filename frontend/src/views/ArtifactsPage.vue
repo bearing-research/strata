@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowDown, ArrowLeft, ArrowUp, Diamond } from '@lucide/vue'
+import { ArrowDown, ArrowUp } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -19,7 +19,7 @@ import {
   type ArtifactRow,
   type ArtifactStats,
 } from '../composables/useStrata'
-import ThemeToggle from '../components/ThemeToggle.vue'
+import PageHeader from '../components/PageHeader.vue'
 import { apiErrorCode } from '../utils/refusal'
 import { outputLabel } from '../utils/storeRows'
 
@@ -154,29 +154,20 @@ onMounted(() => {
 
 <template>
   <div class="artifacts" data-testid="artifacts-page">
-    <div class="artifacts-header">
-      <div class="artifacts-title">
-        <button type="button" class="nav-link back-btn" data-testid="page-back" @click="goBack">
-          <ArrowLeft /> Back
-        </button>
-        <router-link to="/" class="back-link" title="Back to notebooks"
-          ><Diamond fill="currentColor" /> strata</router-link
-        >
+    <PageHeader @back="goBack">
+      <span class="crumb">/</span>
+      <template v-if="sessionId">
+        <span class="page-name" data-testid="artifacts-scope">{{
+          notebookName || 'notebook'
+        }}</span>
         <span class="crumb">/</span>
-        <template v-if="sessionId">
-          <span class="page-name" data-testid="artifacts-scope">{{
-            notebookName || 'notebook'
-          }}</span>
-          <span class="crumb">/</span>
-          <span class="page-name">artifacts</span>
-        </template>
-        <span v-else class="page-name" data-testid="artifacts-scope">server store</span>
-      </div>
-      <div class="artifacts-header-actions">
+        <span class="page-name">artifacts</span>
+      </template>
+      <span v-else class="page-name" data-testid="artifacts-scope">server store</span>
+      <template #actions>
         <router-link to="/logs" class="nav-link" data-testid="nav-logs">Logs</router-link>
-        <ThemeToggle />
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <p class="scope-note" data-testid="artifacts-scope-note">
       <template v-if="sessionId">
@@ -339,62 +330,6 @@ onMounted(() => {
   height: 100vh;
   padding: 16px 24px;
   gap: 12px;
-}
-
-.artifacts-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.artifacts-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.artifacts-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.back-link {
-  font-weight: 700;
-  font-size: 20px;
-  color: var(--accent-primary);
-  text-decoration: none;
-}
-
-.crumb {
-  color: var(--text-muted);
-}
-
-.page-name {
-  font-size: 20px;
-  font-weight: 300;
-  color: var(--text-muted);
-}
-
-.nav-link {
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-decoration: none;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-/* .nav-link on a <button> (Back): reset the browser's default chrome. */
-.back-btn {
-  font-family: inherit;
-  line-height: 1.4;
-  background: transparent;
-  cursor: pointer;
-}
-
-.nav-link:hover {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
 }
 
 .stat-strip {
