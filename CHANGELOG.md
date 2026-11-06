@@ -268,6 +268,12 @@ exhaustive commit history.
   cancels cleanly and leaves the worker alone. (#1426)
 - **A run that fails to start leaves no descriptors open.** A missing input file, or a
   harness process that can't start, leaked open files in the server. (#1426)
+- **A snapshot planned once plans again while the object store is down.** Every scan read the
+  table's `metadata.json`, manifest list and manifests from the store before it could use the
+  cache, so with the store down every scan failed, cache hits too. Iceberg never rewrites these
+  files, so Strata now keeps each one it reads under `iceberg-metadata/` in the cache directory,
+  up to `STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES` (1 GiB), and plans from those copies. A table
+  or file never read still needs the store. (#1470)
 - **`strata run` and MCP run cells in warm processes.** Their cells all started cold, though
   the session had warm processes ready: only the UI used them. An `@each` cell over 300 items
   took 60 s through `strata run` and now takes 26 s. (#1468)
