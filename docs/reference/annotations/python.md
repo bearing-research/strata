@@ -458,9 +458,11 @@ failed item writes nothing, since its missing rows would read as deletions. A so
 with no items refuses the run rather than delete every row. `append`, `merge` and
 `overwrite` are refused: one commit per item, or only the last item's rows.
 
-**Limits.** Python cells on the local worker, read by Python cells. Instances run one at a time, a harness
-each, about half a second before the cell's own work, so plan on that for a first run
-of thousands of items. An `@each` cell cannot also be a `@loop`, `@per_variant` or
+**Limits.** Python cells on the local worker, read by Python cells. Instances run one at a time, each in
+a process of its own. In the UI, `strata run` and MCP that is a warm process, started ahead
+with the notebook's dependencies imported, when one is ready: about a tenth of a second
+before the cell's own work, or about a fifth when no warm process is ready. Plan on that
+for a first run of thousands of items. An `@each` cell cannot also be a `@loop`, `@per_variant` or
 `@variant` cell, or fan out over a sweep. Cell tests, branching from a release,
 `@dataset`, `strata artifact pull` and a publication bundle over its output are not
 supported yet and are refused; a cell that reads the output can do the last three.

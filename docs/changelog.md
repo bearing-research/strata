@@ -270,6 +270,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   cancels cleanly and leaves the worker alone. (#1426)
 - **A run that fails to start leaves no descriptors open.** A missing input file, or a
   harness process that can't start, leaked open files in the server. (#1426)
+- **`strata run` and MCP run cells in warm processes.** Their cells all started cold, though
+  the session had warm processes ready: only the UI used them. An `@each` cell over 300 items
+  took 60 s through `strata run` and now takes 26 s. (#1468)
 - **A DAG label stays off its own edge.** An edge running down and to the left no longer
   passes through its variable name. (#1413)
 - **A `@per_variant` cell shows every variant's displays.** A cell that plotted or displayed a

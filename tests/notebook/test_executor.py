@@ -3731,3 +3731,23 @@ class TestNoInterpreterRunsNoCellCode:
                 "c1", "def test_x(cell):\n    assert cell.x == 1\n"
             )
         assert not marker.exists()
+
+
+class TestConfigOutsideTheServer:
+    def test_it_is_loaded_once_an_executor(self, monkeypatch):
+        """An @each item reads it several times a run; each load cost it a fifth of its run."""
+        import importlib
+
+        from strata.config import StrataConfig
+
+        # Importing the server loads one of its own, to decide whether to mount MCP.
+        importlib.import_module("strata.server")
+        loads = []
+        monkeypatch.setattr(StrataConfig, "load", classmethod(lambda cls: loads.append(1) or cls()))
+        executor = CellExecutor(SimpleNamespace(path=Path("nb")))
+
+        first = executor._lake_config()
+
+        assert executor._lake_config() is first
+        assert len(loads) == 1
+        assert CellExecutor(SimpleNamespace(path=Path("nb")))._lake_config() is not first

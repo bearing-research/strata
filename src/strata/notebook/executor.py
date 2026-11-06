@@ -208,6 +208,7 @@ from strata.notebook.writer import drop_blanked_secrets
 if TYPE_CHECKING:
     import cellgraph as cg
 
+    from strata.config import StrataConfig
     from strata.notebook.datasets import DatasetInput
     from strata.notebook.executor_host import ExecutorHost
     from strata.notebook.pool import WarmProcessPool
@@ -410,6 +411,9 @@ class CellExecutor:
     ``execute_cell`` ensures upstream artifacts exist (recursively on a miss),
     checks this cell's cache, and executes and stores on a miss.
     """
+
+    # Outside the server, the config ``_lake_config`` loaded for this executor.
+    _loaded_config: StrataConfig | None = None
 
     def __init__(
         self,
@@ -1704,7 +1708,8 @@ class CellExecutor:
                 run_token=self._run_token,
                 write_manifest=self._write_manifest,
                 run_harness=self._run_harness,
-                pool=self.pool,
+                # The session's by default, as an R cell's: a CLI or MCP run is warm too.
+                pool=self.pool if self.pool is not None else self.session.warm_pool,
             ),
             source,
             input_specs,
@@ -2356,15 +2361,20 @@ class CellExecutor:
         )
 
     def _lake_config(self):
-        """Server config when running inside the server, else loaded fresh."""
+        """Server config when running inside the server, else loaded once for this executor.
+
+        Several reads a cell: loading each one cost an ``@each`` item a fifth of its run.
+        """
         try:
             from strata.server import get_state
 
             return get_state().config
         except RuntimeError:
-            from strata.config import StrataConfig
+            if self._loaded_config is None:
+                from strata.config import StrataConfig
 
-            return StrataConfig.load()
+                self._loaded_config = StrataConfig.load()
+            return self._loaded_config
 
     def _ambient_strata_url(self) -> str:
         """Server URL the harness binds the injected ``strata`` client to.
