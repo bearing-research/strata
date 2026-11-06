@@ -412,6 +412,9 @@ class CellExecutor:
     checks this cell's cache, and executes and stores on a miss.
     """
 
+    # Outside the server, the config ``_lake_config`` loaded for this executor.
+    _loaded_config: StrataConfig | None = None
+
     def __init__(
         self,
         session: ExecutorHost,
@@ -422,7 +425,6 @@ class CellExecutor:
         self.harness_path = Path(__file__).parent / "harness.py"
         self.r_harness_path = Path(__file__).parent / "languages" / "r" / "harness.R"
         self.pool = pool
-        self._loaded_config: StrataConfig | None = None
         # DAG cycle guard for recursive materialization. Per-instance is correct: each
         # top-level call makes a fresh CellExecutor.
         self._materializing: set[str] = set()
