@@ -578,6 +578,9 @@ class CellOutput(BaseModel):
     computed_at: float | None = Field(
         default=None, description="When the run behind this output stored it, in epoch seconds"
     )
+    variant: str | None = Field(
+        default=None, description="The ``@per_variant`` variant whose run showed this"
+    )
 
 
 class InputWeight(BaseModel):

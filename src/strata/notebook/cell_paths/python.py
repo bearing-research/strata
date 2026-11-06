@@ -430,6 +430,7 @@ async def run_python_cell(
                 cell_id,
                 provenance_hash,
                 current_display_outputs,
+                fanout_variant,
             )
             if (cell is not None and use_cache)
             else []
@@ -804,6 +805,7 @@ async def run_python_cell(
                         source_hash=source_hash,
                         source=source,
                         env_hash=env_hash,
+                        variant=fanout_variant,
                     )
                     # Cache the cell's console by provenance so a hit replays this run's.
                     if cacheable:

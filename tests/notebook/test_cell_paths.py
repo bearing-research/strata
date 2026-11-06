@@ -1311,7 +1311,9 @@ class TestFanout:
     @staticmethod
     def _fakes(base, *, consumed=(), latest=None, finalized=(), **overrides):
         """A host and a context with nothing behind them, and a record of what they were asked."""
-        calls = SimpleNamespace(recorded=[], applied=[], instances=[], staged=[], discarded=[])
+        calls = SimpleNamespace(
+            recorded=[], applied=[], instances=[], staged=[], discarded=[], persisted=[]
+        )
         cell = SimpleNamespace(
             artifact_uris={}, artifact_uri=None, cache_hit=False, last_provenance_hash=None
         )
@@ -1341,6 +1343,9 @@ class TestFanout:
             ),
             apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
                 (cell_id, result)
+            ),
+            persist_display_outputs=lambda cell_id, displays: calls.persisted.append(
+                (cell_id, displays)
             ),
         )
 
