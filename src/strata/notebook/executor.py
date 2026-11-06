@@ -1490,10 +1490,17 @@ class CellExecutor:
         return bool(to_promote)
 
     def _fanout_variants(self, cell_id: str) -> tuple[str, ...] | None:
-        """The variant names if ``cell_id`` is a ``@per_variant`` fan-out cell, else None."""
+        """The variant names if ``cell_id`` is a ``@per_variant`` fan-out cell, else None.
+
+        In the order of the group's tabs, so its console and displays read as the tabs do.
+        """
         dag = self.session.dag
         fanout = dag.fanout_cells.get(cell_id) if dag else None
-        return tuple(name for name, _ in fanout.variants) if fanout is not None else None
+        if dag is None or fanout is None:
+            return None
+        # The group's members are in cell order, which is the order of its tabs.
+        group = next(g for g in dag.variant_groups if g.group == fanout.group)
+        return tuple(name for _, name in group.members)
 
     def _fanout_context(self) -> FanoutContext:
         return FanoutContext(
