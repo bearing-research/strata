@@ -3893,6 +3893,9 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>notebook_state</code> and <code>environment_job_finished</code> have typed payloads.</strong> With them every
+  frame the server sends has a model, and the generated TypeScript describes the cell view a
+  client receives. The frames carry the same keys and values as before. (#1472)</li>
 <li><strong><code>cell_output</code> and <code>cell_error</code> have typed payloads.</strong> Both are validated where they are
   sent, and <code>frontend/src/types/ws-payloads.generated.ts</code> describes them. An entry of <code>outputs</code>
   or <code>displays</code> keeps fields the server does not know, since the harness that wrote it may be a
