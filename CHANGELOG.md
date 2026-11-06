@@ -276,6 +276,10 @@ exhaustive commit history.
   stored under that variant, and the cell shows them all, by variant name, after a run, a
   cache hit or a reopen. Each is named in the web UI and the TUI, and carries `variant` in
   `strata cell show --format json` and MCP's `get_cell`. (#1464)
+- **An `@each` cell shows its items' displays.** A cell that plotted or displayed something per
+  item showed nothing. It now shows every item's, in the order the items ran, each under its
+  item's key, after a run or a hit that lists no item. The manifest names them, so a prune
+  keeps them; a copy to another store carries the values only. (#1467)
 - **A cached cell writes its table again if the table is gone.** A cell whose `@write_table` target
   was deleted, or whose warehouse was, stayed a cache hit and wrote nothing, so the table stayed
   missing while the cell read ready. A hit on a writing cell now checks each table it writes, and
