@@ -36,6 +36,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (#1381)
 
 ### Changed
+- **`cell_output` and `cell_error` have typed payloads.** Both are validated where they are
+  sent, and `frontend/src/types/ws-payloads.generated.ts` describes them. An entry of `outputs`
+  or `displays` keeps fields the server does not know, since the harness that wrote it may be a
+  worker on another version. (#1471)
 - **A cell's input is cloned from the store where the filesystem allows it.** A local blob
   reaches the harness as a copy-on-write clone (APFS, btrfs, XFS with reflinks), which takes
   no time and almost no disk until something writes to it, and a write never reaches the

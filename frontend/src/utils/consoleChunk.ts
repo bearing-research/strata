@@ -43,7 +43,10 @@ export function startConsoleRun(cell: CellConsole): void {
 
 // `cell_output` / `cell_error`: their `stdout` / `stderr` are the run's whole
 // console. An absent stream keeps what was shown.
-export function replaceConsole(cell: CellConsole, payload: Record<string, unknown>): void {
+export function replaceConsole(
+  cell: CellConsole,
+  payload: { stdout?: unknown; stderr?: unknown },
+): void {
   if (typeof payload.stdout === 'string') cell.consoleStdout = payload.stdout
   if (typeof payload.stderr === 'string') cell.consoleStderr = payload.stderr
 }

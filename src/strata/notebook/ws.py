@@ -76,6 +76,8 @@ from strata.notebook.ws_payloads import (
     PresencePayload,
     ReadConfirmCell,
     ReadConfirmPromptPayload,
+    cell_error_payload,
+    cell_result_payload,
     cell_status_payload,
     dag_update_payload,
     error_payload,
@@ -2336,7 +2338,7 @@ async def execute_cell_and_broadcast(
             _make_message(
                 MessageType.CELL_ERROR,
                 next_notebook_sequence(notebook_id),
-                {"cell_id": cell_id, "error": str(e)},
+                cell_error_payload(cell_id, str(e)),
             ),
         )
         await _broadcast_message(
@@ -2494,7 +2496,7 @@ async def _execute_cascade(
                         _make_message(
                             MessageType.CELL_ERROR,
                             next_notebook_sequence(notebook_id),
-                            {"cell_id": cell_id, "error": str(e)},
+                            cell_error_payload(cell_id, str(e)),
                         ),
                     )
                     await _broadcast_message(
@@ -3011,7 +3013,7 @@ async def _run_partition_single_cell(
             _make_message(
                 MessageType.CELL_ERROR,
                 next_notebook_sequence(notebook_id),
-                {"cell_id": cell_id, "error": str(exc)},
+                cell_error_payload(cell_id, str(exc)),
             ),
         )
         await _broadcast_message(
@@ -3555,7 +3557,7 @@ async def _broadcast_output_or_error(
         _make_message(
             MessageType.CELL_OUTPUT if result.success else MessageType.CELL_ERROR,
             next_notebook_sequence(notebook_id),
-            payload,
+            cell_result_payload(result.success, payload),
             ts=ts,
         ),
     )
