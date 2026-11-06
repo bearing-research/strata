@@ -67,18 +67,27 @@ function formatTime(ts: number | null): string {
   return new Date(ts * 1000).toLocaleString()
 }
 
+// Only the latest load may land: one for a store the page has left, or for an older filter,
+// can finish after it.
+let statsSeq = 0
+let listSeq = 0
+
 async function loadStats() {
+  const seq = ++statsSeq
+  let next: ArtifactStats | null
   try {
-    stats.value = props.sessionId
+    next = props.sessionId
       ? await strata.getNotebookStoreStats(props.sessionId)
       : await strata.getArtifactStats()
   } catch {
     // Don't blank the table; the list load reports an unreachable store.
-    stats.value = null
+    next = null
   }
+  if (seq === statsSeq) stats.value = next
 }
 
 async function loadArtifacts() {
+  const seq = ++listSeq
   loading.value = true
   error.value = null
   try {
@@ -93,14 +102,16 @@ async function loadArtifacts() {
     const data = props.sessionId
       ? await strata.getNotebookStoreArtifacts(props.sessionId, query)
       : await strata.getArtifacts(query)
+    if (seq !== listSeq) return
     rows.value = data.artifacts
     notebookName.value = data.notebook_name ?? ''
   } catch (e: any) {
+    if (seq !== listSeq) return
     rows.value = []
     if (apiErrorCode(e) === 'writes_disabled') listUnavailable.value = true
     else error.value = e?.message || 'Failed to fetch artifacts'
   } finally {
-    loading.value = false
+    if (seq === listSeq) loading.value = false
   }
 }
 
@@ -146,6 +157,20 @@ watch([stateFilter, namePrefix, sort, order], () => {
 watch(offset, () => {
   void loadArtifacts()
 })
+
+// One page serves both stores, and moving between their routes keeps it mounted: load the new
+// store from its first page.
+watch(
+  () => props.sessionId,
+  () => {
+    notebookName.value = ''
+    stats.value = null
+    rows.value = []
+    listUnavailable.value = false
+    offset.value = 0
+    refresh()
+  },
+)
 
 onMounted(() => {
   refresh()

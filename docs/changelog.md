@@ -230,6 +230,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **The Logs and Artifacts pages' header fits a phone.** "strata" no longer wraps under its
   diamond, and the theme button stays on the page: the links share Back's row and the
   breadcrumb takes the row below. (#1463)
+- **The Artifacts page loads the store its route names.** Moving from the server store to a
+  notebook's, or between two notebooks', kept the last store's name, rows and totals. (#1465)
 - **The CLI and MCP hand back both forms of a traceback.** `strata run` adds
   `traceback_full`; `cell run` and `run_cell` add `traceback` and `traceback_full`;
   `cell show` and `get_cell` add `error_full`. (#1458)

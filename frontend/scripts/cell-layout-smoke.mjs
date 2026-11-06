@@ -162,8 +162,6 @@ async function main() {
     for (const route of ['/logs', '/artifacts', `/notebook/${sessionId}/artifacts`]) {
       for (const width of [360, 390, 600, 700, 1024]) {
         await page.setViewportSize({ width, height: 800 })
-        // From a blank page: a route change alone keeps the Artifacts page's last load.
-        await page.goto('about:blank')
         await page.goto(`${baseUrl}/#${route}`)
         await page.getByTestId('page-header').waitFor({ timeout: TIMEOUT_MS })
         if (route.startsWith('/notebook/')) {
