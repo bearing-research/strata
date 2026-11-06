@@ -273,9 +273,10 @@ exhaustive commit history.
 - **A `@per_variant` cell shows every variant's displays.** A cell that plotted or displayed a
   value per variant showed nothing: each instance stored its displays under the cell's own id,
   so one variant replaced another's, and the fan-out never gathered them. Each variant's are now
-  stored under that variant, and the cell shows them all, by variant name, after a run, a
-  cache hit or a reopen. Each is named in the web UI and the TUI, and carries `variant` in
-  `strata cell show --format json` and MCP's `get_cell`. (#1464)
+  stored under that variant, and the cell shows them all, in the order of the variant tabs,
+  after a run, a cache hit or a reopen. Each is named in the web UI and the TUI, and carries
+  `variant` in `strata cell show --format json` and MCP's `get_cell`. The variants run and
+  print in that order too, where they had run in the order of their names. (#1464, #1466)
 - **A cached cell writes its table again if the table is gone.** A cell whose `@write_table` target
   was deleted, or whose warehouse was, stayed a cache hit and wrote nothing, so the table stayed
   missing while the cell read ready. A hit on a writing cell now checks each table it writes, and

@@ -250,9 +250,10 @@ reruns only that variant's instance. A group the cell reads as a dict is an inpu
 of every instance, so changing any of its variants reruns them all.
 
 What the cell displays (a figure, `display(...)`, a trailing expression) is
-shown for every variant, one after another in the order of their names, each under
-its variant's name. Its console prefixes each variant's lines with `[variant=<name>]`
-the same way. A variant that ran shows what it displayed now, and one that was a
+shown for every variant, one after another in the order of the variant tabs (the
+order of the variant cells in the notebook), each under its variant's name. The
+instances run in that order, and the console prefixes each variant's lines with
+`[variant=<name>]` the same way. A variant that ran shows what it displayed now, and one that was a
 cache hit shows what it displayed when it ran. If any variant fails, the cell
 shows no displays.
 
