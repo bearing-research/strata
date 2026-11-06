@@ -37,6 +37,7 @@ exhaustive commit history.
 - **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep
+  their files and their cached results. The examples' cells are renamed. (#1474)
   their files and their cached results. The examples' cells are renamed.
 - **cellgraph 0.4: every cell runs once more after the upgrade.** Strata now needs
   `cellgraph>=0.4,<0.5`. Its keys hash exactly what they cover, with each upstream
