@@ -42,6 +42,20 @@ windows = pytest.mark.skipif(
 )
 
 
+def _dialect():
+    """The ledger's SQL dialect; the Postgres run of this suite replaces it."""
+    return None
+
+
+def _open(path: Path) -> NotebookSession:
+    return NotebookSession(parse_notebook(path), path, ledger_dialect=_dialect())
+
+
+def _cli_store(artifact_dir: Path) -> str | None:
+    """The ``--artifact-dir`` a CLI command opens the notebook's store by."""
+    return str(artifact_dir)
+
+
 class Notebook:
     """A notebook of cells ``a``, ``b``, ... in order, and the log its instances append to."""
 
@@ -55,7 +69,7 @@ class Notebook:
             add_cell_to_notebook(path, cell_id, after)
             write_cell(path, cell_id, source)
             after = cell_id
-        self.session = NotebookSession(parse_notebook(path), path)
+        self.session = _open(path)
         self.session.refresh_environment_runtime()
 
     def ran(self) -> list[str]:
@@ -986,7 +1000,7 @@ class TestAnotherStore:
         code = cmd_pull(
             argparse.Namespace(
                 ref=f"{manifest.id}@v={manifest.version}",
-                artifact_dir=str(manager.artifact_dir),
+                artifact_dir=_cli_store(manager.artifact_dir),
                 to=str(out),
                 tenant=None,
             )
@@ -1053,7 +1067,7 @@ class TestOtherSurfaces:
         nb = Notebook(tmp_path, "samples = [1]\n", "# @each s in samples\nout = s\n")
         add_cell_to_notebook(nb.session.path, "z", "b", language=language)
         write_cell(nb.session.path, "z", source)
-        nb.session = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        nb.session = _open(nb.session.path)
         nb.session.refresh_environment_runtime()
         await nb.good("a")
         await nb.good("b")
@@ -1114,7 +1128,7 @@ class TestOtherSurfaces:
         await nb.good("b")
         nb.ran()
 
-        reopened = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        reopened = _open(nb.session.path)
         reopened.refresh_environment_runtime()
         assert reopened.compute_staleness()["a"].status == CellStatus.READY
         result = await CellExecutor(reopened).execute_cell("a", source)
@@ -1169,7 +1183,7 @@ class TestOtherSurfaces:
             "seen = dict(out)\n",
         )
         set_variant_mode(nb.session.path, "g", "sweep")
-        nb.session = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        nb.session = _open(nb.session.path)
         nb.session.refresh_environment_runtime()
         await nb.good("c")
         assert nb.ran() == ["1", "2"]
@@ -1197,7 +1211,7 @@ class TestOtherSurfaces:
             *reader,
         )
         set_variant_mode(nb.session.path, "g", "sweep")
-        nb.session = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        nb.session = _open(nb.session.path)
         nb.session.refresh_environment_runtime()
         await nb.good("c")
         assert "second" in (await nb.good("c", prints.format("second"))).stdout
