@@ -58,6 +58,7 @@ def _config(tmp_path):
         catalog_name="strata",
         metadata_db=tmp_path / "metadata.db",
         cache_dir=tmp_path / "cache",
+        iceberg_metadata_cache_size_bytes=1 << 30,
         s3_region=None,
         s3_access_key=None,
         s3_secret_key=None,
