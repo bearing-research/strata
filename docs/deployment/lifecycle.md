@@ -10,7 +10,7 @@ A Strata deployment has three persistent locations:
 
 | Location | Default | Contents | When to back up |
 | --- | --- | --- | --- |
-| **Notebook storage** | `~/.strata/notebooks/` | One subdirectory per notebook: `notebook.toml`, `cells/*.py`, `pyproject.toml`, `uv.lock`, `work/` (where cells write files), `.strata/` (per-notebook runtime), `.venv/` (per-notebook venv) | Always - this is your work |
+| **Notebook storage** | `~/.strata/notebooks/` | One subdirectory per notebook: `notebook.toml`, `cells/` (one source file per cell), `pyproject.toml`, `uv.lock`, `work/` (where cells write files), `.strata/` (per-notebook runtime), `.venv/` (per-notebook venv) | Always - this is your work |
 | **Iceberg row-group cache** | `~/.strata/cache/` | Arrow-IPC files keyed by Parquet row-group, and the Parquet/Iceberg metadata cache in `metadata.sqlite` inside it (a cache clear keeps it) | Optional - purely a perf cache, safe to delete |
 | **Server-side artifact store** | `~/.strata/artifacts/` (or `STRATA_ARTIFACT_DIR`) | The Core SDK's artifact blobs + metadata SQLite (the metadata moves to Postgres with `STRATA_ARTIFACT_METADATA_DSN`, and `strata migrate` copies an existing SQLite store across). **Distinct from the per-notebook `.strata/artifacts/`** below. | If you use `StrataClient.materialize`, named artifact pointers, publications or pins you care about, API keys, or the service-mode worker registry (they live in the same database) |
 

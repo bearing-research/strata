@@ -23,6 +23,6 @@ order = 0
 
 [[cells]]
 id = "hottest"
-file = "hottest.py"
+file = "hottest.sql"
 language = "sql"
 order = 1

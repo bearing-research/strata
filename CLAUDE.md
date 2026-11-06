@@ -257,7 +257,7 @@ notebook_dir/
 ├── notebook.toml          # committed config (id, name, cells, workers, mounts, env, ai, [catalogs.<name>])
 ├── pyproject.toml         # uv config
 ├── uv.lock
-├── cells/{cell_id}.py     # cell source (8-char UUID prefix)
+├── cells/{cell_id}.py     # cell source (8-char UUID prefix; .sql/.prompt/.md/.r/.widget by language)
 ├── cells/{cell_id}.test.py  # the cell's pytest tests, if any
 ├── work/                  # gitignored; cells run here (layout.WORK_DIR)
 └── .strata/               # gitignored runtime state

@@ -117,8 +117,9 @@ def _events_mount(uri: str, options: dict[str, Any], mode: str) -> tuple[MountSp
 
 
 async def _run(nb_dir: Path, session: NotebookSession) -> tuple[Any, list[dict[str, Any]]]:
-    source = (nb_dir / "cells" / "c1.py").read_text()
-    result = await CellExecutor(session).execute_cell("c1", source)
+    cell = parse_notebook(nb_dir).get_cell("c1")
+    assert cell is not None
+    result = await CellExecutor(session).execute_cell("c1", cell.source)
     assert result.success, result.error
     session.compute_staleness()
     session.mark_executed_ready("c1")

@@ -336,7 +336,7 @@ path exits `2` and says so; stop that run with Ctrl-C instead.
 ## Authoring cells and dependencies (`cell add/edit/rm/mv`, `dep`)
 
 An agent can also build and edit a notebook through commands (instead of writing
-`notebook.toml` + `cells/*.py` by hand):
+`notebook.toml` and the files under `cells/` by hand):
 
 ```bash
 strata cell add      <notebook_dir> (--file body.py | -c 'src') [--run] [--after <id>] [--language python|markdown|sql|r|prompt|widget]

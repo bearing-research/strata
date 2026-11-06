@@ -63,8 +63,9 @@ def _rows(session: NotebookSession, uri: str) -> list[dict[str, Any]]:
 
 
 async def _run(nb_dir: Path, session: NotebookSession, cell_id: str) -> Any:
-    source = (nb_dir / "cells" / f"{cell_id}.py").read_text()
-    result = await CellExecutor(session).execute_cell(cell_id, source)
+    cell = parse_notebook(nb_dir).get_cell(cell_id)
+    assert cell is not None
+    result = await CellExecutor(session).execute_cell(cell_id, cell.source)
     # What the route does after a run.
     session.compute_staleness()
     if result.success:

@@ -69,7 +69,12 @@ def _session(nb_dir: Path) -> Any:
 
 
 def _read(nb_dir: Path, cell_id: str) -> str:
-    return (nb_dir / "cells" / f"{cell_id}.py").read_text()
+    from strata.notebook.parser import parse_notebook
+
+    # By the file notebook.toml names: the extension follows the language.
+    cell = parse_notebook(nb_dir).get_cell(cell_id)
+    assert cell is not None
+    return cell.source
 
 
 def _load_arrow(session: Any, uri: str) -> Any:

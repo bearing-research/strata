@@ -179,7 +179,7 @@ agent is driving:
 | **Web UI**, by opening the server URL in a browser | The full editor: outputs, plots, the DAG, the inspector. **Not read-only**, so you can edit and run cells alongside the agent | You want to see rendered output, or take over |
 | **TUI**, via `strata watch ./my-notebook` | Read-only live spectator in the terminal | No browser, over SSH, or beside the agent in a split terminal |
 | **Any WebSocket client** | The raw frames | You are building your own view; see the [client protocol](../reference/notebook-protocol.md) |
-| **Nothing, then read the directory** | `cells/*.py` is the source; `.strata/runtime.json` holds display outputs, provenance and timings; `.strata/console/` holds per-cell stdout/stderr | You would rather review afterwards than watch |
+| **Nothing, then read the directory** | `cells/` holds the source; `.strata/runtime.json` holds display outputs, provenance and timings; `.strata/console/` holds per-cell stdout/stderr | You would rather review afterwards than watch |
 
 One thing to know about the web UI row: an open tab follows the agent's source
 edits as well as its status and outputs, but a cell **you** are part-way through

@@ -400,7 +400,7 @@ async def test_sql_cell_bind_param_from_upstream_python_cell(tmp_path):
     # It resolves :min_value to 15 from the upstream artifact.
     from strata.notebook.sql.cell_executor import execute_sql_cell
 
-    sql_src = (nb_dir / "cells" / "sql.py").read_text()
+    sql_src = _read_cell(nb_dir, "sql")
     result = await execute_sql_cell(session, "sql", sql_src)
     assert result["success"], result.get("error")
 
@@ -547,7 +547,7 @@ async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     executor = CellExecutor(session)
 
-    sql_src = (nb_dir / "cells" / "sql.py").read_text()
+    sql_src = _read_cell(nb_dir, "sql")
     sql_result = await executor.execute_cell("sql", sql_src)
     assert sql_result.success, sql_result.error
 
@@ -626,7 +626,12 @@ async def test_sql_cell_executor_dispatched_via_main_executor(tmp_path):
 
 
 def _read_cell(nb_dir: Path, cell_id: str) -> str:
-    return (nb_dir / "cells" / f"{cell_id}.py").read_text()
+    from strata.notebook.parser import parse_notebook
+
+    # By the file notebook.toml names: the extension follows the language.
+    cell = parse_notebook(nb_dir).get_cell(cell_id)
+    assert cell is not None
+    return cell.source
 
 
 def _load_artifact_as_arrow(session: Any, uri: str) -> Any:
@@ -787,11 +792,11 @@ async def test_sql_write_cell_makes_db_visible_to_read_cell(tmp_path):
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     executor = CellExecutor(session)
 
-    seed_src = (nb_dir / "cells" / "seed.py").read_text()
+    seed_src = _read_cell(nb_dir, "seed")
     seed_result = await executor.execute_cell("seed", seed_src)
     assert seed_result.success, seed_result.error
 
-    query_src = (nb_dir / "cells" / "query.py").read_text()
+    query_src = _read_cell(nb_dir, "query")
     query_result = await executor.execute_cell("query", query_src)
     assert query_result.success, query_result.error
     table = _load_artifact_as_arrow(session, query_result.artifact_uri)
@@ -843,11 +848,11 @@ async def test_sql_write_cell_resolves_bind_placeholders_from_upstream(tmp_path)
     session.refresh_environment_runtime()
     executor = CellExecutor(session)
 
-    cfg_src = (nb_dir / "cells" / "cfg.py").read_text()
+    cfg_src = _read_cell(nb_dir, "cfg")
     cfg_result = await executor.execute_cell("cfg", cfg_src)
     assert cfg_result.success
 
-    seed_src = (nb_dir / "cells" / "seed.py").read_text()
+    seed_src = _read_cell(nb_dir, "seed")
     seed_result = await executor.execute_cell("seed", seed_src)
     assert seed_result.success, seed_result.error
 
@@ -894,7 +899,7 @@ async def test_sql_write_cell_invalidates_on_upstream_value_change(tmp_path):
     cells = {c.id: c for c in session.notebook_state.cells}
 
     await executor.execute_cell("cfg", cells["cfg"].source)
-    seed_src = (nb_dir / "cells" / "seed.py").read_text()
+    seed_src = _read_cell(nb_dir, "seed")
     first = await executor.execute_cell("seed", seed_src)
     assert first.success and not first.cache_hit
 
@@ -1440,13 +1445,14 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         )
         session = _make_session(nb_dir)
         from strata.notebook.executor import CellExecutor
+        from strata.notebook.writer import write_cell
 
         await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
         session.compute_staleness()
         session.mark_executed_ready("c1")
 
-        (nb_dir / "cells" / "c1.py").write_text(
-            "# @sql connection=db\n# @cache forever\nSELECT id, name FROM events\n"
+        write_cell(
+            nb_dir, "c1", "# @sql connection=db\n# @cache forever\nSELECT id, name FROM events\n"
         )
         reopened = _make_session(nb_dir)
 

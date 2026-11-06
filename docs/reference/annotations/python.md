@@ -48,13 +48,13 @@ and `@loop start_from=` reference across cells. The defaults:
 
 ```toml
 cells = [
-    { id = "seed",      file = "seed_database.py", language = "sql",    order = 0 },
-    { id = "threshold", file = "threshold.py",     language = "python", order = 1 },
-    { id = "top-orders", file = "top_orders.py",   language = "sql",    order = 2 },
+    { id = "seed",       file = "seed_database.sql", language = "sql",    order = 0 },
+    { id = "threshold",  file = "threshold.py",      language = "python", order = 1 },
+    { id = "top-orders", file = "top_orders.sql",    language = "sql",    order = 2 },
 ]
 ```
 
-…then in `cells/top_orders.py`:
+…then in `cells/top_orders.sql`:
 
 ```sql
 # @sql connection=warehouse

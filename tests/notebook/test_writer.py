@@ -183,7 +183,7 @@ def test_add_cell():
 
 
 def test_add_cell_picks_extension_by_language():
-    """Languages with a dedicated extension get it; others default to ``.py``.
+    """Each language gets its own extension; ``.py`` is Python's.
 
     Tools opening cell files outside the UI (R-aware editors, linters, grep) rely on it.
     """
@@ -194,8 +194,8 @@ def test_add_cell_picks_extension_by_language():
         cases = [
             ("py-cell", "python", "py"),
             ("md-cell", "markdown", "md"),
-            ("sql-cell", "sql", "py"),  # SQL cells keep the .py extension.
-            ("prompt-cell", "prompt", "py"),
+            ("sql-cell", "sql", "sql"),
+            ("prompt-cell", "prompt", "prompt"),
             ("r-cell", "r", "r"),
             ("widget-cell", "widget", "widget"),
         ]
@@ -211,6 +211,8 @@ def test_add_cell_picks_extension_by_language():
         assert by_id["r-cell"].value == "r"
         assert by_id["md-cell"].value == "markdown"
         assert by_id["widget-cell"].value == "widget"
+        assert by_id["sql-cell"].value == "sql"
+        assert by_id["prompt-cell"].value == "prompt"
         # Widget cells seed a starter control so they're usable immediately.
         widget_source = next(c.source for c in notebook_state.cells if c.id == "widget-cell")
         assert "slider(" in widget_source
