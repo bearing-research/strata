@@ -3752,6 +3752,11 @@ authentication. This is a startup error, not a warning:</p>
 <td><code>row_group_projection</code></td>
 <td><code>row_group_projection</code> or <code>row_group</code></td>
 </tr>
+<tr>
+<td><code>STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES</code></td>
+<td><code>1073741824</code> (1 GiB)</td>
+<td>Iceberg <code>metadata.json</code> files, manifest lists and manifests read from an object store are kept under <code>iceberg-metadata/</code> in the cache directory, so a snapshot already planned plans again while the store is down. Iceberg never rewrites these files, so a copy stays correct; past this size the least recently read are removed. Writes do not fill it.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="fetcher">Fetcher<a class="headerlink" href="#fetcher" title="Permanent link">&para;</a></h2>

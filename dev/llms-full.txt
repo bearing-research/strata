@@ -10490,6 +10490,7 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_CACHE_DIR`            | `~/.strata/cache`      | Disk cache location                   |
 | `STRATA_MAX_CACHE_SIZE_BYTES` | `10737418240` (10 GB)  | Max cache size                        |
 | `STRATA_CACHE_GRANULARITY`    | `row_group_projection` | `row_group_projection` or `row_group` |
+| `STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES` | `1073741824` (1 GiB) | Iceberg `metadata.json` files, manifest lists and manifests read from an object store are kept under `iceberg-metadata/` in the cache directory, so a snapshot already planned plans again while the store is down. Iceberg never rewrites these files, so a copy stays correct; past this size the least recently read are removed. Writes do not fill it. |
 
 ## Fetcher
 
