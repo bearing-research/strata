@@ -36,6 +36,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (#1381)
 
 ### Changed
+- **`notebook_state` and `environment_job_finished` have typed payloads.** With them every
+  frame the server sends has a model, and the generated TypeScript describes the cell view a
+  client receives. The frames carry the same keys and values as before. (#1472)
 - **`cell_output` and `cell_error` have typed payloads.** Both are validated where they are
   sent, and `frontend/src/types/ws-payloads.generated.ts` describes them. An entry of `outputs`
   or `displays` keeps fields the server does not know, since the harness that wrote it may be a

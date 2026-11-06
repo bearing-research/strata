@@ -12,8 +12,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from strata.notebook.annotations import AnnotationsWirePayload
 from strata.notebook.immutability import MutationWarning
-from strata.notebook.models import CellTestCase, InputWeight
+from strata.notebook.models import (
+    CellState,
+    CellTestCase,
+    CellTestResult,
+    InputWeight,
+    NotebookState,
+)
 from strata.notebook.protocol import MessageType
 
 
@@ -256,7 +263,7 @@ class EnvironmentJobModel(WsPayload):
 class EnvironmentJobEventPayload(WsPayload):
     """``environment_job_started`` / ``environment_job_progress``: one job snapshot.
 
-    ``environment_job_finished`` carries a heavier aggregate payload and is not typed here.
+    ``environment_job_finished`` carries more: :class:`EnvironmentJobFinishedPayload`.
     """
 
     environment_job: EnvironmentJobModel
@@ -660,6 +667,168 @@ def cell_error_payload(cell_id: str, error: str) -> dict[str, Any]:
     return cell_result_payload(False, {"cell_id": cell_id, "error": error})
 
 
+class LastGotModel(WsPayload):
+    """How a cell's last result came: a hit and what it saved, or a run and what it took."""
+
+    cache_hit: bool
+    ms: int
+
+
+class WidgetDescriptorModel(WsPayload):
+    """One control a widget cell declares."""
+
+    name: str
+    kind: str
+    params: dict[str, Any]
+    default: Any = None
+
+
+class WidgetModel(WsPayload):
+    """A widget cell's controls and their current values."""
+
+    descriptors: list[WidgetDescriptorModel]
+    values: dict[str, Any]
+
+
+class CellTestResultView(CellTestResult, WsPayload):
+    """A cell's last test run, and whether the cell, its tests or inputs changed since."""
+
+    stale: bool | None = None
+
+
+class CellView(CellState, WsPayload):
+    """A cell as clients see it: ``NotebookSession.serialize_cell``.
+
+    The stored cell, plus what is derived from its source (annotations, module exports,
+    a widget's controls) and what the session knows (displays with their data, why it
+    is stale, how its last result came).
+    """
+
+    # Narrowed to what the session sends; pydantic validates a subclass's fields as declared.
+    test_result: CellTestResultView | None = None  # ty: ignore[invalid-mutable-override]
+    display_outputs: list[DisplayOutput] = Field(default_factory=list)  # ty: ignore[invalid-attribute-override]
+    display_output: DisplayOutput | None = None  # ty: ignore[invalid-attribute-override]
+    staleness_reasons: list[str]
+    annotations: AnnotationsWirePayload
+    widget: WidgetModel | None = None
+    is_module_cell: bool | None = None
+    module_exports: list[ModuleExportModel] | None = None
+    causality: dict[str, Any] | None = None
+    # Names this cell defines that an earlier cell defined too.
+    shadow_warnings: list[str] | None = None
+    last_got: LastGotModel | None = None
+    # What the last run took, or the last hit loaded in.
+    last_duration_ms: int | None = None
+
+
+class EnvironmentStateModel(WsPayload):
+    """The notebook's Python environment: ``NotebookSession.serialize_environment_state``."""
+
+    requested_python_version: str
+    runtime_python_version: str
+    python_version: str
+    lockfile_hash: str
+    package_count: int
+    declared_package_count: int
+    resolved_package_count: int
+    sync_state: str
+    sync_error: str | None
+    sync_notice: str | None
+    last_synced_at: int | None
+    last_sync_duration_ms: int | None
+    has_lockfile: bool
+    venv_python: str | None
+    interpreter_source: str
+
+
+class RPackageModel(WsPayload):
+    """One package in the notebook's renv library."""
+
+    name: str
+    version: str
+
+
+class REnvironmentStateModel(WsPayload):
+    """The notebook's R environment: ``NotebookSession.serialize_r_environment_state``."""
+
+    has_lockfile: bool
+    current_lock_hash: str
+    lock_hash: str
+    r_version: str
+    system_r_version: str | None
+    last_synced_at: int
+    sync_state: str
+    sync_error: str | None
+    packages: list[RPackageModel]
+    packages_status: str
+    packages_error: str | None
+
+
+class NotebookDagModel(WsPayload):
+    """The DAG a ``notebook_state`` carries."""
+
+    edges: list[DagEdgeModel]
+    roots: list[str]
+    leaves: list[str]
+    topological_order: list[str]
+    # Already ``model_dump``-ed VariantGroup rows; sent only after a variant is added.
+    variant_groups: list[dict[str, Any]] | None = None
+
+
+class NotebookStatePayload(NotebookState, WsPayload):
+    """``notebook_state``: the whole notebook, on reconnect or a change made elsewhere.
+
+    ``NotebookSession.serialize_notebook_state`` plus the DAG. Serialized with
+    ``exclude_unset`` in Python mode, so the wire is what it was before it was typed.
+    """
+
+    cells: list[CellView] = Field(default_factory=list)  # ty: ignore[invalid-attribute-override]
+    environment: EnvironmentStateModel
+    environment_job: EnvironmentJobModel | None
+    environment_job_history: list[EnvironmentJobModel]
+    r_environment: REnvironmentStateModel
+    dag: NotebookDagModel | None = None
+
+
+class DependencyModel(WsPayload):
+    """A Python dependency, declared or resolved."""
+
+    name: str
+    version: str | None
+    specifier: str | None
+
+
+class EnvironmentJobFinishedPayload(WsPayload):
+    """``environment_job_finished``: an environment job ended.
+
+    The cells come with it, since a job can make them stale. A completed job adds the
+    environment it left; an import adds its warnings and count.
+    """
+
+    environment_job: EnvironmentJobModel
+    environment_job_history: list[EnvironmentJobModel]
+    cells: list[CellView]
+    lockfile_changed: bool
+    stale_cell_count: int
+    stale_cell_ids: list[str]
+    warnings: list[str] | None = None
+    imported_count: int | None = None
+    environment: EnvironmentStateModel | None = None
+    r_environment: REnvironmentStateModel | None = None
+    dependencies: list[DependencyModel] | None = None
+    resolved_dependencies: list[DependencyModel] | None = None
+
+
+def notebook_state_payload(state: dict[str, Any]) -> dict[str, Any]:
+    """Validate a ``notebook_state`` payload for the wire, keeping its keys and values."""
+    return NotebookStatePayload.model_validate(state).model_dump(exclude_unset=True)
+
+
+def environment_job_finished_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate an ``environment_job_finished`` payload for the wire."""
+    return EnvironmentJobFinishedPayload.model_validate(payload).model_dump(exclude_unset=True)
+
+
 FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.AGENT_NOTE: AgentNotePayload,
     MessageType.CASCADE_PROGRESS: CascadeProgressPayload,
@@ -675,11 +844,13 @@ FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.CELL_TEST_STATUS: CellTestStatusPayload,
     MessageType.CELL_VARIANT_PROGRESS: CellVariantProgressPayload,
     MessageType.DAG_UPDATE: DagUpdatePayload,
+    MessageType.ENVIRONMENT_JOB_FINISHED: EnvironmentJobFinishedPayload,
     MessageType.ENVIRONMENT_JOB_PROGRESS: EnvironmentJobEventPayload,
     MessageType.ENVIRONMENT_JOB_STARTED: EnvironmentJobEventPayload,
     MessageType.ERROR: ErrorPayload,
     MessageType.IMPACT_PREVIEW: ImpactPreviewPayload,
     MessageType.INSPECT_RESULT: InspectResultPayload,
+    MessageType.NOTEBOOK_STATE: NotebookStatePayload,
     MessageType.PRESENCE: PresencePayload,
     MessageType.PROFILING_SUMMARY: ProfilingSummaryPayload,
     MessageType.READ_CONFIRM_PROMPT: ReadConfirmPromptPayload,

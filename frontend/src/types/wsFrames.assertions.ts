@@ -33,9 +33,9 @@ export type _CodeIsAUnion = Expect<
   >
 >
 
-/** A frame with no payload model is not a key of the map. */
+/** A frame with no payload model (a client's, here) is not a key of the map. */
 export type _UnmodelledFrameIsNotTyped = Expect<
-  Equal<'notebook_state' extends keyof WsServerPayloadMap ? true : false, false>
+  Equal<'cell_execute' extends keyof WsServerPayloadMap ? true : false, false>
 >
 
 /** Fields the wire always carries are not optional. */
