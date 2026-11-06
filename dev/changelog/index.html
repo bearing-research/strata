@@ -3893,6 +3893,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>cell_output</code> and <code>cell_error</code> have typed payloads.</strong> Both are validated where they are
+  sent, and <code>frontend/src/types/ws-payloads.generated.ts</code> describes them. An entry of <code>outputs</code>
+  or <code>displays</code> keeps fields the server does not know, since the harness that wrote it may be a
+  worker on another version. (#1471)</li>
 <li><strong>A cell's input is cloned from the store where the filesystem allows it.</strong> A local blob
   reaches the harness as a copy-on-write clone (APFS, btrfs, XFS with reflinks), which takes
   no time and almost no disk until something writes to it, and a write never reaches the
