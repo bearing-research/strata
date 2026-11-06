@@ -183,8 +183,8 @@ from strata.notebook.table_writes import (
     StagedOutput,
     TableWriteError,
     authorize_table_writes,
+    gone_tables,
     write_cell_tables,
-    written_table_gone,
 )
 from strata.notebook.team_store import (
     TeamPull,
@@ -1113,6 +1113,7 @@ class CellExecutor:
             promote_reverted_leaf=self._promote_reverted_leaf,
             moved=self._moved,
             table_write_refusal=self._table_write_refusal,
+            restore_gone_tables=self._restore_gone_tables,
             load_input_blobs=self._load_input_blobs,
             add_dataset_inputs=self._add_dataset_inputs,
             prepare_mounts=self._prepare_mounts,
@@ -1218,25 +1219,61 @@ class CellExecutor:
                 variant=variant,
             )
             cached = artifact_mgr.find_cached(first_key) if team_pull is not None else None
-        # An instance's table is settled once, for all of them, by its fan-out.
-        if cached is not None and variant is None and await self._written_table_gone(source):
-            return None, None
         return cached, team_pull
 
-    async def _written_table_gone(self, source: str) -> bool:
-        """Whether a hit on *source* would claim rows in a table that no longer exists."""
+    async def _gone_tables(self, source: str) -> list[TableWriteSpec]:
+        """The ``@write_table`` lines of *source* whose table no longer exists."""
         specs = parse_annotations(source).table_writes
         if not specs:
-            return False
+            return []
         return await anyio.to_thread.run_sync(
             functools.partial(
-                written_table_gone,
+                gone_tables,
                 specs,
                 config=self._lake_config(),
                 env=dict(self.session.notebook_state.env),
                 notebook=self.session.path,
             )
         )
+
+    def _write_back(
+        self, cell_id: str, specs: list[TableWriteSpec], variant: str | None = None
+    ) -> None:
+        """Write a hit's stored outputs into *specs*' tables, as its run wrote them.
+
+        A hit's outputs are each variable's latest version (a revert has promoted them).
+
+        Raises:
+            TableWriteError: as for a run's write.
+        """
+        manager = self.session.get_artifact_manager()
+        outputs: dict[str, StagedOutput] = {}
+        for spec in specs:
+            version = manager.artifact_store.get_latest_version(
+                manager.cell_artifact_id(cell_id, spec.variable, variant=variant)
+            )
+            if version is None:
+                continue  # The write names it as not produced.
+            outputs[spec.variable] = StagedOutput(
+                artifact_id=version.id,
+                version=version.version,
+                blob=manager.load_artifact_data(version.id, version.version),
+                content_type=_artifact_content_type(version),
+                provenance_hash=version.provenance_hash,
+            )
+        self._write_cell_tables(specs, outputs)
+
+    async def _restore_gone_tables(self, cell_id: str, source: str) -> None:
+        """Before a hit is served, write its stored outputs into any table that is gone.
+
+        Only those: a table still there holds them already, and an append would double.
+
+        Raises:
+            TableWriteError: as for a run's write.
+        """
+        gone = await self._gone_tables(source)
+        if gone:
+            await anyio.to_thread.run_sync(self._write_back, cell_id, gone)
 
     def _validate_output_hit(
         self,
@@ -1463,7 +1500,8 @@ class CellExecutor:
             execute_python_cell=self._execute_python_cell,
             moved=self._moved,
             promote_reverted_outputs=self._promote_reverted_outputs,
-            written_table_gone=self._written_table_gone,
+            gone_tables=self._gone_tables,
+            write_back=self._write_back,
             store_console_outputs=self._store_console_outputs,
             prepare_mounts=self._prepare_mounts,
             input_refs=self._input_refs,
@@ -1531,6 +1569,7 @@ class CellExecutor:
             promote_reverted_outputs=self._promote_reverted_outputs,
             moved=self._moved,
             table_write_refusal=self._table_write_refusal,
+            restore_gone_tables=self._restore_gone_tables,
             load_input_blobs=self._load_input_blobs,
             dispatch_http_executor=self._dispatch_http_executor,
             prepare_mounts=self._prepare_mounts,
@@ -3159,7 +3198,8 @@ class CellExecutor:
                 )
                 staged_names.append((var_name, content_type))
                 staged_outputs[var_name] = StagedOutput(
-                    staged=staged[-1],
+                    artifact_id=staged[-1].artifact_id,
+                    version=staged[-1].version,
                     blob=blob_data,
                     content_type=content_type,
                     provenance_hash=var_provenance,
@@ -3767,7 +3807,7 @@ class CellExecutor:
                 manifest_tables=self._manifest_tables,
                 moved=self._moved,
                 promote_reverted_outputs=self._promote_reverted_outputs,
-                written_table_gone=self._written_table_gone,
+                restore_gone_tables=self._restore_gone_tables,
                 canonical_output=self._canonical_output,
                 table_write_refusal=self._table_write_refusal,
                 prepare_mounts=self._prepare_mounts,
@@ -3871,7 +3911,7 @@ class CellExecutor:
             input_refs=self._input_refs,
             moved=self._moved,
             promote_reverted_outputs=self._promote_reverted_outputs,
-            written_table_gone=self._written_table_gone,
+            restore_gone_tables=self._restore_gone_tables,
             promote_reverted_leaf=self._promote_reverted_leaf,
             pull_from_team_store=self._pull_from_team_store,
             push_to_team_store=self._push_to_team_store,

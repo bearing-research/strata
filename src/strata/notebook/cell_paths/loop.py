@@ -28,7 +28,7 @@ from strata.notebook.harness_user import (
 )
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import MountSpec, TableWriteSpec
-from strata.notebook.table_writes import StagedOutput, TableWriteError
+from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 
 if TYPE_CHECKING:
     from strata.notebook.executor import _CellProvenance
@@ -53,7 +53,7 @@ class LoopContext:
     promote_reverted_outputs: Callable[..., int | None]
     canonical_output: Callable[[str, str, str], Any]
     table_write_refusal: Callable[[str], str | None]
-    written_table_gone: Callable[[str], Awaitable[bool]]
+    restore_gone_tables: Callable[[str, str], Awaitable[None]]
     prepare_mounts: Callable[..., Awaitable[dict[str, Any]]]
     load_input_blobs: Callable[..., dict[str, Any]]
     keep_failed_output_dirs: Callable[..., None]
@@ -335,11 +335,23 @@ async def _run_loop(
             error=str(exc),
             execution_method="loop",
         )
-    if use_cache and not await context.written_table_gone(source):
+    if use_cache:
         cached = _cached_loop_result(
             host, context, cell_id, loop, cell_provenance, start_time, annotations.table_writes
         )
         if cached is not None:
+            try:
+                await context.restore_gone_tables(cell_id, source)
+            except TableWriteError as exc:
+                cell = host.notebook_state.get_cell(cell_id)
+                if cell is not None:
+                    cell.cache_hit = False
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=write_back_failed(exc),
+                    execution_method="loop",
+                )
             from strata.notebook.runtime_state import persist_cell_loop_run
 
             # A hit serves an earlier run, not the one last started; let the steps on
@@ -712,7 +724,8 @@ async def _run_loop(
     ]
     table_outputs = {
         loop.carry: StagedOutput(
-            staged=staged[0],
+            artifact_id=staged[0].artifact_id,
+            version=staged[0].version,
             blob=carry_blob,
             content_type=carry_content_type,
             provenance_hash=carry_var_provenance,
@@ -748,7 +761,8 @@ async def _run_loop(
             )
         )
         table_outputs[extra_var] = StagedOutput(
-            staged=staged[-1],
+            artifact_id=staged[-1].artifact_id,
+            version=staged[-1].version,
             blob=extra_blob,
             content_type=extra_content_type,
             provenance_hash=derive_subkey(cell_provenance, extra_var),

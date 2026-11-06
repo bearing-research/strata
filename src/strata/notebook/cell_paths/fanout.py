@@ -20,7 +20,7 @@ from strata.notebook.cell_paths.context import _writes_entry
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.models import MountMode, TableWriteSpec, WorkerBackendType
 from strata.notebook.mounts import MountWrite, parse_mount_uri
-from strata.notebook.table_writes import StagedOutput, TableWriteError
+from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 from strata.notebook.workers import resolve_worker_spec
 
 if TYPE_CHECKING:
@@ -41,7 +41,9 @@ class FanoutContext:
     execute_python_cell: Callable[..., Awaitable[CellExecutionResult]]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     promote_reverted_outputs: Callable[..., int | None]
-    written_table_gone: Callable[[str], Awaitable[bool]]
+    gone_tables: Callable[[str], Awaitable[list[TableWriteSpec]]]
+    # (cell id, specs, variant): a hit's stored outputs into those tables.
+    write_back: Callable[..., None]
     store_console_outputs: Callable[..., None]
     prepare_mounts: Callable[..., Awaitable[dict[str, ResolvedMount]]]
     input_refs: Callable[[str], dict[str, str]]
@@ -116,9 +118,8 @@ async def run_fanout_cell(
     # Mounts, tables, fetches and the env are the cell's, not a variant's: resolved once,
     # so every instance sees the same snapshot and a mount is listed once.
     base = await context.compute_provenance(cell_id, source)
-    # Decided once: the first variant to run would bring the table back for the rest.
-    if use_cache and await context.written_table_gone(source):
-        use_cache = False
+    # Before any variant runs: the first to run brings the table back for the rest.
+    gone = await context.gone_tables(source) if use_cache else []
 
     results = await _run_fanout_instances(
         host,
@@ -131,7 +132,17 @@ async def run_fanout_cell(
         base=base,
         instances=[(name, name) for name in variant_names],
     )
-    return _finish_fanout(host, context, cell_id, results, base, start_time)
+    # A variant that ran wrote its rows. One that hit writes its stored ones, even when
+    # another failed: the next run finds the table there and would never write them.
+    error = None
+    if gone:
+        try:
+            for name, result in results:
+                if result.success and result.cache_hit:
+                    await anyio.to_thread.run_sync(context.write_back, cell_id, gone, name)
+        except TableWriteError as exc:
+            error = write_back_failed(exc)
+    return _finish_fanout(host, context, cell_id, results, base, start_time, error=error)
 
 
 async def _run_fanout_instances(
@@ -310,12 +321,17 @@ async def run_each_cell(
     if (
         use_cache
         and consumed
-        and not await context.written_table_gone(source)
         and context.promote_reverted_outputs(
             cell_id, base.provenance_hash, consumed, annotations.table_writes, 0
         )
         is not None
     ):
+        gone = await context.gone_tables(source)
+        if gone:
+            try:
+                await anyio.to_thread.run_sync(_each_write_back, host, context, cell_id, gone)
+            except (TableWriteError, each.EachError) as exc:
+                return refused(write_back_failed(exc))
         return _each_cached(host, context, cell_id, consumed, base, start_time)
 
     # Each instance names itself the cell's output; a run with no manifest puts them back.
@@ -384,6 +400,40 @@ async def run_each_cell(
             duration_ms=finished.duration_ms,
         )
     return finished
+
+
+def _each_write_back(
+    host: ExecutorHost, context: FanoutContext, cell_id: str, specs: list[TableWriteSpec]
+) -> None:
+    """Write every item's stored rows, as its manifest names them, into *specs*' tables.
+
+    Raises:
+        TableWriteError: as for a run's write.
+        each.EachError: a manifest or an item's value is not what a write needs.
+    """
+    manager = host.get_artifact_manager()
+    store = manager.artifact_store
+    outputs: dict[str, StagedOutput] = {}
+    for spec in specs:
+        manifest = store.get_latest_version(manager.cell_artifact_id(cell_id, spec.variable))
+        if manifest is None:
+            continue  # The write names it as not produced.
+        versions = []
+        for key, artifact_id, version in each.manifest_refs(
+            manifest.id, manager.load_artifact_data(manifest.id, manifest.version)
+        ):
+            item = store.get_artifact(artifact_id, version)
+            if item is None:
+                raise each.EachError(f"item {key!r} is {artifact_id}@v={version}, which is gone")
+            versions.append(item)
+        outputs[spec.variable] = StagedOutput(
+            artifact_id=manifest.id,
+            version=manifest.version,
+            blob=each.rows_of(manager, spec.variable, versions),
+            content_type="arrow/ipc",
+            provenance_hash=manifest.provenance_hash,
+        )
+    context.write_cell_tables(specs, outputs)
 
 
 def _each_cached(
@@ -555,7 +605,8 @@ def _store_each_manifests(
             if var_name in written:
                 # One commit over every item's rows, cached items' too.
                 outputs[var_name] = StagedOutput(
-                    staged=staged[-1],
+                    artifact_id=staged[-1].artifact_id,
+                    version=staged[-1].version,
                     blob=each.rows_of(manager, var_name, [v for _, v in versions]),
                     content_type="arrow/ipc",
                     provenance_hash=provenance,

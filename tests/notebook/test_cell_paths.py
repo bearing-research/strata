@@ -105,8 +105,12 @@ def test_a_path_does_not_get_the_executor(path):
     assert executor_uses(path.read_text()) == []
 
 
-async def _table_is_there(_source):
-    return False
+async def _nothing_gone(_cell_id, _source):
+    return None
+
+
+async def _no_gone_tables(_source):
+    return []
 
 
 def _raises(error: Exception):
@@ -898,7 +902,7 @@ class TestLoop:
             "manifest_tables": lambda *_args: {},
             "moved": unused,
             "promote_reverted_outputs": unused,
-            "written_table_gone": _table_is_there,
+            "restore_gone_tables": _nothing_gone,
             "canonical_output": unused,
             "table_write_refusal": lambda _source: None,
             "prepare_mounts": no_mounts,
@@ -1356,7 +1360,8 @@ class TestFanout:
             "execute_python_cell": execute_python_cell,
             "moved": lambda _cell_id: ({}, {}),
             "promote_reverted_outputs": lambda *_args: None,
-            "written_table_gone": _table_is_there,
+            "gone_tables": _no_gone_tables,
+            "write_back": lambda *_args: None,
             "store_console_outputs": lambda *_args, **_kwargs: None,
             "prepare_mounts": nothing,
             "input_refs": lambda _cell_id: {"in": "strata://artifact/in@v=1"},
@@ -1796,6 +1801,7 @@ class TestR:
             "promote_reverted_outputs": lambda *_args: None,
             "moved": lambda _cell_id: ({}, {}),
             "table_write_refusal": lambda _source: None,
+            "restore_gone_tables": _nothing_gone,
             "load_input_blobs": lambda *_args: [],
             "dispatch_http_executor": dispatch_http_executor,
             "prepare_mounts": prepare_mounts,
@@ -2477,7 +2483,7 @@ def _batch_fakes(tmp_path, *, consumed=(), displays=(), console=None, wired=("x"
         "input_refs": lambda _cell: {},
         "moved": lambda _cell: ({}, {}),
         "promote_reverted_outputs": lambda *_args: None,
-        "written_table_gone": _table_is_there,
+        "restore_gone_tables": _nothing_gone,
         "promote_reverted_leaf": lambda *_args: None,
         "pull_from_team_store": pull_from_team_store,
         "push_to_team_store": push_to_team_store,
@@ -3542,6 +3548,7 @@ class TestPython:
             "promote_reverted_leaf": promote_reverted_leaf,
             "moved": lambda _cell_id: ({}, {}),
             "table_write_refusal": lambda _source: None,
+            "restore_gone_tables": _nothing_gone,
             "load_input_blobs": load_input_blobs,
             "add_dataset_inputs": lambda *_args: None,
             "prepare_mounts": prepare_mounts,

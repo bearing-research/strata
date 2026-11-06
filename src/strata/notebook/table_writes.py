@@ -2,9 +2,9 @@
 
 The executor calls :func:`write_cell_tables` between staging a run's outputs and making
 them current. A write that fails discards the run's outputs, so nothing is cached and the
-next run writes again; a cache hit never reaches here, so the same inputs never write
-twice. Each snapshot's summary names the output's artifact id, version and provenance
-hash, as an export's does.
+next run writes again. A cache hit writes only a table that is gone (:func:`gone_tables`),
+from the stored output, so the same inputs never write a table twice. Each snapshot's
+summary names the output's artifact id, version and provenance hash, as an export's does.
 
 Several tables are written one after another, not together: if a later one fails, the
 earlier ones keep their new snapshot and the next run writes them again.
@@ -16,8 +16,6 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-from vestigo.store import StagedVersion
 
 from strata.notebook.harness_user import running_server_config
 from strata.notebook.models import TableWriteSpec
@@ -36,9 +34,10 @@ class TableWriteError(RuntimeError):
 
 @dataclass(frozen=True)
 class StagedOutput:
-    """One variable of a run, staged but not yet current."""
+    """One variable to write: a run's, staged but not yet current, or a hit's stored one."""
 
-    staged: StagedVersion
+    artifact_id: str
+    version: int
     blob: bytes
     content_type: str
     provenance_hash: str
@@ -147,7 +146,7 @@ def _table(spec: TableWriteSpec, output: StagedOutput | None) -> pa.Table:
         raise TableWriteError(
             f"@write_table {spec.variable} {spec.table}: the cell did not produce {spec.variable!r}"
         )
-    ref = f"{output.staged.artifact_id}@v={output.staged.version}"
+    ref = f"{output.artifact_id}@v={output.version}"
     if output.content_type != "arrow/ipc":
         raise TableWriteError(
             f"@write_table {spec.variable} {spec.table}: {spec.variable!r} is "
@@ -162,23 +161,29 @@ def _table(spec: TableWriteSpec, output: StagedOutput | None) -> pa.Table:
         raise TableWriteError(f"@write_table {spec.variable} {spec.table}: {exc}") from exc
 
 
-def written_table_gone(
+def gone_tables(
     specs: list[TableWriteSpec], *, config: Any, env: dict[str, str], notebook: Path
-) -> bool:
-    """Whether a table these writes went to no longer exists.
+) -> list[TableWriteSpec]:
+    """The writes whose table no longer exists.
 
-    A catalog that cannot answer counts as there: running again could append twice.
+    A catalog that cannot answer counts as there: writing again could append twice.
     """
     from strata.iceberg.catalog import IcebergWriter, PyIcebergCatalog
 
     writer = IcebergWriter(PyIcebergCatalog(config, env, notebook=notebook))
+    gone: list[TableWriteSpec] = []
     for spec in specs:
         try:
             if not writer.table_exists(spec.table):
-                return True
+                gone.append(spec)
         except Exception as exc:
             logger.warning("Could not check that table %s still exists: %s", spec.table, exc)
-    return False
+    return gone
+
+
+def write_back_failed(exc: Exception) -> str:
+    """The error of a hit whose stored output could not go back into a table that is gone."""
+    return f"A table this cell writes is gone, and writing its stored output back failed: {exc}"
 
 
 def write_cell_tables(
@@ -209,8 +214,8 @@ def write_cell_tables(
                 writer.write(
                     spec.table,
                     data,
-                    artifact_id=output.staged.artifact_id,
-                    version=output.staged.version,
+                    artifact_id=output.artifact_id,
+                    version=output.version,
                     provenance_hash=output.provenance_hash,
                     promoted_by=principal,
                     tenant=tenant,

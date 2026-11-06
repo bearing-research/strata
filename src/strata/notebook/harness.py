@@ -476,6 +476,15 @@ def _run_one_batched_cell(
                 namespace,
             )
 
+            if response.get("error"):
+                # The parent's hit could not be served, and the cell must not run instead.
+                _send_frame(
+                    frame_out,
+                    "cell_error",
+                    {"cell_id": cell_id, "error": response["error"]},
+                )
+                return ("cell_error", "cell_error")
+
             if response.get("cache_hit"):
                 # Parent has already materialized blobs into cell_output_dir.
                 cached_outputs: dict = response.get("cached_outputs") or {}

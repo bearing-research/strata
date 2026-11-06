@@ -62,7 +62,7 @@ from strata.notebook.mounts import MountWrite, ResolvedMount
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
 from strata.notebook.serializer import ContentType
-from strata.notebook.table_writes import TableWriteError
+from strata.notebook.table_writes import TableWriteError, write_back_failed
 from strata.notebook.team_store import TeamPull
 from strata.notebook.workers import (
     is_embedded_executor_worker,
@@ -96,6 +96,7 @@ class PythonContext:
     promote_reverted_leaf: Callable[..., Any]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     table_write_refusal: Callable[[str], str | None]
+    restore_gone_tables: Callable[[str, str], Awaitable[None]]
     load_input_blobs: Callable[..., Any]
     add_dataset_inputs: Callable[..., None]
     prepare_mounts: Callable[..., Awaitable[dict[str, ResolvedMount]]]
@@ -500,6 +501,20 @@ async def run_python_cell(
         if cached_artifact is not None or (
             not consumed_vars and (cached_display_outputs or cached_console)
         ):
+            # A fan-out writes back for its instances, once they all have run.
+            if cached_artifact is not None and fanout_variant is None:
+                try:
+                    await context.restore_gone_tables(cell_id, source)
+                except TableWriteError as exc:
+                    return refused_run(
+                        host,
+                        CellExecutionResult(
+                            cell_id=cell_id,
+                            success=False,
+                            error=write_back_failed(exc),
+                            execution_method="error",
+                        ),
+                    )
             if remote_metadata.get("remote_transport") == "signed":
                 remote_metadata.setdefault("remote_build_state", "ready")
             duration_ms = (time.time() - start_time) * 1000
