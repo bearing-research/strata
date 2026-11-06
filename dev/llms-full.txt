@@ -3713,9 +3713,10 @@ before its outputs are kept, so a write that fails fails the cell and keeps
 nothing: the next run is not a cache hit and writes again. A cache hit writes
 nothing, so running the same inputs again never appends twice; an explicit
 rerun (↻) writes again. The exception is a table that no longer exists: the
-cell runs and writes it again, every table it writes, so a surviving `append`
-target gets its rows a second time. A catalog that can't be reached leaves the
-hit standing. The target and the mode are part of the cell's
+hit writes the cell's stored output into it, without running the cell, and
+leaves the tables still there alone. If that write fails, the cell fails with
+the reason, and the next run tries it again. A catalog that can't be reached
+leaves the hit standing and writes nothing. The target and the mode are part of the cell's
 provenance, so changing either runs the cell again. Each snapshot's summary
 names the run: the output's artifact id and version and its provenance hash,
 as an export's does. A cell reading the table with `@table` goes out of date
