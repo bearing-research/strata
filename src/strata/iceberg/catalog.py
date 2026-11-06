@@ -22,6 +22,7 @@ from pyiceberg.table.snapshots import Operation, Snapshot
 from vestigo.blob_store import azure_account_url
 
 from strata.config import StrataConfig
+from strata.iceberg import metadata_files
 from strata.iceberg.gcs_credentials import resolve_gcs_credentials
 from strata.iceberg.lake_files import _AZURE_SCHEMES
 from strata.types import ACL_STORE_NAMES, TableIdentity
@@ -334,16 +335,25 @@ class PyIcebergCatalog:
             # The configured warehouse is the default catalog's; a table this request creates
             # belongs in the warehouse it names.
             props["warehouse"] = warehouse_path
-            return SqlCatalog("strata", **_with_catalog_uri(props))
+            return SqlCatalog("strata", **self._catalog_properties(props))
 
         if self.config.catalog_properties:
             return load_catalog(
-                self.config.catalog_name, **_with_catalog_uri(self.config.catalog_properties)
+                self.config.catalog_name, **self._catalog_properties(self.config.catalog_properties)
             )
         return SqlCatalog(
             self.config.catalog_name,
-            uri="sqlite:///:memory:",
-            warehouse=str(self.config.cache_dir / "warehouse"),
+            **self._catalog_properties(
+                {"uri": "sqlite:///:memory:", "warehouse": str(self.config.cache_dir / "warehouse")}
+            ),
+        )
+
+    def _catalog_properties(self, properties: Mapping[str, Any]) -> dict[str, Any]:
+        """*properties* for pyiceberg, reading Iceberg metadata files through Strata's cache."""
+        return metadata_files.catalog_properties(
+            _with_catalog_uri(properties),
+            self.config.cache_dir / "iceberg-metadata",
+            self.config.iceberg_metadata_cache_size_bytes,
         )
 
     def _get_named_catalog(self, name: str) -> Catalog:
@@ -370,7 +380,7 @@ class PyIcebergCatalog:
                         self.config, env=self._env, notebook=self._notebook
                     ),
                 )
-                catalog = load_catalog(name, **_with_catalog_uri(properties))
+                catalog = load_catalog(name, **self._catalog_properties(properties))
                 self._catalogs[key] = catalog
         return catalog
 

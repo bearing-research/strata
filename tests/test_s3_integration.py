@@ -15,8 +15,10 @@ from pyiceberg.schema import Schema
 from pyiceberg.types import DoubleType, IntegerType, LongType, NestedField, StringType
 from testcontainers.community.minio import MinioContainer
 
+from strata.cache.metadata import reset_caches
 from strata.config import StrataConfig
 from strata.fetcher import PyArrowFetcher
+from strata.iceberg.catalog import object_store_unreachable
 from strata.planner import ReadPlanner
 from strata.types import Filter, FilterOp
 from tests.conftest import MINIO_IMAGE
@@ -395,3 +397,62 @@ class TestS3Latency:
 
         print(f"Cold planning: {cold_time * 1000:.1f}ms, Warm planning: {warm_time * 1000:.1f}ms")
         # Timing assertions are flaky in CI, so only print.
+
+
+class TestPlanningWhileTheStoreIsDown:
+    """A snapshot planned once plans again with the object store down (#1181)."""
+
+    def test_metadata_read_once_plans_again_and_unread_metadata_is_unreachable(
+        self, tmp_path_factory
+    ):
+        with MinioContainer(MINIO_IMAGE) as minio:
+            minio.get_client().make_bucket("lake")
+            config = minio.get_config()
+            endpoint = _get_s3_endpoint(config)
+            store = {
+                "s3.endpoint": endpoint,
+                "s3.access-key-id": config["access_key"],
+                "s3.secret-access-key": config["secret_key"],
+                "s3.region": "us-east-1",
+            }
+            catalog_db = tmp_path_factory.mktemp("outage_catalog") / "catalog.db"
+            warehouse = "s3://lake/warehouse"
+            catalog = SqlCatalog(
+                "strata", uri=f"sqlite:///{catalog_db}", warehouse=warehouse, **store
+            )
+            catalog.create_namespace("ns")
+            events = catalog.create_table("ns.events", TEST_SCHEMA)
+            data = create_test_data(num_rows=2000)
+            # Two data files, so a filter on id keeps only the first.
+            events.append(data.slice(0, 1000))
+            events.append(data.slice(1000, 1000))
+            catalog.create_table("ns.other", TEST_SCHEMA).append(data.slice(0, 10))
+
+            strata_config = StrataConfig(
+                cache_dir=tmp_path_factory.mktemp("outage_cache"),
+                s3_endpoint_url=endpoint,
+                s3_access_key=config["access_key"],
+                s3_secret_key=config["secret_key"],
+                s3_region="us-east-1",
+                catalog_properties={"type": "sql", "uri": f"sqlite:///{catalog_db}", **store},
+            )
+            events_uri = f"{warehouse}#ns.events"
+            low = [Filter("id", FilterOp.LT, 500)]
+            # Filtered only: no unfiltered manifest resolution is persisted.
+            planned = ReadPlanner(strata_config).plan(events_uri, filters=low)
+            assert len({task.file_path for task in planned.tasks}) == 1
+
+            minio.get_wrapped_container().stop()
+            # As a restart: no manifest resolution in memory.
+            reset_caches()
+
+            planner = ReadPlanner(strata_config)
+            # metadata.json, the manifest list and the manifests come from the cache.
+            again = planner.plan(events_uri, filters=low)
+            assert again.snapshot_id == planned.snapshot_id
+            assert [t.file_path for t in again.tasks] == [t.file_path for t in planned.tasks]
+
+            # Never read, so it needs the store.
+            with pytest.raises(OSError) as excinfo:
+                planner.plan(f"{warehouse}#ns.other")
+            assert object_store_unreachable(excinfo.value)

@@ -167,7 +167,9 @@ pure request-shaping logic in `services/` (`artifact`, `registry`, `build`,
 `materialize`); the scan streaming runtime in `streaming/` (stream `registry`,
 `scan_builds` prefetch, `ownership`, `qos` admission).
 Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`, `iceberg/` (`catalog`,
-`schema` evolution, position `deletes`, `equality` deletes, `lake_files`).
+`schema` evolution, position `deletes`, `equality` deletes, `lake_files`,
+`metadata_files`: the FileIO that keeps immutable Iceberg metadata on disk, so a
+planned snapshot plans again while the object store is down).
 Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
 Ledger (the `vestigo` package from PyPI, its own repository
