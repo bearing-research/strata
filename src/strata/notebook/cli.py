@@ -273,6 +273,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
         if not ok:
             print(f"error: {err}", file=sys.stderr)
             return 2
+        # A sync starts them; warm processes spare each cell after the first a start.
+        await session.start_missing_warm_pools()
     else:
         if args.format == "human":
             print(_dim("syncing environment…"))

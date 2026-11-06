@@ -77,6 +77,17 @@ class TestEveryHarnessRunsInWork:
         assert read.execution_method == "warm"
         _assert_ran_in_work(session, read)
 
+    @pytest.mark.integration
+    @pytest.mark.warm_pool
+    async def test_an_executor_given_no_pool_runs_in_the_sessions(self, tmp_path, warm_pool):
+        # As strata run and MCP build theirs: the session's pool still serves them.
+        session = _session(tmp_path)
+        session.warm_pool = await warm_pool(session)
+
+        written = await CellExecutor(session).execute_cell("w", WRITE)
+
+        assert written.execution_method == "warm"
+
     async def test_a_run_all_batch(self, tmp_path):
         session = _session(tmp_path)
         specs = [

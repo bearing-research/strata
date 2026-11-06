@@ -43,6 +43,9 @@ class ExecutorHost(Protocol):
     def venv_python(self) -> Path | None: ...
 
     @property
+    def warm_pool(self) -> WarmProcessPool | None: ...
+
+    @property
     def r_warm_pool(self) -> WarmProcessPool | None: ...
 
     @property
