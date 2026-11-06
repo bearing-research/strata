@@ -56,6 +56,23 @@ export interface CellConsolePayload {
   chunk_seq?: number | null
 }
 
+export interface CellErrorPayload {
+  cell_id: string
+  error?: string | null
+  stdout?: string | null
+  stderr?: string | null
+  traceback?: string | null
+  traceback_full?: string | null
+  error_code?: string | null
+  suggest_install?: string | null
+  suggest_install_language?: string | null
+  remote_worker?: string | null
+  remote_transport?: string | null
+  remote_build_id?: string | null
+  remote_build_state?: string | null
+  remote_error_code?: string | null
+}
+
 export interface CellInputsPayload {
   cell_id: string
   machine: string
@@ -77,6 +94,27 @@ export interface CellOutputDeltaPayload {
   attempt: number
   kind: 'delta' | 'retry' | 'notice'
   text: string
+}
+
+export interface CellOutputPayload {
+  cell_id: string
+  stdout: string
+  stderr: string
+  outputs: Record<string, OutputMetadata>
+  cache_hit: boolean
+  duration_ms: number
+  artifact_uri?: string | null
+  execution_method?: string | null
+  mutation_warnings: MutationWarning[]
+  displays?: DisplayOutput[] | null
+  display?: DisplayOutput | null
+  artifact_uris?: Record<string, string> | null
+  saved_ms?: number | null
+  remote_worker?: string | null
+  remote_transport?: string | null
+  remote_build_id?: string | null
+  remote_build_state?: string | null
+  remote_error_code?: string | null
 }
 
 export interface CellProfileModel {
@@ -153,6 +191,24 @@ export interface DagUpdatePayload {
   topological_order: string[]
   cells: CellAnalysisModel[]
   variant_groups: Record<string, unknown>[]
+}
+
+export interface DisplayOutput {
+  content_type: string
+  file?: string | null
+  bytes?: number | null
+  rows?: number | null
+  columns?: string[] | null
+  preview: unknown
+  scalar: unknown
+  artifact_uri?: string | null
+  inline_data_url?: string | null
+  markdown_text?: string | null
+  width?: number | null
+  height?: number | null
+  error?: string | null
+  computed_at?: number | null
+  variant?: string | null
 }
 
 export interface DownstreamImpactModel {
@@ -232,6 +288,29 @@ export interface ModuleExportModel {
   kind: string
 }
 
+export interface MutationWarning {
+  var_name: string
+  message: string
+  suggestion?: string | null
+}
+
+export interface OutputMetadata {
+  content_type: string
+  file?: string | null
+  bytes?: number | null
+  rows?: number | null
+  columns?: string[] | null
+  preview: unknown
+  artifact_uri?: string | null
+  error?: string | null
+  markdown_text?: string | null
+  inline_data_url?: string | null
+  width?: number | null
+  height?: number | null
+  codec?: string | null
+  type?: string | null
+}
+
 export interface PresenceEntryModel {
   principal: string
   focused_cell_id?: string | null
@@ -281,8 +360,10 @@ export interface WsServerPayloadMap {
   cascade_progress: CascadeProgressPayload
   cascade_prompt: CascadePromptPayload
   cell_console: CellConsolePayload
+  cell_error: CellErrorPayload
   cell_inputs: CellInputsPayload
   cell_iteration_progress: CellIterationProgressPayload
+  cell_output: CellOutputPayload
   cell_output_delta: CellOutputDeltaPayload
   cell_status: CellStatusPayload
   cell_test_results: CellTestResultsPayload

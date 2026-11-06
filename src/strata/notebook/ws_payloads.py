@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import CellTestCase, InputWeight
 from strata.notebook.protocol import MessageType
 
@@ -539,13 +540,135 @@ def error_payload(
 # Which model describes which frame's payload. Frames absent here still send
 # hand-built dicts and a client gets ``unknown`` for them. Generated TypeScript
 # derives from this map; a drift test asserts every payload model is registered.
+class OutputMetadata(WsPayload):
+    """One variable a run produced, as its harness described it.
+
+    The harness may be a worker on another Strata version, so a field this one does not
+    know is kept, not refused.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    content_type: str
+    file: str | None = None
+    bytes: int | None = None
+    rows: int | None = None
+    columns: list[str] | None = None
+    preview: Any = None
+    artifact_uri: str | None = None
+    error: str | None = None
+    markdown_text: str | None = None
+    inline_data_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    # Pickled and cell-defined objects: the codec and the value's type name.
+    codec: str | None = None
+    type: str | None = None
+
+
+class DisplayOutput(WsPayload):
+    """One thing a cell showed: a stored display, or one its harness just reported.
+
+    Unknown fields are kept, as on :class:`OutputMetadata`.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    content_type: str
+    file: str | None = None
+    bytes: int | None = None
+    rows: int | None = None
+    columns: list[str] | None = None
+    preview: Any = None
+    # A prompt cell's display text.
+    scalar: Any = None
+    artifact_uri: str | None = None
+    inline_data_url: str | None = None
+    markdown_text: str | None = None
+    width: int | None = None
+    height: int | None = None
+    error: str | None = None
+    computed_at: float | None = None
+    variant: str | None = None
+
+
+class CellOutputPayload(WsPayload):
+    """``cell_output``: a cell ran, or was a cache hit.
+
+    Serialized with ``exclude_unset``, so a field the server did not send stays off
+    the wire (see :func:`cell_result_payload`).
+    """
+
+    cell_id: str
+    # The run's whole console, which replaces the client's.
+    stdout: str
+    stderr: str
+    outputs: dict[str, OutputMetadata]
+    cache_hit: bool
+    duration_ms: int
+    artifact_uri: str | None
+    execution_method: str | None
+    mutation_warnings: list[MutationWarning]
+    displays: list[DisplayOutput] | None = None
+    display: DisplayOutput | None = None
+    # Every stored variable's artifact, each of which may be promoted.
+    artifact_uris: dict[str, str] | None = None
+    # What a hit saved, priced against the run it stands for.
+    saved_ms: int | None = None
+    remote_worker: str | None = None
+    remote_transport: str | None = None
+    remote_build_id: str | None = None
+    remote_build_state: str | None = None
+    remote_error_code: str | None = None
+
+
+class CellErrorPayload(WsPayload):
+    """``cell_error``: a cell failed, or could not be run.
+
+    A failure the server raised itself carries only ``cell_id`` and ``error``.
+    """
+
+    cell_id: str
+    error: str | None
+    stdout: str | None = None
+    stderr: str | None = None
+    traceback: str | None = None
+    # With the harness frames that lead to the cell, which ``traceback`` leaves out.
+    traceback_full: str | None = None
+    error_code: str | None = None
+    suggest_install: str | None = None
+    # ``python`` or ``r``: which install endpoint the suggestion is for.
+    suggest_install_language: str | None = None
+    remote_worker: str | None = None
+    remote_transport: str | None = None
+    remote_build_id: str | None = None
+    remote_build_state: str | None = None
+    remote_error_code: str | None = None
+
+
+def cell_result_payload(success: bool, payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate a ``cell_output`` (*success*) or ``cell_error`` payload for the wire.
+
+    Only the keys *payload* holds are sent, as they were before the frame was typed.
+    """
+    model = CellOutputPayload if success else CellErrorPayload
+    return model.model_validate(payload).model_dump(mode="json", exclude_unset=True)
+
+
+def cell_error_payload(cell_id: str, error: str) -> dict[str, Any]:
+    """Build the ``cell_error`` payload for a failure the server raised itself."""
+    return cell_result_payload(False, {"cell_id": cell_id, "error": error})
+
+
 FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.AGENT_NOTE: AgentNotePayload,
     MessageType.CASCADE_PROGRESS: CascadeProgressPayload,
     MessageType.CASCADE_PROMPT: CascadePromptPayload,
     MessageType.CELL_CONSOLE: CellConsolePayload,
+    MessageType.CELL_ERROR: CellErrorPayload,
     MessageType.CELL_INPUTS: CellInputsPayload,
     MessageType.CELL_ITERATION_PROGRESS: CellIterationProgressPayload,
+    MessageType.CELL_OUTPUT: CellOutputPayload,
     MessageType.CELL_OUTPUT_DELTA: CellOutputDeltaPayload,
     MessageType.CELL_STATUS: CellStatusPayload,
     MessageType.CELL_TEST_RESULTS: CellTestResultsPayload,

@@ -53,7 +53,9 @@ import type {
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
 import type {
+  CellErrorPayload,
   CellInputsPayload,
+  CellOutputPayload,
   InspectResultPayload,
   PresenceEntryModel,
   PresencePayload,
@@ -2052,9 +2054,9 @@ function initializeWebSocket() {
     })
 
     wsInstance.onMessage('cell_output', (msg: WsMessage) => {
-      const p = msg.payload as Record<string, any>
+      const p = msg.payload as CellOutputPayload
       const cellId = p.cell_id as CellId
-      const outputs = p.outputs as Record<string, any> | undefined
+      const outputs = p.outputs
       // A finished cell may have published to the registry.
       scheduleRegistryRefresh()
       scheduleProfilingRefresh()
@@ -2078,11 +2080,11 @@ function initializeWebSocket() {
 
       let output: CellOutput = displayOutputs.at(-1) ?? {
         contentType: 'json/object',
-        artifactUri: p.artifact_uri,
+        artifactUri: p.artifact_uri ?? undefined,
       }
       output.cacheHit = p.cache_hit || false
       output.cacheLoadMs = p.duration_ms
-      output.cacheSavedMs = p.saved_ms
+      output.cacheSavedMs = p.saved_ms ?? undefined
 
       const cell = cellMap.value.get(cellId)
       if (cell) {
@@ -2102,15 +2104,9 @@ function initializeWebSocket() {
         if (p.execution_method === 'executor') {
           updateWorkerHealth(effectiveWorkerNameForCell(cell), 'healthy')
         }
-        // CellEditor only shows the install button for ``python``; R
-        // suggestions are stored but hidden until an R install route exists.
-        cell.suggestInstall = p.suggest_install || undefined
-        cell.suggestInstallLanguage =
-          p.suggest_install_language === 'r'
-            ? 'r'
-            : p.suggest_install_language === 'python'
-              ? 'python'
-              : undefined
+        // Only a failure suggests an install.
+        cell.suggestInstall = undefined
+        cell.suggestInstallLanguage = undefined
       }
 
       setCellOutput(cellId, output, displayOutputs)
@@ -2188,9 +2184,9 @@ function initializeWebSocket() {
     })
 
     wsInstance.onMessage('cell_error', (msg: WsMessage) => {
-      const p = msg.payload as Record<string, any>
+      const p = msg.payload as CellErrorPayload
       const cellId = p.cell_id as CellId
-      const error = p.error as string
+      const error = p.error ?? ''
       const cell = cellMap.value.get(cellId)
       if (cell) {
         cell.status = 'error'
