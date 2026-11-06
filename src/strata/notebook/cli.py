@@ -742,7 +742,7 @@ def new_main(args: argparse.Namespace) -> int:
         )
     else:
         print(f"created: {notebook_dir}")
-        print(_dim("  add cells under cells/*.py and list them in notebook.toml"))
+        print(_dim("  add cell files under cells/ and list them in notebook.toml"))
         print(_dim(f"  validate: strata validate {notebook_dir}"))
         print(_dim(f"  run:      strata run {notebook_dir}"))
     return 0

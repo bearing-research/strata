@@ -876,9 +876,15 @@ def add_cell_to_notebook(
     else:
         order = len(cells_data)
 
-    # Language-matching extension so the file works in outside editors. The harness
-    # reads source by content, so everything else (SQL included) uses ``.py``.
-    extension_by_language = {"markdown": "md", "r": "r", "widget": "widget"}
+    # Language-matching extension so the file works in outside editors and linters; the
+    # language itself comes from notebook.toml, never from the extension.
+    extension_by_language = {
+        "markdown": "md",
+        "r": "r",
+        "sql": "sql",
+        "prompt": "prompt",
+        "widget": "widget",
+    }
     extension = extension_by_language.get(language, "py")
     cell_filename = f"{cell_id}.{extension}"
     cells_dir = notebook_dir / "cells"
