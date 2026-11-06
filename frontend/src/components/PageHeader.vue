@@ -10,7 +10,12 @@ slot, as `.crumb` separators and `.page-name` parts) and its links (`actions` sl
 <template>
   <header class="page-header" data-testid="page-header">
     <div class="page-title">
-      <button type="button" class="nav-link back-btn" data-testid="page-back" @click="$emit('back')">
+      <button
+        type="button"
+        class="nav-link back-btn"
+        data-testid="page-back"
+        @click="$emit('back')"
+      >
         <ArrowLeft /> Back
       </button>
       <router-link to="/" class="home-link" title="Back to notebooks"
@@ -41,6 +46,16 @@ slot, as `.crumb` separators and `.page-name` parts) and its links (`actions` sl
   min-width: 0;
 }
 
+/* Only the notebook's name gives way to a narrow window: Back, home, the page's own name and the
+links keep their width. */
+.back-btn,
+.home-link,
+.page-actions,
+.crumbs :slotted(.crumb),
+.crumbs :slotted(.page-name:last-child) {
+  flex-shrink: 0;
+}
+
 .page-actions {
   display: flex;
   align-items: center;
@@ -52,7 +67,6 @@ slot, as `.crumb` separators and `.page-name` parts) and its links (`actions` sl
   font-size: 20px;
   color: var(--accent-primary);
   text-decoration: none;
-  white-space: nowrap;
 }
 
 .crumbs :slotted(.crumb) {
@@ -77,7 +91,6 @@ slot, as `.crumb` separators and `.page-name` parts) and its links (`actions` sl
   padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  white-space: nowrap;
 }
 /* .nav-link on a <button> (Back): reset the browser's default chrome. */
 .back-btn {
