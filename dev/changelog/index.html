@@ -4137,6 +4137,10 @@ exhaustive commit history.</p>
   after a run, a cache hit or a reopen. Each is named in the web UI and the TUI, and carries
   <code>variant</code> in <code>strata cell show --format json</code> and MCP's <code>get_cell</code>. The variants run and
   print in that order too, where they had run in the order of their names. (#1464, #1466)</li>
+<li><strong>An <code>@each</code> cell shows its items' displays.</strong> A cell that plotted or displayed something per
+  item showed nothing. It now shows every item's, in the order the items ran, each under its
+  item's key, after a run or a hit that lists no item. The manifest names them, so a prune
+  keeps them; a copy to another store carries the values only. (#1467)</li>
 <li><strong>A cached cell writes its table again if the table is gone.</strong> A cell whose <code>@write_table</code> target
   was deleted, or whose warehouse was, stayed a cache hit and wrote nothing, so the table stayed
   missing while the cell read ready. A hit on a writing cell now checks each table it writes, and

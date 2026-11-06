@@ -3761,6 +3761,11 @@ and the items that succeeded stay cached for the next run.</p>
 listed. A new or changed item runs alone. Any other input of the cell, or its source,
 runs every item. Going back to earlier inputs finds the values already stored. Rerun
 (↻) runs every item.</p>
+<p><strong>What the cell shows.</strong> Each item's displays (a figure, <code>display(...)</code>, a trailing
+expression) are shown one after another in the order the items ran, each under its
+item's key, as its console prefixes each item's lines with <code>[variant=&lt;key&gt;]</code>. An item
+that ran shows what it displayed now, and a cached one what it displayed when it ran,
+on a hit that lists nothing too. If any item fails, the cell shows no displays.</p>
 <p><strong>Writing a table.</strong> <code># @write_table ... sync on=&lt;col&gt;</code> is the only mode an <code>@each</code>
 cell takes. The table is written once per run, in one commit, over the rows of every
 item, the cached ones too, so a removed file's rows are deleted though nothing ran. A
@@ -3774,8 +3779,9 @@ of thousands of items. An <code>@each</code> cell cannot also be a <code>@loop</
 <code>@dataset</code>, <code>strata artifact pull</code> and a publication bundle over its output are not
 supported yet and are refused; a cell that reads the output can do the last three.
 A snapshot carries the output and every item it names.</p>
-<p>A prune keeps each instance a kept manifest names and drops the rest, so a removed
-item's value goes once no manifest left names it.</p>
+<p>A prune keeps each instance a kept manifest names, and what it displayed, and drops
+the rest, so a removed item's value goes once no manifest left names it. A copy to
+another store carries the values, not the displays.</p>
 <h2 id="nocache">@nocache<a class="headerlink" href="#nocache" title="Permanent link">&para;</a></h2>
 <p>Force the cell to <strong>always re-execute</strong>: never serve a provenance cache hit.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># @nocache</span>
