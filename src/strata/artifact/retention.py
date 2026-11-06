@@ -21,7 +21,7 @@ def requirements(
     artifact_id: str, content_type: str | None, blob: bytes | Path | None
 ) -> list[tuple[str, int]]:
     """The versions a blob stored as *artifact_id* requires: a folder's files, or the
-    instances of an ``# @each`` manifest.
+    instances of an ``# @each`` manifest and what they displayed.
 
     Empty for any other content type, and for a manifest that cannot be read: an import
     can hold any bytes under the folder type, and such a manifest names nothing, so it
@@ -34,7 +34,13 @@ def requirements(
     data = blob.read_bytes() if isinstance(blob, Path) else blob
     if content_type == each.CONTENT_TYPE:
         try:
-            return [(instance, v) for _, instance, v in each.manifest_refs(artifact_id, data)]
+            return [
+                (ref, v)
+                for _, ref, v in [
+                    *each.manifest_refs(artifact_id, data),
+                    *each.manifest_displays(data),
+                ]
+            ]
         except ValueError:
             logger.warning("%s is not a readable @each manifest; it keeps nothing", artifact_id)
             return []
