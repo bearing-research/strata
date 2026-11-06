@@ -3612,6 +3612,12 @@ fans out to N independent jobs. An instance's provenance covers only its own
 variant's value, so adding a variant only runs the new instance and editing one
 reruns only that variant's instance. A group the cell reads as a dict is an input
 of every instance, so changing any of its variants reruns them all.</p>
+<p>What the cell displays (a figure, <code>display(...)</code>, a trailing expression) is
+shown for every variant, one after another in the order of their names, each under
+its variant's name. Its console prefixes each variant's lines with <code>[variant=&lt;name&gt;]</code>
+the same way. A variant that ran shows what it displayed now, and one that was a
+cache hit shows what it displayed when it ran. If any variant fails, the cell
+shows no displays.</p>
 <p><strong>Choosing the group.</strong> Bare <code># @per_variant</code> infers the group when the cell
 reads from exactly one sweep group. It reads what the cells above it last
 defined, so after a plain cell redefines <code>preds</code> there is no sweep left to fan
