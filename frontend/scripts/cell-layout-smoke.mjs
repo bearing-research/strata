@@ -7,6 +7,7 @@
  *   3. every action can be clicked, including those reaching over the cell below
  *   4. a keyboard reaches them too
  *   5. the notebook header fits a phone: nothing overlaps or runs off the page, its menus included
+ *   6. so does the Logs and Artifacts pages' header, which stays one row on a desktop
  *
  * Exits non-zero on any failed assertion.
  *
@@ -154,6 +155,71 @@ async function main() {
         }
         await page.keyboard.press('Escape')
         await page.mouse.click(1, 790)
+      }
+    }
+
+    // 6. The Logs and Artifacts pages' header: fits a phone, one row on a desktop.
+    for (const route of ['/logs', '/artifacts', `/notebook/${sessionId}/artifacts`]) {
+      for (const width of [360, 390, 600, 700, 1024]) {
+        await page.setViewportSize({ width, height: 800 })
+        // From a blank page: a route change alone keeps the Artifacts page's last load.
+        await page.goto('about:blank')
+        await page.goto(`${baseUrl}/#${route}`)
+        await page.getByTestId('page-header').waitFor({ timeout: TIMEOUT_MS })
+        if (route.startsWith('/notebook/')) {
+          await page
+            .getByText(/cell_layout_smoke_/)
+            .waitFor({ state: 'attached', timeout: TIMEOUT_MS })
+        }
+        const fit = await page.evaluate(() => {
+          const header = document.querySelector('[data-testid="page-header"]')
+          const rects = [
+            ...header.querySelectorAll('.back-btn, .home-link, .crumbs > *, .page-actions > *'),
+          ].map((el) => el.getBoundingClientRect())
+          const overlaps = rects.some((a, i) =>
+            rects
+              .slice(i + 1)
+              .some(
+                (b) =>
+                  a.left < b.right - 1 &&
+                  b.left < a.right - 1 &&
+                  a.top < b.bottom - 1 &&
+                  b.top < a.bottom - 1,
+              ),
+          )
+          return {
+            overlaps,
+            offPage: rects.some((r) => r.left < 0 || r.right > innerWidth),
+            // "strata" under its diamond, a two-line page name.
+            broken: [...header.querySelectorAll('.home-link, .nav-link, .page-name')].some(
+              (el) => el.getClientRects().length > 1,
+            ),
+            squeezed: [...header.querySelectorAll('.page-name')].some(
+              (el) => el.getBoundingClientRect().width < parseFloat(getComputedStyle(el).fontSize),
+            ),
+            // Only the notebook's name may end in an ellipsis.
+            clipped: [...header.querySelectorAll('.page-name:last-child')].some(
+              (el) => el.scrollWidth > el.clientWidth,
+            ),
+            // The links share Back's row.
+            linksBelow:
+              header.querySelector('.page-actions').getBoundingClientRect().top >=
+              header.querySelector('.back-btn').getBoundingClientRect().bottom,
+            height: header.getBoundingClientRect().height,
+            scrollWidth: document.documentElement.scrollWidth,
+          }
+        })
+        const where = `${route} at ${width}px`
+        if (fit.overlaps) failures.push(`the page header's parts overlap on ${where}`)
+        if (fit.offPage) failures.push(`the page header runs off the page on ${where}`)
+        if (fit.broken) failures.push(`a page header link or name breaks across lines on ${where}`)
+        if (fit.squeezed) failures.push(`a page name is squeezed out on ${where}`)
+        if (fit.clipped) failures.push(`the page's name is cut short on ${where}`)
+        if (fit.linksBelow) failures.push(`the page header's links drop below Back on ${where}`)
+        if (fit.scrollWidth > width) failures.push(`${where} is ${fit.scrollWidth}px wide`)
+        if (width > 600 && fit.height > 40) {
+          failures.push(`the page header is ${Math.round(fit.height)}px tall on ${where}`)
+        }
       }
     }
   } finally {

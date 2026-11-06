@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, Circle, Diamond } from '@lucide/vue'
+import { Circle } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -10,7 +10,7 @@ function goBack() {
   else router.push('/')
 }
 import { useStrata, type LogEntry } from '../composables/useStrata'
-import ThemeToggle from '../components/ThemeToggle.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const strata = useStrata()
 
@@ -162,24 +162,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="logs" data-testid="logs-page">
-    <div class="logs-header">
-      <div class="logs-title">
-        <button type="button" class="nav-link back-btn" data-testid="page-back" @click="goBack">
-          <ArrowLeft /> Back
-        </button>
-        <router-link to="/" class="back-link" title="Back to notebooks"
-          ><Diamond fill="currentColor" /> strata</router-link
-        >
-        <span class="crumb">/</span>
-        <span class="page-name">logs</span>
-      </div>
-      <div class="logs-header-actions">
+    <PageHeader @back="goBack">
+      <span class="crumb">/</span>
+      <span class="page-name">logs</span>
+      <template #actions>
         <router-link to="/artifacts" class="nav-link" data-testid="nav-artifacts"
           >Server store</router-link
         >
-        <ThemeToggle />
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <div class="filter-bar">
       <label class="filter">
@@ -264,62 +255,6 @@ onBeforeUnmount(() => {
   height: 100vh;
   padding: 16px 24px;
   gap: 12px;
-}
-
-.logs-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.logs-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.logs-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.nav-link {
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-decoration: none;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-/* .nav-link on a <button> (Back): reset the browser's default chrome. */
-.back-btn {
-  font-family: inherit;
-  line-height: 1.4;
-  background: transparent;
-  cursor: pointer;
-}
-
-.nav-link:hover {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-
-.back-link {
-  font-weight: 700;
-  font-size: 20px;
-  color: var(--accent-primary);
-  text-decoration: none;
-}
-
-.crumb {
-  color: var(--text-muted);
-}
-
-.page-name {
-  font-size: 20px;
-  font-weight: 300;
-  color: var(--text-muted);
 }
 
 .filter-bar {
