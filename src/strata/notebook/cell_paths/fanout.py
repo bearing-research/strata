@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 from vestigo.provenance import derive_subkey
-from vestigo.store import StagedVersion
+from vestigo.store import ArtifactVersion, StagedVersion
 
 from strata.notebook import each, output_dirs
 from strata.notebook.annotations import parse_annotations
@@ -381,6 +381,12 @@ async def run_each_cell(
             context.each_listed.pop(cell_id, None)
         error = None
         if all(result.success for _, result in results):
+            displays = [
+                (key, *host.parse_artifact_uri(output["artifact_uri"]))
+                for key, result in results
+                for output in result.display_outputs
+                if output.get("artifact_uri")
+            ]
             try:
                 await anyio.to_thread.run_sync(
                     _store_each_manifests,
@@ -392,6 +398,7 @@ async def run_each_cell(
                     base,
                     sorted(consumed),
                     annotations.table_writes,
+                    displays,
                 )
             except (TableWriteError, each.EachError) as exc:
                 error = str(exc)
@@ -400,7 +407,15 @@ async def run_each_cell(
     if error is not None and cell is not None and last_good is not None:
         cell.artifact_uris, cell.artifact_uri = last_good
     finished = _finish_fanout(
-        host, context, cell_id, results, base, start_time, error=error, instance_noun="Item"
+        host,
+        context,
+        cell_id,
+        results,
+        base,
+        start_time,
+        error=error,
+        instance_noun="Item",
+        shows_displays=True,
     )
     # The one probe that serves a later hit runs no instance, so it reads their console here.
     if finished.success and not finished.cache_hit and consumed and not annotations.nocache:
@@ -467,16 +482,21 @@ def _each_cached(
         host.resolve_cached_console(cell_id, base.provenance_hash),
         shows_this_key=cell is not None and cell.last_provenance_hash == base.provenance_hash,
     )
-    if cell is not None:
-        cell.cache_hit = True
-        for var_name in sorted(consumed):
-            manifest = manager.artifact_store.get_latest_version(
-                manager.cell_artifact_id(cell_id, var_name)
-            )
-            if manifest is not None:
+    manifests = []
+    for var_name in sorted(consumed):
+        manifest = manager.artifact_store.get_latest_version(
+            manager.cell_artifact_id(cell_id, var_name)
+        )
+        if manifest is not None:
+            manifests.append(manifest)
+            if cell is not None:
                 uri = f"strata://artifact/{manifest.id}@v={manifest.version}"
                 cell.artifact_uris[var_name] = uri
                 cell.artifact_uri = uri
+    if cell is not None:
+        cell.cache_hit = True
+    # Every manifest names the same displays.
+    displays = _each_displays(host, manifests[0]) if manifests else []
     host.record_successful_execution_provenance(
         cell_id,
         base.provenance_hash,
@@ -490,12 +510,31 @@ def _each_cached(
         cell_id=cell_id,
         success=True,
         **console,
+        display_outputs=displays,
+        display_output=displays[-1] if displays else None,
         duration_ms=(time.time() - start_time) * 1000,
         cache_hit=True,
         execution_method="cached",
     )
+    host.persist_display_outputs(cell_id, displays)
     host.apply_execution_result_metadata(cell_id, result)
     return result
+
+
+def _each_displays(host: ExecutorHost, manifest: ArtifactVersion) -> list[dict[str, Any]]:
+    """What the items a manifest names displayed, each naming its item."""
+    manager = host.get_artifact_manager()
+    store = manager.artifact_store
+    shown = []
+    for key, artifact_id, version in each.manifest_displays(
+        manager.load_artifact_data(manifest.id, manifest.version)
+    ):
+        artifact = store.get_artifact(artifact_id, version)
+        if artifact is None:
+            continue
+        for output in host.stored_display_outputs([artifact]):
+            shown.append({**output.model_dump(), "variant": key})
+    return shown
 
 
 async def _list_each_items(
@@ -579,9 +618,10 @@ def _store_each_manifests(
     base: _CellProvenance,
     variables: list[str],
     table_writes: list[TableWriteSpec],
+    displays: list[tuple[str, str, int]],
 ) -> None:
-    """One manifest per output naming each item's version, then the table writes, then
-    all of them current: a write that fails keeps none, as for any other run."""
+    """One manifest per output naming each item's version and *displays*, then the table
+    writes, then all of them current: a write that fails keeps none, as for any other run."""
     manager = host.get_artifact_manager()
     store = manager.artifact_store
     input_versions = context.input_refs(cell_id)
@@ -608,6 +648,7 @@ def _store_each_manifests(
                     blob_data=each.encode_manifest(
                         manager.cell_artifact_id(cell_id, var_name),
                         [(k, v.id, v.version) for k, v in versions],
+                        displays,
                     ),
                     content_type=each.CONTENT_TYPE,
                     provenance_hash=provenance,
