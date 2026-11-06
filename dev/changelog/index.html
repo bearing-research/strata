@@ -4128,6 +4128,9 @@ exhaustive commit history.</p>
   cancels cleanly and leaves the worker alone. (#1426)</li>
 <li><strong>A run that fails to start leaves no descriptors open.</strong> A missing input file, or a
   harness process that can't start, leaked open files in the server. (#1426)</li>
+<li><strong><code>strata run</code> and MCP run cells in warm processes.</strong> Their cells all started cold, though
+  the session had warm processes ready: only the UI used them. An <code>@each</code> cell over 300 items
+  took 60 s through <code>strata run</code> and now takes 26 s. (#1468)</li>
 <li><strong>A DAG label stays off its own edge.</strong> An edge running down and to the left no longer
   passes through its variable name. (#1413)</li>
 <li><strong>A <code>@per_variant</code> cell shows every variant's displays.</strong> A cell that plotted or displayed a

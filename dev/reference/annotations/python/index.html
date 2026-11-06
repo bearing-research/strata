@@ -3772,9 +3772,11 @@ item, the cached ones too, so a removed file's rows are deleted though nothing r
 failed item writes nothing, since its missing rows would read as deletions. A source
 with no items refuses the run rather than delete every row. <code>append</code>, <code>merge</code> and
 <code>overwrite</code> are refused: one commit per item, or only the last item's rows.</p>
-<p><strong>Limits.</strong> Python cells on the local worker, read by Python cells. Instances run one at a time, a harness
-each, about half a second before the cell's own work, so plan on that for a first run
-of thousands of items. An <code>@each</code> cell cannot also be a <code>@loop</code>, <code>@per_variant</code> or
+<p><strong>Limits.</strong> Python cells on the local worker, read by Python cells. Instances run one at a time, each in
+a process of its own. In the UI, <code>strata run</code> and MCP that is a warm process, started ahead
+with the notebook's dependencies imported, when one is ready: about a tenth of a second
+before the cell's own work, or about a fifth when no warm process is ready. Plan on that
+for a first run of thousands of items. An <code>@each</code> cell cannot also be a <code>@loop</code>, <code>@per_variant</code> or
 <code>@variant</code> cell, or fan out over a sweep. Cell tests, branching from a release,
 <code>@dataset</code>, <code>strata artifact pull</code> and a publication bundle over its output are not
 supported yet and are refused; a cell that reads the output can do the last three.
