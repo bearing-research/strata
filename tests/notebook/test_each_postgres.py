@@ -100,3 +100,7 @@ class TestOtherSurfacesOnPostgres(test_each.TestOtherSurfaces):
 
 class TestTheSweepDuringARunOnPostgres(test_each.TestTheSweepDuringARun):
     pass
+
+
+class TestDisplaysOnPostgres(test_each.TestDisplays):
+    pass

@@ -676,7 +676,7 @@ class TestDisplays:
         assert (await nb.good("a")).cache_hit
 
         path = nb.session.path
-        reopened = NotebookSession(parse_notebook(path), path)
+        reopened = _open(path)
 
         assert _shown(reopened.notebook_state.get_cell("a").display_outputs) == [
             ("one.txt", "shows A"),
