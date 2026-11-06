@@ -115,9 +115,11 @@ def _only_build(session: NotebookSession, cell_id: str):
     store, builds, _ = _ledger(session)
     conn = builds._get_connection()
     try:
+        # A build targets its placeholder until the run releases outputs.
         rows = conn.execute(
-            "SELECT build_id FROM artifact_builds WHERE artifact_id LIKE ? ORDER BY created_at",
-            (f"%_cell_{cell_id}_%",),
+            "SELECT build_id FROM artifact_builds WHERE artifact_id LIKE ? OR artifact_id = ?"
+            " ORDER BY created_at",
+            (f"%_cell_{cell_id}_%", session.get_artifact_manager().run_placeholder_id(cell_id)),
         ).fetchall()
     finally:
         conn.close()
@@ -168,7 +170,7 @@ class TestGate1:
             v.provenance_hash for v in first
         }
         # The placeholder the build targeted first is a failed row, not a current value.
-        placeholder = store.get_artifact(f"nb_{session.notebook_state.id}_cell_train_run", 1)
+        placeholder = store.get_artifact(f"nb_{session.notebook_state.id}_run_train", 1)
         assert placeholder is not None and placeholder.state == "failed"
         assert (build.artifact_id, build.version) == (outputs[0].id, outputs[0].version)
 

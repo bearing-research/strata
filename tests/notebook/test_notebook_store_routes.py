@@ -37,6 +37,13 @@ async def test_the_store_lists_what_the_cells_produced(tmp_path, monkeypatch):
         bad = client.get(f"/v1/notebooks/{session.id}/store/artifacts?sort=name")
 
     assert stats["ready_versions"] >= 1
+    # The run's placeholder is in the store, failed, and neither listed nor counted.
+    store = session.get_artifact_manager().artifact_store
+    placeholders = store.list_versions_by_id_prefix(f"nb_{session.notebook_state.id}_run_")
+    assert [v.state for v in placeholders] == ["failed"]
+    assert stats["failed_versions"] == 0
+    assert stats["total_versions"] == len(listed["artifacts"])
+    assert not any(r["artifact_id"] == placeholders[0].id for r in listed["artifacts"])
     assert listed["notebook_name"] == "stored"
     row = next(r for r in listed["artifacts"] if r["output"] == "rows")
     assert row["cell_id"] == "load"

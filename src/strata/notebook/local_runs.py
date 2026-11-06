@@ -166,9 +166,7 @@ class LocalRuns:
         build_id = uuid.uuid4().hex
         # A build references a version, so a run whose outputs do not exist yet targets a
         # placeholder the final release repoints it from (and fails).
-        placeholder_id = f"nb_{self._manager.notebook_id}_cell_{cell_id}_run" + (
-            f"@variant={variant}" if variant else ""
-        )
+        placeholder_id = self._manager.run_placeholder_id(cell_id, variant)
         version = self.store.create_artifact(
             placeholder_id,
             run_output_key(computation_key, build_id, "run"),
