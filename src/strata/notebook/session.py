@@ -1524,6 +1524,21 @@ class NotebookSession:
                     return []
                 pairs.append((artifact, current_output.model_copy(deep=True)))
 
+        return self._resolved_displays(pairs)
+
+    def stored_display_outputs(self, artifacts: list[ArtifactVersion]) -> list[CellOutput]:
+        """Each display artifact as its own run described it; one that does not is left out."""
+        return self._resolved_displays(
+            [
+                (artifact, CellOutput(**described[0]))
+                for artifact in artifacts
+                if (described := stored_display(artifact)) is not None
+            ]
+        )
+
+    def _resolved_displays(
+        self, pairs: list[tuple[ArtifactVersion, CellOutput]]
+    ) -> list[CellOutput]:
         resolved: list[CellOutput] = []
         for artifact, output in pairs:
             output.artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"

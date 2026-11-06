@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     import cellgraph as cg
+    from vestigo.store import ArtifactVersion
 
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.dag import NotebookDag
@@ -79,6 +80,8 @@ class ExecutorHost(Protocol):
         current_outputs: list[CellOutput],
         variant: str | None = None,
     ) -> list[CellOutput]: ...
+
+    def stored_display_outputs(self, artifacts: list[ArtifactVersion]) -> list[CellOutput]: ...
 
     def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None: ...
 
