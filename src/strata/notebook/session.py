@@ -1478,6 +1478,7 @@ class NotebookSession:
         cell_id: str,
         provenance_hash: str,
         current_outputs: list[CellOutput],
+        variant: str | None = None,
     ) -> list[CellOutput]:
         """Return the display outputs cached for ``provenance_hash``, if all are.
 
@@ -1486,12 +1487,16 @@ class NotebookSession:
         previews. Artifacts written before that are bounded and described by
         ``current_outputs``.
         """
-        notebook_id = self.notebook_state.id
         store = self.artifact_manager.artifact_store
 
         def _matching(index: int) -> ArtifactVersion | None:
-            artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___display__{index}"
+            artifact_id = self.artifact_manager.cell_artifact_id(
+                cell_id, f"__display__{index}", variant=variant
+            )
             expected = hashlib.sha256(f"{provenance_hash}:__display__{index}".encode()).hexdigest()
+            if variant is not None:
+                # As a variant's console: nothing reads it as latest, so any version serves.
+                return store.find_version_by_provenance(artifact_id, expected)
             artifact = store.get_latest_version(artifact_id)
             if artifact is None or artifact.provenance_hash != expected:
                 return None

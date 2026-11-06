@@ -1092,7 +1092,13 @@ def _render_outputs(cell: CellView) -> str:
         return f"[error]\n{cell.error}"
 
     parts: list[str] = []
+    shown_variant = None
     for output in cell.display_outputs:
+        # A @per_variant cell shows each variant's in turn, as its console names them.
+        variant = output.get("variant")
+        if variant and variant != shown_variant:
+            parts.append(f"[variant={variant}]")
+        shown_variant = variant
         content_type = str(output.get("content_type") or "")
         if content_type == "text/markdown" and isinstance(output.get("markdown_text"), str):
             parts.append(output["markdown_text"])

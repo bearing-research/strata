@@ -190,6 +190,8 @@ export interface CellOutput {
   /** Whether this came from cache */
   /** When the run behind this output stored it, in epoch seconds. */
   computedAt?: number
+  /** The `@per_variant` variant whose run showed this. */
+  variant?: string
   cacheHit?: boolean
   /** Cache load time in ms (for displaying "⚡ cached · 5ms") */
   cacheLoadMs?: number

@@ -142,7 +142,9 @@ async def run_fanout_cell(
                     await anyio.to_thread.run_sync(context.write_back, cell_id, gone, name)
         except TableWriteError as exc:
             error = write_back_failed(exc)
-    return _finish_fanout(host, context, cell_id, results, base, start_time, error=error)
+    return _finish_fanout(
+        host, context, cell_id, results, base, start_time, error=error, shows_displays=True
+    )
 
 
 async def _run_fanout_instances(
@@ -206,8 +208,13 @@ def _finish_fanout(
     *,
     error: str | None = None,
     instance_noun: str = "Fan-out variant",
+    shows_displays: bool = False,
 ) -> CellExecutionResult:
-    """The cell's result from its instances' (or *error*); record a good run's base key."""
+    """The cell's result from its instances' (or *error*); record a good run's base key.
+
+    With *shows_displays*, a good run shows every instance's displays in turn, each
+    saying which it is.
+    """
     writes = _merge_variant_writes(context.variant_writes.pop(cell_id, []))
     duration_ms = (time.time() - start_time) * 1000
     failures = [(name, r) for name, r in results if not r.success]
@@ -238,12 +245,19 @@ def _finish_fanout(
         # Cached only when no instance ran: one recompute makes the cell a run.
         cache_hit = bool(results) and all(r.cache_hit for _, r in results)
         cell = host.notebook_state.get_cell(cell_id)
+        displays = (
+            [{**output, "variant": name} for name, r in results for output in r.display_outputs]
+            if shows_displays
+            else []
+        )
         aggregate = CellExecutionResult(
             cell_id=cell_id,
             success=True,
             stdout=stdout,
             stderr=stderr,
             duration_ms=duration_ms,
+            display_outputs=displays,
+            display_output=displays[-1] if displays else None,
             cache_hit=cache_hit,
             execution_method="fanout",
             # Before the record below moves the cell's last key on to this one.
@@ -275,6 +289,8 @@ def _finish_fanout(
             )
         except Exception:
             logger.exception("Failed to record fan-out base provenance for cell %s", cell_id)
+    # After every instance's, which each showed only its own.
+    host.persist_display_outputs(cell_id, aggregate.display_outputs if aggregate.success else None)
     host.apply_execution_result_metadata(cell_id, aggregate)
     return aggregate
 

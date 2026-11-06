@@ -36,6 +36,8 @@ class OutputView(BaseModel):
     # writes the artifact to a file.
     artifact_uri: str | None = None
     bytes: int = 0
+    # The ``@per_variant`` variant that showed it, when the cell shows one per variant.
+    variant: str | None = None
 
 
 class SavedOutput(BaseModel):
@@ -1244,6 +1246,7 @@ def _output_view_from_wire(data: dict[str, Any]) -> OutputView:
         columns=data.get("columns"),
         artifact_uri=data.get("artifact_uri"),
         bytes=int(data.get("bytes") or 0),
+        variant=data.get("variant"),
     )
 
 

@@ -151,7 +151,9 @@ class _FakeHost:
     ) -> None:
         return None
 
-    def resolve_cached_display_outputs(self, cell_id, provenance_hash, current_outputs):
+    def resolve_cached_display_outputs(
+        self, cell_id, provenance_hash, current_outputs, variant=None
+    ):
         return current_outputs
 
     def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None:

@@ -77,6 +77,7 @@ class ExecutorHost(Protocol):
         cell_id: str,
         provenance_hash: str,
         current_outputs: list[CellOutput],
+        variant: str | None = None,
     ) -> list[CellOutput]: ...
 
     def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None: ...

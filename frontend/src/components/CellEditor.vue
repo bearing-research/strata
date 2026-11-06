@@ -1355,6 +1355,13 @@ function outputKey(output: CellOutput, index: number): string {
             :key="outputKey(output, index)"
             class="output-block"
           >
+            <!-- A @per_variant cell shows each variant's displays in turn. -->
+            <div
+              v-if="output.variant && output.variant !== visibleOutputs[index - 1]?.variant"
+              class="output-variant"
+            >
+              variant <code>{{ output.variant }}</code>
+            </div>
             <DataTable
               v-if="output.rows?.length && output.columns?.length"
               :notebook-id="notebookId"
@@ -2218,6 +2225,11 @@ function outputKey(output: CellOutput, index: number): string {
 }
 .output-block + .output-block {
   margin-top: 12px;
+}
+.output-variant {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 .output-error {
   color: var(--accent-danger);

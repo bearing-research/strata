@@ -1310,7 +1310,9 @@ class CellExecutor:
         )
         return (
             refreshed if refreshed is not None else cached_artifact,
-            self.session.resolve_cached_display_outputs(cell_id, provenance_hash, current_displays),
+            self.session.resolve_cached_display_outputs(
+                cell_id, provenance_hash, current_displays, variant
+            ),
         )
 
     def _recorded_display_count(
@@ -1377,7 +1379,7 @@ class CellExecutor:
         # Display outputs share the provenance; without promoting them a reverted cell hits with
         # its plot gone. Restore the count the reverted run recorded (the current list holds the
         # later run's, or none after a failure); older displays use the current list.
-        # A fan-out instance's displays are not stored per variant, so they say nothing of it.
+        # An instance's are found by provenance, as its console is, so need no promoting.
         if invalid is None and variant is None:
             display_count = self._recorded_display_count(cell_id, provenance_hash, variant)
             if display_count is None:
@@ -3585,6 +3587,7 @@ class CellExecutor:
         source_hash: str,
         source: str,
         env_hash: str,
+        variant: str | None = None,
     ) -> None:
         """Store a single run's displays and put what was stored on its *result*."""
         result.display_outputs = self._store_display_outputs(
@@ -3596,6 +3599,7 @@ class CellExecutor:
             source_hash=source_hash,
             source=source,
             env_hash=env_hash,
+            variant=variant,
         )
         result.display_output = result.display_outputs[-1] if result.display_outputs else None
 
@@ -3671,10 +3675,12 @@ class CellExecutor:
         source_hash: str = "",
         source: str = "",
         env_hash: str = "",
+        variant: str | None = None,
     ) -> list[dict[str, Any]]:
         """Persist ordered cell display outputs as canonical artifacts.
 
         The run's ``# @output_dir`` listings come first, so the cell's last display stays last.
+        A fan-out instance's are stored under its *variant*.
         """
         listings = self._folder_listings.pop(cell_id, {})
         display_outputs = [
@@ -3690,7 +3696,7 @@ class CellExecutor:
             return []
 
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self._input_refs(cell_id)
+        input_versions = self._input_refs(cell_id, variant)
         stored_displays: list[dict[str, Any]] = []
 
         for index, display_output in enumerate(display_outputs):
@@ -3714,6 +3720,7 @@ class CellExecutor:
                 blob_data=blob_data,
                 content_type=content_type,
                 row_count=row_count if isinstance(row_count, int) else None,
+                variant=variant,
                 provenance_hash=display_provenance,
                 input_versions=input_versions,
                 source_hash=source_hash,

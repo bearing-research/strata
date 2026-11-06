@@ -844,6 +844,7 @@ function parseDisplayOutputPayload(
         ? raw.artifact_uri
         : fallbackArtifactUri || undefined,
     computedAt: typeof raw.computed_at === 'number' ? raw.computed_at : undefined,
+    variant: typeof raw.variant === 'string' && raw.variant ? raw.variant : undefined,
   }
 
   if (contentType === 'arrow/ipc') {
