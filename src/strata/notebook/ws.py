@@ -83,6 +83,7 @@ from strata.notebook.ws_payloads import (
     error_payload,
     impact_preview_payload,
     inspect_result_payload,
+    notebook_state_payload,
     profiling_summary_payload,
     session_closed_payload,
 )
@@ -2098,7 +2099,9 @@ async def _handle_variant_add(
         await _broadcast_message(
             notebook_id,
             _make_message(
-                MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state_payload
+                MessageType.NOTEBOOK_STATE,
+                next_notebook_sequence(notebook_id),
+                notebook_state_payload(state_payload),
             ),
         )
 
@@ -2141,7 +2144,11 @@ async def _handle_notebook_sync(
     # A real sequence: 0 reads as a gap to the client.
     await websocket.send_text(
         _json_encode(
-            _make_message(MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state)
+            _make_message(
+                MessageType.NOTEBOOK_STATE,
+                next_notebook_sequence(notebook_id),
+                notebook_state_payload(state),
+            )
         )
     )
 
@@ -3312,7 +3319,11 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
 
     await _broadcast_message(
         notebook_id,
-        _make_message(MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state),
+        _make_message(
+            MessageType.NOTEBOOK_STATE,
+            next_notebook_sequence(notebook_id),
+            notebook_state_payload(state),
+        ),
     )
 
 

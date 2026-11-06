@@ -112,6 +112,7 @@ from strata.notebook.writer import (
 from strata.notebook.ws_payloads import (
     cell_status_payload,
     environment_job_event_payload,
+    environment_job_finished_payload,
 )
 
 if TYPE_CHECKING:
@@ -3239,7 +3240,7 @@ class NotebookSession:
                 ]
             await self._broadcast_environment_job_message(
                 MessageType.ENVIRONMENT_JOB_FINISHED,
-                payload,
+                environment_job_finished_payload(payload),
             )
             if job.action in {"add", "remove"}:
                 await self._broadcast_environment_staleness_updates(job.stale_cell_ids)
