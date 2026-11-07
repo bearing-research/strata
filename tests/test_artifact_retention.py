@@ -1137,6 +1137,42 @@ class TestNotebookStores:
         assert not _exists(store, removed)
         assert _exists(store, live)
 
+    def test_reopening_sees_a_cell_that_came_back_on_disk(self, tmp_path, monkeypatch):
+        """A reused session prunes before it reloads; its cell list is the old one."""
+        import threading
+        from types import SimpleNamespace
+
+        from strata.notebook import harness_user
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import SessionManager
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook
+
+        notebook = create_notebook(tmp_path, "back", initialize_environment=False)
+        notebook_id = parse_notebook(notebook).id
+        config = SimpleNamespace(
+            notebook_keep_superseded_versions=2, artifact_gc_min_idle_seconds=0
+        )
+        monkeypatch.setattr(harness_user, "running_server_config", lambda: config)
+        monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
+        manager = SessionManager()
+
+        def open_and_wait_for_the_prune():
+            manager.open_notebook(notebook, reuse_existing=True)
+            for thread in threading.enumerate():
+                if thread.name == "notebook-artifact-prune":
+                    thread.join(timeout=30)
+
+        open_and_wait_for_the_prune()
+        # A checkout brings the cell back while the session stays open.
+        add_cell_to_notebook(notebook, "back0001")
+        store = ArtifactStore(notebook / ".strata" / "artifacts")
+        value = _ready(store, f"nb_{notebook_id}_cell_back0001_var_df")
+        _last_used(store, value, 31 * DAY)
+
+        open_and_wait_for_the_prune()
+
+        assert _exists(store, value)
+
     @pytest.mark.parametrize("config", [None, "off"], ids=["no server", "set to 0"])
     def test_without_a_server_or_with_pruning_off_nothing_changes(
         self, tmp_path, monkeypatch, config

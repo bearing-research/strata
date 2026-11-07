@@ -3644,6 +3644,20 @@ class NotebookSession:
             )
 
 
+def _cell_ids_on_disk(notebook_dir: Path) -> list[str] | None:
+    """The cells ``notebook.toml`` lists now, or ``None`` if it cannot be read.
+
+    Read when the sweep runs, not taken from a session: a reused session prunes
+    before it reloads, and its cells may predate a checkout that brought one back.
+    """
+    try:
+        with open(notebook_dir / "notebook.toml", "rb") as f:
+            cells = tomllib.load(f).get("cells", [])
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return [str(cell["id"]) for cell in cells if isinstance(cell, dict) and "id" in cell]
+
+
 def _prune_artifacts_in_background(session: NotebookSession) -> threading.Thread | None:
     """Drop the notebook's older cell values in a background thread.
 
@@ -3659,14 +3673,14 @@ def _prune_artifacts_in_background(session: NotebookSession) -> threading.Thread
         return None
     min_idle_seconds = getattr(config, "artifact_gc_min_idle_seconds", 0.0)
     manager = session.artifact_manager
-    # Taken now, on the opening thread: the cells as this open parsed them.
-    live_cells = [cell.id for cell in session.notebook_state.cells]
 
     def prune() -> None:
         from strata.notebook.quiesce import NotebookQuiesced
 
         try:
-            result = manager.prune(keep, min_idle_seconds, live_cells=live_cells)
+            result = manager.prune(
+                keep, min_idle_seconds, live_cells=_cell_ids_on_disk(session.path)
+            )
         except NotebookQuiesced as exc:
             logger.info("Not pruning %s's artifacts: %s", session.path, exc)
             return

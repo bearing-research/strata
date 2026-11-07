@@ -873,6 +873,26 @@ class TestARemovedCellsValues:
 
         assert self._exists(manager, removed)
 
+    def test_a_removed_value_kept_for_now_keeps_what_it_was_built_from(self, manager):
+        """Only the values that go stop being held, or a kept one would lose its input."""
+        source = self._store(manager, "c0")
+        ref = f"{source[0]}@v={source[1]}"
+        built = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="y",
+            blob_data=b"y",
+            content_type="pickle/object",
+            provenance_hash="prov-c1-y",
+            input_versions={f"strata://artifact/{ref}": ref},
+        )
+        self._idle(manager, source, 31)
+        self._idle(manager, (built.id, built.version), 3)
+
+        self._sweep(manager, [])
+
+        assert self._exists(manager, (built.id, built.version))
+        assert self._exists(manager, source)
+
     def test_a_cell_whose_id_another_starts_with_is_told_apart(self, manager):
         removed = self._store(manager, "c1")
         live = self._store(manager, "c10")
@@ -884,7 +904,7 @@ class TestARemovedCellsValues:
         assert not self._exists(manager, removed)
         assert self._exists(manager, live)
 
-    def test_another_notebooks_values_in_the_store_are_left_alone(self, manager, tmp_path):
+    def test_another_notebooks_values_in_the_store_are_left_alone(self, manager):
         other = NotebookArtifactManager("nb2", artifact_dir=manager.artifact_dir)
         theirs = self._store(other, "c1")
         self._idle(manager, theirs, 31)

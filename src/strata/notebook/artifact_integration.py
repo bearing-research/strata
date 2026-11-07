@@ -140,6 +140,7 @@ class NotebookArtifactManager:
 
         self.artifact_store.sweep_zombie_builds(_ABANDONED_BUILD_SECONDS)
         abandoned = self.fail_abandoned_runs()
+        removed = self._idle_removed_cell_values(live_cells, min_idle_seconds)
         # A folder file is not a value with versions: a manifest may name any of them.
         # A checkpoint is nobody's current value: it goes unless a head holds it or a
         # resume would start from it.
@@ -148,17 +149,8 @@ class NotebookArtifactManager:
             min_idle_seconds=min_idle_seconds,
             exempt=is_file_id,
             spare=failed_since_ready(self),
-            collectable=self.release_store.collectable_checkpoints(),
+            collectable=[*self.release_store.collectable_checkpoints(), *removed],
         )
-        if live_cells is not None:
-            removed = self.removed_cell_values(live_cells)
-            if removed:
-                swept = self.artifact_store.garbage_collect(
-                    collectable=removed,
-                    min_idle_seconds=max(min_idle_seconds, _REMOVED_CELL_SECONDS),
-                )
-                result["deleted_count"] += swept["deleted_count"]
-                result["deleted_bytes"] += swept["deleted_bytes"]
         # After the values: a folder file goes once no manifest version left names it.
         # An @each instance likewise, once no manifest left requires it.
         files = [*(unreferenced_files(self) or ()), *collectable_instances(self)]
@@ -171,6 +163,27 @@ class NotebookArtifactManager:
         result["abandoned_runs"] = abandoned
         return result
 
+    def _idle_removed_cell_values(
+        self, live_cells: Collection[str] | None, min_idle_seconds: float
+    ) -> list[tuple[str, int]]:
+        """The :meth:`removed_cell_values` unused for a month, which the sweep may take.
+
+        Only those: a collectable version stops holding its inputs, so passing one the
+        idle floor keeps would let what it was built from go while it stays. The store
+        reports idleness only through a dry run, which runs only when a cell was removed.
+        """
+        if live_cells is None:
+            return []
+        removed = self.removed_cell_values(live_cells)
+        if not removed:
+            return []
+        dry = self.artifact_store.garbage_collect(
+            collectable=removed,
+            min_idle_seconds=max(min_idle_seconds, _REMOVED_CELL_SECONDS),
+            dry_run=True,
+        )
+        return [(row["artifact_id"], row["version"]) for row in dry["collected"]]
+
     def removed_cell_values(self, live_cells: Collection[str]) -> list[tuple[str, int]]:
         """Every version of this notebook's cell outputs whose cell is not in *live_cells*.
 
@@ -181,12 +194,20 @@ class NotebookArtifactManager:
 
         prefix = f"nb_{self.notebook_id}_cell_"
         live = set(live_cells)
+        # One row per id finds the cells; their versions are listed only for those.
+        cells = set()
+        for latest in self.artifact_store.list_latest_by_id_prefix(prefix):
+            output = self.cell_output_of(latest.id)
+            if output is not None and output[0] not in live:
+                cells.add(output[0])
         removed = []
-        for version in self.artifact_store.list_versions_by_id_prefix(prefix):
-            cell_id, var, _ = version.id[len(prefix) :].partition("_var_")
-            if not var or cell_id in live or "@ckpt=" in version.id or is_file_id(version.id):
-                continue
-            removed.append((version.id, version.version))
+        for cell_id in sorted(cells):
+            for version in self.artifact_store.list_versions_by_id_prefix(
+                f"{prefix}{cell_id}_var_"
+            ):
+                if "@ckpt=" in version.id or is_file_id(version.id):
+                    continue
+                removed.append((version.id, version.version))
         return removed
 
     def fail_abandoned_runs(self) -> int:
