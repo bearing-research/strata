@@ -4025,6 +4025,8 @@ exhaustive commit history.</p>
   skipping it. Run All also skips a failed cell's dependents that would have
   run together in one batch, which before ran on the failed cell's last
   artifacts. No cache keys change. (#1343)</li>
+<li><strong>The ledger is vestigo 0.4.0.</strong> It adds <code>exclude_id_prefix</code> to <code>list_artifacts</code>
+  and <code>stats</code>, and every store gets <code>build_attempts.fenced_at</code> on open. (#1476)</li>
 <li><strong>The ledger is vestigo 0.3.1</strong>, which adds <code>vestigo.torch.HostedRun</code> and
   <code>vestigo.checkpoint_files</code>. No migration. (#1327)</li>
 <li><strong>The ledger is vestigo 0.3.0.</strong> It adds the <code>vestigo.torch</code> adapter
@@ -4097,6 +4099,9 @@ exhaustive commit history.</p>
   breadcrumb takes the row below. (#1463)</li>
 <li><strong>The Artifacts page loads the store its route names.</strong> Moving from the server store to a
   notebook's, or between two notebooks', kept the last store's name, rows and totals. (#1465)</li>
+<li><strong>A notebook's store page leaves out its runs' placeholders.</strong> Each run's placeholder
+  version is failed once the run ends, so the page counted one failed version per run.
+  Placeholders made before this keep their old id and stay listed. (#1476)</li>
 <li><strong>The CLI and MCP hand back both forms of a traceback.</strong> <code>strata run</code> adds
   <code>traceback_full</code>; <code>cell run</code> and <code>run_cell</code> add <code>traceback</code> and <code>traceback_full</code>;
   <code>cell show</code> and <code>get_cell</code> add <code>error_full</code>. (#1458)</li>
