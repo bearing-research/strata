@@ -96,8 +96,8 @@ find what it uses and what it defines, and shows which results an edit has left 
 **[Every result knows where it came from.](https://bearingresearch.com/strata/dev/concepts/artifacts-and-lineage/)** Every
 output is a versioned artifact, so you can trace it back through what produced it.
 
-**[It reads like code in git.](https://bearingresearch.com/strata/dev/concepts/file-format-and-git/)** A notebook is plain
-`.py` files plus a TOML manifest. Outputs and caches stay in a gitignored folder.
+**[It reads like code in git.](https://bearingresearch.com/strata/dev/concepts/file-format-and-git/)** A notebook is one
+plain-text file per cell plus a TOML manifest. Outputs and caches stay in a gitignored folder.
 
 There is more on the [Features](https://bearingresearch.com/strata/dev/concepts/features/) page, and Strata also works
 [as a library](https://bearingresearch.com/strata/dev/getting-started/core/).
@@ -412,7 +412,7 @@ location on startup.
 
 Each notebook gets its own Python environment, managed by `uv`, so
 installing pandas in one notebook doesn't touch another. Everything
-autosaves: source goes to `cells/*.py`, runtime state to `.strata/`.
+autosaves: source goes to `cells/`, runtime state to `.strata/`.
 Both diff cleanly in git, no JSON blobs in commits.
 
 ### Cell types
@@ -846,7 +846,7 @@ agent is driving:
 | **Web UI**, by opening the server URL in a browser | The full editor: outputs, plots, the DAG, the inspector. **Not read-only**, so you can edit and run cells alongside the agent | You want to see rendered output, or take over |
 | **TUI**, via `strata watch ./my-notebook` | Read-only live spectator in the terminal | No browser, over SSH, or beside the agent in a split terminal |
 | **Any WebSocket client** | The raw frames | You are building your own view; see the [client protocol](https://bearingresearch.com/strata/dev/reference/notebook-protocol/) |
-| **Nothing, then read the directory** | `cells/*.py` is the source; `.strata/runtime.json` holds display outputs, provenance and timings; `.strata/console/` holds per-cell stdout/stderr | You would rather review afterwards than watch |
+| **Nothing, then read the directory** | `cells/` holds the source; `.strata/runtime.json` holds display outputs, provenance and timings; `.strata/console/` holds per-cell stdout/stderr | You would rather review afterwards than watch |
 
 One thing to know about the web UI row: an open tab follows the agent's source
 edits as well as its status and outputs, but a cell **you** are part-way through
@@ -2004,7 +2004,7 @@ See [Cell Annotations][a] for the full reference.
 A SQL cell sends a query to a connected database via ADBC (DuckDB through its own driver) and stores the result as an Arrow Table artifact. Like Python and prompt cells, SQL cells participate in the DAG, cache by provenance hash, and surface their output to downstream cells.
 
 ```sql
-# @sql connection=warehouse
+-- @sql connection=warehouse
 SELECT customer, SUM(amount) AS total
 FROM orders
 WHERE amount > :min_amount
@@ -2048,7 +2048,7 @@ Notes:
 
 ## DuckDB over the lake
 
-A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a REST or AWS Glue catalog the server configures (`[tool.strata.catalogs.<name>]`) or, on a personal server, one the notebook defines in [`[catalogs.<name>]`](https://bearingresearch.com/strata/dev/reference/notebook-toml/#notebook-catalogs). `mounts` names mounts declared for the cell, in `[[mounts]]` or with `# @mount`:
+A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a REST or AWS Glue catalog the server configures (`[tool.strata.catalogs.<name>]`) or, on a personal server, one the notebook defines in [`[catalogs.<name>]`](https://bearingresearch.com/strata/dev/reference/notebook-toml/#notebook-catalogs). `mounts` names mounts declared for the cell, in `[[mounts]]` or with `-- @mount`:
 
 ```toml
 [connections.lake]
@@ -2059,15 +2059,15 @@ mounts = ["raw"]
 ```
 
 ```sql
-# @sql connection=lake
+-- @sql connection=lake
 SELECT t.zone, count(*) AS trips
 FROM lake.taxi.trips t JOIN raw USING (zone)
 GROUP BY t.zone
 ```
 
-Each mount is a view by its name over its Parquet, CSV or JSON files, read with the mount's storage options. `file`, `s3`, `gs` and `az` mounts work; GCS and Azure ones are read through the same fsspec filesystem (gcsfs, adlfs) a Python cell's mount uses, so a connection's mounts on one of those schemes must share their storage options. Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. With [`# @cache snapshot`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache) the cell instead keeps reading the snapshots its first run read until it is rerun. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. A REST catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends. A catalog that vends nothing (its store has no STS) sets `header.X-Iceberg-Access-Delegation` to something other than `vended-credentials`, usually empty: DuckDB then asks it for no credentials, and its `s3.*` keys read the tables, under its `s3://` warehouse or, when the warehouse is a name, under the locations of the tables the query names. A table named only at run time is outside those, so its files are read without the keys. So are data files outside a table's location (added with `add_files` from another prefix, or a `write.data.path` elsewhere): in personal mode they are read without the keys and fail with the store's 403, and service mode refuses them already. A Glue catalog is attached through Glue's Iceberg REST endpoint in its `glue.region` for the account `glue.id`, both required; its `glue.*` keys (or `client.*`, or `s3.*`) sign the catalog's requests and read its tables' files, and without keys the AWS credential chain (environment, profile, instance role) does.
+Each mount is a view by its name over its Parquet, CSV or JSON files, read with the mount's storage options. `file`, `s3`, `gs` and `az` mounts work; GCS and Azure ones are read through the same fsspec filesystem (gcsfs, adlfs) a Python cell's mount uses, so a connection's mounts on one of those schemes must share their storage options. Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. With [`-- @cache snapshot`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache) the cell instead keeps reading the snapshots its first run read until it is rerun. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. A REST catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends. A catalog that vends nothing (its store has no STS) sets `header.X-Iceberg-Access-Delegation` to something other than `vended-credentials`, usually empty: DuckDB then asks it for no credentials, and its `s3.*` keys read the tables, under its `s3://` warehouse or, when the warehouse is a name, under the locations of the tables the query names. A table named only at run time is outside those, so its files are read without the keys. So are data files outside a table's location (added with `add_files` from another prefix, or a `write.data.path` elsewhere): in personal mode they are read without the keys and fail with the store's 403, and service mode refuses them already. A Glue catalog is attached through Glue's Iceberg REST endpoint in its `glue.region` for the account `glue.id`, both required; its `glue.*` keys (or `client.*`, or `s3.*`) sign the catalog's requests and read its tables' files, and without keys the AWS credential chain (environment, profile, instance role) does.
 
-A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `# @sql connection=<name> write=true` for a cell that changes a database.
+A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `-- @sql connection=<name> write=true` for a cell that changes a database.
 
 ## Schema discovery
 
@@ -2083,7 +2083,7 @@ min_amount = 100
 ```
 
 ```sql
-# @sql connection=warehouse
+-- @sql connection=warehouse
 SELECT * FROM orders WHERE amount > :min_amount
 ```
 
@@ -2106,9 +2106,9 @@ A SQL cell's **provenance hash** folds together:
 - The hashes of every upstream artifact referenced via `:name`.
 - The driver's **freshness probe** result for the touched tables.
 - The driver's **schema fingerprint** for the touched tables.
-- A salt derived from the `# @cache` policy below.
+- A salt derived from the `-- @cache` policy below.
 
-`# @cache` controls how DB-side state factors in. Default is `fingerprint`.
+`-- @cache` controls how DB-side state factors in. Default is `fingerprint`.
 
 | Policy          | Behavior                                                                                                                  | When to use                        |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
@@ -2132,8 +2132,8 @@ what it was ready about, so it opens idle rather than green with the previous
 database's rows.
 
 ```sql
-# @sql connection=warehouse
-# @cache forever
+-- @sql connection=warehouse
+-- @cache forever
 SELECT * FROM dim_country
 ```
 
@@ -2145,13 +2145,13 @@ SELECT * FROM dim_country
 | ---------- | ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | PostgreSQL | `pg_stat_user_tables` + `pg_class.relfilenode`  | per-table   | Up to ~500 ms stats-collector lag.                                                                                                                                                                                                                                                                                                                           |
 | SQLite     | The database file's size, mtime and header change counter, its `-wal` sidecar, plus `PRAGMA data_version` / `schema_version` | **DB-wide** | Any commit to the file, from any process, changes the token, so a write to one table invalidates cells reading another. A `:memory:` database has only the pragmas.                                                                                                                                                                              |
-| DuckDB     | `PRAGMA database_size`                          | **DB-wide** | Advances when DuckDB writes blocks; two row states between block-aligned flushes can share a token. Pin `# @cache session` on a database that is being written to while you work.                                                                                                                                                                         |
+| DuckDB     | `PRAGMA database_size`                          | **DB-wide** | Advances when DuckDB writes blocks; two row states between block-aligned flushes can share a token. Pin `-- @cache session` on a database that is being written to while you work.                                                                                                                                                                         |
 | Snowflake  | `INFORMATION_SCHEMA.TABLES.LAST_ALTERED`        | per-table   | Per-database scoping (one query per touched database). Bills cloud-services credits but each query is small. `LAST_ALTERED` updates even on 0-row DML, safe direction (over-invalidates, never under).                                                                                                                                                      |
-| BigQuery   | `__TABLES__.last_modified_time`                 | per-table   | Per-dataset scoping. `__TABLES__` is the legacy-but-stable view; `INFORMATION_SCHEMA.TABLES` doesn't expose `last_modified_time`. **Streaming-buffer caveat**: tables receiving streaming inserts have `last_modified_time` lag by minutes-to-90-min until the buffer flushes; pin `# @cache session` on those queries. Permissions: `bigquery.tables.get`. |
+| BigQuery   | `__TABLES__.last_modified_time`                 | per-table   | Per-dataset scoping. `__TABLES__` is the legacy-but-stable view; `INFORMATION_SCHEMA.TABLES` doesn't expose `last_modified_time`. **Streaming-buffer caveat**: tables receiving streaming inserts have `last_modified_time` lag by minutes-to-90-min until the buffer flushes; pin `-- @cache session` on those queries. Permissions: `bigquery.tables.get`. |
 
 The schema fingerprint catches metadata-only changes (`ADD COLUMN`, type changes, nullability flips) that the freshness token would miss.
 
-A probe can only ask about a table the query names. A table named at run time (Snowflake's `IDENTIFIER($tbl)` or `TABLE($tbl)`), a table function (`read_parquet(...)`, `query_table(...)`, a Postgres set-returning function) or a file read in place of a table (DuckDB's `FROM 'events.parquet'`) is not fingerprinted, so under `fingerprint` such a cell re-runs every time, and the header says so. Its result's content is folded into its provenance, so a downstream cell re-runs only when the rows actually changed. Declare `# @cache session` or `# @cache ttl=...` to reuse results instead, or read files through a mount on a [DuckDB lake connection](#duckdb-over-the-lake), whose fingerprint the cache does track.
+A probe can only ask about a table the query names. A table named at run time (Snowflake's `IDENTIFIER($tbl)` or `TABLE($tbl)`), a table function (`read_parquet(...)`, `query_table(...)`, a Postgres set-returning function) or a file read in place of a table (DuckDB's `FROM 'events.parquet'`) is not fingerprinted, so under `fingerprint` such a cell re-runs every time, and the header says so. Its result's content is folded into its provenance, so a downstream cell re-runs only when the rows actually changed. Declare `-- @cache session` or `-- @cache ttl=...` to reuse results instead, or read files through a mount on a [DuckDB lake connection](#duckdb-over-the-lake), whose fingerprint the cache does track.
 
 ## Read-only by default
 
@@ -2172,7 +2172,7 @@ In service mode a DuckDB or SQLite cell, which runs inside the server process, i
 Setup, seeding, and migration scripts opt into writable execution per cell:
 
 ```sql
-# @sql connection=warehouse write=true
+-- @sql connection=warehouse write=true
 DROP TABLE IF EXISTS orders;
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
@@ -2185,19 +2185,19 @@ INSERT INTO orders VALUES (1, 'alice', 25.50), (2, 'bob', 199.99);
 - The body is split into individual statements on sqlglot's tokenizer (ADBC's cursor runs only the first statement otherwise). Each statement runs as written in the cell, and a trailing comment is not a statement.
 - `:name` bind placeholders work the same as in read cells.
 - The default cache policy is `session` (one execution per session; same body in the same session is a cache hit).
-- `# @cache fingerprint` and `# @cache snapshot` error early on write cells: probe-based invalidation has no anchor when the cell mutates state.
+- `-- @cache fingerprint` and `-- @cache snapshot` error early on write cells: probe-based invalidation has no anchor when the cell mutates state.
 - The cell still produces an Arrow artifact: a per-statement status table with `stmt`, `kind` (`CREATE TABLE`, `INSERT`, …), and `rows_affected` (nullable; `null` for DDL).
 - Read cells using the same connection stay on the read path; the override is per-cell.
 
 A query runs off the server's event loop, so a cancel lands at once: the run is abandoned and publishes nothing. The query itself may keep running in the database, because ADBC drivers differ on whether they can cancel one.
 
-## `# @name` and downstream consumption
+## `-- @name` and downstream consumption
 
-A SQL cell's output variable name defaults to `result`; override with `# @name <identifier>`. Downstream cells receive the result as a `pyarrow.Table` (Arrow IPC artifacts deserialize through the standard notebook serializer); call `.to_pandas()` for a pandas DataFrame:
+A SQL cell's output variable name defaults to `result`; override with `-- @name <identifier>`. Downstream cells receive the result as a `pyarrow.Table` (Arrow IPC artifacts deserialize through the standard notebook serializer); call `.to_pandas()` for a pandas DataFrame:
 
 ```sql
-# @sql connection=warehouse
-# @name top_customers
+-- @sql connection=warehouse
+-- @name top_customers
 SELECT customer, SUM(amount) AS total
 FROM orders GROUP BY customer ORDER BY total DESC LIMIT 5
 ```
@@ -2208,23 +2208,23 @@ print(top_customers.shape)  # (5, 2)
 print(top_customers.to_pandas()["total"].sum())
 ```
 
-## `# @after` for setup-then-query pipelines
+## `-- @after` for setup-then-query pipelines
 
 A read SQL cell that depends on a write SQL cell's side effects (the underlying database state) can declare an explicit ordering edge:
 
 ```sql
-# @sql connection=warehouse write=true
+-- @sql connection=warehouse write=true
 CREATE TABLE products (sku TEXT PRIMARY KEY, category TEXT);
 INSERT INTO products VALUES ('A', 'widgets'), ('B', 'gadgets');
 ```
 
 ```sql
-# @sql connection=warehouse
-# @after seed
+-- @sql connection=warehouse
+-- @after seed
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
-`# @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.
+`-- @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.
 
 ## Worked example
 
@@ -2234,11 +2234,15 @@ The [`sql_orders_report`](https://bearingresearch.com/strata/dev/examples/sql_or
 
 | Annotation                              | What it does                                          |
 | --------------------------------------- | ----------------------------------------------------- |
-| `# @sql connection=<name> [write=true]` | Mark the cell as SQL; reference a declared connection |
-| `# @cache <policy>`                     | Override the default `fingerprint` cache policy       |
-| `# @nocache`                            | Always re-execute; wins over any `# @cache` policy    |
-| `# @name <identifier>`                  | Name the output variable (default: `result`)          |
-| `# @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
+| `-- @sql connection=<name> [write=true]` | Mark the cell as SQL; reference a declared connection |
+| `-- @cache <policy>`                     | Override the default `fingerprint` cache policy       |
+| `-- @nocache`                            | Always re-execute; wins over any `-- @cache` policy    |
+| `-- @name <identifier>`                  | Name the output variable (default: `result`)          |
+| `-- @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
+| `-- @mount <name> <uri> ro`              | A mount a DuckDB connection's `mounts` can name       |
+
+These are the only annotations a SQL cell acts on; validation warns about any other.
+They are SQL comments, so a `#` line is not one (see [Writing them](https://bearingresearch.com/strata/dev/reference/annotations/sql/#writing-them)).
 
 See [Cell Annotations][a] for the full reference.
 
@@ -5718,7 +5722,7 @@ retrieval time as `sdDatePublished`. The digest describes what was read, and
 the URL may serve something else now. A step stored before retrieval times were
 recorded shows only when it ran.
 
-A Snowflake or BigQuery cell with [`# @cache snapshot`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache),
+A Snowflake or BigQuery cell with [`-- @cache snapshot`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache),
 published or upstream of what is, shows the moment of the warehouse state it
 read ("Warehouse state as of") and how long the warehouse keeps that state
 ("Queryable until"). Until then a reader with access to the warehouse can run
@@ -6959,7 +6963,7 @@ report it.
 
 ```bash
 strata new "My Analysis" --no-env     # 1. scaffold
-# 2. write cells/*.py, list them in notebook.toml
+# 2. write the files under cells/, list them in notebook.toml
 strata validate my_analysis           # 3. static checks - cheap, run after every edit
 strata run my_analysis                # 4. execute (syncs the venv on first run)
 ```
@@ -7045,11 +7049,13 @@ when writing it by hand:
   deleting a cell.
 - **`file`** - relative to `cells/`. The extension is never read (the
   language comes from `language`); the server writes `.py` for python,
-  prompt and sql, `.r` for r, `.md` for markdown and `.widget` for widget.
+  `.sql` for sql, `.prompt` for prompt, `.r` for r, `.md` for markdown and
+  `.widget` for widget.
 - **`order`** - display order *and* reference-resolution order (see
   below). Keep it consistent with the list order.
-- **`language`** - one of `python`, `r`, `sql`, `prompt`, `markdown`,
-  `widget`.
+- **`language`** - required, one of `python`, `r`, `sql`, `prompt`,
+  `markdown`, `widget`. There is no default: a cell without it stops the
+  notebook from opening, with an error that names the cell.
 
 ## pyproject.toml - required for `strata run`
 
@@ -8313,7 +8319,7 @@ as first-class cell behaviors rather than escape hatches.
 
 | Capability | Strata | marimo | Pluto.jl | Jupyter |
 |---|---|---|---|---|
-| File format | Per-cell `.py` files + `notebook.toml` manifest | Single `.py` per notebook | Single `.jl` per notebook | JSON `.ipynb` |
+| File format | One file per cell in its language (`.py`, `.sql`, `.md`, ...) + `notebook.toml` manifest | Single `.py` per notebook | Single `.jl` per notebook | JSON `.ipynb` |
 | Git-friendly diffs | Per-cell, no embedded outputs or execution counts | Single-file but text | Single-file but text | Outputs + base64 images + execution counts embedded in the same file |
 | Automatic DAG from variable references | Yes | Yes | Yes | No |
 | Persistent cell-output cache | **Automatic**, content-addressed per cell, survives restarts | **Opt-in** via `mo.cache` / `mo.lru_cache` / `mo.persistent_cache` decorators (or context managers) | None, Pluto guarantees the program state is described by the visible code, no hidden cache between sessions | None |
@@ -8361,7 +8367,7 @@ against the new producer. The other tools require duplicating cells (and
 the downstream cells that read them) per variant.
 
 **Notebook commits show the work, not the runtime.** Strata stores cells
-as one `.py` file per cell, `notebook.toml` as the manifest, and all
+as one file per cell in its language (`.py`, `.sql`, `.md`, ...), `notebook.toml` as the manifest, and all
 runtime state (display outputs, console snapshots, the artifact store) in
 a gitignored `.strata/` directory. `notebook.toml`'s `updated_at` only
 bumps on structural edits (adding or removing cells, changing workers),
@@ -8462,7 +8468,7 @@ producing artifacts that flow through an auto-built DAG.
 - **results are keyed by what made them:** a cell's source, its inputs and its environment decide its identity, so identical work is a cache hit and no result ever needs invalidating
 - **only what changed re-runs:** edit one cell and Strata re-runs the cells below it and nothing else
 - **no wiring:** Strata reads each cell to find what it uses and what it defines, so there are no decorators and no edges to maintain by hand
-- **readable in git:** a notebook is plain `.py` files plus a TOML manifest, so a diff shows the code that changed
+- **readable in git:** a notebook is one plain-text file per cell (`.py`, `.sql`, `.md`, ...) plus a TOML manifest, so a diff shows the code that changed
 - **the graph is visible:** the dependency graph renders beside the cells, and clicking a node highlights everything upstream and downstream of it and jumps to its source
 
 ## Cell types
@@ -8592,7 +8598,8 @@ See [the library quickstart](https://bearingresearch.com/strata/dev/getting-star
 
 </div>
 
-R cells take a subset of these: see [R annotations](https://bearingresearch.com/strata/dev/reference/annotations/r/).
+R cells take a subset of these: see [R annotations](https://bearingresearch.com/strata/dev/reference/annotations/r/). SQL cells take six of them,
+written as SQL comments (`-- @key value`): see [What a SQL cell reads](https://bearingresearch.com/strata/dev/reference/annotations/sql/#what-a-sql-cell-reads).
 
 ## How annotations are read
 
@@ -8608,7 +8615,7 @@ y = labels
 classifier.fit(x, y)
 ```
 
-Annotations are parsed from the **first contiguous block** of `#`-prefixed lines. Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`. A key that is not an
+Annotations are parsed from the **first contiguous block** of `#`-prefixed lines (`--` in a [SQL cell](https://bearingresearch.com/strata/dev/reference/annotations/sql/#writing-them)). Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`. A key that is not an
 annotation, such as a misspelled `# @wroker gpu`, does nothing; validation
 warns about it (`annotation_unknown`, in the cell header and `strata validate`)
 and suggests the annotation it is closest to.
@@ -8633,8 +8640,8 @@ When the same setting is configured at multiple levels, the most specific wins:
 | **Timeout** | `# @timeout N` | `cell.timeout` field | `notebook.timeout` field, else 300 seconds |
 | **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
-| **SQL connection** | `# @sql connection=X` | (annotation only) | none; required for SQL cells |
-| **Cache policy** | `# @cache <policy>` | (annotation only) | `fingerprint` (read), `session` (write) |
+| **SQL connection** | `-- @sql connection=X` | (annotation only) | none; required for SQL cells |
+| **Cache policy** | `-- @cache <policy>` | (annotation only) | `fingerprint` (read), `session` (write) |
 | **Cache opt-out** | `# @nocache` | (annotation only) | cache on (serve provenance hits) |
 
 Annotations always take priority. This lets you override per-cell behavior without editing `notebook.toml`.
@@ -8691,17 +8698,17 @@ and `@loop start_from=` reference across cells. The defaults:
 
 ```toml
 cells = [
-    { id = "seed",      file = "seed_database.py", language = "sql",    order = 0 },
-    { id = "threshold", file = "threshold.py",     language = "python", order = 1 },
-    { id = "top-orders", file = "top_orders.py",   language = "sql",    order = 2 },
+    { id = "seed",       file = "seed_database.sql", language = "sql",    order = 0 },
+    { id = "threshold",  file = "threshold.py",      language = "python", order = 1 },
+    { id = "top-orders", file = "top_orders.sql",    language = "sql",    order = 2 },
 ]
 ```
 
-…then in `cells/top_orders.py`:
+…then in `cells/top_orders.sql`:
 
 ```sql
-# @sql connection=warehouse
-# @after seed
+-- @sql connection=warehouse
+-- @after seed
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
@@ -8780,7 +8787,7 @@ model = torch.nn.Linear(384, 10).cuda()
 Format: `# @env KEY=value`. Multiple `@env` lines are supported. The variable is available in `os.environ` during cell execution.
 
 !!! warning "Don't put secrets in `# @env`"
-    `# @env` values live in **committed cell source** (`cells/*.py`).
+    `# @env` values live in **committed cell source** (the files under `cells/`).
     The sensitive-key blanking that the notebook.toml `[env]` writer
     applies (KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL values blanked
     before commit) does **not** apply to `# @env` - the literal value
@@ -9140,7 +9147,7 @@ wrong for a cell whose *point* is a side effect or fresh value:
 
 `# @nocache` opts such a cell out. `# @nocache off` re-enables caching (useful to
 override a default you set elsewhere). It applies to every language (on a SQL
-cell it wins over any `# @cache` policy, `forever` included) and sits alongside
+cell it wins over any `-- @cache` policy, `forever` included) and sits alongside
 the read-write-`@mount` rule, which already forces re-execution for the same
 reason.
 
@@ -9188,8 +9195,8 @@ state that subsequent SQL cells query, and no Python variable flows
 between them.
 
 ```sql
-# @sql connection=warehouse
-# @after seed
+-- @sql connection=warehouse
+-- @after seed
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
@@ -9237,12 +9244,47 @@ A cell with `language = "sql"` runs a query through a declared connection.
 See [SQL cells](https://bearingresearch.com/strata/dev/guides/cells/sql/#sql-cells) for the full feature walkthrough; this
 section is the per-annotation reference.
 
+## Writing them
+
+A SQL cell's annotations are SQL comments: `-- @key value`, in the leading block of
+`--` lines at the top of the cell. Blank lines and other `--` comments may sit in the
+block, and the query starts at the first line that is neither. The file stays valid
+SQL, so an editor or linter reads the `.sql` file as it is.
+
+```sql
+-- @name top_customers
+-- @sql connection=warehouse
+-- @cache forever
+-- Reference data: it changes rarely.
+SELECT customer, SUM(amount) AS total FROM orders GROUP BY customer
+```
+
+`#` is not a comment in SQL, so a `# @sql ...` line in a SQL cell is not an
+annotation: it would reach the database as SQL. Validation reports it as the error
+`sql_annotation_hash`, naming the line, and the cell does not run.
+
+## What a SQL cell reads
+
+| Annotation | What it does |
+| --- | --- |
+| [`-- @sql connection=<name> [write=true]`](#sql) | The connection the query runs on (required), and whether it may write. |
+| [`-- @cache <policy>`](#cache) | The cache policy: `fingerprint` (the default), `forever`, `session`, `ttl=<seconds>` or `snapshot`. |
+| [`-- @nocache`](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache) | Always run; wins over any `@cache` policy. |
+| [`-- @name <identifier>`](#name) | The output variable (default `result`). |
+| [`-- @after <cell-id>`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An ordering-only edge from another cell, such as the one that writes the database this cell reads. |
+| [`-- @mount <name> <uri> ro`](https://bearingresearch.com/strata/dev/reference/annotations/python/#mount) | A mount a DuckDB connection's `mounts` can name, read-only. |
+
+These six are the only ones a SQL cell acts on. Any other annotation, such as
+`-- @worker` or `-- @timeout`, does nothing on a SQL cell, and validation warns
+about it (`annotation_not_for_sql`). A SQL cell runs in the server, so it has no
+worker, timeout or environment of its own.
+
 ## `@sql`
 
 Marks the cell as SQL and binds it to a named connection.
 
 ```sql
-# @sql connection=warehouse
+-- @sql connection=warehouse
 SELECT * FROM orders WHERE amount > :min_amount
 ```
 
@@ -9265,7 +9307,7 @@ Key/value parameters:
   read-only.
 
 ```sql
-# @sql connection=warehouse write=true
+-- @sql connection=warehouse write=true
 DROP TABLE IF EXISTS events;
 CREATE TABLE events (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
 INSERT INTO events VALUES (1, 'alpha'), (2, 'beta');
@@ -9290,20 +9332,20 @@ Override the default `fingerprint` cache policy on a SQL cell.
 | `snapshot`        | The result is pinned to one queryable state of the warehouse. Snowflake, BigQuery, and DuckDB over a catalog; refused on other drivers. |
 
 ```sql
-# @sql connection=warehouse
-# @cache forever
+-- @sql connection=warehouse
+-- @cache forever
 SELECT * FROM dim_country
 ```
 
-`# @cache snapshot` needs a driver whose warehouse can query a table as it
+`-- @cache snapshot` needs a driver whose warehouse can query a table as it
 stood at a moment in time. **Snowflake** (`AT (TIMESTAMP => ...)`) and
 **BigQuery** (`FOR SYSTEM_TIME AS OF ...`) can, and so can a **DuckDB**
 connection with a `catalog` (see below). SQLite, PostgreSQL and DuckDB without
 a catalog cannot, and the cell is refused before any connection is opened.
 
 ```sql
-# @sql connection=warehouse
-# @cache snapshot
+-- @sql connection=warehouse
+-- @cache snapshot
 SELECT region, SUM(amount) AS revenue FROM orders GROUP BY region
 ```
 
@@ -9354,8 +9396,8 @@ For SQL cells, `@name` sets the output variable name (default `result`),
 the same way it does for prompt cells.
 
 ```sql
-# @sql connection=warehouse
-# @name top_customers
+-- @sql connection=warehouse
+-- @name top_customers
 SELECT customer, SUM(amount) AS total
 FROM orders GROUP BY customer ORDER BY total DESC LIMIT 5
 ```
@@ -9902,7 +9944,7 @@ path exits `2` and says so; stop that run with Ctrl-C instead.
 ## Authoring cells and dependencies (`cell add/edit/rm/mv`, `dep`)
 
 An agent can also build and edit a notebook through commands (instead of writing
-`notebook.toml` + `cells/*.py` by hand):
+`notebook.toml` and the files under `cells/` by hand):
 
 ```bash
 strata cell add      <notebook_dir> (--file body.py | -c 'src') [--run] [--after <id>] [--language python|markdown|sql|r|prompt|widget]
@@ -9916,14 +9958,16 @@ strata dep rm        <notebook_dir> <package>                     # uv remove
 ```
 
 `--file -` reads cell source from stdin; `-c 'src'` passes the source inline
-(the two are mutually exclusive). `cell add` mints a backend-style 8-char id (the
+(the two are mutually exclusive). `--language` defaults to `python`, except that a
+`--file` whose extension is another language's (`q.sql`, `p.prompt`) needs it
+spelled out, so a SQL file never becomes a Python cell by accident. `cell add` mints a backend-style 8-char id (the
 same scheme the server uses) and prints the new cell; `mv` prints the new order.
 Pass **`--run`** to execute the cell right after adding it (the one-call
 scratchpad primitive), and the run outcome (`status`, `cache_hit`, `stdout`,
 `stderr`) is folded into the output under `run`. The returned cell is the
 **post-run** view, so its rendered `outputs` (a trailing bare expression's value)
 ride along without a separate `cell show` (`--no-sync` skips the venv sync, as
-with `cell run`). `cell annotate` splices `# @key` [annotations](https://bearingresearch.com/strata/dev/reference/annotations/) into a
+with `cell run`). `cell annotate` splices `# @key` [annotations](https://bearingresearch.com/strata/dev/reference/annotations/) (`-- @key` in a SQL cell) into a
 cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with `edit`;
 it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit
@@ -10124,7 +10168,7 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 - A remote worker resolves names against its own `STRATA_NOTEBOOK_CREDENTIALS`; only the name travels in the dispatch.
 - On a service-mode server, and on any remote worker, a mount's own `options` cannot override a credential's fields or name another secret, file or endpoint: see [Mount options on a shared server](#mount-options-on-a-shared-server).
 - `STRATA_NOTEBOOK_CREDENTIAL_PATHS='{"lab-a": ["/srv/projects/lab-a"]}'` keeps a name to the notebooks under those directories, for a server that hosts several projects. Anywhere else, the cell fails with `credential 'lab-a' is not available to this notebook`, naming the credential and none of its fields. Mounts, connections and catalogs are all checked, and so is a mount sent to a remote worker, before it is sent. A listed name is not usable outside a notebook at all, for example by a scan through a catalog that names it. Names not listed stay open to every notebook.
-- `STRATA_NOTEBOOK_CREDENTIAL_WRITERS='{"lab-bucket": ["user_*", "agent:agt_1/*"]}'` says who may write through a name, as glob patterns over the principal who started the run (`["*"]` is anyone). It gates three writes: an `rw` mount, a `# @sql connection=... write=true` cell whose connection names the credential, and a [`# @write_table`](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table) into a catalog whose `strata_credential` names it. Once it is set, even to `{}`, a name not listed is read-only. A write through a name the run may not write with fails before the run with `credential 'lab-bucket' is read-only on this server` or `... is not writable by '<principal>'`, and nothing is staged or written. An `rw` mount from a cell or from `notebook.toml` is checked, and so is one sent to a remote worker, before it is sent. A mount names a credential when its scheme has a default (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) as well as when it names its own, and both are checked, since the write uses both. An `rw` mount on `s3`, `gs` or `az` that names no credential, and whose scheme has no default, fails with `a read-write s3 mount must name the source it writes to with credential=<name>`, since it would write as the server's own identity. A `file://` mount is outside the setting. A run with no principal (personal mode) matches only `*`. Unset, every name writes. Reads and provenance are unchanged.
+- `STRATA_NOTEBOOK_CREDENTIAL_WRITERS='{"lab-bucket": ["user_*", "agent:agt_1/*"]}'` says who may write through a name, as glob patterns over the principal who started the run (`["*"]` is anyone). It gates three writes: an `rw` mount, a `-- @sql connection=... write=true` cell whose connection names the credential, and a [`# @write_table`](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table) into a catalog whose `strata_credential` names it. Once it is set, even to `{}`, a name not listed is read-only. A write through a name the run may not write with fails before the run with `credential 'lab-bucket' is read-only on this server` or `... is not writable by '<principal>'`, and nothing is staged or written. An `rw` mount from a cell or from `notebook.toml` is checked, and so is one sent to a remote worker, before it is sent. A mount names a credential when its scheme has a default (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) as well as when it names its own, and both are checked, since the write uses both. An `rw` mount on `s3`, `gs` or `az` that names no credential, and whose scheme has no default, fails with `a read-write s3 mount must name the source it writes to with credential=<name>`, since it would write as the server's own identity. A `file://` mount is outside the setting. A run with no principal (personal mode) matches only `*`. Unset, every name writes. Reads and provenance are unchanged.
 
 What these settings limit is what Strata stages and syncs back. A cell never receives a credential's resolved values from Strata: the manifest names a mount's local path, not its options. But a value can reach a cell another way, and then the cell can use it directly, whatever the settings say:
 
@@ -10278,11 +10322,11 @@ application_name = "strata"
 connect_timeout = 5
 ```
 
-SQL cells reference these by name via `# @sql connection=<name>`.
+SQL cells reference these by name via `-- @sql connection=<name>`.
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `<name>` | section header | Connection name - referenced by `# @sql connection=<name>`. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
+| `<name>` | section header | Connection name - referenced by `-- @sql connection=<name>`. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
 | `driver` | string (required) | One of the shipped adapters: `duckdb`, `sqlite`, `postgresql`, `snowflake`, `bigquery`. MotherDuck and MySQL are planned but not yet implemented. |
 | `auth` | table | `${VAR}` indirections only, resolved at execute time and never hashed into provenance. A personal server reads them from its own process environment. A server in service mode reads them from the notebook's env (`[env]` and its secret manager) and never from its own, so a variable the notebook does not set fails the connection; give a connection a server-held secret with `credential`. |
 | `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become driver auth, underneath this block's own `auth`. |
@@ -10368,8 +10412,8 @@ timeout = 600                 # cell-level override
 | Key | Type | Description |
 | --- | --- | --- |
 | `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against - **not** `@name`. See [Cell IDs](https://bearingresearch.com/strata/dev/reference/annotations/python/#cell-ids). |
-| `file` | string (required) | Path to the cell source under `cells/`. The backend names it `<id>.py`, or `<id>.md`, `<id>.r` and `<id>.widget` for markdown, R and widget cells. |
-| `language` | `"python"` \| `"prompt"` \| `"sql"` \| `"markdown"` \| `"r"` \| `"widget"` | Default `"python"`. |
+| `file` | string (required) | Path to the cell source under `cells/`. The backend names a new cell's file by its language: `<id>.py`, `<id>.sql`, `<id>.prompt`, `<id>.md`, `<id>.r` or `<id>.widget`. The name is only for outside editors; `language` decides how the cell runs. |
+| `language` | `"python"` \| `"prompt"` \| `"sql"` \| `"markdown"` \| `"r"` \| `"widget"` (required) | How the cell runs. There is no default and the file's extension is never read for it: a notebook with a cell that leaves it out does not open, and the error names the cell. |
 | `order` | float | Display order. Float so cells can be inserted between existing ones without renumbering. Default `0`. |
 | `worker` | string \| absent | Cell-level worker override. Beaten by `# @worker` in the cell source. |
 | `timeout` | float \| absent | Cell-level timeout override. Beaten by `# @timeout`. |
@@ -11062,7 +11106,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 | `STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS` | `[]` | Directories a `${file:...}` credential reference may read from, as a JSON array or comma-separated absolute paths. A path counts as inside when it resolves there with every symlink followed. Empty, `PUT /v1/admin/notebook-credentials` refuses every `${file:...}` and the startup references in `STRATA_NOTEBOOK_CREDENTIALS` are not limited. Set, every `${file:...}`, from the startup setting or the route, must resolve inside a root, checked at the `PUT` and again at each read; a file there rewritten in place is used at the next run with no call. See [Changing them while the server runs](https://bearingresearch.com/strata/dev/reference/notebook-toml/#changing-them-while-the-server-runs). |
 | `STRATA_NOTEBOOK_MOUNT_CREDENTIALS` | `{}` | A default credential per mount URI scheme as JSON, e.g. `{"s3": "org-bucket"}`, applied to mounts that name none. |
 | `STRATA_NOTEBOOK_CREDENTIAL_PATHS` | `{}` | Credential names only some notebooks may use, as JSON `{name: [directory, ...]}` with absolute directories. A listed name resolves only for a notebook under one of its directories, compared as written (symlinks are not followed, and a path with `..` is never inside); anywhere else, and outside any notebook, it fails naming the credential. Names not listed are open to every notebook. See [Named credentials](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials). |
-| `STRATA_NOTEBOOK_CREDENTIAL_WRITERS` | unset (every name writes) | Who may write through a credential, as JSON `{name: [principal glob, ...]}` matched against the principal who started the run (`"*"` is anyone, and the only pattern a run with no principal matches). It gates an `rw` mount, a `# @sql ... write=true` cell whose connection names the credential, and a `# @write_table` into a catalog whose `strata_credential` names it. A mount whose scheme has a default credential (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) names that one too. Once set, even to `{}` (every name read-only), a name not listed is read-only: a write through it fails before the run, naming the credential, and an `rw` mount on `s3`, `gs` or `az` must name a credential. A `file://` mount is outside the setting. See [Named credentials](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials). |
+| `STRATA_NOTEBOOK_CREDENTIAL_WRITERS` | unset (every name writes) | Who may write through a credential, as JSON `{name: [principal glob, ...]}` matched against the principal who started the run (`"*"` is anyone, and the only pattern a run with no principal matches). It gates an `rw` mount, a `-- @sql ... write=true` cell whose connection names the credential, and a `# @write_table` into a catalog whose `strata_credential` names it. A mount whose scheme has a default credential (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) names that one too. Once set, even to `{}` (every name read-only), a name not listed is read-only: a write through it fails before the run, naming the credential, and an `rw` mount on `s3`, `gs` or `az` must name a credential. A `file://` mount is outside the setting. See [Named credentials](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials). |
 | `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN` | `false` | Whether a cell's [`# @write_table`](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table) may `append` to or `merge` into a table Strata did not create (another writer's). Off, only tables Strata wrote first; an `overwrite` of such a table is refused either way. |
 | `STRATA_NOTEBOOK_MOUNT_CACHE_DIR` | `mount_cache` beside `STRATA_NOTEBOOK_STORAGE_DIR` | Where read-only remote mounts are kept, one copy per machine shared by every notebook: `objects/` holds each remote file once, by URI and version, and `views/` holds each mount's prefix as hard links to them. A harness user must be able to pass through it. Its files and view directories are read-only, so removing it by hand takes `chmod -R u+w` first. On a worker, `~/.strata/mount_cache`, kept across jobs. See [`@mount`](https://bearingresearch.com/strata/dev/reference/annotations/python/#mount). |
 | `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES` | `21474836480` (20 GiB) | Once the mount cache's copies pass this, the least recently used views are removed, with the copies only they held, until it fits. A view used in the last hour, or one a running cell still holds, is kept. `0` turns the cap off. |
@@ -15342,7 +15386,7 @@ A Strata deployment has three persistent locations:
 
 | Location | Default | Contents | When to back up |
 | --- | --- | --- | --- |
-| **Notebook storage** | `~/.strata/notebooks/` | One subdirectory per notebook: `notebook.toml`, `cells/*.py`, `pyproject.toml`, `uv.lock`, `work/` (where cells write files), `.strata/` (per-notebook runtime), `.venv/` (per-notebook venv) | Always - this is your work |
+| **Notebook storage** | `~/.strata/notebooks/` | One subdirectory per notebook: `notebook.toml`, `cells/` (one source file per cell), `pyproject.toml`, `uv.lock`, `work/` (where cells write files), `.strata/` (per-notebook runtime), `.venv/` (per-notebook venv) | Always - this is your work |
 | **Iceberg row-group cache** | `~/.strata/cache/` | Arrow-IPC files keyed by Parquet row-group, and the Parquet/Iceberg metadata cache in `metadata.sqlite` inside it (a cache clear keeps it) | Optional - purely a perf cache, safe to delete |
 | **Server-side artifact store** | `~/.strata/artifacts/` (or `STRATA_ARTIFACT_DIR`) | The Core SDK's artifact blobs + metadata SQLite (the metadata moves to Postgres with `STRATA_ARTIFACT_METADATA_DSN`, and `strata migrate` copies an existing SQLite store across). **Distinct from the per-notebook `.strata/artifacts/`** below. | If you use `StrataClient.materialize`, named artifact pointers, publications or pins you care about, API keys, or the service-mode worker registry (they live in the same database) |
 

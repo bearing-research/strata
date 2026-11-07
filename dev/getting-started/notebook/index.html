@@ -3394,7 +3394,7 @@ directory is a common choice), start the server with <code>--notebook-dir</code>
 location on startup.</p>
 <p>Each notebook gets its own Python environment, managed by <code>uv</code>, so
 installing pandas in one notebook doesn't touch another. Everything
-autosaves: source goes to <code>cells/*.py</code>, runtime state to <code>.strata/</code>.
+autosaves: source goes to <code>cells/</code>, runtime state to <code>.strata/</code>.
 Both diff cleanly in git, no JSON blobs in commits.</p>
 <h3 id="cell-types">Cell types<a class="headerlink" href="#cell-types" title="Permanent link">&para;</a></h3>
 <p>The <strong>+ Add cell</strong> menu offers six kinds, and Python is the default.

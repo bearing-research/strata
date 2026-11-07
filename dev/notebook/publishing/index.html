@@ -3462,7 +3462,7 @@ crate it is a <code>File</code> whose <code>@id</code> is the URL, with that <co
 retrieval time as <code>sdDatePublished</code>. The digest describes what was read, and
 the URL may serve something else now. A step stored before retrieval times were
 recorded shows only when it ran.</p>
-<p>A Snowflake or BigQuery cell with <a href="../../reference/annotations/sql/#cache"><code># @cache snapshot</code></a>,
+<p>A Snowflake or BigQuery cell with <a href="../../reference/annotations/sql/#cache"><code>-- @cache snapshot</code></a>,
 published or upstream of what is, shows the moment of the warehouse state it
 read ("Warehouse state as of") and how long the warehouse keeps that state
 ("Queryable until"). Until then a reader with access to the warehouse can run

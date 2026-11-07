@@ -3176,7 +3176,8 @@
 </tbody>
 </table>
 </div>
-<p>R cells take a subset of these: see <a href="r/">R annotations</a>.</p>
+<p>R cells take a subset of these: see <a href="r/">R annotations</a>. SQL cells take six of them,
+written as SQL comments (<code>-- @key value</code>): see <a href="sql/#what-a-sql-cell-reads">What a SQL cell reads</a>.</p>
 <h2 id="how-annotations-are-read">How annotations are read<a class="headerlink" href="#how-annotations-are-read" title="Permanent link">&para;</a></h2>
 <p>Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, filesystem mounts, and cache behavior, without separate configuration UI. The cell source is the single source of truth.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># @name Train Classifier</span>
@@ -3187,7 +3188,7 @@
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">y</span> <span class="o">=</span> <span class="n">labels</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">classifier</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
 </code></pre></div>
-<p>Annotations are parsed from the <strong>first contiguous block</strong> of <code>#</code>-prefixed lines. Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format <code># @key value</code>. A key that is not an
+<p>Annotations are parsed from the <strong>first contiguous block</strong> of <code>#</code>-prefixed lines (<code>--</code> in a <a href="sql/#writing-them">SQL cell</a>). Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format <code># @key value</code>. A key that is not an
 annotation, such as a misspelled <code># @wroker gpu</code>, does nothing; validation
 warns about it (<code>annotation_unknown</code>, in the cell header and <code>strata validate</code>)
 and suggests the annotation it is closest to.</p>
@@ -3237,13 +3238,13 @@ anyway would compute, and cache, something other than what the source declares.
 </tr>
 <tr>
 <td><strong>SQL connection</strong></td>
-<td><code># @sql connection=X</code></td>
+<td><code>-- @sql connection=X</code></td>
 <td>(annotation only)</td>
 <td>none; required for SQL cells</td>
 </tr>
 <tr>
 <td><strong>Cache policy</strong></td>
-<td><code># @cache &lt;policy&gt;</code></td>
+<td><code>-- @cache &lt;policy&gt;</code></td>
 <td>(annotation only)</td>
 <td><code>fingerprint</code> (read), <code>session</code> (write)</td>
 </tr>

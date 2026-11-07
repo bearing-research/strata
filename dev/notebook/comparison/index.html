@@ -3126,7 +3126,7 @@ as first-class cell behaviors rather than escape hatches.</p>
 <tbody>
 <tr>
 <td>File format</td>
-<td>Per-cell <code>.py</code> files + <code>notebook.toml</code> manifest</td>
+<td>One file per cell in its language (<code>.py</code>, <code>.sql</code>, <code>.md</code>, ...) + <code>notebook.toml</code> manifest</td>
 <td>Single <code>.py</code> per notebook</td>
 <td>Single <code>.jl</code> per notebook</td>
 <td>JSON <code>.ipynb</code></td>
@@ -3234,7 +3234,7 @@ is a one-line edit in <code>notebook.toml</code> and downstream cells re-cascade
 against the new producer. The other tools require duplicating cells (and
 the downstream cells that read them) per variant.</p>
 <p><strong>Notebook commits show the work, not the runtime.</strong> Strata stores cells
-as one <code>.py</code> file per cell, <code>notebook.toml</code> as the manifest, and all
+as one file per cell in its language (<code>.py</code>, <code>.sql</code>, <code>.md</code>, ...), <code>notebook.toml</code> as the manifest, and all
 runtime state (display outputs, console snapshots, the artifact store) in
 a gitignored <code>.strata/</code> directory. <code>notebook.toml</code>'s <code>updated_at</code> only
 bumps on structural edits (adding or removing cells, changing workers),

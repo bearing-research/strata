@@ -2288,6 +2288,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#writing-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing them
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-sql-cell-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a SQL cell reads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sql" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3018,6 +3040,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#writing-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing them
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-sql-cell-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a SQL cell reads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#sql" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3073,10 +3117,63 @@
 <p>A cell with <code>language = "sql"</code> runs a query through a declared connection.
 See <a href="../../../guides/cells/sql/#sql-cells">SQL cells</a> for the full feature walkthrough; this
 section is the per-annotation reference.</p>
+<h2 id="writing-them">Writing them<a class="headerlink" href="#writing-them" title="Permanent link">&para;</a></h2>
+<p>A SQL cell's annotations are SQL comments: <code>-- @key value</code>, in the leading block of
+<code>--</code> lines at the top of the cell. Blank lines and other <code>--</code> comments may sit in the
+block, and the query starts at the first line that is neither. The file stays valid
+SQL, so an editor or linter reads the <code>.sql</code> file as it is.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1">-- @name top_customers</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1">-- @sql connection=warehouse</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1">-- @cache forever</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1">-- Reference data: it changes rarely.</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span>
+</code></pre></div>
+<p><code>#</code> is not a comment in SQL, so a <code># @sql ...</code> line in a SQL cell is not an
+annotation: it would reach the database as SQL. Validation reports it as the error
+<code>sql_annotation_hash</code>, naming the line, and the cell does not run.</p>
+<h2 id="what-a-sql-cell-reads">What a SQL cell reads<a class="headerlink" href="#what-a-sql-cell-reads" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Annotation</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#sql"><code>-- @sql connection=&lt;name&gt; [write=true]</code></a></td>
+<td>The connection the query runs on (required), and whether it may write.</td>
+</tr>
+<tr>
+<td><a href="#cache"><code>-- @cache &lt;policy&gt;</code></a></td>
+<td>The cache policy: <code>fingerprint</code> (the default), <code>forever</code>, <code>session</code>, <code>ttl=&lt;seconds&gt;</code> or <code>snapshot</code>.</td>
+</tr>
+<tr>
+<td><a href="../python/#nocache"><code>-- @nocache</code></a></td>
+<td>Always run; wins over any <code>@cache</code> policy.</td>
+</tr>
+<tr>
+<td><a href="#name"><code>-- @name &lt;identifier&gt;</code></a></td>
+<td>The output variable (default <code>result</code>).</td>
+</tr>
+<tr>
+<td><a href="../python/#after"><code>-- @after &lt;cell-id&gt;</code></a></td>
+<td>An ordering-only edge from another cell, such as the one that writes the database this cell reads.</td>
+</tr>
+<tr>
+<td><a href="../python/#mount"><code>-- @mount &lt;name&gt; &lt;uri&gt; ro</code></a></td>
+<td>A mount a DuckDB connection's <code>mounts</code> can name, read-only.</td>
+</tr>
+</tbody>
+</table>
+<p>These six are the only ones a SQL cell acts on. Any other annotation, such as
+<code>-- @worker</code> or <code>-- @timeout</code>, does nothing on a SQL cell, and validation warns
+about it (<code>annotation_not_for_sql</code>). A SQL cell runs in the server, so it has no
+worker, timeout or environment of its own.</p>
 <h2 id="sql"><code>@sql</code><a class="headerlink" href="#sql" title="Permanent link">&para;</a></h2>
 <p>Marks the cell as SQL and binds it to a named connection.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="p">:</span><span class="n">min_amount</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">-- @sql connection=warehouse</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="p">:</span><span class="n">min_amount</span>
 </code></pre></div>
 <p>Key/value parameters:</p>
 <ul>
@@ -3096,10 +3193,10 @@ section is the per-annotation reference.</p>
   <code>INSERT</code>, <code>DROP</code>). It is per-cell; read cells on the same connection stay
   read-only.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">DROP</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">events</span><span class="p">;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="p">(</span><span class="n">id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span><span class="w"> </span><span class="n">label</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">);</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">'alpha'</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="s1">'beta'</span><span class="p">);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">-- @sql connection=warehouse write=true</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">DROP</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">events</span><span class="p">;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="p">(</span><span class="n">id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span><span class="w"> </span><span class="n">label</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">);</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">'alpha'</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="s1">'beta'</span><span class="p">);</span>
 </code></pre></div>
 <p>Write cells split the body into individual statements via sqlglot, run each
 in sequence, and emit a per-statement status table (<code>stmt</code>, <code>kind</code>,
@@ -3138,18 +3235,18 @@ has no anchor when the cell mutates state.</p>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">forever</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">dim_country</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1">-- @sql connection=warehouse</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1">-- @cache forever</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">dim_country</span>
 </code></pre></div>
-<p><code># @cache snapshot</code> needs a driver whose warehouse can query a table as it
+<p><code>-- @cache snapshot</code> needs a driver whose warehouse can query a table as it
 stood at a moment in time. <strong>Snowflake</strong> (<code>AT (TIMESTAMP =&gt; ...)</code>) and
 <strong>BigQuery</strong> (<code>FOR SYSTEM_TIME AS OF ...</code>) can, and so can a <strong>DuckDB</strong>
 connection with a <code>catalog</code> (see below). SQLite, PostgreSQL and DuckDB without
 a catalog cannot, and the cell is refused before any connection is opened.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">snapshot</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">region</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">revenue</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">-- @sql connection=warehouse</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1">-- @cache snapshot</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">region</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">revenue</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span>
 </code></pre></div>
 <p>The first run reads the warehouse clock and runs the query with every table
 pinned to that moment. The timestamp is the cell's cache key and is recorded on
@@ -3159,7 +3256,7 @@ timestamp moves only when the cell changes (its query, binds, connection or
 upstream inputs) or when you rerun it (<code>↻</code>), which pins to now.</p>
 <p>Time travel only reaches back so far, so each run reports how long its state
 stays queryable:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>State as of 2026-09-15T10:05:00+00:00; queryable until 2026-09-16T10:05:00+00:00.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>State as of 2026-09-15T10:05:00+00:00; queryable until 2026-09-16T10:05:00+00:00.
 </code></pre></div>
 <p>On Snowflake the horizon is the shortest <code>DATA_RETENTION_TIME_IN_DAYS</code> among
 the tables the query reads. On BigQuery it is 48 hours, the shortest time travel
@@ -3175,7 +3272,7 @@ asking the catalog, so a hit works with the catalog unreachable, and a new
 snapshot of a table does not make the cell out of date. Only a rerun (<code>↻</code>)
 or a change to the cell moves it to the current snapshots. The run says which
 snapshots it shows:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>State of lake.taxi.trips at snapshot 5739646342007261951.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>State of lake.taxi.trips at snapshot 5739646342007261951.
 </code></pre></div>
 <p>Every table the query reads must be one of the catalog's, since only those have
 snapshots to read again: a query that reads a mount or a table in the
@@ -3186,10 +3283,10 @@ freshness probe details are in <a href="../../../guides/cells/sql/#per-driver-fr
 <h2 id="name"><code>@name</code><a class="headerlink" href="#name" title="Permanent link">&para;</a></h2>
 <p>For SQL cells, <code>@name</code> sets the output variable name (default <code>result</code>),
 the same way it does for prompt cells.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="n">name</span><span class="w"> </span><span class="n">top_customers</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">5</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1">-- @sql connection=warehouse</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1">-- @name top_customers</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">5</span>
 </code></pre></div>
 <p>A downstream Python cell can then reference <code>top_customers</code> directly as a
 <code>pyarrow.Table</code>; call <code>.to_pandas()</code> for a pandas DataFrame.</p>

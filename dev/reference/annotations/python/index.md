@@ -48,17 +48,17 @@ and `@loop start_from=` reference across cells. The defaults:
 
 ```toml
 cells = [
-    { id = "seed",      file = "seed_database.py", language = "sql",    order = 0 },
-    { id = "threshold", file = "threshold.py",     language = "python", order = 1 },
-    { id = "top-orders", file = "top_orders.py",   language = "sql",    order = 2 },
+    { id = "seed",       file = "seed_database.sql", language = "sql",    order = 0 },
+    { id = "threshold",  file = "threshold.py",      language = "python", order = 1 },
+    { id = "top-orders", file = "top_orders.sql",    language = "sql",    order = 2 },
 ]
 ```
 
-…then in `cells/top_orders.py`:
+…then in `cells/top_orders.sql`:
 
 ```sql
-# @sql connection=warehouse
-# @after seed
+-- @sql connection=warehouse
+-- @after seed
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
@@ -137,7 +137,7 @@ model = torch.nn.Linear(384, 10).cuda()
 Format: `# @env KEY=value`. Multiple `@env` lines are supported. The variable is available in `os.environ` during cell execution.
 
 !!! warning "Don't put secrets in `# @env`"
-    `# @env` values live in **committed cell source** (`cells/*.py`).
+    `# @env` values live in **committed cell source** (the files under `cells/`).
     The sensitive-key blanking that the notebook.toml `[env]` writer
     applies (KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL values blanked
     before commit) does **not** apply to `# @env` - the literal value
@@ -497,7 +497,7 @@ wrong for a cell whose *point* is a side effect or fresh value:
 
 `# @nocache` opts such a cell out. `# @nocache off` re-enables caching (useful to
 override a default you set elsewhere). It applies to every language (on a SQL
-cell it wins over any `# @cache` policy, `forever` included) and sits alongside
+cell it wins over any `-- @cache` policy, `forever` included) and sits alongside
 the read-write-`@mount` rule, which already forces re-execution for the same
 reason.
 
@@ -545,8 +545,8 @@ state that subsequent SQL cells query, and no Python variable flows
 between them.
 
 ```sql
-# @sql connection=warehouse
-# @after seed
+-- @sql connection=warehouse
+-- @after seed
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 

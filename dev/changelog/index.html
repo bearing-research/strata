@@ -3893,6 +3893,24 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A new SQL cell is saved as <code>.sql</code>, a new prompt cell as <code>.prompt</code>.</strong> Both
+  used to get <code>.py</code>, so linters and editors read SQL and prompt text as broken
+  Python. The language still comes from <code>notebook.toml</code>, so existing cells keep
+  their files and their cached results. The examples' cells are renamed. (#1474)</li>
+<li><strong>Breaking: every <code>[[cells]]</code> entry in <code>notebook.toml</code> needs a <code>language</code>.</strong>
+  It used to default to <code>python</code>, so a hand-written <code>.sql</code> entry that left it out
+  ran as Python and failed with a syntax error. A notebook with a cell that has no
+  <code>language</code> now does not open, and the error names the cell. Strata has always
+  written the key, so only hand-written entries are affected. (#1474)</li>
+<li><strong>Breaking: a SQL cell's annotations are SQL comments, <code>-- @key value</code>.</strong> <code>#</code> is no
+  comment in any SQL driver, so a <code># @sql</code> line left the file invalid SQL, a <code>-- note</code>
+  above it turned every annotation off, and a <code>#</code> comment in the query failed at the
+  database. A SQL cell now reads its leading <code>--</code> block, and a <code># @key</code> line in one is
+  an error that names the line. Changing <code>#</code> to <code>--</code> in an existing cell does not run
+  it again: its key covers the query and what the annotations say, not how they
+  are written. SQL cells act on <code>@sql</code>, <code>@cache</code>,
+  <code>@nocache</code>, <code>@name</code>, <code>@after</code> and <code>@mount</code>, listed in the SQL annotation reference;
+  any other annotation on one is a warning. (#1474)</li>
 <li><strong>A prompt cell no longer sends text it could not fill in.</strong> Before, anything
   the template could not evaluate (<code>{{ x | upper }}</code>, <code>{% if x %}</code>, <code>{{ x['k'] }}</code>,
   a name no cell defines) went to the model as written, and the paid answer was

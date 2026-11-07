@@ -114,7 +114,7 @@ location on startup.
 
 Each notebook gets its own Python environment, managed by `uv`, so
 installing pandas in one notebook doesn't touch another. Everything
-autosaves: source goes to `cells/*.py`, runtime state to `.strata/`.
+autosaves: source goes to `cells/`, runtime state to `.strata/`.
 Both diff cleanly in git, no JSON blobs in commits.
 
 ### Cell types

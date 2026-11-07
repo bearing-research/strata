@@ -3051,13 +3051,13 @@
 <h1 id="sql-orders-report">SQL Orders Report<a class="headerlink" href="#sql-orders-report" title="Permanent link">&para;</a></h1>
 <p>A small five-cell notebook that demonstrates Strata's SQL cell support
 against a local SQLite warehouse. The cells span three languages
-(Python → SQL → Python) and exercise both <code># @cache fingerprint</code> (data-
-sensitive) and <code># @cache forever</code> (reference-data) policies.</p>
+(Python → SQL → Python) and exercise both <code>-- @cache fingerprint</code> (data-
+sensitive) and <code>-- @cache forever</code> (reference-data) policies.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Connection config in <code>notebook.toml</code>.</strong> The <code>[connections.warehouse]</code>
   block declares a SQLite driver with a relative path. SQL cells
-  reference it by name via <code># @sql connection=warehouse</code>.</li>
+  reference it by name via <code>-- @sql connection=warehouse</code>.</li>
 <li><strong>Bind parameters from upstream Python.</strong> <code>top_orders</code> resolves
   <code>:min_amount</code> from the <code>threshold</code> cell's variable. No string
   substitution happens, the value flows through ADBC's parameter
@@ -3070,7 +3070,7 @@ sensitive) and <code># @cache forever</code> (reference-data) policies.</p>
 <li><strong>Read-only by default, opt-in writes.</strong> SQL cells open the
   connection with <code>mode=ro</code> plus <code>PRAGMA query_only = ON</code> so a
   stray <code>INSERT</code> can't mutate the DB. The seed cell explicitly
-  opts into writable execution via <code># @sql connection=warehouse
+  opts into writable execution via <code>-- @sql connection=warehouse
   write=true</code>: that's the per-cell escape hatch for setup
   scripts. Other cells in the notebook stay read-only.</li>
 <li><strong>Cross-language pipeline.</strong> The two SQL results flow back into the
@@ -3100,12 +3100,12 @@ sensitive) and <code># @cache forever</code> (reference-data) policies.</p>
 <tr>
 <td><code>top_orders</code></td>
 <td>SQL</td>
-<td><code>WHERE amount &gt; :min_amount</code>, joined to the product catalog, top 5. Declares <code># @after seed</code>.</td>
+<td><code>WHERE amount &gt; :min_amount</code>, joined to the product catalog, top 5. Declares <code>-- @after seed</code>.</td>
 </tr>
 <tr>
 <td><code>category_summary</code></td>
 <td>SQL</td>
-<td>Revenue by category with <code># @cache forever</code>. Declares <code># @after seed</code>.</td>
+<td>Revenue by category with <code>-- @cache forever</code>. Declares <code>-- @after seed</code>.</td>
 </tr>
 <tr>
 <td><code>report</code></td>
@@ -3117,7 +3117,7 @@ sensitive) and <code># @cache forever</code> (reference-data) policies.</p>
 <h2 id="dag-dependencies">DAG dependencies<a class="headerlink" href="#dag-dependencies" title="Permanent link">&para;</a></h2>
 <p><code>top_orders</code> and <code>category_summary</code> depend on the SQLite file that
 <code>seed</code> produces, but no Python variable flows between them, the
-dependency is on a side effect. The <code># @after seed</code> annotation adds
+dependency is on a side effect. The <code>-- @after seed</code> annotation adds
 an ordering-only edge to the DAG so cascade execution and staleness
 both see the link.</p>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
@@ -3145,7 +3145,7 @@ order (or hit "Run all").</p>
   count is unchanged, read-only mode is the security boundary.</p>
 <h2 id="seed">seed<a class="headerlink" href="#seed" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> sql</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1">-- @sql connection=warehouse write=true</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1">-- Seed analytics.db with a small orders dataset.</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1">--</span>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1">-- ``write=true`` opts this cell into writable execution: the</span>
@@ -3211,10 +3211,10 @@ order (or hit "Run all").</p>
 </code></pre></div>
 <h2 id="top_orders">top_orders<a class="headerlink" href="#top_orders" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> sql</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="n">name</span><span class="w"> </span><span class="n">top_orders</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">fingerprint</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">-- @sql connection=warehouse</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1">-- @name top_orders</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1">-- @cache fingerprint</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1">-- @after seed</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">SELECT</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="n">o</span><span class="p">.</span><span class="n">id</span><span class="p">,</span>
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="n">o</span><span class="p">.</span><span class="n">customer</span><span class="p">,</span>
@@ -3230,10 +3230,10 @@ order (or hit "Run all").</p>
 </code></pre></div>
 <h2 id="category_summary">category_summary<a class="headerlink" href="#category_summary" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> sql</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="n">name</span><span class="w"> </span><span class="n">category_summary</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">forever</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1">-- @sql connection=warehouse</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1">-- @name category_summary</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1">-- @cache forever</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1">-- @after seed</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1">-- The product catalog is reference data: it changes rarely and</span>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1">-- the user's asserting "treat this as static". `forever` skips the</span>
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1">-- freshness probe; only an edit to the SQL body itself invalidates</span>

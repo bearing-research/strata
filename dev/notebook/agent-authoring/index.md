@@ -13,7 +13,7 @@ report it.
 
 ```bash
 strata new "My Analysis" --no-env     # 1. scaffold
-# 2. write cells/*.py, list them in notebook.toml
+# 2. write the files under cells/, list them in notebook.toml
 strata validate my_analysis           # 3. static checks - cheap, run after every edit
 strata run my_analysis                # 4. execute (syncs the venv on first run)
 ```
@@ -99,11 +99,13 @@ when writing it by hand:
   deleting a cell.
 - **`file`** - relative to `cells/`. The extension is never read (the
   language comes from `language`); the server writes `.py` for python,
-  prompt and sql, `.r` for r, `.md` for markdown and `.widget` for widget.
+  `.sql` for sql, `.prompt` for prompt, `.r` for r, `.md` for markdown and
+  `.widget` for widget.
 - **`order`** - display order *and* reference-resolution order (see
   below). Keep it consistent with the list order.
-- **`language`** - one of `python`, `r`, `sql`, `prompt`, `markdown`,
-  `widget`.
+- **`language`** - required, one of `python`, `r`, `sql`, `prompt`,
+  `markdown`, `widget`. There is no default: a cell without it stops the
+  notebook from opening, with an error that names the cell.
 
 ## pyproject.toml - required for `strata run`
 

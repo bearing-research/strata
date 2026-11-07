@@ -3292,7 +3292,7 @@ result doesn't open, validate, and run, that's a Strata bug - please
 report it.</p>
 <h2 id="the-loop">The loop<a class="headerlink" href="#the-loop" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>strata<span class="w"> </span>new<span class="w"> </span><span class="s2">"My Analysis"</span><span class="w"> </span>--no-env<span class="w">     </span><span class="c1"># 1. scaffold</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># 2. write cells/*.py, list them in notebook.toml</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># 2. write the files under cells/, list them in notebook.toml</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>strata<span class="w"> </span>validate<span class="w"> </span>my_analysis<span class="w">           </span><span class="c1"># 3. static checks - cheap, run after every edit</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w">                </span><span class="c1"># 4. execute (syncs the venv on first run)</span>
 </code></pre></div>
@@ -3363,11 +3363,13 @@ when writing it by hand:</p>
   deleting a cell.</li>
 <li><strong><code>file</code></strong> - relative to <code>cells/</code>. The extension is never read (the
   language comes from <code>language</code>); the server writes <code>.py</code> for python,
-  prompt and sql, <code>.r</code> for r, <code>.md</code> for markdown and <code>.widget</code> for widget.</li>
+  <code>.sql</code> for sql, <code>.prompt</code> for prompt, <code>.r</code> for r, <code>.md</code> for markdown and
+  <code>.widget</code> for widget.</li>
 <li><strong><code>order</code></strong> - display order <em>and</em> reference-resolution order (see
   below). Keep it consistent with the list order.</li>
-<li><strong><code>language</code></strong> - one of <code>python</code>, <code>r</code>, <code>sql</code>, <code>prompt</code>, <code>markdown</code>,
-  <code>widget</code>.</li>
+<li><strong><code>language</code></strong> - required, one of <code>python</code>, <code>r</code>, <code>sql</code>, <code>prompt</code>,
+  <code>markdown</code>, <code>widget</code>. There is no default: a cell without it stops the
+  notebook from opening, with an error that names the cell.</li>
 </ul>
 <h2 id="pyprojecttoml-required-for-strata-run">pyproject.toml - required for <code>strata run</code><a class="headerlink" href="#pyprojecttoml-required-for-strata-run" title="Permanent link">&para;</a></h2>
 <p><code>strata run</code> builds the notebook's environment with <code>uv sync</code>, which needs a

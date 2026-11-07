@@ -206,7 +206,7 @@ retrieval time as `sdDatePublished`. The digest describes what was read, and
 the URL may serve something else now. A step stored before retrieval times were
 recorded shows only when it ran.
 
-A Snowflake or BigQuery cell with [`# @cache snapshot`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache),
+A Snowflake or BigQuery cell with [`-- @cache snapshot`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache),
 published or upstream of what is, shows the moment of the warehouse state it
 read ("Warehouse state as of") and how long the warehouse keeps that state
 ("Queryable until"). Until then a reader with access to the warehouse can run

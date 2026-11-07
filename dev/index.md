@@ -94,8 +94,8 @@ find what it uses and what it defines, and shows which results an edit has left 
 **[Every result knows where it came from.](https://bearingresearch.com/strata/dev/concepts/artifacts-and-lineage/)** Every
 output is a versioned artifact, so you can trace it back through what produced it.
 
-**[It reads like code in git.](https://bearingresearch.com/strata/dev/concepts/file-format-and-git/)** A notebook is plain
-`.py` files plus a TOML manifest. Outputs and caches stay in a gitignored folder.
+**[It reads like code in git.](https://bearingresearch.com/strata/dev/concepts/file-format-and-git/)** A notebook is one
+plain-text file per cell plus a TOML manifest. Outputs and caches stay in a gitignored folder.
 
 There is more on the [Features](https://bearingresearch.com/strata/dev/concepts/features/) page, and Strata also works
 [as a library](https://bearingresearch.com/strata/dev/getting-started/core/).
