@@ -1,7 +1,7 @@
 """Cell executor: materialize a notebook cell.
 
 ``execute_cell`` recursively materializes upstream inputs, computes provenance
-(``sha256(sorted_input_hashes + source_hash + env_hash)``), returns a cache hit
+(cellgraph's ``parts_digest`` over the cell's key parts), returns a cache hit
 if one exists, and otherwise runs the harness and stores every consumed variable.
 It works on any cell; the cascade planner only previews what will run.
 
@@ -134,7 +134,7 @@ from strata.notebook.harness_user import (
     read_run_file,
     resolve_harness_user,
 )
-from strata.notebook.keys import cell_key
+from strata.notebook.keys import cell_key, inactive_variant_refusal
 from strata.notebook.layout import WORK_DIR
 from strata.notebook.local_runs import (
     LocalRun,
@@ -699,17 +699,12 @@ class CellExecutor:
             return None
         if cell.source != source:
             cell = cell.model_copy(update={"source": source})
-        dag = self.session.dag
-        if dag is not None and cell_id in dag.inactive_cells:
-            # cellgraph neither wires nor keys it.
-            result = CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error=f"{cell.variant_name!r} is not the active variant of group "
-                f"{cell.variant_group!r}; make it active to run it",
-            )
-            self.session.apply_execution_result_metadata(cell_id, result)
-            return result
+        # The source being run decides, which may be ahead of the session's analysis.
+        inactive = inactive_variant_refusal(self._analysis_for(cell_id, source), cell_id)
+        if inactive is not None:
+            # Not saved as the cell's error: making the variant active, not an edit,
+            # clears it.
+            return CellExecutionResult(cell_id=cell_id, success=False, error=inactive)
         diagnostic = blocking_diagnostic(cell, self.session.notebook_state, self.session.analysis)
         if diagnostic is None:
             return None
@@ -3442,6 +3437,10 @@ class CellExecutor:
             return
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id)
+        cell = self.session.notebook_state.get_cell(cell_id)
+        # The definition key is per language, as every other artifact of the cell has it.
+        language = cell.language if cell is not None else "python"
+        source_hash = compute_source_hash(source, language)
         for name in names:
             try:
                 staged = self._stage_output_dir(
@@ -3450,7 +3449,7 @@ class CellExecutor:
                     output_dir,
                     provenance_hash,
                     input_versions,
-                    source_hash=compute_source_hash(source),
+                    source_hash=source_hash,
                     source=source,
                     env_hash=env_hash,
                     variant=variant,

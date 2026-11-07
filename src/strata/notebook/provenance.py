@@ -1,8 +1,10 @@
 """Provenance hashing for notebook cells.
 
-A cell's hash covers its sorted input artifact hashes, its definition key and its
-environment hash, so identical computations hash identically. The formulas are
-cellgraph's; ``strata.notebook.keys`` assembles a cell's inputs.
+A cell's key is cellgraph's (``strata.notebook.keys``): ``parts_digest`` over its
+definition key, environment hash, tagged upstream components and inputs, so identical
+computations hash identically. ``compute_provenance_hash`` is Strata's own digest over
+sorted components, for a key cellgraph does not make: a cell in a notebook with a cycle,
+and a cell test's input fingerprint.
 """
 
 from __future__ import annotations

@@ -184,6 +184,34 @@ class TestWhenTheResultIsKnownNotToMatch:
         assert staleness.status == "idle"
         assert staleness.reasons == []
 
+    @pytest.mark.parametrize(
+        ("schema", "expected"), [(1, ("idle", [])), (None, ("stale", ["self"]))]
+    )
+    def test_a_record_from_another_key_scheme_was_not_edited(self, tmp_path, schema, expected):
+        """After an upgrade the definition key is another formula's: the cell runs again,
+        but nothing says its source changed. A record of this scheme still does."""
+        session = _open(_notebook(tmp_path, c1="x = 1"))
+        cell = session.notebook_state.get_cell("c1")
+        old_key = "e" * 64
+        cell.last_provenance_hash = "f" * 64
+        cell.last_source_hash = old_key
+        cell.last_env_hash = session.cell_env_hash(cell)
+        cell.last_key_parts = {
+            "parts_schema": cg.PARTS_SCHEMA if schema is None else schema,
+            "definition_key": old_key,
+            "env_hash": cell.last_env_hash,
+            "upstream": [],
+            "inputs": [],
+        }
+
+        staleness = session.compute_staleness()["c1"]
+
+        assert (staleness.status, staleness.reasons) == expected
+        if schema is not None:
+            chain = session.causality_map.get("c1")
+            details = [d.type for d in chain.details] if chain is not None else []
+            assert CausalityType.SOURCE_CHANGED not in details
+
     def test_an_input_that_cannot_be_read_says_nothing(self):
         chain = CausalityChain(
             reason=CausalityReason.EXTERNAL,

@@ -113,11 +113,15 @@ def stale_reasons(chain: CausalityChain) -> list[StalenessReason]:
 def _explain(session: NotebookSession, cell: CellState, found: StaleCell) -> CausalityChain:
     stored = cell.last_key_parts
     # Another schema's addresses mean nothing here. Its digest may still be good.
-    if stored is not None and stored.get("parts_schema") != cg.PARTS_SCHEMA:
+    older_scheme = stored is not None and stored.get("parts_schema") != cg.PARTS_SCHEMA
+    if older_scheme:
         stored = None
     current = found.current or {}
-    # Older records kept these two, and they are still facts.
-    recorded = stored or {"definition_key": cell.last_source_hash, "env_hash": cell.last_env_hash}
+    # Older records kept these two, and they are still facts, but another schema's
+    # definition key is another formula's: comparing it would say every cell was edited.
+    recorded = stored or {"env_hash": cell.last_env_hash}
+    if not older_scheme:
+        recorded = stored or {**recorded, "definition_key": cell.last_source_hash}
 
     source_changed = _differs(recorded, current, "definition_key")
     details: list[CausalityDetail] = []

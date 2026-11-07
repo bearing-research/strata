@@ -80,6 +80,20 @@ logger = logging.getLogger(__name__)
 _OUTPUT_VARIABLE = re.compile(r"_var_([^@]+)")
 
 
+def _short_component(component: str) -> str:
+    """An upstream component for a log line: its last value (a hash or a run id), shortened.
+
+    A component is a tagged list such as ``["provenance", hash]``; its tag says little.
+    """
+    try:
+        value: Any = json.loads(component)
+    except ValueError:
+        return component[:12]
+    while isinstance(value, list) and value:
+        value = value[-1]
+    return str(value)[:12]
+
+
 @dataclass(frozen=True)
 class PythonContext:
     """What a Python cell's run asks of the executor, and nothing else."""
@@ -354,8 +368,7 @@ async def run_python_cell(
             cell_id,
             source_hash[:12],
             env_hash[:12],
-            # A component is a tagged list ending in its hash: show the hash, not the tag.
-            [h.rstrip('"]')[-12:] for h in input_hashes],
+            [_short_component(h) for h in input_hashes],
             [fp[:20] for fp in mount_fingerprints],
             [fp[:40] for fp in prov.table_fingerprints],
             provenance_hash[:12],
