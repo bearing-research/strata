@@ -137,7 +137,7 @@ model = torch.nn.Linear(384, 10).cuda()
 Format: `# @env KEY=value`. Multiple `@env` lines are supported. The variable is available in `os.environ` during cell execution.
 
 !!! warning "Don't put secrets in `# @env`"
-    `# @env` values live in **committed cell source** (`cells/*.py`).
+    `# @env` values live in **committed cell source** (the files under `cells/`).
     The sensitive-key blanking that the notebook.toml `[env]` writer
     applies (KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL values blanked
     before commit) does **not** apply to `# @env` - the literal value

@@ -70,7 +70,7 @@ _ARRAY_OF_TABLES_SECTIONS = ("workers", "mounts", "variant_group")
 # A new cell's file extension, so outside editors and linters read it as its language;
 # the language itself comes from notebook.toml, never from the extension. Every
 # language is listed, so a new one cannot fall back to ``.py`` unnoticed.
-_EXTENSION_BY_LANGUAGE = {
+EXTENSION_BY_LANGUAGE = {
     CellLanguage.PYTHON: "py",
     CellLanguage.PROMPT: "prompt",
     CellLanguage.SQL: "sql",
@@ -889,7 +889,7 @@ def add_cell_to_notebook(
     else:
         order = len(cells_data)
 
-    cell_filename = f"{cell_id}.{_EXTENSION_BY_LANGUAGE[CellLanguage(language)]}"
+    cell_filename = f"{cell_id}.{EXTENSION_BY_LANGUAGE[CellLanguage(language)]}"
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)
 

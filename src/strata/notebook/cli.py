@@ -1198,8 +1198,8 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     add_p.add_argument("--after", help="Insert after this cell id (default: at the end)")
     add_p.add_argument(
         "--language",
-        choices=["python", "markdown", "sql", "r", "prompt", "widget"],
-        default="python",
+        choices=[language.value for language in CellLanguage],
+        help="The cell's language (default: python; required when --file names another's)",
     )
     add_p.add_argument(
         "--run",
@@ -1418,6 +1418,14 @@ def _emit_op_error(exc: Exception, fmt: str) -> int:
     return 1
 
 
+def _language_of_extension(file: str | None) -> CellLanguage | None:
+    """The language whose cell files carry *file*'s extension, if any."""
+    from strata.notebook.writer import EXTENSION_BY_LANGUAGE
+
+    suffix = Path(file).suffix.lstrip(".").lower() if file and file != "-" else ""
+    return next((lang for lang, ext in EXTENSION_BY_LANGUAGE.items() if ext == suffix), None)
+
+
 def cell_add_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
@@ -1429,6 +1437,17 @@ def cell_add_main(args: argparse.Namespace) -> int:
         except OSError as exc:
             print(f"error: cannot read --file: {exc}", file=sys.stderr)
             return 2
+    if args.language is None:
+        # The extension never picks the language, but a .sql file must not become Python.
+        named = _language_of_extension(args.file)
+        if named not in (None, CellLanguage.PYTHON):
+            print(
+                f"error: {args.file} looks like a {named} cell; pass --language {named} "
+                "(or --language python)",
+                file=sys.stderr,
+            )
+            return 2
+        args.language = CellLanguage.PYTHON.value
 
     if args.run:
         import asyncio

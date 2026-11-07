@@ -349,7 +349,9 @@ strata dep rm        <notebook_dir> <package>                     # uv remove
 ```
 
 `--file -` reads cell source from stdin; `-c 'src'` passes the source inline
-(the two are mutually exclusive). `cell add` mints a backend-style 8-char id (the
+(the two are mutually exclusive). `--language` defaults to `python`, except that a
+`--file` whose extension is another language's (`q.sql`, `p.prompt`) needs it
+spelled out, so a SQL file never becomes a Python cell by accident. `cell add` mints a backend-style 8-char id (the
 same scheme the server uses) and prints the new cell; `mv` prints the new order.
 Pass **`--run`** to execute the cell right after adding it (the one-call
 scratchpad primitive), and the run outcome (`status`, `cache_hit`, `stdout`,
