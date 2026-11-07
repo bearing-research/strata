@@ -34,6 +34,24 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
+  used to get `.py`, so linters and editors read SQL and prompt text as broken
+  Python. The language still comes from `notebook.toml`, so existing cells keep
+  their files and their cached results. The examples' cells are renamed. (#1474)
+- **Breaking: every `[[cells]]` entry in `notebook.toml` needs a `language`.**
+  It used to default to `python`, so a hand-written `.sql` entry that left it out
+  ran as Python and failed with a syntax error. A notebook with a cell that has no
+  `language` now does not open, and the error names the cell. Strata has always
+  written the key, so only hand-written entries are affected. (#1474)
+- **Breaking: a SQL cell's annotations are SQL comments, `-- @key value`.** `#` is no
+  comment in any SQL driver, so a `# @sql` line left the file invalid SQL, a `-- note`
+  above it turned every annotation off, and a `#` comment in the query failed at the
+  database. A SQL cell now reads its leading `--` block, and a `# @key` line in one is
+  an error that names the line. Changing `#` to `--` in an existing cell does not run
+  it again: its key covers the query and what the annotations say, not how they
+  are written. SQL cells act on `@sql`, `@cache`,
+  `@nocache`, `@name`, `@after` and `@mount`, listed in the SQL annotation reference;
+  any other annotation on one is a warning. (#1474)
 - **A prompt cell no longer sends text it could not fill in.** Before, anything
   the template could not evaluate (`{{ x | upper }}`, `{% if x %}`, `{{ x['k'] }}`,
   a name no cell defines) went to the model as written, and the paid answer was
