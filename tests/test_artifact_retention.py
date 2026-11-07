@@ -1113,6 +1113,30 @@ class TestNotebookStores:
             True,
         ]
 
+    def test_opening_drops_a_removed_cells_idle_values(self, tmp_path, monkeypatch):
+        """The store keeps every id's current value, so a removed cell's stayed for good."""
+        from types import SimpleNamespace
+
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook
+
+        notebook = create_notebook(tmp_path, "removed", initialize_environment=False)
+        add_cell_to_notebook(notebook, "live0001")
+        notebook_id = parse_notebook(notebook).id
+        store = ArtifactStore(notebook / ".strata" / "artifacts")
+        removed = _ready(store, f"nb_{notebook_id}_cell_gone0001_var_df")
+        live = _ready(store, f"nb_{notebook_id}_cell_live0001_var_df")
+        for key in (removed, live):
+            _last_used(store, key, 31 * DAY)
+        config = SimpleNamespace(
+            notebook_keep_superseded_versions=2, artifact_gc_min_idle_seconds=0
+        )
+
+        self._open(notebook, monkeypatch, config)
+
+        assert not _exists(store, removed)
+        assert _exists(store, live)
+
     @pytest.mark.parametrize("config", [None, "off"], ids=["no server", "set to 0"])
     def test_without_a_server_or_with_pruning_off_nothing_changes(
         self, tmp_path, monkeypatch, config

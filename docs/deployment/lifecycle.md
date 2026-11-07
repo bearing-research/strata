@@ -243,7 +243,11 @@ output's current value plus its three most recent earlier values, so reverting
 a recent edit is still a cache hit. Older values are pruned in the background
 each time the server opens the notebook, including a reopen of a notebook that
 is already open, and a value a crash left half-written for over an hour is
-marked failed then. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
+marked failed then. The values of a cell that is no longer in the notebook,
+its current one included, go in the same sweep once unused for 30 days, unless
+a name, pin or publication holds them or a kept value was built from them; the
+wait is for a branch that lacks the cell, so checking it out does not cost the
+cell's results. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
 to keep more, or to `0` to keep every value. Deleting the notebook deletes its
 store.
 
