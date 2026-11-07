@@ -1,7 +1,7 @@
-# @sql connection=warehouse
-# @name category_summary
-# @cache forever
-# @after seed
+-- @sql connection=warehouse
+-- @name category_summary
+-- @cache forever
+-- @after seed
 -- The product catalog is reference data: it changes rarely and
 -- the user's asserting "treat this as static". `forever` skips the
 -- freshness probe; only an edit to the SQL body itself invalidates

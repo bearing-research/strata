@@ -153,7 +153,9 @@ class TestTheAnnotation:
         ],
     )
     def test_it_parses(self, line, expected):
-        assert parse_annotations(f"# @write_table {line}\nx = 1").table_writes == [expected]
+        assert parse_annotations(f"# @write_table {line}\nx = 1", "python").table_writes == [
+            expected
+        ]
 
     @pytest.mark.parametrize(
         "line",
@@ -167,7 +169,7 @@ class TestTheAnnotation:
         ],
     )
     def test_a_line_it_cannot_read_is_dropped(self, line):
-        assert parse_annotations(f"# @write_table {line}\nx = 1").table_writes == []
+        assert parse_annotations(f"# @write_table {line}\nx = 1", "python").table_writes == []
 
     def test_the_target_and_mode_are_part_of_the_source_hash(self):
         """Changing them runs the cell again, so the new write is not a cache hit away."""
@@ -319,7 +321,9 @@ class TestAWritingCell:
         assert (await executor.execute_cell("w", source)).success
         shutil.rmtree(warehouse)
 
-        assert await executor._gone_tables(source) == parse_annotations(source).table_writes
+        assert (
+            await executor._gone_tables(source) == parse_annotations(source, "python").table_writes
+        )
         assert not warehouse.exists()
 
     async def test_run_all_writes_a_deleted_warehouse_from_its_hit(self, tmp_path):

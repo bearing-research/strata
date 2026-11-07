@@ -3079,7 +3079,7 @@ def list_notebook_store_artifacts(
                 "byte_size": artifact.byte_size,
                 "created_at": artifact.created_at,
                 "cell_id": cell_id,
-                "cell_name": parse_annotations(cell.source).name if cell else None,
+                "cell_name": parse_annotations(cell.source, cell.language).name if cell else None,
                 "output": output,
             }
         )
@@ -3262,7 +3262,7 @@ async def get_cell_iterations(
 
     variable_name = variable
     if variable_name is None:
-        loop_annotation = parse_annotations(cell.source).loop
+        loop_annotation = parse_annotations(cell.source, cell.language).loop
         variable_name = loop_annotation.carry if loop_annotation else None
     if not variable_name:
         return {"cell_id": cell_id, "variable": None, "iterations": []}
@@ -3505,7 +3505,7 @@ def _folder_artifact_id(
     cell = session.notebook_state.get_cell(cell_id)
     if cell is None:
         raise HTTPException(status_code=404, detail="Cell not found")
-    if name not in parse_annotations(cell.source).output_dirs:
+    if name not in parse_annotations(cell.source, cell.language).output_dirs:
         raise HTTPException(
             status_code=404, detail=f"{name!r} is not an output_dir annotation of this cell"
         )

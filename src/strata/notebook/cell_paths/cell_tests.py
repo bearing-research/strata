@@ -26,7 +26,13 @@ from strata.notebook.harness_user import (
 )
 from strata.notebook.keys import inactive_variant_refusal
 from strata.notebook.layout import WORK_DIR
-from strata.notebook.models import CellTestCase, CellTestResult, MountMode, MountSpec
+from strata.notebook.models import (
+    CellLanguage,
+    CellTestCase,
+    CellTestResult,
+    MountMode,
+    MountSpec,
+)
 from strata.notebook.mounts import resolve_cell_mounts
 
 if TYPE_CHECKING:
@@ -125,7 +131,8 @@ async def run_cell_tests(
     context.forget_moved(cell_id)
 
     # The same fetch, mount, dataset, table and env inputs a run of the cell gets.
-    annotations = parse_annotations(source)
+    # Cell tests are pytest over Python cells.
+    annotations = parse_annotations(source, CellLanguage.PYTHON)
     # Every mount: a test reads ``cell.<name>``, which no source analysis sees.
     mount_specs = resolve_cell_mounts([], cell.mounts, annotations.mounts)
     prov = await context.compute_provenance(

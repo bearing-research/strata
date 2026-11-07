@@ -31,7 +31,7 @@ from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import RemoteExecutionError
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.local_runs import LocalRun
-from strata.notebook.models import MountSpec, WorkerBackendType
+from strata.notebook.models import CellLanguage, MountSpec, WorkerBackendType
 from strata.notebook.mounts import ResolvedMount, ensure_writable, parse_mount_uri
 from strata.notebook.provenance import compute_source_hash
 from strata.notebook.remote_bundle import (
@@ -373,7 +373,7 @@ async def dispatch_http(
 
     # Before anything runs: an older worker would not make the folder, so a long run
     # would end in a NameError with nothing kept.
-    if parse_annotations(source).output_dirs:
+    if parse_annotations(source, CellLanguage.PYTHON).output_dirs:
         advertised = await worker_advertises(worker_spec, "output_dirs")
         if advertised is None:
             raise RuntimeError(
@@ -873,7 +873,7 @@ async def dispatch_signed(
         )
         # Files the worker uploads while the cell runs are stored as they arrive, so a
         # worker lost later still leaves them.
-        declared = frozenset(parse_annotations(source).output_dirs)
+        declared = frozenset(parse_annotations(source, CellLanguage.PYTHON).output_dirs)
         receiver = output_file_relay.Receiver(
             host.get_artifact_manager(),
             cell_id or "",

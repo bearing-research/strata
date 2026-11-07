@@ -209,8 +209,8 @@ class DuckDBAdapter:
 
         DuckDB has no per-table change counter. ``used_blocks``/``free_blocks`` advance
         on block-aligned flushes, so between flushes two row states can share a token.
-        Notebooks against a shared DB under active writes should use ``# @cache
-        forever`` or ``# @cache off``.
+        Notebooks against a shared DB under active writes should use ``-- @cache
+        forever`` or ``-- @cache off``.
         """
         h = hashlib.sha256()
         with probe_conn.cursor() as cursor:

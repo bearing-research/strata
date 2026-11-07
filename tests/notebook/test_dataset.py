@@ -95,7 +95,7 @@ class TestAnnotation:
         ],
     )
     def test_the_declaration_parses(self, value, expected):
-        (spec,) = parse_annotations(f"# @dataset {value}\nx = 1").datasets
+        (spec,) = parse_annotations(f"# @dataset {value}\nx = 1", "python").datasets
 
         assert (spec.name, spec.dataset, spec.alias, spec.version) == expected
         assert spec.reference == value.split()[1]
@@ -112,7 +112,7 @@ class TestAnnotation:
         ],
     )
     def test_a_malformed_declaration_is_ignored(self, value):
-        assert parse_annotations(f"# @dataset {value}\nx = 1").datasets == []
+        assert parse_annotations(f"# @dataset {value}\nx = 1", "python").datasets == []
 
 
 @pytest.fixture
@@ -567,7 +567,9 @@ class TestTenant:
         cell = session.notebook_state.get_cell("c1")
 
         session._collect_dataset_fingerprints(cell)
-        await CellExecutor(session)._resolve_datasets(parse_annotations(cell.source).datasets)
+        await CellExecutor(session)._resolve_datasets(
+            parse_annotations(cell.source, "python").datasets
+        )
 
         assert seen == ["acme", "acme"]
 

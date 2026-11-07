@@ -26,8 +26,8 @@ from strata.notebook.writer import (  # noqa: E402
 )
 
 GOOD = (
-    "# @sql connection=db\n"
-    "# @name rev\n"
+    "-- @sql connection=db\n"
+    "-- @name rev\n"
     "SELECT region, SUM(gross) AS net FROM orders GROUP BY region\n"
 )
 BAD = GOOD.replace("SUM(gross)", "SUM(absent_detail_check)")
@@ -102,8 +102,8 @@ async def test_a_trailing_comment_is_not_a_statement(tmp_path, name, tail):
             (
                 "w",
                 "sql",
-                "# @sql connection=db write=true\n"
-                "# @name probe\n"
+                "-- @sql connection=db write=true\n"
+                "-- @name probe\n"
                 f"CREATE TABLE IF NOT EXISTS probe_{name}(value INTEGER);\n{tail}",
             )
         ],
@@ -127,8 +127,8 @@ async def test_comments_and_quoted_semicolons_survive_together(tmp_path):
             (
                 "w",
                 "sql",
-                "# @sql connection=db write=true\n"
-                "# @name ledger\n"
+                "-- @sql connection=db write=true\n"
+                "-- @name ledger\n"
                 "-- seed the ledger\n"
                 "CREATE TABLE IF NOT EXISTS notes(label TEXT);\n"
                 "INSERT INTO notes VALUES ('quoted;semicolon');\n"
@@ -232,12 +232,14 @@ async def test_closing_the_session_does_let_the_counter_go(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_body_of_only_comments_runs_nothing(tmp_path):
-    """A comment-only body tokenizes to no statements, which is not a tokenize failure."""
+    """A comment-only body tokenizes to no statements, which is not a tokenize failure.
+
+    A ``--`` line joins the leading block, so the body's comment is a ``/* */`` one."""
     db = tmp_path / "w.db"
     sqlite3.connect(db).close()
     nb = _notebook(
         tmp_path,
-        [("w", "sql", "# @sql connection=db write=true\n# @name nothing\n-- todo\n")],
+        [("w", "sql", "-- @sql connection=db write=true\n-- @name nothing\n/* todo */\n")],
         db,
     )
     session = _session(nb)
@@ -264,8 +266,8 @@ async def test_a_statement_after_a_comment_keeps_its_row_count(tmp_path):
             (
                 "w",
                 "sql",
-                "# @sql connection=db write=true\n"
-                "# @name counted\n"
+                "-- @sql connection=db write=true\n"
+                "-- @name counted\n"
                 "WITH RECURSIVE counter(n) AS (\n"
                 "  VALUES(0) UNION ALL SELECT n+1 FROM counter WHERE n < 2\n"
                 ")\n"
@@ -442,7 +444,7 @@ async def test_a_broken_chain_is_announced_whatever_language_it_runs_through(tmp
             (
                 "q",
                 "sql",
-                "# @sql connection=db\n# @name rev\nSELECT region FROM orders LIMIT :limit\n",
+                "-- @sql connection=db\n-- @name rev\nSELECT region FROM orders LIMIT :limit\n",
             ),
             ("rep", "python", "seen = len(rev)\n{'seen': seen}\n"),
         ],
@@ -477,7 +479,7 @@ async def test_a_sql_target_still_reports_the_upstream_that_broke(tmp_path):
             (
                 "q",
                 "sql",
-                "# @sql connection=db\n# @name rev\nSELECT region FROM orders LIMIT :limit\n",
+                "-- @sql connection=db\n-- @name rev\nSELECT region FROM orders LIMIT :limit\n",
             ),
         ],
         _db(tmp_path),

@@ -18,42 +18,42 @@ from strata.notebook.sql.analyzer import (
 
 
 def test_strip_leading_annotations_returns_only_sql():
-    src = "# @sql connection=warehouse\n# @cache forever\n\nSELECT 1\n"
-    assert _strip_leading_annotations(src).strip() == "SELECT 1"
+    src = "-- @sql connection=warehouse\n-- @cache forever\n\nSELECT 1\n"
+    assert _strip_leading_annotations(src, "sql").strip() == "SELECT 1"
 
 
 def test_strip_leading_annotations_handles_no_annotations():
     src = "SELECT 1\nFROM t"
-    assert _strip_leading_annotations(src).strip() == "SELECT 1\nFROM t"
+    assert _strip_leading_annotations(src, "sql").strip() == "SELECT 1\nFROM t"
 
 
 def test_strip_leading_annotations_blank_when_only_comments():
-    src = "# @sql connection=db\n# @cache forever"
-    assert _strip_leading_annotations(src) == ""
+    src = "-- @sql connection=db\n-- @cache forever"
+    assert _strip_leading_annotations(src, "sql") == ""
 
 
 def test_analyze_extracts_connection_and_cache_policy():
-    src = "# @sql connection=warehouse\n# @cache forever\nSELECT * FROM events\n"
+    src = "-- @sql connection=warehouse\n-- @cache forever\nSELECT * FROM events\n"
     result = analyze_sql_cell(src)
     assert result.connection == "warehouse"
     assert result.cache_policy.kind == "forever"
 
 
 def test_analyze_default_cache_policy_is_fingerprint():
-    """No `# @cache` means fingerprint, so invalidation works without opting in."""
-    src = "# @sql connection=db\nSELECT 1"
+    """No `-- @cache` means fingerprint, so invalidation works without opting in."""
+    src = "-- @sql connection=db\nSELECT 1"
     assert analyze_sql_cell(src).cache_policy.kind == "fingerprint"
 
 
 def test_analyze_name_annotation_overrides_default():
-    src = "# @sql connection=db\n# @name events_count\nSELECT 42 AS n"
+    src = "-- @sql connection=db\n-- @name events_count\nSELECT 42 AS n"
     assert analyze_sql_cell(src).name == "events_count"
     assert analyze_sql_cell(src).defines == ["events_count"]
 
 
 def test_analyze_invalid_name_falls_back_to_result():
     """Non-identifier names fall back to ``result`` rather than an unusable variable name."""
-    src = "# @sql connection=db\n# @name 123-not-ok\nSELECT 1"
+    src = "-- @sql connection=db\n-- @name 123-not-ok\nSELECT 1"
     assert analyze_sql_cell(src).name == "result"
 
 
@@ -85,7 +85,7 @@ def test_placeholder_positions_preserve_duplicates():
 
 def test_analyze_exposes_both_references_and_positions():
     """``analyze_sql_cell`` fills both the deduped references and the ordered positions."""
-    src = "# @sql connection=db\nSELECT :foo + :foo + :bar"
+    src = "-- @sql connection=db\nSELECT :foo + :foo + :bar"
     result = analyze_sql_cell(src)
     assert result.references == ["foo", "bar"]
     assert result.placeholder_positions == ["foo", "foo", "bar"]
@@ -133,7 +133,7 @@ def test_placeholders_honour_backslash_escapes_where_the_dialect_does(dialect):
     sql = r"SELECT 'it\'s :z', 'a\\', :w FROM t"
     assert _extract_placeholder_positions(sql, dialect) == ["w"]
     assert len(_blank_strings_and_comments(sql, dialect)) == len(sql)
-    body = "# @sql connection=wh\n" + sql
+    body = "-- @sql connection=wh\n" + sql
     assert analyze_sql_cell(body, dialect=dialect).placeholder_positions == ["w"]
 
 
@@ -154,7 +154,7 @@ def test_the_dag_scans_binds_in_the_connections_dialect(tmp_path):
     cells = [
         ("defz", "python", "z = 1\n"),
         ("defw", "python", "w = 2\n"),
-        ("q", "sql", "# @sql connection=wh\nSELECT 'it\\'s :z', :w\n"),
+        ("q", "sql", "-- @sql connection=wh\nSELECT 'it\\'s :z', :w\n"),
     ]
     previous = None
     for cell_id, language, source in cells:
@@ -243,7 +243,7 @@ def test_blank_dollar_quote_preserves_length():
 
 def test_analyze_no_dialect_skips_table_extraction():
     """Without a dialect, table extraction is skipped but bind placeholders still work."""
-    src = "# @sql connection=db\nSELECT * FROM events WHERE id = :user_id"
+    src = "-- @sql connection=db\nSELECT * FROM events WHERE id = :user_id"
     result = analyze_sql_cell(src)
     assert result.tables == []
     assert result.parse_error is None
@@ -251,14 +251,14 @@ def test_analyze_no_dialect_skips_table_extraction():
 
 
 def test_analyze_with_dialect_extracts_simple_table():
-    src = "# @sql connection=db\nSELECT * FROM events"
+    src = "-- @sql connection=db\nSELECT * FROM events"
     result = analyze_sql_cell(src, dialect="postgres")
     assert result.tables == [QualifiedTable(catalog=None, schema=None, name="events")]
 
 
 def test_analyze_with_dialect_extracts_qualified_tables():
     src = (
-        "# @sql connection=db\n"
+        "-- @sql connection=db\n"
         "SELECT * FROM analytics.events e "
         "JOIN public.users u ON u.id = e.user_id"
     )
@@ -273,7 +273,7 @@ def test_analyze_with_dialect_extracts_qualified_tables():
 def test_analyze_with_dialect_filters_cte_references():
     """CTE aliases must not leak into ``tables`` as if they were base tables."""
     src = (
-        "# @sql connection=db\n"
+        "-- @sql connection=db\n"
         "WITH summary AS (SELECT user_id, COUNT(*) FROM events GROUP BY user_id)\n"
         "SELECT * FROM summary"
     )
@@ -288,7 +288,7 @@ def test_analyze_with_dialect_filters_cte_references():
 
 def test_analyze_with_dialect_dedupes_table_references():
     src = (
-        "# @sql connection=db\n"
+        "-- @sql connection=db\n"
         "SELECT * FROM events WHERE EXISTS (SELECT 1 FROM events WHERE id < 10)"
     )
     result = analyze_sql_cell(src, dialect="postgres")
@@ -298,12 +298,12 @@ def test_analyze_with_dialect_dedupes_table_references():
 
 def test_identifier_with_a_literal_names_its_table():
     """Snowflake ``IDENTIFIER('...')`` with a literal is a static name, uppercased when unquoted."""
-    src = "# @sql connection=db\nSELECT * FROM IDENTIFIER('events')"
+    src = "-- @sql connection=db\nSELECT * FROM IDENTIFIER('events')"
     result = analyze_sql_cell(src, dialect="snowflake")
     assert result.tables == [QualifiedTable(catalog=None, schema=None, name="EVENTS")]
     assert result.unresolved_tables == []
 
-    src = "# @sql connection=db\nSELECT * FROM IDENTIFIER('db.sch.events')"
+    src = "-- @sql connection=db\nSELECT * FROM IDENTIFIER('db.sch.events')"
     result = analyze_sql_cell(src, dialect="snowflake")
     assert result.tables == [QualifiedTable(catalog="DB", schema="SCH", name="EVENTS")]
 
@@ -314,7 +314,7 @@ def test_identifier_named_at_run_time_is_reported_not_guessed(reference):
 
     sqlglot 30.13+ reads ``$tbl`` as a table called ``tbl`` that the query never reads.
     """
-    src = f"# @sql connection=db\nSELECT * FROM {reference} JOIN orders USING (id)"
+    src = f"-- @sql connection=db\nSELECT * FROM {reference} JOIN orders USING (id)"
     result = analyze_sql_cell(src, dialect="snowflake")
     assert result.tables == [QualifiedTable(catalog=None, schema=None, name="ORDERS")]
     assert result.unresolved_tables == [reference]
@@ -346,7 +346,7 @@ def test_a_table_no_probe_can_name_is_reported_not_tracked(dialect, reference):
     No freshness probe can ask about them, so tracking one would serve the cache
     however the data changed.
     """
-    src = f"# @sql connection=db\nSELECT * FROM {reference} AS x JOIN orders USING (id)"
+    src = f"-- @sql connection=db\nSELECT * FROM {reference} AS x JOIN orders USING (id)"
     result = analyze_sql_cell(src, dialect=dialect)
     assert [t.name.lower() for t in result.tables] == ["orders"]
     assert result.unresolved_tables == [reference]
@@ -365,7 +365,7 @@ def test_a_bigquery_wildcard_or_metadata_view_is_reported_not_tracked(reference,
 
     ``__TABLES__`` has no row for them, so the probe answers "missing" on every run.
     """
-    src = f"# @sql connection=db\nSELECT * FROM {reference} AS x JOIN ds.orders USING (id)"
+    src = f"-- @sql connection=db\nSELECT * FROM {reference} AS x JOIN ds.orders USING (id)"
     result = analyze_sql_cell(src, dialect="bigquery")
     assert result.tables == [QualifiedTable(catalog=None, schema="ds", name="orders")]
     assert result.unresolved_tables == [unresolved]
@@ -373,7 +373,7 @@ def test_a_bigquery_wildcard_or_metadata_view_is_reported_not_tracked(reference,
 
 def test_a_file_looking_name_is_a_table_outside_duckdb():
     """Only DuckDB reads a file as a table; elsewhere ``events.parquet`` is schema ``events``."""
-    src = "# @sql connection=db\nSELECT * FROM events.parquet"
+    src = "-- @sql connection=db\nSELECT * FROM events.parquet"
     result = analyze_sql_cell(src, dialect="postgres")
     assert result.tables == [QualifiedTable(catalog=None, schema="events", name="parquet")]
     assert result.unresolved_tables == []
@@ -394,7 +394,7 @@ def test_a_file_looking_name_is_a_table_outside_duckdb():
 )
 def test_a_set_returning_function_list_is_reported_not_a_crash(dialect, reference, unresolved):
     """``ROWS FROM (...)`` has no table name; it must be reported rather than raise."""
-    src = f"# @sql connection=db\nSELECT * FROM {reference} AS x(a) JOIN orders USING (id)"
+    src = f"-- @sql connection=db\nSELECT * FROM {reference} AS x(a) JOIN orders USING (id)"
     result = analyze_sql_cell(src, dialect=dialect)
     assert result.parse_error is None
     assert [t.name for t in result.tables] == ["orders"]
@@ -413,7 +413,7 @@ def test_a_notebook_with_a_rows_from_cell_opens(tmp_path):
     write_cell(
         nb_dir,
         "sql",
-        "# @sql connection=pg\n# @name q\nSELECT * FROM ROWS FROM (generate_series(1, 3))\n",
+        "-- @sql connection=pg\n-- @name q\nSELECT * FROM ROWS FROM (generate_series(1, 3))\n",
     )
     toml = nb_dir / "notebook.toml"
     toml.write_text(
@@ -442,7 +442,7 @@ def test_an_analyzer_failure_does_not_stop_a_notebook_opening(tmp_path, monkeypa
     monkeypatch.setattr(analyzer_mod, "_extract_tables", boom)
     nb_dir = create_notebook(tmp_path, "analyzer_bug")
     add_cell_to_notebook(nb_dir, "sql", language="sql")
-    write_cell(nb_dir, "sql", "# @sql connection=pg\n# @name q\nSELECT * FROM events\n")
+    write_cell(nb_dir, "sql", "-- @sql connection=pg\n-- @name q\nSELECT * FROM events\n")
     toml = nb_dir / "notebook.toml"
     toml.write_text(
         toml.read_text() + '\n[connections.pg]\ndriver = "postgresql"\nhost = "localhost"\n'
@@ -456,7 +456,7 @@ def test_an_analyzer_failure_does_not_stop_a_notebook_opening(tmp_path, monkeypa
 
 
 def test_table_with_a_literal_names_its_table():
-    src = "# @sql connection=db\nSELECT * FROM TABLE('db.sch.events')"
+    src = "-- @sql connection=db\nSELECT * FROM TABLE('db.sch.events')"
     result = analyze_sql_cell(src, dialect="snowflake")
     assert result.tables == [QualifiedTable(catalog="DB", schema="SCH", name="EVENTS")]
     assert result.unresolved_tables == []
@@ -464,14 +464,14 @@ def test_table_with_a_literal_names_its_table():
 
 def test_snowflake_names_are_the_ones_it_stores():
     """Unquoted names are uppercased for Snowflake and lowercased for Postgres; others keep case."""
-    src = '# @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
+    src = '-- @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
     result = analyze_sql_cell(src, dialect="snowflake")
     assert result.tables == [
         QualifiedTable(catalog="MYDB", schema="PUBLIC", name="EVENTS"),
         QualifiedTable(catalog=None, schema=None, name="MixedCase"),
     ]
 
-    src = '# @sql connection=db\nSELECT * FROM MyDb.Public.Events JOIN "MixedCase" USING (id)'
+    src = '-- @sql connection=db\nSELECT * FROM MyDb.Public.Events JOIN "MixedCase" USING (id)'
     result = analyze_sql_cell(src, dialect="postgres")
     assert result.tables == [
         QualifiedTable(catalog="mydb", schema="public", name="events"),
@@ -506,7 +506,7 @@ def test_internal_errors_are_not_swallowed_as_parse_errors(monkeypatch):
 
     monkeypatch.setattr(analyzer_mod, "_extract_tables", boom)
 
-    src = "# @sql connection=db\nSELECT 1"
+    src = "-- @sql connection=db\nSELECT 1"
     import pytest
 
     with pytest.raises(TypeError, match="internal bug"):
@@ -514,7 +514,7 @@ def test_internal_errors_are_not_swallowed_as_parse_errors(monkeypatch):
 
 
 def test_genuine_sqlglot_parse_errors_become_parse_error_field():
-    src = "# @sql connection=db\nSELECT * FROM"  # truncated
+    src = "-- @sql connection=db\nSELECT * FROM"  # truncated
     result = analyze_sql_cell(src, dialect="postgres")
     assert result.parse_error is not None
     assert result.tables == []
@@ -531,7 +531,7 @@ def test_opening_a_sql_notebook_without_the_sql_extra_names_the_extra(tmp_path, 
 
     notebook = create_notebook(tmp_path, "sql_nb", initialize_environment=False)
     add_cell_to_notebook(notebook, "s1", None, language="sql")
-    write_cell(notebook, "s1", "# @sql connection=db\nSELECT 1\n")
+    write_cell(notebook, "s1", "-- @sql connection=db\nSELECT 1\n")
     for name in [n for n in sys.modules if n.split(".")[0] == "sqlglot"]:
         monkeypatch.delitem(sys.modules, name)
     for name in [n for n in sys.modules if n.startswith("strata.notebook.sql")]:

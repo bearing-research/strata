@@ -170,7 +170,7 @@ class ConnectionSpec(BaseModel):
 
     name: str = Field(
         ...,
-        description=("Connection name, referenced by SQL cells via ``# @sql connection=<name>``."),
+        description=("Connection name, referenced by SQL cells via ``-- @sql connection=<name>``."),
         pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
     )
     driver: str = Field(

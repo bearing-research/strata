@@ -25,8 +25,8 @@ from strata.notebook.writer import (  # noqa: E402
 )
 
 QUERY = (
-    "# @sql connection=db\n"
-    "# @name regional_revenue\n"
+    "-- @sql connection=db\n"
+    "-- @name regional_revenue\n"
     "SELECT region, SUM(gross) AS net FROM orders "
     "WHERE gross >= :minimum_amount GROUP BY region ORDER BY net DESC\n"
 )

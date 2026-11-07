@@ -26,8 +26,8 @@ from strata.notebook.writer import (  # noqa: E402
 )
 
 GOOD = (
-    "# @sql connection=db\n"
-    "# @name rev\n"
+    "-- @sql connection=db\n"
+    "-- @name rev\n"
     "SELECT region, SUM(gross) AS net FROM orders GROUP BY region\n"
 )
 BAD = GOOD.replace("SUM(gross)", "SUM(missing_live_value)")
@@ -153,8 +153,8 @@ async def test_a_write_cell_runs_the_statement_the_cell_declares(tmp_path):
     write_cell(
         nb,
         "w",
-        "# @sql connection=db write=true\n"
-        "# @name cte_alias_probe\n"
+        "-- @sql connection=db write=true\n"
+        "-- @name cte_alias_probe\n"
         "CREATE TABLE IF NOT EXISTS alias_totals(total INTEGER);\n"
         "INSERT INTO alias_totals\n"
         "SELECT SUM(n) FROM (\n"
@@ -186,8 +186,8 @@ async def test_a_multi_statement_write_still_runs_each_statement(tmp_path):
     write_cell(
         nb,
         "w",
-        "# @sql connection=db write=true\n"
-        "# @name multi\n"
+        "-- @sql connection=db write=true\n"
+        "-- @name multi\n"
         "CREATE TABLE IF NOT EXISTS t(v TEXT);\n"
         "INSERT INTO t VALUES ('a; not a separator');\n"
         "INSERT INTO t VALUES ('b');\n",

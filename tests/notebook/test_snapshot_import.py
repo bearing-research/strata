@@ -736,7 +736,7 @@ class TestACellCachedUnderItsOwnScheme:
             conn.executemany("INSERT INTO events VALUES (?)", [(1,), (2,)])
         nb = create_notebook(tmp_path / "src", "Sql", initialize_environment=False)
         add_cell_to_notebook(nb, "q", language="sql")
-        source = "# @sql connection=db\n# @cache forever\nSELECT id FROM events\n"
+        source = "-- @sql connection=db\n-- @cache forever\nSELECT id FROM events\n"
         write_cell(nb, "q", source)
         toml_path = nb / "notebook.toml"
         toml_path.write_text(

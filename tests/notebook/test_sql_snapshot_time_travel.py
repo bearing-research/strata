@@ -1,4 +1,4 @@
-"""``# @cache snapshot`` on warehouses with time travel.
+"""``-- @cache snapshot`` on warehouses with time travel.
 
 A fake Snowflake connection serves a table whose rows carry their landing time, so a query pinned
 ``AT (TIMESTAMP => ...)`` sees exactly the rows that existed then.
@@ -115,7 +115,7 @@ def _ids(session, result) -> list[int]:
     return pa.ipc.open_stream(blob).read_all().column("id").to_pylist()
 
 
-SOURCE = "# @sql connection=wh\n# @cache snapshot\nSELECT id FROM events\n"
+SOURCE = "-- @sql connection=wh\n-- @cache snapshot\nSELECT id FROM events\n"
 
 
 async def test_a_snapshot_cell_hits_on_rerun_and_keeps_its_state_after_new_rows(

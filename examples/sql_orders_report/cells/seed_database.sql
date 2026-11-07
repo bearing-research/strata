@@ -1,4 +1,4 @@
-# @sql connection=warehouse write=true
+-- @sql connection=warehouse write=true
 -- Seed analytics.db with a small orders dataset.
 --
 -- ``write=true`` opts this cell into writable execution: the

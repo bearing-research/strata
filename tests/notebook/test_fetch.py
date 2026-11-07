@@ -105,7 +105,7 @@ class TestAnnotation:
     def test_the_declaration_parses_with_its_options(self):
         digest = "ab" * 32
         (spec,) = parse_annotations(
-            f"# @fetch zones https://x.org/zones.csv sha256={digest} refetch=never\nx = 1"
+            f"# @fetch zones https://x.org/zones.csv sha256={digest} refetch=never\nx = 1", "python"
         ).fetches
 
         assert (spec.name, spec.url, spec.sha256, spec.refetch) == (
@@ -125,7 +125,7 @@ class TestAnnotation:
         ],
     )
     def test_a_malformed_declaration_is_ignored(self, value):
-        assert parse_annotations(f"# @fetch {value}\nx = 1").fetches == []
+        assert parse_annotations(f"# @fetch {value}\nx = 1", "python").fetches == []
 
 
 class TestTheCache:
@@ -326,7 +326,7 @@ class TestPinning:
 
         pinned = pin_fetch_directives(source, {"zones": "a" * 64})
 
-        (spec, other) = parse_annotations(pinned).fetches
+        (spec, other) = parse_annotations(pinned, "python").fetches
         assert (spec.name, spec.sha256, spec.refetch) == ("zones", "a" * 64, "never")
         assert other.sha256 is None
         assert pinned.endswith("rows = 1\n")
@@ -340,7 +340,7 @@ class TestPinning:
         pinned = pin_fetch_directives(source, {"zones": "b" * 64})
 
         assert pinned.count("sha256=") == 1
-        assert parse_annotations(pinned).fetches[0].sha256 == "b" * 64
+        assert parse_annotations(pinned, "python").fetches[0].sha256 == "b" * 64
 
     def _notebook(self, tmp_path, url: str):
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -370,7 +370,7 @@ class TestPinning:
         out = json.loads(capsys.readouterr().out)
         assert out["pinned"] == [{"name": "zones", "url": origin.url(), "sha256": digest}]
         source = (nb / "cells" / "c1.py").read_text()
-        (spec,) = parse_annotations(source).fetches
+        (spec,) = parse_annotations(source, "python").fetches
         assert (spec.sha256, spec.refetch) == (digest, "never")
 
     def test_nothing_downloaded_is_refused_and_the_cell_is_untouched(self, tmp_path, capsys):

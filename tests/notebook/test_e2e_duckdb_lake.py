@@ -139,7 +139,7 @@ async def test_a_duckdb_cell_reads_the_catalog_and_goes_stale_on_a_new_snapshot(
     _configure(monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs=server_catalogs))
     nb_dir = _notebook(
         tmp_path,
-        "# @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
+        "-- @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
         'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"',
     )
     if defined_in == "notebook":
@@ -201,7 +201,7 @@ def test_the_query_reads_the_snapshot_its_provenance_names(
     _configure(
         monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
     )
-    source = f"# @sql connection=lake\n{query}\n"
+    source = f"-- @sql connection=lake\n{query}\n"
     nb_dir = _notebook(tmp_path, source, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     spec = session.notebook_state.connections[0]
@@ -230,7 +230,7 @@ async def test_an_s3_mount_is_a_view_read_with_its_storage_options(tmp_path, mon
         )
         nb_dir = _notebook(
             tmp_path,
-            "# @sql connection=lake\nSELECT sum(k) AS total FROM events\n",
+            "-- @sql connection=lake\nSELECT sum(k) AS total FROM events\n",
             'driver = "duckdb"\npath = ":memory:"\nmounts = ["events"]',
         )
         mount, credentials = _events_mount(
@@ -327,7 +327,7 @@ async def test_a_gcs_or_azure_mount_is_a_view_read_with_its_storage_options(
     )
     nb_dir = _notebook(
         tmp_path,
-        "# @sql connection=lake\nSELECT sum(k) AS total FROM events\n",
+        "-- @sql connection=lake\nSELECT sum(k) AS total FROM events\n",
         'driver = "duckdb"\npath = ":memory:"\nmounts = ["events"]',
     )
     update_notebook_mounts(nb_dir, [mount])
@@ -349,7 +349,7 @@ async def test_a_snapshot_cell_keeps_reading_its_snapshot_until_a_rerun(
         monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
     )
     source = (
-        "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips ORDER BY id\n"
+        "-- @sql connection=lake\n-- @cache snapshot\nSELECT id FROM lake.taxi.trips ORDER BY id\n"
     )
     nb_dir = _notebook(tmp_path, source, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -390,7 +390,7 @@ async def test_a_read_cell_cannot_write_to_the_catalog(tmp_path, monkeypatch, re
     _configure(
         monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
     )
-    source = "# @sql connection=lake\nCOMMIT; INSERT INTO lake.taxi.trips VALUES (9)\n"
+    source = "-- @sql connection=lake\nCOMMIT; INSERT INTO lake.taxi.trips VALUES (9)\n"
     nb_dir = _notebook(tmp_path, source, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
 
@@ -419,7 +419,9 @@ async def test_a_confined_cell_reads_its_catalog_and_nothing_outside_it(
     )
     connection = 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"'
     nb_dir = _notebook(
-        tmp_path, "# @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n", connection
+        tmp_path,
+        "-- @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
+        connection,
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
 
@@ -428,14 +430,14 @@ async def test_a_confined_cell_reads_its_catalog_and_nothing_outside_it(
 
     outside = tmp_path / "secret.txt"
     outside.write_text("do not read")
-    source = f"# @sql connection=lake\nSELECT content FROM read_text('{outside}')\n"
+    source = f"-- @sql connection=lake\nSELECT content FROM read_text('{outside}')\n"
     write_cell(nb_dir, "c1", source)
     result = await CellExecutor(session).execute_cell("c1", source)
     assert result.success is False
     assert "Permission" in (result.error or "")
 
     # The catalog's endpoint is the only URL it opens up.
-    source = f"# @sql connection=lake\nSELECT content FROM read_text('{_elsewhere(properties)}')\n"
+    source = f"-- @sql connection=lake\nSELECT content FROM read_text('{_elsewhere(properties)}')\n"
     write_cell(nb_dir, "c1", source)
     result = await CellExecutor(session).execute_cell("c1", source)
     assert result.success is False
@@ -578,7 +580,7 @@ async def test_a_duckdb_cell_reads_a_catalog_that_vends_nothing_with_its_keys(
     )
     nb_dir = _notebook(
         tmp_path,
-        "# @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
+        "-- @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
         'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"',
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -607,7 +609,7 @@ async def test_a_pinned_cell_over_a_catalog_that_vends_nothing_hits_its_cache_wi
     )
     nb_dir = _notebook(
         tmp_path,
-        "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
+        "-- @sql connection=lake\n-- @cache snapshot\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
         'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"',
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)

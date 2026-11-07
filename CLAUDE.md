@@ -402,9 +402,11 @@ same way. An inactive variant has no key: cellgraph refuses it. The traces in
 
 ### Source annotations
 
-`#` comments at the top of a cell, parsed by `annotations.py`. **Annotations
-always win over persisted config**: they are the single per-cell
-configuration surface.
+Comments at the top of a cell, parsed by `annotations.py`: `# @key value`, or
+`-- @key value` in a SQL cell (the marker is the language analyzer's `comment`,
+cellgraph's `grammar_for`; `parse_annotations` takes the cell's language, with no
+default). **Annotations always win over persisted config**: they are the single
+per-cell configuration surface.
 
 Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
 `mount <name> <uri> [ro|rw]`, `table`, `fetch`, `dataset`,
@@ -412,6 +414,10 @@ Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
 `each <name> in <source> [key=] [glob=]`,
 `nocache`, `stochastic`, `after`, `loop max_iter= carry= [start_from=]`,
 `loop_until <expr>`.
+
+SQL cells: `sql connection=<name> [write=true]`, `cache <policy>`, `nocache`,
+`name`, `after`, `mount` (read-only); any other key warns (`annotation_not_for_sql`),
+and a `# @` line errors (`sql_annotation_hash`), since the driver would get it as SQL.
 
 Prompt cells: `name`, `model`, `temperature`, `max_tokens`, `system`,
 `output json`, `output_schema {…}` (JSON Schema; OpenAI strict json_schema,
