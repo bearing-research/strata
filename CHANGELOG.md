@@ -40,9 +40,11 @@ exhaustive commit history.
   on its next run; after that it is cached as before. The fixes that come with it:
   a sweep reader's key no longer changes when a later cell defines one of the
   members' names, and a sweep instance's key leaves out the other variants'
-  outputs. On Python 3.14, a cell with a top-level `await` no longer loses
-  every name its functions read. Running an inactive variant fails, saying to
-  make it active: what it reads depends on which member is active. (#1475)
+  outputs. An R cell is keyed as a Python cell is, so changing only `@timeout`,
+  `@name` or another annotation that is not in its key no longer reruns it. On
+  Python 3.14, a cell with a top-level `await` no longer loses every name its
+  functions read. Running an inactive variant fails, saying to make it active:
+  what it reads depends on which member is active. (#1475)
 - **`notebook_state` and `environment_job_finished` have typed payloads.** With them every
   frame the server sends has a model, and the generated TypeScript describes the cell view a
   client receives. The frames carry the same keys and values as before. (#1472)
