@@ -35,7 +35,7 @@ dependencies = [
     # because the notebook's store schema and migrations track one version.
     "vestigo==0.3.1",
     # The notebook's analysis: annotations, names, the DAG (bearing-research/cellgraph).
-    "cellgraph>=0.3,<0.4",
+    "cellgraph>=0.4,<0.5",
     "pyiceberg[sql-sqlite,sql-postgres]>=0.12.0",
     "pyarrow>=18.0.0",
     "fastapi>=0.115.0",

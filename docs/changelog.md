@@ -36,6 +36,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (#1381)
 
 ### Changed
+- **cellgraph 0.4: every cell runs once more after the upgrade.** Strata now needs
+  `cellgraph>=0.4,<0.5`. Its keys hash exactly what they cover, with each upstream
+  output tagged by kind, so every cell's key changes once and each cell runs again
+  on its next run; after that it is cached as before. The fixes that come with it:
+  a sweep reader's key no longer changes when a later cell defines one of the
+  members' names, and a sweep instance's key leaves out the other variants'
+  outputs. On Python 3.14, a cell with a top-level `await` no longer loses
+  every name its functions read. Running an inactive variant fails, saying to
+  make it active: what it reads depends on which member is active. (#1475)
 - **`notebook_state` and `environment_job_finished` have typed payloads.** With them every
   frame the server sends has a model, and the generated TypeScript describes the cell view a
   client receives. The frames carry the same keys and values as before. (#1472)

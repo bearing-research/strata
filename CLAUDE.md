@@ -392,9 +392,11 @@ DAG rebuilds on every source change.
 
 The analysis runs on cellgraph (the `cellgraph` package from PyPI, its own
 repository `bearing-research/cellgraph`): `graph.py` calls `cellgraph.analyze`
-with Strata's annotation vocabulary (`vocabulary.py`) and keeps legacy-1
-normalization and digests, so keys match the ones from before cellgraph. The
-traces in `tests/contract/cellgraph` pin that behavior (re-record with `--update`).
+with Strata's annotation vocabulary (`vocabulary.py`). cellgraph keys Python and R
+cells over `parts` (`parts_digest`); a prompt or SQL cell is `HostKeyed`, and
+`keys.py` adds its inputs, built with `cellgraph.input_component`, and keys it the
+same way. An inactive variant has no key: cellgraph refuses it. The traces in
+`tests/contract/cellgraph` pin that behavior (re-record with `--update`).
 
 ### Source annotations
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cellgraph as cg
 import pytest
 
 from strata.notebook import nonce
@@ -378,7 +379,10 @@ async def test_a_sql_cell_changed_input_is_named_from_the_parts_strata_supplies(
         )
         return key.parts
 
-    assert parts("one")["inputs"] == [["mount", "raw", "raw:file:///data:one"]]
+    resolved = cg.Resolved(identity=None, fingerprint="raw:file:///data:one")
+    assert parts("one")["inputs"] == [
+        ["mount", "raw", cg.input_component("mount", "raw", resolved)]
+    ]
 
     session.notebook_state.get_cell("c1").last_key_parts = parts("one")
     chain = explain_staleness(session, {"c1": StaleCell(parts("two"))})["c1"]

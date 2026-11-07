@@ -15,13 +15,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "f1fda85d637587e345d4f0c957859b875486adb73d91eb0ee8b4d6ce24d1f204",
+      "execution_key": "6eac226db730c76b9200183416eaa5c5394d28ee2d144f35bc1a821b63c91136",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:54741814b1ab31d77ac3701be747151d8d62cf24b7b590ec2ba2b8b573ce1546"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -62,11 +62,11 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "1cbf71bf9afc54fc740156b47dd67eca6a92efc2e1759fff5f2ce8a47342e635",
+      "execution_key": "78c84933f07edc595533f3e505945e6ab3e204b450cbe749e8d7b5bfe3e7b590",
       "input_hashes": [],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": []
      },
      "language": "python",
@@ -129,13 +129,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "f1fda85d637587e345d4f0c957859b875486adb73d91eb0ee8b4d6ce24d1f204",
+      "execution_key": "6eac226db730c76b9200183416eaa5c5394d28ee2d144f35bc1a821b63c91136",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:54741814b1ab31d77ac3701be747151d8d62cf24b7b590ec2ba2b8b573ce1546"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -145,7 +145,7 @@
        "out": {
         "artifact": "nb_cellgraph-each_cell_items_var_out@v=1",
         "content_sha256": "78a55ee9da60dae6f90a1c9a7f4ad29557d640bb37eb24f8f9def0de9a6bcc17",
-        "provenance_hash": "8785b2fd96b051d4b53727317a8d9b48460cefad39a1b903da3ec8e4eef86cde"
+        "provenance_hash": "7db8855adbaecab903b8e269928ba4601afa403c97e06aece9e767ca4a188829"
        }
       },
       "each": {
@@ -173,7 +173,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "f1fda85d637587e345d4f0c957859b875486adb73d91eb0ee8b4d6ce24d1f204",
+      "provenance_hash": "6eac226db730c76b9200183416eaa5c5394d28ee2d144f35bc1a821b63c91136",
       "status": "ok"
      },
      "staleness": {
@@ -198,15 +198,15 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "d4c046dea4eff2d9d525e651b27521241db50b8fba95b6000a9bf0930d87b384",
+      "execution_key": "708ea9f914d56409cf02048949b254f13cff214a693ffb58145331ae308bac4d",
       "input_hashes": [
-       "8785b2fd96b051d4b53727317a8d9b48460cefad39a1b903da3ec8e4eef86cde"
+       "[\"provenance\",\"7db8855adbaecab903b8e269928ba4601afa403c97e06aece9e767ca4a188829\"]"
       ],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": [
-       "8785b2fd96b051d4b53727317a8d9b48460cefad39a1b903da3ec8e4eef86cde"
+       "[\"provenance\",\"7db8855adbaecab903b8e269928ba4601afa403c97e06aece9e767ca4a188829\"]"
       ]
      },
      "language": "python",
@@ -224,7 +224,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "d4c046dea4eff2d9d525e651b27521241db50b8fba95b6000a9bf0930d87b384",
+      "provenance_hash": "708ea9f914d56409cf02048949b254f13cff214a693ffb58145331ae308bac4d",
       "status": "ok"
      },
      "staleness": {
@@ -274,13 +274,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "f1fda85d637587e345d4f0c957859b875486adb73d91eb0ee8b4d6ce24d1f204",
+      "execution_key": "6eac226db730c76b9200183416eaa5c5394d28ee2d144f35bc1a821b63c91136",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:54741814b1ab31d77ac3701be747151d8d62cf24b7b590ec2ba2b8b573ce1546"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -290,7 +290,7 @@
        "out": {
         "artifact": "nb_cellgraph-each_cell_items_var_out@v=1",
         "content_sha256": "78a55ee9da60dae6f90a1c9a7f4ad29557d640bb37eb24f8f9def0de9a6bcc17",
-        "provenance_hash": "8785b2fd96b051d4b53727317a8d9b48460cefad39a1b903da3ec8e4eef86cde"
+        "provenance_hash": "7db8855adbaecab903b8e269928ba4601afa403c97e06aece9e767ca4a188829"
        }
       },
       "each": {
@@ -318,7 +318,7 @@
      },
      "run": {
       "cache_hit": true,
-      "provenance_hash": "f1fda85d637587e345d4f0c957859b875486adb73d91eb0ee8b4d6ce24d1f204",
+      "provenance_hash": "6eac226db730c76b9200183416eaa5c5394d28ee2d144f35bc1a821b63c91136",
       "status": "ok"
      },
      "staleness": {
@@ -343,15 +343,15 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "d4c046dea4eff2d9d525e651b27521241db50b8fba95b6000a9bf0930d87b384",
+      "execution_key": "708ea9f914d56409cf02048949b254f13cff214a693ffb58145331ae308bac4d",
       "input_hashes": [
-       "8785b2fd96b051d4b53727317a8d9b48460cefad39a1b903da3ec8e4eef86cde"
+       "[\"provenance\",\"7db8855adbaecab903b8e269928ba4601afa403c97e06aece9e767ca4a188829\"]"
       ],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": [
-       "8785b2fd96b051d4b53727317a8d9b48460cefad39a1b903da3ec8e4eef86cde"
+       "[\"provenance\",\"7db8855adbaecab903b8e269928ba4601afa403c97e06aece9e767ca4a188829\"]"
       ]
      },
      "language": "python",
@@ -369,7 +369,7 @@
      },
      "run": {
       "cache_hit": true,
-      "provenance_hash": "d4c046dea4eff2d9d525e651b27521241db50b8fba95b6000a9bf0930d87b384",
+      "provenance_hash": "708ea9f914d56409cf02048949b254f13cff214a693ffb58145331ae308bac4d",
       "status": "ok"
      },
      "staleness": {
@@ -448,13 +448,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "7e191cbbab8a900d6a29f85b2bccdfb826f8238f82c64e2b02fd40eb1b653449",
+      "execution_key": "070fb38bf3b004c25e6057017ad2b68287ad4143a771c3072874f99b14d35285",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:ec1150bebad65db8d464e1b664a69c1d61649ab75a20be450256a0d88e98695b"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -497,11 +497,11 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "1cbf71bf9afc54fc740156b47dd67eca6a92efc2e1759fff5f2ce8a47342e635",
+      "execution_key": "78c84933f07edc595533f3e505945e6ab3e204b450cbe749e8d7b5bfe3e7b590",
       "input_hashes": [],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": []
      },
      "language": "python",
@@ -568,13 +568,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "7e191cbbab8a900d6a29f85b2bccdfb826f8238f82c64e2b02fd40eb1b653449",
+      "execution_key": "070fb38bf3b004c25e6057017ad2b68287ad4143a771c3072874f99b14d35285",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:ec1150bebad65db8d464e1b664a69c1d61649ab75a20be450256a0d88e98695b"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -584,7 +584,7 @@
        "out": {
         "artifact": "nb_cellgraph-each_cell_items_var_out@v=2",
         "content_sha256": "c240ffb6d001cee28f77f51042d00ea6068f65fd12407baa4ee09557863f9ba5",
-        "provenance_hash": "688209a020344c24b6e704e247913c583ede3c95df21522f110004381382093a"
+        "provenance_hash": "c9a8fb78f770770493f1ea377959e9631f15eb6e1ca09c6e5daab292d0b9e7d7"
        }
       },
       "each": {
@@ -612,7 +612,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "7e191cbbab8a900d6a29f85b2bccdfb826f8238f82c64e2b02fd40eb1b653449",
+      "provenance_hash": "070fb38bf3b004c25e6057017ad2b68287ad4143a771c3072874f99b14d35285",
       "status": "ok"
      },
      "staleness": {
@@ -637,15 +637,15 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "73c626bc745cf8dafd7def21bbac9abe8b903ecb002e34aaed3a323d32343bcf",
+      "execution_key": "583de4ab280550d95635a8fe2cb2f373a1460213d9fd75113ec71c8ceb518799",
       "input_hashes": [
-       "688209a020344c24b6e704e247913c583ede3c95df21522f110004381382093a"
+       "[\"provenance\",\"c9a8fb78f770770493f1ea377959e9631f15eb6e1ca09c6e5daab292d0b9e7d7\"]"
       ],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": [
-       "688209a020344c24b6e704e247913c583ede3c95df21522f110004381382093a"
+       "[\"provenance\",\"c9a8fb78f770770493f1ea377959e9631f15eb6e1ca09c6e5daab292d0b9e7d7\"]"
       ]
      },
      "language": "python",
@@ -663,7 +663,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "73c626bc745cf8dafd7def21bbac9abe8b903ecb002e34aaed3a323d32343bcf",
+      "provenance_hash": "583de4ab280550d95635a8fe2cb2f373a1460213d9fd75113ec71c8ceb518799",
       "status": "ok"
      },
      "staleness": {
@@ -742,13 +742,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "8ee111124edddb63e8703cfdfaf8e547aea9e20a1fc0e1d1e38bbcd21b1ccbfa",
+      "definition_key": "80ddbc46efa5cd4f303bb5ccf15551fee486b3815420c7b30589d0bbd37cbc9a",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "59901dd88232eeef8adc140fa50596e0ae6f197866431a5fe0ac7b9ea625dc3c",
+      "execution_key": "125632dd87d9ce7fbaa95b169fd2b3c3b70968928cabc8c2f0e2887274e95c0d",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:ec1150bebad65db8d464e1b664a69c1d61649ab75a20be450256a0d88e98695b"
       ],
-      "source_hash": "8ee111124edddb63e8703cfdfaf8e547aea9e20a1fc0e1d1e38bbcd21b1ccbfa",
+      "source_hash": "80ddbc46efa5cd4f303bb5ccf15551fee486b3815420c7b30589d0bbd37cbc9a",
       "upstream_hashes": []
      },
      "language": "python",
@@ -791,11 +791,11 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "1cbf71bf9afc54fc740156b47dd67eca6a92efc2e1759fff5f2ce8a47342e635",
+      "execution_key": "78c84933f07edc595533f3e505945e6ab3e204b450cbe749e8d7b5bfe3e7b590",
       "input_hashes": [],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": []
      },
      "language": "python",
@@ -862,13 +862,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "8ee111124edddb63e8703cfdfaf8e547aea9e20a1fc0e1d1e38bbcd21b1ccbfa",
+      "definition_key": "80ddbc46efa5cd4f303bb5ccf15551fee486b3815420c7b30589d0bbd37cbc9a",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "59901dd88232eeef8adc140fa50596e0ae6f197866431a5fe0ac7b9ea625dc3c",
+      "execution_key": "125632dd87d9ce7fbaa95b169fd2b3c3b70968928cabc8c2f0e2887274e95c0d",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:ec1150bebad65db8d464e1b664a69c1d61649ab75a20be450256a0d88e98695b"
       ],
-      "source_hash": "8ee111124edddb63e8703cfdfaf8e547aea9e20a1fc0e1d1e38bbcd21b1ccbfa",
+      "source_hash": "80ddbc46efa5cd4f303bb5ccf15551fee486b3815420c7b30589d0bbd37cbc9a",
       "upstream_hashes": []
      },
      "language": "python",
@@ -878,7 +878,7 @@
        "out": {
         "artifact": "nb_cellgraph-each_cell_items_var_out@v=3",
         "content_sha256": "9ec73d909e239ebb15c697aa9cbea1547fdb515befe083b51de50021e28a8b1a",
-        "provenance_hash": "a8d594896acc49f8569e69f3444caffc20b125cc64089d38a7ad5438cf3d0175"
+        "provenance_hash": "f4d60485a15e18530e3574cf2e70c34ad353fb5a6439339c07762aa762bdecb7"
        }
       },
       "each": {
@@ -906,7 +906,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "59901dd88232eeef8adc140fa50596e0ae6f197866431a5fe0ac7b9ea625dc3c",
+      "provenance_hash": "125632dd87d9ce7fbaa95b169fd2b3c3b70968928cabc8c2f0e2887274e95c0d",
       "status": "ok"
      },
      "staleness": {
@@ -931,15 +931,15 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "cdbd2df8ea8abc427ae894a0b6f9f283bddb9d41eb04f8b7c3ba769d8d124b9b",
+      "execution_key": "fb6d8b537406bafcc1212e9f92e4581fcda01523917d0e7bcb3127d6ffc9b272",
       "input_hashes": [
-       "a8d594896acc49f8569e69f3444caffc20b125cc64089d38a7ad5438cf3d0175"
+       "[\"provenance\",\"f4d60485a15e18530e3574cf2e70c34ad353fb5a6439339c07762aa762bdecb7\"]"
       ],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": [
-       "a8d594896acc49f8569e69f3444caffc20b125cc64089d38a7ad5438cf3d0175"
+       "[\"provenance\",\"f4d60485a15e18530e3574cf2e70c34ad353fb5a6439339c07762aa762bdecb7\"]"
       ]
      },
      "language": "python",
@@ -957,7 +957,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "cdbd2df8ea8abc427ae894a0b6f9f283bddb9d41eb04f8b7c3ba769d8d124b9b",
+      "provenance_hash": "fb6d8b537406bafcc1212e9f92e4581fcda01523917d0e7bcb3127d6ffc9b272",
       "status": "ok"
      },
      "staleness": {
@@ -1036,13 +1036,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "7e191cbbab8a900d6a29f85b2bccdfb826f8238f82c64e2b02fd40eb1b653449",
+      "execution_key": "070fb38bf3b004c25e6057017ad2b68287ad4143a771c3072874f99b14d35285",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:ec1150bebad65db8d464e1b664a69c1d61649ab75a20be450256a0d88e98695b"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -1085,11 +1085,11 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "1cbf71bf9afc54fc740156b47dd67eca6a92efc2e1759fff5f2ce8a47342e635",
+      "execution_key": "78c84933f07edc595533f3e505945e6ab3e204b450cbe749e8d7b5bfe3e7b590",
       "input_hashes": [],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": []
      },
      "language": "python",
@@ -1156,13 +1156,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "7e191cbbab8a900d6a29f85b2bccdfb826f8238f82c64e2b02fd40eb1b653449",
+      "execution_key": "070fb38bf3b004c25e6057017ad2b68287ad4143a771c3072874f99b14d35285",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:ec1150bebad65db8d464e1b664a69c1d61649ab75a20be450256a0d88e98695b"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -1172,7 +1172,7 @@
        "out": {
         "artifact": "nb_cellgraph-each_cell_items_var_out@v=4",
         "content_sha256": "c240ffb6d001cee28f77f51042d00ea6068f65fd12407baa4ee09557863f9ba5",
-        "provenance_hash": "688209a020344c24b6e704e247913c583ede3c95df21522f110004381382093a"
+        "provenance_hash": "c9a8fb78f770770493f1ea377959e9631f15eb6e1ca09c6e5daab292d0b9e7d7"
        }
       },
       "each": {
@@ -1200,7 +1200,7 @@
      },
      "run": {
       "cache_hit": true,
-      "provenance_hash": "7e191cbbab8a900d6a29f85b2bccdfb826f8238f82c64e2b02fd40eb1b653449",
+      "provenance_hash": "070fb38bf3b004c25e6057017ad2b68287ad4143a771c3072874f99b14d35285",
       "status": "ok"
      },
      "staleness": {
@@ -1225,15 +1225,15 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "73c626bc745cf8dafd7def21bbac9abe8b903ecb002e34aaed3a323d32343bcf",
+      "execution_key": "583de4ab280550d95635a8fe2cb2f373a1460213d9fd75113ec71c8ceb518799",
       "input_hashes": [
-       "688209a020344c24b6e704e247913c583ede3c95df21522f110004381382093a"
+       "[\"provenance\",\"c9a8fb78f770770493f1ea377959e9631f15eb6e1ca09c6e5daab292d0b9e7d7\"]"
       ],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": [
-       "688209a020344c24b6e704e247913c583ede3c95df21522f110004381382093a"
+       "[\"provenance\",\"c9a8fb78f770770493f1ea377959e9631f15eb6e1ca09c6e5daab292d0b9e7d7\"]"
       ]
      },
      "language": "python",
@@ -1251,7 +1251,7 @@
      },
      "run": {
       "cache_hit": true,
-      "provenance_hash": "73c626bc745cf8dafd7def21bbac9abe8b903ecb002e34aaed3a323d32343bcf",
+      "provenance_hash": "583de4ab280550d95635a8fe2cb2f373a1460213d9fd75113ec71c8ceb518799",
       "status": "ok"
      },
      "staleness": {
@@ -1330,13 +1330,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "902c6bd54762c4d5c6cb0d03beb9979bf3b58b192f316e1fa8b5f9d09a88c428",
+      "execution_key": "8965e0a50eb8f26f2dfdd0f6cfa2b419f29e0ccd18f4066a1e1987c64e33f566",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:58a001a7b33b4454963c7e7d089b7eb6a23e8ccd10058f7efd1cad04579d76c5"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -1379,11 +1379,11 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "1cbf71bf9afc54fc740156b47dd67eca6a92efc2e1759fff5f2ce8a47342e635",
+      "execution_key": "78c84933f07edc595533f3e505945e6ab3e204b450cbe749e8d7b5bfe3e7b590",
       "input_hashes": [],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": []
      },
      "language": "python",
@@ -1449,13 +1449,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "902c6bd54762c4d5c6cb0d03beb9979bf3b58b192f316e1fa8b5f9d09a88c428",
+      "execution_key": "8965e0a50eb8f26f2dfdd0f6cfa2b419f29e0ccd18f4066a1e1987c64e33f566",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:58a001a7b33b4454963c7e7d089b7eb6a23e8ccd10058f7efd1cad04579d76c5"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -1465,7 +1465,7 @@
        "out": {
         "artifact": "nb_cellgraph-each_cell_items_var_out@v=5",
         "content_sha256": "00ce6f9f5bc5b597ed458996191363b8cc73715ad8b0d5f53ef2aa7736bcb91c",
-        "provenance_hash": "4cf573f480d674591c1d5313b6f41bfc8d159c839a668a18d22bc94273b404cc"
+        "provenance_hash": "242d8c6e5219acf0311bd3bf9b74d47152f897387949b575e5654dd0bee9e8cb"
        }
       },
       "each": {
@@ -1489,7 +1489,7 @@
      },
      "run": {
       "cache_hit": true,
-      "provenance_hash": "902c6bd54762c4d5c6cb0d03beb9979bf3b58b192f316e1fa8b5f9d09a88c428",
+      "provenance_hash": "8965e0a50eb8f26f2dfdd0f6cfa2b419f29e0ccd18f4066a1e1987c64e33f566",
       "status": "ok"
      },
      "staleness": {
@@ -1514,15 +1514,15 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "39f1ce3441474d2f2777cdef51fef3d0a99a203b211492410e99f0296f8ac068",
+      "execution_key": "92b64992987b82f48d61bc3ec6b25565aca913d318ee3954710994f74a9c5220",
       "input_hashes": [
-       "4cf573f480d674591c1d5313b6f41bfc8d159c839a668a18d22bc94273b404cc"
+       "[\"provenance\",\"242d8c6e5219acf0311bd3bf9b74d47152f897387949b575e5654dd0bee9e8cb\"]"
       ],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": [
-       "4cf573f480d674591c1d5313b6f41bfc8d159c839a668a18d22bc94273b404cc"
+       "[\"provenance\",\"242d8c6e5219acf0311bd3bf9b74d47152f897387949b575e5654dd0bee9e8cb\"]"
       ]
      },
      "language": "python",
@@ -1540,7 +1540,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "39f1ce3441474d2f2777cdef51fef3d0a99a203b211492410e99f0296f8ac068",
+      "provenance_hash": "92b64992987b82f48d61bc3ec6b25565aca913d318ee3954710994f74a9c5220",
       "status": "ok"
      },
      "staleness": {
@@ -1590,13 +1590,13 @@
       "upstream_ids": []
      },
      "keys": {
-      "definition_key": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "definition_key": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "902c6bd54762c4d5c6cb0d03beb9979bf3b58b192f316e1fa8b5f9d09a88c428",
+      "execution_key": "8965e0a50eb8f26f2dfdd0f6cfa2b419f29e0ccd18f4066a1e1987c64e33f566",
       "input_hashes": [
        "data:file:///tmp/strata-cellgraph/each/data:58a001a7b33b4454963c7e7d089b7eb6a23e8ccd10058f7efd1cad04579d76c5"
       ],
-      "source_hash": "02c9f7c76196d90231636848b001d356ee6fe7e6aa3996d5db3fb855782c96b2",
+      "source_hash": "dd30fc67da5b91f55f663e3cf36346a57a72a60167af20dfcbcc706a9c54c86e",
       "upstream_hashes": []
      },
      "language": "python",
@@ -1606,7 +1606,7 @@
        "out": {
         "artifact": "nb_cellgraph-each_cell_items_var_out@v=5",
         "content_sha256": "00ce6f9f5bc5b597ed458996191363b8cc73715ad8b0d5f53ef2aa7736bcb91c",
-        "provenance_hash": "4cf573f480d674591c1d5313b6f41bfc8d159c839a668a18d22bc94273b404cc"
+        "provenance_hash": "242d8c6e5219acf0311bd3bf9b74d47152f897387949b575e5654dd0bee9e8cb"
        }
       },
       "each": {
@@ -1633,7 +1633,7 @@
       "console": "",
       "displays": [],
       "execution_method": "cached",
-      "provenance_hash": "902c6bd54762c4d5c6cb0d03beb9979bf3b58b192f316e1fa8b5f9d09a88c428",
+      "provenance_hash": "8965e0a50eb8f26f2dfdd0f6cfa2b419f29e0ccd18f4066a1e1987c64e33f566",
       "status": "ok",
       "then": [
        [
@@ -1664,15 +1664,15 @@
       ]
      },
      "keys": {
-      "definition_key": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "definition_key": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "39f1ce3441474d2f2777cdef51fef3d0a99a203b211492410e99f0296f8ac068",
+      "execution_key": "92b64992987b82f48d61bc3ec6b25565aca913d318ee3954710994f74a9c5220",
       "input_hashes": [
-       "4cf573f480d674591c1d5313b6f41bfc8d159c839a668a18d22bc94273b404cc"
+       "[\"provenance\",\"242d8c6e5219acf0311bd3bf9b74d47152f897387949b575e5654dd0bee9e8cb\"]"
       ],
-      "source_hash": "d4727cff83b5a76a066e84bec9272bca05115a83667c6d71db4837d30d07d1a1",
+      "source_hash": "2faeb9f0c97a12daf6fa6cbf12eaecd050fefd19f5867fbbff69990005c593ea",
       "upstream_hashes": [
-       "4cf573f480d674591c1d5313b6f41bfc8d159c839a668a18d22bc94273b404cc"
+       "[\"provenance\",\"242d8c6e5219acf0311bd3bf9b74d47152f897387949b575e5654dd0bee9e8cb\"]"
       ]
      },
      "language": "python",
@@ -1693,7 +1693,7 @@
       "console": "",
       "displays": [],
       "execution_method": "cached",
-      "provenance_hash": "39f1ce3441474d2f2777cdef51fef3d0a99a203b211492410e99f0296f8ac068",
+      "provenance_hash": "92b64992987b82f48d61bc3ec6b25565aca913d318ee3954710994f74a9c5220",
       "status": "ok",
       "then": [
        [

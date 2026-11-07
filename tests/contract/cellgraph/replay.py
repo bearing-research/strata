@@ -93,8 +93,6 @@ def analyze(state: Any) -> cg.Analysis:
         cells,
         vocabulary.strata_vocabulary(),
         groups,
-        normalization=cg.NORMALIZE_LEGACY_1,
-        digest=cg.DIGEST_LEGACY_1,
     )
 
 
@@ -173,7 +171,7 @@ class _Resolver:
         if len(found) != 1:
             return cg.Unavailable(f"{len(found)} recorded components for {spec.kind} {spec.name}")
         self.used.add(found[0])
-        return cg.Resolved(identity=None, fingerprint=None, legacy=found[0])
+        return cg.Resolved(identity=None, fingerprint=found[0])
 
     def unused(self) -> list[str]:
         everything = [c for kind in _KIND_RESOLVED.values() for c in self.recorded[kind]]
@@ -362,6 +360,19 @@ def replay(name: str, workdir: Path) -> Report:
             refused = refusals.get(cell_id)
             if refused is not None and refused == ca.plannable:
                 miss(index, cell_id, "plannable", not refused, ca.plannable)
+
+            # Without a DAG Strata keys every cell without upstreams, inactive ones too.
+            inactive = analysis.dag is not None and cell_id in analysis.dag.inactive_cells
+            if inactive and recorded["dag_error"] is None:
+                try:
+                    analysis.plan(cell_id, ready=lambda _: True)
+                except cg.InactiveVariantError:
+                    pass
+                else:
+                    miss(index, cell_id, "plan", "InactiveVariantError", "a plan")
+                if "keys" in expected:
+                    miss(index, cell_id, "keys", "none for an inactive variant", "recorded")
+                continue
 
             if ca.plannable and recorded["dag"] is not None:
                 status = {cid: c["staleness"]["status"] for cid, c in recorded["cells"].items()}

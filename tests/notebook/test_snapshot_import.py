@@ -6,6 +6,7 @@ import hashlib
 import json
 import zipfile
 
+import cellgraph as cg
 import pytest
 
 from strata.notebook.parser import parse_notebook
@@ -438,7 +439,7 @@ class TestABundleWritesOnlyIntoTheNotebook:
         imported = import_snapshot(_export(ran, tmp_path / "snap.zip"), tmp_path / "dst" / "nb")
 
         kept = [c.last_key_parts for c in load_runtime_state(imported.notebook_dir).cells.values()]
-        assert kept and all(parts and parts["parts_schema"] == 1 for parts in kept)
+        assert kept and all(parts and parts["parts_schema"] == cg.PARTS_SCHEMA for parts in kept)
 
     def test_an_artifact_id_that_is_a_path_is_refused(self, ran, tmp_path):
         """An artifact id becomes a blob key, so an id that is a path would write outside."""

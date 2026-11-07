@@ -49,7 +49,7 @@ def test_a_plain_cells_source_hash_is_pinned_to_a_known_value():
     source = "# @name totals\n# @env MODE=fast\nx = 1  # one\n"
     assert (
         compute_source_hash(source)
-        == "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26"
+        == "8d3892b026d56691db38e97cc9f1ca55358c0b0749e18588edcb6dfcbce234bd"
     )
 
 

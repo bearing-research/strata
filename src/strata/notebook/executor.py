@@ -699,6 +699,17 @@ class CellExecutor:
             return None
         if cell.source != source:
             cell = cell.model_copy(update={"source": source})
+        dag = self.session.dag
+        if dag is not None and cell_id in dag.inactive_cells:
+            # cellgraph neither wires nor keys it.
+            result = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error=f"{cell.variant_name!r} is not the active variant of group "
+                f"{cell.variant_group!r}; make it active to run it",
+            )
+            self.session.apply_execution_result_metadata(cell_id, result)
+            return result
         diagnostic = blocking_diagnostic(cell, self.session.notebook_state, self.session.analysis)
         if diagnostic is None:
             return None

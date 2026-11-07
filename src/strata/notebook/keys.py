@@ -120,7 +120,7 @@ def _resolvers(fingerprints: Mapping[str, list[str]]) -> dict[str, cg.Resolver]:
             found = next((c for c in fingerprints[kind] if c.startswith(prefix)), None)
             if found is None:
                 return cg.Unavailable(f"no fingerprint for {kind} {spec.name}")
-            return cg.Resolved(identity=None, fingerprint=None, legacy=found)
+            return cg.Resolved(identity=None, fingerprint=found)
 
         return resolve
 
@@ -128,12 +128,17 @@ def _resolvers(fingerprints: Mapping[str, list[str]]) -> dict[str, cg.Resolver]:
 
 
 def input_parts(fingerprints: Mapping[str, list[str]]) -> list[list[str]]:
-    """Each input as a key part, ``[kind, name, component]``. A component begins with its name."""
-    return sorted(
-        [kind, component.partition(":")[0], component]
-        for kind, components in fingerprints.items()
-        for component in components
-    )
+    """Each input as a key part, ``[kind, name, component]``, as cellgraph builds it.
+
+    A fingerprint begins with its input's name.
+    """
+    parts = []
+    for kind, found in fingerprints.items():
+        for fingerprint in found:
+            name = fingerprint.partition(":")[0]
+            resolved = cg.Resolved(identity=None, fingerprint=fingerprint)
+            parts.append([kind, name, cg.input_component(kind, name, resolved)])
+    return sorted(parts)
 
 
 def cell_key(
@@ -181,12 +186,6 @@ def cell_key(
         return CellKey(result.digest, upstream, result.parts)
     # A prompt or SQL cell's generic hash, which it records beside its own key. Its parts
     # have no inputs (they are the host's to key), so supply the ones this hash reads.
-    digest = compute_provenance_hash(
-        cell_provenance_inputs(upstream, mounts, tables, fetches, datasets),
-        result.parts["definition_key"],
-        env_hash,
-    )
-    if instance is not None:
-        digest = cg.derive_subkey(digest, f"variant={instance}")
     inputs = input_parts({"mount": mounts, "table": tables, "fetch": fetches, "dataset": datasets})
-    return CellKey(digest, upstream, {**result.parts, "inputs": inputs})
+    parts = {**result.parts, "inputs": inputs}
+    return CellKey(cg.parts_digest(parts), upstream, parts)

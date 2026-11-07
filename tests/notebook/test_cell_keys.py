@@ -5,14 +5,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cellgraph as cg
 import pytest
 
 from strata.notebook.executor import CellExecutor
-from strata.notebook.keys import cell_key
+from strata.notebook.keys import cell_key, input_parts
 from strata.notebook.parser import parse_notebook
 from strata.notebook.provenance import (
-    cell_provenance_inputs,
-    compute_provenance_hash,
     compute_source_hash,
 )
 from strata.notebook.session import NotebookSession
@@ -42,7 +41,7 @@ def _mount(tmp_path: Path) -> str:
 
 
 def test_a_widget_key_covers_a_mount_declared_on_it(tmp_path):
-    """A widget is keyed by the generic hash over every fingerprint staleness draws."""
+    """A widget is keyed over its parts and every fingerprint staleness draws."""
     session = _session(
         tmp_path, [("w", "widget", "a = slider(0, 1, default=0.5)\n")], _mount(tmp_path)
     )
@@ -67,9 +66,11 @@ def test_a_widget_key_covers_a_mount_declared_on_it(tmp_path):
         datasets=outside.dataset_fingerprints,
         env_hash=env_hash,
     )
-    assert key.provenance_hash == compute_provenance_hash(
-        cell_provenance_inputs([], *fingerprints), compute_source_hash(cell.source), env_hash
-    )
+    assert key.parts is not None
+    assert key.provenance_hash == cg.parts_digest(key.parts)
+    assert key.parts["definition_key"] == compute_source_hash(cell.source, "widget")
+    kinds = dict(zip(("mount", "table", "fetch", "dataset"), fingerprints, strict=True))
+    assert key.parts["inputs"] == input_parts(kinds)
 
 
 _CYCLE = "# @after c1\nx = 1\n"

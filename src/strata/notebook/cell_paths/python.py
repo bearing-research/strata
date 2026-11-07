@@ -354,7 +354,8 @@ async def run_python_cell(
             cell_id,
             source_hash[:12],
             env_hash[:12],
-            [h[:12] for h in input_hashes],
+            # A component is a tagged list ending in its hash: show the hash, not the tag.
+            [h.rstrip('"]')[-12:] for h in input_hashes],
             [fp[:20] for fp in mount_fingerprints],
             [fp[:40] for fp in prov.table_fingerprints],
             provenance_hash[:12],
