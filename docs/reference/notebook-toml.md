@@ -398,7 +398,7 @@ timeout = 600                 # cell-level override
 | Key | Type | Description |
 | --- | --- | --- |
 | `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against - **not** `@name`. See [Cell IDs](annotations/python.md#cell-ids). |
-| `file` | string (required) | Path to the cell source under `cells/`. The backend names it `<id>.py`, or `<id>.md`, `<id>.r` and `<id>.widget` for markdown, R and widget cells. |
+| `file` | string (required) | Path to the cell source under `cells/`. The backend names a new cell's file by its language: `<id>.py`, `<id>.sql`, `<id>.prompt`, `<id>.md`, `<id>.r` or `<id>.widget`. The name is only for outside editors; `language` decides how the cell runs. |
 | `language` | `"python"` \| `"prompt"` \| `"sql"` \| `"markdown"` \| `"r"` \| `"widget"` | Default `"python"`. |
 | `order` | float | Display order. Float so cells can be inserted between existing ones without renumbering. Default `0`. |
 | `worker` | string \| absent | Cell-level worker override. Beaten by `# @worker` in the cell source. |

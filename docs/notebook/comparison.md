@@ -10,7 +10,7 @@ as first-class cell behaviors rather than escape hatches.
 
 | Capability | Strata | marimo | Pluto.jl | Jupyter |
 |---|---|---|---|---|
-| File format | Per-cell `.py` files + `notebook.toml` manifest | Single `.py` per notebook | Single `.jl` per notebook | JSON `.ipynb` |
+| File format | One file per cell in its language (`.py`, `.sql`, `.md`, ...) + `notebook.toml` manifest | Single `.py` per notebook | Single `.jl` per notebook | JSON `.ipynb` |
 | Git-friendly diffs | Per-cell, no embedded outputs or execution counts | Single-file but text | Single-file but text | Outputs + base64 images + execution counts embedded in the same file |
 | Automatic DAG from variable references | Yes | Yes | Yes | No |
 | Persistent cell-output cache | **Automatic**, content-addressed per cell, survives restarts | **Opt-in** via `mo.cache` / `mo.lru_cache` / `mo.persistent_cache` decorators (or context managers) | None, Pluto guarantees the program state is described by the visible code, no hidden cache between sessions | None |
