@@ -103,8 +103,9 @@ when writing it by hand:
   `.widget` for widget.
 - **`order`** - display order *and* reference-resolution order (see
   below). Keep it consistent with the list order.
-- **`language`** - one of `python`, `r`, `sql`, `prompt`, `markdown`,
-  `widget`.
+- **`language`** - required, one of `python`, `r`, `sql`, `prompt`,
+  `markdown`, `widget`. There is no default: a cell without it stops the
+  notebook from opening, with an error that names the cell.
 
 ## pyproject.toml - required for `strata run`
 

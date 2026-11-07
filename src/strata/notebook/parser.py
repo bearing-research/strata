@@ -6,9 +6,11 @@ import os
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from strata.notebook.layout import cell_source_path
 from strata.notebook.models import (
+    CellLanguage,
     CellMeta,
     CellOutput,
     CellState,
@@ -80,12 +82,24 @@ def _parse_catalogs(toml_data: dict) -> dict[str, dict]:
     return {str(name): dict(body) for name, body in raw.items() if isinstance(body, dict)}
 
 
+def _cell_meta(entry: dict[str, Any]) -> CellMeta:
+    """One ``[[cells]]`` entry; a missing ``language`` is refused, naming the cell."""
+    if "language" not in entry:
+        languages = ", ".join(f'"{language.value}"' for language in CellLanguage)
+        raise ValueError(
+            f"notebook.toml: cell {entry.get('id')!r} has no `language`; add one of "
+            f'{languages}, e.g. language = "python"'
+        )
+    return CellMeta(**entry)
+
+
 def parse_notebook(directory: Path) -> NotebookState:
     """Parse a notebook directory: notebook.toml plus every cell file.
 
     Raises:
         FileNotFoundError: If notebook.toml is missing.
-        ValueError: If a cell's ``file`` points outside ``cells/``.
+        ValueError: If a cell's ``file`` points outside ``cells/``, or a cell has no
+            ``language``.
     """
     directory = Path(directory)
     notebook_toml_path = directory / "notebook.toml"
@@ -149,7 +163,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         timeout=toml_data.get("timeout"),
         env=toml_data.get("env", {}),
         workers=[WorkerSpec(**worker) for worker in toml_data.get("workers", [])],
-        cells=[CellMeta(**cell_meta) for cell_meta in toml_data.get("cells", [])],
+        cells=[_cell_meta(cell_meta) for cell_meta in toml_data.get("cells", [])],
         mounts=[MountSpec(**m) for m in toml_data.get("mounts", [])],
         connections=_parsed_connections,
         malformed_connections=_parsed_malformed,

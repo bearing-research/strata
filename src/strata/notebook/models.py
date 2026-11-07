@@ -429,7 +429,8 @@ class CellMeta(BaseModel):
 
     id: str = Field(..., description="Unique cell ID (UUID-like)")
     file: str = Field(..., description="Path to cell source file (relative to cells/)")
-    language: CellLanguage = Field(default=CellLanguage.PYTHON, description="Programming language")
+    # Required: the file's extension never decides how a cell runs.
+    language: CellLanguage = Field(..., description="Programming language")
     order: float = Field(default=0, description="Display order in notebook")
     worker: str | None = Field(
         default=None,

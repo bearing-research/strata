@@ -268,7 +268,7 @@ def test_reload_does_not_restore_ready_state_after_mount_change(tmp_path: Path):
             NotebookToml(
                 notebook_id="reload_mount_state",
                 name="reload_mount_state",
-                cells=[CellMeta(id="c1", file="c1.py", order=0)],
+                cells=[CellMeta(id="c1", file="c1.py", language="python", order=0)],
                 mounts=[
                     MountSpec(
                         name="raw_data",
@@ -312,7 +312,7 @@ def _prime_env_reload_session(tmp_path: Path, source: str, notebook_env: dict[st
         NotebookToml(
             notebook_id="reload_env_state",
             name="reload_env_state",
-            cells=[CellMeta(id="c1", file="c1.py", order=0)],
+            cells=[CellMeta(id="c1", file="c1.py", language="python", order=0)],
             env=notebook_env,
         ),
     )
@@ -348,7 +348,7 @@ def test_reload_preserves_outputs_when_referenced_env_changes(tmp_path: Path):
         NotebookToml(
             notebook_id="reload_env_state",
             name="reload_env_state",
-            cells=[CellMeta(id="c1", file="c1.py", order=0)],
+            cells=[CellMeta(id="c1", file="c1.py", language="python", order=0)],
             env={"APP_MODE": "b"},
         ),
     )
@@ -375,7 +375,7 @@ def test_reload_keeps_unrelated_cells_ready_after_env_change(tmp_path: Path):
         NotebookToml(
             notebook_id="reload_env_state",
             name="reload_env_state",
-            cells=[CellMeta(id="c1", file="c1.py", order=0)],
+            cells=[CellMeta(id="c1", file="c1.py", language="python", order=0)],
             env={"APP_MODE": "a", "OPENAI_API_KEY": "sk-new"},
         ),
     )
@@ -396,7 +396,7 @@ def test_reload_does_not_restore_ready_state_after_worker_runtime_change(tmp_pat
         NotebookToml(
             notebook_id="reload_worker_state",
             name="reload_worker_state",
-            cells=[CellMeta(id="c1", file="c1.py", order=0)],
+            cells=[CellMeta(id="c1", file="c1.py", language="python", order=0)],
             worker="cpu-analytics",
             workers=[
                 WorkerSpec(
@@ -425,7 +425,7 @@ def test_reload_does_not_restore_ready_state_after_worker_runtime_change(tmp_pat
         NotebookToml(
             notebook_id="reload_worker_state",
             name="reload_worker_state",
-            cells=[CellMeta(id="c1", file="c1.py", order=0)],
+            cells=[CellMeta(id="c1", file="c1.py", language="python", order=0)],
             worker="cpu-analytics",
             workers=[
                 WorkerSpec(
