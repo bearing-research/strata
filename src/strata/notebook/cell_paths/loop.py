@@ -27,7 +27,7 @@ from strata.notebook.harness_user import (
     resolve_harness_user,
 )
 from strata.notebook.immutability import MutationWarning
-from strata.notebook.models import MountSpec, TableWriteSpec
+from strata.notebook.models import CellLanguage, MountSpec, TableWriteSpec
 from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 
 if TYPE_CHECKING:
@@ -254,7 +254,7 @@ async def _run_loop(
     use_cache: bool,
     folders: Path | None,
 ) -> CellExecutionResult:
-    annotations = parse_annotations(source)
+    annotations = parse_annotations(source, CellLanguage.PYTHON)
     effective_worker = effective_worker_name(host.notebook_state, cell_id, annotations.worker)
     if effective_worker != "local":
         return CellExecutionResult(

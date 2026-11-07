@@ -465,7 +465,7 @@ class TestPublicationPage:
         )
 
     def test_a_snapshot_step_says_until_when_its_state_can_be_queried(self, store):
-        """A ``# @cache snapshot`` SQL cell upstream records its moment and horizon."""
+        """A ``-- @cache snapshot`` SQL cell upstream records its moment and horizon."""
         html = self._render(
             store,
             source="SELECT * FROM orders",

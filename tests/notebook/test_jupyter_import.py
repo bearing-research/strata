@@ -1293,7 +1293,7 @@ def test_an_env_magic_below_code_becomes_an_annotation_that_applies(tmp_path: Pa
     result = import_notebook(ipynb)
 
     source = parse_notebook(result.notebook_dir).cells[0].source
-    assert parse_annotations(source).env == {"MODE": "fast"}
+    assert parse_annotations(source, "python").env == {"MODE": "fast"}
     assert "%env" not in source
 
 

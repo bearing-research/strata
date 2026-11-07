@@ -63,8 +63,9 @@ def _rows(session: NotebookSession, uri: str) -> list[dict[str, Any]]:
 
 
 async def _run(nb_dir: Path, session: NotebookSession, cell_id: str) -> Any:
-    source = (nb_dir / "cells" / f"{cell_id}.py").read_text()
-    result = await CellExecutor(session).execute_cell(cell_id, source)
+    cell = parse_notebook(nb_dir).get_cell(cell_id)
+    assert cell is not None
+    result = await CellExecutor(session).execute_cell(cell_id, cell.source)
     # What the route does after a run.
     session.compute_staleness()
     if result.success:
@@ -78,7 +79,7 @@ async def test_a_memory_connection_leaves_no_file_in_the_notebook(tmp_path, opti
     _write_parquet(tmp_path / "raw" / "a.parquet", [1])
     nb_dir = _notebook(
         tmp_path,
-        {"c1": "# @sql connection=lake\nSELECT 1 AS one\n"},
+        {"c1": "-- @sql connection=lake\nSELECT 1 AS one\n"},
         f'driver = "duckdb"\npath = ":memory:"\n{options}',
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -96,7 +97,7 @@ async def test_a_mount_is_a_view_and_a_new_file_makes_the_cell_stale(tmp_path):
         tmp_path,
         # No database probe, so the mount's fingerprint is all that tells the
         # two runs apart.
-        {"c1": "# @sql connection=lake\n# @cache forever\nSELECT sum(k) AS total FROM raw\n"},
+        {"c1": "-- @sql connection=lake\n-- @cache forever\nSELECT sum(k) AS total FROM raw\n"},
         'driver = "duckdb"\npath = ":memory:"\nmounts = ["raw"]',
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -128,8 +129,8 @@ async def test_a_database_file_and_its_mounts_are_read_together_and_never_writte
     nb_dir = _notebook(
         tmp_path,
         {
-            "c1": "# @sql connection=lake\nSELECT v FROM raw JOIN labels USING (k) ORDER BY v\n",
-            "c2": "# @sql connection=lake\nINSERT INTO labels VALUES (3, 'three')\n",
+            "c1": "-- @sql connection=lake\nSELECT v FROM raw JOIN labels USING (k) ORDER BY v\n",
+            "c2": "-- @sql connection=lake\nINSERT INTO labels VALUES (3, 'three')\n",
         },
         f'driver = "duckdb"\npath = "{db}"\nmounts = ["raw"]',
     )
@@ -150,7 +151,7 @@ async def test_a_mount_the_cell_does_not_declare_fails_naming_it(tmp_path):
     _write_parquet(tmp_path / "raw" / "a.parquet", [1])
     nb_dir = _notebook(
         tmp_path,
-        {"c1": "# @sql connection=lake\nSELECT * FROM cooked\n"},
+        {"c1": "-- @sql connection=lake\nSELECT * FROM cooked\n"},
         'driver = "duckdb"\npath = ":memory:"\nmounts = ["cooked"]',
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -164,7 +165,7 @@ async def test_a_mount_the_cell_does_not_declare_fails_naming_it(tmp_path):
 async def test_a_catalog_the_server_does_not_configure_fails_naming_it(tmp_path, monkeypatch):
     nb_dir = _notebook(
         tmp_path,
-        {"c1": "# @sql connection=lake\nSELECT * FROM lake.taxi.trips\n"},
+        {"c1": "-- @sql connection=lake\nSELECT * FROM lake.taxi.trips\n"},
         'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"',
     )
     monkeypatch.setattr(NotebookSession, "lake_config", lambda self: StrataConfig())
@@ -234,13 +235,15 @@ def _pinned_versions(sql: str) -> dict[tuple[str, str], int]:
 def test_lake_tables_are_the_catalog_tables_a_read_cell_reads(tmp_path):
     nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
     state = parse_notebook(nb_dir)
-    read = "# @sql connection=lake\nSELECT * FROM lake.taxi.trips JOIN lake.taxi.zones USING (id)\n"
+    read = (
+        "-- @sql connection=lake\nSELECT * FROM lake.taxi.trips JOIN lake.taxi.zones USING (id)\n"
+    )
 
     assert sorted(t.uri for t in lake_tables(state, read)) == [
         "lake:taxi.trips",
         "lake:taxi.zones",
     ]
-    assert lake_tables(state, "# @sql connection=lake write\nDELETE FROM lake.taxi.trips\n") == []
+    assert lake_tables(state, "-- @sql connection=lake write\nDELETE FROM lake.taxi.trips\n") == []
     state.connections = [ConnectionSpec(name="lake", driver="sqlite", path=":memory:")]
     assert lake_tables(state, read) == []
 
@@ -265,7 +268,7 @@ async def test_a_database_file_named_like_a_reserved_database_still_opens(tmp_pa
     _write_parquet(tmp_path / "raw" / "a.parquet", [1])
     nb_dir = _notebook(
         tmp_path,
-        {"c1": "# @sql connection=lake\nSELECT v FROM raw JOIN labels USING (k)\n"},
+        {"c1": "-- @sql connection=lake\nSELECT v FROM raw JOIN labels USING (k)\n"},
         f'driver = "duckdb"\npath = "{db}"\nmounts = ["raw"]',
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -409,7 +412,7 @@ async def test_a_catalog_credential_set_only_in_the_notebook_env_resolves_its_sn
     table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
     table.append(pa.table({"id": [1]}))
     snapshot = catalog.load_table("taxi.trips").current_snapshot().snapshot_id
-    source = "# @sql connection=lake\nSELECT id FROM lake.taxi.trips\n"
+    source = "-- @sql connection=lake\nSELECT id FROM lake.taxi.trips\n"
     nb_dir = _notebook(
         tmp_path, {"c1": source}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"'
     )
@@ -881,7 +884,7 @@ class TestARestCatalogThatVendsNothing:
     async def test_a_pinned_cache_hit_needs_no_catalog(self, tmp_path, monkeypatch):
         from strata.notebook.sql import cell_executor
 
-        source = "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
+        source = "-- @sql connection=lake\n-- @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
         session = self._session(tmp_path, monkeypatch, {"c1": source})
         loads, down = self._catalog(monkeypatch)
         located: list[list[str]] = []
@@ -914,7 +917,7 @@ class TestARestCatalogThatVendsNothing:
     async def test_the_table_a_query_reads_is_a_leaf_of_its_output(self, tmp_path, monkeypatch):
         from strata.notebook.sql import cell_executor
 
-        source = "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
+        source = "-- @sql connection=lake\n-- @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
         session = self._session(tmp_path, monkeypatch, {"c1": source})
         self._catalog(monkeypatch)
         monkeypatch.setattr(
@@ -948,7 +951,7 @@ class TestARestCatalogThatVendsNothing:
     async def test_a_pinned_cache_hit_in_service_mode_needs_no_catalog(self, tmp_path, monkeypatch):
         from strata.notebook.sql import cell_executor
 
-        source = "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
+        source = "-- @sql connection=lake\n-- @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
         session = self._session(tmp_path, monkeypatch, {"c1": source}, mode="service")
         loads, down = self._catalog(monkeypatch)
         confined: list[list[str]] = []
@@ -990,7 +993,7 @@ class TestARestCatalogThatVendsNothing:
         _write_parquet(warehouse / "taxi.trips" / "data" / "0.parquet", [1, 2])
         outside = tmp_path / "server-only.parquet"
         _write_parquet(outside, [9])
-        source = "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
+        source = "-- @sql connection=lake\n-- @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
         session = self._session(tmp_path, monkeypatch, {"c1": source}, mode="service")
         loads, _ = self._catalog(monkeypatch, root=str(warehouse))
         confined: list[list[str]] = []
@@ -1145,7 +1148,7 @@ class TestNotebookCatalogs:
     def test_staleness_resolves_its_tables_through_it(self, tmp_path, monkeypatch):
         session, seen = self._session(tmp_path, monkeypatch, StrataConfig())
         add_cell_to_notebook(session.path, "c1", language="sql")
-        source = "# @sql connection=lake\nSELECT * FROM lake.taxi.trips\n"
+        source = "-- @sql connection=lake\nSELECT * FROM lake.taxi.trips\n"
         write_cell(session.path, "c1", source)
         session = NotebookSession(parse_notebook(session.path), session.path)
 
@@ -1172,7 +1175,7 @@ class TestCacheSnapshotOnDuckDB:
         _write_parquet(tmp_path / "raw" / "a.parquet", [1])
         nb_dir = _notebook(
             tmp_path,
-            {"c1": "# @sql connection=lake\n# @cache snapshot\nSELECT * FROM raw\n"},
+            {"c1": "-- @sql connection=lake\n-- @cache snapshot\nSELECT * FROM raw\n"},
             'driver = "duckdb"\npath = ":memory:"\nmounts = ["raw"]',
         )
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -1188,7 +1191,7 @@ class TestCacheSnapshotOnDuckDB:
         nb_dir = _notebook(
             tmp_path,
             {
-                "c1": "# @sql connection=lake\n# @cache snapshot\n"
+                "c1": "-- @sql connection=lake\n-- @cache snapshot\n"
                 "SELECT * FROM lake.taxi.trips JOIN raw USING (k)\n"
             },
             'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"\nmounts = ["raw"]',
@@ -1205,8 +1208,8 @@ class TestCacheSnapshotOnDuckDB:
         state = parse_notebook(nb_dir)
         body = "SELECT * FROM lake.taxi.trips\n"
 
-        assert lake_tables(state, f"# @sql connection=lake\n{body}")
-        assert lake_tables(state, f"# @sql connection=lake\n# @cache snapshot\n{body}") == []
+        assert lake_tables(state, f"-- @sql connection=lake\n{body}")
+        assert lake_tables(state, f"-- @sql connection=lake\n-- @cache snapshot\n{body}") == []
 
 
 def test_a_python_notebook_needs_no_sql_extra(tmp_path):
@@ -1248,7 +1251,7 @@ class TestAReadCellReads:
     async def _run(tmp_path, body: str):
         nb_dir = _notebook(
             tmp_path,
-            {"c1": f"# @sql connection=lake\n{body}\n"},
+            {"c1": f"-- @sql connection=lake\n{body}\n"},
             'driver = "duckdb"\npath = ":memory:"',
         )
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -1307,7 +1310,7 @@ class TestHowACatalogTableIsWritten:
     def _tables(state, body: str):
         from strata.notebook.sql.lake import lake_tables
 
-        return sorted(t.uri for t in lake_tables(state, f"# @sql connection=lake\n{body}\n"))
+        return sorted(t.uri for t in lake_tables(state, f"-- @sql connection=lake\n{body}\n"))
 
     def test_the_spellings_of_one_table_are_that_table(self, tmp_path):
         nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
@@ -1347,7 +1350,10 @@ class TestWhatCountsAsAReadStatement:
         target = tmp_path / "leak.csv"
         nb_dir = _notebook(
             tmp_path,
-            {"c1": f"# @sql connection=lake\nEXPLAIN ANALYZE COPY (SELECT 1 AS x) TO '{target}'\n"},
+            {
+                "c1": "-- @sql connection=lake\n"
+                f"EXPLAIN ANALYZE COPY (SELECT 1 AS x) TO '{target}'\n"
+            },
             'driver = "duckdb"\npath = ":memory:"',
         )
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -1371,7 +1377,7 @@ class TestWhatCountsAsAReadStatement:
         nb_dir = _notebook(
             tmp_path,
             {
-                "c1": "# @sql connection=lake\n"
+                "c1": "-- @sql connection=lake\n"
                 f"EXPLAIN /*x*/ ANALYZE COPY (SELECT 1 AS x) TO '{target}'\n"
             },
             'driver = "duckdb"\npath = ":memory:"',
@@ -1409,6 +1415,6 @@ class TestWhatCountsAsAReadStatement:
         message = self._violation("INSERT INTO t VALUES (1)") or ""
         assert "write=true" in message
         annotation = parse_annotations(
-            "# @sql connection=db write=true\nINSERT INTO t VALUES (1)\n"
+            "-- @sql connection=db write=true\nINSERT INTO t VALUES (1)\n", "sql"
         )
         assert annotation.sql is not None and annotation.sql.write is True

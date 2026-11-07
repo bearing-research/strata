@@ -48,10 +48,11 @@ def mount_entries(source: str, run_dir: Path) -> dict[str, dict[str, str]]:
     warm pool, R, a worker's) gives the cell its folder unchanged.
     """
     from strata.notebook.annotations import parse_annotations
+    from strata.notebook.models import CellLanguage
 
     root = os.path.normpath(run_dir / OUTPUT_DIRS)
     entries: dict[str, dict[str, str]] = {}
-    for name in parse_annotations(source).output_dirs:
+    for name in parse_annotations(source, CellLanguage.PYTHON).output_dirs:
         # The parser takes identifiers only; on a worker the source is the request's, so
         # the folder is still checked to stay under the run directory.
         folder = os.path.normpath(os.path.join(root, name))

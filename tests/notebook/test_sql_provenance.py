@@ -1,4 +1,4 @@
-"""Tests for SQL provenance hashing and ``# @cache`` policy resolution."""
+"""Tests for SQL provenance hashing and ``-- @cache`` policy resolution."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def _hash_inputs(**overrides):
 
 
 def test_resolve_fingerprint_default():
-    """Default policy (no ``# @cache``) is fingerprint: probes required, snapshot not."""
+    """Default policy (no ``-- @cache``) is fingerprint: probes required, snapshot not."""
     out = resolve_cache_policy(
         CachePolicy(kind="fingerprint"),
         capabilities=_FULL_CAPS,
@@ -134,7 +134,7 @@ def test_resolve_ttl_zero_or_negative_raises():
 
 
 def test_resolve_snapshot_requires_capability():
-    """``# @cache snapshot`` on a driver without durable snapshot IDs fails before probing."""
+    """``-- @cache snapshot`` on a driver without durable snapshot IDs fails before probing."""
     with pytest.raises(CachePolicyError, match="snapshot"):
         resolve_cache_policy(
             CachePolicy(kind="snapshot"),

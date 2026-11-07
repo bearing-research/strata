@@ -25,6 +25,7 @@ from strata.notebook.llm import (
     infer_provider_name,
     render_prompt_template,
 )
+from strata.notebook.models import CellLanguage
 from strata.notebook.prompt_analyzer import analyze_prompt_cell
 from strata.notebook.serializer import _META_SHAPE, _SHAPE_SCALAR, _extract_scalar_from_table
 
@@ -199,7 +200,7 @@ async def execute_prompt_cell(
     start_time = time.time()
     analysis = analyze_prompt_cell(source)
     output_name = analysis.name
-    if parse_annotations(source).nocache:
+    if parse_annotations(source, CellLanguage.PROMPT).nocache:
         use_cache = False
 
     model = analysis.model or llm_config.model

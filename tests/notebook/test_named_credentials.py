@@ -176,7 +176,9 @@ class TestNoSecretInTheNotebook:
     def test_a_mount_annotation_can_name_a_credential(self):
         from strata.notebook.annotations import parse_annotations
 
-        annotations = parse_annotations("# @mount raw s3://lab/raw ro credential=lab-bucket\nx = 1")
+        annotations = parse_annotations(
+            "# @mount raw s3://lab/raw ro credential=lab-bucket\nx = 1", "python"
+        )
 
         assert annotations.mounts[0].credential == "lab-bucket"
         assert annotations.mounts[0].mode.value == "ro"
@@ -265,7 +267,7 @@ class TestProvenance:
         cell = session.notebook_state.get_cell("c1")
         from strata.notebook.annotations import parse_annotations
 
-        mounts = parse_annotations(cell.source).mounts
+        mounts = parse_annotations(cell.source, cell.language).mounts
 
         executed, _ = asyncio.run(CellExecutor(session)._fingerprint_mounts(mounts))
         staleness, _ = session._collect_mount_fingerprints(cell)
@@ -351,7 +353,7 @@ class TestConnections:
             conn.execute("CREATE TABLE t (x INTEGER)")
         nb = create_notebook(tmp_path, "sqlcred")
         add_cell_to_notebook(nb, "c1", language="sql")
-        source = "# @sql connection=db\n# @cache forever\nSELECT x FROM t\n"
+        source = "-- @sql connection=db\n-- @cache forever\nSELECT x FROM t\n"
         write_cell(nb, "c1", source)
         toml = nb / "notebook.toml"
         toml.write_text(

@@ -100,8 +100,8 @@ find what it uses and what it defines, and shows which results an edit has left 
 **[Every result knows where it came from.](concepts/artifacts-and-lineage.md)** Every
 output is a versioned artifact, so you can trace it back through what produced it.
 
-**[It reads like code in git.](concepts/file-format-and-git.md)** A notebook is plain
-`.py` files plus a TOML manifest. Outputs and caches stay in a gitignored folder.
+**[It reads like code in git.](concepts/file-format-and-git.md)** A notebook is one
+plain-text file per cell plus a TOML manifest. Outputs and caches stay in a gitignored folder.
 
 There is more on the [Features](concepts/features.md) page, and Strata also works
 [as a library](getting-started/core.md).

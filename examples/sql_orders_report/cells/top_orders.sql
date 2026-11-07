@@ -1,7 +1,7 @@
-# @sql connection=warehouse
-# @name top_orders
-# @cache fingerprint
-# @after seed
+-- @sql connection=warehouse
+-- @name top_orders
+-- @cache fingerprint
+-- @after seed
 SELECT
     o.id,
     o.customer,

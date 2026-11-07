@@ -5,10 +5,10 @@ updated_at = "2026-04-13T06:24:00.143016+00:00"
 cells = [
     { id = "load", file = "load.py", language = "python", order = 0 },
     { id = "aggregate", file = "aggregate.py", language = "python", order = 1 },
-    { id = "themes", file = "themes.py", language = "prompt", order = 2 },
+    { id = "themes", file = "themes.prompt", language = "prompt", order = 2 },
     { id = "sample", file = "sample.py", language = "python", order = 3 },
     { id = "embed", file = "embed.py", language = "python", order = 4 },
-    { id = "clusters", file = "clusters.py", language = "prompt", order = 5 },
+    { id = "clusters", file = "clusters.prompt", language = "prompt", order = 5 },
     { id = "train", file = "train.py", language = "python", order = 6 },
     { id = "evaluate", file = "evaluate.py", language = "python", order = 7 },
     { id = "plot", file = "plot.py", language = "python", order = 8 },

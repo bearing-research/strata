@@ -955,19 +955,19 @@ class TestSweepRestEndpoint:
 class TestPerVariantParsing:
     def test_bare_sets_flag_no_group(self):
 
-        ann = parse_annotations("# @per_variant\nscore = ev(preds)\n")
+        ann = parse_annotations("# @per_variant\nscore = ev(preds)\n", "python")
         assert ann.per_variant is True
         assert ann.per_variant_group is None
 
     def test_named_group(self):
 
-        ann = parse_annotations("# @per_variant model\nscore = ev(preds)\n")
+        ann = parse_annotations("# @per_variant model\nscore = ev(preds)\n", "python")
         assert ann.per_variant is True
         assert ann.per_variant_group == "model"
 
     def test_absent(self):
 
-        ann = parse_annotations("score = ev(preds)\n")
+        ann = parse_annotations("score = ev(preds)\n", "python")
         assert ann.per_variant is False
         assert ann.per_variant_group is None
 

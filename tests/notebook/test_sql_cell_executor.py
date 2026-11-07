@@ -52,7 +52,7 @@ async def test_a_table_named_at_run_time_is_never_served_from_cache(tmp_path, mo
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(
-        tmp_path, db_path=db_path, cell_source="# @sql connection=db\nSELECT * FROM events\n"
+        tmp_path, db_path=db_path, cell_source="-- @sql connection=db\nSELECT * FROM events\n"
     )
     session = _make_session(nb_dir)
     _with_unresolved_table(monkeypatch)
@@ -70,13 +70,13 @@ async def test_a_table_named_at_run_time_is_never_served_from_cache(tmp_path, mo
 
 @pytest.mark.asyncio
 async def test_a_declared_cache_policy_still_reuses_a_run_time_table(tmp_path, monkeypatch):
-    """``# @cache session`` needs no probe, so a run-time table does not block reuse."""
+    """``-- @cache session`` needs no probe, so a run-time table does not block reuse."""
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
         db_path=db_path,
-        cell_source="# @sql connection=db\n# @cache session\nSELECT * FROM events\n",
+        cell_source="-- @sql connection=db\n-- @cache session\nSELECT * FROM events\n",
     )
     session = _make_session(nb_dir)
     _with_unresolved_table(monkeypatch)
@@ -96,7 +96,7 @@ async def test_an_edit_sqlglot_cannot_tell_apart_still_runs_the_new_query(tmp_pa
     """The cache key is the cell's own text: ``REAL`` and ``NUMERIC`` regenerate alike."""
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
-    real = "# @sql connection=db\n# @cache forever\nSELECT CAST('12' AS REAL) AS v\n"
+    real = "-- @sql connection=db\n-- @cache forever\nSELECT CAST('12' AS REAL) AS v\n"
     nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=real)
     session = _make_session(nb_dir)
 
@@ -132,7 +132,7 @@ async def test_a_duckdb_bind_in_the_select_list_runs(tmp_path, monkeypatch, body
     )
     nb_dir = create_notebook(tmp_path, "duckdb_bind")
     add_cell_to_notebook(nb_dir, "c1", language="sql")
-    source = f"# @sql connection=db{'' if expected else ' write=true'}\n{body}\n"
+    source = f"-- @sql connection=db{'' if expected else ' write=true'}\n{body}\n"
     write_cell(nb_dir, "c1", source)
     toml = nb_dir / "notebook.toml"
     toml.write_text(
@@ -200,8 +200,8 @@ async def test_sql_cell_executes_and_returns_arrow_table(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db\n"
-            "# @cache forever\n"
+            "-- @sql connection=db\n"
+            "-- @cache forever\n"
             "SELECT id, name, value FROM events ORDER BY id\n"
         ),
     )
@@ -225,13 +225,13 @@ async def test_sql_cell_executes_and_returns_arrow_table(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_cell_cache_hit_on_unchanged_inputs(tmp_path):
-    """``# @cache forever`` skips the probe; the second run returns the same artifact as a hit."""
+    """``-- @cache forever`` skips the probe; the second run returns the same artifact as a hit."""
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
         db_path=db_path,
-        cell_source=("# @sql connection=db\n# @cache forever\nSELECT * FROM events\n"),
+        cell_source=("-- @sql connection=db\n-- @cache forever\nSELECT * FROM events\n"),
     )
     session = _make_session(nb_dir)
 
@@ -251,15 +251,15 @@ async def test_sql_cell_cache_hit_on_unchanged_inputs(tmp_path):
 @pytest.mark.parametrize(
     "cell_source",
     [
-        "# @sql connection=db\n# @cache forever\n# @nocache\nSELECT * FROM events\n",
-        "# @sql connection=db write=true\n# @nocache\n"
+        "-- @sql connection=db\n-- @cache forever\n-- @nocache\nSELECT * FROM events\n",
+        "-- @sql connection=db write=true\n-- @nocache\n"
         "INSERT INTO events (name, value) VALUES ('d', 40)\n",
     ],
     ids=["read-cache-forever", "write"],
 )
 @pytest.mark.asyncio
 async def test_sql_cell_nocache_reruns_every_time(tmp_path, cell_source):
-    """``# @nocache`` outranks every ``# @cache`` policy, including forever and write cells."""
+    """``# @nocache`` outranks every ``-- @cache`` policy, including forever and write cells."""
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
     nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=cell_source)
@@ -293,9 +293,9 @@ async def test_sql_cell_fingerprint_invalidates_on_schema_change(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db\n"
-            "# fingerprint is the default; spelling it out for clarity\n"
-            "# @cache fingerprint\n"
+            "-- @sql connection=db\n"
+            "-- fingerprint is the default; spelling it out for clarity\n"
+            "-- @cache fingerprint\n"
             "SELECT * FROM events\n"
         ),
     )
@@ -334,8 +334,8 @@ async def test_sql_cell_read_only_enforces_no_writes(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db\n"
-            "# @cache forever\n"
+            "-- @sql connection=db\n"
+            "-- @cache forever\n"
             "INSERT INTO events (id, name, value) VALUES (99, 'hack', 1)\n"
         ),
     )
@@ -374,8 +374,8 @@ async def test_sql_cell_bind_param_from_upstream_python_cell(tmp_path):
         nb_dir,
         "sql",
         (
-            "# @sql connection=db\n"
-            "# @cache forever\n"
+            "-- @sql connection=db\n"
+            "-- @cache forever\n"
             "SELECT id, name, value FROM events WHERE value > :min_value ORDER BY id\n"
         ),
     )
@@ -400,7 +400,7 @@ async def test_sql_cell_bind_param_from_upstream_python_cell(tmp_path):
     # It resolves :min_value to 15 from the upstream artifact.
     from strata.notebook.sql.cell_executor import execute_sql_cell
 
-    sql_src = (nb_dir / "cells" / "sql.py").read_text()
+    sql_src = _read_cell(nb_dir, "sql")
     result = await execute_sql_cell(session, "sql", sql_src)
     assert result["success"], result.get("error")
 
@@ -415,7 +415,7 @@ async def test_sql_cell_missing_connection_yields_clear_error(tmp_path):
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
         db_path=tmp_path / "anywhere.db",
-        cell_source=("# @sql connection=missing_one\nSELECT 1\n"),
+        cell_source=("-- @sql connection=missing_one\nSELECT 1\n"),
     )
     session = _make_session(nb_dir)
 
@@ -441,7 +441,7 @@ async def test_sql_cell_stays_ready_after_staleness_recompute(tmp_path):
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
         db_path=db_path,
-        cell_source=("# @sql connection=db\n# @cache forever\nSELECT * FROM events\n"),
+        cell_source=("-- @sql connection=db\n-- @cache forever\nSELECT * FROM events\n"),
     )
     session = _make_session(nb_dir)
     executor = CellExecutor(session)
@@ -480,7 +480,7 @@ async def test_undoing_an_edit_to_a_sql_cell_still_checks_its_connection(tmp_pat
 
     db_path = tmp_path / "events.db"
     _seed_sqlite(db_path)
-    original = "# @sql connection=db\n# @cache forever\nSELECT * FROM events\n"
+    original = "-- @sql connection=db\n-- @cache forever\nSELECT * FROM events\n"
     nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=original)
     session = _make_session(nb_dir)
     result = await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
@@ -528,7 +528,7 @@ async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
     write_cell(
         nb_dir,
         "sql",
-        ("# @sql connection=db\n# @cache forever\nSELECT name FROM events ORDER BY id\n"),
+        ("-- @sql connection=db\n-- @cache forever\nSELECT name FROM events ORDER BY id\n"),
     )
     add_cell_to_notebook(nb_dir, "py", after_cell_id="sql", language="python")
     write_cell(
@@ -547,7 +547,7 @@ async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     executor = CellExecutor(session)
 
-    sql_src = (nb_dir / "cells" / "sql.py").read_text()
+    sql_src = _read_cell(nb_dir, "sql")
     sql_result = await executor.execute_cell("sql", sql_src)
     assert sql_result.success, sql_result.error
 
@@ -580,7 +580,7 @@ async def test_a_downstream_cell_gets_a_pyarrow_table_with_pandas_installed(tmp_
     _seed_sqlite(db_path)
     nb_dir = create_notebook(tmp_path, "sql_type")
     add_cell_to_notebook(nb_dir, "sql", language="sql")
-    write_cell(nb_dir, "sql", "# @sql connection=db\nSELECT name FROM events ORDER BY id\n")
+    write_cell(nb_dir, "sql", "-- @sql connection=db\nSELECT name FROM events ORDER BY id\n")
     add_cell_to_notebook(nb_dir, "py", after_cell_id="sql", language="python")
     write_cell(nb_dir, "py", "print(type(result).__module__, type(result).__name__)\n")
     toml_path = nb_dir / "notebook.toml"
@@ -609,7 +609,7 @@ async def test_sql_cell_executor_dispatched_via_main_executor(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db\n# @cache forever\nSELECT id, name FROM events ORDER BY id\n"
+            "-- @sql connection=db\n-- @cache forever\nSELECT id, name FROM events ORDER BY id\n"
         ),
     )
     session = _make_session(nb_dir)
@@ -626,7 +626,12 @@ async def test_sql_cell_executor_dispatched_via_main_executor(tmp_path):
 
 
 def _read_cell(nb_dir: Path, cell_id: str) -> str:
-    return (nb_dir / "cells" / f"{cell_id}.py").read_text()
+    from strata.notebook.parser import parse_notebook
+
+    # By the file notebook.toml names: the extension follows the language.
+    cell = parse_notebook(nb_dir).get_cell(cell_id)
+    assert cell is not None
+    return cell.source
 
 
 def _load_artifact_as_arrow(session: Any, uri: str) -> Any:
@@ -641,7 +646,7 @@ def _load_artifact_as_arrow(session: Any, uri: str) -> Any:
     return pa.ipc.open_stream(blob).read_all()
 
 
-# --- # @sql write=true ----------------------------------------------------
+# --- -- @sql write=true ----------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -652,8 +657,8 @@ async def test_sql_write_cell_creates_table_and_inserts_rows(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db write=true\n"
-            "# @cache session\n"
+            "-- @sql connection=db write=true\n"
+            "-- @cache session\n"
             "CREATE TABLE events (id INTEGER PRIMARY KEY, label TEXT);\n"
             "INSERT INTO events VALUES (1, 'alpha');\n"
             "INSERT INTO events VALUES (2, 'beta');\n"
@@ -680,7 +685,7 @@ async def test_sql_write_cell_caches_within_session(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db write=true\n"
+            "-- @sql connection=db write=true\n"
             "CREATE TABLE t (n INTEGER);\n"
             "INSERT INTO t VALUES (1);\n"
         ),
@@ -710,7 +715,7 @@ async def test_sql_write_cell_rejects_fingerprint_policy(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db write=true\n# @cache fingerprint\nCREATE TABLE t (n INTEGER);\n"
+            "-- @sql connection=db write=true\n-- @cache fingerprint\nCREATE TABLE t (n INTEGER);\n"
         ),
     )
     session = _make_session(nb_dir)
@@ -729,7 +734,7 @@ async def test_sql_write_false_still_blocks_writes(tmp_path):
         tmp_path,
         db_path=tmp_path / "events.db",
         cell_source=(
-            "# @sql connection=db\n"  # write flag NOT set
+            "-- @sql connection=db\n"  # write flag NOT set
             "INSERT INTO events VALUES (99, 'sneak', 1)\n"
         ),
     )
@@ -762,7 +767,7 @@ async def test_sql_write_cell_makes_db_visible_to_read_cell(tmp_path):
         nb_dir,
         "seed",
         (
-            "# @sql connection=db write=true\n"
+            "-- @sql connection=db write=true\n"
             "DROP TABLE IF EXISTS events;\n"
             "CREATE TABLE events (id INTEGER PRIMARY KEY, label TEXT);\n"
             "INSERT INTO events VALUES (1, 'alpha'), (2, 'beta');\n"
@@ -773,9 +778,9 @@ async def test_sql_write_cell_makes_db_visible_to_read_cell(tmp_path):
         nb_dir,
         "query",
         (
-            "# @sql connection=db\n"
-            "# @cache fingerprint\n"
-            "# @after seed\n"
+            "-- @sql connection=db\n"
+            "-- @cache fingerprint\n"
+            "-- @after seed\n"
             "SELECT id, label FROM events ORDER BY id\n"
         ),
     )
@@ -787,11 +792,11 @@ async def test_sql_write_cell_makes_db_visible_to_read_cell(tmp_path):
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     executor = CellExecutor(session)
 
-    seed_src = (nb_dir / "cells" / "seed.py").read_text()
+    seed_src = _read_cell(nb_dir, "seed")
     seed_result = await executor.execute_cell("seed", seed_src)
     assert seed_result.success, seed_result.error
 
-    query_src = (nb_dir / "cells" / "query.py").read_text()
+    query_src = _read_cell(nb_dir, "query")
     query_result = await executor.execute_cell("query", query_src)
     assert query_result.success, query_result.error
     table = _load_artifact_as_arrow(session, query_result.artifact_uri)
@@ -828,7 +833,7 @@ async def test_sql_write_cell_resolves_bind_placeholders_from_upstream(tmp_path)
         nb_dir,
         "seed",
         (
-            "# @sql connection=db write=true\n"
+            "-- @sql connection=db write=true\n"
             "DROP TABLE IF EXISTS t;\n"
             "CREATE TABLE t (label TEXT, n INTEGER);\n"
             "INSERT INTO t VALUES (:label, :count);\n"
@@ -843,11 +848,11 @@ async def test_sql_write_cell_resolves_bind_placeholders_from_upstream(tmp_path)
     session.refresh_environment_runtime()
     executor = CellExecutor(session)
 
-    cfg_src = (nb_dir / "cells" / "cfg.py").read_text()
+    cfg_src = _read_cell(nb_dir, "cfg")
     cfg_result = await executor.execute_cell("cfg", cfg_src)
     assert cfg_result.success
 
-    seed_src = (nb_dir / "cells" / "seed.py").read_text()
+    seed_src = _read_cell(nb_dir, "seed")
     seed_result = await executor.execute_cell("seed", seed_src)
     assert seed_result.success, seed_result.error
 
@@ -877,7 +882,7 @@ async def test_sql_write_cell_invalidates_on_upstream_value_change(tmp_path):
         nb_dir,
         "seed",
         (
-            "# @sql connection=db write=true\n"
+            "-- @sql connection=db write=true\n"
             "DROP TABLE IF EXISTS t;\n"
             "CREATE TABLE t (n INTEGER);\n"
             "INSERT INTO t VALUES (:value);\n"
@@ -894,7 +899,7 @@ async def test_sql_write_cell_invalidates_on_upstream_value_change(tmp_path):
     cells = {c.id: c for c in session.notebook_state.cells}
 
     await executor.execute_cell("cfg", cells["cfg"].source)
-    seed_src = (nb_dir / "cells" / "seed.py").read_text()
+    seed_src = _read_cell(nb_dir, "seed")
     first = await executor.execute_cell("seed", seed_src)
     assert first.success and not first.cache_hit
 
@@ -926,7 +931,7 @@ async def test_sql_write_cell_honors_at_name_for_artifact_key(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db write=true\n# @name seed_status\nCREATE TABLE t (n INTEGER);\n"
+            "-- @sql connection=db write=true\n-- @name seed_status\nCREATE TABLE t (n INTEGER);\n"
         ),
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -960,7 +965,7 @@ async def test_sql_write_cell_propagates_commit_failure(tmp_path, monkeypatch):
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,
         db_path=db_path,
-        cell_source=("# @sql connection=db write=true\nCREATE TABLE t (n INTEGER);\n"),
+        cell_source=("-- @sql connection=db write=true\nCREATE TABLE t (n INTEGER);\n"),
     )
     session = _make_session(nb_dir)
 
@@ -998,7 +1003,7 @@ async def test_sql_write_cell_emits_per_statement_status_table(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db write=true\n"
+            "-- @sql connection=db write=true\n"
             "DROP TABLE IF EXISTS t;\n"
             "CREATE TABLE t (n INTEGER);\n"
             "INSERT INTO t VALUES (1), (2), (3);\n"
@@ -1036,7 +1041,7 @@ async def test_sql_write_cell_recovers_rowcount_from_sqlite_changes(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db write=true\n"
+            "-- @sql connection=db write=true\n"
             "CREATE TABLE t (n INTEGER);\n"
             "INSERT INTO t VALUES (1), (2), (3), (4), (5);\n"
             "UPDATE t SET n = n * 10 WHERE n > 2;\n"
@@ -1153,8 +1158,8 @@ async def test_duckdb_cell_executes_and_returns_arrow_table(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db\n"
-            "# @cache forever\n"
+            "-- @sql connection=db\n"
+            "-- @cache forever\n"
             "SELECT id, name, value FROM events ORDER BY id\n"
         ),
     )
@@ -1182,7 +1187,7 @@ async def test_duckdb_cell_read_only_blocks_writes(tmp_path):
         tmp_path,
         db_path=db_path,
         cell_source=(
-            "# @sql connection=db\n# @cache forever\nINSERT INTO events VALUES (99, 'hack', 1)\n"
+            "-- @sql connection=db\n-- @cache forever\nINSERT INTO events VALUES (99, 'hack', 1)\n"
         ),
     )
     session = _make_session(nb_dir)
@@ -1231,7 +1236,7 @@ async def test_duckdb_cell_binds_a_typed_scalar_from_an_upstream_python_cell(
     write_cell(nb_dir, "py", f"import datetime, decimal, uuid, numpy\nv = {expr}\n")
     add_cell_to_notebook(nb_dir, "sql", after_cell_id="py", language="sql")
     write_cell(
-        nb_dir, "sql", "# @sql connection=db\n# @cache forever\nSELECT CAST(:v AS VARCHAR) AS v\n"
+        nb_dir, "sql", "-- @sql connection=db\n-- @cache forever\nSELECT CAST(:v AS VARCHAR) AS v\n"
     )
     toml_path = nb_dir / "notebook.toml"
     toml_path.write_text(
@@ -1327,7 +1332,7 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         nb_dir = _build_notebook_with_duckdb_cell(
             tmp_path,
             db_path=db_path,
-            cell_source="# @sql connection=db\n# @cache forever\nSELECT id FROM events\n",
+            cell_source="-- @sql connection=db\n-- @cache forever\nSELECT id FROM events\n",
         )
         session = _make_session(nb_dir)
         from strata.notebook.executor import CellExecutor
@@ -1379,7 +1384,7 @@ class TestWhatASqlCellRemembersAcrossAReopen:
 
         status = await self._run_then_reopen(
             tmp_path,
-            "# @sql connection=db\n# @cache forever\nSELECT id FROM events\n",
+            "-- @sql connection=db\n-- @cache forever\nSELECT id FROM events\n",
             repoint_to=tmp_path / "other.duckdb",
         )
 
@@ -1387,11 +1392,11 @@ class TestWhatASqlCellRemembersAcrossAReopen:
 
     @pytest.mark.asyncio
     async def test_a_session_policy_does_not_survive_the_session(self, tmp_path):
-        """``# @cache session`` is invalid after a reopen, which is a new session."""
+        """``-- @cache session`` is invalid after a reopen, which is a new session."""
         from strata.notebook.models import CellStatus
 
         status = await self._run_then_reopen(
-            tmp_path, "# @sql connection=db\n# @cache session\nSELECT id FROM events\n"
+            tmp_path, "-- @sql connection=db\n-- @cache session\nSELECT id FROM events\n"
         )
 
         assert status != CellStatus.READY
@@ -1402,7 +1407,7 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         from strata.notebook.models import CellStatus
 
         status = await self._run_then_reopen(
-            tmp_path, "# @sql connection=db\nSELECT id FROM events\n"
+            tmp_path, "-- @sql connection=db\nSELECT id FROM events\n"
         )
 
         assert status != CellStatus.READY
@@ -1418,7 +1423,7 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         nb_dir = _build_notebook_with_duckdb_cell(
             tmp_path,
             db_path=db_path,
-            cell_source="# @sql connection=db\nSELECT id FROM events\n",
+            cell_source="-- @sql connection=db\nSELECT id FROM events\n",
         )
         session = _make_session(nb_dir)
 
@@ -1436,17 +1441,18 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         nb_dir = _build_notebook_with_duckdb_cell(
             tmp_path,
             db_path=db_path,
-            cell_source="# @sql connection=db\n# @cache forever\nSELECT id FROM events\n",
+            cell_source="-- @sql connection=db\n-- @cache forever\nSELECT id FROM events\n",
         )
         session = _make_session(nb_dir)
         from strata.notebook.executor import CellExecutor
+        from strata.notebook.writer import write_cell
 
         await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
         session.compute_staleness()
         session.mark_executed_ready("c1")
 
-        (nb_dir / "cells" / "c1.py").write_text(
-            "# @sql connection=db\n# @cache forever\nSELECT id, name FROM events\n"
+        write_cell(
+            nb_dir, "c1", "-- @sql connection=db\n-- @cache forever\nSELECT id, name FROM events\n"
         )
         reopened = _make_session(nb_dir)
 

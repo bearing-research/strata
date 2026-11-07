@@ -566,7 +566,7 @@ function preservedExtraSummary(d: DraftConnection): string {
             BigQuery read-only enforcement is credential-based: the service account's IAM grants
             decide what's allowed. Use a SA with
             <code>roles/bigquery.dataViewer</code> for read cells; pair with a write SA carrying
-            <code>roles/bigquery.dataEditor</code> for <code># @sql write=true</code>.
+            <code>roles/bigquery.dataEditor</code> for <code>-- @sql write=true</code>.
           </p>
         </template>
         <template v-else-if="isUnknownDriver(conn.driver)">

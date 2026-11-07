@@ -4,12 +4,47 @@ A cell with `language = "sql"` runs a query through a declared connection.
 See [SQL cells](../../guides/cells/sql.md#sql-cells) for the full feature walkthrough; this
 section is the per-annotation reference.
 
+## Writing them
+
+A SQL cell's annotations are SQL comments: `-- @key value`, in the leading block of
+`--` lines at the top of the cell. Blank lines and other `--` comments may sit in the
+block, and the query starts at the first line that is neither. The file stays valid
+SQL, so an editor or linter reads the `.sql` file as it is.
+
+```sql
+-- @name top_customers
+-- @sql connection=warehouse
+-- @cache forever
+-- Reference data: it changes rarely.
+SELECT customer, SUM(amount) AS total FROM orders GROUP BY customer
+```
+
+`#` is not a comment in SQL, so a `# @sql ...` line in a SQL cell is not an
+annotation: it would reach the database as SQL. Validation reports it as the error
+`sql_annotation_hash`, naming the line, and the cell does not run.
+
+## What a SQL cell reads
+
+| Annotation | What it does |
+| --- | --- |
+| [`-- @sql connection=<name> [write=true]`](#sql) | The connection the query runs on (required), and whether it may write. |
+| [`-- @cache <policy>`](#cache) | The cache policy: `fingerprint` (the default), `forever`, `session`, `ttl=<seconds>` or `snapshot`. |
+| [`-- @nocache`](python.md#nocache) | Always run; wins over any `@cache` policy. |
+| [`-- @name <identifier>`](#name) | The output variable (default `result`). |
+| [`-- @after <cell-id>`](python.md#after) | An ordering-only edge from another cell, such as the one that writes the database this cell reads. |
+| [`-- @mount <name> <uri> ro`](python.md#mount) | A mount a DuckDB connection's `mounts` can name, read-only. |
+
+These six are the only ones a SQL cell acts on. Any other annotation, such as
+`-- @worker` or `-- @timeout`, does nothing on a SQL cell, and validation warns
+about it (`annotation_not_for_sql`). A SQL cell runs in the server, so it has no
+worker, timeout or environment of its own.
+
 ## `@sql`
 
 Marks the cell as SQL and binds it to a named connection.
 
 ```sql
-# @sql connection=warehouse
+-- @sql connection=warehouse
 SELECT * FROM orders WHERE amount > :min_amount
 ```
 
@@ -32,7 +67,7 @@ Key/value parameters:
   read-only.
 
 ```sql
-# @sql connection=warehouse write=true
+-- @sql connection=warehouse write=true
 DROP TABLE IF EXISTS events;
 CREATE TABLE events (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
 INSERT INTO events VALUES (1, 'alpha'), (2, 'beta');
@@ -57,20 +92,20 @@ Override the default `fingerprint` cache policy on a SQL cell.
 | `snapshot`        | The result is pinned to one queryable state of the warehouse. Snowflake, BigQuery, and DuckDB over a catalog; refused on other drivers. |
 
 ```sql
-# @sql connection=warehouse
-# @cache forever
+-- @sql connection=warehouse
+-- @cache forever
 SELECT * FROM dim_country
 ```
 
-`# @cache snapshot` needs a driver whose warehouse can query a table as it
+`-- @cache snapshot` needs a driver whose warehouse can query a table as it
 stood at a moment in time. **Snowflake** (`AT (TIMESTAMP => ...)`) and
 **BigQuery** (`FOR SYSTEM_TIME AS OF ...`) can, and so can a **DuckDB**
 connection with a `catalog` (see below). SQLite, PostgreSQL and DuckDB without
 a catalog cannot, and the cell is refused before any connection is opened.
 
 ```sql
-# @sql connection=warehouse
-# @cache snapshot
+-- @sql connection=warehouse
+-- @cache snapshot
 SELECT region, SUM(amount) AS revenue FROM orders GROUP BY region
 ```
 
@@ -121,8 +156,8 @@ For SQL cells, `@name` sets the output variable name (default `result`),
 the same way it does for prompt cells.
 
 ```sql
-# @sql connection=warehouse
-# @name top_customers
+-- @sql connection=warehouse
+-- @name top_customers
 SELECT customer, SUM(amount) AS total
 FROM orders GROUP BY customer ORDER BY total DESC LIMIT 5
 ```

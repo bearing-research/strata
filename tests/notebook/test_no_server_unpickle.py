@@ -165,7 +165,7 @@ class TestSqlBinds:
             tmp_path,
             [
                 ("prod", _producer_source(marker), None, "python"),
-                ("q1", "# @sql connection=db\nSELECT :evil AS v\n", "prod", "sql"),
+                ("q1", "-- @sql connection=db\nSELECT :evil AS v\n", "prod", "sql"),
             ],
         )
         toml = session.path / "notebook.toml"

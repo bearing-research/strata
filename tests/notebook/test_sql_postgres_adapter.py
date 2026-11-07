@@ -482,7 +482,7 @@ def test_probes_ask_for_the_names_postgres_stores():
     from strata.notebook.sql.analyzer import analyze_sql_cell
 
     analysis = analyze_sql_cell(
-        '# @sql connection=db\nSELECT * FROM Analytics.Events JOIN "MixedCase" USING (id)',
+        '-- @sql connection=db\nSELECT * FROM Analytics.Events JOIN "MixedCase" USING (id)',
         dialect="postgres",
     )
     a = PostgresAdapter()

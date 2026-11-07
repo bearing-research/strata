@@ -206,7 +206,7 @@ def _render_app_cell(
     from strata.notebook.annotations import parse_annotations
 
     blocks: list[Block] = []
-    name = parse_annotations(cell.source).name
+    name = parse_annotations(cell.source, cell.language).name
     if name:
         blocks.append(HeadingBlock(name, level=2))
 
