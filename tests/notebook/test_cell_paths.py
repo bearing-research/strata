@@ -742,6 +742,8 @@ class TestCellTests:
                 ),
                 venv_python=Path("python"),
                 path=tmp_path,
+                # Not analyzed: nothing to say the cell is an inactive variant.
+                analysis=None,
                 record_cell_test_inputs=lambda cell_id, inputs, env: (
                     calls.fingerprint.append(inputs) or "fingerprint"
                 ),

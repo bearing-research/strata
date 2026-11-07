@@ -713,7 +713,7 @@ class TestSweepReadBeforeARedefinition:
         session.compute_staleness()
         assert session.notebook_state.get_cell("report").status == "ready"
         # Keyed on the group, and never batched, where the dict would not form.
-        assert any(h.startswith("sweep:val:") for h in key_upstream(session, "report"))
+        assert any(h.startswith('["sweep","g","val",') for h in key_upstream(session, "report"))
         report = session.notebook_state.get_cell("report")
         assert is_cell_batchable(CellExecutor(session), report) is False
 

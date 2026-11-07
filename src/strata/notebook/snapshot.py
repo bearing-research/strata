@@ -52,7 +52,7 @@ def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) ->
         "dag": _format_dag(session),
         "cells": {
             cell.id: {
-                "source_hash": compute_source_hash(cell.source),
+                "source_hash": compute_source_hash(cell.source, cell.language),
                 "defines": cell.defines,
                 "references": cell.references,
                 "status": cell.status.value if hasattr(cell.status, "value") else str(cell.status),

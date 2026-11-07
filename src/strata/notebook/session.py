@@ -133,6 +133,16 @@ _VARIANT_LINE_RE = re.compile(
 )
 
 
+def _same_key_scheme(cell: CellState) -> bool:
+    """Whether *cell*'s recorded source hash is a definition key of this key scheme.
+
+    A record from another ``PARTS_SCHEMA`` holds another formula's key, which never
+    matches: the cell was not edited, the scheme changed.
+    """
+    parts = cell.last_key_parts
+    return parts is None or parts.get("parts_schema") == cg.PARTS_SCHEMA
+
+
 def _next_variant_name(active_name: str, taken: set[str]) -> str:
     """Return ``<active>_copy`` (or ``<active>_copy2``, ``_copy3``, …)."""
     candidate = f"{active_name}_copy"
@@ -1022,7 +1032,7 @@ class NotebookSession:
                         status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
                     )
                     stale_cells.add(cell_id)
-                elif cell.last_source_hash not in (None, source_hash):
+                elif _same_key_scheme(cell) and cell.last_source_hash not in (None, source_hash):
                     # Edited since it ran: its result is still shown, and no longer matches.
                     staleness_map[cell_id] = CellStaleness(
                         status=CellStatus.STALE, reasons=[StalenessReason.SELF]

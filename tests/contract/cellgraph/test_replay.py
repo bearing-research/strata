@@ -24,7 +24,10 @@ from tests.contract.cellgraph import record, replay  # noqa: E402
 # may differ there. Fixing the bug re-records the trace and removes its entry.
 KNOWN_RECORDED_BUGS: set[tuple[str, int, str, str]] = {
     # An R cell with no consumed variable and no display is never cached, so it has nothing
-    # to find: rr only assigns, and rc only prints.
+    # to find: rr only assigns, and rc and r2 only print. r2's key repeats after r1's
+    # metadata-only edits (@timeout, @name), which are not in r1's key.
+    ("r_directives", 3, "r2", "cache decision"),
+    ("r_directives", 5, "r2", "cache decision"),
     ("r_directives", 17, "rr", "cache decision"),
     ("r_directives", 23, "rc", "cache decision"),
 }

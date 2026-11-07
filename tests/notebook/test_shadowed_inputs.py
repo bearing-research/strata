@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import cellgraph as cg
 import pytest
 
 from strata.notebook.executor import CellExecutor
@@ -181,6 +182,11 @@ def _var_hash(session: NotebookSession, cell_id: str, var: str) -> str:
     return artifact.provenance_hash
 
 
+def _prov(provenance_hash: str) -> str:
+    """An upstream output's component: its provenance hash, tagged."""
+    return cg.canonical_json(["provenance", provenance_hash])
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("other", _OTHER)
 async def test_a_shadowed_read_keys_on_its_wired_producer(tmp_path: Path, other: str):
@@ -189,20 +195,20 @@ async def test_a_shadowed_read_keys_on_its_wired_producer(tmp_path: Path, other:
     await _run_upstreams(session, other)
 
     hashes = key_upstream(session, "c2")
-    assert [h for h in hashes if h.startswith("wired:")] == [
-        f"wired:state={_var_hash(session, 'c1', 'state')}"
+    assert [h for h in hashes if h.startswith('["wired"')] == [
+        cg.canonical_json(["wired", "state", ["provenance", _var_hash(session, "c1", "state")]])
     ]
     # c1 reads state from its only definer: no record, the key it always had.
     assert sorted(key_upstream(session, "c1")) == sorted(
-        [_var_hash(session, "c0", "state"), _var_hash(session, "c0", other)]
+        [_prov(_var_hash(session, "c0", "state")), _prov(_var_hash(session, "c0", other))]
     )
 
 
 @pytest.mark.asyncio
 async def test_a_plain_chain_keeps_its_provenance(tmp_path: Path):
-    """No shadowed name: the key is still sha256(input artifact hashes, source, env)."""
+    """No shadowed name: the key reads the upstream output alone, and no wired record."""
     from strata.notebook.env import compute_execution_env_hash
-    from strata.notebook.provenance import compute_provenance_hash, compute_source_hash
+    from strata.notebook.provenance import compute_source_hash
 
     notebook_dir = create_notebook(tmp_path, "Plain")
     add_cell_to_notebook(notebook_dir, "c0")
@@ -215,7 +221,7 @@ async def test_a_plain_chain_keeps_its_provenance(tmp_path: Path):
     for cell_id, source in (("c0", "x = 1\n"), ("c1", "y = x + 1\n")):
         assert (await executor.execute_cell(cell_id, source)).success
 
-    x_hash = _var_hash(session, "c0", "x")
+    x_hash = _prov(_var_hash(session, "c0", "x"))
     assert key_upstream(session, "c1") == [x_hash]
     cell = session.notebook_state.get_cell("c1")
     env_hash = compute_execution_env_hash(
@@ -223,9 +229,12 @@ async def test_a_plain_chain_keeps_its_provenance(tmp_path: Path):
         session._collect_runtime_env(cell),
         runtime_identity=session._effective_worker_runtime_identity(cell),
     )
-    assert cell.last_provenance_hash == compute_provenance_hash(
-        [x_hash], compute_source_hash("y = x + 1\n"), env_hash
-    )
+    parts = cell.last_key_parts
+    assert parts is not None
+    assert parts["upstream"] == [["output:c0.x", x_hash]]
+    assert parts["definition_key"] == compute_source_hash("y = x + 1\n")
+    assert parts["env_hash"] == env_hash
+    assert cell.last_provenance_hash == cg.parts_digest(parts)
 
 
 @pytest.mark.asyncio

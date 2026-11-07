@@ -2,13 +2,14 @@
 
 cellgraph assembles what a cell reads upstream and keys Python and R cells. Strata
 says what each upstream published (its artifacts) and what each input resolved to
-(the fingerprints staleness and the executor already make). A prompt or SQL cell
-keys itself; its generic hash, recorded beside that key, is made here over the same
-upstreams.
+(the fingerprints staleness and the executor already make). A prompt or SQL cell is
+host-keyed: cellgraph gives its upstream parts, this module adds its inputs, and the
+key is ``parts_digest`` over both, as for the others.
 """
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -120,7 +121,7 @@ def _resolvers(fingerprints: Mapping[str, list[str]]) -> dict[str, cg.Resolver]:
             found = next((c for c in fingerprints[kind] if c.startswith(prefix)), None)
             if found is None:
                 return cg.Unavailable(f"no fingerprint for {kind} {spec.name}")
-            return cg.Resolved(identity=None, fingerprint=None, legacy=found)
+            return cg.Resolved(identity=None, fingerprint=found)
 
         return resolve
 
@@ -128,11 +129,38 @@ def _resolvers(fingerprints: Mapping[str, list[str]]) -> dict[str, cg.Resolver]:
 
 
 def input_parts(fingerprints: Mapping[str, list[str]]) -> list[list[str]]:
-    """Each input as a key part, ``[kind, name, component]``. A component begins with its name."""
-    return sorted(
-        [kind, component.partition(":")[0], component]
-        for kind, components in fingerprints.items()
-        for component in components
+    """Each input as a key part, ``[kind, name, component]``, as cellgraph builds it.
+
+    A fingerprint begins with its input's name.
+    """
+    parts = []
+    for kind, found in fingerprints.items():
+        for fingerprint in found:
+            name = fingerprint.partition(":")[0]
+            resolved = cg.Resolved(identity=None, fingerprint=fingerprint)
+            parts.append([kind, name, cg.input_component(kind, name, resolved)])
+    return sorted(parts)
+
+
+def _label(value: list[str]) -> str:
+    """A ``derive_subkey`` label for *value*, which holds no ':'."""
+    return hashlib.sha256(cg.canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def inactive_variant_refusal(analysis: cg.Analysis, cell_id: str) -> str | None:
+    """Why *cell_id* cannot run or be keyed, when it is an inactive variant.
+
+    cellgraph neither wires nor keys one: what it reads depends on which member is
+    active.
+    """
+    if cell_id not in analysis.graph.inactive_cells:
+        return None
+    member = analysis.cells[cell_id].member
+    if member is None:
+        return f"{cell_id!r} is an inactive variant; make it active to run it"
+    return (
+        f"{member.name!r} is not the active variant of group {member.group!r}; "
+        "make it active to run it"
     )
 
 
@@ -159,10 +187,12 @@ def cell_key(
             definition_key,
             env_hash,
         )
+        # A label may not hold ':', which an item key (a path, a URL) or a variant name
+        # may: each is hashed in as canonical JSON.
         if isinstance(instance, cg.Item):
-            digest = cg.derive_subkey(digest, f"each={instance.key}={instance.digest}")
+            digest = cg.derive_subkey(digest, _label(["each", instance.key, instance.digest]))
         elif instance is not None:
-            digest = cg.derive_subkey(digest, f"variant={instance}")
+            digest = cg.derive_subkey(digest, _label(["variant", instance]))
         return CellKey(digest, [])
     result = analysis.execution_key(
         cell_id,
@@ -179,14 +209,11 @@ def cell_key(
     upstream = [value for _address, value in result.parts["upstream"]]
     if isinstance(result, cg.Keyed):
         return CellKey(result.digest, upstream, result.parts)
+    if result.unresolved:
+        # A digest without what it could not read would match a record made without it.
+        raise InputNotFingerprinted(f"cell {cell_id} has no key: {', '.join(result.unresolved)}")
     # A prompt or SQL cell's generic hash, which it records beside its own key. Its parts
     # have no inputs (they are the host's to key), so supply the ones this hash reads.
-    digest = compute_provenance_hash(
-        cell_provenance_inputs(upstream, mounts, tables, fetches, datasets),
-        result.parts["definition_key"],
-        env_hash,
-    )
-    if instance is not None:
-        digest = cg.derive_subkey(digest, f"variant={instance}")
     inputs = input_parts({"mount": mounts, "table": tables, "fetch": fetches, "dataset": datasets})
-    return CellKey(digest, upstream, {**result.parts, "inputs": inputs})
+    parts = {**result.parts, "inputs": inputs}
+    return CellKey(cg.parts_digest(parts), upstream, parts)

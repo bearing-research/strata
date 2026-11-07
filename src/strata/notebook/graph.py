@@ -134,8 +134,6 @@ def analyze_notebook(state: NotebookState, cells: list[CellState] | None = None)
         cg_cells,
         vocabulary.strata_vocabulary(),
         groups,
-        normalization=cg.NORMALIZE_LEGACY_1,
-        digest=cg.DIGEST_LEGACY_1,
         analyzers=_analyzers(),
     )
 
@@ -161,14 +159,12 @@ def analysis_with(
 
 
 @functools.lru_cache(maxsize=4096)
-def definition_key(source: str) -> str:
-    """The definition key of a cell with *source*: its own lines decide it."""
-    cell = cg.Cell(id="cell", source=source, language="python", meta={"language": "python"})
+def definition_key(source: str, language: str = "python") -> str:
+    """The definition key of a *language* cell with *source*: its own lines decide it."""
+    cell = cg.Cell(id="cell", source=source, language=language, meta={"language": language})
     analysis = cg.analyze(
         [cell],
         vocabulary.strata_vocabulary(),
-        normalization=cg.NORMALIZE_LEGACY_1,
-        digest=cg.DIGEST_LEGACY_1,
         analyzers=_analyzers(),
     )
     key = analysis.cells[cell.id].definition_key

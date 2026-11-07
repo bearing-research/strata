@@ -1,19 +1,19 @@
 """Provenance hashing for notebook cells.
 
-A cell's hash covers its sorted input artifact hashes, its definition key and its
-environment hash, so identical computations hash identically. The formulas are
-cellgraph's; ``strata.notebook.keys`` assembles a cell's inputs.
+A cell's key is cellgraph's (``strata.notebook.keys``): ``parts_digest`` over its
+definition key, environment hash, tagged upstream components and inputs, so identical
+computations hash identically. ``compute_provenance_hash`` is Strata's own digest over
+sorted components, for a key cellgraph does not make: a cell in a notebook with a cycle,
+and a cell test's input fingerprint.
 """
 
 from __future__ import annotations
 
 import hashlib
 
-import cellgraph as cg
 
-
-def compute_source_hash(source: str) -> str:
-    """The definition key of a cell with *source*, from cellgraph.
+def compute_source_hash(source: str, language: str = "python") -> str:
+    """The definition key of a *language* cell with *source*, from cellgraph.
 
     Whitespace and comments do not change it; anything that changes the AST does,
     and so do the annotations that change what the cell computes (``@loop``,
@@ -21,7 +21,7 @@ def compute_source_hash(source: str) -> str:
     """
     from strata.notebook.graph import definition_key
 
-    return definition_key(source)
+    return definition_key(source, language)
 
 
 def safe_filename_stem(variable_name: str) -> str:
@@ -64,4 +64,11 @@ def compute_provenance_hash(
     env_hash: str,
 ) -> str:
     """SHA-256 hex digest over sorted ``input_hashes``, ``source_hash`` and ``env_hash``."""
-    return cg.compute_provenance_hash(input_hashes, source_hash, env_hash)
+    hasher = hashlib.sha256()
+    for component in sorted(input_hashes):
+        hasher.update(component.encode("utf-8"))
+        hasher.update(b"\x00")
+    hasher.update(source_hash.encode("utf-8"))
+    hasher.update(b"\x00")
+    hasher.update(env_hash.encode("utf-8"))
+    return hasher.hexdigest()

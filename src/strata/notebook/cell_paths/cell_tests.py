@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from strata.notebook import output_dirs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import no_interpreter_message
+from strata.notebook.graph import analysis_with
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
     UnsafeRunFile,
@@ -23,6 +24,7 @@ from strata.notebook.harness_user import (
     prepare_work_dir,
     resolve_harness_user,
 )
+from strata.notebook.keys import inactive_variant_refusal
 from strata.notebook.layout import WORK_DIR
 from strata.notebook.models import CellTestCase, CellTestResult, MountMode, MountSpec
 from strata.notebook.mounts import resolve_cell_mounts
@@ -102,6 +104,23 @@ async def run_cell_tests(
         raise RuntimeError(no_interpreter_message(host))
 
     source = cell.source
+    if host.analysis is not None:
+        analysis = analysis_with(cell, host.notebook_state, host.analysis)
+        inactive = inactive_variant_refusal(analysis, cell_id)
+        if inactive is not None:
+            # It has no key to fingerprint its inputs by; nothing is recorded.
+            source_hash, test_source_hash, _ = host.cell_test_fingerprint(
+                cell_id, source, test_source
+            )
+            return CellTestResult(
+                errored=1,
+                tests=[
+                    CellTestCase(name="<refused>", nodeid="", outcome="error", message=inactive)
+                ],
+                cell_source_hash=source_hash,
+                test_source_hash=test_source_hash,
+                ran_at=int(time.time() * 1000),
+            )
     await context.materialize_upstreams(cell_id)
     context.forget_moved(cell_id)
 

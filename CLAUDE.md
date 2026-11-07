@@ -344,7 +344,7 @@ deliberately do not share the entry point, only the artifact-store substrate.
 | ----------------- | -------------------------------------- | ----------------------------------------- |
 | Entry point       | HTTP `POST /v1/materialize`            | In-process method call                    |
 | Unit of work      | One *transform* (e.g. `scan@v1`)       | One *cell* (ad-hoc Python source)         |
-| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.canonical_json + sorted input hashes` for others; `transform_spec` itself carries the inputs **in order**, so input order is significant (positional `input0`/`input1` transforms don't dedup under reordering) | `(sorted_inputs, source_hash, env_hash, mount_fingerprints)` |
+| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.canonical_json + sorted input hashes` for others; `transform_spec` itself carries the inputs **in order**, so input order is significant (positional `input0`/`input1` transforms don't dedup under reordering) | cellgraph's `parts_digest`: definition key, `env_hash`, tagged upstream components, inputs (mounts, tables, fetches, datasets) |
 | Inputs            | List of table / artifact URIs          | Upstream cell variables (resolved via DAG) |
 | Outputs           | Single artifact (Arrow IPC stream)     | Multi-output fan-out, one artifact per consumed variable via `derive_subkey` |
 | Execution         | Server dispatches to registered HTTP executors (v1-push / v2-pull) or built-in scan planner | Local subprocess harness in notebook venv, or HTTP executor |
@@ -392,9 +392,11 @@ DAG rebuilds on every source change.
 
 The analysis runs on cellgraph (the `cellgraph` package from PyPI, its own
 repository `bearing-research/cellgraph`): `graph.py` calls `cellgraph.analyze`
-with Strata's annotation vocabulary (`vocabulary.py`) and keeps legacy-1
-normalization and digests, so keys match the ones from before cellgraph. The
-traces in `tests/contract/cellgraph` pin that behavior (re-record with `--update`).
+with Strata's annotation vocabulary (`vocabulary.py`). cellgraph keys Python and R
+cells over `parts` (`parts_digest`); a prompt or SQL cell is `HostKeyed`, and
+`keys.py` adds its inputs, built with `cellgraph.input_component`, and keys it the
+same way. An inactive variant has no key: cellgraph refuses it. The traces in
+`tests/contract/cellgraph` pin that behavior (re-record with `--update`).
 
 ### Source annotations
 

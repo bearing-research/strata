@@ -625,7 +625,7 @@ def _keys(
         compute_source_hash,
     )
 
-    source_hash = compute_source_hash(cell.source)
+    source_hash = compute_source_hash(cell.source, cell.language.value)
     env_hash = session.cell_env_hash(cell)
     if outside is None:
         outside = session._outside_world_for(cell)
@@ -731,7 +731,9 @@ def _snapshot(
             },
             "published": _published(session, cell, variants),
         }
-        if not get_language_executor(cell.language).skips_execution_provenance:
+        # An inactive variant has no key: cellgraph refuses one.
+        keyable = cell.variant_active is not False
+        if keyable and not get_language_executor(cell.language).skips_execution_provenance:
             entry["keys"], entry["resolved"] = _keys(session, cell, variants, gathered.get(cell.id))
             if get_language_executor(cell.language).has_alternate_cache_scheme:
                 entry["keys"]["host_keyed"] = spy.calls.get(cell.id) if run is not None else None
