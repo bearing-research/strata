@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from strata.notebook.protocol import MessageType
 from strata.notebook.ws_payloads import FRAME_PAYLOADS, WsPayload
 
@@ -77,14 +79,31 @@ def test_every_payload_model_is_registered() -> None:
     )
 
 
-def test_a_field_too_long_for_one_line_is_broken_as_prettier_breaks_it() -> None:
-    """Prettier rewrites the committed file, so an overlong line would show up as drift."""
+def _generator():
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("generate_ws_types", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def test_a_mapping_of_models_names_the_model() -> None:
+    schema = {"type": "object", "additionalProperties": {"$ref": "#/$defs/OutputMetadata"}}
+    assert _generator()._ts_type(schema) == "Record<string, OutputMetadata>"
+
+
+def test_any_with_a_default_is_unknown_and_anything_else_unrendered_raises() -> None:
+    generator = _generator()
+    assert generator._ts_type({"default": None, "title": "Preview"}) == "unknown"
+    with pytest.raises(generator.UnsupportedSchema):
+        generator._ts_type({"default": None, "minimum": 0})
+
+
+def test_a_field_too_long_for_one_line_is_broken_as_prettier_breaks_it() -> None:
+    """Prettier rewrites the committed file, so an overlong line would show up as drift."""
+    module = _generator()
 
     assert module._field_line("code", "?", "'a' | null") == "  code?: 'a' | null"
     fits_below = " | ".join(f"'code_{i}'" for i in range(9))

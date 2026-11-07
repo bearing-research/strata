@@ -34,6 +34,13 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **`notebook_state` and `environment_job_finished` have typed payloads.** With them every
+  frame the server sends has a model, and the generated TypeScript describes the cell view a
+  client receives. The frames carry the same keys and values as before. (#1472)
+- **`cell_output` and `cell_error` have typed payloads.** Both are validated where they are
+  sent, and `frontend/src/types/ws-payloads.generated.ts` describes them. An entry of `outputs`
+  or `displays` keeps fields the server does not know, since the harness that wrote it may be a
+  worker on another version. (#1471)
 - **A cell's input is cloned from the store where the filesystem allows it.** A local blob
   reaches the harness as a copy-on-write clone (APFS, btrfs, XFS with reflinks), which takes
   no time and almost no disk until something writes to it, and a write never reaches the
@@ -268,14 +275,28 @@ exhaustive commit history.
   cancels cleanly and leaves the worker alone. (#1426)
 - **A run that fails to start leaves no descriptors open.** A missing input file, or a
   harness process that can't start, leaked open files in the server. (#1426)
+- **A snapshot planned once plans again while the object store is down.** Every scan read the
+  table's `metadata.json`, manifest list and manifests from the store before it could use the
+  cache, so with the store down every scan failed, cache hits too. Iceberg never rewrites these
+  files, so Strata now keeps each one it reads under `iceberg-metadata/` in the cache directory,
+  up to `STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES` (1 GiB), and plans from those copies. A table
+  or file never read still needs the store. (#1470)
+- **`strata run` and MCP run cells in warm processes.** Their cells all started cold, though
+  the session had warm processes ready: only the UI used them. An `@each` cell over 300 items
+  took 60 s through `strata run` and now takes 26 s. (#1468)
 - **A DAG label stays off its own edge.** An edge running down and to the left no longer
   passes through its variable name. (#1413)
 - **A `@per_variant` cell shows every variant's displays.** A cell that plotted or displayed a
   value per variant showed nothing: each instance stored its displays under the cell's own id,
   so one variant replaced another's, and the fan-out never gathered them. Each variant's are now
-  stored under that variant, and the cell shows them all, by variant name, after a run, a
-  cache hit or a reopen. Each is named in the web UI and the TUI, and carries `variant` in
-  `strata cell show --format json` and MCP's `get_cell`. (#1464)
+  stored under that variant, and the cell shows them all, in the order of the variant tabs,
+  after a run, a cache hit or a reopen. Each is named in the web UI and the TUI, and carries
+  `variant` in `strata cell show --format json` and MCP's `get_cell`. The variants run and
+  print in that order too, where they had run in the order of their names. (#1464, #1466)
+- **An `@each` cell shows its items' displays.** A cell that plotted or displayed something per
+  item showed nothing. It now shows every item's, in the order the items ran, each under its
+  item's key, after a run or a hit that lists no item. The manifest names them, so a prune
+  keeps them; a copy to another store carries the values only. (#1467)
 - **A cached cell writes its table again if the table is gone.** A cell whose `@write_table` target
   was deleted, or whose warehouse was, stayed a cache hit and wrote nothing, so the table stayed
   missing while the cell read ready. A hit on a writing cell now checks each table it writes, and

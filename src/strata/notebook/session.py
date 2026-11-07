@@ -112,6 +112,7 @@ from strata.notebook.writer import (
 from strata.notebook.ws_payloads import (
     cell_status_payload,
     environment_job_event_payload,
+    environment_job_finished_payload,
 )
 
 if TYPE_CHECKING:
@@ -1524,6 +1525,21 @@ class NotebookSession:
                     return []
                 pairs.append((artifact, current_output.model_copy(deep=True)))
 
+        return self._resolved_displays(pairs)
+
+    def stored_display_outputs(self, artifacts: list[ArtifactVersion]) -> list[CellOutput]:
+        """Each display artifact as its own run described it; one that does not is left out."""
+        return self._resolved_displays(
+            [
+                (artifact, CellOutput(**described[0]))
+                for artifact in artifacts
+                if (described := stored_display(artifact)) is not None
+            ]
+        )
+
+    def _resolved_displays(
+        self, pairs: list[tuple[ArtifactVersion, CellOutput]]
+    ) -> list[CellOutput]:
         resolved: list[CellOutput] = []
         for artifact, output in pairs:
             output.artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
@@ -3224,7 +3240,7 @@ class NotebookSession:
                 ]
             await self._broadcast_environment_job_message(
                 MessageType.ENVIRONMENT_JOB_FINISHED,
-                payload,
+                environment_job_finished_payload(payload),
             )
             if job.action in {"add", "remove"}:
                 await self._broadcast_environment_staleness_updates(job.stale_cell_ids)

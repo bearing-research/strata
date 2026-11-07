@@ -5,7 +5,8 @@ on its own content (cellgraph's ``Item``). When every instance has succeeded, on
 manifest per output variable names the version each item produced. The manifest is the
 cell's output: a reader sees one artifact, and an item removed from the source leaves by
 not being in the next manifest. Like an ``# @output_dir`` folder, a manifest requires the
-versions it names, and an instance goes once no manifest left names it.
+versions it names, and an instance goes once no manifest left names it. It names the
+items' displays too, so a hit that lists no item can still show them.
 """
 
 from __future__ import annotations
@@ -156,21 +157,27 @@ def instance_id(manifest_id: str, key: str) -> str:
     return f"{manifest_id.partition('@')[0]}@variant={instance_name(key)}"
 
 
-def encode_manifest(manifest_id: str, entries: list[tuple[str, str, int]]) -> bytes:
-    """A manifest of ``(item key, instance's artifact id, version)``, by key.
+def encode_manifest(
+    manifest_id: str,
+    entries: list[tuple[str, str, int]],
+    displays: list[tuple[str, str, int]] | None = None,
+) -> bytes:
+    """A manifest of ``(item key, instance's artifact id, version)``, by key, and of the
+    ``(item key, display's artifact id, version)`` the items showed, in the order shown.
 
     An entry names an id only when the value landed somewhere other than beside it.
     """
-    return _encoded(
-        {
-            "items": [
-                [key, version]
-                if artifact_id == instance_id(manifest_id, key)
-                else [key, version, artifact_id]
-                for key, artifact_id, version in sorted(entries)
-            ]
-        }
-    )
+    manifest: dict[str, Any] = {
+        "items": [
+            [key, version]
+            if artifact_id == instance_id(manifest_id, key)
+            else [key, version, artifact_id]
+            for key, artifact_id, version in sorted(entries)
+        ]
+    }
+    if displays:
+        manifest["displays"] = [list(display) for display in displays]
+    return _encoded(manifest)
 
 
 def manifest_refs(manifest_id: str, manifest: bytes) -> list[tuple[str, str, int]]:
@@ -189,10 +196,28 @@ def manifest_refs(manifest_id: str, manifest: bytes) -> list[tuple[str, str, int
         raise EachError(f"not an @each manifest: {exc}") from exc
 
 
+def manifest_displays(manifest: bytes) -> list[tuple[str, str, int]]:
+    """A manifest's ``(item key, display's artifact id, version)``, in the order shown.
+
+    Raises:
+        EachError: it is not one, as an import can hold any bytes under this type.
+    """
+    try:
+        return [
+            (str(key), str(artifact_id), int(version))
+            for key, artifact_id, version in json.loads(manifest).get("displays", [])
+        ]
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise EachError(f"not an @each manifest: {exc}") from exc
+
+
 def relocate(
     manifest: bytes, manifest_id: str, landed: dict[tuple[str, int], tuple[str, int]]
 ) -> bytes:
-    """The manifest naming where each instance *landed* in another store."""
+    """The manifest naming where each instance *landed* in another store.
+
+    Without the displays: a copy carries the values, not what showed them.
+    """
     return encode_manifest(
         manifest_id,
         [

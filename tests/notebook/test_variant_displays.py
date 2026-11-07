@@ -24,13 +24,15 @@ from strata.notebook.writer import (
 SHOWS = "# @per_variant\nf'val={val}'\n"
 
 
-def _session(tmp_path: Path, cell: str = SHOWS) -> NotebookSession:
-    """Variants one (val 1) and two (val 2) of group g, swept, and *cell* as ``c``."""
+def _session(
+    tmp_path: Path, cell: str = SHOWS, names: tuple[str, str] = ("one", "two")
+) -> NotebookSession:
+    """Variants *names* (val 1, then val 2) of group g, swept, and *cell* as ``c``."""
     nb = create_notebook(tmp_path, "Variants")
     after = None
     for cell_id, source in {
-        "a": "# @variant g one\nval = 1\n",
-        "b": "# @variant g two\nval = 2\n",
+        "a": f"# @variant g {names[0]}\nval = 1\n",
+        "b": f"# @variant g {names[1]}\nval = 2\n",
         "c": cell,
     }.items():
         add_cell_to_notebook(nb, cell_id, after)
@@ -150,6 +152,16 @@ class TestAPerVariantCellShowsEveryVariant:
             ("one", "val=1"),
             ("two", "val=2"),
         ]
+
+    async def test_they_follow_the_tabs_not_the_names(self, tmp_path):
+        cell = "# @per_variant\nprint(f'ran {val}')\nf'val={val}'\n"
+        session = _session(tmp_path, cell, names=("small", "large"))
+
+        result = await CellExecutor(session).execute_cell("c", cell)
+
+        assert result.success, result.error
+        assert _shown(result.display_outputs) == [("small", "val=1"), ("large", "val=2")]
+        assert result.stdout == "[variant=small]\nran 1\n\n[variant=large]\nran 2\n"
 
     async def test_a_failed_variant_leaves_nothing_shown(self, tmp_path):
         session = _session(tmp_path)

@@ -109,6 +109,7 @@ class _FakeHost:
         self.analysis = analyze_notebook(self.notebook_state)
         self.dag = NotebookDag.of(self.analysis.graph)
         self.venv_python = Path(sys.executable)
+        self.warm_pool = None
         self.r_warm_pool = None
         self.opened_by = None
         self.manager = NotebookArtifactManager(

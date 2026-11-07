@@ -16,6 +16,8 @@ from strata.notebook.ws_payloads import (
     CellTestResultsPayload,
     CellTestStatusPayload,
     EnvironmentJobEventPayload,
+    cell_error_payload,
+    cell_result_payload,
     cell_status_payload,
     environment_job_event_payload,
     impact_preview_payload,
@@ -420,3 +422,74 @@ def test_agent_note_refuses_an_unknown_source():
 
     with pytest.raises(ValidationError):
         AgentNotePayload.model_validate({"source": "human", "text": "hi"})
+
+
+class TestCellResultPayload:
+    """``cell_output`` and ``cell_error`` go out as built, validated on the way."""
+
+    @staticmethod
+    def _output(**fields):
+        return {
+            "cell_id": "c1",
+            "stdout": "hi\n",
+            "stderr": "",
+            "outputs": {
+                "df": {
+                    "content_type": "arrow/ipc",
+                    "file": "df.arrow",
+                    "rows": 2,
+                    "columns": ["a"],
+                    "bytes": 512,
+                    "preview": [[1], [2]],
+                },
+                "model": {
+                    "content_type": "pickle/object",
+                    "file": "model.pickle",
+                    "bytes": 90,
+                    "codec": "cloudpickle",
+                    "type": "Model",
+                    "preview": "<Model object>",
+                },
+            },
+            "cache_hit": False,
+            "duration_ms": 12,
+            "artifact_uri": None,
+            "execution_method": "warm",
+            "mutation_warnings": [{"var_name": "df", "message": "mutated", "suggestion": None}],
+            **fields,
+        }
+
+    def test_a_result_goes_out_as_it_was_built(self):
+        payload = self._output(
+            displays=[{"content_type": "text/markdown", "scalar": "hi", "markdown_text": None}],
+            artifact_uris={"df": "strata://artifact/x@v=1"},
+            saved_ms=0,
+        )
+        assert cell_result_payload(True, payload) == payload
+
+    def test_fields_a_newer_harness_writes_are_kept(self):
+        # The harness may be a worker on another Strata version.
+        payload = self._output(displays=[{"content_type": "image/png", "dpi": 144}])
+        payload["outputs"]["df"]["dtype_backend"] = "pyarrow"
+        assert cell_result_payload(True, payload) == payload
+
+    def test_a_field_the_frame_does_not_have_is_refused(self):
+        with pytest.raises(ValidationError):
+            cell_result_payload(True, self._output(bogus=1))
+
+    def test_an_output_with_no_content_type_is_refused(self):
+        payload = self._output()
+        del payload["outputs"]["df"]["content_type"]
+        with pytest.raises(ValidationError):
+            cell_result_payload(True, payload)
+
+    def test_a_failure_is_not_an_output(self):
+        # An output's fields on a cell_error mean the wrong frame was chosen.
+        with pytest.raises(ValidationError):
+            cell_result_payload(False, self._output(error="boom"))
+
+    def test_a_server_failure_carries_only_the_cell_and_the_error(self):
+        assert cell_error_payload("c1", "worker unreachable") == {
+            "cell_id": "c1",
+            "error": "worker unreachable",
+        }

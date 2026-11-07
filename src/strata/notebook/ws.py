@@ -76,11 +76,14 @@ from strata.notebook.ws_payloads import (
     PresencePayload,
     ReadConfirmCell,
     ReadConfirmPromptPayload,
+    cell_error_payload,
+    cell_result_payload,
     cell_status_payload,
     dag_update_payload,
     error_payload,
     impact_preview_payload,
     inspect_result_payload,
+    notebook_state_payload,
     profiling_summary_payload,
     session_closed_payload,
 )
@@ -2096,7 +2099,9 @@ async def _handle_variant_add(
         await _broadcast_message(
             notebook_id,
             _make_message(
-                MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state_payload
+                MessageType.NOTEBOOK_STATE,
+                next_notebook_sequence(notebook_id),
+                notebook_state_payload(state_payload),
             ),
         )
 
@@ -2139,7 +2144,11 @@ async def _handle_notebook_sync(
     # A real sequence: 0 reads as a gap to the client.
     await websocket.send_text(
         _json_encode(
-            _make_message(MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state)
+            _make_message(
+                MessageType.NOTEBOOK_STATE,
+                next_notebook_sequence(notebook_id),
+                notebook_state_payload(state),
+            )
         )
     )
 
@@ -2336,7 +2345,7 @@ async def execute_cell_and_broadcast(
             _make_message(
                 MessageType.CELL_ERROR,
                 next_notebook_sequence(notebook_id),
-                {"cell_id": cell_id, "error": str(e)},
+                cell_error_payload(cell_id, str(e)),
             ),
         )
         await _broadcast_message(
@@ -2494,7 +2503,7 @@ async def _execute_cascade(
                         _make_message(
                             MessageType.CELL_ERROR,
                             next_notebook_sequence(notebook_id),
-                            {"cell_id": cell_id, "error": str(e)},
+                            cell_error_payload(cell_id, str(e)),
                         ),
                     )
                     await _broadcast_message(
@@ -3011,7 +3020,7 @@ async def _run_partition_single_cell(
             _make_message(
                 MessageType.CELL_ERROR,
                 next_notebook_sequence(notebook_id),
-                {"cell_id": cell_id, "error": str(exc)},
+                cell_error_payload(cell_id, str(exc)),
             ),
         )
         await _broadcast_message(
@@ -3310,7 +3319,11 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
 
     await _broadcast_message(
         notebook_id,
-        _make_message(MessageType.NOTEBOOK_STATE, next_notebook_sequence(notebook_id), state),
+        _make_message(
+            MessageType.NOTEBOOK_STATE,
+            next_notebook_sequence(notebook_id),
+            notebook_state_payload(state),
+        ),
     )
 
 
@@ -3555,7 +3568,7 @@ async def _broadcast_output_or_error(
         _make_message(
             MessageType.CELL_OUTPUT if result.success else MessageType.CELL_ERROR,
             next_notebook_sequence(notebook_id),
-            payload,
+            cell_result_payload(result.success, payload),
             ts=ts,
         ),
     )

@@ -208,6 +208,7 @@ from strata.notebook.writer import drop_blanked_secrets
 if TYPE_CHECKING:
     import cellgraph as cg
 
+    from strata.config import StrataConfig
     from strata.notebook.datasets import DatasetInput
     from strata.notebook.executor_host import ExecutorHost
     from strata.notebook.pool import WarmProcessPool
@@ -410,6 +411,9 @@ class CellExecutor:
     ``execute_cell`` ensures upstream artifacts exist (recursively on a miss),
     checks this cell's cache, and executes and stores on a miss.
     """
+
+    # Outside the server, the config ``_lake_config`` loaded for this executor.
+    _loaded_config: StrataConfig | None = None
 
     def __init__(
         self,
@@ -1490,10 +1494,17 @@ class CellExecutor:
         return bool(to_promote)
 
     def _fanout_variants(self, cell_id: str) -> tuple[str, ...] | None:
-        """The variant names if ``cell_id`` is a ``@per_variant`` fan-out cell, else None."""
+        """The variant names if ``cell_id`` is a ``@per_variant`` fan-out cell, else None.
+
+        In the order of the group's tabs, so its console and displays read as the tabs do.
+        """
         dag = self.session.dag
         fanout = dag.fanout_cells.get(cell_id) if dag else None
-        return tuple(name for name, _ in fanout.variants) if fanout is not None else None
+        if dag is None or fanout is None:
+            return None
+        # The group's members are in cell order, which is the order of its tabs.
+        group = next(g for g in dag.variant_groups if g.group == fanout.group)
+        return tuple(name for _, name in group.members)
 
     def _fanout_context(self) -> FanoutContext:
         return FanoutContext(
@@ -1697,7 +1708,8 @@ class CellExecutor:
                 run_token=self._run_token,
                 write_manifest=self._write_manifest,
                 run_harness=self._run_harness,
-                pool=self.pool,
+                # The session's by default, as an R cell's: a CLI or MCP run is warm too.
+                pool=self.pool if self.pool is not None else self.session.warm_pool,
             ),
             source,
             input_specs,
@@ -2349,15 +2361,20 @@ class CellExecutor:
         )
 
     def _lake_config(self):
-        """Server config when running inside the server, else loaded fresh."""
+        """Server config when running inside the server, else loaded once for this executor.
+
+        Several reads a cell: loading each one cost an ``@each`` item a fifth of its run.
+        """
         try:
             from strata.server import get_state
 
             return get_state().config
         except RuntimeError:
-            from strata.config import StrataConfig
+            if self._loaded_config is None:
+                from strata.config import StrataConfig
 
-            return StrataConfig.load()
+                self._loaded_config = StrataConfig.load()
+            return self._loaded_config
 
     def _ambient_strata_url(self) -> str:
         """Server URL the harness binds the injected ``strata`` client to.

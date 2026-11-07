@@ -129,6 +129,20 @@ class TestExecutionFlow:
         assert "c2" in captured.out
         assert "2 ran" in captured.out or "ran" in captured.out
 
+    def test_a_no_sync_run_has_warm_processes(self, notebook_with_chain):
+        pools = []
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            # The executor's own pool, or the session's it falls back on.
+            pools.append(self.pool or self.session.warm_pool)
+            return _make_result(cell_id)
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            assert run_main([str(notebook_with_chain), "--no-sync"]) == 0
+
+        assert len(pools) == 2
+        assert all(pool is not None for pool in pools)
+
     def test_a_cell_is_labelled_by_its_name(self, tmp_path, capsys):
         notebook_dir = _build_notebook(
             tmp_path, cells=[("c1", "# @name stations\nimport math\n", None)]

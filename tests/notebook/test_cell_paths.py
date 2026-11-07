@@ -1326,6 +1326,7 @@ class TestFanout:
         manager = SimpleNamespace(
             artifact_store=SimpleNamespace(get_latest_version=lambda _id: latest),
             cell_artifact_id=lambda cell_id, var, variant=None: f"{cell_id}.{var}.{variant}",
+            load_artifact_data=lambda _id, _version: each.encode_manifest("m", []),
             stage_cell_output=stage_cell_output,
             finalize_cell_outputs=lambda _staged: list(finalized),
             discard_cell_outputs=calls.discarded.append,
@@ -1347,6 +1348,7 @@ class TestFanout:
             persist_display_outputs=lambda cell_id, displays: calls.persisted.append(
                 (cell_id, displays)
             ),
+            stored_display_outputs=lambda _artifacts: [],
         )
 
         async def compute_provenance(*_args, **_kwargs):
@@ -1585,7 +1587,7 @@ class TestFanout:
         host, context, calls = self._fakes(self._base(), latest=version, finalized=[finalized])
 
         fanout._store_each_manifests(
-            host, context, "c", "src", [each.EachItem("a", "digest")], self._base(), ["out"], []
+            host, context, "c", "src", [each.EachItem("a", "digest")], self._base(), ["out"], [], []
         )
 
         stage = calls.staged[0]
@@ -1600,7 +1602,15 @@ class TestFanout:
 
         with pytest.raises(each.EachError, match="'a' did not produce `out`"):
             fanout._store_each_manifests(
-                host, context, "c", "src", [each.EachItem("a", "digest")], self._base(), ["out"], []
+                host,
+                context,
+                "c",
+                "src",
+                [each.EachItem("a", "digest")],
+                self._base(),
+                ["out"],
+                [],
+                [],
             )
 
         assert calls.staged == []
@@ -1623,6 +1633,7 @@ class TestFanout:
                 self._base(),
                 ["out"],
                 [SimpleNamespace(variable="other")],
+                [],
             )
 
         assert calls.discarded == [["staged-out"]]

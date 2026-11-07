@@ -9,6 +9,28 @@ export interface AgentNotePayload {
   text: string
 }
 
+export interface AnnotationDiagnostic {
+  /** Diagnostic severity */
+  severity: DiagnosticSeverity
+  /** Stable identifier, e.g. 'worker_unknown' */
+  code: string
+  /** Human-readable explanation */
+  message: string
+  /** 1-based line in cell source */
+  line?: number | null
+}
+
+export interface AnnotationsWirePayload {
+  name?: string | null
+  worker?: string | null
+  timeout?: number | null
+  env: Record<string, string>
+  mounts: Record<string, unknown>[]
+  tables: Record<string, unknown>[]
+  loop?: LoopWirePayload | null
+  variant?: VariantWirePayload | null
+}
+
 export interface CascadeProgressPayload {
   plan_id: string
   current_cell_id: string
@@ -56,6 +78,23 @@ export interface CellConsolePayload {
   chunk_seq?: number | null
 }
 
+export interface CellErrorPayload {
+  cell_id: string
+  error?: string | null
+  stdout?: string | null
+  stderr?: string | null
+  traceback?: string | null
+  traceback_full?: string | null
+  error_code?: string | null
+  suggest_install?: string | null
+  suggest_install_language?: string | null
+  remote_worker?: string | null
+  remote_transport?: string | null
+  remote_build_id?: string | null
+  remote_build_state?: string | null
+  remote_error_code?: string | null
+}
+
 export interface CellInputsPayload {
   cell_id: string
   machine: string
@@ -72,11 +111,34 @@ export interface CellIterationProgressPayload {
   duration_ms: number
 }
 
+export type CellLanguage = 'python' | 'prompt' | 'sql' | 'markdown' | 'r' | 'widget'
+
 export interface CellOutputDeltaPayload {
   cell_id: string
   attempt: number
   kind: 'delta' | 'retry' | 'notice'
   text: string
+}
+
+export interface CellOutputPayload {
+  cell_id: string
+  stdout: string
+  stderr: string
+  outputs: Record<string, OutputMetadata>
+  cache_hit: boolean
+  duration_ms: number
+  artifact_uri?: string | null
+  execution_method?: string | null
+  mutation_warnings: MutationWarning[]
+  displays?: DisplayOutput[] | null
+  display?: DisplayOutput | null
+  artifact_uris?: Record<string, string> | null
+  saved_ms?: number | null
+  remote_worker?: string | null
+  remote_transport?: string | null
+  remote_build_id?: string | null
+  remote_build_state?: string | null
+  remote_error_code?: string | null
 }
 
 export interface CellProfileModel {
@@ -88,6 +150,15 @@ export interface CellProfileModel {
   artifact_uri?: string | null
   execution_count: number
 }
+
+export interface CellStaleness {
+  /** Status: ready, stale, idle, running, error */
+  status: CellStatus
+  /** List of staleness reasons */
+  reasons: StalenessReason[]
+}
+
+export type CellStatus = 'idle' | 'running' | 'ready' | 'error' | 'stale'
 
 export interface CellStatusPayload {
   cell_id: string
@@ -110,6 +181,32 @@ export interface CellTestCase {
   outcome: 'passed' | 'failed' | 'error' | 'skipped'
   /** Failure/error message (the rewritten-assert diff for fails) */
   message: string
+}
+
+export interface CellTestResultView {
+  /** Number of passing tests */
+  passed: number
+  /** Number of failing assertions */
+  failed: number
+  /** Number of errored tests (setup/cell failures) */
+  errored: number
+  /** Number of skipped tests */
+  skipped: number
+  /** Per-test outcomes */
+  tests: CellTestCase[]
+  /** Cell source hash the run was against */
+  cell_source_hash: string
+  /** Test source hash the run was against */
+  test_source_hash: string
+  /** Upstream input hashes at run time */
+  input_fingerprint: string
+  /** Run timestamp (epoch milliseconds) */
+  ran_at: number
+  /** True when pytest is not importable in the notebook venv */
+  pytest_unavailable: boolean
+  /** Dev tools (e.g. pytest) auto-provisioned into the venv for this run */
+  auto_installed: string[]
+  stale?: boolean | null
 }
 
 export interface CellTestResultsPayload {
@@ -140,6 +237,134 @@ export interface CellVariantProgressPayload {
   error?: string | null
 }
 
+export interface CellView {
+  /** Cell ID */
+  id: string
+  /** Cell source code */
+  source: string
+  /** pytest source for this cell's unit tests (cells/{id}.test.py) */
+  test_source: string
+  test_result?: CellTestResultView | null
+  /** What the declared inputs weighed when the cell last started */
+  inputs: InputWeight[]
+  /** The worker those inputs were weighed for */
+  inputs_machine?: string | null
+  /** Programming language */
+  language: CellLanguage
+  /** Display order in notebook */
+  order: number
+  /** Who added this cell */
+  created_by?: string | null
+  /** Who last changed it */
+  updated_by?: string | null
+  /** Execution status */
+  status: CellStatus
+  /** Variable names defined by this cell */
+  defines: string[]
+  /** Variable names referenced by this cell */
+  references: string[]
+  /** Subset of defines that came from in-place mutations (df['col'] = ...); the harness must serialize these even when id() is preserved across execution. */
+  mutation_defines: string[]
+  /** Free names that shadow a Python builtin (input, type, id ...). Kept out of references for display, but resolved against the producer map so a cell that shadows a builtin still wires its DAG edge. */
+  builtin_references: string[]
+  /** Cell IDs this cell depends on */
+  upstream_ids: string[]
+  /** Cell IDs that depend on this cell */
+  downstream_ids: string[]
+  /** Resolved persisted worker for this cell (notebook default + cell override) */
+  worker?: string | null
+  /** Persisted cell-level worker override from notebook.toml */
+  worker_override?: string | null
+  /** Resolved persisted timeout for this cell in seconds */
+  timeout?: number | null
+  /** Persisted cell-level timeout override from notebook.toml */
+  timeout_override?: number | null
+  /** Resolved persisted environment variables for this cell */
+  env: Record<string, string>
+  /** Persisted cell-level environment overrides from notebook.toml */
+  env_overrides: Record<string, string>
+  /** Resolved mounts for this cell (notebook-level + cell-level overrides) */
+  mounts: MountSpec[]
+  /** Persisted cell-level mount overrides from notebook.toml */
+  mount_overrides: MountSpec[]
+  /** Variant group ID parsed from ``# @variant <group> <name>``. None for cells that aren't part of a group. */
+  variant_group?: string | null
+  /** Variant name within ``variant_group``, parsed from source. */
+  variant_name?: string | null
+  /** True for cells that aren't grouped or for the active member of a group. False for inactive variants, which are excluded from the producer map and consumed_variables. */
+  variant_active: boolean
+  /** Validation findings for the cell's source annotations */
+  annotation_diagnostics: AnnotationDiagnostic[]
+  /** Whether this is a leaf node (no downstream consumers) */
+  is_leaf: boolean
+  /** Staleness status */
+  staleness?: CellStaleness | null
+  /** URI of last stored artifact (legacy single-var) */
+  artifact_uri?: string | null
+  /** Per-variable artifact URIs: {var_name: uri} */
+  artifact_uris: Record<string, string>
+  display_outputs: DisplayOutput[]
+  display_output?: DisplayOutput | null
+  /** Captured stdout from the last execution (persisted for reopen) */
+  console_stdout: string
+  /** Captured stderr from the last execution (persisted for reopen) */
+  console_stderr: string
+  /** Error message and traceback from the last failed execution. Cleared on the next success. Read it through ``current_error``, which withholds it once the source it happened to has changed. */
+  error?: string | null
+  /** ``error`` with the harness frames a traceback hides, for a bug report */
+  error_full?: string | null
+  /** Runtime-only source hash the last failure happened at, so an error is only claimed for the source that actually produced it */
+  error_source_hash?: string | null
+  /** Whether last execution was a cache hit */
+  cache_hit: boolean
+  /** Last execution method: cached, warm, cold, executor */
+  execution_method?: string | null
+  /** Remote worker name used for the last remote execution */
+  remote_worker?: string | null
+  /** Remote transport used for the last remote execution */
+  remote_transport?: string | null
+  /** Signed build id for the last remote execution, when applicable */
+  remote_build_id?: string | null
+  /** Last observed signed build state for remote execution metadata */
+  remote_build_state?: string | null
+  /** Structured remote execution error code for the last run, when available */
+  remote_error_code?: string | null
+  /** Runtime-only provenance hash from the last successful execution */
+  last_provenance_hash?: string | null
+  /** Runtime-only: what the cell's own cache scheme rested on at its last successful run, for a language that has one */
+  last_reopen_identity?: string | null
+  /** Runtime-only source hash from the last successful execution */
+  last_source_hash?: string | null
+  /** Runtime-only environment hash from the last successful execution */
+  last_env_hash?: string | null
+  /** Runtime-only parts the last successful execution's key was built from */
+  last_key_parts?: Record<string, unknown> | null
+  /** Runtime-only current values of a widget cell's controls */
+  widget_values: Record<string, unknown>
+  staleness_reasons: string[]
+  annotations: AnnotationsWirePayload
+  widget?: WidgetModel | null
+  is_module_cell?: boolean | null
+  module_exports?: ModuleExportModel[] | null
+  causality?: Record<string, unknown> | null
+  shadow_warnings?: string[] | null
+  last_got?: LastGotModel | null
+  last_duration_ms?: number | null
+}
+
+export interface ConnectionSpec {
+  /** Connection name, referenced by SQL cells via ``# @sql connection=<name>``. */
+  name: string
+  /** Driver name: ``postgresql``, ``sqlite``, ``snowflake``, ... */
+  driver: string
+  /** Credential ``${VAR}`` indirections; values resolved at execute time. Never hashed into provenance. */
+  auth: Record<string, string>
+  /** Driver-specific runtime options that don't change which objects the connection sees. */
+  options: Record<string, unknown>
+  /** Name of a server-defined credential whose fields become driver auth, underneath this block's own ``auth``. Part of the connection's identity; its values never are. */
+  credential?: string | null
+}
+
 export interface DagEdgeModel {
   from_cell_id: string
   to_cell_id: string
@@ -155,6 +380,32 @@ export interface DagUpdatePayload {
   variant_groups: Record<string, unknown>[]
 }
 
+export interface DependencyModel {
+  name: string
+  version?: string | null
+  specifier?: string | null
+}
+
+export type DiagnosticSeverity = 'error' | 'warn' | 'info'
+
+export interface DisplayOutput {
+  content_type: string
+  file?: string | null
+  bytes?: number | null
+  rows?: number | null
+  columns?: string[] | null
+  preview: unknown
+  scalar: unknown
+  artifact_uri?: string | null
+  inline_data_url?: string | null
+  markdown_text?: string | null
+  width?: number | null
+  height?: number | null
+  error?: string | null
+  computed_at?: number | null
+  variant?: string | null
+}
+
 export interface DownstreamImpactModel {
   cell_id: string
   cell_name: string
@@ -164,6 +415,21 @@ export interface DownstreamImpactModel {
 
 export interface EnvironmentJobEventPayload {
   environment_job: EnvironmentJobModel
+}
+
+export interface EnvironmentJobFinishedPayload {
+  environment_job: EnvironmentJobModel
+  environment_job_history: EnvironmentJobModel[]
+  cells: CellView[]
+  lockfile_changed: boolean
+  stale_cell_count: number
+  stale_cell_ids: string[]
+  warnings?: string[] | null
+  imported_count?: number | null
+  environment?: EnvironmentStateModel | null
+  r_environment?: REnvironmentStateModel | null
+  dependencies?: DependencyModel[] | null
+  resolved_dependencies?: DependencyModel[] | null
 }
 
 export interface EnvironmentJobModel {
@@ -184,6 +450,24 @@ export interface EnvironmentJobModel {
   stale_cell_count: number
   stale_cell_ids: string[]
   error?: string | null
+}
+
+export interface EnvironmentStateModel {
+  requested_python_version: string
+  runtime_python_version: string
+  python_version: string
+  lockfile_hash: string
+  package_count: number
+  declared_package_count: number
+  resolved_package_count: number
+  sync_state: string
+  sync_error?: string | null
+  sync_notice?: string | null
+  last_synced_at?: number | null
+  last_sync_duration_ms?: number | null
+  has_lockfile: boolean
+  venv_python?: string | null
+  interpreter_source: string
 }
 
 export interface ErrorPayload {
@@ -227,9 +511,128 @@ export interface InspectResultPayload {
   expr?: string | null
 }
 
+export interface LastGotModel {
+  cache_hit: boolean
+  ms: number
+}
+
+export interface LoopWirePayload {
+  max_iter: number
+  carry: string
+  until_expr?: string | null
+  start_from_cell?: string | null
+  start_from_iter?: number | null
+}
+
+export interface MalformedConnection {
+  /** Connection name as written in TOML */
+  name: string
+  /** Raw TOML body, preserved verbatim for round-trip */
+  body: Record<string, unknown>
+  /** Reason this block failed validation */
+  error: string
+}
+
 export interface ModuleExportModel {
   name: string
   kind: string
+}
+
+export type MountMode = 'ro' | 'rw'
+
+export interface MountSpec {
+  /** Mount name, injected as a Path variable in the cell namespace */
+  name: string
+  /** URI: file:///path, s3://bucket/prefix, gs://bucket/prefix, az://container/prefix */
+  uri: string
+  /** Access mode: 'ro' (read-only) or 'rw' (read-write) */
+  mode: MountMode
+  /** Pinned version/etag; disables fingerprinting when set */
+  pin?: string | null
+  /** Backend storage options passed to fsspec (e.g. anon=True, endpoint_url, profile). Merged with executor-level credentials. */
+  options: Record<string, unknown>
+  /** Name of a server-defined credential whose fields become fsspec storage options, so no secret lives in notebook.toml. The name is part of provenance; its values never are. */
+  credential?: string | null
+}
+
+export interface MutationWarning {
+  var_name: string
+  message: string
+  suggestion?: string | null
+}
+
+export interface NotebookDagModel {
+  edges: DagEdgeModel[]
+  roots: string[]
+  leaves: string[]
+  topological_order: string[]
+  variant_groups?: Record<string, unknown>[] | null
+}
+
+export interface NotebookStatePayload {
+  /** Notebook ID */
+  id: string
+  /** Notebook name */
+  name: string
+  /** Notebook-level default worker name */
+  worker?: string | null
+  /** Notebook-level default execution timeout in seconds */
+  timeout?: number | null
+  /** Notebook-level default environment variables */
+  env: Record<string, string>
+  /** Per-key provenance for env: 'manual' for values typed in the Runtime panel, or a provider name (e.g. 'infisical') for values fetched from a secret manager. */
+  env_sources: Record<string, string>
+  /** Last secret-manager fetch error, if any. None on success or when no manager is configured. */
+  env_fetch_error?: string | null
+  /** ISO-8601 timestamp of the last secret-manager fetch. */
+  env_fetched_at?: string | null
+  /** Registered workers available to this notebook */
+  workers: WorkerSpec[]
+  /** Notebook-level filesystem mount defaults */
+  mounts: MountSpec[]
+  /** Named database connections available to SQL cells */
+  connections: ConnectionSpec[]
+  /** Connection blocks that failed to parse, preserved so annotation_validation can surface them and the writer round-trip doesn't erase them. */
+  malformed_connections: MalformedConnection[]
+  /** Parsed ``[catalogs.<name>]`` blocks: catalogs a DuckDB connection can name in personal mode, beside the server's. */
+  catalogs: Record<string, Record<string, unknown>>
+  /** Parsed [secret_manager] block from notebook.toml: provider / project_id / environment / path routing. Non-sensitive; the token that authenticates to the manager lives in the process environment, never here. */
+  secret_manager_config: Record<string, unknown>
+  /** A legacy ``[r]`` block, written back as it was read. The R runtime (lockfile hash, last sync, R version) lives in ``.strata/runtime.json`` as ``RRuntime``. */
+  r: Record<string, unknown>
+  cells: CellView[]
+  /** Resolved variant groups, one entry per group declared in any cell's ``# @variant`` annotation. Frontend renders these as tabbed groups; inactive members are not part of the DAG. */
+  variant_groups: VariantGroupState[]
+  /** Raw {group: active_name} selections from notebook.toml's [[variant_group]] entries. Populated by the parser; consumed by session DAG build to resolve into ``variant_groups``. */
+  variant_active_selections: Record<string, string>
+  /** Raw {group: mode} ('switch' | 'sweep') from notebook.toml's [[variant_group]] entries. Populated by the parser; consumed by the DAG build (sweep → all variants run) and annotation validation. */
+  variant_modes: Record<string, string>
+  /** Path to notebook directory (not serialized) */
+  path?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  environment: EnvironmentStateModel
+  environment_job?: EnvironmentJobModel | null
+  environment_job_history: EnvironmentJobModel[]
+  r_environment: REnvironmentStateModel
+  dag?: NotebookDagModel | null
+}
+
+export interface OutputMetadata {
+  content_type: string
+  file?: string | null
+  bytes?: number | null
+  rows?: number | null
+  columns?: string[] | null
+  preview: unknown
+  artifact_uri?: string | null
+  error?: string | null
+  markdown_text?: string | null
+  inline_data_url?: string | null
+  width?: number | null
+  height?: number | null
+  codec?: string | null
+  type?: string | null
 }
 
 export interface PresenceEntryModel {
@@ -256,6 +659,25 @@ export interface ProfilingSummaryPayload {
   cell_profiles: CellProfileModel[]
 }
 
+export interface REnvironmentStateModel {
+  has_lockfile: boolean
+  current_lock_hash: string
+  lock_hash: string
+  r_version: string
+  system_r_version?: string | null
+  last_synced_at: number
+  sync_state: string
+  sync_error?: string | null
+  packages: RPackageModel[]
+  packages_status: string
+  packages_error?: string | null
+}
+
+export interface RPackageModel {
+  name: string
+  version: string
+}
+
 export interface ReadConfirmCell {
   cell_id: string
   machine: string
@@ -275,25 +697,91 @@ export interface SessionClosedPayload {
   message: string
 }
 
+export type StalenessReason = 'self' | 'upstream' | 'env' | 'external' | 'forced'
+
+export interface VariantGroupState {
+  /** Variant group identifier */
+  group: string
+  /** Active variant name */
+  active_name: string
+  /** Active variant's cell ID */
+  active_cell_id: string
+  /** Group mode: 'switch' (one active member; tab clicks switch active) or 'sweep' (all members run; tab clicks are display-only and downstream consumes a {variant: value} dict). */
+  mode: string
+  /** All members of this group, in source order */
+  members: VariantMember[]
+}
+
+export interface VariantMember {
+  /** Cell ID */
+  cell_id: string
+  /** Variant name within the group */
+  name: string
+  /** Whether this is the active variant */
+  is_active: boolean
+}
+
+export interface VariantWirePayload {
+  group: string
+  name: string
+}
+
+export interface WidgetDescriptorModel {
+  name: string
+  kind: string
+  params: Record<string, unknown>
+  default: unknown
+}
+
+export interface WidgetModel {
+  descriptors: WidgetDescriptorModel[]
+  values: Record<string, unknown>
+}
+
+export type WorkerBackendType = 'local' | 'executor'
+
+export interface WorkerConfig {
+  url?: string | null
+  transport?: string | null
+  strata_url?: string | null
+  token_env?: string | null
+  token?: string | null
+}
+
+export interface WorkerSpec {
+  /** Worker name used in notebook metadata and cell overrides */
+  name: string
+  /** Worker backend type */
+  backend: WorkerBackendType
+  /** Stable runtime fingerprint override for provenance */
+  runtime_id?: string | null
+  /** Backend-specific worker configuration */
+  config: WorkerConfig
+}
+
 /** Frames whose payload shape is generated. Anything absent stays `unknown`. */
 export interface WsServerPayloadMap {
   agent_note: AgentNotePayload
   cascade_progress: CascadeProgressPayload
   cascade_prompt: CascadePromptPayload
   cell_console: CellConsolePayload
+  cell_error: CellErrorPayload
   cell_inputs: CellInputsPayload
   cell_iteration_progress: CellIterationProgressPayload
+  cell_output: CellOutputPayload
   cell_output_delta: CellOutputDeltaPayload
   cell_status: CellStatusPayload
   cell_test_results: CellTestResultsPayload
   cell_test_status: CellTestStatusPayload
   cell_variant_progress: CellVariantProgressPayload
   dag_update: DagUpdatePayload
+  environment_job_finished: EnvironmentJobFinishedPayload
   environment_job_progress: EnvironmentJobEventPayload
   environment_job_started: EnvironmentJobEventPayload
   error: ErrorPayload
   impact_preview: ImpactPreviewPayload
   inspect_result: InspectResultPayload
+  notebook_state: NotebookStatePayload
   presence: PresencePayload
   profiling_summary: ProfilingSummaryPayload
   read_confirm_prompt: ReadConfirmPromptPayload

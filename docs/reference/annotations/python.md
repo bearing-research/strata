@@ -445,6 +445,12 @@ listed. A new or changed item runs alone. Any other input of the cell, or its so
 runs every item. Going back to earlier inputs finds the values already stored. Rerun
 (↻) runs every item.
 
+**What the cell shows.** Each item's displays (a figure, `display(...)`, a trailing
+expression) are shown one after another in the order the items ran, each under its
+item's key, as its console prefixes each item's lines with `[variant=<key>]`. An item
+that ran shows what it displayed now, and a cached one what it displayed when it ran,
+on a hit that lists nothing too. If any item fails, the cell shows no displays.
+
 **Writing a table.** `# @write_table ... sync on=<col>` is the only mode an `@each`
 cell takes. The table is written once per run, in one commit, over the rows of every
 item, the cached ones too, so a removed file's rows are deleted though nothing ran. A
@@ -452,16 +458,19 @@ failed item writes nothing, since its missing rows would read as deletions. A so
 with no items refuses the run rather than delete every row. `append`, `merge` and
 `overwrite` are refused: one commit per item, or only the last item's rows.
 
-**Limits.** Python cells on the local worker, read by Python cells. Instances run one at a time, a harness
-each, about half a second before the cell's own work, so plan on that for a first run
-of thousands of items. An `@each` cell cannot also be a `@loop`, `@per_variant` or
+**Limits.** Python cells on the local worker, read by Python cells. Instances run one at a time, each in
+a process of its own. In the UI, `strata run` and MCP that is a warm process, started ahead
+with the notebook's dependencies imported, when one is ready: about a tenth of a second
+before the cell's own work, or about a fifth when no warm process is ready. Plan on that
+for a first run of thousands of items. An `@each` cell cannot also be a `@loop`, `@per_variant` or
 `@variant` cell, or fan out over a sweep. Cell tests, branching from a release,
 `@dataset`, `strata artifact pull` and a publication bundle over its output are not
 supported yet and are refused; a cell that reads the output can do the last three.
 A snapshot carries the output and every item it names.
 
-A prune keeps each instance a kept manifest names and drops the rest, so a removed
-item's value goes once no manifest left names it.
+A prune keeps each instance a kept manifest names, and what it displayed, and drops
+the rest, so a removed item's value goes once no manifest left names it. A copy to
+another store carries the values, not the displays.
 
 ## @nocache
 

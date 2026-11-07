@@ -514,12 +514,12 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f3_var_score@variant=small@v=1",
+      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f3_var_score@variant=large@v=1",
       "artifact_uris": {
        "score": {
-        "artifact": "nb_cellgraph-fanout_cell_f3_var_score@variant=small@v=1",
-        "content_sha256": "785f3ec7eb32f30b90cd0fcf3657d388b5ff4297f2f9716ff66e9b69c05ddd09",
-        "provenance_hash": "39d6d94baf8a32f78c8e237a414ae7acbe5e6ad4459cae97a2476a8fafcf5fa2"
+        "artifact": "nb_cellgraph-fanout_cell_f3_var_score@variant=large@v=1",
+        "content_sha256": "36790ecd55c2030dc553685bef719df653f413a20cdad1bfd1dc934c76686ddd",
+        "provenance_hash": "b08d28e0af94879e8f951c4c53043214aa8e10296f5a983f1db0730014f17bdd"
        }
       },
       "instances": {
@@ -600,12 +600,12 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f4_var_final@variant=small@v=1",
+      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f4_var_final@variant=large@v=1",
       "artifact_uris": {
        "final": {
-        "artifact": "nb_cellgraph-fanout_cell_f4_var_final@variant=small@v=1",
-        "content_sha256": "535fa30d7e25dd8a49f1536779734ec8286108d115da5045d77f3b4185d8f790",
-        "provenance_hash": "d4baa06bbce179ca3d607af06984967f989d3b93df40f522b3098edff39deb35"
+        "artifact": "nb_cellgraph-fanout_cell_f4_var_final@variant=large@v=1",
+        "content_sha256": "67e9c3acebb154a282f326d4ff1951cd1f342e58e74d562b556b517da5e56132",
+        "provenance_hash": "45d99bafd92762fe61aaee687df360ed6d9a2427460768af060744759282a6dc"
        }
       },
       "instances": {
@@ -1476,12 +1476,12 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f3_var_score@variant=small@v=2",
+      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f3_var_score@variant=large@v=1",
       "artifact_uris": {
        "score": {
-        "artifact": "nb_cellgraph-fanout_cell_f3_var_score@variant=small@v=2",
-        "content_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
-        "provenance_hash": "c2f5e52a74d6d0c35eb4d07561ed2957b67985d1c5afa934b784f7b9d14ba47f"
+        "artifact": "nb_cellgraph-fanout_cell_f3_var_score@variant=large@v=1",
+        "content_sha256": "36790ecd55c2030dc553685bef719df653f413a20cdad1bfd1dc934c76686ddd",
+        "provenance_hash": "b08d28e0af94879e8f951c4c53043214aa8e10296f5a983f1db0730014f17bdd"
        }
       },
       "instances": {
@@ -1562,12 +1562,12 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f4_var_final@variant=small@v=2",
+      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f4_var_final@variant=large@v=1",
       "artifact_uris": {
        "final": {
-        "artifact": "nb_cellgraph-fanout_cell_f4_var_final@variant=small@v=2",
-        "content_sha256": "b7a56873cd771f2c446d369b649430b65a756ba278ff97ec81bb6f55b2e73569",
-        "provenance_hash": "c50349110fdd01a3eaea460f1d1167e8812d07efc6919b22cd0b9f2ee5ae7cad"
+        "artifact": "nb_cellgraph-fanout_cell_f4_var_final@variant=large@v=1",
+        "content_sha256": "67e9c3acebb154a282f326d4ff1951cd1f342e58e74d562b556b517da5e56132",
+        "provenance_hash": "45d99bafd92762fe61aaee687df360ed6d9a2427460768af060744759282a6dc"
        }
       },
       "instances": {
@@ -2526,12 +2526,12 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f3_var_score@variant=small@v=2",
+      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f3_var_score@variant=huge@v=1",
       "artifact_uris": {
        "score": {
-        "artifact": "nb_cellgraph-fanout_cell_f3_var_score@variant=small@v=2",
-        "content_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
-        "provenance_hash": "c2f5e52a74d6d0c35eb4d07561ed2957b67985d1c5afa934b784f7b9d14ba47f"
+        "artifact": "nb_cellgraph-fanout_cell_f3_var_score@variant=huge@v=1",
+        "content_sha256": "73a2af8864fc500fa49048bf3003776c19938f360e56bd03663866fb3087884a",
+        "provenance_hash": "460ced8aaf8675fa8c8ed671a9a5d7afd9d654e8c67885b8cce2105e0a84bc0f"
        }
       },
       "instances": {
@@ -2626,12 +2626,12 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f4_var_final@variant=small@v=2",
+      "artifact_uri": "strata://artifact/nb_cellgraph-fanout_cell_f4_var_final@variant=huge@v=1",
       "artifact_uris": {
        "final": {
-        "artifact": "nb_cellgraph-fanout_cell_f4_var_final@variant=small@v=2",
-        "content_sha256": "b7a56873cd771f2c446d369b649430b65a756ba278ff97ec81bb6f55b2e73569",
-        "provenance_hash": "c50349110fdd01a3eaea460f1d1167e8812d07efc6919b22cd0b9f2ee5ae7cad"
+        "artifact": "nb_cellgraph-fanout_cell_f4_var_final@variant=huge@v=1",
+        "content_sha256": "1bea20e1df19b12013976de2b5e0e3d1fb4ba088b59fe53642c324298b21ffd9",
+        "provenance_hash": "c2dd5f075efdcf9f620551606a86e8c5606a09d414b13ae6c900e6afb369754c"
        }
       },
       "instances": {

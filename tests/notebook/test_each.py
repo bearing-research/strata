@@ -42,6 +42,20 @@ windows = pytest.mark.skipif(
 )
 
 
+def _dialect():
+    """The ledger's SQL dialect; the Postgres run of this suite replaces it."""
+    return None
+
+
+def _open(path: Path) -> NotebookSession:
+    return NotebookSession(parse_notebook(path), path, ledger_dialect=_dialect())
+
+
+def _cli_store(artifact_dir: Path) -> str | None:
+    """The ``--artifact-dir`` a CLI command opens the notebook's store by."""
+    return str(artifact_dir)
+
+
 class Notebook:
     """A notebook of cells ``a``, ``b``, ... in order, and the log its instances append to."""
 
@@ -55,7 +69,7 @@ class Notebook:
             add_cell_to_notebook(path, cell_id, after)
             write_cell(path, cell_id, source)
             after = cell_id
-        self.session = NotebookSession(parse_notebook(path), path)
+        self.session = _open(path)
         self.session.refresh_environment_runtime()
 
     def ran(self) -> list[str]:
@@ -562,6 +576,139 @@ class TestFailure:
         assert set(nb.manifest("b", "out")) == {"good"}
 
 
+SHOWS = "out = path.read_text().upper()\nf'shows {out}'\n"
+
+
+def _shown(outputs) -> list[tuple[str | None, object]]:
+    return [
+        (o["variant"], o["preview"]) if isinstance(o, dict) else (o.variant, o.preview)
+        for o in outputs
+    ]
+
+
+class TestDisplays:
+    """An item's displays show under its key, in the order the items ran."""
+
+    async def _two(self, tmp_path, *more: str) -> tuple[Path, Notebook]:
+        raw, source = _over_files(tmp_path, body=SHOWS)
+        _touch(raw / "one.txt", "a")
+        _touch(raw / "two.txt", "b")
+        return raw, Notebook(tmp_path, source, *more)
+
+    async def test_a_run_shows_each_items_display_by_its_key(self, tmp_path):
+        _, nb = await self._two(tmp_path, READER)
+
+        result = await nb.good("a")
+
+        expected = [("one.txt", "shows A"), ("two.txt", "shows B")]
+        assert _shown(result.display_outputs) == expected
+        assert _shown(nb.session.notebook_state.get_cell("a").display_outputs) == expected
+
+    async def test_a_hit_that_lists_nothing_shows_them_again(self, tmp_path, monkeypatch):
+        _, nb = await self._two(tmp_path, READER)
+        await nb.good("a")
+        nb.session.notebook_state.get_cell("a").display_outputs = []
+
+        def must_not_list(*_args, **_kwargs):
+            raise AssertionError("a cell-level hit lists no items")
+
+        monkeypatch.setattr(each, "items_of_mount", must_not_list)
+        again = await nb.good("a")
+
+        assert again.cache_hit
+        assert _shown(again.display_outputs) == [("one.txt", "shows A"), ("two.txt", "shows B")]
+        assert _shown(nb.session.notebook_state.get_cell("a").display_outputs) == [
+            ("one.txt", "shows A"),
+            ("two.txt", "shows B"),
+        ]
+
+    async def test_a_changed_item_shows_beside_the_cached_ones(self, tmp_path):
+        raw, nb = await self._two(tmp_path, READER)
+        await nb.good("a")
+        nb.ran()
+
+        _touch(raw / "one.txt", "c", tick=1)
+        again = await nb.good("a")
+
+        assert nb.ran() == ["one.txt"]
+        assert _shown(again.display_outputs) == [("one.txt", "shows C"), ("two.txt", "shows B")]
+
+    async def test_a_cell_nothing_reads_shows_them_on_a_hit_too(self, tmp_path):
+        _, nb = await self._two(tmp_path)
+        await nb.good("a")
+        nb.ran()
+
+        again = await nb.good("a")
+
+        assert nb.ran() == []
+        assert _shown(again.display_outputs) == [("one.txt", "shows A"), ("two.txt", "shows B")]
+
+    async def test_a_reverted_item_shows_its_earlier_display(self, tmp_path):
+        raw, nb = await self._two(tmp_path, READER)
+        await nb.good("a")
+        _touch(raw / "one.txt", "c", tick=1)
+        await nb.good("a")
+        _touch(raw / "one.txt", "a")
+
+        again = await nb.good("a")
+
+        assert again.cache_hit
+        assert _shown(again.display_outputs) == [("one.txt", "shows A"), ("two.txt", "shows B")]
+
+    async def test_a_prune_keeps_what_a_manifest_shows(self, tmp_path, monkeypatch):
+        _, nb = await self._two(tmp_path, READER)
+        await nb.good("a")
+        manager = nb.session.get_artifact_manager()
+        manager.prune(keep_superseded=0, min_idle_seconds=0)
+        monkeypatch.setattr(each, "items_of_mount", lambda *_a, **_k: [])
+
+        again = await nb.good("a")
+
+        assert again.cache_hit
+        assert _shown(again.display_outputs) == [("one.txt", "shows A"), ("two.txt", "shows B")]
+
+    async def test_a_hit_leaves_its_own_for_a_reopen(self, tmp_path):
+        raw, nb = await self._two(tmp_path, READER)
+        await nb.good("a")
+        _touch(raw / "one.txt", "c", tick=1)
+        await nb.good("a")
+        _touch(raw / "one.txt", "a")
+        assert (await nb.good("a")).cache_hit
+
+        path = nb.session.path
+        reopened = _open(path)
+
+        assert _shown(reopened.notebook_state.get_cell("a").display_outputs) == [
+            ("one.txt", "shows A"),
+            ("two.txt", "shows B"),
+        ]
+
+    async def test_a_failed_item_shows_nothing(self, tmp_path):
+        raw, nb = await self._two(tmp_path, READER)
+        await nb.good("a")
+        _touch(raw / "two.txt", "", tick=1)
+        failing = nb.session.notebook_state.get_cell("a").source + "assert out\n"
+
+        failed = await nb.run("a", failing)
+
+        assert not failed.success
+        assert failed.display_outputs == []
+        assert nb.session.notebook_state.get_cell("a").display_outputs == []
+
+    async def test_a_copy_to_another_store_names_no_display(self, tmp_path):
+        _, nb = await self._two(tmp_path, READER)
+        await nb.good("a")
+        manager = nb.session.get_artifact_manager()
+        latest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("a", "out"))
+        blob = manager.load_artifact_data(latest.id, latest.version)
+        assert len(each.manifest_displays(blob)) == 2
+
+        moved = each.relocate(blob, latest.id, {})
+
+        assert each.manifest_displays(moved) == []
+        assert each.manifest_refs(latest.id, moved) == each.manifest_refs(latest.id, blob)
+
+
 class TestRetention:
     async def test_prune_sweeps_an_instance_no_manifest_names(self, tmp_path):
         raw, source = _over_files(tmp_path)
@@ -986,7 +1133,7 @@ class TestAnotherStore:
         code = cmd_pull(
             argparse.Namespace(
                 ref=f"{manifest.id}@v={manifest.version}",
-                artifact_dir=str(manager.artifact_dir),
+                artifact_dir=_cli_store(manager.artifact_dir),
                 to=str(out),
                 tenant=None,
             )
@@ -1053,7 +1200,7 @@ class TestOtherSurfaces:
         nb = Notebook(tmp_path, "samples = [1]\n", "# @each s in samples\nout = s\n")
         add_cell_to_notebook(nb.session.path, "z", "b", language=language)
         write_cell(nb.session.path, "z", source)
-        nb.session = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        nb.session = _open(nb.session.path)
         nb.session.refresh_environment_runtime()
         await nb.good("a")
         await nb.good("b")
@@ -1114,7 +1261,7 @@ class TestOtherSurfaces:
         await nb.good("b")
         nb.ran()
 
-        reopened = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        reopened = _open(nb.session.path)
         reopened.refresh_environment_runtime()
         assert reopened.compute_staleness()["a"].status == CellStatus.READY
         result = await CellExecutor(reopened).execute_cell("a", source)
@@ -1169,7 +1316,7 @@ class TestOtherSurfaces:
             "seen = dict(out)\n",
         )
         set_variant_mode(nb.session.path, "g", "sweep")
-        nb.session = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        nb.session = _open(nb.session.path)
         nb.session.refresh_environment_runtime()
         await nb.good("c")
         assert nb.ran() == ["1", "2"]
@@ -1197,7 +1344,7 @@ class TestOtherSurfaces:
             *reader,
         )
         set_variant_mode(nb.session.path, "g", "sweep")
-        nb.session = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        nb.session = _open(nb.session.path)
         nb.session.refresh_environment_runtime()
         await nb.good("c")
         assert "second" in (await nb.good("c", prints.format("second"))).stdout

@@ -190,6 +190,8 @@ class StrataConfig(BaseSettings):
     # Cache settings
     cache_dir: Path = Field(default_factory=lambda: Path.home() / ".strata" / "cache")
     max_cache_size_bytes: Annotated[int, Field(gt=0)] = 10 * 1024 * 1024 * 1024  # 10 GB
+    # Iceberg metadata files read from an object store, kept under cache_dir/iceberg-metadata.
+    iceberg_metadata_cache_size_bytes: Annotated[int, Field(gt=0)] = 1024 * 1024 * 1024  # 1 GiB
     cache_granularity: CacheGranularity = CacheGranularity.ROW_GROUP_PROJECTION
 
     # Fetcher settings
