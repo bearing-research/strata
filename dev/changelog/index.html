@@ -3893,6 +3893,17 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>cellgraph 0.4: every cell runs once more after the upgrade.</strong> Strata now needs
+  <code>cellgraph&gt;=0.4,&lt;0.5</code>. Its keys hash exactly what they cover, with each upstream
+  output tagged by kind, so every cell's key changes once and each cell runs again
+  on its next run; after that it is cached as before. The fixes that come with it:
+  a sweep reader's key no longer changes when a later cell defines one of the
+  members' names, and a sweep instance's key leaves out the other variants'
+  outputs. An R cell is keyed as a Python cell is, so changing only <code>@timeout</code>,
+  <code>@name</code> or another annotation that is not in its key no longer reruns it. On
+  Python 3.14, a cell with a top-level <code>await</code> no longer loses every name its
+  functions read. Running an inactive variant fails, saying to make it active:
+  what it reads depends on which member is active. (#1475)</li>
 <li><strong><code>notebook_state</code> and <code>environment_job_finished</code> have typed payloads.</strong> With them every
   frame the server sends has a model, and the generated TypeScript describes the cell view a
   client receives. The frames carry the same keys and values as before. (#1472)</li>
