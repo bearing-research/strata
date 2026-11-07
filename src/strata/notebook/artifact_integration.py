@@ -16,7 +16,7 @@ import hashlib
 import json
 import shutil
 import time
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -49,6 +49,9 @@ _ABANDONED_BUILD_SECONDS = 3600.0
 # same computation resumes it, so after an edit it is resumed only if the edit is undone;
 # past this its newest checkpoint is no longer kept for it.
 _ABANDONED_RUN_SECONDS = 7 * 24 * 3600.0
+# A removed cell's values go once idle this long: a checkout of a branch without the
+# cell must not cost its results on the next open.
+_REMOVED_CELL_SECONDS = 30 * 24 * 3600.0
 
 
 class _Default(Enum):
@@ -101,7 +104,12 @@ class NotebookArtifactManager:
         )
         self.release_store = ReleaseStore(self.artifact_store, self.build_store)
 
-    def prune(self, keep_superseded: int, min_idle_seconds: float) -> dict:
+    def prune(
+        self,
+        keep_superseded: int,
+        min_idle_seconds: float,
+        live_cells: Collection[str] | None = None,
+    ) -> dict:
         """Drop each cell output's values older than its newest *keep_superseded*.
 
         Keeps every output's current value, anything named, pinned or published, and
@@ -111,6 +119,10 @@ class NotebookArtifactManager:
         ``# @output_dir`` file and ``# @each`` instance no manifest version still names. Values
         a crash left half-written are failed first, so they no longer hold their inputs, and so
         is each interrupted run not resumed within a week, so its checkpoints go.
+
+        With *live_cells*, the notebook's cells, the values of a cell no longer among them go
+        once idle a month (:meth:`removed_cell_values`), current ones too, unless something
+        else holds them.
 
         Raises:
             NotebookQuiesced: the notebook is held still for a copy, which
@@ -128,6 +140,7 @@ class NotebookArtifactManager:
 
         self.artifact_store.sweep_zombie_builds(_ABANDONED_BUILD_SECONDS)
         abandoned = self.fail_abandoned_runs()
+        removed = self._idle_removed_cell_values(live_cells, min_idle_seconds)
         # A folder file is not a value with versions: a manifest may name any of them.
         # A checkpoint is nobody's current value: it goes unless a head holds it or a
         # resume would start from it.
@@ -136,7 +149,7 @@ class NotebookArtifactManager:
             min_idle_seconds=min_idle_seconds,
             exempt=is_file_id,
             spare=failed_since_ready(self),
-            collectable=self.release_store.collectable_checkpoints(),
+            collectable=[*self.release_store.collectable_checkpoints(), *removed],
         )
         # After the values: a folder file goes once no manifest version left names it.
         # An @each instance likewise, once no manifest left requires it.
@@ -149,6 +162,53 @@ class NotebookArtifactManager:
             result["deleted_bytes"] += swept["deleted_bytes"]
         result["abandoned_runs"] = abandoned
         return result
+
+    def _idle_removed_cell_values(
+        self, live_cells: Collection[str] | None, min_idle_seconds: float
+    ) -> list[tuple[str, int]]:
+        """The :meth:`removed_cell_values` unused for a month, which the sweep may take.
+
+        Only those: a collectable version stops holding its inputs, so passing one the
+        idle floor keeps would let what it was built from go while it stays. The store
+        reports idleness only through a dry run, which runs only when a cell was removed.
+        """
+        if live_cells is None:
+            return []
+        removed = self.removed_cell_values(live_cells)
+        if not removed:
+            return []
+        dry = self.artifact_store.garbage_collect(
+            collectable=removed,
+            min_idle_seconds=max(min_idle_seconds, _REMOVED_CELL_SECONDS),
+            dry_run=True,
+        )
+        return [(row["artifact_id"], row["version"]) for row in dry["collected"]]
+
+    def removed_cell_values(self, live_cells: Collection[str]) -> list[tuple[str, int]]:
+        """Every version of this notebook's cell outputs whose cell is not in *live_cells*.
+
+        Checkpoints and ``# @output_dir`` files are left to their own rules, which already
+        take them once nothing needs them.
+        """
+        from strata.notebook.output_dirs import is_file_id
+
+        prefix = f"nb_{self.notebook_id}_cell_"
+        live = set(live_cells)
+        # One row per id finds the cells; their versions are listed only for those.
+        cells = set()
+        for latest in self.artifact_store.list_latest_by_id_prefix(prefix):
+            output = self.cell_output_of(latest.id)
+            if output is not None and output[0] not in live:
+                cells.add(output[0])
+        removed = []
+        for cell_id in sorted(cells):
+            for version in self.artifact_store.list_versions_by_id_prefix(
+                f"{prefix}{cell_id}_var_"
+            ):
+                if "@ckpt=" in version.id or is_file_id(version.id):
+                    continue
+                removed.append((version.id, version.version))
+        return removed
 
     def fail_abandoned_runs(self) -> int:
         """Fail each run whose lease lapsed over a week ago; return how many.

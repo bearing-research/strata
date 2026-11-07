@@ -770,3 +770,163 @@ class TestVerifyANotebookStore:
             (stored["feature_names"].id, "digest_mismatch"),
             (stored["df"].id, "invalid_stream"),
         }
+
+
+class TestARemovedCellsValues:
+    """A removed cell's values stop being current, so the sweep can take them.
+
+    The store keeps each caller-named id's newest version whatever the notebook says,
+    so without this a removed cell's values survived every sweep.
+    """
+
+    DAY = 86400.0
+
+    @staticmethod
+    def _store(manager, cell_id, name="x", **kwargs):
+        version = manager.store_cell_output(
+            cell_id=cell_id,
+            variable_name=name,
+            blob_data=f"{cell_id}-{name}".encode(),
+            content_type="pickle/object",
+            provenance_hash=f"prov-{cell_id}-{name}-{kwargs.get('variant')}",
+            **kwargs,
+        )
+        return version.id, version.version
+
+    @staticmethod
+    def _idle(manager, key, days):
+        import sqlite3
+        import time
+
+        conn = sqlite3.connect(manager.artifact_store.db_path)
+        try:
+            conn.execute(
+                "UPDATE artifact_versions SET created_at = 0, last_used_at = ? "
+                "WHERE id = ? AND version = ?",
+                (time.time() - days * TestARemovedCellsValues.DAY, *key),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _exists(manager, key):
+        return manager.artifact_store.get_artifact(*key) is not None
+
+    def _sweep(self, manager, live):
+        return manager.prune(keep_superseded=1, min_idle_seconds=0, live_cells=live)
+
+    def test_an_idle_value_of_a_removed_cell_goes_and_a_live_cells_stays(self, manager):
+        removed = self._store(manager, "c1")
+        live = self._store(manager, "c2")
+        for key in (removed, live):
+            self._idle(manager, key, 31)
+
+        self._sweep(manager, ["c2"])
+
+        assert not self._exists(manager, removed)
+        assert self._exists(manager, live)
+
+    def test_every_output_of_the_removed_cell_goes(self, manager):
+        keys = [
+            self._store(manager, "c1", "x"),
+            self._store(manager, "c1", "y", variant="fast"),
+            self._store(manager, "c1", "state", iteration=2),
+        ]
+        for key in keys:
+            self._idle(manager, key, 31)
+
+        self._sweep(manager, [])
+
+        assert not any(self._exists(manager, key) for key in keys)
+
+    def test_a_cell_away_on_another_branch_keeps_its_values_a_while(self, manager):
+        """A checkout without the cell must not cost its results on the next open."""
+        removed = self._store(manager, "c1")
+        self._idle(manager, removed, 3)
+
+        self._sweep(manager, [])
+
+        assert self._exists(manager, removed)
+
+    @pytest.mark.parametrize("hold", ["pin", "name", "a live value's input"])
+    def test_every_other_hold_still_keeps_it(self, manager, hold):
+        removed = self._store(manager, "c1")
+        self._idle(manager, removed, 31)
+        store = manager.artifact_store
+        if hold == "pin":
+            store.retain(*removed, kind="pin", holder="review")
+        elif hold == "name":
+            store.set_name("kept", *removed)
+        else:
+            ref = f"{removed[0]}@v={removed[1]}"
+            manager.store_cell_output(
+                cell_id="c2",
+                variable_name="y",
+                blob_data=b"y",
+                content_type="pickle/object",
+                provenance_hash="prov-c2-y",
+                input_versions={f"strata://artifact/{ref}": ref},
+            )
+
+        self._sweep(manager, ["c2"])
+
+        assert self._exists(manager, removed)
+
+    def test_a_removed_value_kept_for_now_keeps_what_it_was_built_from(self, manager):
+        """Only the values that go stop being held, or a kept one would lose its input."""
+        source = self._store(manager, "c0")
+        ref = f"{source[0]}@v={source[1]}"
+        built = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="y",
+            blob_data=b"y",
+            content_type="pickle/object",
+            provenance_hash="prov-c1-y",
+            input_versions={f"strata://artifact/{ref}": ref},
+        )
+        self._idle(manager, source, 31)
+        self._idle(manager, (built.id, built.version), 3)
+
+        self._sweep(manager, [])
+
+        assert self._exists(manager, (built.id, built.version))
+        assert self._exists(manager, source)
+
+    def test_a_cell_whose_id_another_starts_with_is_told_apart(self, manager):
+        removed = self._store(manager, "c1")
+        live = self._store(manager, "c10")
+        for key in (removed, live):
+            self._idle(manager, key, 31)
+
+        self._sweep(manager, ["c10"])
+
+        assert not self._exists(manager, removed)
+        assert self._exists(manager, live)
+
+    def test_another_notebooks_values_in_the_store_are_left_alone(self, manager):
+        other = NotebookArtifactManager("nb2", artifact_dir=manager.artifact_dir)
+        theirs = self._store(other, "c1")
+        self._idle(manager, theirs, 31)
+
+        self._sweep(manager, [])
+
+        assert self._exists(manager, theirs)
+
+    def test_without_the_cells_a_sweep_takes_nothing_by_this_rule(self, manager):
+        removed = self._store(manager, "c1")
+        self._idle(manager, removed, 31)
+
+        manager.prune(keep_superseded=1, min_idle_seconds=0)
+
+        assert self._exists(manager, removed)
+
+    def test_checkpoints_and_folder_files_are_left_to_their_own_rules(self, manager):
+        """Each is taken once nothing needs it, which the removed cell's value cannot tell."""
+        store = manager.artifact_store
+        base = manager.cell_artifact_id("c1", "__files__")
+        for artifact_id in (f"{base}@ckpt=1@file=a", "nb_nb1_cell_c1_var___file__" + "a" * 64):
+            store.create_artifact(artifact_id, f"prov-{artifact_id}")
+        value = self._store(manager, "c1")
+
+        assert manager.removed_cell_values([]) == [value]
