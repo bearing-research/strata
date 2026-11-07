@@ -5,6 +5,7 @@ Annotations do not affect the cell's ``defines``/``references`` analysis.
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -56,7 +57,7 @@ class AnnotationsWirePayload(TypedDict):
 
 @dataclass
 class CachePolicy:
-    """Resolved ``# @cache`` policy for a SQL cell.
+    """Resolved ``-- @cache`` policy for a SQL cell.
 
     ``kind`` is one of: ``fingerprint`` (driver freshness token, the default),
     ``forever`` (static salt), ``session`` (session-unique salt), ``ttl``
@@ -70,7 +71,7 @@ class CachePolicy:
 
 @dataclass
 class SqlAnnotation:
-    """Resolved ``# @sql connection=<name> [write=true]`` directive.
+    """Resolved ``-- @sql connection=<name> [write=true]`` directive.
 
     ``write=true`` opens the connection without read-only enforcement so DDL/DML
     can run; the default is read-only.
@@ -109,7 +110,21 @@ class LoopAnnotation:
     start_from_iter: int | None = None
 
 
-_ANNOTATION_RE = re.compile(r"^#\s*@(\w+)\s*(.*?)\s*$")
+def comment_marker(language: CellLanguage | str | None = None) -> str:
+    """The comment marker of *language*'s directive block: ``--`` for SQL, else ``#``.
+
+    Read from the language's analyzer, so ``SqlAnalyzer.comment`` is its one definition.
+    """
+    import cellgraph as cg
+
+    import strata.notebook.vocabulary  # noqa: F401  (registers Strata's analyzers)
+
+    return cg.comment_marker(cg.get_language_analyzer(str(language or CellLanguage.PYTHON)))
+
+
+@functools.cache
+def _directive_re(marker: str) -> re.Pattern[str]:
+    return re.compile(rf"^{re.escape(marker)}\s*@(\w+)\s*(.*?)\s*$")
 
 
 # Every directive a cell's parsers read (``parse_annotations``, ``analyze_prompt_cell``, and
@@ -150,54 +165,56 @@ ANNOTATION_KEYS = frozenset(
 )
 
 
-def iter_annotation_block(source: str) -> Iterator[tuple[int, str]]:
+def iter_annotation_block(
+    source: str, language: CellLanguage | str | None = None
+) -> Iterator[tuple[int, str]]:
     """Yield ``(1-based lineno, raw_line)`` for the leading comment block.
 
-    The block is the first contiguous run of blank and ``#`` lines; blank lines are
-    not yielded. This is the single definition of the block shared by parsing,
-    validation and the prompt/SQL analysers, so they cannot drift apart.
+    The block is the first contiguous run of blank lines and lines starting with the
+    language's comment marker (``#``, or ``--`` for SQL); blank lines are not yielded.
+    This is the single definition of the block shared by parsing, validation and the
+    prompt/SQL analysers, so they cannot drift apart.
     """
+    marker = comment_marker(language)
     for lineno, line in enumerate(source.splitlines(), start=1):
         stripped = line.strip()
         if not stripped:
             continue
-        if not stripped.startswith("#"):
+        if not stripped.startswith(marker):
             break
         yield lineno, line
 
 
-def parse_annotation_directive(line: str) -> tuple[str, str] | None:
-    """Match one ``# @key value`` line and return ``(key.lower(), value)``, or ``None``."""
-    match = _ANNOTATION_RE.match(line.strip())
+def parse_annotation_directive(
+    line: str, language: CellLanguage | str | None = None
+) -> tuple[str, str] | None:
+    """Match one ``# @key value`` line (``-- @key value`` in SQL) as ``(key.lower(), value)``."""
+    match = _directive_re(comment_marker(language)).match(line.strip())
     if not match:
         return None
     return match.group(1).lower(), match.group(2).strip()
 
 
-def strip_leading_annotations(source: str) -> str:
+def strip_leading_annotations(source: str, language: CellLanguage | str | None = None) -> str:
     """Return source with the leading comment block removed."""
     lines = source.splitlines()
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        return "\n".join(lines[i:])
-    return ""
+    end = _leading_block_end(lines, comment_marker(language))
+    return "\n".join(lines[end:]) if end < len(lines) else ""
 
 
-def _leading_block_end(lines: list[str]) -> int:
+def _leading_block_end(lines: list[str], marker: str) -> int:
     """Index of the first cell-body line: the end of the leading comment block."""
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
+        if stripped and not stripped.startswith(marker):
             return i
     return len(lines)
 
 
-def _format_directive(key: str, value: str) -> str:
+def _format_directive(key: str, value: str, marker: str = "#") -> str:
     """Render a ``# @key value`` line (``# @key`` when *value* is empty)."""
     value = value.strip()
-    return f"# @{key} {value}" if value else f"# @{key}"
+    return f"{marker} @{key} {value}" if value else f"{marker} @{key}"
 
 
 def _line_sep(source: str) -> str:
@@ -212,7 +229,9 @@ _REPEATABLE_DIRECTIVES = frozenset(
 )
 
 
-def set_annotation_directive(source: str, key: str, value: str) -> str:
+def set_annotation_directive(
+    source: str, key: str, value: str, language: CellLanguage | str | None = None
+) -> str:
     """Return *source* with a single ``# @key value`` directive set.
 
     Replaces the first ``# @key`` in the leading block and drops duplicates; when
@@ -222,37 +241,43 @@ def set_annotation_directive(source: str, key: str, value: str) -> str:
     key = key.lower()
     if key in _REPEATABLE_DIRECTIVES:
         raise ValueError(f"@{key} is repeatable; edit the cell source directly")
-    new_line = _format_directive(key, value)
+    marker = comment_marker(language)
+    new_line = _format_directive(key, value, marker)
     sep = _line_sep(source)
     lines = source.splitlines()
-    block_end = _leading_block_end(lines)
+    block_end = _leading_block_end(lines, marker)
 
-    matches = [
-        i for i in range(block_end) if (d := parse_annotation_directive(lines[i])) and d[0] == key
-    ]
+    def parse(line: str) -> tuple[str, str] | None:
+        return parse_annotation_directive(line, language)
+
+    matches = [i for i in range(block_end) if (d := parse(lines[i])) and d[0] == key]
     if matches:
         lines[matches[0]] = new_line
         for i in reversed(matches[1:]):  # collapse accidental duplicates
             del lines[i]
     else:
-        directives = [i for i in range(block_end) if parse_annotation_directive(lines[i])]
+        directives = [i for i in range(block_end) if parse(lines[i])]
         lines.insert(directives[-1] + 1 if directives else 0, new_line)
 
     result = sep.join(lines)
     return result + sep if source.endswith("\n") else result
 
 
-def remove_annotation_directive(source: str, key: str) -> str:
+def remove_annotation_directive(
+    source: str, key: str, language: CellLanguage | str | None = None
+) -> str:
     """Return *source* with every ``# @key`` directive removed from the block."""
     key = key.lower()
     sep = _line_sep(source)
     lines = source.splitlines()
-    block_end = _leading_block_end(lines)
+    block_end = _leading_block_end(lines, comment_marker(language))
     kept = [
         line
         for i, line in enumerate(lines)
         if not (
-            i < block_end and (d := parse_annotation_directive(line)) is not None and d[0] == key
+            i < block_end
+            and (d := parse_annotation_directive(line, language)) is not None
+            and d[0] == key
         )
     ]
     result = sep.join(kept)
@@ -267,7 +292,7 @@ def pin_fetch_directives(source: str, digests: dict[str, str]) -> str:
     """
     sep = _line_sep(source)
     lines = source.splitlines()
-    for i in range(_leading_block_end(lines)):
+    for i in range(_leading_block_end(lines, "#")):
         directive = parse_annotation_directive(lines[i])
         if directive is None or directive[0] != "fetch":
             continue
@@ -376,16 +401,18 @@ class CellAnnotations:
 MARKDOWN_DIRECTIVE_KEYS = frozenset({"app"})
 
 
-def parse_annotations(source: str, language: CellLanguage | str | None = None) -> CellAnnotations:
+def parse_annotations(source: str, language: CellLanguage | str) -> CellAnnotations:
     """Extract annotations from the leading comment block of a cell.
 
-    A markdown cell has none: ``@app``, the one key it reads, is not a field here.
+    *language* is the cell's: it picks the comment marker (``--`` in SQL), so it has no
+    default a SQL cell could silently get the wrong one from. A markdown cell has none:
+    ``@app``, the one key it reads, is not a field here.
     """
     if language == CellLanguage.MARKDOWN:
         return CellAnnotations()
     from strata.notebook.vocabulary import annotations_from, parse_values
 
-    values, directives = parse_values(source, str(language or CellLanguage.PYTHON))
+    values, directives = parse_values(source, str(language))
     return annotations_from(values, directives) if directives else CellAnnotations()
 
 

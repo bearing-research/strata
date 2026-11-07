@@ -358,7 +358,7 @@ async def _sql_session(tmp_path: Path) -> tuple[NotebookSession, Path]:
     notebook_dir = _build_notebook_with_sql_cell(
         tmp_path,
         db_path=db_path,
-        cell_source="# @sql connection=db\n# @cache forever\nSELECT * FROM events\n",
+        cell_source="-- @sql connection=db\n-- @cache forever\nSELECT * FROM events\n",
     )
     session = _make_session(notebook_dir)
     await _run(session, "c1")

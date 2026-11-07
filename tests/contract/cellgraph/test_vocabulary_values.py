@@ -16,6 +16,7 @@ if os.name == "nt":
 
 import cellgraph as cg  # noqa: E402
 
+from strata.notebook.annotations import comment_marker  # noqa: E402
 from strata.notebook.vocabulary import (  # noqa: E402
     annotations_from,
     parse_values,
@@ -53,9 +54,9 @@ EDGES = {
     "max_tokens": ["# @max_tokens 0", "# @max_tokens 10\n# @max_tokens many"],
     "system": ["# @system be brief\n# @system"],
     "sql": [
-        "# @sql connection=a bogus=1",
-        "# @sql connection=a\n# @sql write=maybe",
-        "# @sql write=true connection=b",
+        "-- @sql connection=a bogus=1",
+        "-- @sql connection=a\n-- @sql write=maybe",
+        "-- @sql write=true connection=b",
     ],
     "cache": ["# @cache forever", "# @cache ttl=0", "# @cache bogus", "# @cache ttl=60 extra"],
     "loop": [
@@ -72,18 +73,26 @@ EDGES = {
 LANGUAGES = ("python", "r", "sql", "prompt", "widget", "markdown")
 
 
+def _in_marker(source: str, language: str) -> str:
+    """*source*'s ``#`` directive lines in *language*'s comment marker."""
+    marker = comment_marker(language)
+    return "\n".join(
+        marker + line[1:] if line.startswith("#") else line for line in source.split("\n")
+    )
+
+
 def _corpus():
     """``(language, source)`` for every edge, case and scenario cell."""
     for sources in EDGES.values():
         for source in sources:
             for language in LANGUAGES:
-                yield language, source + "\nx = 1"
+                yield language, _in_marker(source, language) + "\nx = 1"
     for cells in parity.CASES.values():
         yield from ((language, source) for _id, language, source, _toml in cells)
     for cells, _toml in parity.CORE_CASES.values():
         yield from ((language, source) for _id, language, source, _toml in cells)
     for source, _expected in parity.SQL_CASES.values():
-        yield "sql", "# @name t\n" + source
+        yield "sql", "-- @name t\n" + source
 
 
 def _check(language, source):

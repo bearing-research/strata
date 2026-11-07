@@ -353,7 +353,7 @@ export interface CellView {
 }
 
 export interface ConnectionSpec {
-  /** Connection name, referenced by SQL cells via ``# @sql connection=<name>``. */
+  /** Connection name, referenced by SQL cells via ``-- @sql connection=<name>``. */
   name: string
   /** Driver name: ``postgresql``, ``sqlite``, ``snowflake``, ... */
   driver: string

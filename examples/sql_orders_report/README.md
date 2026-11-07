@@ -2,14 +2,14 @@
 
 A small five-cell notebook that demonstrates Strata's SQL cell support
 against a local SQLite warehouse. The cells span three languages
-(Python → SQL → Python) and exercise both `# @cache fingerprint` (data-
-sensitive) and `# @cache forever` (reference-data) policies.
+(Python → SQL → Python) and exercise both `-- @cache fingerprint` (data-
+sensitive) and `-- @cache forever` (reference-data) policies.
 
 ## What it shows
 
 - **Connection config in `notebook.toml`.** The `[connections.warehouse]`
   block declares a SQLite driver with a relative path. SQL cells
-  reference it by name via `# @sql connection=warehouse`.
+  reference it by name via `-- @sql connection=warehouse`.
 - **Bind parameters from upstream Python.** `top_orders` resolves
   `:min_amount` from the `threshold` cell's variable. No string
   substitution happens, the value flows through ADBC's parameter
@@ -22,7 +22,7 @@ sensitive) and `# @cache forever` (reference-data) policies.
 - **Read-only by default, opt-in writes.** SQL cells open the
   connection with `mode=ro` plus `PRAGMA query_only = ON` so a
   stray `INSERT` can't mutate the DB. The seed cell explicitly
-  opts into writable execution via `# @sql connection=warehouse
+  opts into writable execution via `-- @sql connection=warehouse
   write=true`: that's the per-cell escape hatch for setup
   scripts. Other cells in the notebook stay read-only.
 - **Cross-language pipeline.** The two SQL results flow back into the
@@ -35,15 +35,15 @@ sensitive) and `# @cache forever` (reference-data) policies.
 |---|---|---|
 | `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Default `session` cache policy means a re-run inside the same session cache-hits. |
 | `threshold` | Python | Defines `min_amount = 50`. Edit and rerun to vary the threshold. |
-| `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `# @after seed`. |
-| `category_summary` | SQL | Revenue by category with `# @cache forever`. Declares `# @after seed`. |
+| `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `-- @after seed`. |
+| `category_summary` | SQL | Revenue by category with `-- @cache forever`. Declares `-- @after seed`. |
 | `report` | Python | Stitches the two SQL outputs into a markdown report. |
 
 ## DAG dependencies
 
 `top_orders` and `category_summary` depend on the SQLite file that
 `seed` produces, but no Python variable flows between them, the
-dependency is on a side effect. The `# @after seed` annotation adds
+dependency is on a side effect. The `-- @after seed` annotation adds
 an ordering-only edge to the DAG so cascade execution and staleness
 both see the link.
 

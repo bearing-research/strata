@@ -31,8 +31,8 @@ def legacy_parse_annotations(
     if language == CellLanguage.MARKDOWN:
         return result
 
-    for _lineno, line in iter_annotation_block(source):
-        parsed = parse_annotation_directive(line)
+    for _lineno, line in iter_annotation_block(source, language):
+        parsed = parse_annotation_directive(line, language)
         if parsed is None:
             continue
         key, value = parsed

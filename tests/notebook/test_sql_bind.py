@@ -256,7 +256,7 @@ def test_resolve_consumes_analyzer_placeholder_positions_for_duplicates():
     from strata.notebook.sql.analyzer import analyze_sql_cell
 
     analysis = analyze_sql_cell(
-        "# @sql connection=db\nSELECT :foo + :foo AS doubled, :bar AS single",
+        "-- @sql connection=db\nSELECT :foo + :foo AS doubled, :bar AS single",
     )
     # DAG view is deduped.
     assert analysis.references == ["foo", "bar"]

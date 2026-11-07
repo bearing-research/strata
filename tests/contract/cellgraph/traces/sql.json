@@ -581,7 +581,7 @@
    "step": {
     "cell": "s2",
     "op": "edit_cell",
-    "source": "# @sql connection=mem\n# @name doubled\nSELECT :n * 3 AS value\n"
+    "source": "-- @sql connection=mem\n-- @name doubled\nSELECT :n * 3 AS value\n"
    }
   },
   {

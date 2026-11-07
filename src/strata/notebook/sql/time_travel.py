@@ -1,4 +1,4 @@
-"""Durable snapshots for warehouses with time travel (``# @cache snapshot``).
+"""Durable snapshots for warehouses with time travel (``-- @cache snapshot``).
 
 Snowflake and BigQuery have no per-table snapshot id, so a snapshot is a
 timestamp: the first run reads the warehouse clock and pins the query there, and
@@ -34,7 +34,7 @@ class SnapshotPin:
 
 
 class TimeTravelAdapter(Protocol):
-    """What a driver adds to support ``# @cache snapshot`` through time travel."""
+    """What a driver adds to support ``-- @cache snapshot`` through time travel."""
 
     def snapshot_timestamp(self, conn: Any) -> str:
         """The warehouse's current timestamp, as ISO-8601 UTC."""

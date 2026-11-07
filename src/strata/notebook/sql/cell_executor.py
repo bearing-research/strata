@@ -1,6 +1,6 @@
 """SQL cell executor: the entry point ``CellExecutor`` calls for SQL cells.
 
-Resolves the connection and ``# @cache`` policy, binds upstream variables,
+Resolves the connection and ``-- @cache`` policy, binds upstream variables,
 checks the artifact store by SQL provenance, and on a miss runs the query on an
 enforced read-only ADBC connection and stores an ``arrow/ipc`` artifact. Every
 failure surfaces as the result dict's ``error``, as in the prompt executor.
@@ -22,6 +22,7 @@ from vestigo.provenance import derive_subkey
 
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
+from strata.notebook.models import CellLanguage
 from strata.notebook.serializer import (
     _META_SHAPE,
     _SHAPE_SCALAR,
@@ -87,13 +88,13 @@ async def execute_sql_cell(
     start_time = time.time()
 
     # ---- annotations + connection resolution ----------------------
-    annotations = parse_annotations(source)
+    annotations = parse_annotations(source, CellLanguage.SQL)
     # Above every @cache policy, forever included.
     if annotations.nocache:
         use_cache = False
     if annotations.sql is None or not annotations.sql.connection:
         return _error_result(
-            "SQL cell is missing `# @sql connection=<name>`.",
+            "SQL cell is missing `-- @sql connection=<name>`.",
             start_time,
         )
     spec = _find_connection(session, annotations.sql.connection)
@@ -408,7 +409,7 @@ async def _execute_write_cell(
     start_time: float,
     use_cache: bool,
 ) -> dict[str, Any]:
-    """Run a ``# @sql connection=... write=true`` cell.
+    """Run a ``-- @sql connection=... write=true`` cell.
 
     Unlike reads: the connection is writable, the body may be multi-statement
     (run one by one), and the cache key is source-only with default policy
@@ -430,7 +431,7 @@ async def _execute_write_cell(
         return _error_result(
             f"@cache {cache_annotation.kind} isn't valid on a write cell: "
             "writes mutate state, so probe-based invalidation has no anchor. "
-            "Use `# @cache session` (run once per session) or `# @cache forever` "
+            "Use `-- @cache session` (run once per session) or `-- @cache forever` "
             "(idempotent setup; cache by source).",
             start_time,
         )
@@ -808,7 +809,7 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
     to the source. ``forever``, ``session`` and ``ttl`` settle here (this
     session's salt, this moment's ttl bucket).
     """
-    annotations = parse_annotations(cell.source)
+    annotations = parse_annotations(cell.source, CellLanguage.SQL)
     if annotations.sql is None or not annotations.sql.connection:
         return None
     spec = _find_connection(session, annotations.sql.connection)

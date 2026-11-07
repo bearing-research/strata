@@ -57,8 +57,8 @@ cells = [
 …then in `cells/top_orders.sql`:
 
 ```sql
-# @sql connection=warehouse
-# @after seed
+-- @sql connection=warehouse
+-- @after seed
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
@@ -497,7 +497,7 @@ wrong for a cell whose *point* is a side effect or fresh value:
 
 `# @nocache` opts such a cell out. `# @nocache off` re-enables caching (useful to
 override a default you set elsewhere). It applies to every language (on a SQL
-cell it wins over any `# @cache` policy, `forever` included) and sits alongside
+cell it wins over any `-- @cache` policy, `forever` included) and sits alongside
 the read-write-`@mount` rule, which already forces re-execution for the same
 reason.
 
@@ -545,8 +545,8 @@ state that subsequent SQL cells query, and no Python variable flows
 between them.
 
 ```sql
-# @sql connection=warehouse
-# @after seed
+-- @sql connection=warehouse
+-- @after seed
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 

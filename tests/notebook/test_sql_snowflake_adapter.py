@@ -327,7 +327,7 @@ def test_probes_ask_for_the_names_snowflake_stores():
     """
     from strata.notebook.sql.analyzer import analyze_sql_cell
 
-    src = '# @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
+    src = '-- @sql connection=db\nSELECT * FROM mydb.public.events JOIN "MixedCase" USING (id)'
     tables = analyze_sql_cell(src, dialect=SnowflakeAdapter.sqlglot_dialect).tables
     a = SnowflakeAdapter()
 
@@ -533,7 +533,7 @@ def test_probe_freshness_no_schema_does_not_pretend_to_match_public():
 
 
 def test_open_uses_write_role_when_read_only_false():
-    """Read cells apply ``role`` and write cells apply ``write_role``, so ``# @sql write=true``
+    """Read cells apply ``role`` and write cells apply ``write_role``, so ``-- @sql write=true``
     means something.
     """
     cur = _FakeCursor([])

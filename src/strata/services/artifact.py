@@ -82,7 +82,7 @@ class BuildMetadata(NamedTuple):
     source: str = ""
     # ``{url: unix time}`` each fetched input was downloaded.
     fetched_at: dict[str, float] = {}
-    # Recorded by a ``# @cache snapshot`` SQL cell (``notebook.sql.time_travel``).
+    # Recorded by a ``-- @cache snapshot`` SQL cell (``notebook.sql.time_travel``).
     snapshot_at: str | None = None
     snapshot_valid_until: str | None = None
 

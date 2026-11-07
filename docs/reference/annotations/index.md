@@ -36,7 +36,8 @@
 
 </div>
 
-R cells take a subset of these: see [R annotations](r.md).
+R cells take a subset of these: see [R annotations](r.md). SQL cells take six of them,
+written as SQL comments (`-- @key value`): see [What a SQL cell reads](sql.md#what-a-sql-cell-reads).
 
 ## How annotations are read
 
@@ -52,7 +53,7 @@ y = labels
 classifier.fit(x, y)
 ```
 
-Annotations are parsed from the **first contiguous block** of `#`-prefixed lines. Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`. A key that is not an
+Annotations are parsed from the **first contiguous block** of `#`-prefixed lines (`--` in a [SQL cell](sql.md#writing-them)). Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`. A key that is not an
 annotation, such as a misspelled `# @wroker gpu`, does nothing; validation
 warns about it (`annotation_unknown`, in the cell header and `strata validate`)
 and suggests the annotation it is closest to.
@@ -77,8 +78,8 @@ When the same setting is configured at multiple levels, the most specific wins:
 | **Timeout** | `# @timeout N` | `cell.timeout` field | `notebook.timeout` field, else 300 seconds |
 | **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
-| **SQL connection** | `# @sql connection=X` | (annotation only) | none; required for SQL cells |
-| **Cache policy** | `# @cache <policy>` | (annotation only) | `fingerprint` (read), `session` (write) |
+| **SQL connection** | `-- @sql connection=X` | (annotation only) | none; required for SQL cells |
+| **Cache policy** | `-- @cache <policy>` | (annotation only) | `fingerprint` (read), `session` (write) |
 | **Cache opt-out** | `# @nocache` | (annotation only) | cache on (serve provenance hits) |
 
 Annotations always take priority. This lets you override per-cell behavior without editing `notebook.toml`.

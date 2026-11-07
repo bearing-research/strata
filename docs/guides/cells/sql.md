@@ -3,7 +3,7 @@
 A SQL cell sends a query to a connected database via ADBC (DuckDB through its own driver) and stores the result as an Arrow Table artifact. Like Python and prompt cells, SQL cells participate in the DAG, cache by provenance hash, and surface their output to downstream cells.
 
 ```sql
-# @sql connection=warehouse
+-- @sql connection=warehouse
 SELECT customer, SUM(amount) AS total
 FROM orders
 WHERE amount > :min_amount
@@ -47,7 +47,7 @@ Notes:
 
 ## DuckDB over the lake
 
-A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a REST or AWS Glue catalog the server configures (`[tool.strata.catalogs.<name>]`) or, on a personal server, one the notebook defines in [`[catalogs.<name>]`](../../reference/notebook-toml.md#notebook-catalogs). `mounts` names mounts declared for the cell, in `[[mounts]]` or with `# @mount`:
+A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a REST or AWS Glue catalog the server configures (`[tool.strata.catalogs.<name>]`) or, on a personal server, one the notebook defines in [`[catalogs.<name>]`](../../reference/notebook-toml.md#notebook-catalogs). `mounts` names mounts declared for the cell, in `[[mounts]]` or with `-- @mount`:
 
 ```toml
 [connections.lake]
@@ -58,15 +58,15 @@ mounts = ["raw"]
 ```
 
 ```sql
-# @sql connection=lake
+-- @sql connection=lake
 SELECT t.zone, count(*) AS trips
 FROM lake.taxi.trips t JOIN raw USING (zone)
 GROUP BY t.zone
 ```
 
-Each mount is a view by its name over its Parquet, CSV or JSON files, read with the mount's storage options. `file`, `s3`, `gs` and `az` mounts work; GCS and Azure ones are read through the same fsspec filesystem (gcsfs, adlfs) a Python cell's mount uses, so a connection's mounts on one of those schemes must share their storage options. Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. With [`# @cache snapshot`](../../reference/annotations/sql.md#cache) the cell instead keeps reading the snapshots its first run read until it is rerun. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. A REST catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends. A catalog that vends nothing (its store has no STS) sets `header.X-Iceberg-Access-Delegation` to something other than `vended-credentials`, usually empty: DuckDB then asks it for no credentials, and its `s3.*` keys read the tables, under its `s3://` warehouse or, when the warehouse is a name, under the locations of the tables the query names. A table named only at run time is outside those, so its files are read without the keys. So are data files outside a table's location (added with `add_files` from another prefix, or a `write.data.path` elsewhere): in personal mode they are read without the keys and fail with the store's 403, and service mode refuses them already. A Glue catalog is attached through Glue's Iceberg REST endpoint in its `glue.region` for the account `glue.id`, both required; its `glue.*` keys (or `client.*`, or `s3.*`) sign the catalog's requests and read its tables' files, and without keys the AWS credential chain (environment, profile, instance role) does.
+Each mount is a view by its name over its Parquet, CSV or JSON files, read with the mount's storage options. `file`, `s3`, `gs` and `az` mounts work; GCS and Azure ones are read through the same fsspec filesystem (gcsfs, adlfs) a Python cell's mount uses, so a connection's mounts on one of those schemes must share their storage options. Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. With [`-- @cache snapshot`](../../reference/annotations/sql.md#cache) the cell instead keeps reading the snapshots its first run read until it is rerun. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. A REST catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends. A catalog that vends nothing (its store has no STS) sets `header.X-Iceberg-Access-Delegation` to something other than `vended-credentials`, usually empty: DuckDB then asks it for no credentials, and its `s3.*` keys read the tables, under its `s3://` warehouse or, when the warehouse is a name, under the locations of the tables the query names. A table named only at run time is outside those, so its files are read without the keys. So are data files outside a table's location (added with `add_files` from another prefix, or a `write.data.path` elsewhere): in personal mode they are read without the keys and fail with the store's 403, and service mode refuses them already. A Glue catalog is attached through Glue's Iceberg REST endpoint in its `glue.region` for the account `glue.id`, both required; its `glue.*` keys (or `client.*`, or `s3.*`) sign the catalog's requests and read its tables' files, and without keys the AWS credential chain (environment, profile, instance role) does.
 
-A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `# @sql connection=<name> write=true` for a cell that changes a database.
+A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `-- @sql connection=<name> write=true` for a cell that changes a database.
 
 ## Schema discovery
 
@@ -82,7 +82,7 @@ min_amount = 100
 ```
 
 ```sql
-# @sql connection=warehouse
+-- @sql connection=warehouse
 SELECT * FROM orders WHERE amount > :min_amount
 ```
 
@@ -105,9 +105,9 @@ A SQL cell's **provenance hash** folds together:
 - The hashes of every upstream artifact referenced via `:name`.
 - The driver's **freshness probe** result for the touched tables.
 - The driver's **schema fingerprint** for the touched tables.
-- A salt derived from the `# @cache` policy below.
+- A salt derived from the `-- @cache` policy below.
 
-`# @cache` controls how DB-side state factors in. Default is `fingerprint`.
+`-- @cache` controls how DB-side state factors in. Default is `fingerprint`.
 
 | Policy          | Behavior                                                                                                                  | When to use                        |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
@@ -131,8 +131,8 @@ what it was ready about, so it opens idle rather than green with the previous
 database's rows.
 
 ```sql
-# @sql connection=warehouse
-# @cache forever
+-- @sql connection=warehouse
+-- @cache forever
 SELECT * FROM dim_country
 ```
 
@@ -144,13 +144,13 @@ SELECT * FROM dim_country
 | ---------- | ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | PostgreSQL | `pg_stat_user_tables` + `pg_class.relfilenode`  | per-table   | Up to ~500 ms stats-collector lag.                                                                                                                                                                                                                                                                                                                           |
 | SQLite     | The database file's size, mtime and header change counter, its `-wal` sidecar, plus `PRAGMA data_version` / `schema_version` | **DB-wide** | Any commit to the file, from any process, changes the token, so a write to one table invalidates cells reading another. A `:memory:` database has only the pragmas.                                                                                                                                                                              |
-| DuckDB     | `PRAGMA database_size`                          | **DB-wide** | Advances when DuckDB writes blocks; two row states between block-aligned flushes can share a token. Pin `# @cache session` on a database that is being written to while you work.                                                                                                                                                                         |
+| DuckDB     | `PRAGMA database_size`                          | **DB-wide** | Advances when DuckDB writes blocks; two row states between block-aligned flushes can share a token. Pin `-- @cache session` on a database that is being written to while you work.                                                                                                                                                                         |
 | Snowflake  | `INFORMATION_SCHEMA.TABLES.LAST_ALTERED`        | per-table   | Per-database scoping (one query per touched database). Bills cloud-services credits but each query is small. `LAST_ALTERED` updates even on 0-row DML, safe direction (over-invalidates, never under).                                                                                                                                                      |
-| BigQuery   | `__TABLES__.last_modified_time`                 | per-table   | Per-dataset scoping. `__TABLES__` is the legacy-but-stable view; `INFORMATION_SCHEMA.TABLES` doesn't expose `last_modified_time`. **Streaming-buffer caveat**: tables receiving streaming inserts have `last_modified_time` lag by minutes-to-90-min until the buffer flushes; pin `# @cache session` on those queries. Permissions: `bigquery.tables.get`. |
+| BigQuery   | `__TABLES__.last_modified_time`                 | per-table   | Per-dataset scoping. `__TABLES__` is the legacy-but-stable view; `INFORMATION_SCHEMA.TABLES` doesn't expose `last_modified_time`. **Streaming-buffer caveat**: tables receiving streaming inserts have `last_modified_time` lag by minutes-to-90-min until the buffer flushes; pin `-- @cache session` on those queries. Permissions: `bigquery.tables.get`. |
 
 The schema fingerprint catches metadata-only changes (`ADD COLUMN`, type changes, nullability flips) that the freshness token would miss.
 
-A probe can only ask about a table the query names. A table named at run time (Snowflake's `IDENTIFIER($tbl)` or `TABLE($tbl)`), a table function (`read_parquet(...)`, `query_table(...)`, a Postgres set-returning function) or a file read in place of a table (DuckDB's `FROM 'events.parquet'`) is not fingerprinted, so under `fingerprint` such a cell re-runs every time, and the header says so. Its result's content is folded into its provenance, so a downstream cell re-runs only when the rows actually changed. Declare `# @cache session` or `# @cache ttl=...` to reuse results instead, or read files through a mount on a [DuckDB lake connection](#duckdb-over-the-lake), whose fingerprint the cache does track.
+A probe can only ask about a table the query names. A table named at run time (Snowflake's `IDENTIFIER($tbl)` or `TABLE($tbl)`), a table function (`read_parquet(...)`, `query_table(...)`, a Postgres set-returning function) or a file read in place of a table (DuckDB's `FROM 'events.parquet'`) is not fingerprinted, so under `fingerprint` such a cell re-runs every time, and the header says so. Its result's content is folded into its provenance, so a downstream cell re-runs only when the rows actually changed. Declare `-- @cache session` or `-- @cache ttl=...` to reuse results instead, or read files through a mount on a [DuckDB lake connection](#duckdb-over-the-lake), whose fingerprint the cache does track.
 
 ## Read-only by default
 
@@ -171,7 +171,7 @@ In service mode a DuckDB or SQLite cell, which runs inside the server process, i
 Setup, seeding, and migration scripts opt into writable execution per cell:
 
 ```sql
-# @sql connection=warehouse write=true
+-- @sql connection=warehouse write=true
 DROP TABLE IF EXISTS orders;
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
@@ -184,19 +184,19 @@ INSERT INTO orders VALUES (1, 'alice', 25.50), (2, 'bob', 199.99);
 - The body is split into individual statements on sqlglot's tokenizer (ADBC's cursor runs only the first statement otherwise). Each statement runs as written in the cell, and a trailing comment is not a statement.
 - `:name` bind placeholders work the same as in read cells.
 - The default cache policy is `session` (one execution per session; same body in the same session is a cache hit).
-- `# @cache fingerprint` and `# @cache snapshot` error early on write cells: probe-based invalidation has no anchor when the cell mutates state.
+- `-- @cache fingerprint` and `-- @cache snapshot` error early on write cells: probe-based invalidation has no anchor when the cell mutates state.
 - The cell still produces an Arrow artifact: a per-statement status table with `stmt`, `kind` (`CREATE TABLE`, `INSERT`, …), and `rows_affected` (nullable; `null` for DDL).
 - Read cells using the same connection stay on the read path; the override is per-cell.
 
 A query runs off the server's event loop, so a cancel lands at once: the run is abandoned and publishes nothing. The query itself may keep running in the database, because ADBC drivers differ on whether they can cancel one.
 
-## `# @name` and downstream consumption
+## `-- @name` and downstream consumption
 
-A SQL cell's output variable name defaults to `result`; override with `# @name <identifier>`. Downstream cells receive the result as a `pyarrow.Table` (Arrow IPC artifacts deserialize through the standard notebook serializer); call `.to_pandas()` for a pandas DataFrame:
+A SQL cell's output variable name defaults to `result`; override with `-- @name <identifier>`. Downstream cells receive the result as a `pyarrow.Table` (Arrow IPC artifacts deserialize through the standard notebook serializer); call `.to_pandas()` for a pandas DataFrame:
 
 ```sql
-# @sql connection=warehouse
-# @name top_customers
+-- @sql connection=warehouse
+-- @name top_customers
 SELECT customer, SUM(amount) AS total
 FROM orders GROUP BY customer ORDER BY total DESC LIMIT 5
 ```
@@ -207,23 +207,23 @@ print(top_customers.shape)  # (5, 2)
 print(top_customers.to_pandas()["total"].sum())
 ```
 
-## `# @after` for setup-then-query pipelines
+## `-- @after` for setup-then-query pipelines
 
 A read SQL cell that depends on a write SQL cell's side effects (the underlying database state) can declare an explicit ordering edge:
 
 ```sql
-# @sql connection=warehouse write=true
+-- @sql connection=warehouse write=true
 CREATE TABLE products (sku TEXT PRIMARY KEY, category TEXT);
 INSERT INTO products VALUES ('A', 'widgets'), ('B', 'gadgets');
 ```
 
 ```sql
-# @sql connection=warehouse
-# @after seed
+-- @sql connection=warehouse
+-- @after seed
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
-`# @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.
+`-- @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.
 
 ## Worked example
 
@@ -233,10 +233,14 @@ The [`sql_orders_report`](../../examples/sql_orders_report.md) example notebook 
 
 | Annotation                              | What it does                                          |
 | --------------------------------------- | ----------------------------------------------------- |
-| `# @sql connection=<name> [write=true]` | Mark the cell as SQL; reference a declared connection |
-| `# @cache <policy>`                     | Override the default `fingerprint` cache policy       |
-| `# @nocache`                            | Always re-execute; wins over any `# @cache` policy    |
-| `# @name <identifier>`                  | Name the output variable (default: `result`)          |
-| `# @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
+| `-- @sql connection=<name> [write=true]` | Mark the cell as SQL; reference a declared connection |
+| `-- @cache <policy>`                     | Override the default `fingerprint` cache policy       |
+| `-- @nocache`                            | Always re-execute; wins over any `-- @cache` policy    |
+| `-- @name <identifier>`                  | Name the output variable (default: `result`)          |
+| `-- @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
+| `-- @mount <name> <uri> ro`              | A mount a DuckDB connection's `mounts` can name       |
+
+These are the only annotations a SQL cell acts on; validation warns about any other.
+They are SQL comments, so a `#` line is not one (see [Writing them](../../reference/annotations/sql.md#writing-them)).
 
 See [Cell Annotations][a] for the full reference.

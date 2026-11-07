@@ -729,30 +729,30 @@ class TestSqlTablesTheCacheCannotTrack:
         return {d.code: d.message for d in validate_cell_annotations(cell, nb)}
 
     def test_a_table_named_at_run_time_is_flagged(self):
-        messages = self._messages("# @sql connection=db\nSELECT * FROM IDENTIFIER($tbl)")
+        messages = self._messages("-- @sql connection=db\nSELECT * FROM IDENTIFIER($tbl)")
         assert "IDENTIFIER($tbl)" in messages["sql_dynamic_table"]
         assert "re-runs every time" in messages["sql_dynamic_table"]
 
     def test_a_declared_policy_is_not_flagged(self):
         messages = self._messages(
-            "# @sql connection=db\n# @cache session\nSELECT * FROM IDENTIFIER($tbl)"
+            "-- @sql connection=db\n-- @cache session\nSELECT * FROM IDENTIFIER($tbl)"
         )
         assert "sql_dynamic_table" not in messages
 
     def test_a_literal_identifier_is_not_flagged(self):
-        messages = self._messages("# @sql connection=db\nSELECT * FROM IDENTIFIER('events')")
+        messages = self._messages("-- @sql connection=db\nSELECT * FROM IDENTIFIER('events')")
         assert "sql_dynamic_table" not in messages
 
     def test_a_parse_error_says_the_cell_does_not_run(self):
         """The executor refuses SQL it cannot parse before any cache logic, so
         the cell does not run at all; it neither re-runs nor reuses a cache."""
-        messages = self._messages("# @sql connection=db\nSELECT * FROM (")
+        messages = self._messages("-- @sql connection=db\nSELECT * FROM (")
         assert "will not run until its SQL parses" in messages["sql_parse_error"]
         assert "re-runs" not in messages["sql_parse_error"]
         assert "@cache" not in messages["sql_parse_error"]
 
     def test_a_table_function_is_flagged(self):
-        messages = self._messages("# @sql connection=db\nSELECT * FROM TABLE($tbl)")
+        messages = self._messages("-- @sql connection=db\nSELECT * FROM TABLE($tbl)")
         assert "TABLE($tbl)" in messages["sql_dynamic_table"]
 
 

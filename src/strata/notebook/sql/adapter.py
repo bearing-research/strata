@@ -17,7 +17,7 @@ from typing import Any, Protocol
 class AdapterCapabilities:
     """Capability flags for a ``DriverAdapter``.
 
-    The cache policy resolver reads these to decide whether ``# @cache snapshot``
+    The cache policy resolver reads these to decide whether ``-- @cache snapshot``
     can be honored, whether ``fingerprint`` yields a real per-table token or falls
     back to session scope, and whether a separate probe connection is needed.
     """
@@ -62,7 +62,7 @@ class FreshnessToken:
     only compares the bytes. ``is_session_only`` means no real fingerprint was
     available (e.g. DuckDB native) and a session-unique salt was used, so reuse
     is session-scoped. ``is_snapshot`` means a durable, queryable snapshot ID
-    (e.g. Iceberg ``snapshot_id``), which ``# @cache snapshot`` requires.
+    (e.g. Iceberg ``snapshot_id``), which ``-- @cache snapshot`` requires.
     """
 
     value: bytes

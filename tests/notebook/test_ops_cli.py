@@ -293,7 +293,7 @@ def test_cli_mutation_logs_each_annotation_diagnostic_once(tmp_path, capsys):
     nb = _build_notebook(
         tmp_path,
         cells=[
-            ("q", "# @sql connection=local\nSELECT 1 FROM read_parquet('/tmp/x.parquet')", None)
+            ("q", "-- @sql connection=local\nSELECT 1 FROM read_parquet('/tmp/x.parquet')", None)
         ],
         language="sql",
     )

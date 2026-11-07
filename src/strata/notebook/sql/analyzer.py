@@ -16,6 +16,7 @@ from typing import Any
 from sqlglot.errors import SqlglotError as _SqlglotError
 
 from strata.notebook.annotations import CachePolicy, parse_annotations, strip_leading_annotations
+from strata.notebook.models import CellLanguage
 from strata.notebook.sql.adapter import QualifiedTable
 
 # ``(?<![:\w])`` rules out ``::cast`` and tokens like ``schema:foo``.
@@ -55,8 +56,8 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
     and ``-- :bar`` do not match. Tables come from a scope-aware walk that excludes
     CTE and derived-table references.
     """
-    annotations = parse_annotations(source)
-    sql_body = strip_leading_annotations(source).strip()
+    annotations = parse_annotations(source, CellLanguage.SQL)
+    sql_body = strip_leading_annotations(source, CellLanguage.SQL).strip()
 
     output_name = annotations.name if annotations.name else "result"
     if not output_name.isidentifier():
@@ -164,13 +165,13 @@ def read_only_violation(sql: str, dialect: str | None) -> str | None:
             if head == "EXPLAIN":
                 return (
                     "a SQL cell reads, and EXPLAIN ANALYZE runs the statement it describes. "
-                    "Use `# @sql connection=<name> write=true` for a cell that changes a "
+                    "Use `-- @sql connection=<name> write=true` for a cell that changes a "
                     "database, or EXPLAIN without ANALYZE."
                 )
         kind = str(statement.this or "").upper() if name == "Command" else name.upper()
         return (
             f"a SQL cell reads, and {kind} is not a read. Use "
-            "`# @sql connection=<name> write=true` for a cell that changes a database."
+            "`-- @sql connection=<name> write=true` for a cell that changes a database."
         )
     return None
 

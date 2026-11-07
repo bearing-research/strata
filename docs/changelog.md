@@ -45,6 +45,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   ran as Python and failed with a syntax error. A notebook with a cell that has no
   `language` now does not open, and the error names the cell. Strata has always
   written the key, so only hand-written entries are affected. (#1474)
+- **Breaking: a SQL cell's annotations are SQL comments, `-- @key value`.** `#` is no
+  comment in any SQL driver, so a `# @sql` line left the file invalid SQL, a `-- note`
+  above it turned every annotation off, and a `#` comment in the query failed at the
+  database. A SQL cell now reads its leading `--` block, and a `# @key` line in one is
+  an error that names the line. Changing `#` to `--` in an existing cell does not run
+  it again: its key covers the query and what the annotations say, not how they
+  are written. SQL cells act on `@sql`, `@cache`,
+  `@nocache`, `@name`, `@after` and `@mount`, listed in the SQL annotation reference;
+  any other annotation on one is a warning. (#1474)
   their files and their cached results. The examples' cells are renamed.
 - **cellgraph 0.4: every cell runs once more after the upgrade.** Strata now needs
   `cellgraph>=0.4,<0.5`. Its keys hash exactly what they cover, with each upstream

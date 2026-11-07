@@ -244,7 +244,7 @@ class TestASqlWriteCell:
         )
         monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
         db = tmp_path / "out.db"
-        source = "# @sql connection=db write=true\nCREATE TABLE t (n INTEGER);\n"
+        source = "-- @sql connection=db write=true\nCREATE TABLE t (n INTEGER);\n"
         nb = create_notebook(tmp_path, "nb")
         add_cell_to_notebook(nb, "c1", language="sql")
         write_cell(nb, "c1", source)

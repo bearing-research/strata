@@ -1,4 +1,4 @@
-"""Provenance hash and ``# @cache`` policy resolution for SQL cells.
+"""Provenance hash and ``-- @cache`` policy resolution for SQL cells.
 
 The hash captures the query, its binds, and, as strongly as the backend allows,
 the database state the query saw::
@@ -49,10 +49,10 @@ from strata.notebook.sql.adapter import (
 
 
 class CachePolicyError(ValueError):
-    """``# @cache`` annotation can't be honored by the resolved adapter.
+    """``-- @cache`` annotation can't be honored by the resolved adapter.
 
     Raised by ``resolve_cache_policy`` before any probe runs, typically for
-    ``# @cache snapshot`` on a driver without ``capabilities.supports_snapshot``.
+    ``-- @cache snapshot`` on a driver without ``capabilities.supports_snapshot``.
     """
 
 
@@ -69,7 +69,7 @@ class ResolvedCachePolicy:
         schema_required: Whether ``adapter.probe_schema`` runs. Same as
             ``freshness_required``: without it, ADD COLUMN or a type change
             would not invalidate.
-        snapshot_required: Only for ``# @cache snapshot``: a freshness token with
+        snapshot_required: Only for ``-- @cache snapshot``: a freshness token with
             ``is_snapshot`` False must be rejected.
     """
 
@@ -94,7 +94,7 @@ def resolve_cache_policy(
     session_id: str,
     now: float | None = None,
 ) -> ResolvedCachePolicy:
-    """Apply ``# @cache`` semantics to produce a ``ResolvedCachePolicy``.
+    """Apply ``-- @cache`` semantics to produce a ``ResolvedCachePolicy``.
 
     ``now`` defaults to ``time.time()``; tests pin it. Probe-time fallbacks
     happen in the executor; this view is static.
