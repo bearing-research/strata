@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field, JsonValue, field_validator
 
+from strata.notebook.models import CellLanguage
+
 if TYPE_CHECKING:
     import httpx
 
@@ -587,7 +589,7 @@ class LocalNotebookOps:
 
     # --- authoring + env ---
 
-    _LANGUAGES = ("python", "markdown", "sql", "r", "prompt", "widget")
+    _LANGUAGES = tuple(language.value for language in CellLanguage)
 
     def add_cell(
         self, source: str, *, after: str | None = None, language: str = "python"

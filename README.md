@@ -76,8 +76,8 @@ That is a real run of the tutorial below, whose load step waits two seconds on p
 agent wrote it. Watch live in the browser or with `strata watch` in a terminal,
 or read the directory afterwards.
 
-**It reads like code in git.** A notebook is plain `.py` files plus a TOML
-manifest. Outputs and caches stay in a gitignored `.strata/` folder.
+**It reads like code in git.** A notebook is one plain-text file per cell
+(`.py`, `.sql`, `.md`, ...) plus a TOML manifest. Outputs and caches stay in a gitignored `.strata/` folder.
 
 ```
 my-notebook/

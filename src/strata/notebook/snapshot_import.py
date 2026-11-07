@@ -26,6 +26,7 @@ from vestigo.store import ArtifactStore, ArtifactVersion
 
 from strata.artifact.retention import requirements
 from strata.artifact.transfer import RECORD_FIELDS, remap_input_versions
+from strata.notebook.parser import parse_cell_entry
 from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION
 
 _ARTIFACT_URI_PREFIX = "strata://artifact/"
@@ -221,6 +222,11 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
     if not isinstance(cells, list) or not all(isinstance(cell, dict) for cell in cells):
         raise NotASnapshotError("not a snapshot: notebook.toml's cells are not a list of tables")
     for cell in cells:
+        # What parse_notebook would refuse on every open, refused before anything is written.
+        try:
+            parse_cell_entry(cell)
+        except ValueError as exc:
+            raise NotASnapshotError(f"the bundle's {exc}") from exc
         file = cell.get("file", "")
         # The parser joins this onto cells/, so it must stay a relative path inside it.
         if any(part in ("", ".", "..") for part in str(file).split("/")):

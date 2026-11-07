@@ -58,7 +58,7 @@ against the new producer. The other tools require duplicating cells (and
 the downstream cells that read them) per variant.
 
 **Notebook commits show the work, not the runtime.** Strata stores cells
-as one `.py` file per cell, `notebook.toml` as the manifest, and all
+as one file per cell in its language (`.py`, `.sql`, `.md`, ...), `notebook.toml` as the manifest, and all
 runtime state (display outputs, console snapshots, the artifact store) in
 a gitignored `.strata/` directory. `notebook.toml`'s `updated_at` only
 bumps on structural edits (adding or removing cells, changing workers),

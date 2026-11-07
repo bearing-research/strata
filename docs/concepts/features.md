@@ -16,7 +16,7 @@ producing artifacts that flow through an auto-built DAG.
 - **results are keyed by what made them:** a cell's source, its inputs and its environment decide its identity, so identical work is a cache hit and no result ever needs invalidating
 - **only what changed re-runs:** edit one cell and Strata re-runs the cells below it and nothing else
 - **no wiring:** Strata reads each cell to find what it uses and what it defines, so there are no decorators and no edges to maintain by hand
-- **readable in git:** a notebook is plain `.py` files plus a TOML manifest, so a diff shows the code that changed
+- **readable in git:** a notebook is one plain-text file per cell (`.py`, `.sql`, `.md`, ...) plus a TOML manifest, so a diff shows the code that changed
 - **the graph is visible:** the dependency graph renders beside the cells, and clicking a node highlights everything upstream and downstream of it and jumps to its source
 
 ## Cell types

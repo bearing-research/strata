@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tomllib
 import zipfile
 
 import cellgraph as cg
 import pytest
+import tomli_w
 
 from strata.notebook.parser import parse_notebook
 from strata.notebook.runtime_state import load_runtime_state
@@ -189,6 +191,23 @@ class TestRefusals:
 
         with pytest.raises(NotASnapshotError, match="total.py"):
             import_snapshot(broken, tmp_path / "dst")
+
+    def test_a_bundle_cell_without_a_language_is_refused(self, ran, tmp_path):
+        """Imported, it would refuse every open; it is refused before anything is written."""
+        bundle = _export(ran, tmp_path / "snap.zip")
+        broken = tmp_path / "broken.zip"
+        with zipfile.ZipFile(bundle) as src, zipfile.ZipFile(broken, "w") as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "notebook.toml":
+                    toml = tomllib.loads(data.decode())
+                    del toml["cells"][0]["language"]
+                    data = tomli_w.dumps(toml).encode()
+                dst.writestr(name, data)
+
+        with pytest.raises(NotASnapshotError, match="has no `language`"):
+            import_snapshot(broken, tmp_path / "dst")
+        assert not (tmp_path / "dst").exists()
 
     def test_nothing_is_written_when_it_refuses(self, tmp_path):
         bogus = tmp_path / "bogus.zip"

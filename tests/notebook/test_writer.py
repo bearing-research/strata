@@ -185,9 +185,9 @@ def test_add_cell():
 def test_every_language_has_an_extension():
     """A new language must name its extension instead of being written as ``.py``."""
     from strata.notebook.models import CellLanguage
-    from strata.notebook.writer import _EXTENSION_BY_LANGUAGE
+    from strata.notebook.writer import EXTENSION_BY_LANGUAGE
 
-    assert set(_EXTENSION_BY_LANGUAGE) == set(CellLanguage)
+    assert set(EXTENSION_BY_LANGUAGE) == set(CellLanguage)
 
 
 def test_add_cell_picks_extension_by_language():
