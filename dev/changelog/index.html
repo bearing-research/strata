@@ -3893,6 +3893,18 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A prompt cell no longer sends text it could not fill in.</strong> Before, anything
+  the template could not evaluate (<code>{{ x | upper }}</code>, <code>{% if x %}</code>, <code>{{ x['k'] }}</code>,
+  a name no cell defines) went to the model as written, and the paid answer was
+  stored as a success. These are now errors that keep the cell from running
+  (<code>prompt_template_invalid</code>, <code>prompt_input_undefined</code>), or that stop it before
+  the call when only a run can tell (<code>{{ x.y }}</code>). <code>\{{</code> and <code>\{%</code> write the
+  characters themselves. (#1461)</li>
+<li><strong>A prompt cell reads a Python object as its <code>str()</code>.</strong> It used to see a
+  placeholder. The value is loaded in the notebook's environment, never in the
+  server, and an object with no text of its own (a default repr holding an
+  address) or no text form at all (an R object, a folder) fails the cell before
+  the call. (#1461)</li>
 <li><strong>cellgraph 0.4: every cell runs once more after the upgrade.</strong> Strata now needs
   <code>cellgraph&gt;=0.4,&lt;0.5</code>. Its keys hash exactly what they cover, with each upstream
   output tagged by kind, so every cell's key changes once and each cell runs again

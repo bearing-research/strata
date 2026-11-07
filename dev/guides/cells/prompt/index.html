@@ -3218,7 +3218,11 @@
 </tr>
 <tr>
 <td>Python object (stored as a pickle: a class instance, a fitted model)</td>
-<td>A placeholder. The server never unpickles a cell's output, so the prompt says the value is a Python object and the cell's console names it. Convert it in the producing cell (<code>str(model)</code>, a dict).</td>
+<td><code>str(value)</code>, read in the notebook's environment because the server never unpickles a cell's output. The object needs text of its own: a default repr like <code>&lt;Model object at 0x...&gt;</code> fails the cell, so give the class a <code>__str__</code> or convert the value in the producing cell.</td>
+</tr>
+<tr>
+<td>Anything else that has no text (an R object, a folder)</td>
+<td>The cell fails. Convert it in a cell upstream.</td>
 </tr>
 <tr>
 <td>anything else</td>
@@ -3231,9 +3235,11 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>{{ df.describe() }}     # OK, pandas describe() is allow-listed
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>{{ df.head() }}         # OK
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>{{ df.shape }}          # OK, attribute access (non-callable)
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>{{ df.to_csv() }}       # blocked (unknown method); left as-is in the template
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>{{ df.to_csv() }}       # error: not an allowed method
 </code></pre></div>
 <p>Only a small set of methods is permitted (<code>describe</code>, <code>head</code>, <code>tail</code> on pandas objects), called with no arguments. Arbitrary method calls are blocked to keep template rendering side-effect-free.</p>
+<p><strong>Nothing else is template syntax.</strong> <code>{{ x['k'] }}</code>, <code>{{ x | upper }}</code> and <code>{% if x %}</code> are errors rather than text sent to the model, as is a <code>{{</code> with no closing <code>}}</code> or a name no other cell defines. Conditions, loops and formatting belong in a Python cell upstream. The cell does not run, so no call is paid for; a failure that only shows at run time, such as <code>{{ x.y }}</code> on a value with no <code>y</code>, also stops before the call.</p>
+<p>To write the characters themselves, escape them: <code>\{{</code> renders as <code>{{</code> and <code>\{%</code> as <code>{%</code>. Braces in a variable's value are always left alone.</p>
 <h2 id="prompt-cell-annotations">Prompt-cell annotations<a class="headerlink" href="#prompt-cell-annotations" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

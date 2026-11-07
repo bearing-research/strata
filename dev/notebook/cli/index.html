@@ -3552,7 +3552,8 @@ subprocesses, no LLM calls:</p>
 <li>per-cell annotation diagnostics - the <strong>same validation the server runs
   on open / reload</strong> (<code>worker_unknown</code>, <code>loop_missing_carry</code>,
   <code>sql_connection_missing</code>, <code>fetch_unreadable</code>, <code>dataset_unreadable</code>,
-  malformed <code>@output_schema</code>, …)</li>
+  malformed <code>@output_schema</code>, <code>prompt_template_invalid</code>,
+  <code>prompt_input_undefined</code>, …)</li>
 </ul>
 <p>Exit codes mirror <code>strata run</code>: <code>0</code> valid (warnings allowed), <code>1</code> invalid
 (parse failure, DAG cycle, or any error-severity diagnostic), <code>2</code>

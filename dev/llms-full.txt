@@ -2343,7 +2343,8 @@ Variables are injected with `{{ expression }}`. The expression is resolved again
 | pandas Series     | Name, length and dtype, then as many values as fit         |
 | numpy ndarray     | Shape + dtype + first 10 elements                          |
 | dict / list       | JSON, indented                                             |
-| Python object (stored as a pickle: a class instance, a fitted model) | A placeholder. The server never unpickles a cell's output, so the prompt says the value is a Python object and the cell's console names it. Convert it in the producing cell (`str(model)`, a dict). |
+| Python object (stored as a pickle: a class instance, a fitted model) | `str(value)`, read in the notebook's environment because the server never unpickles a cell's output. The object needs text of its own: a default repr like `<Model object at 0x...>` fails the cell, so give the class a `__str__` or convert the value in the producing cell. |
+| Anything else that has no text (an R object, a folder) | The cell fails. Convert it in a cell upstream. |
 | anything else     | `str(value)`                                               |
 
 Each variable has a 2,000-token budget (about 8,000 characters) per template render. A frame or series drops rows past the budget and ends with `... (N more rows)`; other values are cut with a `... (truncated)` marker.
@@ -2354,10 +2355,14 @@ Each variable has a 2,000-token budget (about 8,000 characters) per template ren
 {{ df.describe() }}     # OK, pandas describe() is allow-listed
 {{ df.head() }}         # OK
 {{ df.shape }}          # OK, attribute access (non-callable)
-{{ df.to_csv() }}       # blocked (unknown method); left as-is in the template
+{{ df.to_csv() }}       # error: not an allowed method
 ```
 
 Only a small set of methods is permitted (`describe`, `head`, `tail` on pandas objects), called with no arguments. Arbitrary method calls are blocked to keep template rendering side-effect-free.
+
+**Nothing else is template syntax.** `{{ x['k'] }}`, `{{ x | upper }}` and `{% if x %}` are errors rather than text sent to the model, as is a `{{` with no closing `}}` or a name no other cell defines. Conditions, loops and formatting belong in a Python cell upstream. The cell does not run, so no call is paid for; a failure that only shows at run time, such as `{{ x.y }}` on a value with no `y`, also stops before the call.
+
+To write the characters themselves, escape them: `\{{` renders as `{{` and `\{%` as `{%`. Braces in a variable's value are always left alone.
 
 ## Prompt-cell annotations
 
@@ -9710,7 +9715,8 @@ strata validate <notebook_dir> [--format human|json]
 - per-cell annotation diagnostics - the **same validation the server runs
   on open / reload** (`worker_unknown`, `loop_missing_carry`,
   `sql_connection_missing`, `fetch_unreadable`, `dataset_unreadable`,
-  malformed `@output_schema`, …)
+  malformed `@output_schema`, `prompt_template_invalid`,
+  `prompt_input_undefined`, …)
 
 Exit codes mirror `strata run`: `0` valid (warnings allowed), `1` invalid
 (parse failure, DAG cycle, or any error-severity diagnostic), `2`

@@ -149,7 +149,8 @@ strata validate <notebook_dir> [--format human|json]
 - per-cell annotation diagnostics - the **same validation the server runs
   on open / reload** (`worker_unknown`, `loop_missing_carry`,
   `sql_connection_missing`, `fetch_unreadable`, `dataset_unreadable`,
-  malformed `@output_schema`, …)
+  malformed `@output_schema`, `prompt_template_invalid`,
+  `prompt_input_undefined`, …)
 
 Exit codes mirror `strata run`: `0` valid (warnings allowed), `1` invalid
 (parse failure, DAG cycle, or any error-severity diagnostic), `2`
