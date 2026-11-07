@@ -681,7 +681,7 @@ _OBJECT_TEXTS: OrderedDict[str, str] = OrderedDict()
 _OBJECT_TEXTS_MAX = 256
 
 
-async def _objects_to_text(session: NotebookSession, variables: dict[str, Any]) -> list[str]:
+async def _objects_to_text(session: ExecutorHost, variables: dict[str, Any]) -> list[str]:
     """Replace each ``ObjectInput`` with its text; return why any could not be."""
     names = [name for name, value in variables.items() if isinstance(value, ObjectInput)]
     results = await asyncio.gather(*(_object_text(session, n, variables[n]) for n in names))
@@ -708,7 +708,7 @@ def _reaches_into_objects(template: str, object_names: set[str]) -> list[str]:
 
 
 async def _object_text(
-    session: NotebookSession, name: str, value: ObjectInput
+    session: ExecutorHost, name: str, value: ObjectInput
 ) -> tuple[str, str | None]:
     """``str()`` of a stored object, from a subprocess running as cell code."""
     from strata.notebook.executor import _no_interpreter_message
