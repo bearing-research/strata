@@ -6,11 +6,17 @@ calls the LLM, and stores the response as an artifact.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 import json
 import logging
+import os
+import re
+import tempfile
 import time
+from collections import OrderedDict
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from vestigo.provenance import derive_subkey
@@ -26,6 +32,7 @@ from strata.notebook.llm import (
     render_prompt_template,
 )
 from strata.notebook.prompt_analyzer import analyze_prompt_cell
+from strata.notebook.prompt_template import Placeholder, PromptTemplateError, parse_template
 from strata.notebook.serializer import _META_SHAPE, _SHAPE_SCALAR, _extract_scalar_from_table
 
 if TYPE_CHECKING:
@@ -37,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 # Every attempt costs tokens, so keep the ceiling low; ``# @validate_retries N`` raises it.
 DEFAULT_VALIDATE_ATTEMPTS = 3
+_MAX_TOKENS_PER_VARIABLE = 2000
 
 
 def _validation_errors(content: str, schema: dict[str, Any]) -> list[str]:
@@ -211,13 +219,20 @@ async def execute_prompt_cell(
     system_prompt = analysis.system_prompt
 
     variables, input_hashes = _load_upstream_variables(session, cell_id)
-    object_note = _object_input_note(variables)
+    object_names = {name for name, value in variables.items() if isinstance(value, ObjectInput)}
+    object_problems = _reaches_into_objects(analysis.template_body, object_names)
+    object_problems += await _objects_to_text(session, variables)
+    if object_problems:
+        return _error_result("\n".join(object_problems), start_time)
 
-    rendered = render_prompt_template(
-        analysis.template_body,
-        variables,
-        max_tokens_per_var=2000,
-    )
+    try:
+        rendered = render_prompt_template(
+            analysis.template_body,
+            variables,
+            max_tokens_per_var=_MAX_TOKENS_PER_VARIABLE,
+        )
+    except PromptTemplateError as exc:
+        return _error_result(str(exc), start_time)
 
     if not rendered.strip():
         return _error_result("Prompt template is empty after rendering", start_time)
@@ -271,7 +286,7 @@ async def execute_prompt_cell(
                     "display_outputs": [display_output],
                     "display_output": display_output,
                     "stdout": "",
-                    "stderr": object_note,
+                    "stderr": "",
                     "error": None,
                     "cache_hit": True,
                     "duration_ms": int(duration_ms),
@@ -491,15 +506,9 @@ async def execute_prompt_cell(
         "display_outputs": [display_output],
         "display_output": display_output,
         "stdout": "",
-        "stderr": "\n".join(
-            filter(
-                None,
-                [
-                    object_note,
-                    f"Model: {result.model} | "
-                    f"Tokens: {total_input_tokens}→{total_output_tokens}{retries_suffix}",
-                ],
-            )
+        "stderr": (
+            f"Model: {result.model} | "
+            f"Tokens: {total_input_tokens}→{total_output_tokens}{retries_suffix}"
         ),
         "error": None,
         "cache_hit": False,
@@ -640,7 +649,10 @@ def _load_upstream_variables(
                     continue
                 blob = artifact_mgr.load_artifact_data(canonical_id, artifact.version)
                 content_type = artifact.params.get("content_type") or "json/object"
-                variables[var_name] = _parse_output(blob, content_type)
+                value = _parse_output(blob, content_type)
+                if isinstance(value, ObjectInput):
+                    value = dataclasses.replace(value, ref=f"{canonical_id}@v={artifact.version}")
+                variables[var_name] = value
                 input_hashes[var_name] = artifact.provenance_hash
             except Exception as e:
                 logger.warning("Failed to load upstream %s: %s", var_name, e)
@@ -648,18 +660,140 @@ def _load_upstream_variables(
     return variables, input_hashes
 
 
-_OBJECT_PLACEHOLDER = "<Python object: prompt cells read only tables, JSON values and text>"
+@dataclasses.dataclass(frozen=True, repr=False)
+class ObjectInput:
+    """A stored value the server must not load: only the notebook's venv reads it."""
+
+    content_type: str
+    blob: bytes
+    # The artifact version it was read from, which never changes, so its text does not.
+    ref: str | None = None
 
 
-def _object_input_note(variables: dict[str, Any]) -> str:
-    """Name the inputs rendered as the object placeholder, or return ``""``."""
-    names = [name for name, value in variables.items() if value is _OBJECT_PLACEHOLDER]
-    if not names:
-        return ""
-    return (
-        f"Not rendered: {', '.join(names)} (Python object). Prompt cells read only "
-        "tables, JSON values and text; convert it in the producing cell."
+_LOADABLE_OBJECT_TYPES = frozenset({"pickle/object", "module/cell-instance"})
+_OBJECT_TEXT_HARNESS = Path(__file__).parent / "object_text_harness.py"
+_OBJECT_TEXT_TIMEOUT_SECONDS = 30.0
+# What ``object.__repr__`` and functions print. Its address changes on every load, so
+# the rendered prompt would too, and no run would hit the cache.
+_DEFAULT_REPR_RE = re.compile(r"<[^<>]* at 0x[0-9a-fA-F]+>")
+# Each object's text by artifact version: a cache hit must not load a large model again.
+_OBJECT_TEXTS: OrderedDict[str, str] = OrderedDict()
+_OBJECT_TEXTS_MAX = 256
+
+
+async def _objects_to_text(session: ExecutorHost, variables: dict[str, Any]) -> list[str]:
+    """Replace each ``ObjectInput`` with its text; return why any could not be."""
+    names = [name for name, value in variables.items() if isinstance(value, ObjectInput)]
+    results = await asyncio.gather(*(_object_text(session, n, variables[n]) for n in names))
+    problems: list[str] = []
+    for name, (text, problem) in zip(names, results, strict=True):
+        if problem is not None:
+            problems.append(problem)
+        else:
+            variables[name] = text
+    return problems
+
+
+def _reaches_into_objects(template: str, object_names: set[str]) -> list[str]:
+    """``{{ obj.attr }}`` on an object: its attributes are not in the text it was read as."""
+    parts, _problems = parse_template(template)
+    return [
+        f"`{part.text}`: `{part.root}` is a Python object, which a prompt reads only as "
+        f"its text. Take what the prompt needs from it in the cell that produces it."
+        for part in parts
+        if isinstance(part, Placeholder)
+        and part.root in object_names
+        and part.expression != part.root
+    ]
+
+
+async def _object_text(
+    session: ExecutorHost, name: str, value: ObjectInput
+) -> tuple[str, str | None]:
+    """``str()`` of a stored object, from a subprocess running as cell code."""
+    from strata.notebook.executor import _no_interpreter_message
+    from strata.notebook.harness_env import configured_allowlist, harness_env
+    from strata.notebook.harness_user import (
+        LocalExecutionRefused,
+        hand_over,
+        identity_env,
+        resolve_harness_user,
+        spawn_kwargs,
     )
+    from strata.notebook.process_tree import (
+        subprocess_kwargs_for_new_group,
+        terminate_subprocess_tree,
+    )
+
+    convert = f"Convert `{name}` to text, a dict or a table in the cell that produces it."
+    if value.ref is not None and value.ref in _OBJECT_TEXTS:
+        _OBJECT_TEXTS.move_to_end(value.ref)
+        return _OBJECT_TEXTS[value.ref], None
+    if value.content_type not in _LOADABLE_OBJECT_TYPES:
+        return "", f"`{name}` is stored as {value.content_type}, which has no text. {convert}"
+    try:
+        harness_user = resolve_harness_user()
+    except LocalExecutionRefused as exc:
+        return "", f"`{name}` is a Python object, and {exc} {convert}"
+    python_executable = session.venv_python
+    if python_executable is None:
+        return "", f"`{name}` is a Python object: {_no_interpreter_message(session)}"
+
+    with tempfile.TemporaryDirectory(prefix="strata_prompt_object_") as directory:
+        path = Path(directory) / "input.pickle"
+        path.write_bytes(value.blob)
+        hand_over(Path(directory), harness_user)
+        allowlist = configured_allowlist()
+        # A fixed seed: a set prints in one order, so the rendered prompt and its cache
+        # key do not change from run to run.
+        base = harness_env(allowlist) if allowlist else dict(os.environ)
+        env = {**(identity_env(base, harness_user) or base), "PYTHONHASHSEED": "0"}
+        try:
+            process = await asyncio.create_subprocess_exec(
+                str(python_executable),
+                str(_OBJECT_TEXT_HARNESS),
+                value.content_type,
+                str(path),
+                # One past the budget, so the renderer still marks the cut.
+                str(_MAX_TOKENS_PER_VARIABLE * 4 + 1),
+                cwd=str(session.path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                **spawn_kwargs(harness_user),
+                **subprocess_kwargs_for_new_group(),
+            )
+        except OSError as exc:
+            return "", f"`{name}` could not be read: {exc}. {convert}"
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=_OBJECT_TEXT_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            return "", f"`str({name})` did not finish in time. {convert}"
+        finally:
+            # Also on cancel: the object's code must not outlive the cell's run.
+            if process.returncode is None:
+                await asyncio.shield(terminate_subprocess_tree(process))
+
+    try:
+        result = json.loads(stdout)
+    except json.JSONDecodeError:
+        detail = stderr.decode(errors="replace").strip()[-500:]
+        return "", f"`{name}` could not be read: {detail or 'the process died'}. {convert}"
+    if "error" in result:
+        return "", f"`{name}` could not be read: {result['error']}. {convert}"
+    text, type_name = result["text"], result["type"]
+    if _DEFAULT_REPR_RE.search(text):
+        return "", (
+            f"`{name}` ({type_name}) has no text of its own: `str({name})` gives `{text[:200]}`. "
+            "Give its class a `__str__`, or convert it in the cell that produces it."
+        )
+    if value.ref is not None:
+        _OBJECT_TEXTS[value.ref] = text
+        if len(_OBJECT_TEXTS) > _OBJECT_TEXTS_MAX:
+            _OBJECT_TEXTS.popitem(last=False)
+    return text, None
 
 
 def _parse_output(blob: bytes, content_type: str) -> Any:
@@ -684,10 +818,10 @@ def _parse_output(blob: bytes, content_type: str) -> Any:
             return json.loads(blob)
         except Exception:
             return blob.decode(errors="replace")
-    elif content_type == "pickle/object":
-        # Unpickling would run the producing cell's code as the server user.
-        return _OBJECT_PLACEHOLDER
-    return blob.decode(errors="replace")
+    elif content_type.startswith("text/"):
+        return blob.decode(errors="replace")
+    # Unpickling would run the producing cell's code as the server user.
+    return ObjectInput(content_type, blob)
 
 
 def _preview(value: Any) -> Any:

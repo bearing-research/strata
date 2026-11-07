@@ -579,7 +579,7 @@ class TestPromptOutputSchemaDiagnostics:
         return CellState(id="c1", source=source, language="prompt")
 
     def test_valid_schema_no_diagnostic(self):
-        cell = self._prompt_cell('# @output_schema {"type": "object"}\nSummarize {{ df }}')
+        cell = self._prompt_cell('# @output_schema {"type": "object"}\nSummarize this')
         diags = validate_cell_annotations(cell, _nb())
         assert [d.code for d in diags] == []
 

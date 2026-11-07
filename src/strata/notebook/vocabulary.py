@@ -1062,7 +1062,14 @@ class PromptAnalyzer:
 
     def analyze(self, cell: cg.Cell) -> cg.Analyzed:
         result = analyze_prompt_cell(cell.source)
-        return cg.Analyzed(defines=list(result.defines), references=list(result.references))
+        return cg.Analyzed(
+            defines=list(result.defines),
+            references=list(result.references),
+            diagnostics=[
+                cg.Diagnostic("prompt_template_invalid", cg.Severity.ERROR, message, line=line)
+                for line, message in result.template_problems
+            ],
+        )
 
     def normalize(self, body: str) -> str:
         return cg.strip_lines(body)

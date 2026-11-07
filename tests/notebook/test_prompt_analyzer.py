@@ -116,10 +116,10 @@ Extract entities from {{ text }} as a JSON array."""
         result = analyze_prompt_cell("What is the meaning of life?")
         assert result.references == []
 
-    def test_builtins_not_referenced(self):
-        result = analyze_prompt_cell("Print {{ len }} of {{ data }}")
-        assert "len" not in result.references
-        assert "data" in result.references
+    def test_a_builtin_name_is_an_input(self):
+        """A template calls nothing, so ``{{ filter }}`` reads a cell's ``filter``."""
+        result = analyze_prompt_cell("Apply {{ filter }} to {{ data }}")
+        assert result.references == ["filter", "data"]
 
     def test_invalid_name_ignored(self):
         result = analyze_prompt_cell("# @name 123invalid\nHello")
