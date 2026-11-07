@@ -134,7 +134,7 @@ def list_fetches(session: NotebookSession) -> list[dict[str, Any]]:
     cache = FetchCache(session.path)
     fetches = []
     for cell in session.notebook_state.cells:
-        for spec in parse_annotations(cell.source).fetches:
+        for spec in parse_annotations(cell.source, cell.language).fetches:
             recorded = cache.recorded(spec.url)
             fetches.append(
                 {
@@ -177,7 +177,7 @@ def _loop_iterations_to_carry(
     for cell in session.notebook_state.cells:
         if wanted is not None and cell.id not in wanted:
             continue
-        loop = parse_annotations(cell.source).loop
+        loop = parse_annotations(cell.source, cell.language).loop
         if loop is None:
             continue
         for _, artifact in manager.list_iterations(cell.id, loop.carry):

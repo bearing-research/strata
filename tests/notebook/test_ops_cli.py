@@ -293,7 +293,7 @@ def test_cli_mutation_logs_each_annotation_diagnostic_once(tmp_path, capsys):
     nb = _build_notebook(
         tmp_path,
         cells=[
-            ("q", "# @sql connection=local\nSELECT 1 FROM read_parquet('/tmp/x.parquet')", None)
+            ("q", "-- @sql connection=local\nSELECT 1 FROM read_parquet('/tmp/x.parquet')", None)
         ],
         language="sql",
     )
@@ -454,6 +454,28 @@ def test_cli_cell_add_can_add_a_widget_cell(chain_nb, capsys):
     new = json.loads(capsys.readouterr().out)
     assert new["language"] == "widget"
     assert (chain_nb / "cells" / f"{new['id']}.widget").read_text() == source
+
+
+def test_cli_cell_add_refuses_a_sql_file_without_a_language(chain_nb, tmp_path, capsys):
+    """The extension never picks the language, but a .sql file must not become Python."""
+    src = tmp_path / "q.sql"
+    src.write_text("SELECT 1")
+    cells_before = sorted(p.name for p in (chain_nb / "cells").iterdir())
+
+    assert main(["cell", "add", str(chain_nb), "--file", str(src)]) == 2
+
+    assert "pass --language sql" in capsys.readouterr().err
+    assert sorted(p.name for p in (chain_nb / "cells").iterdir()) == cells_before
+
+
+def test_cli_cell_add_takes_a_sql_file_as_python_when_told(chain_nb, tmp_path, capsys):
+    src = tmp_path / "q.sql"
+    src.write_text("w = 5")
+    argv = ["cell", "add", str(chain_nb), "--file", str(src), "--language", "python"]
+
+    assert main([*argv, "--format", "json"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["language"] == "python"
 
 
 def test_cli_cell_add_c_and_file_are_mutually_exclusive(chain_nb, tmp_path):

@@ -18,7 +18,7 @@ from strata.notebook import each, output_dirs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import _writes_entry
 from strata.notebook.execution_result import CellExecutionResult, hit_console
-from strata.notebook.models import MountMode, TableWriteSpec, WorkerBackendType
+from strata.notebook.models import CellLanguage, MountMode, TableWriteSpec, WorkerBackendType
 from strata.notebook.mounts import MountWrite, parse_mount_uri
 from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 from strata.notebook.workers import resolve_worker_spec
@@ -98,7 +98,7 @@ async def run_fanout_cell(
     # Each variant writes the same table: an overwrite or sync would keep only the last's.
     replacing = [
         spec
-        for spec in parse_annotations(source).table_writes
+        for spec in parse_annotations(source, CellLanguage.PYTHON).table_writes
         if spec.mode in ("overwrite", "sync")
     ]
     if replacing:
@@ -323,7 +323,7 @@ async def run_each_cell(
     # A release is one instance's, and the manifest's key does not carry a branch.
     if cell_id in context.branch_inits:
         return refused("Branching an @each cell from a release is not supported yet")
-    annotations = parse_annotations(source)
+    annotations = parse_annotations(source, CellLanguage.PYTHON)
     assert annotations.each is not None  # the cell is in the DAG's each_cells
     base = await context.compute_provenance(cell_id, source)
     worker = resolve_worker_spec(host.notebook_state, base.effective_worker)

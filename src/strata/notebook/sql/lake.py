@@ -28,7 +28,7 @@ import sqlglot
 from sqlglot import exp
 
 from strata.notebook.annotations import parse_annotations
-from strata.notebook.models import TableSpec
+from strata.notebook.models import CellLanguage, TableSpec
 from strata.notebook.sql.adapter import QualifiedTable
 from strata.notebook.sql.time_travel import splice_after_tables
 
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from strata.notebook.models import ConnectionSpec, NotebookState
 
 
-# Artifact transform param a ``# @cache snapshot`` cell records: the
+# Artifact transform param a ``-- @cache snapshot`` cell records: the
 # ``[namespace, table, snapshot]`` rows its query read.
 PARAM_SNAPSHOT_IDS = "sql_snapshot_ids"
 
@@ -127,10 +127,10 @@ def lake_tables(notebook_state: NotebookState, source: str) -> list[TableSpec]:
     """The catalog tables a SQL cell reads, as ``@table`` declarations.
 
     Staleness and generic provenance fold these with the cell's own ``@table``
-    declarations. A ``# @cache snapshot`` cell reads the snapshots it pinned, so
+    declarations. A ``-- @cache snapshot`` cell reads the snapshots it pinned, so
     a new one does not make it stale.
     """
-    annotations = parse_annotations(source)
+    annotations = parse_annotations(source, CellLanguage.SQL)
     if annotations.sql is None or not annotations.sql.connection or annotations.sql.write:
         return []
     if annotations.cache is not None and annotations.cache.kind == "snapshot":
@@ -300,7 +300,7 @@ def _table_key(table_spec: TableSpec) -> tuple[str, str]:
 
 
 def snapshot_problem(catalog: str, analysis: Any) -> str | None:
-    """Why ``# @cache snapshot`` cannot pin this DuckDB query, or None.
+    """Why ``-- @cache snapshot`` cannot pin this DuckDB query, or None.
 
     Only the catalog's tables have snapshots that can be read again; a mount, a
     table in the connection's own database or one named at run time can change
@@ -444,7 +444,7 @@ def _mount_sources(
     declared = {
         m.name: m
         for m in resolve_cell_mounts(
-            [], cell.mounts if cell else [], parse_annotations(source).mounts
+            [], cell.mounts if cell else [], parse_annotations(source, CellLanguage.SQL).mounts
         )
     }
     resolver = MountResolver(

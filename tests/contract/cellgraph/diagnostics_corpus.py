@@ -100,6 +100,12 @@ path = "db.sqlite"
 _CYCLE = ("# @per_variant", "# @per_variant a b", "# @variant g a", "# @loop max_iter=3 carry=x")
 
 
+def in_marker(lines: str, language: str) -> str:
+    """*lines* written in *language*'s comment marker: ``--`` in SQL, whose cells read
+    ``-- @key`` where the oracle's recorder read ``# @key``."""
+    return lines.replace("# @", "-- @") if language == "sql" else lines
+
+
 def cases() -> dict[str, list[tuple[str, str, str]]]:
     """Each case's cells, as ``(id, language, source)``; ``p`` defines ``x``."""
     found: dict[str, list[tuple[str, str, str]]] = {}
@@ -107,7 +113,7 @@ def cases() -> dict[str, list[tuple[str, str, str]]]:
         for index, line in enumerate(LINES):
             found[f"{language}-{index:02d}"] = [
                 ("p", "python", "x = 1"),
-                ("c", language, f"{line}\n{_BODIES[language]}"),
+                ("c", language, f"{in_marker(line, language)}\n{_BODIES[language]}"),
             ]
     for index, line in enumerate(_CYCLE):
         found[f"cycle-{index}"] = [

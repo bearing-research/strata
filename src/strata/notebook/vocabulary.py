@@ -45,6 +45,7 @@ from strata.notebook.annotation_validation import (
     _table_uri_malformed,
     _unreadable,
     _value_problem,
+    sql_annotation_diagnostics,
     sql_connection_diagnostics,
 )
 from strata.notebook.annotations import (
@@ -283,7 +284,7 @@ def _validate_loop(loop: Any, context: cg.ValidationContext) -> list[cg.Diagnost
     if cell.language in _NO_INPUT_CHECKS:
         return []
     # ``_find_annotation_line(source, "loop")``: the first line whose key starts with it.
-    line = _find_annotation_line(cell.source, "loop")
+    line = _find_annotation_line(cell.source, "loop", language=cell.language)
     diagnostics: list[cg.Diagnostic] = []
     if loop.max_iter <= 0:
         diagnostics.append(
@@ -333,7 +334,8 @@ def _validate_loop(loop: Any, context: cg.ValidationContext) -> list[cg.Diagnost
                     f"`@loop_until` expression is not a valid Python expression: {exc.msg}.",
                     cell.id,
                     "loop",
-                    _find_annotation_line(cell.source, "loop_until") or line,
+                    _find_annotation_line(cell.source, "loop_until", language=cell.language)
+                    or line,
                 )
             )
     return diagnostics
@@ -356,7 +358,7 @@ def _validate_mounts(mounts: Any, context: cg.ValidationContext) -> list[cg.Diag
     notebook_mount_names = {m.name for m in cell.meta.get("notebook_mounts", [])}
     diagnostics: list[cg.Diagnostic] = []
     for mount in mounts:
-        line = _find_annotation_line(cell.source, "mount", mount.name)
+        line = _find_annotation_line(cell.source, "mount", mount.name, language=cell.language)
         scheme = mount.uri.split("://")[0].lower() if "://" in mount.uri else ""
         if not scheme or scheme not in _SUPPORTED_MOUNT_SCHEMES:
             diagnostics.append(
@@ -392,7 +394,7 @@ def _validate_tables(tables: Any, context: cg.ValidationContext) -> list[cg.Diag
         return []
     diagnostics: list[cg.Diagnostic] = []
     for table in tables:
-        line = _find_annotation_line(cell.source, "table", table.name)
+        line = _find_annotation_line(cell.source, "table", table.name, language=cell.language)
         if _table_uri_malformed(table.uri):
             diagnostics.append(
                 cg.Diagnostic(
@@ -428,7 +430,7 @@ def _validate_tables(tables: Any, context: cg.ValidationContext) -> list[cg.Diag
                 "name; the cell will fail to run.",
                 cell.id,
                 "table",
-                _find_annotation_line(cell.source, "table", dup),
+                _find_annotation_line(cell.source, "table", dup, language=cell.language),
             )
         )
     return diagnostics
@@ -442,7 +444,7 @@ def _validate_output_schema(schema: Any, context: cg.ValidationContext) -> list[
     error = analyze_prompt_cell(cell.source).output_schema_error
     if not error:
         return []
-    line = _find_annotation_line(cell.source, "output_schema")
+    line = _find_annotation_line(cell.source, "output_schema", language=cell.language)
     return [
         cg.Diagnostic(
             "prompt_output_schema_invalid", cg.Severity.ERROR, error, cell.id, "output_schema", line
@@ -465,7 +467,7 @@ def _validate_name(name: str, context: cg.ValidationContext) -> list[cg.Diagnost
             "name",
             d.line,
         )
-        for d in cg.GRAMMAR.directives(cell.source)
+        for d in _directives(cell)
         if d.key == "name" and d.value and not d.value.isidentifier()
     ]
 
@@ -475,7 +477,7 @@ def _validate_app(value: str, context: cg.ValidationContext) -> list[cg.Diagnost
     cell = context.cell
     if cell.language == CellLanguage.MARKDOWN.value:
         return []
-    directives = [d for d in cg.GRAMMAR.directives(cell.source) if d.key == "app"]
+    directives = [d for d in _directives(cell) if d.key == "app"]
     return [
         cg.Diagnostic(
             error.code or "app_unreadable",
@@ -505,7 +507,7 @@ def _parse_nocache(directives: list[cg.Directive]) -> Any:
 def _validate_stochastic(_nocache: bool, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     """``@stochastic`` with an explicit ``@nocache off``: the last readable line of each."""
     cell = context.cell
-    directives = cg.GRAMMAR.directives(cell.source)
+    directives = _directives(cell)
     stochastic = [d for d in directives if d.key == "stochastic"]
     nocache = [d for d in directives if d.key == "nocache" and _problem(d) is None]
     if not stochastic or not _flag(stochastic) or not nocache or _flag(nocache):
@@ -525,7 +527,7 @@ def _validate_stochastic(_nocache: bool, context: cg.ValidationContext) -> list[
 
 def _validate_per_variant(group: Any, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     source = context.cell.source
-    writes = parse_annotations(source).table_writes
+    writes = parse_annotations(source, context.cell.language).table_writes
     mode = next((w.mode for w in writes if w.mode in ("overwrite", "sync")), None)
     if mode is None:
         return []
@@ -538,7 +540,7 @@ def _validate_per_variant(group: Any, context: cg.ValidationContext) -> list[cg.
             f"the variants apart, or {mode} from a cell that reads the {{variant: value}} dict.",
             context.cell.id,
             "per_variant",
-            _find_annotation_line(source, "write_table", mode),
+            _find_annotation_line(source, "write_table", mode, language=context.cell.language),
         )
     ]
 
@@ -555,10 +557,12 @@ def _validate_each(each: Any, context: cg.ValidationContext) -> list[cg.Diagnost
                 "`@each` runs Python cells only.",
                 cell.id,
                 "each",
-                _find_annotation_line(source, "each", each["source"]),
+                _find_annotation_line(
+                    source, "each", each["source"], language=context.cell.language
+                ),
             )
         ]
-    annotations = parse_annotations(source)
+    annotations = parse_annotations(source, cell.language)
     diagnostics = []
     if annotations.loop is not None:
         diagnostics.append(
@@ -568,7 +572,9 @@ def _validate_each(each: Any, context: cg.ValidationContext) -> list[cg.Diagnost
                 "`@each` can't be combined with `@loop`.",
                 cell.id,
                 "each",
-                _find_annotation_line(source, "each", each["source"]),
+                _find_annotation_line(
+                    source, "each", each["source"], language=context.cell.language
+                ),
             )
         )
     mode = next((w.mode for w in annotations.table_writes if w.mode != "sync"), None)
@@ -581,7 +587,7 @@ def _validate_each(each: Any, context: cg.ValidationContext) -> list[cg.Diagnost
                 "commits once per run over every item's rows.",
                 cell.id,
                 "each",
-                _find_annotation_line(source, "write_table", mode),
+                _find_annotation_line(source, "write_table", mode, language=context.cell.language),
             )
         )
     return diagnostics
@@ -734,6 +740,12 @@ def strata_vocabulary() -> cg.Vocabulary:
 # --- the parsed values as ``CellAnnotations`` -------------------------------------
 
 
+def _directives(cell: cg.Cell) -> list[cg.Directive]:
+    """Every directive of *cell*, in its language's comment marker."""
+    grammar = strata_vocabulary().grammar_for(cg.get_language_analyzer(cell.language))
+    return grammar.directives(cell.source)
+
+
 def parse_values(source: str, language: str) -> tuple[dict[str, Any], list[cg.Directive]]:
     """Each present annotation's parsed value, and the directives the language reads.
 
@@ -750,8 +762,10 @@ def parse_values(source: str, language: str) -> tuple[dict[str, Any], list[cg.Di
 @functools.lru_cache(maxsize=4096)
 def _parsed_values(source: str, language: str) -> tuple[dict[str, Any], tuple[cg.Directive, ...]]:
     vocabulary = strata_vocabulary()
-    keys = cg.directive_keys(cg.get_language_analyzer(language))
-    directives = vocabulary.grammar.directives(source, keys=keys)
+    analyzer = cg.get_language_analyzer(language)
+    directives = vocabulary.grammar_for(analyzer).directives(
+        source, keys=cg.directive_keys(analyzer)
+    )
     by_owner: dict[str, list[cg.Directive]] = {}
     for directive in directives:
         owner = vocabulary.owner(directive.key)
@@ -1028,6 +1042,8 @@ class SqlAnalyzer:
     ``@sql`` connection's diagnostics. Host-keyed."""
 
     owns_key = False
+    # ``-- @key value``: ``#`` is no comment in any SQL driver.
+    comment = "--"
 
     def analyze(self, cell: cg.Cell) -> cg.Analyzed:
         from strata.notebook.languages.analyzer import _SqlAnalyzer
@@ -1037,7 +1053,7 @@ class SqlAnalyzer:
         # It reads only the session's connections, for the dialect.
         session = SimpleNamespace(notebook_state=SimpleNamespace(connections=connections))
         result = _SqlAnalyzer().analyze(state, session)  # ty: ignore[invalid-argument-type]
-        found = sql_connection_diagnostics(
+        found = sql_annotation_diagnostics(cell.source) + sql_connection_diagnostics(
             cell.source, connections, list(cell.meta.get("malformed_connections", []))
         )
         return cg.Analyzed(

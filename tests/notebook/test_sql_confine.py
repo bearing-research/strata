@@ -115,7 +115,7 @@ async def test_only_service_mode_confines_a_sql_cell(
 ):
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
     monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
-    source = f"# @sql connection=db\nSELECT content FROM read_text('{outside}')\n"
+    source = f"-- @sql connection=db\nSELECT content FROM read_text('{outside}')\n"
     nb_dir = _notebook(tmp_path, source)
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
 
@@ -163,7 +163,7 @@ async def test_only_service_mode_refuses_a_sqlite_write_cell_attaching_another_f
     monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
     nb_dir = create_notebook(tmp_path, "confine_sqlite")
     add_cell_to_notebook(nb_dir, "c1", language="sql")
-    source = f"# @sql connection=db write=true\nATTACH '{other}' AS o\n"
+    source = f"-- @sql connection=db write=true\nATTACH '{other}' AS o\n"
     write_cell(nb_dir, "c1", source)
     toml = nb_dir / "notebook.toml"
     toml.write_text(
@@ -206,7 +206,7 @@ async def test_a_mount_whose_root_holds_server_state_is_refused(
         artifact_dir=secret.parent,
     )
     monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
-    source = f"# @sql connection=db\nSELECT content FROM read_text('{secret}')\n"
+    source = f"-- @sql connection=db\nSELECT content FROM read_text('{secret}')\n"
     nb_dir = create_notebook(tmp_path, "mount_root")
     add_cell_to_notebook(nb_dir, "c1", language="sql")
     write_cell(nb_dir, "c1", source)
@@ -316,7 +316,7 @@ async def test_a_service_mount_inside_server_state_is_refused(tmp_path, monkeypa
     )
     root.mkdir(parents=True)
     (root / "data.csv").write_text("a\n1\n")
-    source = f"# @sql connection=db\nSELECT a FROM read_csv('{root / 'data.csv'}')\n"
+    source = f"-- @sql connection=db\nSELECT a FROM read_csv('{root / 'data.csv'}')\n"
     add_cell_to_notebook(nb_dir, "c1", language="sql")
     write_cell(nb_dir, "c1", source)
     update_notebook_mounts(nb_dir, [MountSpec(name="srv", uri=root.as_uri())])
@@ -378,9 +378,9 @@ class TestDatabaseFile:
         nb_dir = create_notebook(tmp_path / "notebooks", "mine")
         add_cell_to_notebook(nb_dir, "c1", language="sql")
         if write:
-            source = "# @sql connection=db write=true\nUPDATE secret SET x = 'mine'\n"
+            source = "-- @sql connection=db write=true\nUPDATE secret SET x = 'mine'\n"
         else:
-            source = "# @sql connection=db\nSELECT x FROM secret\n"
+            source = "-- @sql connection=db\nSELECT x FROM secret\n"
         write_cell(nb_dir, "c1", source)
         toml = nb_dir / "notebook.toml"
         toml.write_text(toml.read_text() + f'\n[connections.db]\ndriver = "sqlite"\n{connection}\n')
@@ -544,7 +544,7 @@ async def test_a_service_mode_cell_reads_auth_vars_from_the_notebook_env(
     monkeypatch.setattr(PostgresAdapter, "_invoke_connect", record)
     nb_dir = create_notebook(tmp_path, "auth_env")
     add_cell_to_notebook(nb_dir, "c1", language="sql")
-    source = f"# @sql connection=db{' write=true' if write else ''}\nSELECT 1\n"
+    source = f"-- @sql connection=db{' write=true' if write else ''}\nSELECT 1\n"
     write_cell(nb_dir, "c1", source)
     toml = nb_dir / "notebook.toml"
     toml.write_text(
@@ -589,7 +589,7 @@ async def test_a_service_mode_bigquery_key_file_is_the_notebooks_own(
     (nb_dir / "sa.json").write_text("{}")
     path = {"server": str(outside), "dotdot": "../server-only/secret.txt", "own": "sa.json"}
     add_cell_to_notebook(nb_dir, "c1", language="sql")
-    source = "# @sql connection=db\nSELECT 1\n"
+    source = "-- @sql connection=db\nSELECT 1\n"
     write_cell(nb_dir, "c1", source)
     toml = nb_dir / "notebook.toml"
     toml.write_text(
@@ -629,7 +629,7 @@ def test_reopen_identity_reads_only_a_key_file_the_cell_may_use(
     (nb_dir / "sa.json").write_text("{}")
     path = {"server": str(outside), "own": "sa.json"}
     add_cell_to_notebook(nb_dir, "c1", language="sql")
-    write_cell(nb_dir, "c1", "# @sql connection=db\n# @cache forever\nSELECT 1\n")
+    write_cell(nb_dir, "c1", "-- @sql connection=db\n-- @cache forever\nSELECT 1\n")
     toml = nb_dir / "notebook.toml"
     toml.write_text(
         toml.read_text() + '\n[connections.db]\ndriver = "bigquery"\nproject_id = "p"\n'
@@ -665,7 +665,7 @@ async def test_a_service_mode_bigquery_connection_without_a_key_file_is_refused(
     nb_dir = create_notebook(tmp_path, "bq_ambient")
     (nb_dir / "rw.json").write_text("{}")
     add_cell_to_notebook(nb_dir, "c1", language="sql")
-    source = f"# @sql connection=db{' write=true' if write else ''}\nSELECT 1\n"
+    source = f"-- @sql connection=db{' write=true' if write else ''}\nSELECT 1\n"
     write_cell(nb_dir, "c1", source)
     toml = nb_dir / "notebook.toml"
     # A write key alone still leaves read cells on ambient credentials.

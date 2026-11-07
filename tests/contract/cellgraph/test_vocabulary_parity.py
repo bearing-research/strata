@@ -242,25 +242,25 @@ password = "hunter2"
 SQL_CASES = {
     "no_sql_line": ("select 1 as v", [("sql_connection_missing", "error", None)]),
     "unknown_connection": (
-        "# @sql connection=elsewhere\nselect 1 as v",
+        "-- @sql connection=elsewhere\nselect 1 as v",
         [("sql_connection_unknown", "warn", 2)],
     ),
     "malformed_connection": (
-        "# @sql connection=broken\nselect 1 as v",
+        "-- @sql connection=broken\nselect 1 as v",
         [("connection_malformed", "error", 2)],
     ),
     "unknown_driver": (
-        "# @sql connection=odd\nselect 1 as v",
+        "-- @sql connection=odd\nselect 1 as v",
         [("connection_driver_unknown", "error", 2)],
     ),
-    "valid_connection": ("# @sql connection=good\nselect 1 as v", []),
+    "valid_connection": ("-- @sql connection=good\nselect 1 as v", []),
     "auth_literal": (
-        "# @sql connection=secret\nselect 1 as v",
+        "-- @sql connection=secret\nselect 1 as v",
         [("connection_auth_literal_secret", "warn", 2)],
     ),
     # The later line wins, so its line is the one reported.
     "later_sql_line_wins": (
-        "# @sql connection=good\n# @sql connection=elsewhere\nselect 1 as v",
+        "-- @sql connection=good\n-- @sql connection=elsewhere\nselect 1 as v",
         [("sql_connection_unknown", "warn", 3)],
     ),
 }
@@ -317,7 +317,7 @@ def test_cellgraph_reports_its_core_checks_as_strata_does(name, tmp_path):
 def test_cellgraph_reports_the_sql_connection_as_strata_does(name, tmp_path):
     source, expected = SQL_CASES[name]
     notebook_dir = tmp_path / name
-    cells = [("q", "sql", "# @name t\n" + source, None), ("d", "python", "print(t)", None)]
+    cells = [("q", "sql", "-- @name t\n" + source, None), ("d", "python", "print(t)", None)]
     _write(notebook_dir, cells, extra_toml=_CONNECTIONS)
     session, _analysis = _assert_parity(notebook_dir)
 

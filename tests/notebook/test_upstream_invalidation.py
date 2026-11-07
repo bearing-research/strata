@@ -93,9 +93,9 @@ class TestUpstreamInvalidation:
                 notebook_id="mount-nb",
                 name="Mount Pipeline",
                 cells=[
-                    CellMeta(id="c1", file="c1.py", order=0),
-                    CellMeta(id="c2", file="c2.py", order=1),
-                    CellMeta(id="c3", file="c3.py", order=2),
+                    CellMeta(id="c1", file="c1.py", language="python", order=0),
+                    CellMeta(id="c2", file="c2.py", language="python", order=1),
+                    CellMeta(id="c3", file="c3.py", language="python", order=2),
                 ],
                 mounts=[
                     MountSpec(

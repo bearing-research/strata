@@ -1,4 +1,4 @@
-"""Tests for `# @sql` and `# @cache` annotations and their validation."""
+"""Tests for `-- @sql` and `-- @cache` annotations and their validation."""
 
 from __future__ import annotations
 
@@ -10,56 +10,56 @@ from strata.notebook.models import CellState, ConnectionSpec, NotebookState
 
 
 def test_parses_sql_connection():
-    src = "# @sql connection=warehouse\nSELECT 1"
-    a = parse_annotations(src)
+    src = "-- @sql connection=warehouse\nSELECT 1"
+    a = parse_annotations(src, "sql")
     assert a.sql is not None
     assert a.sql.connection == "warehouse"
 
 
 def test_sql_without_connection_keyword_yields_none_connection():
     """``@sql`` without ``connection=`` parses to a None connection so validation can flag it."""
-    src = "# @sql warehouse\nSELECT 1"
-    a = parse_annotations(src)
+    src = "-- @sql warehouse\nSELECT 1"
+    a = parse_annotations(src, "sql")
     assert a.sql is not None
     assert a.sql.connection is None
 
 
 def test_sql_later_lines_override_earlier():
-    src = "# @sql connection=foo\n# @sql connection=bar\nSELECT 1"
-    a = parse_annotations(src)
+    src = "-- @sql connection=foo\n-- @sql connection=bar\nSELECT 1"
+    a = parse_annotations(src, "sql")
     assert a.sql is not None
     assert a.sql.connection == "bar"
 
 
 def test_no_sql_annotation_yields_none():
-    a = parse_annotations("SELECT 1")
+    a = parse_annotations("SELECT 1", "sql")
     assert a.sql is None
 
 
 def test_parses_cache_policies():
     cases = [
-        ("# @cache fingerprint\nSELECT 1", CachePolicy(kind="fingerprint")),
-        ("# @cache forever\nSELECT 1", CachePolicy(kind="forever")),
-        ("# @cache session\nSELECT 1", CachePolicy(kind="session")),
-        ("# @cache snapshot\nSELECT 1", CachePolicy(kind="snapshot")),
-        ("# @cache ttl=300\nSELECT 1", CachePolicy(kind="ttl", ttl_seconds=300)),
+        ("-- @cache fingerprint\nSELECT 1", CachePolicy(kind="fingerprint")),
+        ("-- @cache forever\nSELECT 1", CachePolicy(kind="forever")),
+        ("-- @cache session\nSELECT 1", CachePolicy(kind="session")),
+        ("-- @cache snapshot\nSELECT 1", CachePolicy(kind="snapshot")),
+        ("-- @cache ttl=300\nSELECT 1", CachePolicy(kind="ttl", ttl_seconds=300)),
     ]
     for src, expected in cases:
-        got = parse_annotations(src).cache
+        got = parse_annotations(src, "sql").cache
         assert got == expected, f"{src!r} → {got!r}, expected {expected!r}"
 
 
 def test_invalid_cache_policy_drops_to_none():
     """Unknown policies and malformed ttl parse to None; validation reports them."""
     cases = [
-        "# @cache\nSELECT 1",
-        "# @cache bogus\nSELECT 1",
-        "# @cache ttl=abc\nSELECT 1",
-        "# @cache ttl=-5\nSELECT 1",
-        "# @cache ttl=0\nSELECT 1",
+        "-- @cache\nSELECT 1",
+        "-- @cache bogus\nSELECT 1",
+        "-- @cache ttl=abc\nSELECT 1",
+        "-- @cache ttl=-5\nSELECT 1",
+        "-- @cache ttl=0\nSELECT 1",
     ]
     for src in cases:
-        assert parse_annotations(src).cache is None, src
+        assert parse_annotations(src, "sql").cache is None, src
 
 
 # --- validation diagnostics -----------------------------------------------
@@ -83,13 +83,13 @@ def test_validation_flags_missing_sql_annotation():
 
 
 def test_validation_flags_sql_without_connection_keyword():
-    cell = _sql_cell("# @sql warehouse\nSELECT 1")
+    cell = _sql_cell("-- @sql warehouse\nSELECT 1")
     diags = validate_cell_annotations(cell, _state_with([]))
     assert any(d.code == "sql_connection_missing" for d in diags)
 
 
 def test_validation_flags_unknown_connection():
-    cell = _sql_cell("# @sql connection=warehouse\nSELECT 1")
+    cell = _sql_cell("-- @sql connection=warehouse\nSELECT 1")
     state = _state_with([ConnectionSpec(name="other", driver="sqlite")])
     diags = validate_cell_annotations(cell, state)
     codes = [d.code for d in diags]
@@ -98,7 +98,7 @@ def test_validation_flags_unknown_connection():
 
 
 def test_validation_clean_when_connection_declared():
-    cell = _sql_cell("# @sql connection=warehouse\nSELECT 1")
+    cell = _sql_cell("-- @sql connection=warehouse\nSELECT 1")
     state = _state_with([ConnectionSpec(name="warehouse", driver="postgresql")])
     diags = validate_cell_annotations(cell, state)
     assert diags == []
@@ -106,7 +106,7 @@ def test_validation_clean_when_connection_declared():
 
 def test_validation_flags_unknown_cache_policy():
     cell = _sql_cell(
-        "# @sql connection=db\n# @cache bogus\nSELECT 1",
+        "-- @sql connection=db\n-- @cache bogus\nSELECT 1",
     )
     state = _state_with([ConnectionSpec(name="db", driver="sqlite")])
     diags = validate_cell_annotations(cell, state)
@@ -116,7 +116,7 @@ def test_validation_flags_unknown_cache_policy():
 
 def test_validation_flags_invalid_ttl():
     cell = _sql_cell(
-        "# @sql connection=db\n# @cache ttl=abc\nSELECT 1",
+        "-- @sql connection=db\n-- @cache ttl=abc\nSELECT 1",
     )
     state = _state_with([ConnectionSpec(name="db", driver="sqlite")])
     diags = validate_cell_annotations(cell, state)
@@ -129,7 +129,7 @@ def test_validation_clean_for_valid_cache_policies():
     # is about cache_policy_unknown / cache_ttl_invalid.
     state = _state_with([ConnectionSpec(name="db", driver="postgresql")])
     for policy in ("fingerprint", "forever", "session", "snapshot", "ttl=600"):
-        cell = _sql_cell(f"# @sql connection=db\n# @cache {policy}\nSELECT 1")
+        cell = _sql_cell(f"-- @sql connection=db\n-- @cache {policy}\nSELECT 1")
         diags = validate_cell_annotations(cell, state)
         assert diags == [], f"{policy}: {diags}"
 
@@ -141,7 +141,7 @@ def test_validation_flags_malformed_connection():
     """A declared but malformed connection gets ``connection_malformed``, not ``unknown``."""
     from strata.notebook.models import MalformedConnection
 
-    cell = _sql_cell("# @sql connection=warehouse\nSELECT 1")
+    cell = _sql_cell("-- @sql connection=warehouse\nSELECT 1")
     state = NotebookState(
         id="nb1",
         connections=[],
@@ -195,7 +195,7 @@ def test_validation_flags_unknown_driver():
     _reset_for_tests()
     register_adapter(_Stub())
     try:
-        cell = _sql_cell("# @sql connection=warehouse\nSELECT 1")
+        cell = _sql_cell("-- @sql connection=warehouse\nSELECT 1")
         state = _state_with([ConnectionSpec(name="warehouse", driver="snowflakez")])
         diags = validate_cell_annotations(cell, state)
         codes = [d.code for d in diags]
@@ -213,7 +213,7 @@ def test_validation_skips_driver_check_when_registry_empty():
 
     _reset_for_tests()
     try:
-        cell = _sql_cell("# @sql connection=warehouse\nSELECT 1")
+        cell = _sql_cell("-- @sql connection=warehouse\nSELECT 1")
         state = _state_with([ConnectionSpec(name="warehouse", driver="madeup")])
         diags = validate_cell_annotations(cell, state)
         assert all(d.code != "connection_driver_unknown" for d in diags)
@@ -226,7 +226,7 @@ def test_validation_flags_literal_auth_values():
 
     Without a diagnostic the connection would break after an unrelated rewrite.
     """
-    cell = _sql_cell("# @sql connection=db\nSELECT 1")
+    cell = _sql_cell("-- @sql connection=db\nSELECT 1")
     state = _state_with(
         [
             ConnectionSpec(
@@ -249,7 +249,7 @@ def test_validation_flags_literal_auth_values():
 
 
 def test_validation_clean_when_all_auth_uses_indirection():
-    cell = _sql_cell("# @sql connection=db\nSELECT 1")
+    cell = _sql_cell("-- @sql connection=db\nSELECT 1")
     state = _state_with(
         [
             ConnectionSpec(
@@ -272,7 +272,7 @@ def test_validation_surfaces_sql_parse_error_diagnostic():
     Otherwise only ``defines`` / ``references`` cross the session boundary and the
     parse failure is invisible in the UI.
     """
-    cell = _sql_cell("# @sql connection=db\nSELECT * FROM")  # truncated
+    cell = _sql_cell("-- @sql connection=db\nSELECT * FROM")  # truncated
     state = _state_with([ConnectionSpec(name="db", driver="postgresql")])
     diags = validate_cell_annotations(cell, state)
     codes = [d.code for d in diags]
@@ -284,7 +284,7 @@ def test_validation_surfaces_sql_parse_error_diagnostic():
 
 
 def test_validation_no_sql_parse_error_for_valid_sql():
-    cell = _sql_cell("# @sql connection=db\nSELECT * FROM events")
+    cell = _sql_cell("-- @sql connection=db\nSELECT * FROM events")
     state = _state_with([ConnectionSpec(name="db", driver="postgresql")])
     diags = validate_cell_annotations(cell, state)
     assert all(d.code != "sql_parse_error" for d in diags)
@@ -292,9 +292,76 @@ def test_validation_no_sql_parse_error_for_valid_sql():
 
 def test_validation_skips_sql_parse_check_when_connection_unknown():
     """No resolved connection means no dialect, so no ``sql_parse_error`` is reported."""
-    cell = _sql_cell("# @sql connection=missing\nSELECT * FROM")
+    cell = _sql_cell("-- @sql connection=missing\nSELECT * FROM")
     state = _state_with([])
     diags = validate_cell_annotations(cell, state)
     codes = [d.code for d in diags]
     assert "sql_connection_unknown" in codes
     assert "sql_parse_error" not in codes
+
+
+# --- the `--` marker --------------------------------------------------------
+
+
+def test_a_sql_cell_reads_annotations_as_sql_comments():
+    src = "-- @name top\n-- @sql connection=w\n-- a note\n\n-- @cache forever\nSELECT 1"
+    a = parse_annotations(src, "sql")
+    assert (a.name, a.sql and a.sql.connection, a.cache) == ("top", "w", CachePolicy("forever"))
+
+
+def test_a_hash_line_is_not_a_sql_annotation():
+    """``#`` is no SQL comment: it is the query's first line, and it ends the block."""
+    assert parse_annotations("# @sql connection=w\nSELECT 1", "sql").sql is None
+    after = parse_annotations("-- @sql connection=w\n# note\n-- @name late\nSELECT 1", "sql")
+    assert after.sql is not None and after.name is None
+
+
+def test_the_query_starts_after_the_leading_comment_block():
+    from strata.notebook.annotations import strip_leading_annotations
+
+    src = "-- @sql connection=w\n-- why\n\nSELECT 1 -- trailing\n-- @name not_a_directive\n"
+    assert strip_leading_annotations(src, "sql") == "SELECT 1 -- trailing\n-- @name not_a_directive"
+
+
+def test_set_and_remove_write_the_sql_marker():
+    from strata.notebook.annotations import remove_annotation_directive, set_annotation_directive
+
+    src = "-- @sql connection=w\nSELECT 1\n"
+    named = set_annotation_directive(src, "name", "top", "sql")
+    assert named == "-- @sql connection=w\n-- @name top\nSELECT 1\n"
+    assert remove_annotation_directive(named, "name", "sql") == src
+
+
+def test_a_hash_annotation_in_a_sql_cell_blocks_it():
+    from strata.notebook.annotation_validation import blocking_diagnostic
+
+    cell = _sql_cell("# @sql connection=db\nSELECT 1")
+    diagnostic = blocking_diagnostic(
+        cell, _state_with([ConnectionSpec(name="db", driver="sqlite")])
+    )
+    assert diagnostic is not None and diagnostic.code == "sql_annotation_hash"
+    assert diagnostic.line == 1 and "`-- @sql ...`" in diagnostic.message
+
+
+def test_an_annotation_a_sql_cell_ignores_is_a_warning():
+    cell = _sql_cell("-- @sql connection=db\n-- @worker gpu\n-- @zzz\nSELECT 1")
+    diags = validate_cell_annotations(
+        cell, _state_with([ConnectionSpec(name="db", driver="sqlite")])
+    )
+    ignored = [d for d in diags if d.code == "annotation_not_for_sql"]
+    assert [(d.severity, d.line) for d in ignored] == [("warn", 2)]
+    # An unknown key is still `annotation_unknown`, not this.
+    assert any(d.code == "annotation_unknown" for d in diags)
+
+
+def test_every_annotation_a_sql_cell_reads_is_quiet():
+    from strata.notebook.annotation_validation import SQL_ANNOTATION_KEYS
+
+    cell = _sql_cell(
+        "-- @sql connection=db\n-- @cache forever\n-- @nocache\n-- @name t\n"
+        "-- @after c0\n-- @mount m file:///tmp/m ro\nSELECT 1"
+    )
+    state = _state_with([ConnectionSpec(name="db", driver="sqlite")])
+    codes = {d.code for d in validate_cell_annotations(cell, state)}
+    assert "annotation_not_for_sql" not in codes
+    assert SQL_ANNOTATION_KEYS == {"sql", "cache", "nocache", "name", "after", "mount"}

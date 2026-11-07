@@ -137,7 +137,7 @@ class _PythonExecutor:
         from strata.notebook.annotations import parse_annotations
         from strata.notebook.executor import effective_worker_name
 
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
 
         worker = effective_worker_name(executor.session.notebook_state, cell.id, annotations.worker)
         if worker != "local":

@@ -985,7 +985,7 @@ class NotebookSession:
                 # either way.
                 keyed_elsewhere = (
                     language_executor.has_alternate_cache_scheme
-                    or parse_annotations(cell.source).per_variant
+                    or parse_annotations(cell.source, cell.language).per_variant
                 )
                 # A display alone says nothing of the cell's variables and console, and after
                 # edit, run, undo it is older than both. Restored only as part of the last run.
@@ -2075,7 +2075,7 @@ class NotebookSession:
             return False
         if (
             get_language_executor(cell.language).has_alternate_cache_scheme
-            or parse_annotations(cell.source).per_variant
+            or parse_annotations(cell.source, cell.language).per_variant
         ):
             return False
         return self._resolve_cached_outputs(cell.id, cell.last_provenance_hash) is None
@@ -2152,7 +2152,7 @@ class NotebookSession:
         Source annotations can override the notebook-default mounts at execution time,
         so this merges both layers exactly as the executor does.
         """
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
         merged_mounts = resolve_cell_mounts(
             [], mounts_of(self.notebook_state, cell, cell.source), annotations.mounts
         )
@@ -2190,7 +2190,7 @@ class NotebookSession:
         downstream) reads idle forever. Never raises: an unreachable catalog shows the
         cell stale.
         """
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
         tables = list(annotations.tables)
         if not tables and annotations.sql is None:
             return []
@@ -2216,7 +2216,7 @@ class NotebookSession:
         Checked at most every ``STALE_CHECK_SECONDS``, since staleness runs on each
         source edit and the executor checks again before every run. Never raises.
         """
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
         if not annotations.fetches:
             return []
         from strata.notebook.fetch import FetchCache, guard_settings
@@ -2234,7 +2234,7 @@ class NotebookSession:
         per declaration; the executor resolves before every run and records the answer
         here. Never raises: an unresolvable name fingerprints as stale.
         """
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
         if not annotations.datasets:
             return []
         from strata.notebook import datasets
@@ -2280,7 +2280,7 @@ class NotebookSession:
         references enter its provenance, so adding an unrelated notebook-level secret
         does not invalidate it.
         """
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
         resolved = drop_blanked_secrets(cell.env)
         resolved.update(annotations.env)
         declared = set(annotations.env) | set(getattr(cell, "env_overrides", {}) or {})
@@ -2288,7 +2288,7 @@ class NotebookSession:
 
     def _effective_worker_name(self, cell: Any) -> str | None:
         """Return the effective worker name with annotation precedence."""
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
         if annotations.worker:
             return annotations.worker
         if cell.worker:

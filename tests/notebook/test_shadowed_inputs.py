@@ -126,7 +126,7 @@ async def test_sql_binds_the_wired_producer(tmp_path: Path, other: str):
     from strata.notebook.sql.cell_executor import _load_upstream_variables
 
     source = (
-        "# @sql connection=db\n"
+        "-- @sql connection=db\n"
         f"SELECT CAST(:state AS INTEGER) * 100 + CAST(:{other} AS INTEGER) AS out\n"
     )
     session = _session(tmp_path, other, "sql", source)

@@ -589,7 +589,7 @@ def _published(session: Any, cell: Any, variants: list[str]) -> dict[str, Any]:
         "artifact_uri": cell.artifact_uri,
         "instances": instances,
     }
-    if parse_annotations(cell.source).each is not None:
+    if parse_annotations(cell.source, cell.language).each is not None:
         published["each"] = _each_items(store, cell, outputs)
     return published
 

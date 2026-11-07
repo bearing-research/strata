@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from strata.notebook.ops import CellView, WorkerListView
 
-from strata.notebook.annotations import parse_annotations
+from strata.notebook.annotations import comment_marker, parse_annotations
 from strata.notebook.models import CellLanguage
 
 # Disabled when stdout isn't a tty so pipes and CI logs stay clean.
@@ -51,14 +51,15 @@ def _yellow(text: str) -> str:
     return _color("33", text)
 
 
-def _cell_label(source: str, max_len: int = 32) -> str:
+def _cell_label(source: str, language: CellLanguage | str, max_len: int = 32) -> str:
     """Short display label for a cell: its ``@name``, or first code line, or "(empty)"."""
-    name = parse_annotations(source).name
+    name = parse_annotations(source, language).name
     if name:
         return name[:max_len] + ("…" if len(name) > max_len else "")
+    marker = comment_marker(language)
     for raw in source.splitlines():
         line = raw.strip()
-        if not line or line.startswith("#"):
+        if not line or line.startswith(marker):
             continue
         return line[:max_len] + ("…" if len(line) > max_len else "")
     return "(empty)"
@@ -327,7 +328,7 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             if cell.language == CellLanguage.MARKDOWN:
                 entry = {
                     "id": cell_id,
-                    "label": f"[markdown] {_cell_label(cell.source)}",
+                    "label": f"[markdown] {_cell_label(cell.source, cell.language)}",
                     "status": "ok",
                     "reason": None,
                     "duration_ms": 0,
@@ -349,7 +350,7 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             }:
                 entry = {
                     "id": cell_id,
-                    "label": f"[{cell.language}] {_cell_label(cell.source)}",
+                    "label": f"[{cell.language}] {_cell_label(cell.source, cell.language)}",
                     "status": "skipped",
                     "reason": f"unsupported language: {cell.language}",
                     "duration_ms": 0,
@@ -364,7 +365,7 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             if any(u in failed_cells for u in upstream):
                 entry = {
                     "id": cell_id,
-                    "label": _cell_label(cell.source),
+                    "label": _cell_label(cell.source, cell.language),
                     "status": "skipped",
                     "reason": "upstream failed",
                     "duration_ms": 0,
@@ -393,7 +394,7 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             except Exception as exc:
                 entry = {
                     "id": cell_id,
-                    "label": _cell_label(cell.source),
+                    "label": _cell_label(cell.source, cell.language),
                     "status": "error",
                     "error": f"{type(exc).__name__}: {exc}",
                     "duration_ms": 0,
@@ -407,7 +408,7 @@ async def _run_notebook(args: argparse.Namespace) -> int:
 
             entry: dict[str, Any] = {
                 "id": cell_id,
-                "label": _cell_label(cell.source),
+                "label": _cell_label(cell.source, cell.language),
                 "status": "ok" if result.success else "error",
                 "duration_ms": int(result.duration_ms or 0),
                 "cache_hit": bool(result.cache_hit),
@@ -742,7 +743,7 @@ def new_main(args: argparse.Namespace) -> int:
         )
     else:
         print(f"created: {notebook_dir}")
-        print(_dim("  add cells under cells/*.py and list them in notebook.toml"))
+        print(_dim("  add cell files under cells/ and list them in notebook.toml"))
         print(_dim(f"  validate: strata validate {notebook_dir}"))
         print(_dim(f"  run:      strata run {notebook_dir}"))
     return 0
@@ -1198,8 +1199,8 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     add_p.add_argument("--after", help="Insert after this cell id (default: at the end)")
     add_p.add_argument(
         "--language",
-        choices=["python", "markdown", "sql", "r", "prompt", "widget"],
-        default="python",
+        choices=[language.value for language in CellLanguage],
+        help="The cell's language (default: python; required when --file names another's)",
     )
     add_p.add_argument(
         "--run",
@@ -1234,7 +1235,9 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     mv_p.add_argument("--format", choices=["human", "json"], default="json")
     mv_p.set_defaults(func=cell_mv_main)
 
-    annotate_p = sub.add_parser("annotate", help="Set or remove a cell's `# @key` annotations")
+    annotate_p = sub.add_parser(
+        "annotate", help="Set or remove a cell's annotations (`# @key`; `-- @key` in a SQL cell)"
+    )
     _add_target_args(annotate_p)
     annotate_p.add_argument("cell_id", help="Cell id to annotate")
     annotate_p.add_argument(
@@ -1418,6 +1421,14 @@ def _emit_op_error(exc: Exception, fmt: str) -> int:
     return 1
 
 
+def _language_of_extension(file: str | None) -> CellLanguage | None:
+    """The language whose cell files carry *file*'s extension, if any."""
+    from strata.notebook.writer import EXTENSION_BY_LANGUAGE
+
+    suffix = Path(file).suffix.lstrip(".").lower() if file and file != "-" else ""
+    return next((lang for lang, ext in EXTENSION_BY_LANGUAGE.items() if ext == suffix), None)
+
+
 def cell_add_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
@@ -1429,6 +1440,17 @@ def cell_add_main(args: argparse.Namespace) -> int:
         except OSError as exc:
             print(f"error: cannot read --file: {exc}", file=sys.stderr)
             return 2
+    if args.language is None:
+        # The extension never picks the language, but a .sql file must not become Python.
+        named = _language_of_extension(args.file)
+        if named not in (None, CellLanguage.PYTHON):
+            print(
+                f"error: {args.file} looks like a {named} cell; pass --language {named} "
+                "(or --language python)",
+                file=sys.stderr,
+            )
+            return 2
+        args.language = CellLanguage.PYTHON.value
 
     if args.run:
         import asyncio
@@ -1579,7 +1601,7 @@ def cell_pin_fetch_main(args: argparse.Namespace) -> int:
     except NotebookOpsError as exc:
         return _emit_op_error(exc, args.format)
 
-    specs = parse_annotations(cell.source).fetches
+    specs = parse_annotations(cell.source, cell.language).fetches
     unknown = sorted(set(args.names) - {spec.name for spec in specs})
     if unknown:
         print(
@@ -1651,11 +1673,12 @@ def cell_annotate_main(args: argparse.Namespace) -> int:
         if ops is None:
             return 2
         try:
-            source = ops.get_cell(args.cell_id).source
+            current = ops.get_cell(args.cell_id)
+            source = current.source
             for key, value in sets:
-                source = set_annotation_directive(source, key, value)
+                source = set_annotation_directive(source, key, value, current.language)
             for key in args.unset:
-                source = remove_annotation_directive(source, key.strip())
+                source = remove_annotation_directive(source, key.strip(), current.language)
             cell = ops.edit_cell(args.cell_id, source)
         except ValueError as exc:  # e.g. a repeatable directive passed to --set
             print(f"error: {exc}", file=sys.stderr)

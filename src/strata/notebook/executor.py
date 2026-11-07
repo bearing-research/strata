@@ -667,7 +667,7 @@ class CellExecutor:
         # serves every worker lookup in it.
         notebook_state = self.session.notebook_state
         worker = effective_worker_name(
-            self.session.notebook_state, cell_id, parse_annotations(source).worker
+            self.session.notebook_state, cell_id, self._annotations(cell_id, source).worker
         )
         if init is not None:
             self._branch_inits[cell_id] = init
@@ -728,7 +728,7 @@ class CellExecutor:
         use_cache: bool,
     ) -> CellExecutionResult:
         """Route one execution to its language / loop / fan-out pipeline."""
-        annotations = parse_annotations(source)
+        annotations = self._annotations(cell_id, source)
         timeout_seconds = self._resolve_effective_timeout(
             cell_id,
             timeout_seconds,
@@ -870,7 +870,7 @@ class CellExecutor:
     def _timeout_message(self, cell_id: str | None, timeout_seconds: float) -> str:
         """``cell_timeout_message`` naming the lever ``_resolve_effective_timeout`` took."""
         cell = self.session.notebook_state.get_cell(cell_id) if cell_id else None
-        if cell is not None and parse_annotations(cell.source).timeout is not None:
+        if cell is not None and parse_annotations(cell.source, cell.language).timeout is not None:
             return cell_timeout_message(timeout_seconds, set_by="annotation")
         if (
             cell is not None and cell.timeout is not None
@@ -923,7 +923,7 @@ class CellExecutor:
         instance's is this ``for_instance``.
         """
         if annotations is None:
-            annotations = parse_annotations(source)
+            annotations = self._annotations(cell_id, source)
         if mount_specs is None:
             mount_specs = self._resolve_cell_mount_specs(cell_id, source)
         effective_worker = effective_worker_name(
@@ -1233,7 +1233,7 @@ class CellExecutor:
 
     async def _gone_tables(self, source: str) -> list[TableWriteSpec]:
         """The ``@write_table`` lines of *source* whose table no longer exists."""
-        specs = parse_annotations(source).table_writes
+        specs = parse_annotations(source, CellLanguage.PYTHON).table_writes
         if not specs:
             return []
         return await anyio.to_thread.run_sync(
@@ -1945,6 +1945,11 @@ class CellExecutor:
     # ①½ Resolve mounts
     # ------------------------------------------------------------------
 
+    def _annotations(self, cell_id: str, source: str) -> CellAnnotations:
+        """*source*'s annotations, read in *cell_id*'s language (``--`` for SQL)."""
+        cell = self.session.notebook_state.get_cell(cell_id)
+        return parse_annotations(source, cell.language if cell else CellLanguage.PYTHON)
+
     def _resolve_cell_mount_specs(
         self,
         cell_id: str,
@@ -1955,7 +1960,7 @@ class CellExecutor:
 
         cell_mounts_spec = mounts_of(self.session.notebook_state, cell, source) if cell else []
 
-        annotations = parse_annotations(source)
+        annotations = parse_annotations(source, cell.language if cell else CellLanguage.PYTHON)
         annotation_mounts = annotations.mounts
 
         merged = resolve_cell_mounts(
@@ -2275,7 +2280,7 @@ class CellExecutor:
         The weights its provenance makes, except that a ``@fetch`` is asked with a HEAD
         rather than downloaded.
         """
-        annotations = parse_annotations(source)
+        annotations = self._annotations(cell_id, source)
         mount_specs = self._resolve_cell_mount_specs(cell_id, source)
         machine = effective_worker_name(self.session.notebook_state, cell_id, annotations.worker)
         weights: list[InputWeight] = []
@@ -3135,7 +3140,7 @@ class CellExecutor:
                 return run_output_key(provenance_hash, local_run.build_id, var_name)
             return derive_subkey(provenance_hash, var_name)
 
-        output_dir_names = set(parse_annotations(source or cell.source).output_dirs)
+        output_dir_names = set(parse_annotations(source or cell.source, cell.language).output_dirs)
         for var_name in consumed_vars | leaf_vars:
             if var_name in output_dir_names:
                 try:
@@ -3245,7 +3250,7 @@ class CellExecutor:
 
         # One run's outputs become current together or not at all: a downstream cell
         # must never read one variable from this run and another from an earlier one.
-        table_writes = parse_annotations(source or cell.source).table_writes
+        table_writes = parse_annotations(source or cell.source, cell.language).table_writes
         # An @each cell writes once, over every item, with its manifest.
         if variant in self._each_items.get(cell_id, {}):
             table_writes = []
@@ -3344,7 +3349,7 @@ class CellExecutor:
         Called before the run's provenance is recorded and its outputs stored, since
         nothing may see those two apart.
         """
-        if not parse_annotations(source).output_dirs:
+        if not self._annotations(cell_id, source).output_dirs:
             return None
         return await anyio.to_thread.run_sync(
             self._collect_output_dirs, cell_id, source, output_dir
@@ -3356,7 +3361,7 @@ class CellExecutor:
         """Each folder's manifest, or what collecting it raised: run in a thread, since a
         folder can hold gigabytes. Staging reports a failure as if it had collected it."""
         collected: dict[str, bytes | Exception] = {}
-        for name in parse_annotations(source).output_dirs:
+        for name in self._annotations(cell_id, source).output_dirs:
             try:
                 collected[name] = self._collect_output_dir(cell_id, name, output_dir)
             except Exception as exc:
@@ -3432,7 +3437,7 @@ class CellExecutor:
         are listed and downloaded through ``GET .../cells/{cell_id}/folders/{name}``. Best
         effort: the run has already failed.
         """
-        names = parse_annotations(source).output_dirs
+        names = self._annotations(cell_id, source).output_dirs
         if not names:
             return
         artifact_mgr = self.session.get_artifact_manager()
@@ -3477,7 +3482,7 @@ class CellExecutor:
         """Why this run may not write its ``@write_table`` tables, checked before it runs."""
         try:
             authorize_table_writes(
-                parse_annotations(source).table_writes,
+                parse_annotations(source, CellLanguage.PYTHON).table_writes,
                 config=self._lake_config(),
                 env=dict(self.session.notebook_state.env),
                 notebook=self.session.path,
@@ -4033,7 +4038,7 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
 
     # A batch never sees a fetch's bytes; a fetching cell runs single-cell, where the
     # fetch is checked and injected.
-    annotations = parse_annotations(cell.source)
+    annotations = parse_annotations(cell.source, cell.language)
     if annotations.fetches or annotations.datasets or annotations.each is not None:
         return False
 

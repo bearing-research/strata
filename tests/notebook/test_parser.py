@@ -329,3 +329,44 @@ def test_a_cell_file_in_a_subdirectory_of_cells_still_parses(tmp_path):
     (nb / "cells" / "sub" / "c1.py").write_text("x = 1\n")
 
     assert parse_notebook(nb).cells[0].source == "x = 1\n"
+
+
+def test_a_cell_without_a_language_refuses_the_notebook(tmp_path):
+    """No default: a ``.sql`` entry that leaves ``language`` out must not run as Python."""
+    nb = create_notebook(tmp_path, "No language", initialize_environment=False)
+    add_cell_to_notebook(nb, "q", language="sql")
+    data = tomllib.loads((nb / "notebook.toml").read_text())
+    del data["cells"][0]["language"]
+    (nb / "notebook.toml").write_text(tomli_w.dumps(data))
+
+    with pytest.raises(ValueError, match="cell 'q' has no `language`"):
+        parse_notebook(nb)
+
+
+@pytest.mark.parametrize(
+    ("change", "match"),
+    [
+        ({"language": "SQL"}, r"cell 'q' is not valid: language: Input should be"),
+        ({"order": "first"}, r"cell 'q' is not valid: order: "),
+    ],
+)
+def test_a_bad_cell_entry_names_the_cell(tmp_path, change, match):
+    nb = create_notebook(tmp_path, "Bad entry", initialize_environment=False)
+    add_cell_to_notebook(nb, "q", language="sql")
+    data = tomllib.loads((nb / "notebook.toml").read_text())
+    data["cells"][0].update(change)
+    (nb / "notebook.toml").write_text(tomli_w.dumps(data))
+
+    with pytest.raises(ValueError, match=match):
+        parse_notebook(nb)
+
+
+def test_a_cells_entry_that_is_not_a_table_is_a_value_error(tmp_path):
+    """A ValueError, so the open route answers 400 rather than 500."""
+    nb = create_notebook(tmp_path, "Not a table", initialize_environment=False)
+    data = tomllib.loads((nb / "notebook.toml").read_text())
+    data["cells"] = ["x"]
+    (nb / "notebook.toml").write_text(tomli_w.dumps(data))
+
+    with pytest.raises(ValueError, match="entry is not a table"):
+        parse_notebook(nb)

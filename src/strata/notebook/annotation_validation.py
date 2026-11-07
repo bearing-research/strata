@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING
 
 from strata.notebook.annotations import (
     _LOOP_START_FROM_RE,
+    ANNOTATION_KEYS,
+    comment_marker,
     iter_annotation_block,
+    parse_annotation_directive,
     parse_annotations,
 )
 from strata.notebook.models import (
@@ -120,7 +123,7 @@ def _validate_prompt_inputs(analysis: cg.Analysis, cell_id: str) -> list[Annotat
 
 def _validate_worker(cell: CellState, notebook_state: NotebookState) -> list[AnnotationDiagnostic]:
     """``worker_unknown``: a worker execution cannot resolve."""
-    annotations = parse_annotations(cell.source)
+    annotations = parse_annotations(cell.source, cell.language)
     diagnostics: list[AnnotationDiagnostic] = []
     # The catalog execution resolves against: in service mode the server's registry,
     # where members cannot declare workers at all.
@@ -460,17 +463,17 @@ def sql_connection_diagnostics(
 ) -> list[AnnotationDiagnostic]:
     """A SQL cell's ``@sql`` connection: missing, malformed, unknown, or its own problems."""
     diagnostics: list[AnnotationDiagnostic] = []
-    sql = parse_annotations(source).sql
+    sql = parse_annotations(source, CellLanguage.SQL).sql
     if sql is None or not sql.connection:
         diagnostics.append(
             AnnotationDiagnostic(
                 severity=DiagnosticSeverity.ERROR,
                 code="sql_connection_missing",
                 message=(
-                    "SQL cells require `# @sql connection=<name>`. The connection "
+                    "SQL cells require `-- @sql connection=<name>`. The connection "
                     "must match a `[connections.<name>]` block in notebook.toml."
                 ),
-                line=_find_annotation_line(source, "sql"),
+                line=_find_annotation_line(source, "sql", language=CellLanguage.SQL),
             )
         )
     else:
@@ -511,13 +514,48 @@ def sql_connection_diagnostics(
     return diagnostics
 
 
+# What a SQL cell acts on; any other ``-- @key`` on one is read by nothing.
+SQL_ANNOTATION_KEYS = frozenset({"sql", "cache", "nocache", "name", "after", "mount"})
+
+
+def sql_annotation_diagnostics(source: str) -> list[AnnotationDiagnostic]:
+    """A ``# @key`` line, which SQL sends to the database, and keys SQL cells ignore."""
+    diagnostics = [
+        AnnotationDiagnostic(
+            severity=DiagnosticSeverity.ERROR,
+            code="sql_annotation_hash",
+            message=(
+                f"SQL cells write annotations as `-- @{key} ...`; this `# @{key}` line "
+                "is not one, and the database would read it as SQL."
+            ),
+            line=lineno,
+        )
+        for lineno, line_text in iter_annotation_block(source, CellLanguage.PYTHON)
+        if (key := (parse_annotation_directive(line_text) or ("", ""))[0])
+    ]
+    for lineno, line_text in iter_annotation_block(source, CellLanguage.SQL):
+        parsed = parse_annotation_directive(line_text, CellLanguage.SQL)
+        if parsed is None or parsed[0] in SQL_ANNOTATION_KEYS or parsed[0] not in ANNOTATION_KEYS:
+            continue
+        supported = ", ".join(f"`@{k}`" for k in sorted(SQL_ANNOTATION_KEYS))
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="annotation_not_for_sql",
+                message=f"`@{parsed[0]}` does nothing on a SQL cell, which reads {supported}.",
+                line=lineno,
+            )
+        )
+    return diagnostics
+
+
 def _validate_sql_tables(
     cell: CellState,
     notebook_state: NotebookState,
 ) -> list[AnnotationDiagnostic]:
     """SQL that does not parse, or names a table only when it runs."""
     diagnostics: list[AnnotationDiagnostic] = []
-    sql = parse_annotations(cell.source).sql
+    sql = parse_annotations(cell.source, CellLanguage.SQL).sql
     valid_by_name = {c.name: c for c in notebook_state.connections}
 
     # Surface the analyzer's sqlglot ``parse_error`` as a diagnostic so it survives the
@@ -562,8 +600,8 @@ def _validate_sql_tables(
                             f"{named} is resolved only when the query runs (a "
                             "table named at run time, a table function or a "
                             "file), so the cache can't tell when it changes: "
-                            "this cell re-runs every time. Add `# @cache session` "
-                            "or `# @cache ttl=...` to reuse results."
+                            "this cell re-runs every time. Add `-- @cache session` "
+                            "or `-- @cache ttl=...` to reuse results."
                         ),
                         line=None,
                     )
@@ -594,17 +632,24 @@ def _validate_sql_tables(
 def _sql_connection_line(source: str, target: str) -> int | None:
     """The last ``@sql`` line naming ``target``: later lines win, so it is the one in force."""
     found = None
-    for lineno, line_text in iter_annotation_block(source):
-        tokens = line_text.strip().lstrip("#").split()
+    for lineno, line_text in iter_annotation_block(source, CellLanguage.SQL):
+        tokens = line_text.strip().removeprefix("--").split()
         if tokens and tokens[0].lower() == "@sql" and f"connection={target}" in tokens:
             found = lineno
     return found
 
 
-def _find_annotation_line(source: str, directive: str, needle: str | None = None) -> int | None:
+def _find_annotation_line(
+    source: str,
+    directive: str,
+    needle: str | None = None,
+    *,
+    language: CellLanguage | str | None = None,
+) -> int | None:
     """Return 1-based line number of the first matching annotation."""
-    for lineno, line_text in iter_annotation_block(source):
-        lowered = line_text.strip().lstrip("#").strip().lower()
+    marker = comment_marker(language)
+    for lineno, line_text in iter_annotation_block(source, language):
+        lowered = line_text.strip().removeprefix(marker).strip().lower()
         if not lowered.startswith(f"@{directive.lower()}"):
             continue
         if needle is None or needle.lower() in lowered:

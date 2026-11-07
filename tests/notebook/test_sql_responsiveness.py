@@ -28,15 +28,15 @@ from strata.notebook.writer import (  # noqa: E402
 # Bounded, and long enough that the loop would visibly stall if the driver ran
 # on it. Nothing here asserts how long it takes, only that other work ran.
 SLOW = (
-    "# @sql connection=db\n"
-    "# @name slow_total\n"
+    "-- @sql connection=db\n"
+    "-- @name slow_total\n"
     "WITH RECURSIVE counter(n) AS (\n"
     "  VALUES(0) UNION ALL SELECT n+1 FROM counter WHERE n < 20000000\n"
     ") SELECT SUM(n) AS total FROM counter\n"
 )
 GOOD = (
-    "# @sql connection=db\n"
-    "# @name rev\n"
+    "-- @sql connection=db\n"
+    "-- @name rev\n"
     "SELECT region, SUM(gross) AS net FROM orders GROUP BY region\n"
 )
 CONSUMER = "rows = len(rev)\n{'rows': rows}\n"
@@ -123,8 +123,8 @@ async def test_a_write_cell_does_not_run_on_the_event_loop(tmp_path, monkeypatch
     monkeypatch.setattr(cell_executor, "_execute_write_statements", recording_write)
 
     seed = (
-        "# @sql connection=db write=true\n"
-        "# @name seeded\n"
+        "-- @sql connection=db write=true\n"
+        "-- @name seeded\n"
         "INSERT INTO orders VALUES (9, 'West', 50.0);\n"
     )
     session = _session(_notebook(tmp_path, [("w", "sql", seed)]))

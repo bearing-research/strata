@@ -11,7 +11,7 @@ flag: read cells should use a ``credentials_path`` service account with
 writes use the read credentials).
 
 Streaming inserts make ``last_modified_time`` lag by up to about 90 minutes, so
-freshness is underestimated; such cells should use ``# @cache session``.
+freshness is underestimated; such cells should use ``-- @cache session``.
 """
 
 from __future__ import annotations

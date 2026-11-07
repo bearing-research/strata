@@ -32,6 +32,7 @@ from strata.notebook.harness_user import (
 )
 from strata.notebook.layout import cell_source_path, write_gitignore
 from strata.notebook.models import (
+    CellLanguage,
     ConnectionSpec,
     MalformedConnection,
     MountSpec,
@@ -65,6 +66,18 @@ def _serialize_mounts(mounts: list[MountSpec]) -> list[dict[str, Any]]:
 # Rendered as ``[[name]]`` blocks: tomli_w always picks the inline
 # ``name = [{...}]`` form for simple dicts, which makes git diffs messy.
 _ARRAY_OF_TABLES_SECTIONS = ("workers", "mounts", "variant_group")
+
+# A new cell's file extension, so outside editors and linters read it as its language;
+# the language itself comes from notebook.toml, never from the extension. Every
+# language is listed, so a new one cannot fall back to ``.py`` unnoticed.
+EXTENSION_BY_LANGUAGE = {
+    CellLanguage.PYTHON: "py",
+    CellLanguage.PROMPT: "prompt",
+    CellLanguage.SQL: "sql",
+    CellLanguage.MARKDOWN: "md",
+    CellLanguage.R: "r",
+    CellLanguage.WIDGET: "widget",
+}
 
 
 def _dump_notebook_toml(data: dict[str, Any], fp: Any) -> None:
@@ -876,11 +889,7 @@ def add_cell_to_notebook(
     else:
         order = len(cells_data)
 
-    # Language-matching extension so the file works in outside editors. The harness
-    # reads source by content, so everything else (SQL included) uses ``.py``.
-    extension_by_language = {"markdown": "md", "r": "r", "widget": "widget"}
-    extension = extension_by_language.get(language, "py")
-    cell_filename = f"{cell_id}.{extension}"
+    cell_filename = f"{cell_id}.{EXTENSION_BY_LANGUAGE[CellLanguage(language)]}"
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)
 

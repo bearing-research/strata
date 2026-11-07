@@ -69,7 +69,12 @@ def _session(nb_dir: Path) -> Any:
 
 
 def _read(nb_dir: Path, cell_id: str) -> str:
-    return (nb_dir / "cells" / f"{cell_id}.py").read_text()
+    from strata.notebook.parser import parse_notebook
+
+    # By the file notebook.toml names: the extension follows the language.
+    cell = parse_notebook(nb_dir).get_cell(cell_id)
+    assert cell is not None
+    return cell.source
 
 
 def _load_arrow(session: Any, uri: str) -> Any:
@@ -102,8 +107,8 @@ async def test_sql_injection_via_bind_does_not_alter_database(tmp_path):
             (
                 "sql",
                 "sql",
-                "# @sql connection=db\n"
-                "# @cache forever\n"
+                "-- @sql connection=db\n"
+                "-- @cache forever\n"
                 "SELECT id FROM events WHERE name = :needle\n",
             ),
         ],
@@ -151,8 +156,8 @@ async def test_sql_cache_keyed_on_upstream_bind_value_not_rerun(tmp_path):
             (
                 "sql",
                 "sql",
-                "# @sql connection=db\n"
-                "# @cache forever\n"
+                "-- @sql connection=db\n"
+                "-- @cache forever\n"
                 "SELECT id, name FROM events WHERE value > :min_value ORDER BY id\n",
             ),
         ],
@@ -227,7 +232,7 @@ async def test_sql_cache_keyed_on_upstream_bind_value_not_rerun(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_snapshot_policy_errors_before_opening_connection(tmp_path, monkeypatch):
-    """``# @cache snapshot`` on SQLite fails in ``resolve_cache_policy``, before any connection.
+    """``-- @cache snapshot`` on SQLite fails in ``resolve_cache_policy``, before any connection.
 
     The adapter's ``open`` is patched to crash and counted, so a regression that
     opens a connection or runs probes first fails with the crash, not the diagnostic.
@@ -244,7 +249,7 @@ async def test_sql_snapshot_policy_errors_before_opening_connection(tmp_path, mo
             (
                 "c1",
                 "sql",
-                "# @sql connection=db\n# @cache snapshot\nSELECT * FROM events\n",
+                "-- @sql connection=db\n-- @cache snapshot\nSELECT * FROM events\n",
             )
         ],
     )
@@ -293,7 +298,7 @@ async def test_sql_null_bind_param_via_none_upstream(tmp_path):
             (
                 "sql",
                 "sql",
-                "# @sql connection=db\n# @cache forever\nSELECT :sentinel AS sentinel_back\n",
+                "-- @sql connection=db\n-- @cache forever\nSELECT :sentinel AS sentinel_back\n",
             ),
         ],
     )
@@ -348,8 +353,8 @@ async def test_sql_empty_result_set_produces_valid_artifact(tmp_path):
             (
                 "c1",
                 "sql",
-                "# @sql connection=db\n"
-                "# @cache forever\n"
+                "-- @sql connection=db\n"
+                "-- @cache forever\n"
                 "SELECT id, name FROM events WHERE value < 0\n",
             )
         ],
@@ -378,7 +383,7 @@ class TestAnOutsideWriteIsSeen:
 
         db_path = tmp_path / "events.db"
         _seed_sqlite(db_path)
-        source = "# @sql connection=db\nSELECT sum(value) AS total FROM events\n"
+        source = "-- @sql connection=db\nSELECT sum(value) AS total FROM events\n"
         nb_dir = _build_notebook(tmp_path, db_path=db_path, cells=[("sql", "sql", source)])
         session = _session(nb_dir)
         executor = CellExecutor(session)
@@ -403,7 +408,7 @@ class TestAnOutsideWriteIsSeen:
 
         db_path = tmp_path / "events.db"
         _seed_sqlite(db_path)
-        source = "# @sql connection=db\nSELECT sum(value) AS total FROM events\n"
+        source = "-- @sql connection=db\nSELECT sum(value) AS total FROM events\n"
         nb_dir = _build_notebook(tmp_path, db_path=db_path, cells=[("sql", "sql", source)])
         executor = CellExecutor(_session(nb_dir))
 
@@ -421,7 +426,7 @@ class TestAnOutsideWriteIsSeen:
         _seed_sqlite(db_path)
         with sqlite3.connect(db_path) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-        source = "# @sql connection=db\nSELECT sum(value) AS total FROM events\n"
+        source = "-- @sql connection=db\nSELECT sum(value) AS total FROM events\n"
         nb_dir = _build_notebook(tmp_path, db_path=db_path, cells=[("sql", "sql", source)])
         session = _session(nb_dir)
         executor = CellExecutor(session)
@@ -483,7 +488,7 @@ class TestACellThatAlwaysRunsMovesItsConsumers:
             tmp_path,
             db_path=db_path,
             cells=[
-                ("sql", "sql", "# @sql connection=db\n# @name q\nSELECT id FROM events\n"),
+                ("sql", "sql", "-- @sql connection=db\n-- @name q\nSELECT id FROM events\n"),
                 ("count", "python", "total = len(q)\n"),
                 ("show", "python", "print(total)\n"),
             ],

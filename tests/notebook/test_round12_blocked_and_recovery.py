@@ -25,7 +25,7 @@ from strata.notebook.writer import (  # noqa: E402
     write_cell,
 )
 
-GOOD = "# @sql connection=db\n# @name inventory\nSELECT sku, qty FROM stock\n"
+GOOD = "-- @sql connection=db\n-- @name inventory\nSELECT sku, qty FROM stock\n"
 BAD = GOOD.replace("FROM stock", "FROM missing_stock")
 MID = "shortage = len(inventory)\nshortage\n"
 REPORT = "report = shortage * 2\n{'report': report}\n"

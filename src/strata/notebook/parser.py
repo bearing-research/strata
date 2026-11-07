@@ -7,8 +7,11 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from strata.notebook.layout import cell_source_path
 from strata.notebook.models import (
+    CellLanguage,
     CellMeta,
     CellOutput,
     CellState,
@@ -80,12 +83,34 @@ def _parse_catalogs(toml_data: dict) -> dict[str, dict]:
     return {str(name): dict(body) for name, body in raw.items() if isinstance(body, dict)}
 
 
+def parse_cell_entry(entry: object) -> CellMeta:
+    """One ``[[cells]]`` entry; anything it cannot be is refused, naming the cell."""
+    if not isinstance(entry, dict):
+        raise ValueError(f"notebook.toml: a [[cells]] entry is not a table: {entry!r}")
+    cell_id = entry.get("id")
+    if "language" not in entry:
+        languages = ", ".join(f'"{language.value}"' for language in CellLanguage)
+        raise ValueError(
+            f"notebook.toml: cell {cell_id!r} has no `language`; add one of "
+            f'{languages}, e.g. language = "python"'
+        )
+    try:
+        return CellMeta(**entry)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors()
+        )
+        raise ValueError(f"notebook.toml: cell {cell_id!r} is not valid: {problems}") from exc
+
+
 def parse_notebook(directory: Path) -> NotebookState:
     """Parse a notebook directory: notebook.toml plus every cell file.
 
     Raises:
         FileNotFoundError: If notebook.toml is missing.
-        ValueError: If a cell's ``file`` points outside ``cells/``.
+        ValueError: If a cell's ``file`` points outside ``cells/``, or a cell has no
+            ``language``.
     """
     directory = Path(directory)
     notebook_toml_path = directory / "notebook.toml"
@@ -149,7 +174,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         timeout=toml_data.get("timeout"),
         env=toml_data.get("env", {}),
         workers=[WorkerSpec(**worker) for worker in toml_data.get("workers", [])],
-        cells=[CellMeta(**cell_meta) for cell_meta in toml_data.get("cells", [])],
+        cells=[parse_cell_entry(entry) for entry in toml_data.get("cells", [])],
         mounts=[MountSpec(**m) for m in toml_data.get("mounts", [])],
         connections=_parsed_connections,
         malformed_connections=_parsed_malformed,

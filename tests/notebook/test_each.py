@@ -1188,7 +1188,7 @@ class TestOtherSurfaces:
         ("language", "source"),
         [
             ("prompt", "Summarize {{ out }}\n"),
-            ("sql", "# @sql connection=db\nSELECT :out AS x\n"),
+            ("sql", "-- @sql connection=db\nSELECT :out AS x\n"),
             pytest.param(
                 "r",
                 "x <- length(out)\n",

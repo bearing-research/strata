@@ -7,34 +7,34 @@ from strata.notebook.annotations import parse_annotations
 
 class TestNameAnnotation:
     def test_name_with_spaces(self):
-        result = parse_annotations("# @name Load arXiv Papers\nx = 1")
+        result = parse_annotations("# @name Load arXiv Papers\nx = 1", "python")
         assert result.name == "Load arXiv Papers"
 
     def test_name_identifier(self):
-        result = parse_annotations("# @name research_themes\n")
+        result = parse_annotations("# @name research_themes\n", "python")
         assert result.name == "research_themes"
 
     def test_name_with_special_chars(self):
         """@name accepts names with parentheses and other chars."""
-        result = parse_annotations("# @name Aggregate by Topic (DataFusion)\nx = 1")
+        result = parse_annotations("# @name Aggregate by Topic (DataFusion)\nx = 1", "python")
         assert result.name == "Aggregate by Topic (DataFusion)"
 
     def test_name_empty_is_none(self):
-        result = parse_annotations("# @name\nx = 1")
+        result = parse_annotations("# @name\nx = 1", "python")
         assert result.name is None
 
     def test_name_no_annotation(self):
-        result = parse_annotations("x = 1")
+        result = parse_annotations("x = 1", "python")
         assert result.name is None
 
     def test_name_with_worker(self):
-        result = parse_annotations("# @name Train Model\n# @worker gpu-fly\nx = 1")
+        result = parse_annotations("# @name Train Model\n# @worker gpu-fly\nx = 1", "python")
         assert result.name == "Train Model"
         assert result.worker == "gpu-fly"
 
     def test_name_after_non_comment_ignored(self):
         """@name after the leading comment block is ignored."""
-        result = parse_annotations("x = 1\n# @name Late Name\n")
+        result = parse_annotations("x = 1\n# @name Late Name\n", "python")
         assert result.name is None
 
 
@@ -94,7 +94,9 @@ class TestNameInRoutes:
 class TestLoopAnnotation:
     def test_loop_requires_max_iter_and_carry(self):
         """A well-formed ``@loop`` populates max_iter and carry."""
-        result = parse_annotations("# @loop max_iter=10 carry=state\nstate = refine(state)")
+        result = parse_annotations(
+            "# @loop max_iter=10 carry=state\nstate = refine(state)", "python"
+        )
         assert result.loop is not None
         assert result.loop.max_iter == 10
         assert result.loop.carry == "state"
@@ -109,14 +111,14 @@ class TestLoopAnnotation:
             "# @loop_until state['confidence'] > 0.9\n"
             "state = refine(state)\n"
         )
-        result = parse_annotations(source)
+        result = parse_annotations(source, "python")
         assert result.loop is not None
         assert result.loop.until_expr == "state['confidence'] > 0.9"
 
     def test_loop_start_from_parses_cell_and_iter(self):
         """``start_from=<cell>@iter=<k>`` is split into its two fields."""
         source = "# @loop max_iter=5 carry=state start_from=evolve@iter=3\nstate = propose(state)"
-        result = parse_annotations(source)
+        result = parse_annotations(source, "python")
         assert result.loop is not None
         assert result.loop.start_from_cell == "evolve"
         assert result.loop.start_from_iter == 3
@@ -129,20 +131,20 @@ class TestLoopAnnotation:
             "# @loop_until state.get('done')\n"
             "state = tick(state)\n"
         )
-        result = parse_annotations(source)
+        result = parse_annotations(source, "python")
         assert result.loop is not None
         assert result.loop.max_iter == 20
         assert result.loop.carry == "state"
         assert result.loop.until_expr == "state.get('done')"
 
     def test_loop_absent_when_no_annotation(self):
-        result = parse_annotations("x = 1")
+        result = parse_annotations("x = 1", "python")
         assert result.loop is None
 
     def test_loop_ignores_unknown_keys(self):
         """Unknown ``key=value`` pairs on a ``@loop`` line are silently skipped."""
         result = parse_annotations(
-            "# @loop max_iter=3 carry=state nonsense=42\nstate = tick(state)"
+            "# @loop max_iter=3 carry=state nonsense=42\nstate = tick(state)", "python"
         )
         assert result.loop is not None
         assert result.loop.max_iter == 3
@@ -150,7 +152,7 @@ class TestLoopAnnotation:
 
     def test_loop_start_from_malformed_is_dropped(self):
         """A ``start_from`` value that does not match ``<cell>@iter=<int>`` is dropped."""
-        result = parse_annotations("# @loop max_iter=5 carry=state start_from=badvalue\n")
+        result = parse_annotations("# @loop max_iter=5 carry=state start_from=badvalue\n", "python")
         assert result.loop is not None
         assert result.loop.start_from_cell is None
         assert result.loop.start_from_iter is None
@@ -158,7 +160,7 @@ class TestLoopAnnotation:
     def test_loop_until_without_loop_still_captures_expr(self):
         """``@loop_until`` alone should still record the expression so validation can
         surface the missing ``max_iter``/``carry`` as errors."""
-        result = parse_annotations("# @loop_until x > 0\nx = 1")
+        result = parse_annotations("# @loop_until x > 0\nx = 1", "python")
         assert result.loop is not None
         assert result.loop.until_expr == "x > 0"
         assert result.loop.max_iter == 0
@@ -218,34 +220,34 @@ class TestLoopAnnotation:
 
 class TestVariantAnnotation:
     def test_variant_parses_group_and_name(self):
-        result = parse_annotations("# @variant model_choice gpt4\nx = 1")
+        result = parse_annotations("# @variant model_choice gpt4\nx = 1", "python")
         assert result.variant is not None
         assert result.variant.group == "model_choice"
         assert result.variant.name == "gpt4"
 
     def test_variant_absent_when_not_set(self):
-        result = parse_annotations("x = 1")
+        result = parse_annotations("x = 1", "python")
         assert result.variant is None
 
     def test_variant_missing_name_is_dropped(self):
-        result = parse_annotations("# @variant model_choice\nx = 1")
+        result = parse_annotations("# @variant model_choice\nx = 1", "python")
         assert result.variant is None
 
     def test_variant_extra_tokens_dropped(self):
-        result = parse_annotations("# @variant model_choice gpt4 extra\nx = 1")
+        result = parse_annotations("# @variant model_choice gpt4 extra\nx = 1", "python")
         assert result.variant is None
 
     def test_variant_non_identifier_group_dropped(self):
-        result = parse_annotations("# @variant model-choice gpt4\nx = 1")
+        result = parse_annotations("# @variant model-choice gpt4\nx = 1", "python")
         assert result.variant is None
 
     def test_variant_non_identifier_name_dropped(self):
-        result = parse_annotations("# @variant model_choice gpt-4\nx = 1")
+        result = parse_annotations("# @variant model_choice gpt-4\nx = 1", "python")
         assert result.variant is None
 
     def test_variant_coexists_with_other_annotations(self):
         source = "# @name GPT-4 model\n# @variant model_choice gpt4\nx = 1"
-        result = parse_annotations(source)
+        result = parse_annotations(source, "python")
         assert result.variant is not None
         assert result.variant.group == "model_choice"
         assert result.variant.name == "gpt4"
@@ -256,23 +258,23 @@ class TestAfterAnnotation:
     """Tests for the @after ordering-dependency annotation."""
 
     def test_after_single_cell(self):
-        result = parse_annotations("# @after setup\nx = 1")
+        result = parse_annotations("# @after setup\nx = 1", "python")
         assert result.after == ["setup"]
 
     def test_after_multiple_lines_stack(self):
-        result = parse_annotations("# @after setup\n# @after seed_db\nx = 1")
+        result = parse_annotations("# @after setup\n# @after seed_db\nx = 1", "python")
         assert result.after == ["setup", "seed_db"]
 
     def test_after_multiple_ids_on_one_line(self):
-        result = parse_annotations("# @after setup seed_db\nx = 1")
+        result = parse_annotations("# @after setup seed_db\nx = 1", "python")
         assert result.after == ["setup", "seed_db"]
 
     def test_after_dedupes_repeated_ids(self):
-        result = parse_annotations("# @after setup\n# @after setup\nx = 1")
+        result = parse_annotations("# @after setup\n# @after setup\nx = 1", "python")
         assert result.after == ["setup"]
 
     def test_after_empty_when_absent(self):
-        result = parse_annotations("x = 1")
+        result = parse_annotations("x = 1", "python")
         assert result.after == []
 
 
@@ -280,7 +282,9 @@ class TestTableAnnotation:
     """Parsing of the table input annotation."""
 
     def test_basic_table(self):
-        result = parse_annotations("# @table trips file:///data/warehouse#nyc.trips\nx = 1\n")
+        result = parse_annotations(
+            "# @table trips file:///data/warehouse#nyc.trips\nx = 1\n", "python"
+        )
         assert len(result.tables) == 1
         table = result.tables[0]
         assert table.name == "trips"
@@ -289,30 +293,31 @@ class TestTableAnnotation:
 
     def test_snapshot_pin(self):
         result = parse_annotations(
-            "# @table events s3://bucket/wh#db.events snapshot=1292033279574548405\nx = 1\n"
+            "# @table events s3://bucket/wh#db.events snapshot=1292033279574548405\nx = 1\n",
+            "python",
         )
         assert result.tables[0].snapshot_pin == 1292033279574548405
 
     def test_invalid_name_ignored(self):
-        result = parse_annotations("# @table 2bad file:///wh#db.t\nx = 1\n")
+        result = parse_annotations("# @table 2bad file:///wh#db.t\nx = 1\n", "python")
         assert result.tables == []
 
     def test_missing_uri_ignored(self):
-        result = parse_annotations("# @table trips\nx = 1\n")
+        result = parse_annotations("# @table trips\nx = 1\n", "python")
         assert result.tables == []
 
     def test_malformed_snapshot_ignored(self):
-        result = parse_annotations("# @table trips file:///wh#db.t snapshot=abc\nx = 1\n")
+        result = parse_annotations("# @table trips file:///wh#db.t snapshot=abc\nx = 1\n", "python")
         assert result.tables == []
 
     def test_multiple_tables(self):
         result = parse_annotations(
-            "# @table a file:///wh#db.a\n# @table b file:///wh#db.b\nx = 1\n"
+            "# @table a file:///wh#db.a\n# @table b file:///wh#db.b\nx = 1\n", "python"
         )
         assert [t.name for t in result.tables] == ["a", "b"]
 
     def test_wire_payload_includes_tables(self):
-        result = parse_annotations("# @table trips file:///wh#db.t\nx = 1\n")
+        result = parse_annotations("# @table trips file:///wh#db.t\nx = 1\n", "python")
         payload = result.to_wire_payload()
         assert payload["tables"] == [
             {"name": "trips", "uri": "file:///wh#db.t", "snapshot_pin": None}
@@ -335,7 +340,7 @@ class TestSpliceDirectives:
     def test_set_inserts_on_bare_cell(self):
         out = self._set("x = 1\n", "worker", "gpu-box")
         assert out == "# @worker gpu-box\nx = 1\n"
-        assert parse_annotations(out).worker == "gpu-box"
+        assert parse_annotations(out, "python").worker == "gpu-box"
 
     def test_set_groups_then_replaces_in_place(self):
         out = self._set("x = 1\n", "worker", "gpu-box")
@@ -347,7 +352,7 @@ class TestSpliceDirectives:
     def test_set_preserves_body_and_plain_comments(self):
         out = self._set("# header\nimport os\nx = 1\n", "name", "n")
         assert "# header" in out and "import os" in out
-        assert parse_annotations(out).name == "n"
+        assert parse_annotations(out, "python").name == "n"
 
     def test_set_empty_value_renders_flag(self):
         assert self._set("x = 1\n", "output", "") == "# @output\nx = 1\n"
@@ -360,7 +365,7 @@ class TestSpliceDirectives:
         src = "# @worker gpu\n# @name feat\nx = 1\n"
         out = self._rm(src, "worker")
         assert out == "# @name feat\nx = 1\n"
-        assert parse_annotations(out).worker is None
+        assert parse_annotations(out, "python").worker is None
 
     def test_remove_absent_key_is_noop(self):
         assert self._rm("# @name feat\nx = 1\n", "worker") == "# @name feat\nx = 1\n"
@@ -386,26 +391,26 @@ class TestSpliceDirectives:
 
 class TestNocacheAnnotation:
     def test_nocache_sets_flag(self):
-        result = parse_annotations("# @nocache\nprint('x')\n")
+        result = parse_annotations("# @nocache\nprint('x')\n", "python")
         assert result.nocache is True
 
     def test_nocache_off_disables(self):
-        result = parse_annotations("# @nocache off\nprint('x')\n")
+        result = parse_annotations("# @nocache off\nprint('x')\n", "python")
         assert result.nocache is False
 
     def test_nocache_default_false(self):
-        result = parse_annotations("print('x')\n")
+        result = parse_annotations("print('x')\n", "python")
         assert result.nocache is False
 
 
 def test_each_parse_hands_out_its_own_values():
     """The parse is remembered by source; a caller's changes stay its own."""
     source = "# @mount d file:///tmp/x\n# @env K=v\n# @after a\nx = 1\n"
-    first = parse_annotations(source)
+    first = parse_annotations(source, "python")
     first.mounts[0].uri = "file:///elsewhere"
     first.env["K"] = "changed"
     first.after.append("b")
-    second = parse_annotations(source)
+    second = parse_annotations(source, "python")
     assert second.mounts[0].uri == "file:///tmp/x"
     assert second.env == {"K": "v"}
     assert second.after == ["a"]

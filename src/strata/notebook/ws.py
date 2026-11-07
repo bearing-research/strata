@@ -2686,7 +2686,7 @@ async def _run_partition_batch(
     # abort of the whole batch.
     mount_failed_cells: list[tuple[str, Exception]] = []
     for cell in cells_in_run:
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
 
         effective_env = executor._resolve_effective_runtime_env(cell.id, annotations.env)
 
@@ -3330,7 +3330,8 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
 def _effective_worker_name(session, cell_id: str, source: str) -> str | None:
     """The worker a run of the cell targets; ``None`` if the source does not parse."""
     try:
-        annotations = parse_annotations(source)
+        cell = session.notebook_state.get_cell(cell_id)
+        annotations = parse_annotations(source, cell.language if cell else CellLanguage.PYTHON)
     except Exception:
         return None
     return effective_worker_name(session.notebook_state, cell_id, annotations.worker)
@@ -3758,7 +3759,7 @@ async def apply_widget_values(
     result = await execute_cell_and_broadcast(
         session, cell_id, execution_state, notebook_id, mode="force"
     )
-    if parse_annotations(cell.source).live:
+    if parse_annotations(cell.source, cell.language).live:
         await _run_live_cascade(session, cell_id, execution_state, notebook_id)
     return result
 

@@ -33,7 +33,7 @@ from strata.notebook.credentials import CredentialError, CredentialResolver
 from strata.notebook.hardware import hardware_report
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
 from strata.notebook.layout import WORK_DIR
-from strata.notebook.models import MountSpec
+from strata.notebook.models import CellLanguage, MountSpec
 from strata.notebook.mount_cache import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_IDLE_DAYS,
@@ -1045,7 +1045,7 @@ def create_notebook_executor_app(
             # lost worker still leaves them; the bundle then names them instead of carrying them.
             streamer = (
                 _OutputDirStreamer(output_dir / output_dirs.OUTPUT_DIRS, output_file_url)
-                if output_file_url and parse_annotations(source).output_dirs
+                if output_file_url and parse_annotations(source, CellLanguage.PYTHON).output_dirs
                 else None
             )
             stop_streaming = asyncio.Event()

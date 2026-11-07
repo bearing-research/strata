@@ -99,11 +99,11 @@ def mounts_of(state: NotebookState, cell: CellState, source: str) -> list[MountS
         names |= {*analyzed.references, *analyzed.builtin_references}
         if names & _DYNAMIC_LOOKUPS:
             return list(cell.mounts)
-        each = parse_annotations(source).each
+        each = parse_annotations(source, cell.language).each
         if each is not None:
             names.add(each["source"])
     elif cell.language == CellLanguage.SQL:
-        sql = parse_annotations(source).sql
+        sql = parse_annotations(source, cell.language).sql
         for connection in state.connections:
             if sql is not None and connection.name == sql.connection:
                 names.update(getattr(connection, "mounts", None) or [])

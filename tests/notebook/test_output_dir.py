@@ -58,13 +58,15 @@ def _manifest(session, version: int | None = None, cell_id: str = "w") -> tuple[
 
 class TestTheAnnotation:
     def test_it_parses(self):
-        assert parse_annotations("# @output_dir ckpt\n# @output_dir logs\nx = 1").output_dirs == [
+        assert parse_annotations(
+            "# @output_dir ckpt\n# @output_dir logs\nx = 1", "python"
+        ).output_dirs == [
             "ckpt",
             "logs",
         ]
 
     def test_a_name_that_is_not_an_identifier_is_dropped(self):
-        assert parse_annotations("# @output_dir 2ckpt\nx = 1").output_dirs == []
+        assert parse_annotations("# @output_dir 2ckpt\nx = 1", "python").output_dirs == []
 
     def test_the_folder_is_a_define_of_its_cell(self, tmp_path):
         session = _session(tmp_path)
@@ -1084,8 +1086,8 @@ def test_a_folder_name_cannot_leave_the_run_directory(tmp_path, monkeypatch):
 
     real = annotations.parse_annotations
 
-    def loose(source):
-        parsed = real(source)
+    def loose(source, language):
+        parsed = real(source, language)
         parsed.output_dirs = ["../escape"]
         return parsed
 

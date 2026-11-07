@@ -57,7 +57,7 @@ from strata.notebook.local_runs import (
     RunRefused,
     relay_events,
 )
-from strata.notebook.models import MountMode, MountSpec, WorkerBackendType
+from strata.notebook.models import CellLanguage, MountMode, MountSpec, WorkerBackendType
 from strata.notebook.mounts import MountWrite, ResolvedMount
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
@@ -653,7 +653,7 @@ async def run_python_cell(
                 provenance_hash = run_key(prov)
                 if each_item is not None and each_item.path is not None:
                     # A file binds as a one-file mount: a Path, read-only, in every harness.
-                    each_spec = parse_annotations(source).each
+                    each_spec = parse_annotations(source, CellLanguage.PYTHON).each
                     assert each_spec is not None  # it has an item
                     prepared_mounts[each_spec["name"]] = ResolvedMount(
                         spec=MountSpec(name=each_spec["name"], uri=each_item.path.as_uri()),

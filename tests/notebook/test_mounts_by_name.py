@@ -124,7 +124,7 @@ class TestWhatACellGets:
             ConnectionSpec(name="reads", driver="duckdb", mounts=["data"]),
             ConnectionSpec(name="plain", driver="duckdb"),
         )
-        source = f"# @sql connection={connection}\nSELECT 1\n"
+        source = f"-- @sql connection={connection}\nSELECT 1\n"
         cell = CellState(id="c", source=source, language=CellLanguage.SQL, mounts=[DATA, OTHER])
         assert mounts_of(state, cell, source) == expected
 

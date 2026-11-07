@@ -7,7 +7,7 @@ cells = [
     { id = "helpers", file = "helpers.py", language = "python", order = 1 },
     { id = "fetch_news", file = "fetch_news.py", language = "python", order = 2 },
     { id = "analysis-intro", file = "analysis_intro.md", language = "markdown", order = 2.5 },
-    { id = "extract_signals", file = "extract_signals.py", language = "prompt", order = 3 },
+    { id = "extract_signals", file = "extract_signals.prompt", language = "prompt", order = 3 },
     { id = "persist_signals", file = "persist_signals.py", language = "python", order = 4 },
     { id = "fetch_prices", file = "fetch_prices.py", language = "python", order = 5 },
     { id = "risk_check", file = "risk_check.py", language = "python", order = 6 },
@@ -16,7 +16,7 @@ cells = [
     { id = "reconcile", file = "reconcile.py", language = "python", order = 8 },
     { id = "costs", file = "costs.py", language = "python", order = 9 },
     { id = "pnl_report", file = "pnl_report.py", language = "python", order = 10 },
-    { id = "daily_note", file = "daily_note.py", language = "prompt", order = 11 },
+    { id = "daily_note", file = "daily_note.prompt", language = "prompt", order = 11 },
 ]
 
 [secret_manager]

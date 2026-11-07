@@ -336,7 +336,7 @@ path exits `2` and says so; stop that run with Ctrl-C instead.
 ## Authoring cells and dependencies (`cell add/edit/rm/mv`, `dep`)
 
 An agent can also build and edit a notebook through commands (instead of writing
-`notebook.toml` + `cells/*.py` by hand):
+`notebook.toml` and the files under `cells/` by hand):
 
 ```bash
 strata cell add      <notebook_dir> (--file body.py | -c 'src') [--run] [--after <id>] [--language python|markdown|sql|r|prompt|widget]
@@ -350,14 +350,16 @@ strata dep rm        <notebook_dir> <package>                     # uv remove
 ```
 
 `--file -` reads cell source from stdin; `-c 'src'` passes the source inline
-(the two are mutually exclusive). `cell add` mints a backend-style 8-char id (the
+(the two are mutually exclusive). `--language` defaults to `python`, except that a
+`--file` whose extension is another language's (`q.sql`, `p.prompt`) needs it
+spelled out, so a SQL file never becomes a Python cell by accident. `cell add` mints a backend-style 8-char id (the
 same scheme the server uses) and prints the new cell; `mv` prints the new order.
 Pass **`--run`** to execute the cell right after adding it (the one-call
 scratchpad primitive), and the run outcome (`status`, `cache_hit`, `stdout`,
 `stderr`) is folded into the output under `run`. The returned cell is the
 **post-run** view, so its rendered `outputs` (a trailing bare expression's value)
 ride along without a separate `cell show` (`--no-sync` skips the venv sync, as
-with `cell run`). `cell annotate` splices `# @key` [annotations](../reference/annotations/index.md) into a
+with `cell run`). `cell annotate` splices `# @key` [annotations](../reference/annotations/index.md) (`-- @key` in a SQL cell) into a
 cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with `edit`;
 it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit
