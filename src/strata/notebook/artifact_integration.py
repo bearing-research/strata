@@ -4,6 +4,7 @@ Artifact ids::
 
     Regular cell output: nb_{notebook_id}_cell_{cell_id}_var_{variable_name}
     Loop iteration:      nb_{notebook_id}_cell_{cell_id}_var_{variable_name}@iter={k}
+    Run placeholder:     nb_{notebook_id}_run_{cell_id}[@variant={name}]
 
 The ``@iter={k}`` suffix lets downstream cells, the inspector and
 ``@loop start_from=<cell>@iter=<k>`` address one iteration by name.
@@ -197,6 +198,16 @@ class NotebookArtifactManager:
         if variant is not None:
             base = f"{base}@variant={variant}"
         return base
+
+    @property
+    def run_placeholder_prefix(self) -> str:
+        """What every run placeholder's id starts with, and no output's does."""
+        return f"nb_{self.notebook_id}_run_"
+
+    def run_placeholder_id(self, cell_id: str, variant: str | None = None) -> str:
+        """The version a local run's build targets until its outputs exist; failed after."""
+        base = f"{self.run_placeholder_prefix}{cell_id}"
+        return f"{base}@variant={variant}" if variant else base
 
     def load_iteration_blob(
         self,

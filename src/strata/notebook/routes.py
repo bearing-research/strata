@@ -3036,8 +3036,9 @@ async def get_notebook_dag(notebook_id: str, session: SessionDep) -> dict:
 
 @router.get("/{notebook_id}/store/stats")
 def get_notebook_store_stats(notebook_id: str, session: SessionDep) -> dict:
-    """``GET /v1/artifacts/stats`` over this notebook's own store."""
-    return session.get_artifact_manager().artifact_store.stats()
+    """``GET /v1/artifacts/stats`` over this notebook's own store, run placeholders left out."""
+    manager = session.get_artifact_manager()
+    return manager.artifact_store.stats(exclude_id_prefix=manager.run_placeholder_prefix)
 
 
 @router.get("/{notebook_id}/store/artifacts")
@@ -3050,13 +3051,21 @@ def list_notebook_store_artifacts(
     sort: Literal["created_at", "byte_size", "row_count"] = "created_at",
     order: Literal["asc", "desc"] = "desc",
 ) -> dict:
-    """``GET /v1/artifacts`` over this notebook's own store, each row with the cell behind it."""
+    """``GET /v1/artifacts`` over this notebook's own store, each row with the cell behind it.
+
+    A run's placeholder is left out: its build's bookkeeping, failed once the outputs exist.
+    """
     from strata.notebook.annotations import parse_annotations
 
     manager = session.get_artifact_manager()
     rows = []
     for artifact in manager.artifact_store.list_artifacts(
-        limit=limit, offset=offset, state=state, sort=sort, order=order
+        limit=limit,
+        offset=offset,
+        state=state,
+        sort=sort,
+        order=order,
+        exclude_id_prefix=manager.run_placeholder_prefix,
     ):
         cell_id, output = manager.cell_output_of(artifact.id) or (None, None)
         cell = session.notebook_state.get_cell(cell_id) if cell_id else None
