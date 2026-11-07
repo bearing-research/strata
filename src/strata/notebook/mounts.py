@@ -492,13 +492,12 @@ class MountFingerprinter:
 
     @staticmethod
     def fingerprint_local_sync(path: Path) -> str:
-        """Fingerprint a local directory from file mtimes and sizes (fast, not content-based)."""
+        """Fingerprint a local file or directory from its files' stats (fast, not content-based)."""
         if not path.exists():
             return hashlib.sha256(b"missing").hexdigest()
 
         if path.is_file():
-            stat = path.stat()
-            content = f"{path}:{stat.st_size}:{stat.st_mtime_ns}"
+            content = f"{path}:{_stat_key(path.stat())}"
             return hashlib.sha256(content.encode()).hexdigest()
 
         parts: list[str] = []
@@ -507,9 +506,8 @@ class MountFingerprinter:
                 for fname in sorted(files):
                     fpath = Path(root) / fname
                     try:
-                        stat = fpath.stat()
                         rel = fpath.relative_to(path)
-                        parts.append(f"{rel}:{stat.st_size}:{stat.st_mtime_ns}")
+                        parts.append(f"{rel}:{_stat_key(fpath.stat())}")
                     except OSError:
                         pass
         except OSError:
@@ -616,6 +614,16 @@ class MountFingerprinter:
 
 
 # --- Helpers ---
+
+
+def _stat_key(stat: os.stat_result) -> str:
+    """A file's part of a local fingerprint.
+
+    Size and mtime alone miss a same-size edit with its mtime put back (``cp -p``,
+    ``rsync -t``, ``touch -r``). Every write moves ctime, which ``utime`` cannot set,
+    and a replacement by rename changes the inode.
+    """
+    return f"{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ino}:{stat.st_ctime_ns}"
 
 
 def _options_digest(storage_options: dict[str, Any]) -> str:

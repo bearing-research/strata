@@ -1210,3 +1210,65 @@ class TestAStagingCopyIsTheCellsToWrite:
             ("let_through", staging.parent),
             ("hand_over", staging),
         ]
+
+
+class TestALocalMountSeesEveryWrite:
+    """The local fingerprint is in the cell's key, so an edit it misses is a stale hit."""
+
+    @staticmethod
+    def _fingerprint(path: Path) -> str:
+        from strata.notebook.mounts import MountFingerprinter
+
+        return MountFingerprinter.fingerprint_local_sync(path)
+
+    @staticmethod
+    def _rewrite_keeping_size_and_mtime(path: Path, text: str) -> None:
+        import os
+
+        before = path.stat()
+        path.write_text(text)
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = path.stat()
+        assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
+
+    @pytest.mark.parametrize("as_file", [False, True])
+    def test_a_same_size_edit_with_its_mtime_restored_changes_it(
+        self, tmp_path: Path, as_file: bool
+    ) -> None:
+        """``cp -p``, ``rsync -t`` and ``touch -r`` leave size and mtime as they were."""
+        data = tmp_path / "data"
+        data.mkdir()
+        target = data / "rows.csv"
+        target.write_text("a,1\n")
+        mounted = target if as_file else data
+        before = self._fingerprint(mounted)
+
+        self._rewrite_keeping_size_and_mtime(target, "a,2\n")
+
+        assert self._fingerprint(mounted) != before
+
+    def test_a_replacement_by_rename_with_the_same_size_and_mtime_changes_it(
+        self, tmp_path: Path
+    ) -> None:
+        import os
+
+        data = tmp_path / "data"
+        data.mkdir()
+        target = data / "rows.csv"
+        target.write_text("a,1\n")
+        before = self._fingerprint(data)
+        old = target.stat()
+
+        replacement = tmp_path / "rows.tmp"
+        replacement.write_text("a,2\n")
+        os.utime(replacement, ns=(old.st_atime_ns, old.st_mtime_ns))
+        os.replace(replacement, target)
+
+        assert self._fingerprint(data) != before
+
+    def test_an_untouched_mount_keeps_its_fingerprint(self, tmp_path: Path) -> None:
+        data = tmp_path / "data"
+        (data / "sub").mkdir(parents=True)
+        (data / "sub" / "rows.csv").write_text("a,1\n")
+
+        assert self._fingerprint(data) == self._fingerprint(data)

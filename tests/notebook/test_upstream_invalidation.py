@@ -129,14 +129,15 @@ class TestUpstreamInvalidation:
         assert staleness["c2"].status == "stale"
         assert StalenessReason.UPSTREAM in staleness["c2"].reasons
 
-        # A local mount is keyed on size and mtime, so that is what going back means.
+        # Putting the bytes back with the old mtime is still a write: a local mount is
+        # keyed on stats, and to them it looks like a same-size edit with its mtime
+        # restored, which must not hit the old result.
         (data_dir / "data.txt").write_text("hello", encoding="utf-8")
         os.utime(data_dir / "data.txt", ns=(before.st_atime_ns, before.st_mtime_ns))
 
         staleness = session.compute_staleness()
-        assert staleness["c1"].status == "ready"
-        assert staleness["c2"].status == "ready"
-        assert session.notebook_state.get_cell("c1").cache_hit is True
+        assert staleness["c1"].status == "stale"
+        assert staleness["c1"].reasons == [StalenessReason.EXTERNAL]
 
     @pytest.mark.asyncio
     async def test_multi_output_upstream_stays_ready_when_unchanged(self, tmp_path):

@@ -266,6 +266,9 @@ def _recording(scenario: str, notebook_dir: Path, registry: Path) -> Iterator[_S
             sql_cell_executor, "execute_sql_cell", spy.entry(sql_cell_executor.execute_sql_cell)
         ),
         mock.patch.object(cli, "_quiet_notebook_logs", contextlib.nullcontext),
+        # A local mount's key also holds each file's inode and ctime, which no copy of a
+        # scenario can reproduce; with mtimes pinned, size and mtime stand for them.
+        mock.patch("strata.notebook.mounts._stat_key", lambda st: f"{st.st_size}:{st.st_mtime_ns}"),
     ]
     server = None
     try:
