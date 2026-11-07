@@ -329,3 +329,15 @@ def test_a_cell_file_in_a_subdirectory_of_cells_still_parses(tmp_path):
     (nb / "cells" / "sub" / "c1.py").write_text("x = 1\n")
 
     assert parse_notebook(nb).cells[0].source == "x = 1\n"
+
+
+def test_a_cell_without_a_language_refuses_the_notebook(tmp_path):
+    """No default: a ``.sql`` entry that leaves ``language`` out must not run as Python."""
+    nb = create_notebook(tmp_path, "No language", initialize_environment=False)
+    add_cell_to_notebook(nb, "q", language="sql")
+    data = tomllib.loads((nb / "notebook.toml").read_text())
+    del data["cells"][0]["language"]
+    (nb / "notebook.toml").write_text(tomli_w.dumps(data))
+
+    with pytest.raises(ValueError, match="cell 'q' has no `language`"):
+        parse_notebook(nb)

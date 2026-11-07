@@ -40,6 +40,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep
   their files and their cached results. The examples' cells are renamed. (#1474)
+- **Breaking: every `[[cells]]` entry in `notebook.toml` needs a `language`.**
+  It used to default to `python`, so a hand-written `.sql` entry that left it out
+  ran as Python and failed with a syntax error. A notebook with a cell that has no
+  `language` now does not open, and the error names the cell. Strata has always
+  written the key, so only hand-written entries are affected. (#1474)
   their files and their cached results. The examples' cells are renamed.
 - **cellgraph 0.4: every cell runs once more after the upgrade.** Strata now needs
   `cellgraph>=0.4,<0.5`. Its keys hash exactly what they cover, with each upstream
