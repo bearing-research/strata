@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -150,11 +151,15 @@ class DriverAdapter(Protocol):
         self,
         probe_conn: Any,
         tables: list[QualifiedTable],
+        *,
+        digests_path: Path | None = None,
     ) -> FreshnessToken:
         """Return a freshness token for the given tables.
 
         Called once per cell execution for the cache key, so it must be cheap
-        (one metadata round-trip per database).
+        (one metadata round-trip per database). *digests_path* is the notebook's digest
+        cache, which an adapter keying a local file by its contents needs (SQLite raises
+        without it); the executor always passes it.
         """
         ...
 

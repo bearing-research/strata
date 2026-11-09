@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from vestigo.provenance import derive_subkey
@@ -23,6 +24,7 @@ from vestigo.provenance import derive_subkey
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.models import CellLanguage
+from strata.notebook.mounts import DIGESTS_FILE
 from strata.notebook.serializer import (
     _META_SHAPE,
     _SHAPE_SCALAR,
@@ -269,7 +271,12 @@ async def execute_sql_cell(
     elif policy.freshness_required or policy.schema_required:
         try:
             freshness, schema_fp = await asyncio.to_thread(
-                _run_probes, adapter, runtime_spec, analysis.tables, policy
+                _run_probes,
+                adapter,
+                runtime_spec,
+                analysis.tables,
+                policy,
+                session.path / ".strata" / DIGESTS_FILE,
             )
         except Exception as exc:  # noqa: BLE001
             return _error_result(f"probe failed: {exc}", start_time)
@@ -1116,8 +1123,10 @@ def _run_probes(
     spec: ConnectionSpec,
     tables: list[Any],
     policy: Any,
+    digests_path: Path,
 ) -> tuple[Any, Any]:
-    """Run freshness and schema probes per the resolved policy.
+    """Run freshness and schema probes per the resolved policy. *digests_path* is the
+    notebook's digest cache, which a local database's contents are keyed through.
 
     Adapters with ``needs_separate_probe_conn`` (Postgres) get their own
     connection, since stats are frozen inside the query connection's transaction.
@@ -1127,7 +1136,7 @@ def _run_probes(
     probe_conn = adapter.open(spec, read_only=True)
     try:
         if policy.freshness_required:
-            freshness = adapter.probe_freshness(probe_conn, tables)
+            freshness = adapter.probe_freshness(probe_conn, tables, digests_path=digests_path)
         if policy.schema_required:
             schema_fp = adapter.probe_schema(probe_conn, tables)
     finally:

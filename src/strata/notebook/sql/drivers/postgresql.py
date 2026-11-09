@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse, urlunparse
 
@@ -228,6 +229,8 @@ class PostgresAdapter:
         self,
         probe_conn: Any,
         tables: list[QualifiedTable],
+        *,
+        digests_path: Path | None = None,
     ) -> FreshnessToken:
         """Per-table freshness via DML counters, relfilenode and resolved schema.
 

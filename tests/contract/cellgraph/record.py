@@ -49,12 +49,10 @@ ROOT = Path("/tmp/strata-cellgraph")
 # Scenario text files name the notebook directory as this.
 PLACEHOLDER = "@NB@"
 _TEXT_SUFFIXES = {".py", ".r", ".R", ".sql", ".prompt", ".toml"}
-_FIXED_MTIME_NS = 1_700_000_000 * 10**9
 # The fetch scenario's URLs are in its keys, so its server listens on a fixed port.
 FETCH_PORT = 47613
 # The worker scenario's URL is in its notebook.toml, so its worker also has a fixed port.
 WORKER_PORT = 47614
-_SKIP_DIRS = {".strata", ".venv", "work"}
 
 # What a scenario needs from the machine beyond the dev environment.
 REQUIRES = {"r_directives": "Rscript"}
@@ -81,15 +79,6 @@ def _prepared_venv(notebook_dir: Path) -> None:
     python.parent.mkdir(parents=True, exist_ok=True)
     python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
     python.chmod(0o755)
-
-
-def _pin_mtimes(notebook_dir: Path) -> None:
-    """Give every file one mtime, so a SQLite database's key (its size and mtime, until it
-    too is keyed by content) depends on its size alone."""
-    for root, dirs, files in os.walk(notebook_dir):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
-        for name in files:
-            os.utime(Path(root) / name, ns=(_FIXED_MTIME_NS, _FIXED_MTIME_NS))
 
 
 class _Counter:
@@ -809,7 +798,6 @@ def _record(name: str) -> dict[str, Any]:
             spy.calls = {}
             ran = _apply(step, notebook_dir, registry)
             run, session = ran if ran is not None else (None, None)
-            _pin_mtimes(notebook_dir)
             recorded.append({"step": step, **_snapshot(notebook_dir, spy, run, session)})
     trace = {"trace_format": TRACE_FORMAT, "scenario": name, "steps": recorded}
     _check_no_machine_paths(trace)

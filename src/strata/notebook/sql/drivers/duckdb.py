@@ -204,6 +204,8 @@ class DuckDBAdapter:
         self,
         probe_conn: Any,
         tables: list[QualifiedTable],
+        *,
+        digests_path: Path | None = None,
     ) -> FreshnessToken:
         """DB-wide freshness via ``PRAGMA database_size``; ``tables`` is ignored.
 

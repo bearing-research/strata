@@ -15,6 +15,7 @@ import hashlib
 import re
 from collections.abc import Callable
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -308,6 +309,8 @@ class SnowflakeAdapter:
         self,
         probe_conn: Any,
         tables: list[QualifiedTable],
+        *,
+        digests_path: Path | None = None,
     ) -> FreshnessToken:
         """Per-table freshness via ``INFORMATION_SCHEMA.TABLES.LAST_ALTERED``.
 

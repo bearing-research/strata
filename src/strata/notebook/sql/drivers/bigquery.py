@@ -254,6 +254,8 @@ class BigQueryAdapter:
         self,
         probe_conn: Any,
         tables: list[QualifiedTable],
+        *,
+        digests_path: Path | None = None,
     ) -> FreshnessToken:
         """Per-table freshness via ``__TABLES__.last_modified_time`` (unix millis).
 

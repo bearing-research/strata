@@ -50,6 +50,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A local mount's hash shows its progress.** A cell whose local mount is being hashed,
   by a run or by the background check, shows "hashing raw · 3.2 GB of 50.0 GB" until it
   is done. Over the WebSocket this is the new `cell_mount_progress` frame. (#1483)
+- **A SQLite database is keyed by its content.** A SQL cell over one was keyed by the
+  file's size, modification time and header change counter, so a database replaced by
+  one of the same size with the old mtime kept (a restore, `cp` then `touch -r`) served
+  the old result, and a `touch` ran the cell again. Now it is the sha256 of the file and
+  its `-wal`, kept in `.strata/hashes.sqlite` while their stat holds (on Windows a
+  rewrite in place that restores the mtime is still not seen). The key changes, so
+  each such cell runs once after the upgrade. (#PRNUM)
 - **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep

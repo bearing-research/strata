@@ -186,7 +186,7 @@ def test_validation_flags_unknown_driver():
         def open(self, spec, *, read_only):
             return None
 
-        def probe_freshness(self, probe_conn, tables):
+        def probe_freshness(self, probe_conn, tables, *, digests_path=None):
             return FreshnessToken(value=b"")
 
         def probe_schema(self, probe_conn, tables):

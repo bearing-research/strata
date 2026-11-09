@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -17,13 +18,13 @@ adbc_sqlite = pytest.importorskip("adbc_driver_sqlite")
 # --- fixtures -------------------------------------------------------------
 
 
-def _seed_sqlite(path: Path) -> None:
-    """Create a SQLite file with one table the cells can query."""
+def _seed_sqlite(path: Path, first: int = 10) -> None:
+    """Create a SQLite file with one table the cells can query, *first* the first value."""
     with sqlite3.connect(path) as conn:
         conn.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)")
         conn.executemany(
             "INSERT INTO events (id, name, value) VALUES (?, ?, ?)",
-            [(1, "alpha", 10), (2, "beta", 20), (3, "gamma", 30)],
+            [(1, "alpha", first), (2, "beta", 20), (3, "gamma", 30)],
         )
         conn.commit()
 
@@ -246,6 +247,60 @@ async def test_sql_cell_cache_hit_on_unchanged_inputs(tmp_path):
     assert second["cache_hit"] is True
     assert second["execution_method"] == "cached"
     assert first["artifact_uri"] == second["artifact_uri"]
+
+
+@pytest.mark.asyncio
+async def test_a_database_replaced_at_its_size_and_mtime_reruns(tmp_path):
+    """A database is keyed by its contents: a copy built the same way, one value apart,
+    has the same size, change counter and pragmas, and the copy kept the old mtime."""
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    restored = tmp_path / "restored.db"
+    _seed_sqlite(restored, first=11)
+    nb_dir = _build_notebook_with_sql_cell(
+        tmp_path,
+        db_path=db_path,
+        cell_source="-- @sql connection=db\nSELECT value FROM events WHERE id = 1\n",
+    )
+    session = _make_session(nb_dir)
+    src = _read_cell(nb_dir, "c1")
+
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    first = await execute_sql_cell(session, "c1", src)
+    before = db_path.stat()
+    db_path.write_bytes(restored.read_bytes())
+    os.utime(db_path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert db_path.stat().st_size == before.st_size
+
+    second = await execute_sql_cell(session, "c1", src)
+
+    assert first["success"] and second["success"], second.get("error")
+    assert second["cache_hit"] is False
+    assert _load_artifact_as_arrow(session, second["artifact_uri"]).to_pylist() == [{"value": 11}]
+
+
+@pytest.mark.asyncio
+async def test_a_touch_of_the_database_is_still_a_hit(tmp_path):
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    nb_dir = _build_notebook_with_sql_cell(
+        tmp_path,
+        db_path=db_path,
+        cell_source="-- @sql connection=db\nSELECT * FROM events\n",
+    )
+    session = _make_session(nb_dir)
+    src = _read_cell(nb_dir, "c1")
+
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    first = await execute_sql_cell(session, "c1", src)
+    later = db_path.stat().st_mtime_ns + 10**10
+    os.utime(db_path, ns=(later, later))
+    second = await execute_sql_cell(session, "c1", src)
+
+    assert first["success"] and second["success"], second.get("error")
+    assert second["cache_hit"] is True
 
 
 @pytest.mark.parametrize(
