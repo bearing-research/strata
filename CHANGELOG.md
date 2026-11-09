@@ -45,6 +45,9 @@ exhaustive commit history.
   background.** The cell shows stale with "Checking mount `raw`" until the hash is done,
   then ready again if its files did not change, without a run. A run in the meantime
   waits for that hash rather than reading the files a second time. (#1482)
+- **A local mount's hash shows its progress.** A cell whose local mount is being hashed,
+  by a run or by the background check, shows "hashing raw · 3.2 GB of 50.0 GB" until it
+  is done. Over the WebSocket this is the new `cell_mount_progress` frame. (#1483)
 - **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep

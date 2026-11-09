@@ -69,6 +69,7 @@ from strata.notebook.ws_payloads import (
     CascadePromptPayload,
     CellConsolePayload,
     CellIterationProgressPayload,
+    CellMountProgressPayload,
     CellOutputDeltaPayload,
     CellTestResultsPayload,
     CellTestStatusPayload,
@@ -428,6 +429,15 @@ async def _broadcast_staleness_updates(
             notebook_id,
             _make_message(MessageType.CELL_STATUS, next_notebook_sequence(notebook_id), payload),
         )
+
+
+async def broadcast_mount_progress(notebook_id: str, progress: dict[str, Any]) -> None:
+    """Send one ``cell_mount_progress`` frame to every client of *notebook_id*."""
+    payload = CellMountProgressPayload(**progress).model_dump(mode="json")
+    seq = next_notebook_sequence(notebook_id)
+    await _broadcast_message(
+        notebook_id, _make_message(MessageType.CELL_MOUNT_PROGRESS, seq, payload)
+    )
 
 
 async def refresh_staleness(session: NotebookSession) -> None:
@@ -2210,7 +2220,11 @@ def _make_executor_with_progress(
             _make_message(MessageType.CELL_VARIANT_PROGRESS, seq, payload),
         )
 
+    async def _broadcast_mount_progress(progress: dict[str, Any]) -> None:
+        await broadcast_mount_progress(notebook_id, progress)
+
     executor.on_iteration_complete = _broadcast_iteration_progress
+    executor.on_mount_progress = _broadcast_mount_progress
     executor.on_prompt_delta = _broadcast_prompt_delta
     executor.on_variant_complete = _broadcast_variant_progress
     return executor

@@ -1,3 +1,4 @@
+import type { MountProgress } from '../utils/mountProgress'
 import type { InputWeight, TypedWsFrame, WsServerPayloadMap } from './ws-payloads.generated'
 
 export type CellId = string
@@ -320,6 +321,8 @@ export interface Cell {
   inputsMachine?: string
   /** Live loop-cell progress, hydrated from WS ``cell_iteration_progress`` messages */
   loopProgress?: LoopProgress
+  /** Local mounts being hashed, by mount name, from ``cell_mount_progress`` */
+  mountProgress?: Record<string, MountProgress>
   /** Live @per_variant fan-out progress from ``cell_variant_progress``;
    * reset when the cell starts running. */
   variantProgress?: VariantProgress[]
@@ -778,6 +781,7 @@ export type WsServerMessageType =
   | 'cell_error' // Cell execution failed
   | 'cell_inputs' // What a run's mounts, tables and fetches weigh
   | 'cell_iteration_progress' // Loop cell completed one iteration
+  | 'cell_mount_progress' // How much of a local mount has been hashed
   | 'cell_variant_progress' // @per_variant fan-out completed one variant
   | 'cell_test_status' // Cell unit-test run lifecycle (running/ready/error)
   | 'cell_test_results' // Cell unit-test per-test outcomes + totals

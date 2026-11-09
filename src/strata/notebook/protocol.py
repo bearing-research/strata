@@ -64,6 +64,9 @@ class MessageType(StrEnum):
     # One completed variant of a ``# @per_variant`` fan-out cell. Payload:
     # ``{cell_id, variant, index, total, success, duration_ms, error?}``.
     CELL_VARIANT_PROGRESS = "cell_variant_progress"
+    # A local mount of the cell being hashed, by a run or the background job. Payload:
+    # ``{cell_id, mount, bytes_done, bytes, done}``; ``done`` ends it, also on failure.
+    CELL_MOUNT_PROGRESS = "cell_mount_progress"
     # Cell unit-test lifecycle. CELL_TEST_STATUS mirrors CELL_STATUS ({cell_id, status});
     # CELL_TEST_RESULTS carries per-test outcomes, totals and a staleness flag.
     CELL_TEST_STATUS = "cell_test_status"

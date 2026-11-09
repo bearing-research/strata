@@ -336,6 +336,8 @@ class NotebookSession:
         # ``(digests_path, root)``, and the task hashing each (``_hash_mounts``).
         self._mounts_to_hash: set[tuple[Path, Path]] = set()
         self._mount_hashing: dict[tuple[Path, Path], asyncio.Task[None]] = {}
+        # The cells, and their name for it, each such mount's progress is shown on.
+        self._mount_hash_cells: dict[tuple[Path, Path], dict[str, str]] = {}
         self._mount_hash_lock = threading.Lock()
 
         self.warm_pool: WarmProcessPool | None = None
@@ -881,9 +883,17 @@ class NotebookSession:
             if not done.done():
                 done.set_result(None)
 
+        def report(bytes_done: int, total: int, finished: bool) -> None:
+            key = (digests_path, root)
+            progress = self._broadcast_mount_progress(key, bytes_done, total, finished)
+            try:
+                asyncio.run_coroutine_threadsafe(progress, loop)
+            except RuntimeError:
+                progress.close()  # the loop closed: no client to tell
+
         def hash_files() -> None:
             try:
-                hash_local_mount(root, digests_path)
+                hash_local_mount(root, digests_path, on_progress=report)
             except OSError as exc:
                 # The recompute below shows what is there now (a folder gone is changed).
                 logger.warning("Could not hash the local mount %s: %s", root, exc)
@@ -903,11 +913,34 @@ class NotebookSession:
         finally:
             with self._mount_hash_lock:
                 self._mount_hashing.pop((digests_path, root), None)
+                self._mount_hash_cells.pop((digests_path, root), None)
         if self.closed:
             return
         from strata.notebook.ws import refresh_staleness
 
         await refresh_staleness(self)
+
+    async def _broadcast_mount_progress(
+        self, key: tuple[Path, Path], bytes_done: int, total: int, finished: bool
+    ) -> None:
+        """One ``cell_mount_progress`` frame per cell that mounts the folder being hashed."""
+        with self._mount_hash_lock:
+            cells = dict(self._mount_hash_cells.get(key, {}))
+        if self.closed:
+            return
+        from strata.notebook.ws import broadcast_mount_progress
+
+        for cell_id, mount in cells.items():
+            await broadcast_mount_progress(
+                self.id,
+                {
+                    "cell_id": cell_id,
+                    "mount": mount,
+                    "bytes_done": bytes_done,
+                    "bytes": total,
+                    "done": finished,
+                },
+            )
 
     def _outside_world_fingerprints(self) -> dict[str, _OutsideWorld]:
         """Fingerprint what each cell reads from outside, before the lock.
@@ -2267,6 +2300,8 @@ class NotebookSession:
             ):
                 # Its job reads it: reading it here too reads its last files twice.
                 mount_fingerprints.append(mount_component(mount, nonce.unhashed_nonce()))
+                with self._mount_hash_lock:
+                    self._mount_hash_cells.setdefault(key, {})[cell.id] = mount.name
                 continue
             fingerprint = mount_fingerprint_sync(resolver, mount, read_bytes=STALENESS_READ_BYTES)
             if fingerprint is None:
@@ -2276,6 +2311,7 @@ class NotebookSession:
             if nonce.is_unhashed(fingerprint):
                 with self._mount_hash_lock:
                     self._mounts_to_hash.add(key)
+                    self._mount_hash_cells.setdefault(key, {})[cell.id] = mount.name
 
         return mount_fingerprints, has_rw_mount
 

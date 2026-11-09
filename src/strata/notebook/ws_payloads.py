@@ -125,6 +125,21 @@ class CellIterationProgressPayload(WsPayload):
     duration_ms: int
 
 
+class CellMountProgressPayload(WsPayload):
+    """``cell_mount_progress``: how much of a cell's local mount has been hashed.
+
+    Sent by a run that hashes it and by the background hash a staleness check starts, about
+    every 256 MiB and only for a hash of more. ``done`` ends it, whether the hash finished
+    or failed.
+    """
+
+    cell_id: str
+    mount: str
+    bytes_done: int
+    bytes: int
+    done: bool = False
+
+
 class CellVariantProgressPayload(WsPayload):
     """``cell_variant_progress``: one completed variant of a ``# @per_variant`` cell."""
 
@@ -837,6 +852,7 @@ FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.CELL_ERROR: CellErrorPayload,
     MessageType.CELL_INPUTS: CellInputsPayload,
     MessageType.CELL_ITERATION_PROGRESS: CellIterationProgressPayload,
+    MessageType.CELL_MOUNT_PROGRESS: CellMountProgressPayload,
     MessageType.CELL_OUTPUT: CellOutputPayload,
     MessageType.CELL_OUTPUT_DELTA: CellOutputDeltaPayload,
     MessageType.CELL_STATUS: CellStatusPayload,
