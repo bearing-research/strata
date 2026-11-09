@@ -683,7 +683,7 @@ def digest_cache(path: Path) -> Generator[FileDigests]:
 
 
 def close_digest_caches() -> None:
-    """Close every digest cache nothing is using (tests, and a server shutting down)."""
+    """Close every digest cache nothing is using; the test suite does after each test."""
     with _digest_caches_lock:
         for k in [k for k, e in _digest_caches.items() if e.users == 0]:
             _digest_caches.pop(k).digests.close()
@@ -696,16 +696,15 @@ def local_digests(
 
     A file the cache at *digests_path* holds a digest for under its current stat is not
     read. With *read_bytes*, ``None`` instead of reading more than that of the files that
-    can be read. A file that cannot be read is ``unreadable``, so the mount's key changes
-    once it can be; one that changed while it was read gets a key no run reproduces.
+    can be read. The rest is :func:`file_digests`.
     """
-    files = local_files(root)
+    files = without_digest_cache(local_files(root), digests_path)
     with digest_cache(digests_path) as cache:
         try:
             known = cache.cached_many(path for _, path, _ in files)
         except OSError:
             # A file went between the walk and the look.
-            return None if read_bytes is not None else _digests_one_by_one(cache, files)
+            return None if read_bytes is not None else file_digests(cache, files)
         digests = {rel: sha for (rel, _, _), sha in zip(files, known) if sha is not None}
         missing = [f for f, sha in zip(files, known) if sha is None]
         unread = sum(st.st_size for _, path, st in missing if os.access(path, os.R_OK))
@@ -713,19 +712,31 @@ def local_digests(
             return None
         if unread >= _LOG_READ_BYTES:
             logger.info("Hashing %s: %d files, %d bytes", root, len(missing), unread)
-        if not missing:
-            return digests
-        try:
-            found = cache.digest_many(
-                [path for _, path, _ in missing], stats=[st for _, _, st in missing]
-            )
-        except OSError:
-            # One file failed: the rest one by one, the ones read so far remembered.
-            return digests | _digests_one_by_one(cache, missing)
-        return digests | {
-            rel: d.sha256 if d.settled else nonce.unread_nonce()
-            for (rel, _, _), d in zip(missing, found)
-        }
+        return digests | file_digests(cache, missing)
+
+
+def file_digests(
+    cache: FileDigests, files: list[tuple[str, Path, os.stat_result]]
+) -> dict[str, str]:
+    """*files*' sha256 by relative path, read where *cache* holds none.
+
+    A file that cannot be read is ``unreadable``, so its mount's key changes once it can
+    be; one that changed while it was read gets a key no run reproduces; one gone since
+    the walk is left out.
+    """
+    readable = [f for f in files if os.access(f[1], os.R_OK)]
+    digests = {rel: "unreadable" for rel, path, _ in files if not os.access(path, os.R_OK)}
+    try:
+        found = cache.digest_many(
+            [path for _, path, _ in readable], stats=[st for _, _, st in readable]
+        )
+    except OSError:
+        # Gone, or unreadable after all: the rest one by one, those read so far remembered.
+        return digests | _digests_one_by_one(cache, readable)
+    return digests | {
+        rel: d.sha256 if d.settled else nonce.unread_nonce()
+        for (rel, _, _), d in zip(readable, found)
+    }
 
 
 def _digests_one_by_one(
@@ -742,6 +753,15 @@ def _digests_one_by_one(
         else:
             digests[rel] = found.sha256 if found.settled else nonce.unread_nonce()
     return digests
+
+
+def without_digest_cache(
+    files: list[tuple[str, Path, os.stat_result]], digests_path: Path
+) -> list[tuple[str, Path, os.stat_result]]:
+    """*files* without the digest cache's own, which each look rewrites: a mount over the
+    notebook's folder would otherwise never key the same twice."""
+    own = {digests_path.absolute(), Path(f"{digests_path.absolute()}-journal")}
+    return [f for f in files if f[1].absolute() not in own]
 
 
 def _fingerprint_digests(digests: Mapping[str, str]) -> str:

@@ -284,3 +284,72 @@ class TestReviewFixes:
 
         assert again == first
         assert read == []
+
+
+class TestSecondReview:
+    """What a second review of the content key found."""
+
+    async def test_weighing_a_cell_before_it_runs_reads_no_cold_mount(self, tmp_path, monkeypatch):
+        from strata.notebook import executor as executor_module
+        from strata.notebook.executor import CellExecutor
+
+        raw, source = _over_mount(tmp_path)
+        _touch(raw / "f.txt", "aaaa")
+        nb = Notebook(tmp_path, source, READER.replace("dict(out)", "out"))
+        monkeypatch.setattr(executor_module, "STALENESS_READ_BYTES", 0)
+        read = TestReviewFixes._counted(monkeypatch)
+
+        await CellExecutor(nb.session).estimate_reads("a", source)
+
+        assert read == []
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or os.geteuid() == 0, reason="needs a file its owner cannot read"
+    )
+    def test_a_pinned_mounts_unreadable_item_is_keyed_as_such(self, tmp_path):
+        from strata.notebook import each
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        _touch(raw / "a.txt", "aaaa")
+        _touch(raw / "b.txt", "bbbb")
+        (raw / "b.txt").chmod(0)
+        try:
+            items = each.items_of_mount(raw, None, digests_path=tmp_path / "hashes.sqlite")
+        finally:
+            (raw / "b.txt").chmod(0o600)
+
+        assert {i.key: i.digest for i in items}["b.txt"] == "unreadable"
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or os.geteuid() == 0, reason="needs a file its owner cannot read"
+    )
+    def test_an_unreadable_file_does_not_stop_the_parallel_read(self, tmp_path, monkeypatch):
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        for name in ("a", "b", "c"):
+            _touch(raw / f"{name}.txt", name * 4)
+        (raw / "b.txt").chmod(0)
+        one_by_one = []
+        digest = FileDigests.digest
+        monkeypatch.setattr(
+            FileDigests, "digest", lambda self, p: one_by_one.append(p) or digest(self, p)
+        )
+        try:
+            digests = local_digests(raw, tmp_path / "hashes.sqlite")
+        finally:
+            (raw / "b.txt").chmod(0o600)
+
+        assert digests is not None and digests["b.txt"] == "unreadable"
+        assert one_by_one == []
+
+    def test_a_mount_over_the_notebook_keys_the_same_twice(self, tmp_path, later):
+        digests_path = tmp_path / ".strata" / "hashes.sqlite"
+        _touch(tmp_path / "a.txt", "aaaa")
+        local_digests(tmp_path, digests_path)
+
+        second = local_digests(tmp_path, digests_path)
+        third = local_digests(tmp_path, digests_path)
+
+        assert second == third
+        assert not any(rel.startswith(".strata/hashes.sqlite") for rel in second)

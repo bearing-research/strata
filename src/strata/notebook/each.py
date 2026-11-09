@@ -20,8 +20,14 @@ from typing import Any
 
 import cellgraph as cg
 
-from strata.notebook.mounts import _sha256, digest_cache, glob_matches, local_files
-from strata.notebook.nonce import unread_nonce
+from strata.notebook.mounts import (
+    _sha256,
+    digest_cache,
+    file_digests,
+    glob_matches,
+    local_files,
+    without_digest_cache,
+)
 from strata.notebook.output_dirs import is_assembling
 from strata.notebook.serializer import to_serialization_safe
 
@@ -119,24 +125,22 @@ def items_of_mount(
     """
     if not root.is_dir():
         raise EachError(f"@each over a mount needs a folder, and {root} is not one")
-    listed = [
-        (relative, path)
-        for relative, path, _ in local_files(root)
-        if glob is None or glob_matches(relative, glob)
-    ]
-    unversioned = [p for relative, p in listed if versions is None or relative not in versions]
-    read: dict[Path, str] = {}
+    listed = [f for f in local_files(root) if glob is None or glob_matches(f[0], glob)]
+    if digests_path is not None:
+        listed = without_digest_cache(listed, digests_path)
+    unversioned = [f for f in listed if versions is None or f[0] not in versions]
+    read: dict[str, str] = {}
     if unversioned and digests_path is not None:
         with digest_cache(digests_path) as cache:
-            found = cache.digest_many(unversioned)
-        # One read while it changed is keyed so that no later run matches it.
-        read = {p: d.sha256 if d.settled else unread_nonce() for p, d in zip(unversioned, found)}
+            read = file_digests(cache, unversioned)
     items = []
-    for relative, path in listed:
+    for relative, path, _ in listed:
         if versions is not None and relative in versions:
             digest = versions[relative]
-        elif path in read:
-            digest = read[path]
+        elif relative in read:
+            digest = read[relative]
+        elif digests_path is not None:
+            continue  # gone since the walk
         else:
             with path.open("rb") as handle:
                 digest = _sha256(handle)
