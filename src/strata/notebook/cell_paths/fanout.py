@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -19,7 +19,7 @@ from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import _writes_entry
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.models import CellLanguage, MountMode, TableWriteSpec, WorkerBackendType
-from strata.notebook.mounts import MountWrite
+from strata.notebook.mounts import MountWrite, moved_key, moved_parts
 from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 from strata.notebook.workers import resolve_worker_spec
 
@@ -198,6 +198,22 @@ async def _run_fanout_instances(
     return results
 
 
+def _moved(results: list[tuple[str, CellExecutionResult]]) -> str | None:
+    """The first input an instance read that moved while it ran, if any did."""
+    return next((r.moved_input for _, r in results if r.moved_input), None)
+
+
+def _kept(base: _CellProvenance, moved: str | None) -> _CellProvenance:
+    """*base*, or under :func:`moved_key` when an input moved while an instance ran."""
+    if moved is not None:
+        return replace(
+            base,
+            provenance_hash=moved_key(base.provenance_hash),
+            key_parts=moved_parts(base.key_parts, moved),
+        )
+    return base
+
+
 def _finish_fanout(
     host: ExecutorHost,
     context: FanoutContext,
@@ -216,6 +232,7 @@ def _finish_fanout(
     saying which it is.
     """
     writes = _merge_variant_writes(context.variant_writes.pop(cell_id, []))
+    moved = _moved(results)
     duration_ms = (time.time() - start_time) * 1000
     failures = [(name, r) for name, r in results if not r.success]
     stdout = "\n".join(f"[variant={name}]\n{r.stdout}" for name, r in results if r.stdout)
@@ -259,6 +276,7 @@ def _finish_fanout(
             display_outputs=displays,
             display_output=displays[-1] if displays else None,
             cache_hit=cache_hit,
+            moved_input=moved,
             execution_method="fanout",
             # Before the record below moves the cell's last key on to this one.
             replaces_console=cache_hit
@@ -276,15 +294,16 @@ def _finish_fanout(
         )
         # Record the BASE provenance: compute_staleness recomputes the base hash, so a
         # variant-scoped value would leave the fan-out cell perpetually stale on re-open.
+        kept = _kept(base, moved)
         try:
             host.record_successful_execution_provenance(
                 cell_id,
-                base.provenance_hash,
+                kept.provenance_hash,
                 base.source_hash,
                 base.env_hash,
                 table_reads=base.table_reads,
                 reads=base.reads(*context.moved(cell_id)),
-                key_parts=base.key_parts,
+                key_parts=kept.key_parts,
                 writes=_writes_entry(writes),
             )
         except Exception:
@@ -395,7 +414,8 @@ async def run_each_cell(
                     cell_id,
                     source,
                     items,
-                    base,
+                    # An item that moved while it ran keeps the manifest out of reach too.
+                    _kept(base, _moved(results)),
                     sorted(consumed),
                     annotations.table_writes,
                     displays,
@@ -418,7 +438,13 @@ async def run_each_cell(
         shows_displays=True,
     )
     # The one probe that serves a later hit runs no instance, so it reads their console here.
-    if finished.success and not finished.cache_hit and consumed and not annotations.nocache:
+    if (
+        finished.success
+        and not finished.cache_hit
+        and consumed
+        and not annotations.nocache
+        and finished.moved_input is None
+    ):
         context.store_console_outputs(
             cell_id,
             base.provenance_hash,

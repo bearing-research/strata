@@ -126,3 +126,219 @@ async def test_a_run_all_batch_keys_on_the_view_it_read(tmp_path, monkeypatch):
     assert _status(session, "c1") != "ready"
     (data / "b.txt").unlink()
     assert _status(session, "c1") == "ready"
+
+
+def _writes_once(data: Path, flag: Path) -> str:
+    """Code that rewrites ``a.txt`` in the live folder, once, as another writer would."""
+    return (
+        f"import os\nif os.path.exists({str(flag)!r}):\n"
+        f"    os.remove({str(flag)!r})\n"
+        f"    open({str(data / 'a.txt')!r}, 'w').write('changed')\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_file_written_while_the_cell_ran_is_never_served_after_it_is_put_back(tmp_path):
+    data = _data(tmp_path)
+    flag = tmp_path / "flag"
+    flag.touch()
+    source = f"# @mount data {data.as_uri()} ro\nn = (data / 'a.txt').read_text()\n" + _writes_once(
+        data, flag
+    )
+    session = _session(tmp_path, {"c1": source, "c2": "m = n\n"})
+    executor = CellExecutor(session)
+
+    moved = await executor.execute_cell("c1", source)
+
+    assert moved.success, moved.error
+    assert moved.moved_input == "data/a.txt"
+    assert "data/a.txt changed while the cell ran" in moved.stderr
+    assert _status(session, "c1") != "ready"
+    # Back to what the run was keyed on: a hit would serve outputs made over other bytes.
+    (data / "a.txt").write_text("a")
+    assert _status(session, "c1") != "ready"
+    again = await executor.execute_cell("c1", source)
+    assert again.success and again.cache_hit is False
+    assert again.moved_input is None
+    assert _status(session, "c1") == "ready"
+
+
+@pytest.mark.asyncio
+async def test_a_run_all_batch_keeps_a_moved_run_for_that_run_only(tmp_path):
+    from strata.notebook import ws
+
+    data = _data(tmp_path)
+    flag = tmp_path / "flag"
+    flag.touch()
+    source = f"# @mount data {data.as_uri()} ro\nn = (data / 'a.txt').read_text()\n" + _writes_once(
+        data, flag
+    )
+    session = _session(tmp_path, {"c1": source, "c2": "m = n\n"})
+    executor = CellExecutor(session)
+    notebook_id = session.notebook_state.id
+
+    batch = await ws._run_partition_batch(
+        session=session,
+        executor=executor,
+        cells_in_run=[session.notebook_state.get_cell("c1")],
+        notebook_id=notebook_id,
+        force=False,
+        execution_state=ws._ensure_execution_state(notebook_id),
+    )
+
+    assert [r.status for r in batch.cell_results] == ["ok"]
+    assert "data/a.txt changed while the cell ran" in batch.cell_results[0].stderr
+    (data / "a.txt").write_text("a")
+    assert _status(session, "c1") != "ready"
+    again = await executor.execute_cell("c1", source)
+    assert again.success and again.cache_hit is False
+
+
+@pytest.mark.asyncio
+async def test_an_each_item_written_while_it_ran_keeps_the_manifest_out_of_reach(tmp_path):
+    data = _data(tmp_path)
+    (data / "b.txt").write_text("b")
+    flag, log = tmp_path / "flag", tmp_path / "ran.log"
+    flag.touch()
+    source = (
+        f"# @mount data {data.as_uri()} ro\n# @each path in data\nout = path.read_text()\n"
+        f"open({str(log)!r}, 'a').write(path.name + '\\n')\n" + _writes_once(data, flag)
+    )
+    session = _session(tmp_path, {"c1": source, "c2": "seen = dict(out)\n"})
+    executor = CellExecutor(session)
+
+    moved = await executor.execute_cell("c1", source)
+
+    assert moved.success, moved.error
+    # Named in the mount it was listed from, not by the instance's binding.
+    assert moved.moved_input == "data/a.txt"
+    (data / "a.txt").write_text("a")
+    assert _status(session, "c1") != "ready"
+    log.write_text("")
+    again = await executor.execute_cell("c1", source)
+    assert again.success and again.moved_input is None
+    # b.txt's instance read a still item: the folder it was listed from is not its key.
+    assert log.read_text().split() == ["a.txt"]
+    assert _status(session, "c1") == "ready"
+
+
+@pytest.mark.asyncio
+async def test_an_each_instance_checks_the_cells_other_mounts(tmp_path):
+    data = _data(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "c.txt").write_text("c")
+    flag = tmp_path / "flag"
+    flag.touch()
+    source = (
+        f"# @mount data {data.as_uri()} ro\n# @mount other {other.as_uri()} ro\n"
+        "# @each path in data\nout = path.read_text()\n"
+        f"import os\nif os.path.exists({str(flag)!r}):\n"
+        f"    os.remove({str(flag)!r})\n"
+        f"    open({str(other / 'c.txt')!r}, 'w').write('changed')\n"
+    )
+    session = _session(tmp_path, {"c1": source, "c2": "seen = dict(out)\n"})
+
+    moved = await CellExecutor(session).execute_cell("c1", source)
+
+    assert moved.success, moved.error
+    assert moved.moved_input == "other/c.txt"
+    assert _status(session, "c1") != "ready"
+
+
+@pytest.mark.asyncio
+async def test_a_loop_whose_mount_moved_keeps_its_outputs_for_that_run_only(tmp_path):
+    data = _data(tmp_path)
+    flag = tmp_path / "flag"
+    flag.touch()
+    source = (
+        f"# @mount data {data.as_uri()} ro\n# @loop max_iter=2 carry=state\n"
+        "state = state + len((data / 'a.txt').read_text())\n" + _writes_once(data, flag)
+    )
+    session = _session(tmp_path, {"s": "state = 0\n", "c1": source, "c2": "m = state\n"})
+    executor = CellExecutor(session)
+    await executor.execute_cell("s", "state = 0\n")
+
+    moved = await executor.execute_cell("c1", source)
+
+    assert moved.success, moved.error
+    assert moved.moved_input == "data/a.txt"
+    assert "data/a.txt changed while the cell ran" in moved.stderr
+    (data / "a.txt").write_text("a")
+    assert _status(session, "c1") != "ready"
+    again = await executor.execute_cell("c1", source)
+    assert again.success and again.cache_hit is False
+    assert again.moved_input is None
+    assert _status(session, "c1") == "ready"
+
+
+@pytest.mark.asyncio
+async def test_a_moved_run_says_which_mount_moved_once_the_file_is_put_back(tmp_path):
+    from strata.notebook.staleness_explanations import CausalityType
+
+    data = _data(tmp_path)
+    flag = tmp_path / "flag"
+    flag.touch()
+    source = f"# @mount data {data.as_uri()} ro\nn = (data / 'a.txt').read_text()\n" + _writes_once(
+        data, flag
+    )
+    session = _session(tmp_path, {"c1": source, "c2": "m = n\n"})
+    await CellExecutor(session).execute_cell("c1", source)
+    (data / "a.txt").write_text("a")
+
+    assert _status(session, "c1") != "ready"
+    details = session.causality_map["c1"].details
+    assert [(d.type, d.input_name) for d in details] == [(CausalityType.EXTERNAL_CHANGED, "data")]
+
+
+@pytest.mark.asyncio
+async def test_a_batched_stochastic_cell_keeps_every_run(tmp_path):
+    from vestigo.provenance import derive_subkey
+
+    from strata.notebook import ws
+
+    source = "# @stochastic\nimport random\nsample = random.random()\n"
+    session = _session(tmp_path, {"c1": source, "c2": "m = sample\n"})
+    executor = CellExecutor(session)
+    notebook_id = session.notebook_state.id
+
+    for _ in range(2):
+        batch = await ws._run_partition_batch(
+            session=session,
+            executor=executor,
+            cells_in_run=[session.notebook_state.get_cell("c1")],
+            notebook_id=notebook_id,
+            force=False,
+            execution_state=ws._ensure_execution_state(notebook_id),
+        )
+        assert [r.status for r in batch.cell_results] == ["ok"]
+
+    manager = session.get_artifact_manager()
+    store = manager.artifact_store
+    sample_id = manager.cell_artifact_id("c1", "sample")
+    rows = [store.get_artifact(sample_id, v) for v in (1, 2)]
+    assert [r.state for r in rows] == ["ready", "ready"], "both runs persist"
+    assert rows[0].provenance_hash != rows[1].provenance_hash
+    key = session.notebook_state.get_cell("c1").last_provenance_hash
+    assert store.find_by_provenance(derive_subkey(key, "sample")) is None
+
+
+@pytest.mark.asyncio
+async def test_a_moved_leafs_displays_are_not_served_after_the_file_is_put_back(tmp_path):
+    data = _data(tmp_path)
+    flag = tmp_path / "flag"
+    flag.touch()
+    source = (
+        f"# @mount data {data.as_uri()} ro\n"
+        "display(Markdown((data / 'a.txt').read_text()))\n" + _writes_once(data, flag)
+    )
+    session = _session(tmp_path, {"c1": source})
+    executor = CellExecutor(session)
+
+    moved = await executor.execute_cell("c1", source)
+
+    assert moved.success, moved.error
+    assert moved.moved_input == "data/a.txt"
+    (data / "a.txt").write_text("a")
+    again = await executor.execute_cell("c1", source)
+    assert again.success and again.cache_hit is False

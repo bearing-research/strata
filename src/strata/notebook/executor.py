@@ -19,6 +19,7 @@ import json
 import logging
 import tempfile as tempfile
 import time
+import uuid
 from collections.abc import Awaitable, Callable, Coroutine, Generator, Iterable, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
@@ -309,6 +310,8 @@ class _CellProvenance:
     read_confirmation: ReadConfirmation | None = None
     # The fan-out instance this keys, whose key carries its ``variant=`` or ``each=`` subkey.
     instance: str | cg.Item | None = None
+    # The mounts as the run prepared them (``over_mounts``): what it is keyed on.
+    prepared: Mapping[str, ResolvedMount] | None = None
 
     def for_instance(self, instance: str | cg.Item) -> _CellProvenance:
         """The same provenance for one fan-out instance, over the inputs it reads."""
@@ -329,8 +332,8 @@ class _CellProvenance:
             if (fingerprint := prepared[spec.name].fingerprint) is not None
         ]
         if fingerprints == self.mount_fingerprints:
-            return self
-        return self._rehashed(mount_fingerprints=fingerprints)
+            return replace(self, prepared=prepared)
+        return replace(self._rehashed(mount_fingerprints=fingerprints), prepared=prepared)
 
     def _rehashed(self, **changes: Any) -> _CellProvenance:
         changed = replace(self, **changes)
@@ -3104,8 +3107,9 @@ class CellExecutor:
 
         With ``variant`` set, ids get an ``@variant={name}`` suffix so fan-out
         instances do not collide. With a *local_run*, the outputs become its ``final``
-        release; *stochastic* keys them by the run (``# @stochastic``) so every run's
-        persist beside the cached key, which none of them matches.
+        release; *stochastic* keys them by the run (``# @stochastic``, or a run whose local
+        mount moved) so every run's persist beside the cached key, which none of them
+        matches. Without a *local_run*, the run is this call.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or self.session.dag is None:
@@ -3161,9 +3165,11 @@ class CellExecutor:
             ".rds",
         ]
 
+        run_id = local_run.build_id if local_run is not None else uuid.uuid4().hex
+
         def output_key(var_name: str) -> str:
-            if stochastic and local_run is not None:
-                return run_output_key(provenance_hash, local_run.build_id, var_name)
+            if stochastic:
+                return run_output_key(provenance_hash, run_id, var_name)
             return derive_subkey(provenance_hash, var_name)
 
         output_dir_names = set(parse_annotations(source or cell.source, cell.language).output_dirs)
