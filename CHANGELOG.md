@@ -54,7 +54,7 @@ exhaustive commit history.
   the old result, and a `touch` ran the cell again. Now it is the sha256 of the file and
   its `-wal`, kept in `.strata/hashes.sqlite` while their stat holds (on Windows a
   rewrite in place that restores the mtime is still not seen). The key changes, so
-  each such cell runs once after the upgrade. (#PRNUM)
+  each such cell runs once after the upgrade. (#1494)
 - **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep
