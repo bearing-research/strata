@@ -764,29 +764,6 @@ async def run_python_cell(
                     variant=fanout_variant,
                 )
 
-            # ⑤ Store artifacts for consumed variables.
-            if exec_result.success:
-                module_export_error = write_module_export_outputs(
-                    host,
-                    cell_id,
-                    source,
-                    result_output_dir,
-                    provenance_hash,
-                    exec_result.outputs,
-                )
-                if module_export_error is not None:
-                    exec_result = CellExecutionResult(
-                        cell_id=cell_id,
-                        success=False,
-                        stdout=exec_result.stdout,
-                        stderr=exec_result.stderr,
-                        outputs=exec_result.outputs,
-                        duration_ms=exec_result.duration_ms,
-                        error=module_export_error,
-                        execution_method=exec_result.execution_method,
-                        mutation_warnings=exec_result.mutation_warnings,
-                    ).apply_remote_metadata(**remote_metadata)
-
             # The instance is keyed on its item, not on the folder the items are listed from.
             moved = (
                 await asyncio.to_thread(
@@ -804,6 +781,33 @@ async def run_python_cell(
                 exec_result = dataclasses.replace(
                     exec_result, stderr=exec_result.stderr + moved_line(moved), moved_input=moved
                 )
+
+            # ⑤ Store artifacts for consumed variables.
+            if exec_result.success:
+                module_export_error = write_module_export_outputs(
+                    host,
+                    cell_id,
+                    source,
+                    result_output_dir,
+                    # A value an exported def closes over is stored now: a run kept for
+                    # itself stores it where no later run finds it either.
+                    provenance_hash
+                    if not prov.annotations.stochastic and moved is None
+                    else derive_subkey(provenance_hash, f"run={uuid.uuid4().hex}"),
+                    exec_result.outputs,
+                )
+                if module_export_error is not None:
+                    exec_result = CellExecutionResult(
+                        cell_id=cell_id,
+                        success=False,
+                        stdout=exec_result.stdout,
+                        stderr=exec_result.stderr,
+                        outputs=exec_result.outputs,
+                        duration_ms=exec_result.duration_ms,
+                        error=module_export_error,
+                        execution_method=exec_result.execution_method,
+                        mutation_warnings=exec_result.mutation_warnings,
+                    ).apply_remote_metadata(**remote_metadata)
 
             if exec_result.success:
                 store_error: str | None = None

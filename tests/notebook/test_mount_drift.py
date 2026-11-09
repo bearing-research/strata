@@ -152,7 +152,7 @@ async def test_a_file_written_while_the_cell_ran_is_never_served_after_it_is_put
 
     assert moved.success, moved.error
     assert moved.moved_input == "data/a.txt"
-    assert "data/a.txt changed while the cell ran" in moved.stderr
+    assert "data/a.txt changed after the run began" in moved.stderr
     assert _status(session, "c1") != "ready"
     # Back to what the run was keyed on: a hit would serve outputs made over other bytes.
     (data / "a.txt").write_text("a")
@@ -187,7 +187,7 @@ async def test_a_run_all_batch_keeps_a_moved_run_for_that_run_only(tmp_path):
     )
 
     assert [r.status for r in batch.cell_results] == ["ok"]
-    assert "data/a.txt changed while the cell ran" in batch.cell_results[0].stderr
+    assert "data/a.txt changed after the run began" in batch.cell_results[0].stderr
     (data / "a.txt").write_text("a")
     assert _status(session, "c1") != "ready"
     again = await executor.execute_cell("c1", source)
@@ -263,7 +263,7 @@ async def test_a_loop_whose_mount_moved_keeps_its_outputs_for_that_run_only(tmp_
 
     assert moved.success, moved.error
     assert moved.moved_input == "data/a.txt"
-    assert "data/a.txt changed while the cell ran" in moved.stderr
+    assert "data/a.txt changed after the run began" in moved.stderr
     (data / "a.txt").write_text("a")
     assert _status(session, "c1") != "ready"
     again = await executor.execute_cell("c1", source)
@@ -342,3 +342,22 @@ async def test_a_moved_leafs_displays_are_not_served_after_the_file_is_put_back(
     (data / "a.txt").write_text("a")
     again = await executor.execute_cell("c1", source)
     assert again.success and again.cache_hit is False
+
+
+@pytest.mark.asyncio
+async def test_a_value_a_stochastic_def_closes_over_is_kept_for_its_run_only(tmp_path):
+    from vestigo.provenance import derive_subkey
+
+    source = (
+        "# @stochastic\nimport random\ndata = random.random()\n\ndef sample():\n    return data\n"
+    )
+    session = _session(tmp_path, {"c1": source, "c2": "seen = sample()\n"})
+
+    made = await CellExecutor(session).execute_cell("c1", source)
+
+    assert made.success, made.error
+    store = session.get_artifact_manager().artifact_store
+    key = session.notebook_state.get_cell("c1").last_provenance_hash
+    # Stored before the def, which pins it; under the key it would be a row a check finds.
+    assert store.find_by_provenance(derive_subkey(key, "data")) is None
+    assert store.find_by_provenance(derive_subkey(key, "sample")) is None

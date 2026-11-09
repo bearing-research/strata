@@ -920,8 +920,9 @@ def moved_parts(key_parts: dict[str, Any] | None, moved: str) -> dict[str, Any] 
 
 
 def moved_line(moved: str) -> str:
-    """The console line that says *moved* changed while the cell ran."""
-    return f"{moved} changed while the cell ran; its outputs are kept for this run only.\n"
+    """The console line that says *moved* changed after the run began: while the cell ran,
+    or, in Run All, before it ran but after the batch was keyed."""
+    return f"{moved} changed after the run began; its outputs are kept for this run only.\n"
 
 
 def moved_file(prepared: Mapping[str, ResolvedMount], *, skip: Collection[str] = ()) -> str | None:

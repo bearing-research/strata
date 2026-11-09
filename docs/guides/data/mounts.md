@@ -58,9 +58,11 @@ last iteration. If one no longer holds what the key was taken from, the outputs 
 displays are kept as a `@stochastic` run's are: under the run, where no later key finds
 them, so a cell reading them keys on that run. The cell stays stale, says the mount
 changed, and its console says which file moved
-("`raw/part-3.csv` changed while the cell ran"). Putting the file back does not bring
+("`raw/part-3.csv` changed after the run began"). Putting the file back does not bring
 those outputs back as a cache hit; the next run computes them again. Only the content is
-compared, so a file written and put back before the run ends is not seen.
+compared, so a file written and put back before the run ends is not seen. Run All keys
+its cells before the first runs, so a file an earlier cell writes into a later cell's
+read-only mount counts as moved for the later cell.
 
 **A cell says how much it reads.** A badge shows what its read-only remote mounts,
 `@table` inputs and `@fetch` URLs weighed when it last started ("reads 3.0 GB"), and
