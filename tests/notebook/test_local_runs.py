@@ -444,6 +444,46 @@ sample = random.random()
 """
 
 
+class TestCheckpointHolds:
+    def test_a_checkpoint_the_idle_floor_keeps_keeps_what_it_was_built_from(self, tmp_path: Path):
+        """A collectable checkpoint the sweep keeps still holds the value it read."""
+        import sqlite3
+        import time
+
+        session, executor = _notebook(tmp_path, TRAIN.replace("epoch == 1", "epoch == 99"))
+        train = session.notebook_state.get_cell("train")
+        assert _run(executor, "train", train.source).success is True
+        store, _, releases = _ledger(session)
+        (first,) = _only_build(session, "train")
+        features_id = f"nb_{session.notebook_state.id}_cell_features_var_features"
+        read = store.get_latest_version(features_id)
+        # New features and a shorter second run: the first run's last two checkpoints
+        # stay their ids' current values, collectable, and alone read the old features.
+        features = session.notebook_state.get_cell("features")
+        features.source = features.source.replace("events_snapshot}", 'events_snapshot, "v": 2}')
+        train.source = train.source.replace("range(start, 4)", "range(start, 2)")
+        assert _run(executor, "train", train.source).success is True
+        assert len(_only_build(session, "train")) == 2
+        tail = [r for r in releases.releases_of(first.build_id, "checkpoint") if r.sequence > 2]
+        assert len(tail) == 2
+        # Every value but the checkpoints idle past the floor.
+        conn = sqlite3.connect(store.db_path)
+        try:
+            conn.execute(
+                "UPDATE artifact_versions SET created_at = 0, last_used_at = ? "
+                "WHERE id NOT LIKE '%@ckpt=%'",
+                (time.time() - 31 * 86400,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        session.get_artifact_manager().prune(keep_superseded=0, min_idle_seconds=7 * 86400)
+
+        assert all(releases.bundle(r.release_id).outputs for r in tail)
+        assert store.get_artifact(read.id, read.version) is not None
+
+
 def _files(store, bundle) -> dict[str, bytes]:
     return {
         path: store.read_blob(v.id, v.version)

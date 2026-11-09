@@ -168,9 +168,9 @@ class NotebookArtifactManager:
     ) -> list[tuple[str, int]]:
         """The :meth:`removed_cell_values` unused for a month, which the sweep may take.
 
-        Only those: a collectable version stops holding its inputs, so passing one the
-        idle floor keeps would let what it was built from go while it stays. The store
-        reports idleness only through a dry run, which runs only when a cell was removed.
+        Their floor is longer than the sweep's, so a cell away on another branch keeps its
+        results. The store takes one floor per sweep and reports idleness only through a
+        dry run, which runs only when a cell was removed.
         """
         if live_cells is None:
             return []
