@@ -289,6 +289,7 @@ class StalenessReason(StrEnum):
     ENV = "env"
     EXTERNAL = "external"  # a mount, table, fetch or dataset, a connection or a model
     FORCED = "forced"  # Re-run despite a cache hit
+    CHECKING = "checking"  # a local mount whose files are being hashed
 
 
 class CellLanguage(StrEnum):

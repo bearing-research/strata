@@ -436,7 +436,8 @@ class LocalNotebookOps:
         if self._staleness_computed:
             return
         self._staleness_computed = True
-        self._session.compute_staleness()
+        # One command: a background hash would outlive nothing that reads it.
+        self._session.compute_staleness(hash_mounts=False)
 
     def list_cells(self) -> list[CellView]:
         """List every cell in order (see :meth:`NotebookOps.list_cells`)."""

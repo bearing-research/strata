@@ -430,6 +430,21 @@ async def _broadcast_staleness_updates(
         )
 
 
+async def refresh_staleness(session: NotebookSession) -> None:
+    """Recompute *session*'s staleness and broadcast the cells that changed.
+
+    For a background job that finished (``NotebookSession._hash_mount``). Not while a run
+    is active: the run recomputes when it ends, on the loop, where no cell can start
+    under the walk.
+    """
+    if notebook_has_active_execution(session.id):
+        return
+    previous = session.capture_cell_state_snapshot()
+    # Starts no job: one still unhashed after its own retries is a file still changing.
+    staleness_map = await session.compute_staleness_async(hash_mounts=False)
+    await _broadcast_changed_staleness(session, session.id, previous, staleness_map)
+
+
 async def _refresh_and_broadcast_changed_staleness(
     session: NotebookSession,
     notebook_id: str,
@@ -471,6 +486,16 @@ async def _refresh_and_broadcast_changed_staleness(
         for stale_id in session.mark_cell_error(mark_error_cell_id):
             staleness_map[stale_id] = CellStaleness(status=CellStatus.STALE, reasons=[])
         staleness_map[mark_error_cell_id] = CellStaleness(status=CellStatus.ERROR, reasons=[])
+    await _broadcast_changed_staleness(session, notebook_id, previous_snapshot, staleness_map)
+    return staleness_map
+
+
+async def _broadcast_changed_staleness(
+    session: NotebookSession,
+    notebook_id: str,
+    previous_snapshot: dict[str, CellStateSnapshot],
+    staleness_map: dict[str, CellStaleness],
+) -> None:
     changed: dict[str, CellStaleness] = {}
 
     for cell in session.notebook_state.cells:
@@ -489,8 +514,6 @@ async def _refresh_and_broadcast_changed_staleness(
 
     if changed:
         await _broadcast_staleness_updates(session, notebook_id, changed)
-
-    return staleness_map
 
 
 async def _run_execution_task(

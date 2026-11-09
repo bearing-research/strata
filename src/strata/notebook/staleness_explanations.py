@@ -32,6 +32,7 @@ class CausalityType(StrEnum):
     EXTERNAL_CHANGED = "external_changed"  # a mount, table, fetch or dataset
     IDENTITY_CHANGED = "identity_changed"  # a SQL cell's connection, a prompt cell's model
     UNAVAILABLE = "unavailable"  # an input that cannot be read now
+    CHECKING = "checking"  # a local mount whose files are being hashed
 
 
 _STALE_BECAUSE = (
@@ -39,6 +40,8 @@ _STALE_BECAUSE = (
     (StalenessReason.UPSTREAM, {CausalityType.INPUT_CHANGED}),
     (StalenessReason.EXTERNAL, {CausalityType.EXTERNAL_CHANGED, CausalityType.IDENTITY_CHANGED}),
     (StalenessReason.ENV, {CausalityType.ENV_CHANGED}),
+    # Not known to have changed: shown apart from a change.
+    (StalenessReason.CHECKING, {CausalityType.CHECKING}),
 )
 
 
@@ -49,6 +52,7 @@ class CausalityReason(StrEnum):
     UPSTREAM = "upstream"
     EXTERNAL = "external"
     ENV = "env"
+    CHECKING = "checking"
     UNKNOWN = "unknown"
 
 
@@ -238,18 +242,19 @@ def _input_changes(
         # Declaring or dropping an input in the source is the edit, already reported.
         if source_changed and (address not in before or address not in now):
             continue
-        component = now.get(address)
         kind, name = address
         details.append(
-            CausalityDetail(
-                type=CausalityType.UNAVAILABLE
-                if component is not None and nonce.is_unresolved(component)
-                else CausalityType.EXTERNAL_CHANGED,
-                input_kind=kind,
-                input_name=name,
-            )
+            CausalityDetail(type=_input_change(now.get(address)), input_kind=kind, input_name=name)
         )
     return details
+
+
+def _input_change(component: str | None) -> CausalityType:
+    if component is not None and nonce.is_unresolved(component):
+        return CausalityType.UNAVAILABLE
+    if component is not None and nonce.is_unhashed(component):
+        return CausalityType.CHECKING
+    return CausalityType.EXTERNAL_CHANGED
 
 
 def _reason(details: list[CausalityDetail]) -> CausalityReason:
@@ -258,6 +263,8 @@ def _reason(details: list[CausalityDetail]) -> CausalityReason:
         return CausalityReason.SELF
     if any(detail.cell_id is not None or detail.cell_name is not None for detail in details):
         return CausalityReason.UPSTREAM
+    if types - {CausalityType.ENV_CHANGED} == {CausalityType.CHECKING}:
+        return CausalityReason.CHECKING
     if types - {CausalityType.ENV_CHANGED}:
         return CausalityReason.EXTERNAL
     return CausalityReason.ENV if types else CausalityReason.UNKNOWN

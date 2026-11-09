@@ -148,6 +148,7 @@ export type StalenessReason =
   | 'env' // environment (uv.lock runtime deps) changed since last run
   | 'external' // a mount, table, fetch or dataset, a connection or a model changed since last run
   | 'forced' // ran with stale inputs ("Run this only"): result exists but suspect
+  | 'checking' // a local mount's files are being hashed: not known to have changed
 
 /** State of a single input variable for a cell */
 export type InputState = 'ready' | 'stale' | 'missing' | 'error'
@@ -422,7 +423,7 @@ export interface VariantProgress {
 
 /** Causality chain: explains why a cell is stale */
 export interface CausalityChain {
-  reason: 'self' | 'upstream' | 'external' | 'env' | 'unknown'
+  reason: 'self' | 'upstream' | 'external' | 'env' | 'checking' | 'unknown'
   details: CausalityDetail[]
   /** There may be more than the details say: not everything could be compared */
   incomplete?: boolean
@@ -436,11 +437,12 @@ export interface CausalityDetail {
     | 'external_changed'
     | 'identity_changed'
     | 'unavailable'
+    | 'checking'
   /** For source/input changes: which cell changed */
   cellId?: CellId
   /** Human-readable name of the changed cell */
   cellName?: string
-  /** For external_changed and unavailable: a mount, table, fetch or dataset */
+  /** For external_changed, unavailable and checking: a mount, table, fetch or dataset */
   inputKind?: string
   inputName?: string
   /** For env_changed: which package changed */

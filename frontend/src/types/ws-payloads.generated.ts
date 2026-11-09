@@ -697,7 +697,7 @@ export interface SessionClosedPayload {
   message: string
 }
 
-export type StalenessReason = 'self' | 'upstream' | 'env' | 'external' | 'forced'
+export type StalenessReason = 'self' | 'upstream' | 'env' | 'external' | 'forced' | 'checking'
 
 export interface VariantGroupState {
   /** Variant group identifier */

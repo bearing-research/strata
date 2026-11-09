@@ -21,6 +21,7 @@ import os
 import shutil
 import stat
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
@@ -50,9 +51,13 @@ DIGESTS_FILE = "hashes.sqlite"
 
 STALENESS_READ_BYTES = 64 * 1024 * 1024
 """What a staleness check reads of a local mount's files the cache holds no digest for.
-Past it the mount is unresolved, and the cell shows stale until a run reads them."""
+Past it the mount's component is :func:`nonce.unhashed_nonce`'s, and the session hashes
+the mount in the background (``NotebookSession._hash_mounts``)."""
 
 _LOG_READ_BYTES = 1024 * 1024 * 1024
+# A background hash's tries, and the wait between them: past the digest cache's 2 s rule.
+_HASH_ATTEMPTS = 3
+_SETTLE_SECONDS = 2.5
 # Digest caches kept open, the least recently used idle one closed past this.
 _OPEN_DIGEST_CACHES = 32
 
@@ -607,7 +612,7 @@ class MountFingerprinter:
         merged options the data fetch uses, so the listing hits the same
         endpoint; when ``None``, ``mount.options`` is used. A local mount's file
         digests are cached at *digests_path*; past *read_bytes* of files to read, its
-        fingerprint is a unique one, so the cell shows stale.
+        fingerprint is :func:`nonce.unhashed_nonce`'s, and the session hashes it.
         """
         if mount.mode == MountMode.READ_WRITE:
             return None
@@ -622,8 +627,8 @@ class MountFingerprinter:
             fingerprint = MountFingerprinter.fingerprint_local_sync(
                 Path(path), digests_path, read_bytes=read_bytes
             )
-            # Not read yet, which is not unavailable.
-            return nonce.unread_nonce() if fingerprint is None else fingerprint
+            # Not read yet, which is not unavailable: a background job reads it.
+            return nonce.unhashed_nonce() if fingerprint is None else fingerprint
         else:
             effective = storage_options if storage_options is not None else (mount.options or None)
             return MountFingerprinter.fingerprint_remote_sync(
@@ -689,6 +694,15 @@ def close_digest_caches() -> None:
             _digest_caches.pop(k).digests.close()
 
 
+_hashing_locks: dict[tuple[Path, Path], threading.Lock] = {}
+
+
+def _hashing(digests_path: Path, root: Path) -> threading.Lock:
+    key = (digests_path.absolute(), root.absolute())
+    with _digest_caches_lock:
+        return _hashing_locks.setdefault(key, threading.Lock())
+
+
 def local_digests(
     root: Path, digests_path: Path, *, read_bytes: int | None = None
 ) -> dict[str, str] | None:
@@ -698,6 +712,28 @@ def local_digests(
     read. With *read_bytes*, ``None`` instead of reading more than that of the files that
     can be read. The rest is :func:`file_digests`.
     """
+    if read_bytes is None:
+        # A run and the background job over one mount: the second finds the first's digests.
+        with _hashing(digests_path, root):
+            return _local_digests(root, digests_path, read_bytes=None)
+    return _local_digests(root, digests_path, read_bytes=read_bytes)
+
+
+def hash_local_mount(root: Path, digests_path: Path) -> None:
+    """Hash *root*'s files into the cache at *digests_path* until a staleness check can key
+    it, at most :data:`_HASH_ATTEMPTS` times: a file written under 2 s before it was read
+    is not remembered, so it is read again once it has settled."""
+    for attempt in range(_HASH_ATTEMPTS):
+        local_digests(root, digests_path)
+        last = attempt == _HASH_ATTEMPTS - 1
+        if last or local_digests(root, digests_path, read_bytes=STALENESS_READ_BYTES) is not None:
+            return
+        time.sleep(_SETTLE_SECONDS)
+
+
+def _local_digests(
+    root: Path, digests_path: Path, *, read_bytes: int | None
+) -> dict[str, str] | None:
     files = without_digest_cache(local_files(root), digests_path)
     with digest_cache(digests_path) as cache:
         try:
@@ -1044,8 +1080,9 @@ def mount_fingerprint_sync(
     staleness never reproduces. It includes the uri (two directories with the
     same files are different inputs) and the credential's name, never its values.
     An unresolvable credential gives a unique fingerprint: the cell shows stale,
-    runs, and fails naming the credential. So does a local mount with more than
-    *read_bytes* of files to read, which staleness passes: a run reads them.
+    runs, and fails naming the credential. A local mount with more than *read_bytes* of
+    files to read, which staleness passes, gets :func:`nonce.unhashed_nonce`'s, and the
+    session hashes it in the background (:func:`hash_local_mount`).
     """
     return weigh_mount_sync(resolver, mount, None, read_bytes=read_bytes)[0]
 

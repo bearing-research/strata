@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import json
 import logging
@@ -24,7 +25,7 @@ import cellgraph as cg
 from vestigo.file_modes import PASS_THROUGH_DIR, private_dir, private_file
 from vestigo.provenance import derive_subkey
 
-from strata.notebook import console_relay, output_file_relay
+from strata.notebook import console_relay, nonce, output_file_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.dag import NotebookDag
@@ -57,6 +58,7 @@ from strata.notebook.models import (
     CellStatus,
     DatasetSpec,
     InputWeight,
+    MountMode,
     NotebookState,
     StalenessReason,
     VariantGroupState,
@@ -330,6 +332,11 @@ class NotebookSession:
         # lock because a session outlives any single event loop, and an asyncio.Lock
         # awaited from another loop never wakes.
         self._staleness_lock = threading.RLock()
+        # Local mounts a staleness check found too much of unhashed, as
+        # ``(digests_path, root)``, and the task hashing each (``_hash_mounts``).
+        self._mounts_to_hash: set[tuple[Path, Path]] = set()
+        self._mount_hashing: dict[tuple[Path, Path], asyncio.Task[None]] = {}
+        self._mount_hash_lock = threading.Lock()
 
         self.warm_pool: WarmProcessPool | None = None
         # Set by SessionManager.close_session; an environment job outliving the session must
@@ -804,7 +811,7 @@ class NotebookSession:
         return self.artifact_manager
 
     async def compute_staleness_async(
-        self, executing: str | None = None
+        self, executing: str | None = None, *, hash_mounts: bool = True
     ) -> dict[str, CellStaleness]:
         """``compute_staleness`` in a worker thread.
 
@@ -815,15 +822,23 @@ class NotebookSession:
         a worker-annotated cell reads the server store's registry, and the store's pool is
         sized to that limiter.
         """
-        return await anyio.to_thread.run_sync(self.compute_staleness, executing)
+        staleness = await anyio.to_thread.run_sync(
+            functools.partial(self.compute_staleness, executing, hash_mounts=False)
+        )
+        if hash_mounts:
+            self._hash_mounts()
+        return staleness
 
-    def compute_staleness(self, executing: str | None = None) -> dict[str, CellStaleness]:
+    def compute_staleness(
+        self, executing: str | None = None, *, hash_mounts: bool = True
+    ) -> dict[str, CellStaleness]:
         """Compute staleness for all cells, updating ``cell.staleness`` and causality chains.
 
         Reads the outside world for ``@fetch``, ``@dataset`` and ``@table`` cells, so
         async callers want :meth:`compute_staleness_async`. ``executing`` is a cell
         running during this recompute: its status stays running and it is left out of
-        the returned map.
+        the returned map. A local mount too large to hash here is hashed by a task
+        (``hash_mounts``, on the event loop only), which recomputes when it is done.
         """
         # Outside reads (an ``@fetch`` gets 60s) happen before the lock: they mutate
         # nothing, and holding the lock across them would block the broadcast path,
@@ -831,7 +846,68 @@ class NotebookSession:
         with one_policy_read():
             prefetched = self._outside_world_fingerprints()
             with self._staleness_lock:
-                return self._compute_staleness_locked(prefetched, executing)
+                staleness = self._compute_staleness_locked(prefetched, executing)
+        if hash_mounts:
+            self._hash_mounts()
+        return staleness
+
+    def _hash_mounts(self) -> None:
+        """Start one task per local mount staleness left unhashed, none for one in hand."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no loop to run them: the next check on one starts them
+        with self._mount_hash_lock:
+            in_hand = {key for key, task in self._mount_hashing.items() if _live(task)}
+            wanted = self._mounts_to_hash - in_hand
+            self._mounts_to_hash.clear()
+            for key in wanted:
+                self._mount_hashing[key] = loop.create_task(self._hash_mount(*key))
+
+    def _hashing(self, key: tuple[Path, Path]) -> bool:
+        with self._mount_hash_lock:
+            task = self._mount_hashing.get(key)
+        return task is not None and _live(task)
+
+    async def _hash_mount(self, digests_path: Path, root: Path) -> None:
+        """Hash a local mount's files into its digest cache, then recompute staleness, so a
+        cell whose files did not change is ready again."""
+        from strata.notebook.mounts import hash_local_mount
+
+        loop = asyncio.get_running_loop()
+        done: asyncio.Future[None] = loop.create_future()
+
+        def finish() -> None:
+            if not done.done():
+                done.set_result(None)
+
+        def hash_files() -> None:
+            try:
+                hash_local_mount(root, digests_path)
+            except OSError as exc:
+                # The recompute below shows what is there now (a folder gone is changed).
+                logger.warning("Could not hash the local mount %s: %s", root, exc)
+            except Exception:
+                logger.exception("Hashing the local mount %s failed", root)
+            finally:
+                # Whatever it raised, or the task would wait, holding the mount, forever.
+                try:
+                    loop.call_soon_threadsafe(finish)
+                except RuntimeError:
+                    logger.debug("The loop closed while %s was hashed", root)
+
+        # Not the loop's executor, which a stopping server waits for: a daemon thread.
+        threading.Thread(target=hash_files, name=f"hash {root}", daemon=True).start()
+        try:
+            await done
+        finally:
+            with self._mount_hash_lock:
+                self._mount_hashing.pop((digests_path, root), None)
+        if self.closed:
+            return
+        from strata.notebook.ws import refresh_staleness
+
+        await refresh_staleness(self)
 
     def _outside_world_fingerprints(self) -> dict[str, _OutsideWorld]:
         """Fingerprint what each cell reads from outside, before the lock.
@@ -2166,7 +2242,9 @@ class NotebookSession:
         from strata.notebook.mounts import (
             STALENESS_READ_BYTES,
             MountResolver,
+            mount_component,
             mount_fingerprint_sync,
+            parse_mount_uri,
         )
 
         resolver = MountResolver(
@@ -2179,11 +2257,25 @@ class NotebookSession:
         has_rw_mount = False
         for mount in sorted(merged_mounts, key=lambda m: m.name):
             # A cold local mount is read by a run, not on every source flush.
+            scheme, path = parse_mount_uri(mount.uri)
+            key = (resolver.digests_path, Path(path))
+            if (
+                scheme == "file"
+                and mount.mode != MountMode.READ_WRITE
+                and mount.pin is None
+                and self._hashing(key)
+            ):
+                # Its job reads it: reading it here too reads its last files twice.
+                mount_fingerprints.append(mount_component(mount, nonce.unhashed_nonce()))
+                continue
             fingerprint = mount_fingerprint_sync(resolver, mount, read_bytes=STALENESS_READ_BYTES)
             if fingerprint is None:
                 has_rw_mount = True
-            else:
-                mount_fingerprints.append(fingerprint)
+                continue
+            mount_fingerprints.append(fingerprint)
+            if nonce.is_unhashed(fingerprint):
+                with self._mount_hash_lock:
+                    self._mounts_to_hash.add(key)
 
         return mount_fingerprints, has_rw_mount
 
@@ -3647,6 +3739,11 @@ class NotebookSession:
                     "payload": payload,
                 },
             )
+
+
+def _live(task: asyncio.Task[Any]) -> bool:
+    """Whether *task* will still end: one left on a loop that has closed never does."""
+    return not task.done() and not task.get_loop().is_closed()
 
 
 def _cell_ids_on_disk(notebook_dir: Path) -> list[str] | None:
