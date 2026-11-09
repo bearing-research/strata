@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Copy,
   FlaskConical,
+  Hourglass,
   Pencil,
   Play,
   Plus,
@@ -277,6 +278,7 @@ const STALENESS_REASON_LABELS: Record<StalenessReason, string> = {
   env: 'environment changed',
   external: 'input changed',
   forced: 'forced re-run',
+  checking: 'checking files',
 }
 
 const statusTitle = computed(() => {
@@ -459,6 +461,8 @@ const causalityTooltip = computed(() => {
         return 'its connection or model changed'
       case 'unavailable':
         return `"${d.inputName || d.cellName || d.cellId}" can't be read`
+      case 'checking':
+        return `checking ${d.inputKind} "${d.inputName}": its files aren't hashed yet`
       default:
         return d.type
     }
@@ -1138,6 +1142,7 @@ function outputKey(output: CellOutput, index: number): string {
             <span v-else-if="detail.type === 'unavailable'" class="detail-icon"
               ><TriangleAlert
             /></span>
+            <span v-else-if="detail.type === 'checking'" class="detail-icon"><Hourglass /></span>
             <span v-else class="detail-icon"><Settings /></span>
             <span v-if="detail.type === 'source_changed'">
               Source of <code>{{ detail.cellName || detail.cellId }}</code> changed
@@ -1153,6 +1158,10 @@ function outputKey(output: CellOutput, index: number): string {
             </span>
             <span v-else-if="detail.type === 'unavailable'">
               <code>{{ detail.inputName || detail.cellName || detail.cellId }}</code> can't be read
+            </span>
+            <span v-else-if="detail.type === 'checking'">
+              Checking {{ detail.inputKind }} <code>{{ detail.inputName }}</code
+              >: its files aren't hashed yet
             </span>
             <span v-else>
               Environment changed

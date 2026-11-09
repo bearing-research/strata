@@ -6,8 +6,10 @@ a rewrite that keeps the size and the mtime is still seen. These run real cells.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -189,7 +191,7 @@ class TestReviewFixes:
         monkeypatch.setattr(digests, "_read_digest", counted)
         return read
 
-    def test_a_mount_not_read_yet_shows_as_changed_not_unavailable(self, tmp_path):
+    def test_a_mount_not_read_yet_shows_as_checked_not_unavailable(self, tmp_path):
         from strata.notebook import nonce
 
         (tmp_path / "raw").mkdir()
@@ -201,6 +203,7 @@ class TestReviewFixes:
 
         assert component is not None
         assert not nonce.is_unresolved(component)
+        assert nonce.is_unhashed(component)
         assert component != mount_fingerprint_sync(resolver, mount, read_bytes=0)
 
     @pytest.mark.skipif(
@@ -353,3 +356,282 @@ class TestSecondReview:
 
         assert second == third
         assert not any(rel.startswith(".strata/hashes.sqlite") for rel in second)
+
+
+class TestBackgroundHashing:
+    """A mount too large for the staleness check to hash is hashed by a task."""
+
+    async def _cold(self, tmp_path, monkeypatch, *sources: str):
+        raw, source = _over_mount(tmp_path)
+        _touch(raw / "f.txt", "aaaa")
+        nb = Notebook(tmp_path, source, *(sources or (READER.replace("dict(out)", "out"),)))
+        for cell_id in nb.ids:
+            await nb.good(cell_id)
+        nb.ran()
+        # A new stat with the same bytes: more to read than staleness may.
+        monkeypatch.setattr(mounts, "STALENESS_READ_BYTES", 3)
+        _touch(raw / "f.txt", "aaaa", tick=5)
+        return nb
+
+    async def test_staleness_reads_nothing_and_a_task_hashes_the_mount_then_it_is_ready(
+        self, tmp_path, monkeypatch, later
+    ):
+        from vestigo import digests
+
+        from strata.notebook import ws
+        from strata.notebook.models import CellStaleness, StalenessReason
+        from strata.notebook.staleness_explanations import CausalityReason, CausalityType
+
+        nb = await self._cold(tmp_path, monkeypatch)
+        reads = []
+        read_digest = digests._read_digest
+        monkeypatch.setattr(
+            digests, "_read_digest", lambda path: reads.append(path) or read_digest(path)
+        )
+        broadcast = []
+
+        async def record(session, notebook_id, staleness_map):
+            broadcast.append({k: v.status for k, v in staleness_map.items()})
+
+        monkeypatch.setattr(ws, "_broadcast_staleness_updates", record)
+
+        staleness = await nb.session.compute_staleness_async()
+
+        assert reads == []
+        # Not known to have changed: its own reason, not ``external``.
+        assert staleness["a"] == CellStaleness(
+            status=CellStatus.STALE, reasons=[StalenessReason.CHECKING]
+        )
+        chain = nb.session.causality_map["a"]
+        assert chain.reason == CausalityReason.CHECKING
+        assert [(d.type, d.input_name) for d in chain.details] == [(CausalityType.CHECKING, "raw")]
+        jobs = list(nb.session._mount_hashing.values())
+        assert len(jobs) == 1
+
+        await asyncio.gather(*jobs)
+
+        assert reads
+        assert nb.session.notebook_state.get_cell("a").status == CellStatus.READY
+        assert broadcast == [{"a": CellStatus.READY, "b": CellStatus.READY}]
+        assert nb.ran() == []
+
+    async def test_one_task_per_mount_however_many_cells_and_checks(
+        self, tmp_path, monkeypatch, later
+    ):
+        raw = tmp_path / "raw"
+        second = f"# @mount raw {raw.as_uri()} ro\nalso = (raw / 'f.txt').read_text()\n"
+        nb = await self._cold(tmp_path, monkeypatch, second)
+        started = []
+        hash_mount = nb.session._hash_mount
+
+        def counted(*key):
+            started.append(key)
+            return hash_mount(*key)
+
+        monkeypatch.setattr(nb.session, "_hash_mount", counted)
+
+        await nb.session.compute_staleness_async()
+        await nb.session.compute_staleness_async()
+
+        assert len(started) == 1
+        await asyncio.gather(*nb.session._mount_hashing.values())
+        assert nb.session._mount_hashing == {}
+
+    async def test_a_closed_session_is_not_recomputed(self, tmp_path, monkeypatch, later):
+        from strata.notebook import ws
+
+        nb = await self._cold(tmp_path, monkeypatch)
+        refreshed = []
+
+        async def record(session):
+            refreshed.append(session)
+
+        monkeypatch.setattr(ws, "refresh_staleness", record)
+        await nb.session.compute_staleness_async()
+        jobs = list(nb.session._mount_hashing.values())
+        nb.session.closed = True
+
+        await asyncio.gather(*jobs)
+
+        assert refreshed == []
+
+    def test_a_run_meanwhile_waits_for_the_hash_and_reads_nothing_again(
+        self, tmp_path, monkeypatch, later
+    ):
+        from vestigo import digests
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        _touch(raw / "f.txt", "aaaa")
+        reads = []
+        reading = threading.Event()
+        release = threading.Event()
+        read_digest = digests._read_digest
+
+        def slow(path):
+            reads.append(path)
+            if len(reads) == 1:
+                reading.set()
+                release.wait(10)
+            return read_digest(path)
+
+        monkeypatch.setattr(digests, "_read_digest", slow)
+        cache = tmp_path / "hashes.sqlite"
+        found = []
+        first = threading.Thread(target=lambda: found.append(local_digests(raw, cache)))
+        second = threading.Thread(target=lambda: found.append(local_digests(raw, cache)))
+        first.start()
+        assert reading.wait(10)
+        second.start()
+        second.join(0.5)
+        # Without the lock it reads the file itself, past the held first read.
+        assert second.is_alive()
+        release.set()
+        first.join(10)
+        second.join(10)
+
+        assert len(reads) == 1
+        assert found[0] == found[1]
+
+    async def test_a_mount_gone_before_its_hash_is_recomputed_as_changed(
+        self, tmp_path, monkeypatch, later
+    ):
+        import shutil
+
+        from strata.notebook import ws
+        from strata.notebook.staleness_explanations import CausalityType
+
+        nb = await self._cold(tmp_path, monkeypatch)
+        monkeypatch.setattr(ws, "_broadcast_staleness_updates", lambda *a: asyncio.sleep(0))
+        await nb.session.compute_staleness_async()
+        jobs = list(nb.session._mount_hashing.values())
+        shutil.rmtree(tmp_path / "raw")
+
+        await asyncio.gather(*jobs)
+
+        details = nb.session.causality_map["a"].details
+        assert [(d.type, d.input_name) for d in details] == [
+            (CausalityType.EXTERNAL_CHANGED, "raw")
+        ]
+
+    async def test_staleness_reads_no_mount_its_job_is_reading(self, tmp_path, monkeypatch, later):
+        from vestigo import digests
+
+        from strata.notebook.staleness_explanations import CausalityType
+
+        nb = await self._cold(tmp_path, monkeypatch)
+        reads = []
+        reading = threading.Event()
+        release = threading.Event()
+        read_digest = digests._read_digest
+
+        def slow(path):
+            reads.append(path)
+            reading.set()
+            release.wait(10)
+            return read_digest(path)
+
+        monkeypatch.setattr(digests, "_read_digest", slow)
+        await nb.session.compute_staleness_async()
+        jobs = list(nb.session._mount_hashing.values())
+        await asyncio.to_thread(reading.wait, 10)
+        # What is left is within what staleness may read; the job is reading it.
+        monkeypatch.setattr(mounts, "STALENESS_READ_BYTES", STALENESS_READ_BYTES)
+
+        await nb.session.compute_staleness_async()
+
+        details = nb.session.causality_map["a"].details
+        assert [d.type for d in details] == [CausalityType.CHECKING]
+        release.set()
+        await asyncio.gather(*jobs)
+        assert len(reads) == 1
+
+    def test_a_file_too_fresh_to_remember_is_hashed_again_a_few_times(self, tmp_path, monkeypatch):
+        from vestigo import digests
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        _touch(raw / "f.txt", "aaaa")  # its ctime is now: the cache will not keep it
+        monkeypatch.setattr(mounts, "STALENESS_READ_BYTES", 3)
+        monkeypatch.setattr(mounts, "_SETTLE_SECONDS", 0)
+        reads = []
+        read_digest = digests._read_digest
+        monkeypatch.setattr(
+            digests, "_read_digest", lambda path: reads.append(path) or read_digest(path)
+        )
+
+        mounts.hash_local_mount(raw, tmp_path / "hashes.sqlite")
+
+        assert len(reads) == mounts._HASH_ATTEMPTS
+
+    async def test_a_hash_that_fails_unexpectedly_ends_its_job(self, tmp_path, monkeypatch):
+        from strata.notebook import ws
+
+        nb = await self._cold(tmp_path, monkeypatch)
+
+        def broken(root, digests_path):
+            raise ValueError("this FileDigests is closed")
+
+        monkeypatch.setattr(mounts, "hash_local_mount", broken)
+        monkeypatch.setattr(ws, "_broadcast_staleness_updates", lambda *a: asyncio.sleep(0))
+        await nb.session.compute_staleness_async()
+        jobs = list(nb.session._mount_hashing.values())
+
+        await asyncio.wait_for(asyncio.gather(*jobs), 10)
+
+        assert nb.session._mount_hashing == {}
+
+    async def test_a_job_left_on_a_closed_loop_does_not_hold_its_mount(
+        self, tmp_path, monkeypatch, later
+    ):
+        import types
+
+        nb = await self._cold(tmp_path, monkeypatch)
+        await nb.session.compute_staleness_async()
+        (key,) = nb.session._mount_hashing
+        await asyncio.gather(*nb.session._mount_hashing.values())
+        closed = asyncio.new_event_loop()
+        closed.close()
+        nb.session._mount_hashing[key] = types.SimpleNamespace(
+            done=lambda: False, get_loop=lambda: closed
+        )
+        _touch(tmp_path / "raw" / "f.txt", "aaaa", tick=9)
+
+        await nb.session.compute_staleness_async()
+
+        assert nb.session._mount_hashing[key].get_loop() is asyncio.get_running_loop()
+        await asyncio.gather(nb.session._mount_hashing[key])
+
+    async def test_no_recompute_while_a_run_is_active(self, tmp_path, monkeypatch):
+        from strata.notebook import ws
+
+        nb = await self._cold(tmp_path, monkeypatch)
+        monkeypatch.setattr(ws, "notebook_has_active_execution", lambda notebook_id: True)
+        recomputed = []
+        compute = nb.session.compute_staleness_async
+
+        async def counted(*args, **kwargs):
+            recomputed.append(kwargs)
+            return await compute(*args, **kwargs)
+
+        await nb.session.compute_staleness_async()
+        jobs = list(nb.session._mount_hashing.values())
+        monkeypatch.setattr(nb.session, "compute_staleness_async", counted)
+
+        await asyncio.gather(*jobs)
+
+        assert recomputed == []
+
+    async def test_an_offline_handle_starts_no_job(self, tmp_path, monkeypatch):
+        from strata.notebook.ops import LocalNotebookOps
+
+        nb = await self._cold(tmp_path, monkeypatch)
+        started = []
+        monkeypatch.setattr(
+            "strata.notebook.session.NotebookSession._hash_mount",
+            lambda self, *key: started.append(key) or asyncio.sleep(0),
+        )
+
+        LocalNotebookOps(nb.session.path).list_cells()
+
+        assert started == []

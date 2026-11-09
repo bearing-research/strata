@@ -154,9 +154,9 @@ class TestStalenessOffTheEventLoop:
         ran_on: list[int] = []
         original = session.compute_staleness
 
-        def _record(executing=None):
+        def _record(executing=None, **kwargs):
             ran_on.append(threading.get_ident())
-            return original(executing)
+            return original(executing, **kwargs)
 
         monkeypatch.setattr(session, "compute_staleness", _record)
 
