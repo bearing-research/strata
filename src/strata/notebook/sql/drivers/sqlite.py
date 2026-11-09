@@ -1,7 +1,7 @@
 """SQLite driver adapter, backed by ``adbc-driver-sqlite``.
 
-SQLite has no per-table change tracking, so freshness is database-wide (file
-state plus pragmas) while the schema fingerprint is per table. Read-only opens
+SQLite has no per-table change tracking, so freshness is database-wide (the file's
+contents plus pragmas) while the schema fingerprint is per table. Read-only opens
 use ``mode=ro`` plus ``PRAGMA query_only``. See ``docs/internal/design-sql-cells.md``.
 """
 
@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from strata.notebook.mounts import local_digests
 from strata.notebook.sql.adapter import (
     AdapterCapabilities,
     ColumnInfo,
@@ -139,27 +140,26 @@ def _database_path(probe_conn) -> str | None:
     return None
 
 
-def _file_signals(path: str | None) -> list[bytes]:
-    """What the database file says about how recently it changed."""
+def _file_signals(path: str | None, digests_path: Path | None) -> list[bytes]:
+    """The contents of the database file and its WAL, what a query reads."""
     if not path:
         return [b"memory"]
-    signals: list[bytes] = []
-    for candidate in (Path(path), Path(f"{path}-wal")):
-        try:
-            stat = candidate.stat()
-        except OSError:
-            signals.append(f"{candidate.name}:absent".encode())
-            continue
-        signals.append(f"{candidate.name}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+    if digests_path is None:
+        raise ValueError("a SQLite database's freshness needs a digest cache")
+    return [
+        f"{candidate.name}:{_content(candidate, digests_path)}".encode()
+        for candidate in (Path(path), Path(f"{path}-wal"))
+    ]
+
+
+def _content(path: Path, digests_path: Path) -> str:
+    """*path*'s digest as a local mount's file gets it (:func:`local_digests`), or
+    ``absent``: a WAL a checkpoint removed between the look and the read is absent too."""
     try:
-        with open(path, "rb") as database:
-            header = database.read(28)
-    except OSError:
-        return signals
-    if len(header) >= 28:
-        # Bumped on every commit reaching the main file: how a rollback-journal DB signals change.
-        signals.append(b"change-counter:" + header[24:28])
-    return signals
+        digests = local_digests(path, digests_path)
+    except FileNotFoundError:
+        return "absent"
+    return (digests or {}).get(path.name, "absent")
 
 
 class SqliteAdapter:
@@ -295,14 +295,19 @@ class SqliteAdapter:
         self,
         probe_conn: Any,
         tables: list[QualifiedTable],
+        *,
+        digests_path: Path | None = None,
     ) -> FreshnessToken:
-        """DB-wide freshness: the database file's own state, plus the pragmas.
+        """DB-wide freshness: the contents of the database file and its WAL, plus the
+        pragmas.
 
         *tables* is ignored; SQLite has no per-table change counters. ``PRAGMA
         data_version`` alone is silently useless: it tracks other connections' writes
-        as seen by this one, and the probe opens a new connection each run. So the file
-        is asked directly: size, mtime, the header change counter, and the WAL's size
-        and mtime. ``:memory:`` has only the pragmas, and nothing there can go stale.
+        as seen by this one, and the probe opens a new connection each run. A file's
+        size and mtime are not enough either: pages keep the size, and a write can keep
+        or restore the mtime. So each file's sha256 is taken, read only when the digest
+        cache at *digests_path* holds none for its stat. ``:memory:`` has only the
+        pragmas, and nothing there can go stale.
         """
         h = hashlib.sha256()
         with probe_conn.cursor() as cursor:
@@ -319,7 +324,7 @@ class SqliteAdapter:
         h.update(str(data_row[0]).encode())
         h.update(b":schema_version:")
         h.update(str(schema_row[0]).encode())
-        for part in _file_signals(_database_path(probe_conn)):
+        for part in _file_signals(_database_path(probe_conn), digests_path):
             h.update(b":")
             h.update(part)
         return FreshnessToken(value=h.digest())

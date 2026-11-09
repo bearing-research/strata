@@ -616,7 +616,9 @@ def test_real_schema_version_changes_on_ddl(tmp_path):
 
     probe = a.open(spec, read_only=True)
     try:
-        before = a.probe_freshness(probe, [QualifiedTable(None, None, "t")]).value
+        before = a.probe_freshness(
+            probe, [QualifiedTable(None, None, "t")], digests_path=tmp_path / "hashes.sqlite"
+        ).value
     finally:
         probe.close()
 
@@ -627,7 +629,9 @@ def test_real_schema_version_changes_on_ddl(tmp_path):
 
     probe2 = a.open(spec, read_only=True)
     try:
-        after = a.probe_freshness(probe2, [QualifiedTable(None, None, "t")]).value
+        after = a.probe_freshness(
+            probe2, [QualifiedTable(None, None, "t")], digests_path=tmp_path / "hashes.sqlite"
+        ).value
     finally:
         probe2.close()
 
@@ -736,3 +740,109 @@ def test_sqlite_list_schema_empty_database(tmp_path):
     finally:
         conn.close()
     assert schema == []
+
+
+@pytestmark_real_db
+def test_a_database_written_while_it_is_read_keys_no_later_run(tmp_path, monkeypatch):
+    from vestigo.digests import Digest
+
+    from strata.notebook import mounts
+
+    db_path = tmp_path / "busy.sqlite"
+    seed = sqlite3.connect(db_path)
+    seed.execute("CREATE TABLE t (x INTEGER)")
+    seed.commit()
+    seed.close()
+
+    class _Moving:
+        def cached_many(self, paths):
+            return [None for _ in paths]
+
+        def digest_many(self, paths, *, stats):
+            return [Digest("0" * 64, settled=False) for _ in paths]
+
+    @contextmanager
+    def moving(path):
+        yield _Moving()
+
+    monkeypatch.setattr(mounts, "digest_cache", moving)
+    a = SqliteAdapter()
+    spec = ConnectionSpec(name="db", driver="sqlite", path=str(db_path))
+
+    def token() -> bytes:
+        probe = a.open(spec, read_only=True)
+        try:
+            return a.probe_freshness(
+                probe, [QualifiedTable(None, None, "t")], digests_path=tmp_path / "hashes.sqlite"
+            ).value
+        finally:
+            probe.close()
+
+    assert token() != token()
+
+
+def _seeded(db_path) -> None:
+    seed = sqlite3.connect(db_path)
+    seed.execute("CREATE TABLE t (x INTEGER)")
+    seed.execute("INSERT INTO t VALUES (1)")
+    seed.commit()
+    seed.close()
+
+
+def _token(db_path, digests_path) -> bytes:
+    a = SqliteAdapter()
+    probe = a.open(ConnectionSpec(name="db", driver="sqlite", path=str(db_path)), read_only=True)
+    try:
+        return a.probe_freshness(
+            probe, [QualifiedTable(None, None, "t")], digests_path=digests_path
+        ).value
+    finally:
+        probe.close()
+
+
+@pytest.fixture
+def remembered(monkeypatch):
+    """Every digest read 10 s after now: past the 2 s rule, so a digest is remembered."""
+    import time
+
+    from vestigo.digests import FileDigests
+
+    from strata.notebook import mounts
+
+    monkeypatch.setattr(
+        mounts, "FileDigests", lambda path: FileDigests(path, clock=lambda: time.time_ns() + 10**10)
+    )
+
+
+@pytestmark_real_db
+def test_an_unchanged_database_is_not_read_again(tmp_path, monkeypatch, remembered):
+    import vestigo.digests
+
+    db_path = tmp_path / "db.sqlite"
+    _seeded(db_path)
+    first = _token(db_path, tmp_path / "hashes.sqlite")
+    reads = []
+    read = vestigo.digests._read_digest
+    monkeypatch.setattr(vestigo.digests, "_read_digest", lambda p: reads.append(p) or read(p))
+
+    assert _token(db_path, tmp_path / "hashes.sqlite") == first
+    assert reads == []
+
+
+@pytestmark_real_db
+def test_a_remembered_database_replaced_at_its_size_and_mtime_is_read_again(tmp_path, remembered):
+    db_path = tmp_path / "db.sqlite"
+    _seeded(db_path)
+    other = tmp_path / "other.sqlite"
+    seed = sqlite3.connect(other)
+    seed.execute("CREATE TABLE t (x INTEGER)")
+    seed.execute("INSERT INTO t VALUES (2)")
+    seed.commit()
+    seed.close()
+    first = _token(db_path, tmp_path / "hashes.sqlite")
+    before = db_path.stat()
+    db_path.write_bytes(other.read_bytes())
+    os.utime(db_path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert db_path.stat().st_size == before.st_size
+
+    assert _token(db_path, tmp_path / "hashes.sqlite") != first

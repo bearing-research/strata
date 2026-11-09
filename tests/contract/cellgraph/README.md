@@ -103,8 +103,6 @@ snapshot holds:
   it as `@NB@`. The recorder refuses a trace that names the repository, the home
   directory or the interpreter. Since the path is fixed, a lock per scenario keeps
   two runs on one machine (two checkouts, two users) from deleting each other's copy.
-- **Mtimes.** A local mount's listing hashes each file's mtime, so the recorder
-  gives every file one mtime after each step.
 - **Environment.** No scenario has a `uv.lock`. Cells run with the dev interpreter
   and `--no-sync`, as the harness tests do. The recorder clears `STRATA_*` and proxy
   variables, sets `STRATA_ARTIFACT_DIR` to a per-scenario registry and `HOME` to an
