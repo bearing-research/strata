@@ -38,6 +38,7 @@ from strata.notebook.harness_user import (
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.lifeline import lifeline_handoff
 from strata.notebook.models import CellOutput
+from strata.notebook.mounts import moved_file, moved_key, moved_line, moved_parts
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
     subprocess_kwargs_for_new_group,
@@ -938,6 +939,13 @@ async def batch_service_persist(
     if module_export_error:
         return {"ok": False, "error": f"module export rejected: {module_export_error}"}
 
+    # A mount that moved while the cell ran: its outputs are kept for this run only.
+    moved = await asyncio.to_thread(moved_file, prov.prepared) if prov.prepared else None
+    if moved is not None:
+        # The cell's result reads its console from this payload.
+        payload["stderr"] = payload.get("stderr", "") + moved_line(moved)
+    # Under a key no check makes: the cell stays stale and no hit replays its displays.
+    kept_hash = provenance_hash if moved is None else moved_key(provenance_hash)
     try:
         stored_ok = context.store_outputs(
             cell_id,
@@ -947,6 +955,7 @@ async def batch_service_persist(
             source_hash=source_hash,
             source=executed_source,
             env_hash=env_hash,
+            stochastic=prov.annotations.stochastic or moved is not None,
             run_outputs=payload.get("outputs"),
         )
     except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
@@ -964,7 +973,7 @@ async def batch_service_persist(
             persisted_displays = context.store_display_outputs(
                 cell_id,
                 cell_output_dir,
-                provenance_hash,
+                kept_hash,
                 input_hashes,
                 display_outputs_meta,
                 source_hash=source_hash,
@@ -976,7 +985,7 @@ async def batch_service_persist(
 
     # Stored as in single-cell. Rerun All stores it too, or the next Run All replays an
     # older run's; only ``# @nocache`` stores none.
-    if not prov.annotations.nocache:
+    if not prov.annotations.nocache and moved is None:
         context.store_console_outputs(
             cell_id,
             provenance_hash,
@@ -998,12 +1007,12 @@ async def batch_service_persist(
     try:
         host.record_successful_execution_provenance(
             cell_id,
-            provenance_hash,
+            kept_hash,
             source_hash,
             env_hash,
             table_reads=prov.table_reads,
             reads=prov.reads(*context.moved(cell_id)),
-            key_parts=prov.key_parts,
+            key_parts=prov.key_parts if moved is None else moved_parts(prov.key_parts, moved),
         )
     except Exception:
         logger.exception("Batch could not record the run of cell %s", cell_id)

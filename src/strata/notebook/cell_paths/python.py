@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import functools
 import json
 import logging
@@ -58,7 +59,14 @@ from strata.notebook.local_runs import (
     relay_events,
 )
 from strata.notebook.models import CellLanguage, MountMode, MountSpec, WorkerBackendType
-from strata.notebook.mounts import MountWrite, ResolvedMount
+from strata.notebook.mounts import (
+    MountWrite,
+    ResolvedMount,
+    moved_file,
+    moved_key,
+    moved_line,
+    moved_parts,
+)
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
 from strata.notebook.serializer import ContentType
@@ -637,6 +645,8 @@ async def run_python_cell(
             # Mounts this server prepares are prepared before the run is keyed: it reads
             # this listing, which the one its key came from may have moved past.
             prepared_mounts: dict[str, ResolvedMount] | None = None
+            listed: dict[str, ResolvedMount] = {}
+            each_source: str | None = None
             if worker_spec is not None and (
                 worker_spec.backend == WorkerBackendType.LOCAL
                 or is_embedded_executor_worker(worker_spec)
@@ -649,17 +659,25 @@ async def run_python_cell(
                         [m for m in mount_specs if m.name not in listed], cell_id
                     ),
                 }
-                prov = prov.over_mounts(prepared_mounts)
-                provenance_hash = run_key(prov)
                 if each_item is not None and each_item.path is not None:
                     # A file binds as a one-file mount: a Path, read-only, in every harness.
                     each_spec = parse_annotations(source, CellLanguage.PYTHON).each
                     assert each_spec is not None  # it has an item
+                    each_source = each_spec["source"]
+                    # A local item is keyed by its sha256, as a local mount's file is.
+                    digests_path = listed[each_source].digests_path
                     prepared_mounts[each_spec["name"]] = ResolvedMount(
                         spec=MountSpec(name=each_spec["name"], uri=each_item.path.as_uri()),
                         local_path=each_item.path,
                         fingerprint=each_item.digest,
+                        file_versions=(
+                            {each_item.path.name: each_item.digest} if digests_path else None
+                        ),
+                        digests_path=digests_path,
                     )
+                # Keyed over the cell's mounts only; an item's binding is not one of them.
+                prov = prov.over_mounts(prepared_mounts)
+                provenance_hash = run_key(prov)
 
             # A local run is an execution of the ledger: a build with an attempt whose
             # lease this process renews, open until its outputs are stored.
@@ -746,6 +764,24 @@ async def run_python_cell(
                     variant=fanout_variant,
                 )
 
+            # The instance is keyed on its item, not on the folder the items are listed from.
+            moved = (
+                await asyncio.to_thread(
+                    moved_file, prov.prepared, skip=(each_source,) if each_source else ()
+                )
+                if exec_result.success and prov.prepared
+                else None
+            )
+            if moved is not None and each_source is not None and each_item is not None:
+                # The item's binding is no mount: name the file in the mount it came from.
+                if moved.partition("/")[0] not in listed:
+                    moved = f"{each_source}/{each_item.key}"
+            if moved is not None:
+                # Kept for this run only, as a ``# @stochastic`` run's outputs are.
+                exec_result = dataclasses.replace(
+                    exec_result, stderr=exec_result.stderr + moved_line(moved), moved_input=moved
+                )
+
             # ⑤ Store artifacts for consumed variables.
             if exec_result.success:
                 module_export_error = write_module_export_outputs(
@@ -753,7 +789,11 @@ async def run_python_cell(
                     cell_id,
                     source,
                     result_output_dir,
-                    provenance_hash,
+                    # A value an exported def closes over is stored now: a run kept for
+                    # itself stores it where no later run finds it either.
+                    provenance_hash
+                    if not prov.annotations.stochastic and moved is None
+                    else derive_subkey(provenance_hash, f"run={uuid.uuid4().hex}"),
                     exec_result.outputs,
                 )
                 if module_export_error is not None:
@@ -790,7 +830,7 @@ async def run_python_cell(
                         build_duration_ms=exec_result.duration_ms,
                         collected=collected,
                         local_run=local_run,
-                        stochastic=prov.annotations.stochastic,
+                        stochastic=prov.annotations.stochastic or moved is not None,
                         run_outputs=exec_result.outputs,
                     )
                 except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
@@ -814,7 +854,7 @@ async def run_python_cell(
                     context.store_result_displays(
                         exec_result,
                         result_output_dir,
-                        provenance_hash,
+                        provenance_hash if moved is None else moved_key(provenance_hash),
                         input_hashes,
                         source_hash=source_hash,
                         source=source,
@@ -822,7 +862,7 @@ async def run_python_cell(
                         variant=fanout_variant,
                     )
                     # Cache the cell's console by provenance so a hit replays this run's.
-                    if cacheable:
+                    if cacheable and moved is None:
                         context.store_console_outputs(
                             cell_id,
                             provenance_hash,
@@ -865,7 +905,17 @@ async def run_python_cell(
                         context.variant_writes.setdefault(cell_id, []).extend(mount_writes)
                     else:
                         context.record_good_run(
-                            cell_id, provenance_hash, source_hash, env_hash, prov, mount_writes
+                            cell_id,
+                            # Under a key no check makes: the cell stays stale.
+                            provenance_hash if moved is None else moved_key(provenance_hash),
+                            source_hash,
+                            env_hash,
+                            prov
+                            if moved is None
+                            else dataclasses.replace(
+                                prov, key_parts=moved_parts(prov.key_parts, moved)
+                            ),
+                            mount_writes,
                         )
 
             host.persist_display_outputs(

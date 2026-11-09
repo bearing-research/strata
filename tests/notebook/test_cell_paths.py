@@ -1678,6 +1678,7 @@ class TestR:
             table_reads=[],
             key_parts={},
             reads=lambda *_args: {},
+            prepared=None,
         )
         prov.over_mounts = lambda _mounts: prov
         for name, value in overrides.items():
@@ -2401,10 +2402,11 @@ def _batch_prov(*, nocache=False):
         source_hash="source",
         env_hash="env",
         input_hashes=["input"],
-        annotations=SimpleNamespace(nocache=nocache, table_writes=[]),
+        annotations=SimpleNamespace(nocache=nocache, table_writes=[], stochastic=False),
         table_reads=[],
         key_parts={},
         reads=lambda *_args: {},
+        prepared=None,
     )
     prov.rekeyed = lambda: prov
     return prov
@@ -3399,6 +3401,7 @@ class TestPython:
             table_reads=[],
             key_parts={},
             reads=lambda *_args: {},
+            prepared=None,
         )
         prov.over_mounts = lambda _mounts: prov
         prov.for_instance = lambda _instance: prov

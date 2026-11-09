@@ -28,6 +28,7 @@ from strata.notebook.harness_user import (
 )
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import CellLanguage, MountSpec, TableWriteSpec
+from strata.notebook.mounts import moved_file, moved_key, moved_line, moved_parts
 from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 
 if TYPE_CHECKING:
@@ -697,6 +698,18 @@ async def _run_loop(
     # loop cell always looks stale. ``cell_provenance``, ``env_hash`` and
     # ``carry_var_provenance`` were computed before the loop.
 
+    # A mount that moved while the loop ran: its outputs are kept for this run only, under
+    # a key of its own, and the cell is recorded under one no check makes.
+    moved = await anyio.to_thread.run_sync(moved_file, prov.prepared) if prov.prepared else None
+    output_provenance = cell_provenance
+    recorded_provenance, recorded_parts = cell_provenance, prov.key_parts
+    if moved is not None:
+        combined_stderr.append(moved_line(moved))
+        output_provenance = derive_subkey(cell_provenance, f"run={uuid.uuid4().hex}")
+        carry_var_provenance = derive_subkey(output_provenance, loop.carry)
+        recorded_provenance = moved_key(cell_provenance)
+        recorded_parts = moved_parts(prov.key_parts, moved)
+
     # Environment identity for lineage and the team cache; the cost is the whole loop,
     # which is what a teammate skipping it saves.
     loop_build_env = str((final_result or {}).get("build_env") or "")
@@ -751,7 +764,7 @@ async def _run_loop(
                 variable_name=extra_var,
                 blob_data=extra_blob,
                 content_type=extra_content_type,
-                provenance_hash=derive_subkey(cell_provenance, extra_var),
+                provenance_hash=derive_subkey(output_provenance, extra_var),
                 input_versions=loop_input_versions,
                 source_hash=source_hash,
                 source=source,
@@ -765,7 +778,7 @@ async def _run_loop(
             version=staged[-1].version,
             blob=extra_blob,
             content_type=extra_content_type,
-            provenance_hash=derive_subkey(cell_provenance, extra_var),
+            provenance_hash=derive_subkey(output_provenance, extra_var),
         )
         extra_outputs[extra_var] = {
             "content_type": extra_content_type,
@@ -780,7 +793,7 @@ async def _run_loop(
                 variable_name=name,
                 blob_data=folder_manifests[name],
                 content_type=output_dirs.CONTENT_TYPE,
-                provenance_hash=derive_subkey(cell_provenance, name),
+                provenance_hash=derive_subkey(output_provenance, name),
                 input_versions=loop_input_versions,
                 source_hash=source_hash,
                 source=source,
@@ -832,12 +845,12 @@ async def _run_loop(
     # Lets ``compute_staleness`` hit the "uncached ready" path for leaf loop cells.
     host.record_successful_execution_provenance(
         cell_id,
-        cell_provenance,
+        recorded_provenance,
         source_hash,
         env_hash,
         table_reads=prov.table_reads,
         reads=prov.reads(*context.moved(cell_id)),
-        key_parts=prov.key_parts,
+        key_parts=recorded_parts,
     )
     raw_displays = final_result.get("displays") if final_result else None
     display_outputs = (
@@ -852,7 +865,7 @@ async def _run_loop(
             display_outputs = context.store_display_outputs(
                 cell_id,
                 Path(display_dir),
-                cell_provenance,
+                recorded_provenance,
                 prov.input_hashes,
                 display_outputs,
                 source_hash=source_hash,
@@ -860,7 +873,7 @@ async def _run_loop(
                 env_hash=env_hash,
             )
     # So a hit replays this run's. A leaf's is its record of the run: a cold open reads it ready.
-    if not annotations.nocache:
+    if not annotations.nocache and moved is None:
         context.store_console_outputs(
             cell_id,
             cell_provenance,
@@ -895,6 +908,7 @@ async def _run_loop(
         artifact_uri=canonical_uri,
         execution_method="loop",
         mutation_warnings=all_mutation_warnings,
+        moved_input=moved,
     )
 
 

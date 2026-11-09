@@ -57,6 +57,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   its `-wal`, kept in `.strata/hashes.sqlite` while their stat holds (on Windows a
   rewrite in place that restores the mtime is still not seen). The key changes, so
   each such cell runs once after the upgrade. (#1494)
+- **A run whose local mount changed while it ran is kept for that run only.** The cell
+  reads the live folder, so a file written during the run gave outputs its key did not
+  describe, and putting the file back later served them as a cache hit. Now each
+  read-only local mount (and an `@each` instance's item) is hashed again after a good
+  run. If a file moved, the outputs are kept as a `@stochastic` run's are, the cell
+  stays stale and says that mount changed, and its console names the file. A batched
+  `@stochastic` cell in Run All now keeps every run too, as a single run does. (#1495)
 - **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep

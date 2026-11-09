@@ -60,6 +60,9 @@ class CellExecutionResult:
     # With the harness frames that lead to the cell, which ``traceback`` leaves out.
     traceback_full: str | None = None
     cache_hit: bool = False
+    # A local mount's file (``mount/path``) that changed while the run read it: its
+    # outputs are kept for the run only (``mounts.moved_file``).
+    moved_input: str | None = None
     artifact_uri: str | None = None
     execution_method: str = "cold"  # cold, warm, cached
     mutation_warnings: list[MutationWarning] = field(default_factory=list)

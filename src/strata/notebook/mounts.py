@@ -23,7 +23,7 @@ import stat
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable, Coroutine, Generator, Mapping
+from collections.abc import Callable, Collection, Coroutine, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +32,7 @@ from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel
 from vestigo.digests import FileDigests
+from vestigo.provenance import derive_subkey
 
 from strata.notebook import nonce
 from strata.notebook.credentials import (
@@ -897,6 +898,59 @@ def _digests_one_by_one(
         else:
             digests[rel] = found.sha256 if found.settled else nonce.unread_nonce()
     return digests
+
+
+def moved_key(provenance_hash: str) -> str:
+    """What a run whose input moved is recorded under: a key no check makes, so its cell
+    stays stale until a run that reads still files."""
+    return derive_subkey(provenance_hash, "moved")
+
+
+def moved_parts(key_parts: dict[str, Any] | None, moved: str) -> dict[str, Any] | None:
+    """*key_parts* with the part of the mount *moved* is in marked as changed, so the stale
+    cell's explanation names that mount even once the file is put back."""
+    if key_parts is None or "inputs" not in key_parts:
+        return key_parts
+    mount = moved.partition("/")[0]
+    inputs = [
+        [kind, name, f"{component}:moved" if (kind, name) == ("mount", mount) else component]
+        for kind, name, component in key_parts["inputs"]
+    ]
+    return {**key_parts, "inputs": inputs}
+
+
+def moved_line(moved: str) -> str:
+    """The console line that says *moved* changed after the run began: while the cell ran,
+    or, in Run All, before it ran but after the batch was keyed."""
+    return f"{moved} changed after the run began; its outputs are kept for this run only.\n"
+
+
+def moved_file(prepared: Mapping[str, ResolvedMount], *, skip: Collection[str] = ()) -> str | None:
+    """A file of a local read-only mount in *prepared*, but those in *skip*, whose content
+    is not what the run was keyed on (``mount/path``), or ``None`` when none moved.
+
+    Read after a run: the cell reads the live folder, so a file written meanwhile gives
+    outputs the key does not describe. Only its content is compared, so a file written and
+    put back before this check is not seen.
+    """
+    for name, rm in sorted(prepared.items()):
+        if name in skip or rm.file_versions is None or rm.digests_path is None:
+            continue  # remote, pinned or read-write: nothing local was keyed by content
+        try:
+            # Mostly remembered digests, so without waiting on a background hash of the mount.
+            now = local_digests(rm.local_path, rm.digests_path, read_bytes=STALENESS_READ_BYTES)
+            if now is None:
+                now = local_digests(rm.local_path, rm.digests_path) or {}
+        except OSError:
+            return name  # the folder went
+        moved = sorted(
+            rel
+            for rel in now.keys() | rm.file_versions.keys()
+            if now.get(rel) != rm.file_versions.get(rel)
+        )
+        if moved:
+            return f"{name}/{moved[0]}"
+    return None
 
 
 def without_digest_cache(

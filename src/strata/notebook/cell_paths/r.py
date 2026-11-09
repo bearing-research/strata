@@ -10,7 +10,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +37,7 @@ from strata.notebook.harness_user import (
 )
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.models import MountMode, MountSpec, WorkerBackendType
+from strata.notebook.mounts import moved_file, moved_key, moved_line, moved_parts
 from strata.notebook.table_writes import TableWriteError, write_back_failed
 from strata.notebook.team_store import TeamPull
 from strata.notebook.workers import is_http_executor_worker, resolve_worker_spec, worker_transport
@@ -436,6 +437,19 @@ async def run_r_cell(
                     cell_id, source, result_output_dir, provenance_hash, env_hash, collected
                 )
 
+            # A mount that moved while the cell ran: its outputs are kept for this run only.
+            moved = (
+                await asyncio.to_thread(moved_file, prov.prepared)
+                if exec_result.success and prov.prepared
+                else None
+            )
+            if moved is not None:
+                exec_result = replace(
+                    exec_result, stderr=exec_result.stderr + moved_line(moved), moved_input=moved
+                )
+            # Under a key no check makes: the cell stays stale and no hit replays its displays.
+            kept_hash = provenance_hash if moved is None else moved_key(provenance_hash)
+
             if exec_result.success:
                 store_error = None
                 try:
@@ -451,6 +465,7 @@ async def run_r_cell(
                         build_env=str(result.get("build_env") or ""),
                         hardware=result.get("hardware") or {},
                         collected=collected,
+                        stochastic=moved is not None,
                         run_outputs=exec_result.outputs,
                     )
                 except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
@@ -471,7 +486,7 @@ async def run_r_cell(
                     context.store_result_displays(
                         exec_result,
                         result_output_dir,
-                        provenance_hash,
+                        kept_hash,
                         input_hashes,
                         source_hash=source_hash,
                         source=source,
@@ -482,6 +497,7 @@ async def run_r_cell(
                     if (
                         not prov.has_rw_mount
                         and not prov.annotations.nocache
+                        and moved is None
                         and (consumed_vars or exec_result.display_outputs)
                     ):
                         context.store_console_outputs(
@@ -520,7 +536,14 @@ async def run_r_cell(
                         env_hash=env_hash,
                     )
                     context.record_good_run(
-                        cell_id, provenance_hash, source_hash, env_hash, prov, mount_writes
+                        cell_id,
+                        kept_hash,
+                        source_hash,
+                        env_hash,
+                        prov
+                        if moved is None
+                        else replace(prov, key_parts=moved_parts(prov.key_parts, moved)),
+                        mount_writes,
                     )
 
             host.persist_display_outputs(
