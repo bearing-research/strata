@@ -61,7 +61,7 @@ exhaustive commit history.
   read-only local mount (and an `@each` instance's item) is hashed again after a good
   run. If a file moved, the outputs are kept as a `@stochastic` run's are, the cell
   stays stale and says that mount changed, and its console names the file. A batched
-  `@stochastic` cell in Run All now keeps every run too, as a single run does. (#PRNUM)
+  `@stochastic` cell in Run All now keeps every run too, as a single run does. (#1495)
 - **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep
