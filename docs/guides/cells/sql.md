@@ -152,6 +152,8 @@ The schema fingerprint catches metadata-only changes (`ADD COLUMN`, type changes
 
 A probe can only ask about a table the query names. A table named at run time (Snowflake's `IDENTIFIER($tbl)` or `TABLE($tbl)`), a table function (`read_parquet(...)`, `query_table(...)`, a Postgres set-returning function) or a file read in place of a table (DuckDB's `FROM 'events.parquet'`) is not fingerprinted, so under `fingerprint` such a cell re-runs every time, and the header says so. Its result's content is folded into its provenance, so a downstream cell re-runs only when the rows actually changed. Declare `-- @cache session` or `-- @cache ttl=...` to reuse results instead, or read files through a mount on a [DuckDB lake connection](#duckdb-over-the-lake), whose fingerprint the cache does track.
 
+The probes run again after the query, and a DuckDB lake connection's mounts are fingerprinted again, since the query reads the live database and files after its key was taken. If one changed while the query ran, or cannot be probed again, the result is not cached: its content is folded into its provenance as above, and the console says what changed ("the database of connection 'db' changed while the query ran; its result is not cached"). So a commit during the query is never served later, even once the database is put back. Only content is compared, so a change undone before the query ends is not seen. A pinned snapshot (`-- @cache snapshot`, a catalog table read at its snapshot) cannot change and is not probed again.
+
 ## Read-only by default
 
 SQL cells are **read-only by default**, but the enforcement mechanism depends on the backend:

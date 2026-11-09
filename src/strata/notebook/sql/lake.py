@@ -34,7 +34,8 @@ from strata.notebook.sql.time_travel import splice_after_tables
 
 if TYPE_CHECKING:
     from strata.notebook.executor_host import ExecutorHost
-    from strata.notebook.models import ConnectionSpec, NotebookState
+    from strata.notebook.models import ConnectionSpec, MountSpec, NotebookState
+    from strata.notebook.mounts import MountResolver
 
 
 # Artifact transform param a ``-- @cache snapshot`` cell records: the
@@ -65,6 +66,10 @@ class Lake:
     # ones): found by locate_tables only once the cache misses, so a cache hit needs no
     # catalog.
     unlocated: list[TableSpec] = field(default_factory=list)
+    # Each mount the query reads, with the fingerprint its key took, to check after the
+    # query (:func:`moved_mount`): it reads the live folder or prefix.
+    mounts: list[tuple[MountSpec, str]] = field(default_factory=list)
+    mount_resolver: MountResolver | None = None
 
 
 def lake_options(spec: ConnectionSpec) -> tuple[str | None, list[str]]:
@@ -475,8 +480,23 @@ def _mount_sources(
         if fingerprint is None:
             raise LakeError(f"mount {name!r} is read-write; a SQL cell reads mounts read-only")
         lake.fingerprints.append(fingerprint)
+        lake.mounts.append((mount, fingerprint))
         sources.append({"name": name, "uri": mount.uri, "storage_options": storage_options})
+    lake.mount_resolver = resolver
     return sources
+
+
+def moved_mount(lake: Lake) -> str | None:
+    """The first mount *lake*'s query read whose fingerprint is no longer the one its key
+    took, or ``None``. Only content is compared, so a change put back since is not seen."""
+    from strata.notebook.mounts import mount_fingerprint_sync
+
+    if lake.mount_resolver is None:
+        return None
+    for mount, fingerprint in lake.mounts:
+        if mount_fingerprint_sync(lake.mount_resolver, mount) != fingerprint:
+            return mount.name
+    return None
 
 
 def pin_snapshots(sql: str, catalog: str, snapshots: dict[tuple[str, str], int]) -> str:
