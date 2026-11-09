@@ -417,9 +417,9 @@ def test_another_connection_to_the_file_does_not_move_the_freshness_token(tmp_pa
     tables = [QualifiedTable(catalog=None, schema=None, name="t")]
 
     with a.open(spec, read_only=True) as ro:
-        before = a.probe_freshness(ro, tables)
+        before = a.probe_freshness(ro, tables, digests_path=UNUSED_DIGESTS)
         with a.open(spec, read_only=True) as other:
             other.execute("SELECT sum(x) FROM t").fetchall()
-            after = a.probe_freshness(ro, tables)
+            after = a.probe_freshness(ro, tables, digests_path=UNUSED_DIGESTS)
 
     assert before == after
