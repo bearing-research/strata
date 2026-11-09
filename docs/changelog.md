@@ -58,7 +58,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   rewrite in place that restores the mtime is still not seen). A file past 64 MiB is
   keyed by its stat instead, ctime included, so a database written all the time is not
   read before every run. The key changes, so each such cell runs once after the
-  upgrade. (#1494, #PRNUM)
+  upgrade. (#1494, #1497)
 - **A run whose local mount changed while it ran is kept for that run only.** The cell
   reads the live folder, so a file written during the run gave outputs its key did not
   describe, and putting the file back later served them as a cache hit. Now each
