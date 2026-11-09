@@ -402,3 +402,30 @@ def test_a_query_fetches_arrow_without_duckdbs_extra_copy():
         warnings.simplefilter("error")
         table = _query_arrow(cursor, "SELECT ? AS a", (7,))
     assert table.to_pylist() == [{"a": 7}]
+
+
+def test_another_connection_to_the_file_does_not_move_the_freshness_token(tmp_path):
+    """DuckDB shares one database per file in a process; its memory use is not the file's."""
+    db = tmp_path / "f.duckdb"
+    a = DuckDBAdapter()
+    spec = ConnectionSpec(name="db", driver="duckdb", path=str(db))
+    rw = a.open(spec, read_only=False)
+    rw.execute("CREATE TABLE t(x INT)")
+    rw.execute("INSERT INTO t SELECT range FROM range(0, 100000)")
+    rw.execute("CHECKPOINT")
+    rw.close()
+    tables = [QualifiedTable(catalog=None, schema=None, name="t")]
+
+    ro = a.open(spec, read_only=True)
+    try:
+        before = a.probe_freshness(ro, tables)
+        other = a.open(spec, read_only=True)
+        try:
+            other.execute("SELECT sum(x) FROM t").fetchall()
+            after = a.probe_freshness(ro, tables)
+        finally:
+            other.close()
+    finally:
+        ro.close()
+
+    assert before == after

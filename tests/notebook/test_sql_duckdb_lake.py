@@ -1488,3 +1488,22 @@ async def test_a_mount_written_while_the_query_ran_is_never_served_after_it_is_p
     assert again.success, again.error
     assert again.cache_hit is False
     assert _rows(session, again.artifact_uri) == [{"total": 3}]
+
+
+def test_a_mount_that_cannot_be_listed_again_is_not_blamed_for_changing(monkeypatch):
+    from strata.notebook import mounts, nonce
+    from strata.notebook.sql.lake import Lake, moved_mount
+
+    raw = MountSpec(name="raw", uri="s3://bucket/raw")
+    lake = Lake(spec=ConnectionSpec(name="lake", driver="duckdb"), mount_resolver=object())
+    lake.mounts = [(raw, "raw:s3://bucket/raw:abc")]
+    monkeypatch.setattr(
+        mounts,
+        "mount_fingerprint_sync",
+        lambda _resolver, mount: f"{mount.name}:unresolved:{nonce.unresolved_nonce()}",
+    )
+
+    assert moved_mount(lake) == "mount 'raw' could not be listed again"
+    # Unlisted when the key was taken: that key is one no later run makes.
+    lake.mounts = [(raw, f"raw:unresolved:{nonce.unresolved_nonce()}")]
+    assert moved_mount(lake) is None

@@ -55,7 +55,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   the query was cached under the old key and served once the database was put back.
   Now the probes run again after the query, and a DuckDB lake connection's mounts are
   fingerprinted again; if one moved, the result is keyed on its rows, as for a table
-  named at run time, and the console says what changed. (#1498)
+  named at run time, and the console says what changed. A DuckDB database's token no
+  longer holds the process's memory use, which another connection to the file moved, so
+  each DuckDB cell runs once after the upgrade. (#1498)
 - **A SQLite database is keyed by its content.** A SQL cell over one was keyed by the
   file's size, modification time and header change counter, so a database replaced by
   one of the same size with the old mtime kept (a restore, `cp` then `touch -r`) served

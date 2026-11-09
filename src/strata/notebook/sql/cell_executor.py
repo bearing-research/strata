@@ -255,7 +255,8 @@ async def execute_sql_cell(
     # ---- probes (optional) -----------------------------------------
     freshness = None
     schema_fp = None
-    probed = False
+    # What the probes gave, to compare after the query; a pinned snapshot cannot change.
+    probes: tuple[Any, Any] | None = None
     pin: SnapshotPin | None = None
     if pinned_lake is not None:
         # The snapshot ids are the state; an Iceberg snapshot fixes its schema too.
@@ -271,7 +272,6 @@ async def execute_sql_cell(
                 return _error_result(f"snapshot probe failed: {exc}", start_time)
         freshness = FreshnessToken(value=f"at:{pin.at}".encode(), is_snapshot=True)
     elif policy.freshness_required or policy.schema_required:
-        probed = True
         try:
             freshness, schema_fp = await asyncio.to_thread(
                 _run_probes,
@@ -283,6 +283,7 @@ async def execute_sql_cell(
             )
         except Exception as exc:  # noqa: BLE001
             return _error_result(f"probe failed: {exc}", start_time)
+        probes = (freshness, schema_fp)
         if policy.snapshot_required and (freshness is None or not freshness.is_snapshot):
             return _error_result(
                 "@cache snapshot requires a durable snapshot ID; "
@@ -344,16 +345,21 @@ async def execute_sql_cell(
             start_time,
         )
 
-    # The query read the live database and mounts, after the key was taken from them.
-    moved = await asyncio.to_thread(
-        _moved_after_query,
-        adapter,
-        runtime_spec,
-        analysis.tables,
-        policy,
-        session.path / ".strata" / DIGESTS_FILE,
-        (freshness, schema_fp) if probed else None,
-        lake,
+    # The query read the live database and mounts, after the key was taken from them. A
+    # result keyed on its rows, or never looked up, needs no check.
+    moved = (
+        None
+        if runs_every_time or annotations.nocache
+        else await asyncio.to_thread(
+            _moved_after_query,
+            adapter,
+            runtime_spec,
+            analysis.tables,
+            policy,
+            session.path / ".strata" / DIGESTS_FILE,
+            probes,
+            lake,
+        )
     )
 
     blob = _serialize_arrow_ipc(table)
@@ -1171,28 +1177,20 @@ def _moved_after_query(
 ) -> str | None:
     """Why the query's result is not what its key describes, or ``None``: the database
     changed since the run probed it (*probes* is what the probes gave then), or cannot be
-    probed again, or a mount of its lake changed. A pinned snapshot cannot change."""
+    probed again, or a mount of its lake changed or cannot be listed again."""
     if probes is not None:
         try:
             now = _run_probes(adapter, spec, tables, policy, digests_path)
         except Exception as exc:  # noqa: BLE001
             return f"the database of connection {spec.name!r} could not be probed again ({exc})"
-        if _probed_values(*now) != _probed_values(*probes):
+        if now != probes:
             return f"the database of connection {spec.name!r} changed while the query ran"
     if lake is None:
         return None
     try:
-        mount = moved_mount(lake)
+        return moved_mount(lake)
     except Exception as exc:  # noqa: BLE001
         return f"the connection's mounts could not be checked again ({exc})"
-    return f"mount {mount!r} changed while the query ran" if mount is not None else None
-
-
-def _probed_values(freshness: Any, schema_fp: Any) -> tuple[Any, Any]:
-    return (
-        freshness.value if freshness is not None else None,
-        schema_fp.value if schema_fp is not None else None,
-    )
 
 
 def _previous_pin(artifact_mgr: Any, canonical_id: str, basis: str) -> SnapshotPin | None:

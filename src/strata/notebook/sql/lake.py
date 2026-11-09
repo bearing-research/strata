@@ -487,15 +487,21 @@ def _mount_sources(
 
 
 def moved_mount(lake: Lake) -> str | None:
-    """The first mount *lake*'s query read whose fingerprint is no longer the one its key
-    took, or ``None``. Only content is compared, so a change put back since is not seen."""
+    """Why a mount *lake*'s query read no longer has the fingerprint its key took, or
+    ``None``. Only content is compared, so a change put back since is not seen."""
+    from strata.notebook import nonce
     from strata.notebook.mounts import mount_fingerprint_sync
 
     if lake.mount_resolver is None:
         return None
     for mount, fingerprint in lake.mounts:
-        if mount_fingerprint_sync(lake.mount_resolver, mount) != fingerprint:
-            return mount.name
+        if nonce.is_unresolved(fingerprint):
+            continue  # unlisted when keyed: no later key matches this one
+        now = mount_fingerprint_sync(lake.mount_resolver, mount)
+        if nonce.is_unresolved(now or ""):
+            return f"mount {mount.name!r} could not be listed again"
+        if now != fingerprint:
+            return f"mount {mount.name!r} changed while the query ran"
     return None
 
 

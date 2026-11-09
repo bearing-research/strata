@@ -1594,3 +1594,32 @@ async def test_a_query_whose_database_cannot_be_probed_again_is_not_cached(tmp_p
     assert first["success"], first.get("error")
     assert "could not be probed again (gone)" in first["stderr"]
     assert (await cell_executor.execute_sql_cell(session, "c1", src))["cache_hit"] is False
+
+
+@pytest.mark.parametrize(
+    "cell_source",
+    [
+        "-- @sql connection=db\n-- @nocache\nSELECT * FROM events\n",
+        "-- @sql connection=db\nSELECT * FROM events\n",
+    ],
+    ids=["nocache", "named-at-run-time"],
+)
+@pytest.mark.asyncio
+async def test_a_result_no_cache_check_finds_is_not_checked_after_the_query(
+    tmp_path, monkeypatch, cell_source
+):
+    from strata.notebook.sql import cell_executor
+
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=cell_source)
+    session = _make_session(nb_dir)
+    if "nocache" not in cell_source:
+        _with_unresolved_table(monkeypatch)
+    monkeypatch.setattr(
+        cell_executor, "_moved_after_query", lambda *_a: pytest.fail("checked after the query")
+    )
+
+    result = await cell_executor.execute_sql_cell(session, "c1", _read_cell(nb_dir, "c1"))
+
+    assert result["success"], result.get("error")
