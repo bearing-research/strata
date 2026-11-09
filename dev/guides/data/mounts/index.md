@@ -42,7 +42,7 @@ kept in `.strata/hashes.sqlite` while the file's stat holds, so an unchanged mou
 costs a `stat` per file. A file written less than 2 s before it was read is read again
 next time. The staleness check reads at most 64 MiB of files it holds no digest for.
 Past that the server hashes the mount in the background, and the cell shows stale
-("Checking mount `raw`") until it is done; a cell whose files did not change is then
+("Checking mount `raw`", with how much is hashed) until it is done; a cell whose files did not change is then
 ready again, and a run in the meantime waits for that hash rather than starting its own.
 Links to files are followed,
 links to folders are not, and a file that cannot be read is keyed as unreadable. A

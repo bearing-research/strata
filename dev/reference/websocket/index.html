@@ -3920,6 +3920,11 @@
 <td>Per-variant update from a <code># @per_variant</code> fan-out cell</td>
 </tr>
 <tr>
+<td><code>cell_mount_progress</code></td>
+<td><code>{ "cell_id": "...", "mount": "raw", "bytes_done": 3200000000, "bytes": 50000000000, "done": false }</code></td>
+<td>How much of a local mount has been hashed, after each batch of files (256 MiB or more, and at least one file per read thread) of a hash of more than one batch: on the cell a run hashes it for, and on every cell that mounts it while the background check hashes it, under each name it has there. <code>done</code> ends it, whether the hash finished or failed. A frame missed while the socket was down is not resent, so a client clears its progress on reconnect and waits for the next one</td>
+</tr>
+<tr>
 <td><code>cell_test_status</code></td>
 <td><code>{ "cell_id": "...", "status": "running" }</code></td>
 <td>Test run lifecycle: <code>running</code> → <code>ready</code> / <code>error</code> (mirrors <code>cell_status</code>)</td>
