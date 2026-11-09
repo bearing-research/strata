@@ -567,6 +567,7 @@ async def _list_each_items(
                 prepared[source].local_path,
                 spec.get("glob"),
                 versions=prepared[source].file_versions,
+                digests_path=prepared[source].digests_path,
             )
         )
         return items, base.over_mounts(prepared)

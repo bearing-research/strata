@@ -169,3 +169,118 @@ class TestEachItems:
         await nb.good("a")
         assert nb.ran() == ["two.txt"]
         assert "('two.txt', 'CCCC')" in (await nb.good("b")).stdout
+
+
+class TestReviewFixes:
+    """What a first review of the content key found."""
+
+    @staticmethod
+    def _counted(monkeypatch) -> list:
+        """The files read from now on."""
+        from vestigo import digests
+
+        read: list = []
+        read_digest = digests._read_digest
+
+        def counted(path):
+            read.append(Path(path))
+            return read_digest(path)
+
+        monkeypatch.setattr(digests, "_read_digest", counted)
+        return read
+
+    def test_a_mount_not_read_yet_shows_as_changed_not_unavailable(self, tmp_path):
+        from strata.notebook import nonce
+
+        (tmp_path / "raw").mkdir()
+        _touch(tmp_path / "raw" / "f.txt", "aaaa")
+        resolver = MountResolver(cache_dir=tmp_path / "nb" / "mount_cache")
+        mount = MountSpec(name="raw", uri=(tmp_path / "raw").as_uri())
+
+        component = mount_fingerprint_sync(resolver, mount, read_bytes=0)
+
+        assert component is not None
+        assert not nonce.is_unresolved(component)
+        assert component != mount_fingerprint_sync(resolver, mount, read_bytes=0)
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or os.geteuid() == 0, reason="needs a file its owner cannot read"
+    )
+    def test_a_file_that_cannot_be_read_does_not_count_against_staleness(self, tmp_path, later):
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        _touch(raw / "a.txt", "aaaa")
+        _touch(raw / "big.bin", "b" * 100)
+        (raw / "big.bin").chmod(0)
+        try:
+            ran = local_digests(raw, tmp_path / "hashes.sqlite")
+            looked = local_digests(raw, tmp_path / "hashes.sqlite", read_bytes=10)
+        finally:
+            (raw / "big.bin").chmod(0o600)
+
+        assert looked == ran
+        assert ran["big.bin"] == "unreadable"
+
+    def test_a_cache_that_cannot_be_opened_still_remembers(self, tmp_path, monkeypatch, later):
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        _touch(raw / "a.txt", "aaaa")
+        unopenable = tmp_path / "not-a-folder"
+        unopenable.write_text("")
+        read = self._counted(monkeypatch)
+
+        first = local_digests(raw, unopenable / "hashes.sqlite")
+        assert read
+        read.clear()
+        assert local_digests(raw, unopenable / "hashes.sqlite", read_bytes=0) == first
+        assert read == []
+
+    def test_a_warm_mount_reads_and_logs_nothing(self, tmp_path, monkeypatch, caplog, later):
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        _touch(raw / "a.txt", "aaaa")
+        monkeypatch.setattr(mounts, "_LOG_READ_BYTES", 1)
+        local_digests(raw, tmp_path / "hashes.sqlite")
+        read = self._counted(monkeypatch)
+        caplog.clear()
+
+        with caplog.at_level("INFO", logger="strata.notebook.mounts"):
+            local_digests(raw, tmp_path / "hashes.sqlite")
+
+        assert read == []
+        assert "Hashing" not in caplog.text
+
+    def test_a_file_that_changed_while_read_gets_a_key_no_run_reproduces(
+        self, tmp_path, monkeypatch
+    ):
+        from vestigo.digests import Digest
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        _touch(raw / "a.txt", "aaaa")
+        monkeypatch.setattr(
+            FileDigests,
+            "digest_many",
+            lambda self, paths, **_: [Digest("torn", settled=False) for _ in paths],
+        )
+
+        first = local_digests(raw, tmp_path / "hashes.sqlite")
+        second = local_digests(raw, tmp_path / "hashes.sqlite")
+
+        assert first["a.txt"] != "torn"
+        assert first != second
+
+    def test_a_pinned_mounts_items_are_read_once(self, tmp_path, monkeypatch, later):
+        from strata.notebook import each
+
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        _touch(raw / "a.txt", "aaaa")
+        first = each.items_of_mount(raw, None, digests_path=tmp_path / "hashes.sqlite")
+        read = self._counted(monkeypatch)
+        monkeypatch.setattr(each, "_sha256", lambda f: read.append(f.name) or "uncached")
+
+        again = each.items_of_mount(raw, None, digests_path=tmp_path / "hashes.sqlite")
+
+        assert again == first
+        assert read == []

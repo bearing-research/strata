@@ -1413,8 +1413,8 @@ class TestFanout:
             SimpleNamespace(name="out", uri="file:///out", mode=MountMode.READ_WRITE),
         ]
         prepared = {
-            "data": SimpleNamespace(local_path=tmp_path, file_versions=versions),
-            "out": SimpleNamespace(local_path=tmp_path, file_versions=None),
+            "data": SimpleNamespace(local_path=tmp_path, file_versions=versions, digests_path=None),
+            "out": SimpleNamespace(local_path=tmp_path, file_versions=None, digests_path=None),
         }
 
         async def prepare_mounts(_specs, _cell_id, only=None):
@@ -1568,6 +1568,7 @@ class TestFanout:
             "root": tmp_path,
             "glob": "*.csv",
             "versions": {"a.csv": "v1"},
+            "digests_path": None,
         }
         # A read-write mount gets its own staging per instance, so it is not handed on.
         assert context.each_listed == {"c": {"data": prepared["data"]}}

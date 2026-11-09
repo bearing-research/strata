@@ -20,7 +20,10 @@ import logging
 import os
 import shutil
 import stat
-from collections.abc import Mapping
+import threading
+from collections import OrderedDict
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -50,6 +53,8 @@ STALENESS_READ_BYTES = 64 * 1024 * 1024
 Past it the mount is unresolved, and the cell shows stale until a run reads them."""
 
 _LOG_READ_BYTES = 1024 * 1024 * 1024
+# Digest caches kept open, the least recently used idle one closed past this.
+_OPEN_DIGEST_CACHES = 32
 
 
 @dataclass
@@ -68,6 +73,8 @@ class ResolvedMount:
     # RO only: each file's version by relative path, the listing's for a remote mount and
     # the sha256 for a local one (none for a pinned one).
     file_versions: dict[str, str] | None = None
+    # Local RO only: where its files' digests are cached, for one that has no version.
+    digests_path: Path | None = None
 
 
 class WrittenFile(BaseModel):
@@ -303,7 +310,9 @@ class MountResolver:
         if mount.pin is not None:
             fingerprint = MountFingerprinter.fingerprint_mount_sync(mount)
             assert fingerprint is not None
-            return ResolvedMount(spec=mount, local_path=p, fingerprint=fingerprint)
+            return ResolvedMount(
+                spec=mount, local_path=p, fingerprint=fingerprint, digests_path=self.digests_path
+            )
         digests = await asyncio.to_thread(local_digests, p, self.digests_path)
         assert digests is not None
         return ResolvedMount(
@@ -311,6 +320,7 @@ class MountResolver:
             local_path=p,
             fingerprint=_fingerprint_digests(digests),
             file_versions=digests,
+            digests_path=self.digests_path,
         )
 
     async def _resolve_remote(
@@ -612,7 +622,8 @@ class MountFingerprinter:
             fingerprint = MountFingerprinter.fingerprint_local_sync(
                 Path(path), digests_path, read_bytes=read_bytes
             )
-            return nonce.unresolved_nonce() if fingerprint is None else fingerprint
+            # Not read yet, which is not unavailable.
+            return nonce.unread_nonce() if fingerprint is None else fingerprint
         else:
             effective = storage_options if storage_options is not None else (mount.options or None)
             return MountFingerprinter.fingerprint_remote_sync(
@@ -620,7 +631,7 @@ class MountFingerprinter:
             )
 
 
-def _local_files(root: Path) -> list[tuple[str, Path, os.stat_result]]:
+def local_files(root: Path) -> list[tuple[str, Path, os.stat_result]]:
     """``(relative path, path, stat)`` of each regular file under *root*, or *root* itself.
 
     A link to a file is a file, as in a Hugging Face cache; a dangling one is skipped,
@@ -641,39 +652,80 @@ def _local_files(root: Path) -> list[tuple[str, Path, os.stat_result]]:
     return sorted(files)
 
 
+class _DigestCache:
+    def __init__(self, path: Path) -> None:
+        self.digests = FileDigests(path)
+        self.users = 0
+
+
+_digest_caches: OrderedDict[Path, _DigestCache] = OrderedDict()
+_digest_caches_lock = threading.Lock()
+
+
+@contextmanager
+def digest_cache(path: Path) -> Generator[FileDigests]:
+    """The process's one :class:`FileDigests` over *path*, opened once: one that fell back
+    to memory then still remembers between looks. Past :data:`_OPEN_DIGEST_CACHES`, the
+    least recently used one nothing is using is closed."""
+    key = path.absolute()
+    with _digest_caches_lock:
+        entry = _digest_caches.pop(key, None) or _DigestCache(key)
+        _digest_caches[key] = entry
+        entry.users += 1
+    try:
+        yield entry.digests
+    finally:
+        with _digest_caches_lock:
+            entry.users -= 1
+            idle = [k for k, e in _digest_caches.items() if e.users == 0]
+            for k in idle[: max(0, len(_digest_caches) - _OPEN_DIGEST_CACHES)]:
+                _digest_caches.pop(k).digests.close()
+
+
+def close_digest_caches() -> None:
+    """Close every digest cache nothing is using (tests, and a server shutting down)."""
+    with _digest_caches_lock:
+        for k in [k for k, e in _digest_caches.items() if e.users == 0]:
+            _digest_caches.pop(k).digests.close()
+
+
 def local_digests(
     root: Path, digests_path: Path, *, read_bytes: int | None = None
 ) -> dict[str, str] | None:
     """Each file's sha256 under the local mount *root*, by relative POSIX path.
 
     A file the cache at *digests_path* holds a digest for under its current stat is not
-    read. With *read_bytes*, ``None`` instead of reading more than that. A file that
-    cannot be read is ``unreadable``: the mount's key still changes once it can be.
+    read. With *read_bytes*, ``None`` instead of reading more than that of the files that
+    can be read. A file that cannot be read is ``unreadable``, so the mount's key changes
+    once it can be; one that changed while it was read gets a key no run reproduces.
     """
-    files = _local_files(root)
-    cache = FileDigests(digests_path)
-    try:
-        if read_bytes is not None:
-            try:
-                known = cache.cached_many(path for _, path, _ in files)
-            except OSError:
-                return None  # a file went between the walk and the look
-            unread = sum(st.st_size for (_, _, st), sha in zip(files, known) if sha is None)
-            if unread > read_bytes:
-                return None
-        unread = sum(st.st_size for _, _, st in files)
+    files = local_files(root)
+    with digest_cache(digests_path) as cache:
+        try:
+            known = cache.cached_many(path for _, path, _ in files)
+        except OSError:
+            # A file went between the walk and the look.
+            return None if read_bytes is not None else _digests_one_by_one(cache, files)
+        digests = {rel: sha for (rel, _, _), sha in zip(files, known) if sha is not None}
+        missing = [f for f, sha in zip(files, known) if sha is None]
+        unread = sum(st.st_size for _, path, st in missing if os.access(path, os.R_OK))
+        if read_bytes is not None and unread > read_bytes:
+            return None
         if unread >= _LOG_READ_BYTES:
-            logger.info("Hashing %s: %d files, up to %d bytes", root, len(files), unread)
+            logger.info("Hashing %s: %d files, %d bytes", root, len(missing), unread)
+        if not missing:
+            return digests
         try:
             found = cache.digest_many(
-                [path for _, path, _ in files], stats=[st for _, _, st in files]
+                [path for _, path, _ in missing], stats=[st for _, _, st in missing]
             )
         except OSError:
             # One file failed: the rest one by one, the ones read so far remembered.
-            return _digests_one_by_one(cache, files)
-        return {rel: d.sha256 for (rel, _, _), d in zip(files, found)}
-    finally:
-        cache.close()
+            return digests | _digests_one_by_one(cache, missing)
+        return digests | {
+            rel: d.sha256 if d.settled else nonce.unread_nonce()
+            for (rel, _, _), d in zip(missing, found)
+        }
 
 
 def _digests_one_by_one(
@@ -682,11 +734,13 @@ def _digests_one_by_one(
     digests: dict[str, str] = {}
     for rel, path, _ in files:
         try:
-            digests[rel] = cache.digest(path).sha256
+            found = cache.digest(path)
         except FileNotFoundError:
             continue  # gone since the walk
         except OSError:
             digests[rel] = "unreadable"
+        else:
+            digests[rel] = found.sha256 if found.settled else nonce.unread_nonce()
     return digests
 
 

@@ -19,6 +19,12 @@ def unresolved_nonce() -> str:
     return _MARKER + hashlib.sha256(os.urandom(32)).hexdigest()[len(_MARKER) :]
 
 
+def unread_nonce() -> str:
+    """64 hex digits no other call returns, for a file not read yet or read while it
+    changed: unlike :func:`unresolved_nonce`, its input shows as changed, not unavailable."""
+    return hashlib.sha256(b"unread" + os.urandom(32)).hexdigest()
+
+
 def is_unresolved(component: str) -> bool:
     """Whether this key component holds a nonce: its input could not be resolved."""
     return _MARKER in component

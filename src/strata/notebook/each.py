@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +20,8 @@ from typing import Any
 
 import cellgraph as cg
 
-from strata.notebook.mounts import _sha256, glob_matches
+from strata.notebook.mounts import _sha256, digest_cache, glob_matches, local_files
+from strata.notebook.nonce import unread_nonce
 from strata.notebook.output_dirs import is_assembling
 from strata.notebook.serializer import to_serialization_safe
 
@@ -105,44 +104,39 @@ def items_of_table(table: Any, key_column: str | None, name: str) -> list[EachIt
     return list(items.values())
 
 
-def _listed_files(root: Path) -> list[tuple[str, Path]]:
-    """``(relative path, path)`` of what the mount's fingerprint counts: regular files.
-
-    A link to a file is a file, as in a Hugging Face cache or a DVC checkout.
-    """
-    if not root.is_dir():
-        raise EachError(f"@each over a mount needs a folder, and {root} is not one")
-    files = []
-    for dirpath, _dirnames, filenames in os.walk(root):
-        for filename in filenames:
-            path = Path(dirpath) / filename
-            try:
-                state = path.stat()
-            except OSError:
-                continue  # a dangling link
-            if stat.S_ISREG(state.st_mode):
-                files.append((path.relative_to(root).as_posix(), path))
-    return sorted(files)
-
-
 def items_of_mount(
     root: Path,
     glob: str | None,
     *,
     versions: Mapping[str, str] | None = None,
+    digests_path: Path | None = None,
 ) -> list[EachItem]:
     """One item per file, named by its relative path, keyed by its content.
 
     *versions* are what the mount was keyed on: a local mount's file digests, a remote
     listing's versions. A file with none (a pinned mount's, or a listing without them)
-    is read.
+    is read, through the digest cache at *digests_path* when it is a local mount's.
     """
+    if not root.is_dir():
+        raise EachError(f"@each over a mount needs a folder, and {root} is not one")
+    listed = [
+        (relative, path)
+        for relative, path, _ in local_files(root)
+        if glob is None or glob_matches(relative, glob)
+    ]
+    unversioned = [p for relative, p in listed if versions is None or relative not in versions]
+    read: dict[Path, str] = {}
+    if unversioned and digests_path is not None:
+        with digest_cache(digests_path) as cache:
+            found = cache.digest_many(unversioned)
+        # One read while it changed is keyed so that no later run matches it.
+        read = {p: d.sha256 if d.settled else unread_nonce() for p, d in zip(unversioned, found)}
     items = []
-    for relative, path in _listed_files(root):
-        if glob is not None and not glob_matches(relative, glob):
-            continue
+    for relative, path in listed:
         if versions is not None and relative in versions:
             digest = versions[relative]
+        elif path in read:
+            digest = read[path]
         else:
             with path.open("rb") as handle:
                 digest = _sha256(handle)
