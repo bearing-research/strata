@@ -2,342 +2,342 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://bearingresearch.com/strata/dev/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/changelog/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/concepts/artifacts-and-lineage/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/concepts/caching/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/concepts/dag-and-staleness/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/concepts/features/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/concepts/file-format-and-git/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/core/registry/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/deployment/codespaces/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/deployment/docker/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/deployment/fly/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/deployment/lifecycle/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/deployment/modes/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/deployment/observability/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/deployment/privacy/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/deployment/service-mode/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/agent_demo/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/arxiv_classifier/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/caching/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/data_viewer/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/each_pipeline/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/iris_classification/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/library_cells/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/loop_hill_climb/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/markdown_showcase/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/model_variants/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/model_variants_sweep/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/news_alpha_trader/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/pandas_basics/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/r_lm_vs_sklearn/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/r_mtcars_analysis/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/review_triage/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/s3_mount/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/sql_orders_report/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/titanic_ml/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/examples/widget_playground/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/getting-started/core/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/getting-started/installation/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/getting-started/notebook/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/cells/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/cells/prompt/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/cells/python/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/cells/r/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/cells/sql/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/cells/widget/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/compute/ssh/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/data/fetch-and-datasets/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/data/mounts/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/data/write-back/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/share/app-view/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/guides/share/team-store/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/agent-authoring/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/agent/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/cli/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/comparison/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/environment/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/examples/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/export/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/import/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/keyboard/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/mcp/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/publishing/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/registry-dashboard/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/scratchpad/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/secrets/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/testing/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/tui/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/worker-pool/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/notebook/workers/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/configuration/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/executor-protocol/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/notebook-protocol/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/notebook-toml/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/rest-api/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/websocket/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/worker-connect/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/annotations/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/annotations/loops-and-variants/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/annotations/prompt/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/annotations/python/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/annotations/r/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/annotations/sql/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://bearingresearch.com/strata/dev/reference/annotations/widget/</loc>
-         <lastmod>2026-11-07</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
 </urlset>

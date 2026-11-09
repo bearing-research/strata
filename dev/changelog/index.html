@@ -4066,6 +4066,11 @@ exhaustive commit history.</p>
   skipping it. Run All also skips a failed cell's dependents that would have
   run together in one batch, which before ran on the failed cell's last
   artifacts. No cache keys change. (#1343)</li>
+<li><strong>The ledger is vestigo 0.5.0.</strong> A sweep no longer deletes a cell value that a kept
+  checkpoint was built from: before, a checkpoint the idle floor kept could lose its
+  inputs in the same pass. Two processes opening one new SQLite store at once no
+  longer fail. It adds <code>vestigo.digests.FileDigests</code>, which Strata does not call yet.
+  No migration. (#1480)</li>
 <li><strong>The ledger is vestigo 0.4.0.</strong> It adds <code>exclude_id_prefix</code> to <code>list_artifacts</code>
   and <code>stats</code>, and every store gets <code>build_attempts.fenced_at</code> on open. (#1476)</li>
 <li><strong>The ledger is vestigo 0.3.1</strong>, which adds <code>vestigo.torch.HostedRun</code> and
