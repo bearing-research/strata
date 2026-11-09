@@ -43,7 +43,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   again. A file's digest is kept in `.strata/hashes.sqlite` while its stat holds, so an
   unchanged mount is not read again. The staleness check reads at most 64 MiB of files
   it holds no digest for, and past that shows the cell stale until a run reads them.
-  The key changes, so each such cell runs once after the upgrade. (#NN)
+  The key changes, so each such cell runs once after the upgrade. (#1481)
 - **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep
