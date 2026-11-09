@@ -3151,8 +3151,11 @@ archive extracted again) makes the cell stale, and a `touch`, a `chmod` or a
 `git checkout` of an unchanged file runs nothing. A file is read once: its digest is
 kept in `.strata/hashes.sqlite` while the file's stat holds, so an unchanged mount
 costs a `stat` per file. A file written less than 2 s before it was read is read again
-next time. The staleness check reads at most 64 MiB of files it holds no digest for;
-past that the cell shows stale until a run reads them. Links to files are followed,
+next time. The staleness check reads at most 64 MiB of files it holds no digest for.
+Past that the server hashes the mount in the background, and the cell shows stale
+("Checking mount `raw`") until it is done; a cell whose files did not change is then
+ready again, and a run in the meantime waits for that hash rather than starting its own.
+Links to files are followed,
 links to folders are not, and a file that cannot be read is keyed as unreadable. A
 file that changed while it was read gets a key no later run matches, so that run's
 result is never reused.
@@ -8004,7 +8007,7 @@ A cell is out of date when no stored result matches its current provenance. This
 
 A cell that still has a result and whose upstream moved reads **stale · upstream changed**. A cell you edited after it ran reads **stale · source changed**, and undoing the edit brings it back to **ready**, shown as cached, along with the cells downstream of it. A cell whose environment or declared outside input changed reads **stale · environment changed** or **stale · input changed**, and the cells downstream of it read stale too. When the change goes away, as when `uv.lock` returns to what it was, they read ready again without running. If an input cannot be read at all, or a run's record cannot say what moved, nothing is known to be wrong, so the cell reads **idle**. The `@fetch` and `@dataset` checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the `@table` catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.
 
-The **causality chain** explains why a cell is stale. Each good run saves the parts its key was built from (source, environment, upstream outputs and outside inputs), and the chain lists the parts that differ now: "the source of X changed", "upstream X changed", "mount `raw` changed". An input that cannot be read now is reported as that. When the record cannot explain the change, for example a run from before parts were saved, the chain says it is incomplete rather than guessing.
+The **causality chain** explains why a cell is stale. Each good run saves the parts its key was built from (source, environment, upstream outputs and outside inputs), and the chain lists the parts that differ now: "the source of X changed", "upstream X changed", "mount `raw` changed". An input that cannot be read now is reported as that, and a local mount still being hashed as "checking mount `raw`". When the record cannot explain the change, for example a run from before parts were saved, the chain says it is incomplete rather than guessing.
 
 ## Cell status lifecycle
 

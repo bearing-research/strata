@@ -3009,8 +3009,11 @@ archive extracted again) makes the cell stale, and a <code>touch</code>, a <code
 <code>git checkout</code> of an unchanged file runs nothing. A file is read once: its digest is
 kept in <code>.strata/hashes.sqlite</code> while the file's stat holds, so an unchanged mount
 costs a <code>stat</code> per file. A file written less than 2 s before it was read is read again
-next time. The staleness check reads at most 64 MiB of files it holds no digest for;
-past that the cell shows stale until a run reads them. Links to files are followed,
+next time. The staleness check reads at most 64 MiB of files it holds no digest for.
+Past that the server hashes the mount in the background, and the cell shows stale
+("Checking mount <code>raw</code>") until it is done; a cell whose files did not change is then
+ready again, and a run in the meantime waits for that hash rather than starting its own.
+Links to files are followed,
 links to folders are not, and a file that cannot be read is keyed as unreadable. A
 file that changed while it was read gets a key no later run matches, so that run's
 result is never reused.</p>
