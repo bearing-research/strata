@@ -3914,6 +3914,13 @@ exhaustive commit history.</p>
   its <code>-wal</code>, kept in <code>.strata/hashes.sqlite</code> while their stat holds (on Windows a
   rewrite in place that restores the mtime is still not seen). The key changes, so
   each such cell runs once after the upgrade. (#1494)</li>
+<li><strong>A run whose local mount changed while it ran is kept for that run only.</strong> The cell
+  reads the live folder, so a file written during the run gave outputs its key did not
+  describe, and putting the file back later served them as a cache hit. Now each
+  read-only local mount (and an <code>@each</code> instance's item) is hashed again after a good
+  run. If a file moved, the outputs are kept as a <code>@stochastic</code> run's are, the cell
+  stays stale and says that mount changed, and its console names the file. A batched
+  <code>@stochastic</code> cell in Run All now keeps every run too, as a single run does. (#1495)</li>
 <li><strong>A new SQL cell is saved as <code>.sql</code>, a new prompt cell as <code>.prompt</code>.</strong> Both
   used to get <code>.py</code>, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from <code>notebook.toml</code>, so existing cells keep

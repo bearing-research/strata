@@ -49,6 +49,21 @@ links to folders are not, and a file that cannot be read is keyed as unreadable.
 file that changed while it was read gets a key no later run matches, so that run's
 result is never reused.
 
+**A file written while the cell runs keeps that run to itself.** A local mount is not
+copied: the cell reads the live folder, after its key was taken. So once a run
+succeeds, its read-only local mounts are hashed again (mostly a `stat` per file, since
+their digests were just kept; a file written less than 2 s before the run read it is
+read again), and an `@each` instance's item file too; a loop cell's, once after its
+last iteration. If one no longer holds what the key was taken from, the outputs and
+displays are kept as a `@stochastic` run's are: under the run, where no later key finds
+them, so a cell reading them keys on that run. The cell stays stale, says the mount
+changed, and its console says which file moved
+("`raw/part-3.csv` changed after the run began"). Putting the file back does not bring
+those outputs back as a cache hit; the next run computes them again. Only the content is
+compared, so a file written and put back before the run ends is not seen. Run All keys
+its cells before the first runs, so a file an earlier cell writes into a later cell's
+read-only mount counts as moved for the later cell.
+
 **A cell says how much it reads.** A badge shows what its read-only remote mounts,
 `@table` inputs and `@fetch` URLs weighed when it last started ("reads 3.0 GB"), and
 while it runs, how much of that moves onto the machine ("2.0 GB to read"), with each
