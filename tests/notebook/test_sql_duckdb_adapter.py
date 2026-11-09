@@ -7,6 +7,7 @@ parent's transaction, hence the ``_ReadOnlyDuckDB`` proxy and the in-memory RO t
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,10 @@ from strata.notebook.sql import FreshnessToken, QualifiedTable, SchemaFingerprin
 from strata.notebook.sql.drivers.duckdb import DuckDBAdapter, _ReadOnlyDuckDB
 
 duckdb = pytest.importorskip("duckdb")
+
+# Read only by an adapter that keys a local file by its contents.
+UNUSED_DIGESTS = Path("unused-hashes.sqlite")
+
 
 # --- capability flags -------------------------------------------------------
 
@@ -221,7 +226,9 @@ def test_real_probe_freshness_changes_after_dml(tmp_path):
     rw.close()
 
     ro = a.open(spec, read_only=True)
-    t1 = a.probe_freshness(ro, [QualifiedTable(catalog=None, schema=None, name="t")])
+    t1 = a.probe_freshness(
+        ro, [QualifiedTable(catalog=None, schema=None, name="t")], digests_path=UNUSED_DIGESTS
+    )
     ro.close()
 
     rw = a.open(spec, read_only=False)
@@ -230,7 +237,9 @@ def test_real_probe_freshness_changes_after_dml(tmp_path):
     rw.close()
 
     ro = a.open(spec, read_only=True)
-    t2 = a.probe_freshness(ro, [QualifiedTable(catalog=None, schema=None, name="t")])
+    t2 = a.probe_freshness(
+        ro, [QualifiedTable(catalog=None, schema=None, name="t")], digests_path=UNUSED_DIGESTS
+    )
     ro.close()
 
     assert isinstance(t1, FreshnessToken)
@@ -254,13 +263,16 @@ def test_real_probe_freshness_ignores_table_list_db_wide(tmp_path):
     rw.close()
 
     ro = a.open(spec, read_only=True)
-    t_a = a.probe_freshness(ro, [QualifiedTable(catalog=None, schema=None, name="a")])
+    t_a = a.probe_freshness(
+        ro, [QualifiedTable(catalog=None, schema=None, name="a")], digests_path=UNUSED_DIGESTS
+    )
     t_ab = a.probe_freshness(
         ro,
         [
             QualifiedTable(catalog=None, schema=None, name="a"),
             QualifiedTable(catalog=None, schema=None, name="b"),
         ],
+        digests_path=UNUSED_DIGESTS,
     )
     ro.close()
     assert t_a.value == t_ab.value

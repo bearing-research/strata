@@ -310,7 +310,7 @@ class SnowflakeAdapter:
         probe_conn: Any,
         tables: list[QualifiedTable],
         *,
-        digests_path: Path | None = None,
+        digests_path: Path,
     ) -> FreshnessToken:
         """Per-table freshness via ``INFORMATION_SCHEMA.TABLES.LAST_ALTERED``.
 

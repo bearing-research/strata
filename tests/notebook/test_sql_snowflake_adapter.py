@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 from strata.notebook.models import ConnectionSpec
 from strata.notebook.sql import FreshnessToken, QualifiedTable, SchemaFingerprint
 from strata.notebook.sql.drivers.snowflake import SnowflakeAdapter
+
+# Read only by an adapter that keys a local file by its contents.
+UNUSED_DIGESTS = Path("unused-hashes.sqlite")
+
 
 # --- mock-conn helper -------------------------------------------------------
 
@@ -265,7 +270,7 @@ def test_probe_freshness_groups_by_database():
         QualifiedTable(catalog="EVENTS", schema="PUBLIC", name="events"),
         QualifiedTable(catalog="METRICS", schema="PUBLIC", name="counters"),
     ]
-    token = a.probe_freshness(_FakeConn(cur), tables)
+    token = a.probe_freshness(_FakeConn(cur), tables, digests_path=UNUSED_DIGESTS)
     assert isinstance(token, FreshnessToken)
     assert token.value  # non-empty hash
 
@@ -287,7 +292,7 @@ def test_probe_freshness_uses_current_database_for_unqualified_tables():
     )
     a = SnowflakeAdapter()
     tables = [QualifiedTable(catalog=None, schema="PUBLIC", name="events")]
-    a.probe_freshness(_FakeConn(cur), tables)
+    a.probe_freshness(_FakeConn(cur), tables, digests_path=UNUSED_DIGESTS)
 
     queries = [sql for sql, _ in cur.executions]
     # First we resolve the current database, then use it.
@@ -300,10 +305,10 @@ def test_probe_freshness_token_changes_on_last_altered():
     tables = [QualifiedTable(catalog="EVENTS", schema="PUBLIC", name="orders")]
 
     cur1 = _FakeCursor([("INFORMATION_SCHEMA.TABLES", ("PUBLIC", "orders", "2026-05-01 12:00:00"))])
-    token1 = a.probe_freshness(_FakeConn(cur1), tables)
+    token1 = a.probe_freshness(_FakeConn(cur1), tables, digests_path=UNUSED_DIGESTS)
 
     cur2 = _FakeCursor([("INFORMATION_SCHEMA.TABLES", ("PUBLIC", "orders", "2026-05-01 12:01:00"))])
-    token2 = a.probe_freshness(_FakeConn(cur2), tables)
+    token2 = a.probe_freshness(_FakeConn(cur2), tables, digests_path=UNUSED_DIGESTS)
     assert token1.value != token2.value
 
 
@@ -314,8 +319,8 @@ def test_probe_freshness_missing_table_distinct_from_present():
 
     cur_present = _FakeCursor([("INFORMATION_SCHEMA.TABLES", ("PUBLIC", "orders", "2026-05-01"))])
     cur_missing = _FakeCursor([("INFORMATION_SCHEMA.TABLES", None)])
-    a_present = a.probe_freshness(_FakeConn(cur_present), tables)
-    a_missing = a.probe_freshness(_FakeConn(cur_missing), tables)
+    a_present = a.probe_freshness(_FakeConn(cur_present), tables, digests_path=UNUSED_DIGESTS)
+    a_missing = a.probe_freshness(_FakeConn(cur_missing), tables, digests_path=UNUSED_DIGESTS)
     assert a_present.value != a_missing.value
 
 
@@ -337,7 +342,10 @@ def test_probes_ask_for_the_names_snowflake_stores():
         info = [(sql, params) for sql, params in cur.executions if "INFORMATION_SCHEMA" in sql]
         return [sql for sql, _ in info], [params for _, params in info]
 
-    for probe in (a.probe_freshness, a.probe_schema):
+    def freshness(conn, tables):
+        return a.probe_freshness(conn, tables, digests_path=UNUSED_DIGESTS)
+
+    for probe in (freshness, a.probe_schema):
         queries, params = probe_params(probe)
         assert any('"MYDB".INFORMATION_SCHEMA' in q for q in queries)
         assert sorted(params) == [("PUBLIC", "EVENTS"), ("PUBLIC", "MixedCase")]
@@ -352,7 +360,7 @@ def test_probe_freshness_empty_tables():
     """No tables touched gives an empty token and issues no queries."""
     cur = _FakeCursor([])
     a = SnowflakeAdapter()
-    token = a.probe_freshness(_FakeConn(cur), [])
+    token = a.probe_freshness(_FakeConn(cur), [], digests_path=UNUSED_DIGESTS)
     assert token.value == b""
     assert cur.executions == []
 
@@ -503,7 +511,7 @@ def test_probe_freshness_uses_current_schema_for_unqualified_tables():
     a = SnowflakeAdapter()
     # Unqualified table, which relies on CURRENT_SCHEMA().
     tables = [QualifiedTable(catalog=None, schema=None, name="orders")]
-    a.probe_freshness(_FakeConn(cur), tables)
+    a.probe_freshness(_FakeConn(cur), tables, digests_path=UNUSED_DIGESTS)
 
     # Find the INFORMATION_SCHEMA query and its schema bind value.
     info_calls = [(sql, params) for sql, params in cur.executions if "INFORMATION_SCHEMA" in sql]
@@ -525,7 +533,7 @@ def test_probe_freshness_no_schema_does_not_pretend_to_match_public():
     )
     a = SnowflakeAdapter()
     tables = [QualifiedTable(catalog=None, schema=None, name="orders")]
-    token = a.probe_freshness(_FakeConn(cur), tables)
+    token = a.probe_freshness(_FakeConn(cur), tables, digests_path=UNUSED_DIGESTS)
     assert token.value  # non-empty (sentinel)
     info_calls = [sql for sql, _ in cur.executions if "INFORMATION_SCHEMA" in sql]
     # No INFORMATION_SCHEMA query was issued: sentinel only.

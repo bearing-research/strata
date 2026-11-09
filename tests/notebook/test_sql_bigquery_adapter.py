@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from pathlib import Path
 
 from strata.notebook.models import ConnectionSpec
 from strata.notebook.sql import FreshnessToken, QualifiedTable, SchemaFingerprint
 from strata.notebook.sql.drivers.bigquery import BigQueryAdapter
+
+# Read only by an adapter that keys a local file by its contents.
+UNUSED_DIGESTS = Path("unused-hashes.sqlite")
+
 
 # --- mock-conn helper -------------------------------------------------------
 
@@ -258,7 +263,7 @@ def test_probe_freshness_groups_tables_by_dataset():
         QualifiedTable(catalog="acme-prod", schema="events", name="orders"),
         QualifiedTable(catalog="acme-prod", schema="metrics", name="counters"),
     ]
-    token = a.probe_freshness(_FakeConn(cur), tables)
+    token = a.probe_freshness(_FakeConn(cur), tables, digests_path=UNUSED_DIGESTS)
     assert isinstance(token, FreshnessToken)
     assert token.value
 
@@ -274,8 +279,8 @@ def test_probe_freshness_token_changes_on_last_modified():
 
     cur1 = _FakeCursor([("__TABLES__", ("orders", 1714596000000))])
     cur2 = _FakeCursor([("__TABLES__", ("orders", 1714596001000))])
-    t1 = a.probe_freshness(_FakeConn(cur1), tables)
-    t2 = a.probe_freshness(_FakeConn(cur2), tables)
+    t1 = a.probe_freshness(_FakeConn(cur1), tables, digests_path=UNUSED_DIGESTS)
+    t2 = a.probe_freshness(_FakeConn(cur2), tables, digests_path=UNUSED_DIGESTS)
     assert t1.value != t2.value
 
 
@@ -289,7 +294,7 @@ def test_probe_freshness_uses_session_defaults_for_unqualified_tables():
     )
     a = BigQueryAdapter()
     tables = [QualifiedTable(catalog=None, schema=None, name="orders")]
-    a.probe_freshness(_FakeConn(cur), tables)
+    a.probe_freshness(_FakeConn(cur), tables, digests_path=UNUSED_DIGESTS)
 
     queries = [sql for sql, _ in cur.executions if "__TABLES__" in sql]
     assert any("`acme-prod.events.__TABLES__`" in q for q in queries)
@@ -300,7 +305,7 @@ def test_probe_freshness_no_dataset_yields_sentinel():
     cur = _FakeCursor([])
     a = BigQueryAdapter()
     tables = [QualifiedTable(catalog=None, schema=None, name="orders")]
-    token = a.probe_freshness(_FakeConn(cur), tables)
+    token = a.probe_freshness(_FakeConn(cur), tables, digests_path=UNUSED_DIGESTS)
     assert token.value
     queries = [sql for sql, _ in cur.executions if "__TABLES__" in sql]
     assert queries == []
@@ -312,8 +317,8 @@ def test_probe_freshness_missing_table_distinct_from_present():
     cur_present = _FakeCursor([("__TABLES__", ("orders", 1714596000000))])
     cur_missing = _FakeCursor([("__TABLES__", None)])
     assert (
-        a.probe_freshness(_FakeConn(cur_present), tables).value
-        != a.probe_freshness(_FakeConn(cur_missing), tables).value
+        a.probe_freshness(_FakeConn(cur_present), tables, digests_path=UNUSED_DIGESTS).value
+        != a.probe_freshness(_FakeConn(cur_missing), tables, digests_path=UNUSED_DIGESTS).value
     )
 
 
@@ -321,7 +326,7 @@ def test_probe_freshness_empty_tables():
     """No tables gives an empty token and issues no queries."""
     cur = _FakeCursor([])
     a = BigQueryAdapter()
-    token = a.probe_freshness(_FakeConn(cur), [])
+    token = a.probe_freshness(_FakeConn(cur), [], digests_path=UNUSED_DIGESTS)
     assert token.value == b""
     assert cur.executions == []
 

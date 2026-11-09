@@ -152,14 +152,13 @@ class DriverAdapter(Protocol):
         probe_conn: Any,
         tables: list[QualifiedTable],
         *,
-        digests_path: Path | None = None,
+        digests_path: Path,
     ) -> FreshnessToken:
         """Return a freshness token for the given tables.
 
         Called once per cell execution for the cache key, so it must be cheap
         (one metadata round-trip per database). *digests_path* is the notebook's digest
-        cache, which an adapter keying a local file by its contents needs (SQLite raises
-        without it); the executor always passes it.
+        cache, which an adapter keying a local file by its contents reads.
         """
         ...
 
