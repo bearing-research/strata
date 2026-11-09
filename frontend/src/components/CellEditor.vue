@@ -39,6 +39,7 @@ import {
   showsWorkerBadge,
 } from '../utils/notebookWorkers'
 import { inputWeightBadge } from '../utils/inputWeights'
+import { mountProgressLabel } from '../utils/mountProgress'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
 import { cacheBadgeLabel, cacheBadgeTitle, durationLabel } from '../utils/cacheBadge'
 import { cellDotTitle } from '../utils/cellRunBadge'
@@ -1033,6 +1034,15 @@ function outputKey(output: CellOutput, index: number): string {
                   aria-hidden="true"
                 ></span>
                 <RotateCw /> {{ loopProgressLabel }}
+              </span>
+              <span
+                v-for="(progress, mount) in cell.mountProgress"
+                :key="`hash-${mount}`"
+                class="loop-progress-badge running"
+                :title="`Hashing the files of mount ${mount} to key the cell`"
+              >
+                <span class="loop-spinner" aria-hidden="true"></span>
+                {{ mountProgressLabel(String(mount), progress) }}
               </span>
               <span
                 v-for="v in cell.variantProgress"

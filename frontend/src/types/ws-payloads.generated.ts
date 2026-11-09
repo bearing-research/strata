@@ -113,6 +113,14 @@ export interface CellIterationProgressPayload {
 
 export type CellLanguage = 'python' | 'prompt' | 'sql' | 'markdown' | 'r' | 'widget'
 
+export interface CellMountProgressPayload {
+  cell_id: string
+  mount: string
+  bytes_done: number
+  bytes: number
+  done: boolean
+}
+
 export interface CellOutputDeltaPayload {
   cell_id: string
   attempt: number
@@ -768,6 +776,7 @@ export interface WsServerPayloadMap {
   cell_error: CellErrorPayload
   cell_inputs: CellInputsPayload
   cell_iteration_progress: CellIterationProgressPayload
+  cell_mount_progress: CellMountProgressPayload
   cell_output: CellOutputPayload
   cell_output_delta: CellOutputDeltaPayload
   cell_status: CellStatusPayload

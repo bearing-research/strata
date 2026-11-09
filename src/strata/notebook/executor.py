@@ -19,7 +19,7 @@ import json
 import logging
 import tempfile as tempfile
 import time
-from collections.abc import Awaitable, Callable, Generator, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Coroutine, Generator, Iterable, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -156,6 +156,7 @@ from strata.notebook.models import (
 from strata.notebook.mount_cache import MountCache
 from strata.notebook.mounts import (
     STALENESS_READ_BYTES,
+    HashProgress,
     MountCredentials,
     MountResolver,
     MountWrite,
@@ -163,6 +164,8 @@ from strata.notebook.mounts import (
     ensure_writable,
     listing_entries,
     mount_component,
+    mount_progress_frame,
+    on_loop,
     parse_mount_uri,
     resolve_cell_mounts,
     weigh_mount_sync,
@@ -493,6 +496,8 @@ class CellExecutor:
         self.on_prompt_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None
         # Fired after each @per_variant variant completes (CELL_VARIANT_PROGRESS). Same wiring.
         self.on_variant_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+        # Fired as a run hashes a local mount (CELL_MOUNT_PROGRESS). Same wiring.
+        self.on_mount_progress: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -942,6 +947,7 @@ class CellExecutor:
                 listings=listings,
                 approvals=mount_approvals,
                 only=_each_files(annotations.each),
+                cell_id=cell_id,
             )
         else:
             mount_approvals = list(mount_fingerprints)
@@ -1972,6 +1978,17 @@ class CellExecutor:
 
         return merged
 
+    def _mount_progress(self, cell_id: str | None, mount: str) -> HashProgress | None:
+        """A reporter of *mount*'s hash on *cell_id*, called on the hashing thread."""
+        callback = self.on_mount_progress
+        if cell_id is None or callback is None:
+            return None
+
+        async def send(bytes_done: int, total: int, done: bool) -> None:
+            await callback(mount_progress_frame(cell_id, mount, bytes_done, total, done))
+
+        return on_loop(asyncio.get_running_loop(), send)
+
     async def _fingerprint_mounts(
         self,
         mount_specs: list[MountSpec],
@@ -1982,6 +1999,7 @@ class CellExecutor:
         approvals: list[str] | None = None,
         only: Mapping[str, str] | None = None,
         read_bytes: int | None = None,
+        cell_id: str | None = None,
     ) -> tuple[list[str], bool]:
         """Compute mount fingerprints without preparing local materializations.
 
@@ -1991,6 +2009,7 @@ class CellExecutor:
         *approvals* gets what a yes to reading each mount is kept for. *only* gives, by
         mount name, the glob of the files a run reads, the rest of the mount weighing nothing.
         *read_bytes* caps what a local mount's files are read for (``weigh_mount_sync``).
+        With *cell_id*, a local mount's hash is reported on that cell (``on_mount_progress``).
         """
         self._mount_resolver.credential_resolver = self._credential_resolver()
         mount_fingerprints: list[str] = []
@@ -2004,6 +2023,7 @@ class CellExecutor:
                 cache,
                 (only or {}).get(mount.name),
                 read_bytes=read_bytes,
+                on_progress=self._mount_progress(cell_id, mount.name),
             )
             if approvals is not None and approval is not None:
                 approvals.append(approval)

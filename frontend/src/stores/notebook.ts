@@ -42,6 +42,7 @@ import {
 } from '../utils/cacheBadge'
 import { storedErrorOutput } from '../utils/storedError'
 import { lastGotOf } from '../utils/provenanceLine'
+import { applyMountProgress } from '../utils/mountProgress'
 import { useStrata } from '../composables/useStrata'
 import type {
   AliasMoveResult,
@@ -2002,6 +2003,11 @@ function initializeWebSocket() {
     // Edits typed while the socket was down go out before the sync, which would
     // otherwise bring back the server's older text.
     wsInstance.onOpen(flushDirtyCells)
+    // A hash's finished frame may have gone out while the socket was down; one still
+    // running reports again within its next batch.
+    wsInstance.onOpen(() => {
+      for (const cell of notebook.cells) cell.mountProgress = undefined
+    })
 
     wsInstance.onMessage('cell_status', (msg: WsMessage) => {
       const p = msg.payload as Record<string, any>
@@ -2156,6 +2162,18 @@ function initializeWebSocket() {
           typeof p.duration_ms === 'number' ? p.duration_ms : Number(p.duration_ms) || undefined,
       }
       cell.loopProgress = progress
+    })
+
+    wsInstance.onMessage('cell_mount_progress', (msg: WsMessage) => {
+      const p = msg.payload as Record<string, any>
+      const cell = cellMap.value.get(p.cell_id as CellId)
+      if (!cell) return
+      cell.mountProgress = applyMountProgress(cell.mountProgress, {
+        mount: String(p.mount),
+        bytes_done: Number(p.bytes_done),
+        bytes: Number(p.bytes),
+        done: Boolean(p.done),
+      })
     })
 
     wsInstance.onMessage('cell_variant_progress', (msg: WsMessage) => {

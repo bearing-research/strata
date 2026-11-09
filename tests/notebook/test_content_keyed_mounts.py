@@ -21,8 +21,10 @@ from strata.notebook.models import CellStatus, MountSpec
 from strata.notebook.mounts import (
     STALENESS_READ_BYTES,
     MountResolver,
+    hash_local_mount,
     local_digests,
     mount_fingerprint_sync,
+    on_loop,
     weigh_mount_sync,
 )
 from tests.notebook.test_each import READER, Notebook, _logs, _over_files, _touch
@@ -635,3 +637,190 @@ class TestBackgroundHashing:
         LocalNotebookOps(nb.session.path).list_cells()
 
         assert started == []
+
+
+class TestHashProgress:
+    """A hash of more than a batch reports how far it is, on the cells it is for."""
+
+    @pytest.fixture
+    def small_batches(self, monkeypatch):
+        monkeypatch.setattr(mounts, "_PROGRESS_BATCH_BYTES", 4)
+        monkeypatch.setattr(mounts, "_READ_THREADS", 1)
+
+    def _files(self, tmp_path: Path, count: int = 3) -> Path:
+        raw = tmp_path / "raw"
+        raw.mkdir()
+        for i in range(count):
+            _touch(raw / f"{i}.txt", f"{i:04d}", tick=i)
+        return raw
+
+    def test_each_batch_is_reported_and_the_last_report_finishes(self, tmp_path, small_batches):
+        raw = self._files(tmp_path)
+        reports = []
+
+        digests = local_digests(
+            raw, tmp_path / "hashes.sqlite", on_progress=lambda *r: reports.append(r)
+        )
+
+        assert len(digests) == 3
+        assert reports == [(0, 12, False), (4, 12, False), (8, 12, False), (12, 12, True)]
+
+    def test_a_batch_holds_a_file_per_read_thread(self, tmp_path, monkeypatch, small_batches):
+        # Fewer would leave the threads ``digest_many`` reads on idle.
+        monkeypatch.setattr(mounts, "_READ_THREADS", 2)
+        raw = self._files(tmp_path, count=4)
+        reports = []
+
+        local_digests(raw, tmp_path / "hashes.sqlite", on_progress=lambda *r: reports.append(r))
+
+        assert reports == [(0, 16, False), (8, 16, False), (16, 16, True)]
+
+    def test_the_tries_of_a_background_hash_finish_once(self, tmp_path, monkeypatch, small_batches):
+        raw = self._files(tmp_path)
+        monkeypatch.setattr(mounts, "_SETTLE_SECONDS", 0)
+        # Never settled, so each try reads the files again.
+        monkeypatch.setattr(mounts, "STALENESS_READ_BYTES", 0)
+        reports = []
+
+        hash_local_mount(raw, tmp_path / "hashes.sqlite", on_progress=lambda *r: reports.append(r))
+
+        assert [r for r in reports if r[2]] == [(12, 12, True)]
+        assert reports[-1] == (12, 12, True)
+        assert reports.count((0, 12, False)) == mounts._HASH_ATTEMPTS
+
+    async def test_reports_reach_the_loop_in_order(self):
+        loop = asyncio.get_running_loop()
+        sent = []
+
+        async def send(bytes_done, total, done):
+            await asyncio.sleep(0.01 if bytes_done == 0 else 0)
+            sent.append((bytes_done, done))
+
+        report = on_loop(loop, send)
+        await asyncio.to_thread(lambda: (report(0, 8, False), report(8, 8, True)))
+        while len(sent) < 2:
+            await asyncio.sleep(0.01)
+
+        assert sent == [(0, False), (8, True)]
+
+    def test_a_report_after_the_loop_closed_is_dropped(self):
+        loop = asyncio.new_event_loop()
+        sent = []
+
+        async def send(*report):
+            sent.append(report)
+
+        report = on_loop(loop, send)
+        loop.close()
+
+        report(0, 8, False)
+
+        assert sent == []
+
+    def test_a_hash_of_one_batch_reports_nothing(self, tmp_path):
+        raw = self._files(tmp_path)
+        reports = []
+
+        local_digests(raw, tmp_path / "hashes.sqlite", on_progress=lambda *r: reports.append(r))
+
+        assert reports == []
+
+    def test_a_hash_that_fails_still_reports_it_finished(
+        self, tmp_path, monkeypatch, small_batches
+    ):
+        raw = self._files(tmp_path)
+        reports = []
+        read_batch = mounts._read_batch
+        batches = []
+
+        def failing(cache, files):
+            batches.append(files)
+            if len(batches) == 2:
+                raise ValueError("this FileDigests is closed")
+            return read_batch(cache, files)
+
+        monkeypatch.setattr(mounts, "_read_batch", failing)
+
+        with pytest.raises(ValueError):
+            local_digests(raw, tmp_path / "hashes.sqlite", on_progress=lambda *r: reports.append(r))
+
+        assert reports[-1] == (4, 12, True)
+
+    async def test_a_run_reports_its_hash_on_its_cell(self, tmp_path, small_batches):
+        from strata.notebook.executor import CellExecutor
+
+        raw, source = _over_mount(tmp_path)
+        _touch(raw / "f.txt", "aaaa")
+        _touch(raw / "g.txt", "cccc", tick=1)
+        nb = Notebook(tmp_path, source)
+        frames = []
+
+        async def record(progress):
+            frames.append(progress)
+
+        executor = CellExecutor(nb.session)
+        executor.on_mount_progress = record
+        result = await executor.execute_cell("a", nb.session.notebook_state.get_cell("a").source)
+        assert result.success, result.error
+        while not frames or not frames[-1]["done"]:
+            await asyncio.sleep(0.01)  # the reports are scheduled from the hashing thread
+
+        assert {(f["cell_id"], f["mount"]) for f in frames} == {("a", "raw")}
+        assert frames[0]["bytes_done"] == 0
+        assert frames[-1] == {
+            "cell_id": "a",
+            "mount": "raw",
+            "bytes_done": 8,
+            "bytes": 8,
+            "done": True,
+        }
+
+    async def test_the_background_hash_reports_on_every_cell_that_mounts_the_folder(
+        self, tmp_path, monkeypatch, later
+    ):
+        from strata.notebook import ws
+
+        raw, source = _over_mount(tmp_path)
+        _touch(raw / "f.txt", "aaaa")
+        _touch(raw / "g.txt", "cccc", tick=1)
+        second = f"# @mount data {raw.as_uri()} ro\nalso = (data / 'f.txt').read_text()\n"
+        nb = Notebook(tmp_path, source, second)
+        for cell_id in nb.ids:
+            await nb.good(cell_id)
+        monkeypatch.setattr(mounts, "STALENESS_READ_BYTES", 3)
+        monkeypatch.setattr(mounts, "_PROGRESS_BATCH_BYTES", 4)
+        monkeypatch.setattr(mounts, "_READ_THREADS", 1)
+        _touch(raw / "f.txt", "aaaa", tick=5)
+        _touch(raw / "g.txt", "cccc", tick=6)
+        frames = []
+
+        async def record(notebook_id, progress):
+            frames.append(progress)
+
+        monkeypatch.setattr(ws, "broadcast_mount_progress", record)
+        monkeypatch.setattr(ws, "_broadcast_staleness_updates", lambda *a: asyncio.sleep(0))
+
+        await nb.session.compute_staleness_async()
+        await asyncio.gather(*nb.session._mount_hashing.values())
+        while sum(f["done"] for f in frames) < 2:
+            await asyncio.sleep(0.01)
+
+        assert {(f["cell_id"], f["mount"]) for f in frames} == {("a", "raw"), ("b", "data")}
+        assert {f["cell_id"]: f["done"] for f in frames if f["done"]} == {"a": True, "b": True}
+
+    def test_the_cells_shown_are_those_that_mount_the_folder_now(self, tmp_path):
+        raw, source = _over_mount(tmp_path)
+        _touch(raw / "f.txt", "aaaa")
+        twice = (
+            f"# @mount data {raw.as_uri()} ro\n# @mount same {raw.as_uri()} ro\n"
+            "also = (data / 'f.txt').read_text()\n"
+        )
+        written = f"# @mount out {raw.as_uri()} rw\nwrote = 1\n"
+        nb = Notebook(tmp_path, source, twice, written)
+        session = nb.session
+
+        assert sorted(session._cell_mounts_of(raw)) == [("a", "raw"), ("b", "data"), ("b", "same")]
+
+        session.notebook_state.get_cell("a").source = "out = 1\n"
+
+        assert sorted(session._cell_mounts_of(raw)) == [("b", "data"), ("b", "same")]

@@ -23,7 +23,7 @@ import stat
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Coroutine, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,6 +58,50 @@ _LOG_READ_BYTES = 1024 * 1024 * 1024
 # A background hash's tries, and the wait between them: past the digest cache's 2 s rule.
 _HASH_ATTEMPTS = 3
 _SETTLE_SECONDS = 2.5
+# What a hash reads between two progress reports; a hash of no more reports none.
+_PROGRESS_BATCH_BYTES = 256 * 1024 * 1024
+# ``digest_many``'s read threads: a batch of fewer files would leave some idle.
+_READ_THREADS = min(32, os.cpu_count() or 1)
+
+HashProgress = Callable[[int, int, bool], None]
+"""``(bytes read, bytes to read, finished)``, from the hashing thread: once at the start,
+after each batch, and finished last, also when the hash failed."""
+
+
+def on_loop(
+    loop: asyncio.AbstractEventLoop, send: Callable[[int, int, bool], Coroutine[Any, Any, None]]
+) -> HashProgress:
+    """A :data:`HashProgress` that runs *send* on *loop*, each report after the one before,
+    so a client never gets a report after the finished one."""
+    lock = asyncio.Lock()
+
+    async def in_order(bytes_done: int, total: int, done: bool) -> None:
+        async with lock:
+            await send(bytes_done, total, done)
+
+    def report(bytes_done: int, total: int, done: bool) -> None:
+        coroutine = in_order(bytes_done, total, done)
+        try:
+            asyncio.run_coroutine_threadsafe(coroutine, loop)
+        except RuntimeError:
+            coroutine.close()  # the loop closed: no client to tell
+
+    return report
+
+
+def mount_progress_frame(
+    cell_id: str, mount: str, bytes_done: int, total: int, done: bool
+) -> dict[str, Any]:
+    """A ``cell_mount_progress`` payload: *mount*'s hash, as *cell_id* names it."""
+    return {
+        "cell_id": cell_id,
+        "mount": mount,
+        "bytes_done": bytes_done,
+        "bytes": total,
+        "done": done,
+    }
+
+
 # Digest caches kept open, the least recently used idle one closed past this.
 _OPEN_DIGEST_CACHES = 32
 
@@ -528,7 +572,11 @@ class MountFingerprinter:
 
     @staticmethod
     def fingerprint_local_sync(
-        path: Path, digests_path: Path, *, read_bytes: int | None = None
+        path: Path,
+        digests_path: Path,
+        *,
+        read_bytes: int | None = None,
+        on_progress: HashProgress | None = None,
     ) -> str | None:
         """Fingerprint a local file or directory from each file's relative path and content.
 
@@ -538,7 +586,7 @@ class MountFingerprinter:
         """
         if not path.exists():
             return hashlib.sha256(b"missing").hexdigest()
-        digests = local_digests(path, digests_path, read_bytes=read_bytes)
+        digests = local_digests(path, digests_path, read_bytes=read_bytes, on_progress=on_progress)
         return None if digests is None else _fingerprint_digests(digests)
 
     @staticmethod
@@ -604,6 +652,7 @@ class MountFingerprinter:
         *,
         digests_path: Path | None = None,
         read_bytes: int | None = None,
+        on_progress: HashProgress | None = None,
     ) -> str | None:
         """Compute the fingerprint for any mount spec.
 
@@ -625,7 +674,7 @@ class MountFingerprinter:
             if digests_path is None:
                 raise ValueError(f"mount {mount.name}: a local mount needs a digest cache")
             fingerprint = MountFingerprinter.fingerprint_local_sync(
-                Path(path), digests_path, read_bytes=read_bytes
+                Path(path), digests_path, read_bytes=read_bytes, on_progress=on_progress
             )
             # Not read yet, which is not unavailable: a background job reads it.
             return nonce.unhashed_nonce() if fingerprint is None else fingerprint
@@ -704,35 +753,56 @@ def _hashing(digests_path: Path, root: Path) -> threading.Lock:
 
 
 def local_digests(
-    root: Path, digests_path: Path, *, read_bytes: int | None = None
+    root: Path,
+    digests_path: Path,
+    *,
+    read_bytes: int | None = None,
+    on_progress: HashProgress | None = None,
 ) -> dict[str, str] | None:
     """Each file's sha256 under the local mount *root*, by relative POSIX path.
 
     A file the cache at *digests_path* holds a digest for under its current stat is not
     read. With *read_bytes*, ``None`` instead of reading more than that of the files that
-    can be read. The rest is :func:`file_digests`.
+    can be read. The rest is :func:`file_digests`, which reports to *on_progress*.
     """
     if read_bytes is None:
         # A run and the background job over one mount: the second finds the first's digests.
         with _hashing(digests_path, root):
-            return _local_digests(root, digests_path, read_bytes=None)
-    return _local_digests(root, digests_path, read_bytes=read_bytes)
+            return _local_digests(root, digests_path, read_bytes=None, on_progress=on_progress)
+    return _local_digests(root, digests_path, read_bytes=read_bytes, on_progress=on_progress)
 
 
-def hash_local_mount(root: Path, digests_path: Path) -> None:
+def hash_local_mount(
+    root: Path, digests_path: Path, *, on_progress: HashProgress | None = None
+) -> None:
     """Hash *root*'s files into the cache at *digests_path* until a staleness check can key
     it, at most :data:`_HASH_ATTEMPTS` times: a file written under 2 s before it was read
-    is not remembered, so it is read again once it has settled."""
-    for attempt in range(_HASH_ATTEMPTS):
-        local_digests(root, digests_path)
-        last = attempt == _HASH_ATTEMPTS - 1
-        if last or local_digests(root, digests_path, read_bytes=STALENESS_READ_BYTES) is not None:
-            return
-        time.sleep(_SETTLE_SECONDS)
+    is not remembered, so it is read again once it has settled. *on_progress* hears the
+    tries as one hash, finished once."""
+    shown: tuple[int, int] | None = None
+
+    def report(bytes_done: int, total: int, finished: bool) -> None:
+        nonlocal shown
+        shown = (bytes_done, total)
+        if not finished and on_progress is not None:
+            on_progress(bytes_done, total, False)
+
+    try:
+        for attempt in range(_HASH_ATTEMPTS):
+            local_digests(root, digests_path, on_progress=report)
+            last = attempt == _HASH_ATTEMPTS - 1
+            if last or (
+                local_digests(root, digests_path, read_bytes=STALENESS_READ_BYTES) is not None
+            ):
+                return
+            time.sleep(_SETTLE_SECONDS)
+    finally:
+        if on_progress is not None and shown is not None:
+            on_progress(*shown, True)
 
 
 def _local_digests(
-    root: Path, digests_path: Path, *, read_bytes: int | None
+    root: Path, digests_path: Path, *, read_bytes: int | None, on_progress: HashProgress | None
 ) -> dict[str, str] | None:
     files = without_digest_cache(local_files(root), digests_path)
     with digest_cache(digests_path) as cache:
@@ -740,7 +810,9 @@ def _local_digests(
             known = cache.cached_many(path for _, path, _ in files)
         except OSError:
             # A file went between the walk and the look.
-            return None if read_bytes is not None else file_digests(cache, files)
+            if read_bytes is not None:
+                return None
+            return file_digests(cache, files, on_progress=on_progress)
         digests = {rel: sha for (rel, _, _), sha in zip(files, known) if sha is not None}
         missing = [f for f, sha in zip(files, known) if sha is None]
         unread = sum(st.st_size for _, path, st in missing if os.access(path, os.R_OK))
@@ -748,30 +820,66 @@ def _local_digests(
             return None
         if unread >= _LOG_READ_BYTES:
             logger.info("Hashing %s: %d files, %d bytes", root, len(missing), unread)
-        return digests | file_digests(cache, missing)
+        return digests | file_digests(cache, missing, on_progress=on_progress)
 
 
 def file_digests(
-    cache: FileDigests, files: list[tuple[str, Path, os.stat_result]]
+    cache: FileDigests,
+    files: list[tuple[str, Path, os.stat_result]],
+    *,
+    on_progress: HashProgress | None = None,
 ) -> dict[str, str]:
     """*files*' sha256 by relative path, read where *cache* holds none.
 
     A file that cannot be read is ``unreadable``, so its mount's key changes once it can
     be; one that changed while it was read gets a key no run reproduces; one gone since
-    the walk is left out.
+    the walk is left out. Past :data:`_PROGRESS_BATCH_BYTES`, the files are read in
+    batches of about that, and of no fewer files than read threads, each reported to
+    *on_progress*.
     """
     readable = [f for f in files if os.access(f[1], os.R_OK)]
     digests = {rel: "unreadable" for rel, path, _ in files if not os.access(path, os.R_OK)}
+    total = sum(st.st_size for _, _, st in readable)
+    if on_progress is None or total <= _PROGRESS_BATCH_BYTES:
+        return digests | _read_batch(cache, readable)
+    done = 0
+    on_progress(0, total, False)
     try:
-        found = cache.digest_many(
-            [path for _, path, _ in readable], stats=[st for _, _, st in readable]
-        )
+        for batch in _batches(readable):
+            digests |= _read_batch(cache, batch)
+            done += sum(st.st_size for _, _, st in batch)
+            if done < total:
+                on_progress(done, total, False)
+    finally:
+        on_progress(done, total, True)
+    return digests
+
+
+def _batches(
+    files: list[tuple[str, Path, os.stat_result]],
+) -> Generator[list[tuple[str, Path, os.stat_result]]]:
+    batch: list[tuple[str, Path, os.stat_result]] = []
+    size = 0
+    for file in files:
+        batch.append(file)
+        size += file[2].st_size
+        if size >= _PROGRESS_BATCH_BYTES and len(batch) >= _READ_THREADS:
+            yield batch
+            batch, size = [], 0
+    if batch:
+        yield batch
+
+
+def _read_batch(
+    cache: FileDigests, files: list[tuple[str, Path, os.stat_result]]
+) -> dict[str, str]:
+    try:
+        found = cache.digest_many([path for _, path, _ in files], stats=[st for _, _, st in files])
     except OSError:
         # Gone, or unreadable after all: the rest one by one, those read so far remembered.
-        return digests | _digests_one_by_one(cache, readable)
-    return digests | {
-        rel: d.sha256 if d.settled else nonce.unread_nonce()
-        for (rel, _, _), d in zip(readable, found)
+        return _digests_one_by_one(cache, files)
+    return {
+        rel: d.sha256 if d.settled else nonce.unread_nonce() for (rel, _, _), d in zip(files, found)
     }
 
 
@@ -1094,6 +1202,7 @@ def weigh_mount_sync(
     glob: str | None = None,
     *,
     read_bytes: int | None = None,
+    on_progress: HashProgress | None = None,
 ) -> tuple[str | None, MountWeight | None, str | None]:
     """:func:`mount_fingerprint_sync`'s component, with the mount's weight from the same
     listing: its share already in *cache*, the one the cell runs against.
@@ -1104,7 +1213,8 @@ def weigh_mount_sync(
     The weight is ``None`` for a mount that moves nothing to read (``file://``) or that a
     run does not read through a view (``rw``). The third is what a yes to a large read
     is kept for (``read_confirm``): the component, without the per-call nonce an
-    unresolvable credential or a failed listing gets.
+    unresolvable credential or a failed listing gets. *on_progress* hears a local mount's
+    hash, when there is one to make (:data:`HashProgress`).
     """
     try:
         storage_options = resolver.storage_options(mount)
@@ -1121,6 +1231,7 @@ def weigh_mount_sync(
             storage_options=storage_options or None,
             digests_path=resolver.digests_path,
             read_bytes=read_bytes,
+            on_progress=on_progress,
         )
         if mount.pin is not None and scheme != "file":
             weight = MountWeight(bytes=None, cached_bytes=None)

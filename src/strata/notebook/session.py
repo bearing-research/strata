@@ -59,6 +59,7 @@ from strata.notebook.models import (
     DatasetSpec,
     InputWeight,
     MountMode,
+    MountSpec,
     NotebookState,
     StalenessReason,
     VariantGroupState,
@@ -872,7 +873,7 @@ class NotebookSession:
     async def _hash_mount(self, digests_path: Path, root: Path) -> None:
         """Hash a local mount's files into its digest cache, then recompute staleness, so a
         cell whose files did not change is ready again."""
-        from strata.notebook.mounts import hash_local_mount
+        from strata.notebook.mounts import hash_local_mount, on_loop
 
         loop = asyncio.get_running_loop()
         done: asyncio.Future[None] = loop.create_future()
@@ -881,9 +882,12 @@ class NotebookSession:
             if not done.done():
                 done.set_result(None)
 
+        async def report(bytes_done: int, total: int, finished: bool) -> None:
+            await self._broadcast_mount_progress(root, bytes_done, total, finished)
+
         def hash_files() -> None:
             try:
-                hash_local_mount(root, digests_path)
+                hash_local_mount(root, digests_path, on_progress=on_loop(loop, report))
             except OSError as exc:
                 # The recompute below shows what is there now (a folder gone is changed).
                 logger.warning("Could not hash the local mount %s: %s", root, exc)
@@ -908,6 +912,40 @@ class NotebookSession:
         from strata.notebook.ws import refresh_staleness
 
         await refresh_staleness(self)
+
+    async def _broadcast_mount_progress(
+        self, root: Path, bytes_done: int, total: int, finished: bool
+    ) -> None:
+        """One ``cell_mount_progress`` frame per cell mount of the folder being hashed."""
+        if self.closed:
+            return
+        from strata.notebook.mounts import mount_progress_frame
+        from strata.notebook.ws import broadcast_mount_progress
+
+        for cell_id, mount in self._cell_mounts_of(root):
+            await broadcast_mount_progress(
+                self.id, mount_progress_frame(cell_id, mount, bytes_done, total, finished)
+            )
+
+    def _cell_mounts_of(self, root: Path) -> list[tuple[str, str]]:
+        """Each ``(cell id, mount name)`` whose key reads the local folder *root*, as the
+        cells stand now."""
+        from strata.notebook.languages import get_language_executor
+        from strata.notebook.mounts import parse_mount_uri
+
+        found = []
+        for cell in self.notebook_state.cells:
+            if get_language_executor(cell.language).skips_execution_provenance:
+                continue
+            annotations = parse_annotations(cell.source, cell.language)
+            merged = resolve_cell_mounts(
+                [], mounts_of(self.notebook_state, cell, cell.source), annotations.mounts
+            )
+            for mount in merged:
+                scheme, path = parse_mount_uri(mount.uri)
+                if _keyed_by_local_hash(mount, scheme) and Path(path) == root:
+                    found.append((cell.id, mount.name))
+        return found
 
     def _outside_world_fingerprints(self) -> dict[str, _OutsideWorld]:
         """Fingerprint what each cell reads from outside, before the lock.
@@ -2259,12 +2297,7 @@ class NotebookSession:
             # A cold local mount is read by a run, not on every source flush.
             scheme, path = parse_mount_uri(mount.uri)
             key = (resolver.digests_path, Path(path))
-            if (
-                scheme == "file"
-                and mount.mode != MountMode.READ_WRITE
-                and mount.pin is None
-                and self._hashing(key)
-            ):
+            if _keyed_by_local_hash(mount, scheme) and self._hashing(key):
                 # Its job reads it: reading it here too reads its last files twice.
                 mount_fingerprints.append(mount_component(mount, nonce.unhashed_nonce()))
                 continue
@@ -3739,6 +3772,11 @@ class NotebookSession:
                     "payload": payload,
                 },
             )
+
+
+def _keyed_by_local_hash(mount: MountSpec, scheme: str) -> bool:
+    """Whether *mount*'s component is its local files' hash, what the background job makes."""
+    return scheme == "file" and mount.mode != MountMode.READ_WRITE and mount.pin is None
 
 
 def _live(task: asyncio.Task[Any]) -> bool:
