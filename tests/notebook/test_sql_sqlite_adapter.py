@@ -9,12 +9,17 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 from strata.notebook.models import ConnectionSpec
 from strata.notebook.sql import FreshnessToken, QualifiedTable, SchemaFingerprint
 from strata.notebook.sql.drivers.sqlite import SqliteAdapter
+
+# Read only by an adapter that keys a local file by its contents.
+UNUSED_DIGESTS = Path("unused-hashes.sqlite")
+
 
 # --- mock-conn helper -------------------------------------------------------
 
@@ -343,7 +348,9 @@ def test_probe_freshness_combines_data_and_schema_version():
         ]
     )
     conn = _FakeConn(cursor)
-    token = a.probe_freshness(conn, [QualifiedTable(None, None, "users")])
+    token = a.probe_freshness(
+        conn, [QualifiedTable(None, None, "users")], digests_path=UNUSED_DIGESTS
+    )
     assert isinstance(token, FreshnessToken)
     assert not token.is_session_only
     assert token.value != b""
@@ -359,7 +366,9 @@ def test_probe_freshness_token_changes_on_data_version():
                 ("schema_version", [(schema_v,)]),
             ]
         )
-        return a.probe_freshness(_FakeConn(cursor), [QualifiedTable(None, None, "t")]).value
+        return a.probe_freshness(
+            _FakeConn(cursor), [QualifiedTable(None, None, "t")], digests_path=UNUSED_DIGESTS
+        ).value
 
     base = make_token(1, 1)
     assert make_token(1, 1) == base
@@ -378,7 +387,7 @@ def test_probe_freshness_ignores_table_list_db_wide():
                 ("schema_version", [(5,)]),
             ]
         )
-        return a.probe_freshness(_FakeConn(cursor), tables).value
+        return a.probe_freshness(_FakeConn(cursor), tables, digests_path=UNUSED_DIGESTS).value
 
     a_only = make_token([QualifiedTable(None, None, "users")])
     a_and_b = make_token(

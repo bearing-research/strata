@@ -122,7 +122,7 @@ class _StubAdapter:
     def open(self, spec, *, read_only):
         return None
 
-    def probe_freshness(self, probe_conn, tables, *, digests_path=None):
+    def probe_freshness(self, probe_conn, tables, *, digests_path):
         return FreshnessToken(value=b"")
 
     def probe_schema(self, probe_conn, tables):

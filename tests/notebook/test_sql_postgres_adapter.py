@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,10 @@ import pytest
 from strata.notebook.models import ConnectionSpec
 from strata.notebook.sql import FreshnessToken, QualifiedTable, SchemaFingerprint
 from strata.notebook.sql.drivers.postgresql import PostgresAdapter, _splice_userinfo
+
+# Read only by an adapter that keys a local file by its contents.
+UNUSED_DIGESTS = Path("unused-hashes.sqlite")
+
 
 # --- mock-conn helper -------------------------------------------------------
 
@@ -318,7 +323,7 @@ def test_splice_userinfo_handles_special_chars():
 
 def test_probe_freshness_empty_tables_returns_empty_token():
     a = PostgresAdapter()
-    token = a.probe_freshness(_FakeConn(_FakeCursor(scripts=[])), [])
+    token = a.probe_freshness(_FakeConn(_FakeCursor(scripts=[])), [], digests_path=UNUSED_DIGESTS)
     assert isinstance(token, FreshnessToken)
     assert token.value == b""
     assert not token.is_session_only
@@ -335,7 +340,9 @@ def test_probe_freshness_token_reflects_dml_relfilenode_and_schema():
         cursor = _FakeCursor(scripts=[("to_regclass", (dml, relfilenode, resolved_schema))])
         conn = _FakeConn(cursor)
         return a.probe_freshness(
-            conn, [QualifiedTable(catalog=None, schema=None, name="users")]
+            conn,
+            [QualifiedTable(catalog=None, schema=None, name="users")],
+            digests_path=UNUSED_DIGESTS,
         ).value
 
     base = make_token(123, 456)
@@ -373,8 +380,8 @@ def test_probe_freshness_is_order_invariant():
 
     t_users = QualifiedTable(catalog=None, schema="public", name="users")
     t_orders = QualifiedTable(catalog=None, schema="public", name="orders")
-    a_b = a.probe_freshness(conn_factory(), [t_users, t_orders]).value
-    b_a = a.probe_freshness(conn_factory(), [t_orders, t_users]).value
+    a_b = a.probe_freshness(conn_factory(), [t_users, t_orders], digests_path=UNUSED_DIGESTS).value
+    b_a = a.probe_freshness(conn_factory(), [t_orders, t_users], digests_path=UNUSED_DIGESTS).value
     assert a_b == b_a
 
 
@@ -383,7 +390,9 @@ def test_probe_freshness_missing_table_marks_session_only():
     a = PostgresAdapter()
     cursor = _FakeCursor(scripts=[("to_regclass", None)])
     conn = _FakeConn(cursor)
-    token = a.probe_freshness(conn, [QualifiedTable(catalog=None, schema=None, name="ghost")])
+    token = a.probe_freshness(
+        conn, [QualifiedTable(catalog=None, schema=None, name="ghost")], digests_path=UNUSED_DIGESTS
+    )
     assert token.is_session_only is True
 
 
@@ -395,6 +404,7 @@ def test_probe_freshness_uses_to_regclass_for_qualified_name():
     a.probe_freshness(
         conn,
         [QualifiedTable(catalog=None, schema="analytics", name="events")],
+        digests_path=UNUSED_DIGESTS,
     )
     sql, params = cursor.executions[0]
     assert "to_regclass" in sql
@@ -406,7 +416,11 @@ def test_probe_freshness_lets_search_path_resolve_unqualified_name():
     a = PostgresAdapter()
     cursor = _FakeCursor(scripts=[("to_regclass", (1, 2, "analytics"))])
     conn = _FakeConn(cursor)
-    a.probe_freshness(conn, [QualifiedTable(catalog=None, schema=None, name="events")])
+    a.probe_freshness(
+        conn,
+        [QualifiedTable(catalog=None, schema=None, name="events")],
+        digests_path=UNUSED_DIGESTS,
+    )
     sql, params = cursor.executions[0]
     assert "to_regclass" in sql
     # A single-component identifier resolves through the connection's search_path,
@@ -422,7 +436,9 @@ def test_probe_freshness_resolved_schema_distinguishes_unqualified_collisions():
         cursor = _FakeCursor(scripts=[("to_regclass", (1, 2, resolved_schema))])
         conn = _FakeConn(cursor)
         return a.probe_freshness(
-            conn, [QualifiedTable(catalog=None, schema=None, name="events")]
+            conn,
+            [QualifiedTable(catalog=None, schema=None, name="events")],
+            digests_path=UNUSED_DIGESTS,
         ).value
 
     assert token_for_resolved("public") != token_for_resolved("analytics")
@@ -487,7 +503,7 @@ def test_probes_ask_for_the_names_postgres_stores():
     )
     a = PostgresAdapter()
     cursor = _FakeCursor(scripts=[("to_regclass", (1, 2, "analytics"))])
-    a.probe_freshness(_FakeConn(cursor), analysis.tables)
+    a.probe_freshness(_FakeConn(cursor), analysis.tables, digests_path=UNUSED_DIGESTS)
     assert sorted(params for _sql, params in cursor.executions) == [
         ('"MixedCase"',),
         ('"analytics"."events"',),

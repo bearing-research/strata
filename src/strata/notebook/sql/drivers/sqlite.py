@@ -140,12 +140,10 @@ def _database_path(probe_conn) -> str | None:
     return None
 
 
-def _file_signals(path: str | None, digests_path: Path | None) -> list[bytes]:
+def _file_signals(path: str | None, digests_path: Path) -> list[bytes]:
     """The contents of the database file and its WAL, what a query reads."""
     if not path:
         return [b"memory"]
-    if digests_path is None:
-        raise ValueError("a SQLite database's freshness needs a digest cache")
     return [
         f"{candidate.name}:{_content(candidate, digests_path)}".encode()
         for candidate in (Path(path), Path(f"{path}-wal"))
@@ -296,7 +294,7 @@ class SqliteAdapter:
         probe_conn: Any,
         tables: list[QualifiedTable],
         *,
-        digests_path: Path | None = None,
+        digests_path: Path,
     ) -> FreshnessToken:
         """DB-wide freshness: the contents of the database file and its WAL, plus the
         pragmas.

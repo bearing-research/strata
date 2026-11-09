@@ -230,7 +230,7 @@ class PostgresAdapter:
         probe_conn: Any,
         tables: list[QualifiedTable],
         *,
-        digests_path: Path | None = None,
+        digests_path: Path,
     ) -> FreshnessToken:
         """Per-table freshness via DML counters, relfilenode and resolved schema.
 
