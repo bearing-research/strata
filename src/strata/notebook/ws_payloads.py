@@ -128,9 +128,9 @@ class CellIterationProgressPayload(WsPayload):
 class CellMountProgressPayload(WsPayload):
     """``cell_mount_progress``: how much of a cell's local mount has been hashed.
 
-    Sent by a run that hashes it and by the background hash a staleness check starts, about
-    every 256 MiB and only for a hash of more. ``done`` ends it, whether the hash finished
-    or failed.
+    Sent by a run that hashes it and by the background hash a staleness check starts, after
+    each batch of files (256 MiB or more), only for a hash of more than one batch. ``done``
+    ends it, whether the hash finished or failed.
     """
 
     cell_id: str

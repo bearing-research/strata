@@ -164,6 +164,8 @@ from strata.notebook.mounts import (
     ensure_writable,
     listing_entries,
     mount_component,
+    mount_progress_frame,
+    on_loop,
     parse_mount_uri,
     resolve_cell_mounts,
     weigh_mount_sync,
@@ -1981,20 +1983,11 @@ class CellExecutor:
         callback = self.on_mount_progress
         if cell_id is None or callback is None:
             return None
-        loop = asyncio.get_running_loop()
 
-        def report(bytes_done: int, total: int, done: bool) -> None:
-            progress = {
-                "cell_id": cell_id,
-                "mount": mount,
-                "bytes_done": bytes_done,
-                "bytes": total,
-                "done": done,
-            }
-            # The run awaits the hash, so the loop is still running.
-            asyncio.run_coroutine_threadsafe(callback(progress), loop)
+        async def send(bytes_done: int, total: int, done: bool) -> None:
+            await callback(mount_progress_frame(cell_id, mount, bytes_done, total, done))
 
-        return report
+        return on_loop(asyncio.get_running_loop(), send)
 
     async def _fingerprint_mounts(
         self,

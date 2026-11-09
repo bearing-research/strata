@@ -23,7 +23,7 @@ import stat
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Coroutine, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,10 +60,48 @@ _HASH_ATTEMPTS = 3
 _SETTLE_SECONDS = 2.5
 # What a hash reads between two progress reports; a hash of no more reports none.
 _PROGRESS_BATCH_BYTES = 256 * 1024 * 1024
+# ``digest_many``'s read threads: a batch of fewer files would leave some idle.
+_READ_THREADS = min(32, os.cpu_count() or 1)
 
 HashProgress = Callable[[int, int, bool], None]
 """``(bytes read, bytes to read, finished)``, from the hashing thread: once at the start,
 after each batch, and finished last, also when the hash failed."""
+
+
+def on_loop(
+    loop: asyncio.AbstractEventLoop, send: Callable[[int, int, bool], Coroutine[Any, Any, None]]
+) -> HashProgress:
+    """A :data:`HashProgress` that runs *send* on *loop*, each report after the one before,
+    so a client never gets a report after the finished one."""
+    lock = asyncio.Lock()
+
+    async def in_order(bytes_done: int, total: int, done: bool) -> None:
+        async with lock:
+            await send(bytes_done, total, done)
+
+    def report(bytes_done: int, total: int, done: bool) -> None:
+        coroutine = in_order(bytes_done, total, done)
+        try:
+            asyncio.run_coroutine_threadsafe(coroutine, loop)
+        except RuntimeError:
+            coroutine.close()  # the loop closed: no client to tell
+
+    return report
+
+
+def mount_progress_frame(
+    cell_id: str, mount: str, bytes_done: int, total: int, done: bool
+) -> dict[str, Any]:
+    """A ``cell_mount_progress`` payload: *mount*'s hash, as *cell_id* names it."""
+    return {
+        "cell_id": cell_id,
+        "mount": mount,
+        "bytes_done": bytes_done,
+        "bytes": total,
+        "done": done,
+    }
+
+
 # Digest caches kept open, the least recently used idle one closed past this.
 _OPEN_DIGEST_CACHES = 32
 
@@ -739,13 +777,28 @@ def hash_local_mount(
 ) -> None:
     """Hash *root*'s files into the cache at *digests_path* until a staleness check can key
     it, at most :data:`_HASH_ATTEMPTS` times: a file written under 2 s before it was read
-    is not remembered, so it is read again once it has settled."""
-    for attempt in range(_HASH_ATTEMPTS):
-        local_digests(root, digests_path, on_progress=on_progress)
-        last = attempt == _HASH_ATTEMPTS - 1
-        if last or local_digests(root, digests_path, read_bytes=STALENESS_READ_BYTES) is not None:
-            return
-        time.sleep(_SETTLE_SECONDS)
+    is not remembered, so it is read again once it has settled. *on_progress* hears the
+    tries as one hash, finished once."""
+    shown: tuple[int, int] | None = None
+
+    def report(bytes_done: int, total: int, finished: bool) -> None:
+        nonlocal shown
+        shown = (bytes_done, total)
+        if not finished and on_progress is not None:
+            on_progress(bytes_done, total, False)
+
+    try:
+        for attempt in range(_HASH_ATTEMPTS):
+            local_digests(root, digests_path, on_progress=report)
+            last = attempt == _HASH_ATTEMPTS - 1
+            if last or (
+                local_digests(root, digests_path, read_bytes=STALENESS_READ_BYTES) is not None
+            ):
+                return
+            time.sleep(_SETTLE_SECONDS)
+    finally:
+        if on_progress is not None and shown is not None:
+            on_progress(*shown, True)
 
 
 def _local_digests(
@@ -781,7 +834,8 @@ def file_digests(
     A file that cannot be read is ``unreadable``, so its mount's key changes once it can
     be; one that changed while it was read gets a key no run reproduces; one gone since
     the walk is left out. Past :data:`_PROGRESS_BATCH_BYTES`, the files are read in
-    batches of about that, each reported to *on_progress*.
+    batches of about that, and of no fewer files than read threads, each reported to
+    *on_progress*.
     """
     readable = [f for f in files if os.access(f[1], os.R_OK)]
     digests = {rel: "unreadable" for rel, path, _ in files if not os.access(path, os.R_OK)}
@@ -809,7 +863,7 @@ def _batches(
     for file in files:
         batch.append(file)
         size += file[2].st_size
-        if size >= _PROGRESS_BATCH_BYTES:
+        if size >= _PROGRESS_BATCH_BYTES and len(batch) >= _READ_THREADS:
             yield batch
             batch, size = [], 0
     if batch:

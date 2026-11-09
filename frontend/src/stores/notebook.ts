@@ -2003,6 +2003,11 @@ function initializeWebSocket() {
     // Edits typed while the socket was down go out before the sync, which would
     // otherwise bring back the server's older text.
     wsInstance.onOpen(flushDirtyCells)
+    // A hash's finished frame may have gone out while the socket was down; one still
+    // running reports again within its next batch.
+    wsInstance.onOpen(() => {
+      for (const cell of notebook.cells) cell.mountProgress = undefined
+    })
 
     wsInstance.onMessage('cell_status', (msg: WsMessage) => {
       const p = msg.payload as Record<string, any>
