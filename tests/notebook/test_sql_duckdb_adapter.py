@@ -416,16 +416,10 @@ def test_another_connection_to_the_file_does_not_move_the_freshness_token(tmp_pa
     rw.close()
     tables = [QualifiedTable(catalog=None, schema=None, name="t")]
 
-    ro = a.open(spec, read_only=True)
-    try:
+    with a.open(spec, read_only=True) as ro:
         before = a.probe_freshness(ro, tables)
-        other = a.open(spec, read_only=True)
-        try:
+        with a.open(spec, read_only=True) as other:
             other.execute("SELECT sum(x) FROM t").fetchall()
             after = a.probe_freshness(ro, tables)
-        finally:
-            other.close()
-    finally:
-        ro.close()
 
     assert before == after
