@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +20,14 @@ from typing import Any
 
 import cellgraph as cg
 
-from strata.notebook.mounts import _sha256, glob_matches
+from strata.notebook.mounts import (
+    _sha256,
+    digest_cache,
+    file_digests,
+    glob_matches,
+    local_files,
+    without_digest_cache,
+)
 from strata.notebook.output_dirs import is_assembling
 from strata.notebook.serializer import to_serialization_safe
 
@@ -104,47 +110,37 @@ def items_of_table(table: Any, key_column: str | None, name: str) -> list[EachIt
     return list(items.values())
 
 
-def _listed_files(root: Path) -> list[tuple[str, Path, int, int]]:
-    """``(relative path, path, size, mtime_ns)`` of what the mount's fingerprint counts.
-
-    A link to a file is a file, as in a Hugging Face cache or a DVC checkout.
-    """
-    if not root.is_dir():
-        raise EachError(f"@each over a mount needs a folder, and {root} is not one")
-    files = []
-    for dirpath, _dirnames, filenames in os.walk(root):
-        for filename in filenames:
-            path = Path(dirpath) / filename
-            try:
-                state = path.stat()
-            except OSError:
-                continue  # a dangling link
-            relative = path.relative_to(root).as_posix()
-            files.append((relative, path, state.st_size, state.st_mtime_ns))
-    return sorted(files)
-
-
 def items_of_mount(
     root: Path,
     glob: str | None,
     *,
-    by_content: bool,
     versions: Mapping[str, str] | None = None,
+    digests_path: Path | None = None,
 ) -> list[EachItem]:
-    """One item per file, named by its relative path.
+    """One item per file, named by its relative path, keyed by its content.
 
-    A local file's digest is its size and mtime, what the mount's fingerprint reads. A
-    remote mount's view is new for each listing, so its mtimes say nothing: the listing's
-    *versions*, or the file's content where the listing has none.
+    *versions* are what the mount was keyed on: a local mount's file digests, a remote
+    listing's versions. A file with none (a pinned mount's, or a listing without them)
+    is read, through the digest cache at *digests_path* when it is a local mount's.
     """
+    if not root.is_dir():
+        raise EachError(f"@each over a mount needs a folder, and {root} is not one")
+    listed = [f for f in local_files(root) if glob is None or glob_matches(f[0], glob)]
+    if digests_path is not None:
+        listed = without_digest_cache(listed, digests_path)
+    unversioned = [f for f in listed if versions is None or f[0] not in versions]
+    read: dict[str, str] = {}
+    if unversioned and digests_path is not None:
+        with digest_cache(digests_path) as cache:
+            read = file_digests(cache, unversioned)
     items = []
-    for relative, path, size, mtime_ns in _listed_files(root):
-        if glob is not None and not glob_matches(relative, glob):
-            continue
-        if not by_content:
-            digest = hashlib.sha256(f"{size}:{mtime_ns}".encode()).hexdigest()
-        elif versions is not None and relative in versions:
+    for relative, path, _ in listed:
+        if versions is not None and relative in versions:
             digest = versions[relative]
+        elif relative in read:
+            digest = read[relative]
+        elif digests_path is not None:
+            continue  # gone since the walk
         else:
             with path.open("rb") as handle:
                 digest = _sha256(handle)

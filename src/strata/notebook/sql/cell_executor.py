@@ -216,8 +216,15 @@ async def execute_sql_cell(
     lake = None
     if any(lake_options(spec)):
         try:
-            lake = resolve_lake(
-                session, cell_id, source, runtime_spec, analysis.tables, pinned=pinned
+            # Off the loop: a catalog answers over the network, a local mount is hashed.
+            lake = await asyncio.to_thread(
+                resolve_lake,
+                session,
+                cell_id,
+                source,
+                runtime_spec,
+                analysis.tables,
+                pinned=pinned,
             )
         except LakeError as exc:
             return _error_result(f"connection {spec.name!r}: {exc}", start_time)

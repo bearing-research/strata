@@ -155,6 +155,7 @@ from strata.notebook.models import (
 )
 from strata.notebook.mount_cache import MountCache
 from strata.notebook.mounts import (
+    STALENESS_READ_BYTES,
     MountCredentials,
     MountResolver,
     MountWrite,
@@ -1980,6 +1981,7 @@ class CellExecutor:
         listings: dict[str, dict[str, dict[str, Any]]] | None = None,
         approvals: list[str] | None = None,
         only: Mapping[str, str] | None = None,
+        read_bytes: int | None = None,
     ) -> tuple[list[str], bool]:
         """Compute mount fingerprints without preparing local materializations.
 
@@ -1988,6 +1990,7 @@ class CellExecutor:
         the listing of each mount whose share is unknown, for the machine to be asked.
         *approvals* gets what a yes to reading each mount is kept for. *only* gives, by
         mount name, the glob of the files a run reads, the rest of the mount weighing nothing.
+        *read_bytes* caps what a local mount's files are read for (``weigh_mount_sync``).
         """
         self._mount_resolver.credential_resolver = self._credential_resolver()
         mount_fingerprints: list[str] = []
@@ -2000,6 +2003,7 @@ class CellExecutor:
                 mount,
                 cache,
                 (only or {}).get(mount.name),
+                read_bytes=read_bytes,
             )
             if approvals is not None and approval is not None:
                 approvals.append(approval)
@@ -2294,6 +2298,8 @@ class CellExecutor:
             listings=listings,
             approvals=mount_approvals,
             only=_each_files(annotations.each),
+            # A local mount weighs nothing: a badge never reads one whole.
+            read_bytes=STALENESS_READ_BYTES,
         )
         if cache is None and listings:
             weights = await self._ask_worker_cache(machine, mount_specs, weights, listings)

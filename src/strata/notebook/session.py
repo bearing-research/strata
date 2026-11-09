@@ -2163,7 +2163,11 @@ class NotebookSession:
         # Same storage options the executor fingerprints with, or a mount reached through
         # a credential lists differently and the cell never matches its own artifacts.
         from strata.notebook.credentials import CredentialResolver
-        from strata.notebook.mounts import MountResolver, mount_fingerprint_sync
+        from strata.notebook.mounts import (
+            STALENESS_READ_BYTES,
+            MountResolver,
+            mount_fingerprint_sync,
+        )
 
         resolver = MountResolver(
             cache_dir=self.path / ".strata" / "mount_cache",
@@ -2174,7 +2178,8 @@ class NotebookSession:
         mount_fingerprints: list[str] = []
         has_rw_mount = False
         for mount in sorted(merged_mounts, key=lambda m: m.name):
-            fingerprint = mount_fingerprint_sync(resolver, mount)
+            # A cold local mount is read by a run, not on every source flush.
+            fingerprint = mount_fingerprint_sync(resolver, mount, read_bytes=STALENESS_READ_BYTES)
             if fingerprint is None:
                 has_rw_mount = True
             else:

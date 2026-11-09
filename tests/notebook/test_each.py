@@ -122,7 +122,7 @@ def _over_files(tmp_path: Path, extra: str = "", body: str = "out = path.read_te
 
 def _touch(path: Path, text: str, tick: int = 0) -> None:
     path.write_text(text)
-    # A digest reads the mtime; a test does not wait for the clock to move.
+    # A fixed mtime: a rewrite at the same tick keeps it, as ``cp -p`` does.
     stamp = 1_700_000_000 + tick
     os.utime(path, (stamp, stamp))
 
@@ -1390,18 +1390,17 @@ class TestOtherSurfaces:
 
 
 class TestListing:
-    def test_a_remote_file_digests_its_content_and_a_local_one_its_state(self, tmp_path):
+    def test_a_file_without_a_version_is_keyed_by_its_content(self, tmp_path):
         path = tmp_path / "one.txt"
         _touch(path, "a")
-        local = each.items_of_mount(tmp_path, None, by_content=False)
-        remote = each.items_of_mount(tmp_path, None, by_content=True)
+        before = each.items_of_mount(tmp_path, None)
 
         _touch(path, "a", tick=1)
+        assert each.items_of_mount(tmp_path, None) == before
+        _touch(path, "b", tick=1)
+        assert each.items_of_mount(tmp_path, None) != before
 
-        assert each.items_of_mount(tmp_path, None, by_content=False) != local
-        assert each.items_of_mount(tmp_path, None, by_content=True) == remote
-
-    def test_a_remote_file_takes_the_listings_version_and_hashes_what_has_none(
+    def test_a_file_takes_the_version_the_mount_was_keyed_on_and_hashes_what_has_none(
         self, tmp_path, monkeypatch
     ):
         _touch(tmp_path / "one.txt", "a")
@@ -1415,9 +1414,7 @@ class TestListing:
 
         monkeypatch.setattr(each, "_sha256", counted)
 
-        items = each.items_of_mount(
-            tmp_path, None, by_content=True, versions={"one.txt": "listed-version"}
-        )
+        items = each.items_of_mount(tmp_path, None, versions={"one.txt": "listed-version"})
 
         assert items[0].digest == "listed-version"
         assert hashed == ["two.txt"]

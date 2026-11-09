@@ -221,6 +221,10 @@ def _reset_process_globals():
     from strata.iceberg.lake_files import reset as reset_lake_files
 
     reset_lake_files()
+    # A notebook's digest cache stays open across looks; a test's must not outlive it.
+    from strata.notebook.mounts import close_digest_caches
+
+    close_digest_caches()
     # The build runner's heartbeat task is bound to the loop that started it; a
     # leftover runner breaks the next lifespan's teardown ("attached to a different loop").
     _reset_transform_singletons()

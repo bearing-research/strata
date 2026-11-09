@@ -20,13 +20,17 @@ import logging
 import os
 import shutil
 import stat
-from collections.abc import Mapping
+import threading
+from collections import OrderedDict
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel
+from vestigo.digests import FileDigests
 
 from strata.notebook import nonce
 from strata.notebook.credentials import (
@@ -40,6 +44,17 @@ from strata.notebook.models import MountMode, MountSpec
 from strata.notebook.mount_cache import MountCache, object_key
 
 logger = logging.getLogger(__name__)
+
+DIGESTS_FILE = "hashes.sqlite"
+"""Beside a resolver's ``cache_dir``: the digests of its local mounts' files, by stat."""
+
+STALENESS_READ_BYTES = 64 * 1024 * 1024
+"""What a staleness check reads of a local mount's files the cache holds no digest for.
+Past it the mount is unresolved, and the cell shows stale until a run reads them."""
+
+_LOG_READ_BYTES = 1024 * 1024 * 1024
+# Digest caches kept open, the least recently used idle one closed past this.
+_OPEN_DIGEST_CACHES = 32
 
 
 @dataclass
@@ -55,8 +70,11 @@ class ResolvedMount:
     baseline: dict[str, tuple[int, int]] | None = None
     # Remote RO only: the bytes downloaded to build the view (0 when it was cached).
     bytes_moved: int | None = None
-    # Remote RO only: what the listing says of each file's version, by relative path.
+    # RO only: each file's version by relative path, the listing's for a remote mount and
+    # the sha256 for a local one (none for a pinned one).
     file_versions: dict[str, str] | None = None
+    # Local RO only: where its files' digests are cached, for one that has no version.
+    digests_path: Path | None = None
 
 
 class WrittenFile(BaseModel):
@@ -209,6 +227,7 @@ class MountResolver:
         # Empty by default, so a mount naming an undefined credential fails by name
         # instead of reaching the store anonymously.
         self.credential_resolver = credential_resolver or CredentialResolver()
+        self.digests_path = self.cache_dir.parent / DIGESTS_FILE
         self._fsspec_available: bool | None = None
 
     def storage_options(self, mount: MountSpec) -> dict[str, Any]:
@@ -288,9 +307,21 @@ class MountResolver:
         if not p.exists():
             raise ValueError(f"Local mount '{mount.name}' path does not exist: {p}")
 
-        fingerprint = await MountFingerprinter.fingerprint_mount(mount)
-        assert fingerprint is not None
-        return ResolvedMount(spec=mount, local_path=p, fingerprint=fingerprint)
+        if mount.pin is not None:
+            fingerprint = MountFingerprinter.fingerprint_mount_sync(mount)
+            assert fingerprint is not None
+            return ResolvedMount(
+                spec=mount, local_path=p, fingerprint=fingerprint, digests_path=self.digests_path
+            )
+        digests = await asyncio.to_thread(local_digests, p, self.digests_path)
+        assert digests is not None
+        return ResolvedMount(
+            spec=mount,
+            local_path=p,
+            fingerprint=_fingerprint_digests(digests),
+            file_versions=digests,
+            digests_path=self.digests_path,
+        )
 
     async def _resolve_remote(
         self,
@@ -491,37 +522,19 @@ class MountFingerprinter:
     """Content fingerprints for mount URIs, so cache entries invalidate when contents change."""
 
     @staticmethod
-    def fingerprint_local_sync(path: Path) -> str:
-        """Fingerprint a local directory from file mtimes and sizes (fast, not content-based)."""
+    def fingerprint_local_sync(
+        path: Path, digests_path: Path, *, read_bytes: int | None = None
+    ) -> str | None:
+        """Fingerprint a local file or directory from each file's relative path and content.
+
+        The digests come from the cache at *digests_path*, so an unchanged file is stat'ed,
+        not read. ``None`` when *read_bytes* is given and the files the cache holds no
+        digest for are more than that.
+        """
         if not path.exists():
             return hashlib.sha256(b"missing").hexdigest()
-
-        if path.is_file():
-            stat = path.stat()
-            content = f"{path}:{stat.st_size}:{stat.st_mtime_ns}"
-            return hashlib.sha256(content.encode()).hexdigest()
-
-        parts: list[str] = []
-        try:
-            for root, _dirs, files in os.walk(path):
-                for fname in sorted(files):
-                    fpath = Path(root) / fname
-                    try:
-                        stat = fpath.stat()
-                        rel = fpath.relative_to(path)
-                        parts.append(f"{rel}:{stat.st_size}:{stat.st_mtime_ns}")
-                    except OSError:
-                        pass
-        except OSError:
-            pass
-
-        content = "\n".join(sorted(parts))
-        return hashlib.sha256(content.encode()).hexdigest()
-
-    @staticmethod
-    async def fingerprint_local(path: Path) -> str:
-        """Async wrapper for local mount fingerprinting."""
-        return MountFingerprinter.fingerprint_local_sync(path)
+        digests = local_digests(path, digests_path, read_bytes=read_bytes)
+        return None if digests is None else _fingerprint_digests(digests)
 
     @staticmethod
     def fingerprint_remote_sync(
@@ -583,13 +596,18 @@ class MountFingerprinter:
     def fingerprint_mount_sync(
         mount: MountSpec,
         storage_options: dict[str, Any] | None = None,
+        *,
+        digests_path: Path | None = None,
+        read_bytes: int | None = None,
     ) -> str | None:
         """Compute the fingerprint for any mount spec.
 
         ``None`` for read-write mounts: the caller must skip the cache check.
         Pinned mounts hash the pin value. ``storage_options`` should be the
         merged options the data fetch uses, so the listing hits the same
-        endpoint; when ``None``, ``mount.options`` is used.
+        endpoint; when ``None``, ``mount.options`` is used. A local mount's file
+        digests are cached at *digests_path*; past *read_bytes* of files to read, its
+        fingerprint is a unique one, so the cell shows stale.
         """
         if mount.mode == MountMode.READ_WRITE:
             return None
@@ -599,20 +617,156 @@ class MountFingerprinter:
 
         scheme, path = parse_mount_uri(mount.uri)
         if scheme == "file":
-            return MountFingerprinter.fingerprint_local_sync(Path(path))
+            if digests_path is None:
+                raise ValueError(f"mount {mount.name}: a local mount needs a digest cache")
+            fingerprint = MountFingerprinter.fingerprint_local_sync(
+                Path(path), digests_path, read_bytes=read_bytes
+            )
+            # Not read yet, which is not unavailable.
+            return nonce.unread_nonce() if fingerprint is None else fingerprint
         else:
             effective = storage_options if storage_options is not None else (mount.options or None)
             return MountFingerprinter.fingerprint_remote_sync(
                 scheme, path, storage_options=effective
             )
 
-    @staticmethod
-    async def fingerprint_mount(
-        mount: MountSpec,
-        storage_options: dict[str, Any] | None = None,
-    ) -> str | None:
-        """Async wrapper for mount fingerprinting."""
-        return MountFingerprinter.fingerprint_mount_sync(mount, storage_options)
+
+def local_files(root: Path) -> list[tuple[str, Path, os.stat_result]]:
+    """``(relative path, path, stat)`` of each regular file under *root*, or *root* itself.
+
+    A link to a file is a file, as in a Hugging Face cache; a dangling one is skipped,
+    and links to directories are not followed.
+    """
+    if not root.is_dir():
+        return [(root.name, root, root.stat())]
+    files = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            path = Path(dirpath) / filename
+            try:
+                st = path.stat()
+            except OSError:
+                continue  # a dangling link, or gone since the walk listed it
+            if stat.S_ISREG(st.st_mode):
+                files.append((path.relative_to(root).as_posix(), path, st))
+    return sorted(files)
+
+
+class _DigestCache:
+    def __init__(self, path: Path) -> None:
+        self.digests = FileDigests(path)
+        self.users = 0
+
+
+_digest_caches: OrderedDict[Path, _DigestCache] = OrderedDict()
+_digest_caches_lock = threading.Lock()
+
+
+@contextmanager
+def digest_cache(path: Path) -> Generator[FileDigests]:
+    """The process's one :class:`FileDigests` over *path*, opened once: one that fell back
+    to memory then still remembers between looks. Past :data:`_OPEN_DIGEST_CACHES`, the
+    least recently used one nothing is using is closed."""
+    key = path.absolute()
+    with _digest_caches_lock:
+        entry = _digest_caches.pop(key, None) or _DigestCache(key)
+        _digest_caches[key] = entry
+        entry.users += 1
+    try:
+        yield entry.digests
+    finally:
+        with _digest_caches_lock:
+            entry.users -= 1
+            idle = [k for k, e in _digest_caches.items() if e.users == 0]
+            for k in idle[: max(0, len(_digest_caches) - _OPEN_DIGEST_CACHES)]:
+                _digest_caches.pop(k).digests.close()
+
+
+def close_digest_caches() -> None:
+    """Close every digest cache nothing is using; the test suite does after each test."""
+    with _digest_caches_lock:
+        for k in [k for k, e in _digest_caches.items() if e.users == 0]:
+            _digest_caches.pop(k).digests.close()
+
+
+def local_digests(
+    root: Path, digests_path: Path, *, read_bytes: int | None = None
+) -> dict[str, str] | None:
+    """Each file's sha256 under the local mount *root*, by relative POSIX path.
+
+    A file the cache at *digests_path* holds a digest for under its current stat is not
+    read. With *read_bytes*, ``None`` instead of reading more than that of the files that
+    can be read. The rest is :func:`file_digests`.
+    """
+    files = without_digest_cache(local_files(root), digests_path)
+    with digest_cache(digests_path) as cache:
+        try:
+            known = cache.cached_many(path for _, path, _ in files)
+        except OSError:
+            # A file went between the walk and the look.
+            return None if read_bytes is not None else file_digests(cache, files)
+        digests = {rel: sha for (rel, _, _), sha in zip(files, known) if sha is not None}
+        missing = [f for f, sha in zip(files, known) if sha is None]
+        unread = sum(st.st_size for _, path, st in missing if os.access(path, os.R_OK))
+        if read_bytes is not None and unread > read_bytes:
+            return None
+        if unread >= _LOG_READ_BYTES:
+            logger.info("Hashing %s: %d files, %d bytes", root, len(missing), unread)
+        return digests | file_digests(cache, missing)
+
+
+def file_digests(
+    cache: FileDigests, files: list[tuple[str, Path, os.stat_result]]
+) -> dict[str, str]:
+    """*files*' sha256 by relative path, read where *cache* holds none.
+
+    A file that cannot be read is ``unreadable``, so its mount's key changes once it can
+    be; one that changed while it was read gets a key no run reproduces; one gone since
+    the walk is left out.
+    """
+    readable = [f for f in files if os.access(f[1], os.R_OK)]
+    digests = {rel: "unreadable" for rel, path, _ in files if not os.access(path, os.R_OK)}
+    try:
+        found = cache.digest_many(
+            [path for _, path, _ in readable], stats=[st for _, _, st in readable]
+        )
+    except OSError:
+        # Gone, or unreadable after all: the rest one by one, those read so far remembered.
+        return digests | _digests_one_by_one(cache, readable)
+    return digests | {
+        rel: d.sha256 if d.settled else nonce.unread_nonce()
+        for (rel, _, _), d in zip(readable, found)
+    }
+
+
+def _digests_one_by_one(
+    cache: FileDigests, files: list[tuple[str, Path, os.stat_result]]
+) -> dict[str, str]:
+    digests: dict[str, str] = {}
+    for rel, path, _ in files:
+        try:
+            found = cache.digest(path)
+        except FileNotFoundError:
+            continue  # gone since the walk
+        except OSError:
+            digests[rel] = "unreadable"
+        else:
+            digests[rel] = found.sha256 if found.settled else nonce.unread_nonce()
+    return digests
+
+
+def without_digest_cache(
+    files: list[tuple[str, Path, os.stat_result]], digests_path: Path
+) -> list[tuple[str, Path, os.stat_result]]:
+    """*files* without the digest cache's own, which each look rewrites: a mount over the
+    notebook's folder would otherwise never key the same twice."""
+    own = {digests_path.absolute(), Path(f"{digests_path.absolute()}-journal")}
+    return [f for f in files if f[1].absolute() not in own]
+
+
+def _fingerprint_digests(digests: Mapping[str, str]) -> str:
+    content = "\n".join(f"{rel}:{sha}" for rel, sha in sorted(digests.items()))
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 # --- Helpers ---
@@ -881,20 +1035,28 @@ class MountWeight:
     listing: dict[str, dict[str, Any]] | None = field(default=None, compare=False, repr=False)
 
 
-def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | None:
+def mount_fingerprint_sync(
+    resolver: MountResolver, mount: MountSpec, *, read_bytes: int | None = None
+) -> str | None:
     """The provenance component for one mount, shared by execution and staleness.
 
     Both must produce the same string, or artifacts are keyed under a hash
     staleness never reproduces. It includes the uri (two directories with the
     same files are different inputs) and the credential's name, never its values.
     An unresolvable credential gives a unique fingerprint: the cell shows stale,
-    runs, and fails naming the credential.
+    runs, and fails naming the credential. So does a local mount with more than
+    *read_bytes* of files to read, which staleness passes: a run reads them.
     """
-    return weigh_mount_sync(resolver, mount, None)[0]
+    return weigh_mount_sync(resolver, mount, None, read_bytes=read_bytes)[0]
 
 
 def weigh_mount_sync(
-    resolver: MountResolver, mount: MountSpec, cache: MountCache | None, glob: str | None = None
+    resolver: MountResolver,
+    mount: MountSpec,
+    cache: MountCache | None,
+    glob: str | None = None,
+    *,
+    read_bytes: int | None = None,
 ) -> tuple[str | None, MountWeight | None, str | None]:
     """:func:`mount_fingerprint_sync`'s component, with the mount's weight from the same
     listing: its share already in *cache*, the one the cell runs against.
@@ -918,7 +1080,10 @@ def weigh_mount_sync(
     unlisted = False
     if scheme == "file" or mount.mode == MountMode.READ_WRITE or mount.pin is not None:
         fingerprint = MountFingerprinter.fingerprint_mount_sync(
-            mount, storage_options=storage_options or None
+            mount,
+            storage_options=storage_options or None,
+            digests_path=resolver.digests_path,
+            read_bytes=read_bytes,
         )
         if mount.pin is not None and scheme != "file":
             weight = MountWeight(bytes=None, cached_bytes=None)
