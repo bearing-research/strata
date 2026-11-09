@@ -409,7 +409,7 @@ to one item in each instance. What `<source>` is decides what an item is:
 
 | Source                      | One item per | Named by         | Runs again when         |
 | --------------------------- | ------------ | ---------------- | ----------------------- |
-| a mount, with an optional `glob=` | file   | its relative path | its size or mtime changes (a remote file: its listed version) |
+| a mount, with an optional `glob=` | file   | its relative path | its content changes (a remote file: its listed version) |
 | a dict from another cell    | entry        | its key          | its value changes       |
 | a list from another cell    | value        | the value itself | an edit is a new item   |
 | a table from another cell, with `key=` | row | the `key=` column | the row changes       |

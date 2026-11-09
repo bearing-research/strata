@@ -3002,6 +3002,18 @@ and drops views unused for some days, least recently used first; see
 <a href="../../../reference/configuration/#notebook"><code>STRATA_NOTEBOOK_MOUNT_CACHE_DIR</code></a> and
 the two settings after it. A worker keeps its cache across jobs. An <code>rw</code> mount
 is still staged per notebook.</p>
+<p><strong>A read-only local mount is keyed by what its files hold.</strong> A cell's result is keyed
+on the sha256 of each file under the mount, with its path relative to the mount, so a
+rewrite that keeps the size and the modification time (<code>rsync -t</code>, <code>cp -p</code>, an
+archive extracted again) makes the cell stale, and a <code>touch</code>, a <code>chmod</code> or a
+<code>git checkout</code> of an unchanged file runs nothing. A file is read once: its digest is
+kept in <code>.strata/hashes.sqlite</code> while the file's stat holds, so an unchanged mount
+costs a <code>stat</code> per file. A file written less than 2 s before it was read is read again
+next time. The staleness check reads at most 64 MiB of files it holds no digest for;
+past that the cell shows stale until a run reads them. Links to files are followed,
+links to folders are not, and a file that cannot be read is keyed as unreadable. A
+file that changed while it was read gets a key no later run matches, so that run's
+result is never reused.</p>
 <p><strong>A cell says how much it reads.</strong> A badge shows what its read-only remote mounts,
 <code>@table</code> inputs and <code>@fetch</code> URLs weighed when it last started ("reads 3.0 GB"), and
 while it runs, how much of that moves onto the machine ("2.0 GB to read"), with each

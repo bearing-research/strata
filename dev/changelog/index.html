@@ -3893,6 +3893,14 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A read-only local mount, and each <code>@each</code> item over one, is keyed by its files'
+  content.</strong> Before, it was keyed by each file's size and modification time, so a
+  rewrite that kept both (<code>rsync -t</code>, <code>cp -p</code>, an archive extracted again) served the
+  old result, and a <code>touch</code> or a <code>git checkout</code> of an unchanged file ran the cell
+  again. A file's digest is kept in <code>.strata/hashes.sqlite</code> while its stat holds, so an
+  unchanged mount is not read again. The staleness check reads at most 64 MiB of files
+  it holds no digest for, and past that shows the cell stale until a run reads them.
+  The key changes, so each such cell runs once after the upgrade. (#1481)</li>
 <li><strong>A new SQL cell is saved as <code>.sql</code>, a new prompt cell as <code>.prompt</code>.</strong> Both
   used to get <code>.py</code>, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from <code>notebook.toml</code>, so existing cells keep

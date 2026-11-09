@@ -33,6 +33,19 @@ and drops views unused for some days, least recently used first; see
 the two settings after it. A worker keeps its cache across jobs. An `rw` mount
 is still staged per notebook.
 
+**A read-only local mount is keyed by what its files hold.** A cell's result is keyed
+on the sha256 of each file under the mount, with its path relative to the mount, so a
+rewrite that keeps the size and the modification time (`rsync -t`, `cp -p`, an
+archive extracted again) makes the cell stale, and a `touch`, a `chmod` or a
+`git checkout` of an unchanged file runs nothing. A file is read once: its digest is
+kept in `.strata/hashes.sqlite` while the file's stat holds, so an unchanged mount
+costs a `stat` per file. A file written less than 2 s before it was read is read again
+next time. The staleness check reads at most 64 MiB of files it holds no digest for;
+past that the cell shows stale until a run reads them. Links to files are followed,
+links to folders are not, and a file that cannot be read is keyed as unreadable. A
+file that changed while it was read gets a key no later run matches, so that run's
+result is never reused.
+
 **A cell says how much it reads.** A badge shows what its read-only remote mounts,
 `@table` inputs and `@fetch` URLs weighed when it last started ("reads 3.0 GB"), and
 while it runs, how much of that moves onto the machine ("2.0 GB to read"), with each

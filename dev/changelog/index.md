@@ -36,6 +36,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (#1381)
 
 ### Changed
+- **A read-only local mount, and each `@each` item over one, is keyed by its files'
+  content.** Before, it was keyed by each file's size and modification time, so a
+  rewrite that kept both (`rsync -t`, `cp -p`, an archive extracted again) served the
+  old result, and a `touch` or a `git checkout` of an unchanged file ran the cell
+  again. A file's digest is kept in `.strata/hashes.sqlite` while its stat holds, so an
+  unchanged mount is not read again. The staleness check reads at most 64 MiB of files
+  it holds no digest for, and past that shows the cell stale until a run reads them.
+  The key changes, so each such cell runs once after the upgrade. (#1481)
 - **A new SQL cell is saved as `.sql`, a new prompt cell as `.prompt`.** Both
   used to get `.py`, so linters and editors read SQL and prompt text as broken
   Python. The language still comes from `notebook.toml`, so existing cells keep
