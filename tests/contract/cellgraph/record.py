@@ -84,7 +84,8 @@ def _prepared_venv(notebook_dir: Path) -> None:
 
 
 def _pin_mtimes(notebook_dir: Path) -> None:
-    """Give every file one mtime, so a ``file://`` listing depends on names and sizes."""
+    """Give every file one mtime, so a SQLite database's key (its size and mtime, until it
+    too is keyed by content) depends on its size alone."""
     for root, dirs, files in os.walk(notebook_dir):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         for name in files:

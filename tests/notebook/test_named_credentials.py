@@ -225,10 +225,12 @@ class TestProvenance:
         data.mkdir()
         (data / "f.txt").write_text("rows")
         mount = MountSpec(name="data", uri=f"file://{data}")
-
-        assert mount_fingerprint_sync(MountResolver(cache_dir=tmp_path), mount) == (
-            f"data:{mount.uri}:{MountFingerprinter.fingerprint_mount_sync(mount)}"
+        resolver = MountResolver(cache_dir=tmp_path / "mount_cache")
+        contents = MountFingerprinter.fingerprint_mount_sync(
+            mount, digests_path=resolver.digests_path
         )
+
+        assert mount_fingerprint_sync(resolver, mount) == f"data:{mount.uri}:{contents}"
 
     def test_two_empty_directories_are_not_one_input(self, tmp_path):
         """A cell reads the mount's path too, so pointing it elsewhere is a change.

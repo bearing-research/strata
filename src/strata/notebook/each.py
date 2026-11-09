@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -104,8 +105,8 @@ def items_of_table(table: Any, key_column: str | None, name: str) -> list[EachIt
     return list(items.values())
 
 
-def _listed_files(root: Path) -> list[tuple[str, Path, int, int]]:
-    """``(relative path, path, size, mtime_ns)`` of what the mount's fingerprint counts.
+def _listed_files(root: Path) -> list[tuple[str, Path]]:
+    """``(relative path, path)`` of what the mount's fingerprint counts: regular files.
 
     A link to a file is a file, as in a Hugging Face cache or a DVC checkout.
     """
@@ -119,8 +120,8 @@ def _listed_files(root: Path) -> list[tuple[str, Path, int, int]]:
                 state = path.stat()
             except OSError:
                 continue  # a dangling link
-            relative = path.relative_to(root).as_posix()
-            files.append((relative, path, state.st_size, state.st_mtime_ns))
+            if stat.S_ISREG(state.st_mode):
+                files.append((path.relative_to(root).as_posix(), path))
     return sorted(files)
 
 
@@ -128,22 +129,19 @@ def items_of_mount(
     root: Path,
     glob: str | None,
     *,
-    by_content: bool,
     versions: Mapping[str, str] | None = None,
 ) -> list[EachItem]:
-    """One item per file, named by its relative path.
+    """One item per file, named by its relative path, keyed by its content.
 
-    A local file's digest is its size and mtime, what the mount's fingerprint reads. A
-    remote mount's view is new for each listing, so its mtimes say nothing: the listing's
-    *versions*, or the file's content where the listing has none.
+    *versions* are what the mount was keyed on: a local mount's file digests, a remote
+    listing's versions. A file with none (a pinned mount's, or a listing without them)
+    is read.
     """
     items = []
-    for relative, path, size, mtime_ns in _listed_files(root):
+    for relative, path in _listed_files(root):
         if glob is not None and not glob_matches(relative, glob):
             continue
-        if not by_content:
-            digest = hashlib.sha256(f"{size}:{mtime_ns}".encode()).hexdigest()
-        elif versions is not None and relative in versions:
+        if versions is not None and relative in versions:
             digest = versions[relative]
         else:
             with path.open("rb") as handle:

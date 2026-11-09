@@ -19,7 +19,7 @@ from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import _writes_entry
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.models import CellLanguage, MountMode, TableWriteSpec, WorkerBackendType
-from strata.notebook.mounts import MountWrite, parse_mount_uri
+from strata.notebook.mounts import MountWrite
 from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 from strata.notebook.workers import resolve_worker_spec
 
@@ -561,13 +561,11 @@ async def _list_each_items(
         context.each_listed[cell_id] = {
             m.name: prepared[m.name] for m in base.mount_specs if m.mode == MountMode.READ_ONLY
         }
-        scheme, _ = parse_mount_uri(mount.uri)
         items = await anyio.to_thread.run_sync(
             functools.partial(
                 each.items_of_mount,
                 prepared[source].local_path,
                 spec.get("glob"),
-                by_content=scheme != "file",
                 versions=prepared[source].file_versions,
             )
         )

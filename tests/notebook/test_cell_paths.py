@@ -1539,11 +1539,9 @@ class TestFanout:
         assert context.each_items == {}
         assert context.each_listed == {}
 
-    @pytest.mark.parametrize(
-        ("uri", "by_content"), [("s3://bucket/data", True), ("file:///data", False)]
-    )
-    async def test_a_listing_reads_only_the_glob_and_keys_a_remote_mount_on_content(
-        self, tmp_path, monkeypatch, uri, by_content
+    @pytest.mark.parametrize("uri", ["s3://bucket/data", "file:///data"])
+    async def test_a_listing_reads_only_the_glob_and_keys_items_as_the_mount_was_keyed(
+        self, tmp_path, monkeypatch, uri
     ):
         specs, prepared, prepare_mounts = self._over_data(tmp_path, uri, versions={"a.csv": "v1"})
         over = self._base()
@@ -1569,7 +1567,6 @@ class TestFanout:
         assert listed == {
             "root": tmp_path,
             "glob": "*.csv",
-            "by_content": by_content,
             "versions": {"a.csv": "v1"},
         }
         # A read-write mount gets its own staging per instance, so it is not handed on.
