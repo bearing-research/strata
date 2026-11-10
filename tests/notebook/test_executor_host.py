@@ -138,7 +138,7 @@ class _FakeHost:
     def environment_attestation_error(self) -> str | None:
         return None
 
-    def cell_env_hash(self, cell: Any) -> str:
+    def cell_env_hash(self, cell: Any, packages: Any) -> str:
         return "fake-env"
 
     def wired_variables(self, cell_id: str, upstream_id: str) -> set[str]:

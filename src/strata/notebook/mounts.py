@@ -915,6 +915,10 @@ def _digests_one_by_one(
     return digests
 
 
+# How a moved local package is named (``env.LocalPackages.moved``); a mount name has no space.
+LOCAL_PACKAGE = "local package "
+
+
 def moved_key(provenance_hash: str) -> str:
     """What a run whose input moved is recorded under: a key no check makes, so its cell
     stays stale until a run that reads still files."""
@@ -922,8 +926,11 @@ def moved_key(provenance_hash: str) -> str:
 
 
 def moved_parts(key_parts: dict[str, Any] | None, moved: str) -> dict[str, Any] | None:
-    """*key_parts* with the part of the mount *moved* is in marked as changed, so the stale
-    cell's explanation names that mount even once the file is put back."""
+    """*key_parts* with the part of the mount *moved* is in, or the environment for a local
+    package, marked as changed, so the stale cell's explanation names it even once the
+    file is put back."""
+    if key_parts is not None and moved.startswith(LOCAL_PACKAGE):
+        return {**key_parts, "env_hash": f"{key_parts.get('env_hash')}:moved"}
     if key_parts is None or "inputs" not in key_parts:
         return key_parts
     mount = moved.partition("/")[0]

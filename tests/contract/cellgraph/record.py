@@ -609,6 +609,7 @@ def _keys(
     component is the one staleness drew. When it gathered nothing (no DAG), the cell's
     is read here, as staleness itself does for a cell it missed.
     """
+    from strata.notebook.env import local_packages
     from strata.notebook.keys import cell_key
     from strata.notebook.provenance import (
         cell_provenance_inputs,
@@ -616,7 +617,7 @@ def _keys(
     )
 
     source_hash = compute_source_hash(cell.source, cell.language.value)
-    env_hash = session.cell_env_hash(cell)
+    env_hash = session.cell_env_hash(cell, local_packages(session.path))
     if outside is None:
         outside = session._outside_world_for(cell)
     fingerprints = {

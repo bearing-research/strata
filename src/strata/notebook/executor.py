@@ -122,7 +122,12 @@ from strata.notebook.cell_paths.sql import run_sql_cell
 from strata.notebook.cell_paths.widget import run_widget_cell
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
-from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
+from strata.notebook.env import (
+    LocalPackages,
+    compute_execution_env_hash,
+    local_packages,
+    narrow_env_for_provenance,
+)
 from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.graph import analysis_with, mounts_of
 from strata.notebook.harness_user import (
@@ -312,6 +317,8 @@ class _CellProvenance:
     instance: str | cg.Item | None = None
     # The mounts as the run prepared them (``over_mounts``): what it is keyed on.
     prepared: Mapping[str, ResolvedMount] | None = None
+    # The local path packages as the run keyed them, checked again after it.
+    local_packages: LocalPackages | None = None
 
     def for_instance(self, instance: str | cg.Item) -> _CellProvenance:
         """The same provenance for one fan-out instance, over the inputs it reads."""
@@ -974,10 +981,12 @@ class CellExecutor:
             declared_env_keys,
             language=getattr(cell_state, "language", "python"),
         )
+        packages = await asyncio.to_thread(local_packages, self.session.path)
         env_hash = compute_execution_env_hash(
             self.session.path,
             provenance_env,
             runtime_identity=runtime_identity,
+            local_packages=packages,
         )
         (
             config,
@@ -1071,6 +1080,7 @@ class CellExecutor:
             table_reads=table_reads,
             input_weights=weights,
             read_confirmation=read_confirmation,
+            local_packages=packages,
         )
 
     # ------------------------------------------------------------------

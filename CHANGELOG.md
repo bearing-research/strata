@@ -38,8 +38,9 @@ exhaustive commit history.
   records a path dependency (`uv add --editable ../mylib`) by its path alone, so an edit
   to the library served each cell the result computed from the old code. Now an editable
   package's import roots enter by content, through `.strata/hashes.sqlite`, and editing
-  the library makes every cell stale with no sync needed; one installed without
-  `--editable` counts by what the last sync installed. Notebooks with such a package run
+  the library makes every cell stale with no sync needed; an edit while a cell runs
+  keeps that run's outputs for that run only. One installed without `--editable` counts
+  by what the last sync installed. Notebooks with such a package run
   each cell once after the upgrade. (#1499)
 - **A read-only local mount, and each `@each` item over one, is keyed by its files'
   content.** Before, it was keyed by each file's size and modification time, so a

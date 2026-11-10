@@ -37,6 +37,7 @@ from strata.notebook.cell_paths.context import (
 from strata.notebook.cell_paths.context import no_interpreter_message as _no_interpreter_message
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
+from strata.notebook.env import moved_input
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
     HarnessUser,
@@ -60,9 +61,9 @@ from strata.notebook.local_runs import (
 )
 from strata.notebook.models import CellLanguage, MountMode, MountSpec, WorkerBackendType
 from strata.notebook.mounts import (
+    LOCAL_PACKAGE,
     MountWrite,
     ResolvedMount,
-    moved_file,
     moved_key,
     moved_line,
     moved_parts,
@@ -767,14 +768,19 @@ async def run_python_cell(
             # The instance is keyed on its item, not on the folder the items are listed from.
             moved = (
                 await asyncio.to_thread(
-                    moved_file, prov.prepared, skip=(each_source,) if each_source else ()
+                    functools.partial(
+                        moved_input,
+                        prov.prepared,
+                        prov.local_packages,
+                        skip=(each_source,) if each_source else (),
+                    )
                 )
-                if exec_result.success and prov.prepared
+                if exec_result.success
                 else None
             )
             if moved is not None and each_source is not None and each_item is not None:
                 # The item's binding is no mount: name the file in the mount it came from.
-                if moved.partition("/")[0] not in listed:
+                if not moved.startswith(LOCAL_PACKAGE) and moved.partition("/")[0] not in listed:
                     moved = f"{each_source}/{each_item.key}"
             if moved is not None:
                 # Kept for this run only, as a ``# @stochastic`` run's outputs are.

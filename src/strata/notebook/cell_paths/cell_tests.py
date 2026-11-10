@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from strata.notebook import output_dirs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import no_interpreter_message
+from strata.notebook.env import local_packages
 from strata.notebook.graph import analysis_with
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
@@ -264,7 +265,7 @@ async def run_cell_tests(
         + prov.table_fingerprints
         + prov.fetch_fingerprints
         + prov.dataset_fingerprints,
-        host.cell_env_hash(cell),
+        host.cell_env_hash(cell, await asyncio.to_thread(local_packages, host.path)),
     )
     source_hash, test_source_hash, _ = host.cell_test_fingerprint(cell_id, source, test_source)
     result = CellTestResult(

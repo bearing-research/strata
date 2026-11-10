@@ -8,6 +8,7 @@ from pathlib import Path
 import cellgraph as cg
 import pytest
 
+from strata.notebook.env import local_packages
 from strata.notebook.executor import CellExecutor
 from strata.notebook.keys import cell_key, input_parts
 from strata.notebook.parser import parse_notebook
@@ -49,7 +50,7 @@ def test_a_widget_key_covers_a_mount_declared_on_it(tmp_path):
     cell.mount_overrides = list(cell.mounts)
     outside = session._outside_world_for(cell)
     assert outside.mount_fingerprints, "the mount reaches the widget"
-    env_hash = session.cell_env_hash(cell)
+    env_hash = session.cell_env_hash(cell, local_packages(session.path))
     fingerprints = [
         outside.mount_fingerprints,
         outside.table_fingerprints,
@@ -99,5 +100,5 @@ def test_staleness_reads_an_input_an_edit_added_after_its_prefetch(tmp_path):
     session.notebook_state.get_cell("c0").source = f"# @mount d file://{data}\nx = 1\n"
     session.re_analyze_cell("c0")
 
-    staleness = session._compute_staleness_locked(prefetched)
+    staleness = session._compute_staleness_locked(prefetched, local_packages(session.path))
     assert "c0" in staleness

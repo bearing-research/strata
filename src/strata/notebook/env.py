@@ -14,11 +14,20 @@ import json
 import logging
 import re
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from strata.notebook.mounts import DIGESTS_FILE, local_digests
+from packaging.utils import canonicalize_name
+
+from strata.notebook.mounts import (
+    DIGESTS_FILE,
+    LOCAL_PACKAGE,
+    ResolvedMount,
+    local_digests,
+    moved_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -338,57 +347,95 @@ def _fold_lockfile_into_hash(
 _LOCAL_SOURCE = re.compile(rb'\b(?:editable|directory) = "(?!\.")')
 
 
-def local_packages_key(notebook_dir: Path) -> str | None:
-    """What the notebook's local packages hold, or ``None`` when its lock names none.
+@dataclass(frozen=True)
+class LocalPackages:
+    """What each local package the notebook's lock installs from a path held when read.
 
     The lock records a path dependency by its path alone. One installed editable runs
     from its source, so its import roots (the paths its ``.pth`` adds, else its folder)
     enter by content, through the notebook's digest cache. One built from a directory
     runs from what the last sync installed, so its installed ``RECORD``.
     """
+
+    notebook_dir: Path
+    keys: Mapping[str, str] = field(default_factory=dict)
+
+    @property
+    def key(self) -> str | None:
+        """All of them as one, or ``None`` with none, so such a notebook keys as before."""
+        if not self.keys:
+            return None
+        hasher = hashlib.sha256()
+        for name, key in sorted(self.keys.items()):
+            hasher.update(f"\0local={name}|{key}".encode())
+        return hasher.hexdigest()
+
+    def moved(self) -> str | None:
+        """``local package <name>`` for one whose content is not what it was when read, or
+        ``None``: read after a run, which imports from the live source."""
+        now = local_packages(self.notebook_dir).keys
+        changed = sorted(n for n in self.keys.keys() | now.keys() if self.keys.get(n) != now.get(n))
+        return f"{LOCAL_PACKAGE}{changed[0]}" if changed else None
+
+
+def local_packages(notebook_dir: Path) -> LocalPackages:
+    """The notebook's local path packages as they are now (see :class:`LocalPackages`).
+
+    Reads every file of an editable one the digest cache holds no digest for, so callers
+    on the event loop run it in a thread.
+    """
     try:
         with open(notebook_dir / "uv.lock", "rb") as f:
             raw = f.read()
     except OSError:
-        return None  # an unreadable lock is logged by compute_lockfile_hash
+        return LocalPackages(notebook_dir)  # an unreadable lock is logged by compute_lockfile_hash
     if not _LOCAL_SOURCE.search(raw):
-        return None
+        return LocalPackages(notebook_dir)
     try:
         closure = _runtime_packages(tomllib.loads(raw.decode("utf-8")))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError):
-        return None
-    local = [
-        pkg
-        for pkg in closure or []
-        if isinstance(pkg.get("source"), dict)
-        and not _is_project_root(pkg)
-        and ("editable" in pkg["source"] or "directory" in pkg["source"])
-    ]
-    if not local:
-        return None
-
+        return LocalPackages(notebook_dir)
     digests_path = notebook_dir / ".strata" / DIGESTS_FILE
     skip_dir = _not_package_source(notebook_dir)
-    hasher = hashlib.sha256()
-    for pkg in local:
-        hasher.update(b"\0local=")
-        hasher.update(pkg["name"].encode("utf-8"))
-        record = _installed_record(notebook_dir / ".venv", pkg["name"])
-        editable = pkg["source"].get("editable")
-        if not isinstance(editable, str):
-            hasher.update(b"|record=")
-            hasher.update(record[1] if record is not None else b"")
+    keys: dict[str, str] = {}
+    for pkg in closure or []:
+        source = pkg.get("source")
+        if not isinstance(source, dict) or _is_project_root(pkg):
             continue
-        roots = _import_roots(*record) if record is not None else []
-        for root in roots or [notebook_dir / editable]:
-            try:
-                digests = local_digests(root, digests_path, skip_dir=skip_dir) or {}
-            except FileNotFoundError:
-                digests = {}
-            hasher.update(b"|root=")
-            for rel, sha in sorted(digests.items()):
-                hasher.update(f"{rel}:{sha}\n".encode())
-    return hasher.hexdigest()
+        editable, directory = source.get("editable"), source.get("directory")
+        if not isinstance(editable, str) and not isinstance(directory, str):
+            continue
+        record = _installed_record(notebook_dir / ".venv", pkg["name"])
+        hasher = hashlib.sha256()
+        if isinstance(editable, str):
+            roots = _import_roots(*record) if record is not None else []
+            for root in roots or [notebook_dir / editable]:
+                try:
+                    digests = local_digests(root, digests_path, skip_dir=skip_dir) or {}
+                except OSError:
+                    digests = {}  # gone, or not ours to read: its files key it once readable
+                hasher.update(b"\0root=")
+                for rel, sha in sorted(digests.items()):
+                    hasher.update(f"{rel}:{sha}\n".encode())
+        else:
+            hasher.update(b"\0record=")
+            hasher.update(record[1] if record is not None else b"")
+        keys[pkg["name"]] = hasher.hexdigest()
+    return LocalPackages(notebook_dir, keys)
+
+
+def moved_input(
+    prepared: Mapping[str, ResolvedMount] | None,
+    packages: LocalPackages | None,
+    *,
+    skip: Collection[str] = (),
+) -> str | None:
+    """What a run read that is not what it was keyed on: a local mount's file (``mount/path``,
+    see :func:`moved_file`), then a local package, or ``None``."""
+    moved = moved_file(prepared, skip=skip) if prepared else None
+    if moved is None and packages is not None:
+        moved = packages.moved()
+    return moved
 
 
 def _not_package_source(notebook_dir: Path) -> Callable[[Path], bool]:
@@ -409,14 +456,14 @@ def _not_package_source(notebook_dir: Path) -> Callable[[Path], bool]:
 
 def _installed_record(venv: Path, name: str) -> tuple[Path, bytes] | None:
     """The site-packages folder and ``RECORD`` of *name* installed in *venv*, or ``None``."""
-    wanted = re.sub(r"[-_.]+", "_", name).lower()
+    wanted = canonicalize_name(name)
     for dist_info in sorted(venv.glob("lib/python*/site-packages/*.dist-info")) + sorted(
         venv.glob("Lib/site-packages/*.dist-info")
     ):
-        if re.sub(r"[-_.]+", "_", dist_info.name.split("-")[0]).lower() == wanted:
+        if canonicalize_name(dist_info.name.split("-")[0]) == wanted:
             try:
                 return dist_info.parent, (dist_info / "RECORD").read_bytes()
-            except FileNotFoundError:
+            except OSError:
                 return None
     return None
 
@@ -430,7 +477,7 @@ def _import_roots(site_packages: Path, record: bytes) -> list[Path]:
             continue
         try:
             content = (site_packages / rel).read_text("utf-8")
-        except (FileNotFoundError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError):
             continue
         for entry in content.splitlines():
             entry = entry.strip()
@@ -462,16 +509,19 @@ def compute_execution_env_hash(
     notebook_dir: Path,
     runtime_env: Mapping[str, str] | None = None,
     runtime_identity: str | None = None,
+    *,
+    local_packages: LocalPackages,
 ) -> str:
     """The cell's execution env hash: the lockfile hash, the local packages' content and
     the provenance-relevant env vars.
 
+    *local_packages* is :func:`local_packages`, read once by a caller keying several cells.
     Equals ``compute_lockfile_hash`` when the lock names no local package and
     ``runtime_env`` and ``runtime_identity`` are empty. The local packages stay out of
     ``compute_lockfile_hash``, which says whether the venv was synced from the lock.
     """
     lockfile_hash = compute_lockfile_hash(notebook_dir)
-    local = local_packages_key(notebook_dir)
+    local = local_packages.key
     if local is not None:
         lockfile_hash = hashlib.sha256(f"{lockfile_hash}\0local={local}".encode()).hexdigest()
     if not runtime_env and not runtime_identity:
