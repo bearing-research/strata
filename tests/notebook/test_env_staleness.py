@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from strata.notebook.dependencies import add_dependency
-from strata.notebook.env import compute_execution_env_hash
+from strata.notebook.env import compute_execution_env_hash, local_packages
 from strata.notebook.provenance import compute_source_hash
 from strata.notebook.session import SessionManager
 from strata.notebook.workers import worker_runtime_identity
@@ -82,6 +82,7 @@ class TestComponentHashStorage:
                 session.notebook_state,
                 None,
             ),
+            local_packages=local_packages(session.path),
         )
 
 
@@ -175,6 +176,7 @@ class TestStoredHashLookup:
 
         assert stored_env == compute_execution_env_hash(
             nb_dir,
+            local_packages=local_packages(nb_dir),
             runtime_identity=worker_runtime_identity(
                 session.notebook_state,
                 None,

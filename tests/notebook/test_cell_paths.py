@@ -747,7 +747,7 @@ class TestCellTests:
                 record_cell_test_inputs=lambda cell_id, inputs, env: (
                     calls.fingerprint.append(inputs) or "fingerprint"
                 ),
-                cell_env_hash=lambda cell: "env",
+                cell_env_hash=lambda cell, packages: "env",
                 cell_test_fingerprint=lambda *args: ("source", "tests", None),
             )
 
@@ -1679,6 +1679,7 @@ class TestR:
             key_parts={},
             reads=lambda *_args: {},
             prepared=None,
+            local_packages=None,
         )
         prov.over_mounts = lambda _mounts: prov
         for name, value in overrides.items():
@@ -2407,6 +2408,7 @@ def _batch_prov(*, nocache=False):
         key_parts={},
         reads=lambda *_args: {},
         prepared=None,
+        local_packages=None,
     )
     prov.rekeyed = lambda: prov
     return prov
@@ -3402,6 +3404,7 @@ class TestPython:
             key_parts={},
             reads=lambda *_args: {},
             prepared=None,
+            local_packages=None,
         )
         prov.over_mounts = lambda _mounts: prov
         prov.for_instance = lambda _instance: prov

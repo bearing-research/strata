@@ -8,6 +8,7 @@ import cellgraph as cg
 import pytest
 
 from strata.notebook import nonce
+from strata.notebook.env import local_packages
 from strata.notebook.executor import CellExecutor
 from strata.notebook.keys import cell_key
 from strata.notebook.runtime_state import load_runtime_state
@@ -195,7 +196,7 @@ class TestWhenTheResultIsKnownNotToMatch:
         old_key = "e" * 64
         cell.last_provenance_hash = "f" * 64
         cell.last_source_hash = old_key
-        cell.last_env_hash = session.cell_env_hash(cell)
+        cell.last_env_hash = session.cell_env_hash(cell, local_packages(session.path))
         cell.last_key_parts = {
             "parts_schema": cg.PARTS_SCHEMA if schema is None else schema,
             "definition_key": old_key,

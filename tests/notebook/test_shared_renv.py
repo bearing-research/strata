@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from strata.notebook import dependencies, shared_env, writer
-from strata.notebook.env import compute_execution_env_hash
+from strata.notebook.env import compute_execution_env_hash, local_packages
 from strata.notebook.shared_env import COMPLETE_MARKER, collect
 from tests.notebook.conftest import skip_if_no_r
 
@@ -78,7 +78,10 @@ def test_two_notebooks_with_one_lock_share_one_library_restored_once(tmp_path, s
     second = _notebook(tmp_path, "second")
     # A per-notebook library from before the switch gives way to the link.
     (second / "renv" / "library" / "R-4.4" / "stale").mkdir(parents=True)
-    hashes = {nb: compute_execution_env_hash(nb) for nb in (first, second)}
+    hashes = {
+        nb: compute_execution_env_hash(nb, local_packages=local_packages(nb))
+        for nb in (first, second)
+    }
 
     assert writer._renv_sync(first) is True
     assert writer._renv_sync(second) is True
@@ -89,7 +92,10 @@ def test_two_notebooks_with_one_lock_share_one_library_restored_once(tmp_path, s
     assert fake_r[0][1] == {"RENV_PATHS_CACHE": str(shared.resolve() / "r" / "cache")}
     assert (second / "renv" / "library" / "R-4.4" / "jsonlite").is_dir()
     assert not (second / "renv" / "library" / "R-4.4" / "stale").exists()
-    assert {nb: compute_execution_env_hash(nb) for nb in (first, second)} == hashes
+    assert {
+        nb: compute_execution_env_hash(nb, local_packages=local_packages(nb))
+        for nb in (first, second)
+    } == hashes
 
 
 def test_a_different_lock_gets_its_own_library(tmp_path, shared, fake_r):

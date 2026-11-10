@@ -2,7 +2,7 @@
 #
 # Reads R source on stdin, writes a JSON object with `defines`,
 # `references`, and (on syntax error) `parse_error` to stdout.
-# Counterpart of the Python `strata.notebook.analyzer` module: the
+# Counterpart of the Python analyzer (`cellgraph.python`): the
 # defines/references convention exactly mirrors the Python side.
 #
 # Loaded by `RLanguageAnalyzer` in this same package via

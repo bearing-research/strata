@@ -42,8 +42,10 @@ from strata.notebook.dependencies import (
     list_r_packages,
 )
 from strata.notebook.env import (
+    LocalPackages,
     compute_execution_env_hash,
     compute_lockfile_hash,
+    local_packages,
     narrow_env_for_provenance,
 )
 from strata.notebook.execution_result import CachedConsole
@@ -846,8 +848,10 @@ class NotebookSession:
         # which takes it on the event loop and would freeze every socket.
         with one_policy_read():
             prefetched = self._outside_world_fingerprints()
+            # Once for every cell, and outside the lock: it reads the files of a package.
+            packages = local_packages(self.path)
             with self._staleness_lock:
-                staleness = self._compute_staleness_locked(prefetched, executing)
+                staleness = self._compute_staleness_locked(prefetched, packages, executing)
         if hash_mounts:
             self._hash_mounts()
         return staleness
@@ -992,7 +996,10 @@ class NotebookSession:
         )
 
     def _compute_staleness_locked(
-        self, prefetched: dict[str, _OutsideWorld], executing: str | None = None
+        self,
+        prefetched: dict[str, _OutsideWorld],
+        packages: LocalPackages,
+        executing: str | None = None,
     ) -> dict[str, CellStaleness]:
         staleness_map: dict[str, CellStaleness] = {}
         stale_cells: set[str] = set()  # for propagation
@@ -1033,7 +1040,7 @@ class NotebookSession:
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
                 to_explain[cell_id] = StaleCell(
-                    self._parts_under_stale_upstream(cell, prefetched.get(cell_id)),
+                    self._parts_under_stale_upstream(cell, prefetched.get(cell_id), packages),
                     tuple(uid for uid in cell.upstream_ids if uid in stale_cells),
                 )
                 continue
@@ -1053,7 +1060,7 @@ class NotebookSession:
             analysis = analysis_with(cell, self.notebook_state, self.analysis)
             source_hash = analysis.cells[cell_id].definition_key
             assert source_hash is not None
-            env_hash = self.cell_env_hash(cell)
+            env_hash = self.cell_env_hash(cell, packages)
 
             # Missing only if the DAG moved meanwhile, a race this walk loses anyway (the
             # next flush recomputes), so read our own rather than skip the cell's mounts.
@@ -1182,7 +1189,7 @@ class NotebookSession:
         return staleness_map
 
     def _parts_under_stale_upstream(
-        self, cell: CellState, outside: _OutsideWorld | None
+        self, cell: CellState, outside: _OutsideWorld | None, packages: LocalPackages
     ) -> dict[str, Any] | None:
         """The key parts that do not rest on upstream outputs, which are about to change."""
         # A never-run cell has nothing to explain.
@@ -1191,7 +1198,7 @@ class NotebookSession:
         analysis = analysis_with(cell, self.notebook_state, self.analysis)
         parts: dict[str, Any] = {
             "definition_key": analysis.cells[cell.id].definition_key,
-            "env_hash": self.cell_env_hash(cell),
+            "env_hash": self.cell_env_hash(cell, packages),
         }
         # Missing only if the DAG moved meanwhile, and the next flush recomputes.
         if outside is not None:
@@ -2425,12 +2432,14 @@ class NotebookSession:
             return cell.worker
         return self.notebook_state.worker
 
-    def cell_env_hash(self, cell: Any) -> str:
-        """The environment hash staleness folds into ``cell``'s provenance."""
+    def cell_env_hash(self, cell: Any, packages: LocalPackages) -> str:
+        """The environment hash staleness folds into ``cell``'s provenance, over *packages*
+        (:func:`~strata.notebook.env.local_packages`)."""
         return compute_execution_env_hash(
             self.path,
             self._collect_runtime_env(cell),
             runtime_identity=self._effective_worker_runtime_identity(cell),
+            local_packages=packages,
         )
 
     def _effective_worker_runtime_identity(self, cell: Any) -> str | None:

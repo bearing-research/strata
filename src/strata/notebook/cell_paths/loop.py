@@ -19,6 +19,7 @@ from vestigo.provenance import derive_subkey
 from strata.notebook import output_dirs
 from strata.notebook.annotations import LoopAnnotation, parse_annotations
 from strata.notebook.cell_paths.context import artifact_content_type, effective_worker_name
+from strata.notebook.env import moved_input
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
@@ -28,7 +29,7 @@ from strata.notebook.harness_user import (
 )
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import CellLanguage, MountSpec, TableWriteSpec
-from strata.notebook.mounts import moved_file, moved_key, moved_line, moved_parts
+from strata.notebook.mounts import moved_key, moved_line, moved_parts
 from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 
 if TYPE_CHECKING:
@@ -698,9 +699,10 @@ async def _run_loop(
     # loop cell always looks stale. ``cell_provenance``, ``env_hash`` and
     # ``carry_var_provenance`` were computed before the loop.
 
-    # A mount that moved while the loop ran: its outputs are kept for this run only, under
+    # A mount or local package that moved while the loop ran: its outputs are kept for this
+    # run only, under
     # a key of its own, and the cell is recorded under one no check makes.
-    moved = await anyio.to_thread.run_sync(moved_file, prov.prepared) if prov.prepared else None
+    moved = await anyio.to_thread.run_sync(moved_input, prov.prepared, prov.local_packages)
     output_provenance = cell_provenance
     recorded_provenance, recorded_parts = cell_provenance, prov.key_parts
     if moved is not None:
