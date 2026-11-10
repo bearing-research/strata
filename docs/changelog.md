@@ -42,7 +42,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   there too. Now it is the folder beside the notebook, for Python, R and SQL cells, and
   the key holds the path as written, so two checkouts of a notebook key the cell alike.
   A relative mount sent to a remote executor is refused before it is sent, as a
-  `file://` one was. (#1500)
+  `file://` one was. (#1502)
 - **A local package installed from a path is part of every cell's key.** `uv.lock`
   records a path dependency (`uv add --editable ../mylib`) by its path alone, so an edit
   to the library served each cell the result computed from the old code. Now an editable
