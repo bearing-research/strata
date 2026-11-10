@@ -2234,7 +2234,8 @@ class Person:
 
         assert result.success is False
         assert result.error == (
-            "Execution failed: Remote executor workers do not support file:// mounts: 'raw_data'"
+            f"Execution failed: mount 'raw_data' is a local path (file://{tmp_path}), "
+            "on this machine; a remote executor worker cannot read it"
         )
 
     @pytest.mark.asyncio

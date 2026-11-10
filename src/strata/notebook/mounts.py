@@ -42,6 +42,7 @@ from strata.notebook.credentials import (
     read_credential_file,
 )
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
+from strata.notebook.layout import is_runtime_dir
 from strata.notebook.models import MountMode, MountSpec
 from strata.notebook.mount_cache import MountCache, object_key
 
@@ -211,14 +212,16 @@ def local_mount_path(path: str, notebook_dir: Path | None) -> Path:
 
     A relative one is under the notebook's directory, so a committed ``../data`` means
     the same folder wherever the notebook is checked out; its key holds the path as
-    written. Without *notebook_dir* there is nothing to resolve it against.
+    written. Without *notebook_dir* there is nothing to resolve it against. It is
+    resolved: DuckDB drops a ``..`` after a linked notebook directory as text, where the
+    OS goes up from the link's target.
     """
     local = Path(path)
     if local.is_absolute():
         return local
     if notebook_dir is None:
         raise ValueError(f"the relative mount path {path!r} needs the notebook's directory")
-    return notebook_dir / local
+    return (notebook_dir / local).resolve()
 
 
 def parse_mount_uri(uri: str) -> tuple[str, str]:
@@ -233,6 +236,8 @@ def parse_mount_uri(uri: str) -> tuple[str, str]:
     scheme = parsed.scheme.lower()
 
     if not scheme:
+        if not uri:
+            raise ValueError("a mount URI names no path")
         return "file", uri
 
     if scheme not in supported:
@@ -247,6 +252,8 @@ def parse_mount_uri(uri: str) -> tuple[str, str]:
         scheme = "az"
 
     if scheme == "file":
+        if not parsed.path:
+            raise ValueError(f"the mount URI {uri!r} names no path")
         return "file", unquote(parsed.path)
     else:
         path = parsed.netloc
@@ -715,14 +722,19 @@ def local_files(
     """``(relative path, path, stat)`` of each regular file under *root*, or *root* itself.
 
     A link to a file is a file, as in a Hugging Face cache; a dangling one is skipped,
-    and links to directories are not followed, nor directories *skip_dir* refuses.
+    and links to directories are not followed, nor directories *skip_dir* refuses, nor a
+    notebook's runtime state (:func:`layout.is_runtime_dir`), which its every run writes.
     """
     if not root.is_dir():
         return [(root.name, root, root.stat())]
     files = []
     for dirpath, dirnames, filenames in os.walk(root):
-        if skip_dir is not None:
-            dirnames[:] = [d for d in dirnames if not skip_dir(Path(dirpath) / d)]
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if not is_runtime_dir(Path(dirpath) / d)
+            and (skip_dir is None or not skip_dir(Path(dirpath) / d))
+        ]
         for filename in filenames:
             path = Path(dirpath) / filename
             try:

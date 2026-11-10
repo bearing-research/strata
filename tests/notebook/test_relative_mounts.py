@@ -11,7 +11,7 @@ import pytest
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import CellStatus, MountSpec
-from strata.notebook.mounts import local_mount_path
+from strata.notebook.mounts import local_files, local_mount_path, parse_mount_uri
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.writer import (
@@ -24,11 +24,36 @@ from strata.notebook.writer import (
 SOURCE = "# @mount shared ../shared ro\ntext = (shared / 'a.txt').read_text()\n"
 
 
-def test_a_relative_path_is_under_the_notebook():
-    assert local_mount_path("../shared", Path("/nb")) == Path("/nb/../shared")
+def test_a_relative_path_is_under_the_notebook(tmp_path, monkeypatch):
+    assert local_mount_path("../shared", Path("/nb")) == Path("/shared")
     assert local_mount_path("/data", Path("/nb")) == Path("/data")
     with pytest.raises(ValueError, match="needs the notebook's directory"):
         local_mount_path("shared", None)
+    # A session opened by a relative path: the mount does not move with the cwd.
+    monkeypatch.chdir(tmp_path)
+    assert local_mount_path("../shared", Path("nb")) == tmp_path / "shared"
+
+
+@pytest.mark.parametrize("uri", ["", "file://"])
+def test_a_local_mount_names_a_path(uri):
+    with pytest.raises(ValueError, match="names no path"):
+        parse_mount_uri(uri)
+
+
+def test_a_notebooks_runtime_state_is_not_a_mounts_content(tmp_path):
+    nb_dir = create_notebook(tmp_path, "nb", initialize_environment=False)
+    for rel in (".strata/x", ".venv/x", "work/x", "renv/library/x", "renv/staging/x"):
+        (nb_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        (nb_dir / rel).write_text("run")
+    (nb_dir / "renv" / "activate.R").write_text("kept")
+    (tmp_path / "other" / ".strata").mkdir(parents=True)  # not beside a notebook.toml
+    (tmp_path / "other" / ".strata" / "x").write_text("kept")
+
+    listed = {rel for rel, _, _ in local_files(tmp_path)}
+
+    assert "nb/renv/activate.R" in listed
+    assert "other/.strata/x" in listed
+    assert not [rel for rel in listed if rel.endswith("/x") and rel.startswith("nb/")]
 
 
 def _checkout(root: Path) -> Path:
@@ -59,6 +84,27 @@ async def test_a_cell_reads_its_relative_mount_from_any_server_cwd(tmp_path, mon
     (tmp_path / "repo" / "shared" / "a.txt").write_text("two, longer")
     assert session.compute_staleness()["c1"].status == CellStatus.STALE
     again = await executor.execute_cell("c1", SOURCE)
+    assert not again.cache_hit
+    assert again.outputs["text"]["preview"] == "two, longer"
+
+
+@pytest.mark.asyncio
+async def test_a_mount_over_the_notebook_keeps_its_cache(tmp_path):
+    """Every run writes the notebook's .strata/: a mount holding it would never hit."""
+    source = "# @mount repo .. ro\ntext = (repo / 'a.txt').read_text()\n"
+    (tmp_path / "repo").mkdir()
+    (tmp_path / "repo" / "a.txt").write_text("one")
+    nb_dir = create_notebook(tmp_path / "repo", "rel")
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", source)
+    session = SessionManager().open_notebook(nb_dir)
+    executor = CellExecutor(session)
+
+    assert not (await executor.execute_cell("c1", source)).cache_hit
+    assert (await executor.execute_cell("c1", source)).cache_hit
+
+    (tmp_path / "repo" / "a.txt").write_text("two, longer")
+    again = await executor.execute_cell("c1", source)
     assert not again.cache_hit
     assert again.outputs["text"]["preview"] == "two, longer"
 
@@ -96,6 +142,50 @@ async def test_a_sql_cell_reads_a_relative_mount(tmp_path, monkeypatch):
     (tmp_path / "elsewhere" / "deeper").mkdir(parents=True)
     monkeypatch.chdir(tmp_path / "elsewhere" / "deeper")  # where ../raw does not exist
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    result = await CellExecutor(session).execute_cell("c1", source)
+
+    assert result.success, result.error
+    art_id, version = result.artifact_uri.removeprefix("strata://artifact/").rsplit("@v=", 1)
+    blob = session.get_artifact_manager().load_artifact_data(art_id, int(version))
+    assert pa.ipc.open_stream(blob).read_all().to_pylist() == [{"total": 3}]
+
+
+def test_two_checkouts_key_the_project_mount_alike(tmp_path):
+    def mounts(parent: Path) -> list[str]:
+        nb_dir = create_notebook(
+            parent, "scratch", initialize_environment=False, project_mount="project"
+        )
+        add_cell_to_notebook(nb_dir, "c1")
+        write_cell(nb_dir, "c1", "files = list(project.iterdir())\n")
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+        cell = session.notebook_state.get_cell("c1")
+        return session._outside_world_for(cell).mount_fingerprints
+
+    assert mounts(tmp_path / "a") == mounts(tmp_path / "b")
+
+
+@pytest.mark.asyncio
+async def test_a_sql_cell_reads_where_python_does_under_a_linked_notebook(tmp_path):
+    """DuckDB would take ``link/../raw`` as text, where the OS goes up from the target."""
+    pytest.importorskip("duckdb")
+    real, view = tmp_path / "real", tmp_path / "view"
+    for root, rows in ((real, [1, 2]), (view, [100])):
+        (root / "raw").mkdir(parents=True)
+        pq.write_table(pa.table({"k": rows}), root / "raw" / "a.parquet")
+    nb_dir = create_notebook(real, "rel_sql")
+    source = "-- @sql connection=lake\n-- @cache forever\nSELECT sum(k) AS total FROM raw\n"
+    add_cell_to_notebook(nb_dir, "c1", language="sql")
+    write_cell(nb_dir, "c1", source)
+    update_notebook_mounts(nb_dir, [MountSpec(name="raw", uri="../raw")])
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.lake]\ndriver = "duckdb"\npath = ":memory:"\n'
+        'mounts = ["raw"]\n'
+    )
+    linked = view / "rel_sql"
+    linked.symlink_to(nb_dir, target_is_directory=True)
+    session = NotebookSession(parse_notebook(linked), linked)
 
     result = await CellExecutor(session).execute_cell("c1", source)
 

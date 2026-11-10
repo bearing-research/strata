@@ -406,7 +406,8 @@ async def dispatch_http(
     for mount in mount_specs:
         if parse_mount_uri(mount.uri)[0] == "file":
             raise RuntimeError(
-                f"Remote executor workers do not support file:// mounts: '{mount.name}'"
+                f"mount {mount.name!r} is a local path ({mount.uri}), on this machine; "
+                "a remote executor worker cannot read it"
             )
     # The worker resolves names from its own registry, so this notebook's allowance is
     # checked here, before the names leave.

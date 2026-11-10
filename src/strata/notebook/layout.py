@@ -40,6 +40,25 @@ _GITIGNORE_HEADER = """\
 """
 
 
+# Under a notebook's directory, what its runs write: never part of a mount's content.
+_RUNTIME_DIRS: tuple[tuple[str, ...], ...] = (
+    (".strata",),
+    (".venv",),
+    (WORK_DIR,),
+    ("renv", "library"),
+    ("renv", "staging"),
+)
+
+
+def is_runtime_dir(path: Path) -> bool:
+    """Whether *path* is a notebook's ``.strata/``, ``.venv/``, ``work/`` or renv library:
+    one of those beside a ``notebook.toml``."""
+    for parts in _RUNTIME_DIRS:
+        if path.parts[-len(parts) :] == parts:
+            return (path.parents[len(parts) - 1] / "notebook.toml").is_file()
+    return False
+
+
 def gitignore_contents() -> str:
     """The ``.gitignore`` a new notebook directory gets."""
     return _GITIGNORE_HEADER + "\n".join(IGNORED_PATTERNS) + "\n"

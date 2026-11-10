@@ -543,12 +543,13 @@ def create_notebook(
     notebook_id = str(uuid.uuid4())
 
     # Pinned read-only mount of the project dir, so cells use `open(<name> / "file")`.
-    # Pinned means no hashing: project churn (including .strata/) never re-stales cells.
+    # Pinned means no hashing: project churn never re-stales cells. Relative, so every
+    # checkout of the notebook keys its cells alike.
     mounts: list[MountSpec] = []
     if project_mount is not None:
         if not project_mount.isidentifier():
             raise ValueError(f"--project-mount name {project_mount!r} must be a valid identifier")
-        mounts.append(MountSpec(name=project_mount, uri=f"file://{parent_dir}", pin="project-root"))
+        mounts.append(MountSpec(name=project_mount, uri="..", pin="project-root"))
 
     now = datetime.now(tz=UTC)
     notebook_toml = NotebookToml(

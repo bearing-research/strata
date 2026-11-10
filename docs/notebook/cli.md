@@ -185,7 +185,7 @@ dependencies), and only missing scaffolding is added, so re-running it never
 orphans artifacts or loses settings.
 
 `--project-mount [NAME]` adds a notebook-level **read-only mount of `--parent`**
-(the project directory) as a `Path` variable `NAME` (default `project`) in every
+(the project directory, written as `..` so every checkout keys it alike) as a `Path` variable `NAME` (default `project`) in every
 cell, so cells read project files as `open(project / "file")` without absolute
 paths, even though a cell runs in the notebook's `work/` directory. The mount is **pinned**, so it never gets fingerprinted (no directory
 hashing, and the project's own churn never re-stales cells). This is the

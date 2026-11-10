@@ -154,7 +154,7 @@ class TestMountUriUnsupported:
 
     @pytest.mark.parametrize(
         "uri",
-        ["ftp://bad/path", "http://bad/path", "notascheme"],
+        ["ftp://bad/path", "http://bad/path", "://bad"],
     )
     def test_unsupported_scheme(self, uri):
         cell = _cell(f"# @mount data {uri} ro\nx = 1")
@@ -163,6 +163,9 @@ class TestMountUriUnsupported:
     def test_supported_schemes_pass(self):
         for uri in [
             "file:///tmp/x",
+            "/tmp/x",
+            "../shared",
+            "shared",
             "s3://bucket/prefix",
             "gs://bucket/prefix",
             "gcs://bucket/prefix",

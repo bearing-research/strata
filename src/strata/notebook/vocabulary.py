@@ -359,7 +359,8 @@ def _validate_mounts(mounts: Any, context: cg.ValidationContext) -> list[cg.Diag
     diagnostics: list[cg.Diagnostic] = []
     for mount in mounts:
         line = _find_annotation_line(cell.source, "mount", mount.name, language=cell.language)
-        scheme = mount.uri.split("://")[0].lower() if "://" in mount.uri else ""
+        # A bare path is local, under the notebook's directory when relative.
+        scheme = mount.uri.split("://")[0].lower() if "://" in mount.uri else "file"
         if not scheme or scheme not in _SUPPORTED_MOUNT_SCHEMES:
             diagnostics.append(
                 cg.Diagnostic(

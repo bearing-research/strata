@@ -21,6 +21,7 @@ from strata.notebook.models import (
     WorkerBackendType,
     WorkerSpec,
 )
+from strata.notebook.mounts import local_mount_path, parse_mount_uri
 from strata.notebook.parser import parse_notebook
 from strata.notebook.writer import (
     add_cell_to_notebook,
@@ -92,8 +93,10 @@ def test_create_notebook_project_mount_adds_pinned_ro_mount():
         mount = nb.mounts[0]
         assert mount.name == "project"
         # Points at the project (parent) dir, read-only, and pinned so it never
-        # gets fingerprinted (no directory hashing, no staleness churn).
-        assert mount.uri == f"file://{parent}"
+        # gets fingerprinted (no directory hashing, no staleness churn). Relative, so
+        # another checkout keys it alike.
+        assert mount.uri == ".."
+        assert local_mount_path(parse_mount_uri(mount.uri)[1], notebook_dir) == parent.resolve()
         assert mount.mode.value == "ro"
         assert mount.pin is not None
 

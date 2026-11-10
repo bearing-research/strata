@@ -41,6 +41,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   folder depending on where the server started, and a SQL cell's DuckDB view read it from
   there too. Now it is the folder beside the notebook, for Python, R and SQL cells, and
   the key holds the path as written, so two checkouts of a notebook key the cell alike.
+  `strata new --project-mount` writes its mount as `..` for the same reason. A mount
+  holding a notebook is not keyed by that notebook's `.strata/`, `.venv/` or `work/`,
+  which every run writes, and a bare path no longer warns of an unsupported scheme.
   A relative mount sent to a remote executor is refused before it is sent, as a
   `file://` one was. (#1502)
 - **A local package installed from a path is part of every cell's key.** `uv.lock`
