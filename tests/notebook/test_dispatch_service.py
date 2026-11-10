@@ -471,10 +471,11 @@ class TestDirect:
 
         assert _metadata(http.requests[0])["inputs"][0]["file"] == "f.tar"
 
-    async def test_a_file_mount_cannot_go_to_a_worker(self, http, features, tmp_path):
-        mount = MountSpec(name="m", uri="file:///data")
+    @pytest.mark.parametrize("uri", ["file:///data", "/data", "../data"])
+    async def test_a_file_mount_cannot_go_to_a_worker(self, http, features, tmp_path, uri):
+        mount = MountSpec(name="m", uri=uri)
 
-        with pytest.raises(RuntimeError, match="do not support file:// mounts: 'm'"):
+        with pytest.raises(RuntimeError, match="mount 'm' is a local path"):
             await self._run(tmp_path, mounts=[mount])
 
     async def test_credentials_are_checked_before_the_names_leave(self, http, features, tmp_path):

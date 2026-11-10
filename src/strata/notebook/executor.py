@@ -498,6 +498,7 @@ class CellExecutor:
         self._mount_resolver = MountResolver(
             cache_dir=session.path / ".strata" / "mount_cache",
             credentials=mount_credentials,
+            notebook_dir=session.path,
         )
         # Fired after each loop iteration. Set by the WS handler for live progress; unset for
         # REST / CLI.

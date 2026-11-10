@@ -67,7 +67,7 @@ from strata.notebook.models import (
     VariantGroupState,
     VariantMember,
 )
-from strata.notebook.mounts import resolve_cell_mounts
+from strata.notebook.mounts import local_mount_path, resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
 from strata.notebook.presence import SessionPresence
 from strata.notebook.protocol import MessageType
@@ -947,7 +947,9 @@ class NotebookSession:
             )
             for mount in merged:
                 scheme, path = parse_mount_uri(mount.uri)
-                if _keyed_by_local_hash(mount, scheme) and Path(path) == root:
+                if not _keyed_by_local_hash(mount, scheme):
+                    continue
+                if local_mount_path(path, self.path) == root:
                     found.append((cell.id, mount.name))
         return found
 
@@ -2297,23 +2299,26 @@ class NotebookSession:
             credential_resolver=CredentialResolver.from_config(
                 self.lake_config(), env=dict(self.notebook_state.env), notebook=self.path
             ),
+            notebook_dir=self.path,
         )
         mount_fingerprints: list[str] = []
         has_rw_mount = False
         for mount in sorted(merged_mounts, key=lambda m: m.name):
             # A cold local mount is read by a run, not on every source flush.
             scheme, path = parse_mount_uri(mount.uri)
-            key = (resolver.digests_path, Path(path))
-            if _keyed_by_local_hash(mount, scheme) and self._hashing(key):
-                # Its job reads it: reading it here too reads its last files twice.
-                mount_fingerprints.append(mount_component(mount, nonce.unhashed_nonce()))
-                continue
+            key = None
+            if _keyed_by_local_hash(mount, scheme):
+                key = (resolver.digests_path, local_mount_path(path, self.path))
+                if self._hashing(key):
+                    # Its job reads it: reading it here too reads its last files twice.
+                    mount_fingerprints.append(mount_component(mount, nonce.unhashed_nonce()))
+                    continue
             fingerprint = mount_fingerprint_sync(resolver, mount, read_bytes=STALENESS_READ_BYTES)
             if fingerprint is None:
                 has_rw_mount = True
                 continue
             mount_fingerprints.append(fingerprint)
-            if nonce.is_unhashed(fingerprint):
+            if key is not None and nonce.is_unhashed(fingerprint):
                 with self._mount_hash_lock:
                     self._mounts_to_hash.add(key)
 

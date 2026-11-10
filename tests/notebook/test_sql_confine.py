@@ -293,6 +293,15 @@ class TestLocalMountRoots:
         assert self._problem((tmp_path / "lake" / "raw").as_uri(), config, own) is None
         assert self._problem("s3://bucket/", config, own) is None
 
+    def test_a_relative_root_is_checked_where_the_mount_reads_it(
+        self, tmp_path, config, monkeypatch
+    ):
+        own = tmp_path / "notebooks" / "nb"
+        monkeypatch.chdir("/")  # from here, "data" would be the top-level /data
+
+        assert self._problem("data", config, own) is None
+        assert self._problem("../other", config, own) is not None  # another notebook
+
 
 @pytest.mark.parametrize("where", ["artifact-store", "own"])
 @pytest.mark.asyncio
