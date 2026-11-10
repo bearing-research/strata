@@ -54,6 +54,9 @@ _SHELL_RE = re.compile(r"^(\s*)!(.*)$")
 # ``files = !ls /data``: IPython binds the lhs to stdout lines. Unhandled,
 # the line breaks Python's parser.
 _SHELL_ASSIGN_RE = re.compile(r"^(\s*)([A-Za-z_]\w*)(\s*=\s*)!(.+)$")
+# A surrogate on its own, as a truncated emoji leaves in a notebook's JSON: Python
+# neither parses it nor writes it as UTF-8.
+_LONE_SURROGATE_RE = re.compile("[\ud800-\udfff]")
 # %timeit's options: -n<N> -r<R> -p<P> take a number; -t -c -q -o are flags.
 _TIMEIT_OPTIONS_RE = re.compile(r"\A(?:-[nrp]\s*\d+\s+|-[tcqo]\s+)+")
 _PIP_INSTALL_RE = re.compile(
@@ -156,9 +159,15 @@ def import_notebook(
     prev_cell_id: str | None = None
     cell_deps: list[str] = []
     scanned_imports: set[str] = set()
-    for cell in nb.get("cells") or []:
+    for position, cell in enumerate(nb.get("cells") or [], start=1):
         cell_type = cell.get("cell_type")
-        source = _source_to_text(cell.get("source", ""))
+        source, unpaired = _LONE_SURROGATE_RE.subn(
+            "\ufffd", _source_to_text(cell.get("source", ""))
+        )
+        if unpaired:
+            result.warnings.append(
+                f"cell {position}: {unpaired} lone surrogate(s), not text, replaced with U+FFFD"
+            )
 
         if cell_type == "markdown":
             cell_id = _new_cell_id("md")
