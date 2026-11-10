@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from strata.notebook.mounts import local_digests
+from strata.notebook.mounts import STALENESS_READ_BYTES, local_digests
 from strata.notebook.sql.adapter import (
     AdapterCapabilities,
     ColumnInfo,
@@ -151,13 +151,19 @@ def _file_signals(path: str | None, digests_path: Path) -> list[bytes]:
 
 
 def _content(path: Path, digests_path: Path) -> str:
-    """*path*'s digest as a local mount's file gets it (:func:`local_digests`), or
-    ``absent``: a WAL a checkpoint removed between the look and the read is absent too."""
+    """*path*'s digest as a local mount's file gets it (:func:`local_digests`), its stat
+    when it has none and is too large to read before every run, or ``absent``: a WAL a
+    checkpoint removed between the look and the read is absent too."""
     try:
-        digests = local_digests(path, digests_path)
+        # A database written all the time has a new stat on every commit.
+        digests = local_digests(path, digests_path, read_bytes=STALENESS_READ_BYTES)
+        if digests is None:
+            # What the digest cache trusts; a copy over it gets a new ctime.
+            st = path.stat()
+            return f"stat:{st.st_dev}:{st.st_ino}:{st.st_size}:{st.st_mtime_ns}:{st.st_ctime_ns}"
     except FileNotFoundError:
         return "absent"
-    return (digests or {}).get(path.name, "absent")
+    return digests.get(path.name, "absent")
 
 
 class SqliteAdapter:
@@ -304,8 +310,9 @@ class SqliteAdapter:
         as seen by this one, and the probe opens a new connection each run. A file's
         size and mtime are not enough either: pages keep the size, and a write can keep
         or restore the mtime. So each file's sha256 is taken, read only when the digest
-        cache at *digests_path* holds none for its stat. ``:memory:`` has only the
-        pragmas, and nothing there can go stale.
+        cache at *digests_path* holds none for its stat. A file past
+        ``STALENESS_READ_BYTES`` with none is keyed by its stat instead, ctime and inode
+        included. ``:memory:`` has only the pragmas, and nothing there can go stale.
         """
         h = hashlib.sha256()
         with probe_conn.cursor() as cursor:

@@ -855,3 +855,52 @@ def test_a_remembered_database_replaced_at_its_size_and_mtime_is_read_again(tmp_
     assert db_path.stat().st_size == before.st_size
 
     assert _token(db_path, tmp_path / "hashes.sqlite") != first
+
+
+@pytest.fixture
+def past_the_bound(monkeypatch):
+    """A database too large to read before every run: its digest is never taken."""
+    import vestigo.digests
+
+    from strata.notebook.sql.drivers import sqlite
+
+    monkeypatch.setattr(sqlite, "STALENESS_READ_BYTES", 1)
+    reads = []
+    read = vestigo.digests._read_digest
+    monkeypatch.setattr(vestigo.digests, "_read_digest", lambda p: reads.append(p) or read(p))
+    return reads
+
+
+@pytestmark_real_db
+def test_a_database_past_the_read_bound_is_keyed_by_its_stat(tmp_path, past_the_bound):
+    db_path = tmp_path / "db.sqlite"
+    _seeded(db_path)
+
+    first = _token(db_path, tmp_path / "hashes.sqlite")
+
+    assert _token(db_path, tmp_path / "hashes.sqlite") == first
+    assert past_the_bound == []
+
+
+@pytestmark_real_db
+def test_a_database_past_the_bound_replaced_at_its_size_and_mtime_reruns(tmp_path, past_the_bound):
+    db_path = tmp_path / "db.sqlite"
+    _seeded(db_path)
+    other = tmp_path / "other.sqlite"
+    seed = sqlite3.connect(other)
+    seed.execute("CREATE TABLE t (x INTEGER)")
+    seed.execute("INSERT INTO t VALUES (2)")
+    seed.commit()
+    seed.close()
+    first = _token(db_path, tmp_path / "hashes.sqlite")
+    before = db_path.stat()
+    db_path.write_bytes(other.read_bytes())
+    os.utime(db_path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert (db_path.stat().st_size, db_path.stat().st_mtime_ns) == (
+        before.st_size,
+        before.st_mtime_ns,
+    )
+
+    # The write moved the ctime, which no utime can restore.
+    assert _token(db_path, tmp_path / "hashes.sqlite") != first
+    assert past_the_bound == []
