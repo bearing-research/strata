@@ -25,6 +25,7 @@ from strata.notebook.cell_paths.context import (
     _worker_mount_writes,
     refused_run,
 )
+from strata.notebook.env import moved_input
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
@@ -37,7 +38,7 @@ from strata.notebook.harness_user import (
 )
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.models import MountMode, MountSpec, WorkerBackendType
-from strata.notebook.mounts import moved_file, moved_key, moved_line, moved_parts
+from strata.notebook.mounts import moved_key, moved_line, moved_parts
 from strata.notebook.table_writes import TableWriteError, write_back_failed
 from strata.notebook.team_store import TeamPull
 from strata.notebook.workers import is_http_executor_worker, resolve_worker_spec, worker_transport
@@ -439,8 +440,8 @@ async def run_r_cell(
 
             # A mount that moved while the cell ran: its outputs are kept for this run only.
             moved = (
-                await asyncio.to_thread(moved_file, prov.prepared)
-                if exec_result.success and prov.prepared
+                await asyncio.to_thread(moved_input, prov.prepared, prov.local_packages)
+                if exec_result.success
                 else None
             )
             if moved is not None:

@@ -207,7 +207,7 @@ async def test_a_shadowed_read_keys_on_its_wired_producer(tmp_path: Path, other:
 @pytest.mark.asyncio
 async def test_a_plain_chain_keeps_its_provenance(tmp_path: Path):
     """No shadowed name: the key reads the upstream output alone, and no wired record."""
-    from strata.notebook.env import compute_execution_env_hash
+    from strata.notebook.env import compute_execution_env_hash, local_packages
     from strata.notebook.provenance import compute_source_hash
 
     notebook_dir = create_notebook(tmp_path, "Plain")
@@ -228,6 +228,7 @@ async def test_a_plain_chain_keeps_its_provenance(tmp_path: Path):
         session.path,
         session._collect_runtime_env(cell),
         runtime_identity=session._effective_worker_runtime_identity(cell),
+        local_packages=local_packages(session.path),
     )
     parts = cell.last_key_parts
     assert parts is not None

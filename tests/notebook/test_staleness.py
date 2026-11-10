@@ -184,14 +184,14 @@ class TestStalenessOffTheEventLoop:
         guard = threading.Lock()
         original = session._compute_staleness_locked
 
-        def _watch(prefetched, executing=None):
+        def _watch(prefetched, packages, executing=None):
             nonlocal inside, overlapped
             with guard:
                 inside += 1
                 if inside > 1:
                     overlapped = True
             try:
-                return original(prefetched, executing)
+                return original(prefetched, packages, executing)
             finally:
                 with guard:
                     inside -= 1
@@ -221,14 +221,14 @@ class TestStalenessOffTheEventLoop:
         # whether or not the serialization works.
         original = session._compute_staleness_locked
 
-        def _watch(prefetched, executing=None):
+        def _watch(prefetched, packages, executing=None):
             nonlocal inside, overlapped
             with guard:
                 inside += 1
                 if inside > 1:
                     overlapped = True
             try:
-                return original(prefetched, executing)
+                return original(prefetched, packages, executing)
             finally:
                 with guard:
                     inside -= 1

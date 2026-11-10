@@ -587,7 +587,7 @@ class TestEditedCellReadsStale:
         await self._run_pipeline(session)
 
         with monkeypatch.context() as moved:
-            moved.setattr(session, "cell_env_hash", lambda cell: "another-environment")
+            moved.setattr(session, "cell_env_hash", lambda cell, packages: "another-environment")
             staleness = session.compute_staleness()
 
             assert staleness["c1"].status == "stale"
@@ -601,6 +601,6 @@ class TestEditedCellReadsStale:
     async def test_a_cell_that_never_ran_is_idle(self, pipeline_notebook, monkeypatch):
         session = pipeline_notebook
 
-        monkeypatch.setattr(session, "cell_env_hash", lambda cell: "another-environment")
+        monkeypatch.setattr(session, "cell_env_hash", lambda cell, packages: "another-environment")
 
         assert session.compute_staleness()["c1"].status == "idle"

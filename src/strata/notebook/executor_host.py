@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.dag import NotebookDag
+    from strata.notebook.env import LocalPackages
     from strata.notebook.execution_result import CachedConsole
     from strata.notebook.models import CellOutput, DatasetSpec, InputWeight, NotebookState
     from strata.notebook.pool import WarmProcessPool
@@ -62,7 +63,7 @@ class ExecutorHost(Protocol):
 
     def environment_execution_block_message(self) -> str | None: ...
 
-    def cell_env_hash(self, cell: Any) -> str: ...
+    def cell_env_hash(self, cell: Any, packages: LocalPackages) -> str: ...
 
     def cell_test_fingerprint(
         self, cell_id: str, source: str, test_source: str

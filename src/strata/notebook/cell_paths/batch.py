@@ -25,6 +25,7 @@ from strata.notebook.cell_paths.context import (
 from strata.notebook.cell_paths.context import artifact_content_type as _artifact_content_type
 from strata.notebook.cell_paths.context import no_interpreter_message as _no_interpreter_message
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
+from strata.notebook.env import moved_input
 from strata.notebook.execution_result import hit_console
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
@@ -38,7 +39,7 @@ from strata.notebook.harness_user import (
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.lifeline import lifeline_handoff
 from strata.notebook.models import CellOutput
-from strata.notebook.mounts import moved_file, moved_key, moved_line, moved_parts
+from strata.notebook.mounts import moved_key, moved_line, moved_parts
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
     subprocess_kwargs_for_new_group,
@@ -939,8 +940,9 @@ async def batch_service_persist(
     if module_export_error:
         return {"ok": False, "error": f"module export rejected: {module_export_error}"}
 
-    # A mount that moved while the cell ran: its outputs are kept for this run only.
-    moved = await asyncio.to_thread(moved_file, prov.prepared) if prov.prepared else None
+    # A mount or local package that moved while the cell ran: its outputs are kept for
+    # this run only.
+    moved = await asyncio.to_thread(moved_input, prov.prepared, prov.local_packages)
     if moved is not None:
         # The cell's result reads its console from this payload.
         payload["stderr"] = payload.get("stderr", "") + moved_line(moved)
