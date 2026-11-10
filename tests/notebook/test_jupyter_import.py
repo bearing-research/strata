@@ -1173,6 +1173,30 @@ def test_import_flags_a_cell_nested_past_the_parser(tmp_path: Path, end: str) ->
     assert any(d.startswith("pandas") for d in result.captured_deps)
 
 
+def test_import_replaces_a_lone_surrogate_and_warns(tmp_path: Path) -> None:
+    """Half an emoji in a cell's JSON imports as U+FFFD; a whole one is left alone."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _md_cell("# Results \ud83d\ude00\n"),
+            _code_cell('label = "done \ud83d"\n'),
+            _md_cell("note \udc00\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    assert [cell.source.strip() for cell in nb.cells] == [
+        "# Results \U0001f600",
+        'label = "done \ufffd"',
+        "note \ufffd",
+    ]
+    assert [w for w in result.warnings if "lone surrogate" in w] == [
+        "cell 2: 1 lone surrogate(s), not text, replaced with U+FFFD",
+        "cell 3: 1 lone surrogate(s), not text, replaced with U+FFFD",
+    ]
+    assert not any("fails to analyze" in w for w in result.warnings)
+
+
 def test_import_check_deps_skipped_when_uv_missing(tmp_path: Path, monkeypatch) -> None:
     """``check_deps=True`` records a skip warning if uv isn't on PATH."""
     ipynb = _make_ipynb(tmp_path, [_code_cell("import pandas as pd\n")])
