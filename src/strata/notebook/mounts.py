@@ -686,16 +686,20 @@ class MountFingerprinter:
             )
 
 
-def local_files(root: Path) -> list[tuple[str, Path, os.stat_result]]:
+def local_files(
+    root: Path, *, skip_dir: Callable[[Path], bool] | None = None
+) -> list[tuple[str, Path, os.stat_result]]:
     """``(relative path, path, stat)`` of each regular file under *root*, or *root* itself.
 
     A link to a file is a file, as in a Hugging Face cache; a dangling one is skipped,
-    and links to directories are not followed.
+    and links to directories are not followed, nor directories *skip_dir* refuses.
     """
     if not root.is_dir():
         return [(root.name, root, root.stat())]
     files = []
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        if skip_dir is not None:
+            dirnames[:] = [d for d in dirnames if not skip_dir(Path(dirpath) / d)]
         for filename in filenames:
             path = Path(dirpath) / filename
             try:
@@ -759,18 +763,24 @@ def local_digests(
     *,
     read_bytes: int | None = None,
     on_progress: HashProgress | None = None,
+    skip_dir: Callable[[Path], bool] | None = None,
 ) -> dict[str, str] | None:
     """Each file's sha256 under the local mount *root*, by relative POSIX path.
 
     A file the cache at *digests_path* holds a digest for under its current stat is not
     read. With *read_bytes*, ``None`` instead of reading more than that of the files that
     can be read. The rest is :func:`file_digests`, which reports to *on_progress*.
+    *skip_dir* is :func:`local_files`'.
     """
     if read_bytes is None:
         # A run and the background job over one mount: the second finds the first's digests.
         with _hashing(digests_path, root):
-            return _local_digests(root, digests_path, read_bytes=None, on_progress=on_progress)
-    return _local_digests(root, digests_path, read_bytes=read_bytes, on_progress=on_progress)
+            return _local_digests(
+                root, digests_path, read_bytes=None, on_progress=on_progress, skip_dir=skip_dir
+            )
+    return _local_digests(
+        root, digests_path, read_bytes=read_bytes, on_progress=on_progress, skip_dir=skip_dir
+    )
 
 
 def hash_local_mount(
@@ -803,9 +813,14 @@ def hash_local_mount(
 
 
 def _local_digests(
-    root: Path, digests_path: Path, *, read_bytes: int | None, on_progress: HashProgress | None
+    root: Path,
+    digests_path: Path,
+    *,
+    read_bytes: int | None,
+    on_progress: HashProgress | None,
+    skip_dir: Callable[[Path], bool] | None,
 ) -> dict[str, str] | None:
-    files = without_digest_cache(local_files(root), digests_path)
+    files = without_digest_cache(local_files(root, skip_dir=skip_dir), digests_path)
     with digest_cache(digests_path) as cache:
         try:
             known = cache.cached_many(path for _, path, _ in files)

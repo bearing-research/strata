@@ -3,7 +3,7 @@
 The env hash folds ``uv.lock`` (and ``renv.lock``). The uv part is a fingerprint
 of the runtime closure only, so adding or removing a dev tool, the first one
 included, never invalidates a cell's cache. It does not depend on the notebook
-project's own name.
+project's own name. A cell's env hash also holds what its local path packages hold.
 """
 
 from __future__ import annotations
@@ -14,9 +14,11 @@ import json
 import logging
 import re
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+
+from strata.notebook.mounts import DIGESTS_FILE, local_digests
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +202,44 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
         data: Any = tomllib.loads(raw_uv_lock.decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError):
         return None
+    closure = _runtime_packages(data)
+    if closure is None:
+        return None
 
+    hasher = hashlib.sha256()
+    # The interpreter is part of the environment: a notebook moved from 3.12 to 3.13 keeps
+    # every pure-Python package and its hashes, and must still go stale.
+    requires_python = data.get("requires-python")
+    if isinstance(requires_python, str):
+        hasher.update(b"\0python=")
+        hasher.update(requires_python.encode("utf-8"))
+    for pkg in closure:
+        hasher.update(b"\0pkg=")
+        hasher.update(pkg["name"].encode("utf-8"))
+        hasher.update(b"@")
+        hasher.update(str(pkg.get("version", "")).encode("utf-8"))
+        # A git source has no artifact hashes; its commit lives in the source.
+        hasher.update(b"|source=")
+        hasher.update(json.dumps(pkg.get("source"), sort_keys=True).encode("utf-8"))
+        # Artifact hashes catch a same-version re-pin.
+        artifact_hashes: list[str] = []
+        sdist = pkg.get("sdist")
+        if isinstance(sdist, dict) and isinstance(sdist.get("hash"), str):
+            artifact_hashes.append(sdist["hash"])
+        wheels = pkg.get("wheels")
+        if isinstance(wheels, list):
+            for wheel in wheels:
+                if isinstance(wheel, dict) and isinstance(wheel.get("hash"), str):
+                    artifact_hashes.append(wheel["hash"])
+        for artifact_hash in sorted(artifact_hashes):
+            hasher.update(b"|")
+            hasher.update(artifact_hash.encode("utf-8"))
+    return hasher.digest()
+
+
+def _runtime_packages(data: Any) -> list[dict] | None:
+    """The packages a parsed ``uv.lock``'s root reaches through its runtime deps, by name
+    then version, or ``None`` without a root."""
     packages = data.get("package")
     if not isinstance(packages, list):
         return None
@@ -248,36 +287,11 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
                 for group in optional.values():
                     frontier.extend(_dep_names(group))
 
-    hasher = hashlib.sha256()
-    # The interpreter is part of the environment: a notebook moved from 3.12 to 3.13 keeps
-    # every pure-Python package and its hashes, and must still go stale.
-    requires_python = data.get("requires-python")
-    if isinstance(requires_python, str):
-        hasher.update(b"\0python=")
-        hasher.update(requires_python.encode("utf-8"))
-    for name in sorted(seen):
-        for pkg in sorted(by_name.get(name, []), key=lambda p: str(p.get("version", ""))):
-            hasher.update(b"\0pkg=")
-            hasher.update(name.encode("utf-8"))
-            hasher.update(b"@")
-            hasher.update(str(pkg.get("version", "")).encode("utf-8"))
-            # A git source has no artifact hashes; its commit lives in the source.
-            hasher.update(b"|source=")
-            hasher.update(json.dumps(pkg.get("source"), sort_keys=True).encode("utf-8"))
-            # Artifact hashes catch a same-version re-pin.
-            artifact_hashes: list[str] = []
-            sdist = pkg.get("sdist")
-            if isinstance(sdist, dict) and isinstance(sdist.get("hash"), str):
-                artifact_hashes.append(sdist["hash"])
-            wheels = pkg.get("wheels")
-            if isinstance(wheels, list):
-                for wheel in wheels:
-                    if isinstance(wheel, dict) and isinstance(wheel.get("hash"), str):
-                        artifact_hashes.append(wheel["hash"])
-            for artifact_hash in sorted(artifact_hashes):
-                hasher.update(b"|")
-                hasher.update(artifact_hash.encode("utf-8"))
-    return hasher.digest()
+    return [
+        pkg
+        for name in sorted(seen)
+        for pkg in sorted(by_name.get(name, []), key=lambda p: str(p.get("version", "")))
+    ]
 
 
 def _fold_lockfile_into_hash(
@@ -319,6 +333,113 @@ def _fold_lockfile_into_hash(
     hasher.update(content)
 
 
+# A path source other than the project's own ``editable = "."``: most locks have none, and
+# are not parsed a second time.
+_LOCAL_SOURCE = re.compile(rb'\b(?:editable|directory) = "(?!\.")')
+
+
+def local_packages_key(notebook_dir: Path) -> str | None:
+    """What the notebook's local packages hold, or ``None`` when its lock names none.
+
+    The lock records a path dependency by its path alone. One installed editable runs
+    from its source, so its import roots (the paths its ``.pth`` adds, else its folder)
+    enter by content, through the notebook's digest cache. One built from a directory
+    runs from what the last sync installed, so its installed ``RECORD``.
+    """
+    try:
+        with open(notebook_dir / "uv.lock", "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None  # an unreadable lock is logged by compute_lockfile_hash
+    if not _LOCAL_SOURCE.search(raw):
+        return None
+    try:
+        closure = _runtime_packages(tomllib.loads(raw.decode("utf-8")))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+    local = [
+        pkg
+        for pkg in closure or []
+        if isinstance(pkg.get("source"), dict)
+        and not _is_project_root(pkg)
+        and ("editable" in pkg["source"] or "directory" in pkg["source"])
+    ]
+    if not local:
+        return None
+
+    digests_path = notebook_dir / ".strata" / DIGESTS_FILE
+    skip_dir = _not_package_source(notebook_dir)
+    hasher = hashlib.sha256()
+    for pkg in local:
+        hasher.update(b"\0local=")
+        hasher.update(pkg["name"].encode("utf-8"))
+        record = _installed_record(notebook_dir / ".venv", pkg["name"])
+        editable = pkg["source"].get("editable")
+        if not isinstance(editable, str):
+            hasher.update(b"|record=")
+            hasher.update(record[1] if record is not None else b"")
+            continue
+        roots = _import_roots(*record) if record is not None else []
+        for root in roots or [notebook_dir / editable]:
+            try:
+                digests = local_digests(root, digests_path, skip_dir=skip_dir) or {}
+            except FileNotFoundError:
+                digests = {}
+            hasher.update(b"|root=")
+            for rel, sha in sorted(digests.items()):
+                hasher.update(f"{rel}:{sha}\n".encode())
+    return hasher.hexdigest()
+
+
+def _not_package_source(notebook_dir: Path) -> Callable[[Path], bool]:
+    """A package folder's directories that hold no source: caches, hidden ones, venvs, and
+    the notebook itself, whose cells would otherwise key the library."""
+    notebook = notebook_dir.resolve()
+
+    def skip(path: Path) -> bool:
+        return (
+            path.name.startswith(".")
+            or path.name == "__pycache__"
+            or (path / "pyvenv.cfg").is_file()
+            or path.resolve() == notebook
+        )
+
+    return skip
+
+
+def _installed_record(venv: Path, name: str) -> tuple[Path, bytes] | None:
+    """The site-packages folder and ``RECORD`` of *name* installed in *venv*, or ``None``."""
+    wanted = re.sub(r"[-_.]+", "_", name).lower()
+    for dist_info in sorted(venv.glob("lib/python*/site-packages/*.dist-info")) + sorted(
+        venv.glob("Lib/site-packages/*.dist-info")
+    ):
+        if re.sub(r"[-_.]+", "_", dist_info.name.split("-")[0]).lower() == wanted:
+            try:
+                return dist_info.parent, (dist_info / "RECORD").read_bytes()
+            except FileNotFoundError:
+                return None
+    return None
+
+
+def _import_roots(site_packages: Path, record: bytes) -> list[Path]:
+    """The folders the ``.pth`` files *record* installs put on ``sys.path``."""
+    roots: list[Path] = []
+    for line in record.decode("utf-8", "replace").splitlines():
+        rel = line.split(",", 1)[0]
+        if not rel.endswith(".pth"):
+            continue
+        try:
+            content = (site_packages / rel).read_text("utf-8")
+        except (FileNotFoundError, UnicodeDecodeError):
+            continue
+        for entry in content.splitlines():
+            entry = entry.strip()
+            # As ``site`` reads one: an ``import`` line runs, a comment is skipped.
+            if entry and not entry.startswith(("#", "import ", "import\t")):
+                roots.append(site_packages / entry)
+    return roots
+
+
 def narrow_env_for_provenance(
     source: str,
     resolved_env: Mapping[str, str],
@@ -342,11 +463,17 @@ def compute_execution_env_hash(
     runtime_env: Mapping[str, str] | None = None,
     runtime_identity: str | None = None,
 ) -> str:
-    """The cell's execution env hash: the lockfile hash plus provenance-relevant env vars.
+    """The cell's execution env hash: the lockfile hash, the local packages' content and
+    the provenance-relevant env vars.
 
-    Equals ``compute_lockfile_hash`` when ``runtime_env`` and ``runtime_identity`` are empty.
+    Equals ``compute_lockfile_hash`` when the lock names no local package and
+    ``runtime_env`` and ``runtime_identity`` are empty. The local packages stay out of
+    ``compute_lockfile_hash``, which says whether the venv was synced from the lock.
     """
     lockfile_hash = compute_lockfile_hash(notebook_dir)
+    local = local_packages_key(notebook_dir)
+    if local is not None:
+        lockfile_hash = hashlib.sha256(f"{lockfile_hash}\0local={local}".encode()).hexdigest()
     if not runtime_env and not runtime_identity:
         return lockfile_hash
 
