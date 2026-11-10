@@ -3438,7 +3438,7 @@ database's rows.</p>
 </tr>
 <tr>
 <td>DuckDB</td>
-<td><code>PRAGMA database_size</code></td>
+<td><code>PRAGMA database_size</code>, but its memory columns</td>
 <td><strong>DB-wide</strong></td>
 <td>Advances when DuckDB writes blocks; two row states between block-aligned flushes can share a token. Pin <code>-- @cache session</code> on a database that is being written to while you work.</td>
 </tr>
@@ -3458,6 +3458,7 @@ database's rows.</p>
 </table>
 <p>The schema fingerprint catches metadata-only changes (<code>ADD COLUMN</code>, type changes, nullability flips) that the freshness token would miss.</p>
 <p>A probe can only ask about a table the query names. A table named at run time (Snowflake's <code>IDENTIFIER($tbl)</code> or <code>TABLE($tbl)</code>), a table function (<code>read_parquet(...)</code>, <code>query_table(...)</code>, a Postgres set-returning function) or a file read in place of a table (DuckDB's <code>FROM 'events.parquet'</code>) is not fingerprinted, so under <code>fingerprint</code> such a cell re-runs every time, and the header says so. Its result's content is folded into its provenance, so a downstream cell re-runs only when the rows actually changed. Declare <code>-- @cache session</code> or <code>-- @cache ttl=...</code> to reuse results instead, or read files through a mount on a <a href="#duckdb-over-the-lake">DuckDB lake connection</a>, whose fingerprint the cache does track.</p>
+<p>The probes run again after the query, and a DuckDB lake connection's mounts are fingerprinted again, since the query reads the live database and files after its key was taken. If one changed while the query ran, or cannot be probed again, the result is not cached: its content is folded into its provenance as above, and the console says what changed ("the database of connection 'db' changed while the query ran; its result is not cached"). So a commit during the query is never served later, even once the database is put back. Only content is compared, so a change undone before the query ends is not seen. A pinned snapshot (<code>-- @cache snapshot</code>, a catalog table read at its snapshot) cannot change and is not probed again, and a result no cache check finds (<code>-- @nocache</code>, a table named at run time) is not checked. The check costs one more probe, and one more listing of each mount, per run that misses the cache.</p>
 <h2 id="read-only-by-default">Read-only by default<a class="headerlink" href="#read-only-by-default" title="Permanent link">&para;</a></h2>
 <p>SQL cells are <strong>read-only by default</strong>, but the enforcement mechanism depends on the backend:</p>
 <ul>
