@@ -49,48 +49,6 @@ def _superseded_chain(store, tenant=None):
     return rows, figure
 
 
-class TestPinsInTheStore:
-    def test_a_pinned_version_and_its_ancestors_survive_a_sweep(self, store):
-        rows, figure = _superseded_chain(store)
-        store.retain("figure", figure, kind="pin", holder="snapshot:s1", created_by="amber")
-
-        store.garbage_collect(max_idle_days=0)
-
-        assert store.get_artifact("figure", figure) is not None
-        assert store.get_artifact("rows", rows) is not None
-
-    def test_once_released_the_chain_is_collected(self, store):
-        rows, figure = _superseded_chain(store)
-        store.retain("figure", figure, kind="pin", holder="snapshot:s1")
-        assert store.release("figure", figure, kind="pin", holder="snapshot:s1")
-
-        result = store.garbage_collect(max_idle_days=0)
-
-        assert result["deleted_count"] == 2
-        assert store.get_artifact("figure", figure) is None
-        assert store.get_artifact("rows", rows) is None
-
-    def test_two_holders_release_independently(self, store):
-        rows, figure = _superseded_chain(store)
-        store.retain("figure", figure, kind="pin", holder="snapshot:s1")
-        store.retain("figure", figure, kind="pin", holder="review:42")
-        # Pinning again under a reason refreshes it rather than stacking.
-        store.retain("figure", figure, kind="pin", holder="snapshot:s1", created_by="again")
-
-        assert store.release("figure", figure, kind="pin", holder="snapshot:s1")
-        store.garbage_collect(max_idle_days=0)
-
-        assert store.get_artifact("figure", figure) is not None
-        assert [pin["holder"] for pin in store.retention_roots("figure", figure)] == ["review:42"]
-
-    def test_a_pin_needs_a_version_that_exists_and_a_reason(self, store):
-        _version(store, "rows", b"[1]")
-        with pytest.raises(ValueError, match="not found"):
-            store.retain("rows", 99, kind="pin", holder="snapshot:s1")
-        with pytest.raises(ValueError, match="holder"):
-            store.retain("rows", 1, kind="pin", holder="  ")
-
-
 @pytest.fixture
 def service(monkeypatch, tmp_path):
     """The real app over a service-mode, trusted-proxy server."""

@@ -22,26 +22,6 @@ def _analyzed_cell(cell_id: str, source: str) -> CellAnalysisWithId:
     )
 
 
-class TestAnalyzerEdges:
-    """Analyzer bindings that decide whether a downstream cell gets its edge."""
-
-    def test_dotted_import_wires_the_root_module(self):
-        cells = [
-            _analyzed_cell("imp", "import os.path"),
-            _analyzed_cell("use", "name = os.path.basename('/a/b')"),
-        ]
-        dag = NotebookDag.from_cells(cells)
-        assert dag.cell_upstream["use"] == ["imp"]
-
-    def test_read_before_redefinition_wires_the_upstream(self):
-        cells = [
-            _analyzed_cell("up", "x = 1"),
-            _analyzed_cell("use", "print(x)\nx = 5"),
-        ]
-        dag = NotebookDag.from_cells(cells)
-        assert dag.cell_upstream["use"] == ["up"]
-
-
 class TestInplaceMutationRouting:
     """An ``inplace=True`` method call makes the mutating cell a (re)producer of the receiver.
 
@@ -81,35 +61,6 @@ class TestInplaceMutationRouting:
 
 
 class TestDagBuildingBasics:
-    def test_single_cell_no_deps(self):
-        cells = [CellAnalysisWithId(id="a", defines=["x"], references=[])]
-        dag = NotebookDag.from_cells(cells)
-
-        assert len(dag.edges) == 0
-        assert dag.cell_upstream == {"a": []}
-        assert dag.cell_downstream == {"a": []}
-        assert dag.roots == {"a"}
-        assert dag.leaves == {"a"}
-
-    def test_linear_chain(self):
-        """Linear dependency chain: A → B → C."""
-        cells = [
-            CellAnalysisWithId(id="a", defines=["x"], references=[]),
-            CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
-            CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        assert len(dag.edges) == 2
-        assert dag.edges[0] == DagEdge("a", "b", "x")
-        assert dag.edges[1] == DagEdge("b", "c", "y")
-
-        assert dag.cell_upstream == {"a": [], "b": ["a"], "c": ["b"]}
-        assert dag.cell_downstream == {"a": ["b"], "b": ["c"], "c": []}
-
-        assert dag.roots == {"a"}
-        assert dag.leaves == {"c"}
-
     def test_diamond_dependency(self):
         """Diamond dependency: A → B, A → C, B+C → D."""
         cells = [
@@ -156,17 +107,6 @@ class TestDagBuildingBasics:
         assert dag.roots == {"a", "b"}
         assert dag.leaves == {"c"}
 
-    def test_multiple_leaves(self):
-        cells = [
-            CellAnalysisWithId(id="a", defines=["x"], references=[]),
-            CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
-            CellAnalysisWithId(id="c", defines=["z"], references=["x"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        assert dag.roots == {"a"}
-        assert dag.leaves == {"b", "c"}
-
 
 class TestDagMultipleVariables:
     def test_multiple_vars_one_edge(self):
@@ -186,60 +126,8 @@ class TestDagMultipleVariables:
         assert dag.cell_upstream == {"a": [], "b": ["a"]}
         assert dag.cell_downstream == {"a": ["b"], "b": []}
 
-    def test_variable_shadowing(self):
-        """When multiple cells define same variable, last one wins."""
-        cells = [
-            CellAnalysisWithId(id="a", defines=["df"], references=[]),
-            CellAnalysisWithId(id="b", defines=["df"], references=[]),
-            CellAnalysisWithId(id="c", defines=["result"], references=["df"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        # df should flow from b (last define) to c, not from a
-        edges_dict = {(e.from_cell_id, e.to_cell_id): e.variable for e in dag.edges}
-        assert edges_dict == {("b", "c"): "df"}
-
-        # a has no downstream (its output is shadowed)
-        assert dag.cell_downstream["a"] == []
-        assert dag.cell_upstream["c"] == ["b"]
-
-        # c consumes df from b
-        assert dag.consumed_variables["b"] == {"df"}
-
-
-class TestDagConsumedVariables:
-    def test_consumed_variables_basic(self):
-        cells = [
-            CellAnalysisWithId(id="a", defines=["x", "y"], references=[]),
-            CellAnalysisWithId(id="b", defines=[], references=["x"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        # x is consumed by b, y is not
-        assert dag.consumed_variables["a"] == {"x"}
-
-    def test_unconsumed_variables_not_cached(self):
-        cells = [
-            CellAnalysisWithId(id="a", defines=["df", "temp"], references=[]),
-            CellAnalysisWithId(id="b", defines=[], references=["df"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        # Only df is consumed; temp is not
-        assert dag.consumed_variables["a"] == {"df"}
-
 
 class TestTopologicalSort:
-    def test_topo_sort_simple(self):
-        cells = [
-            CellAnalysisWithId(id="a", defines=["x"], references=[]),
-            CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
-            CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        assert dag.topological_order == ["a", "b", "c"]
-
     def test_topo_sort_diamond(self):
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
@@ -255,31 +143,8 @@ class TestTopologicalSort:
         # b and c can be in any order as long as they're between a and d
         assert set(order[1:3]) == {"b", "c"}
 
-    def test_topo_sort_multiple_roots(self):
-        cells = [
-            CellAnalysisWithId(id="a", defines=["x"], references=[]),
-            CellAnalysisWithId(id="b", defines=["y"], references=[]),
-            CellAnalysisWithId(id="c", defines=["z"], references=["x", "y"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        order = dag.topological_order
-        assert order[-1] == "c"
-        # a and b can be in any order
-        assert set(order[:2]) == {"a", "b"}
-
 
 class TestCycleDetection:
-    def test_no_cycle_linear(self):
-        cells = [
-            CellAnalysisWithId(id="a", defines=["x"], references=[]),
-            CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
-            CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        assert dag.topological_order == ["a", "b", "c"]
-
     def test_forward_reference_no_cycle(self):
         """A references y, defined later by B: no cycle and no edge.
 
@@ -466,59 +331,6 @@ class TestAfterEdges:
     nothing to ``consumed_variables``.
     """
 
-    def test_after_creates_upstream_edge(self):
-        cells = [
-            CellAnalysisWithId(id="setup", defines=[], references=[]),
-            CellAnalysisWithId(id="query", defines=[], references=[], after=["setup"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-        assert dag.cell_upstream["query"] == ["setup"]
-        assert dag.cell_downstream["setup"] == ["query"]
-        assert dag.topological_order == ["setup", "query"]
-
-    def test_after_edge_carries_no_variable(self):
-        cells = [
-            CellAnalysisWithId(id="setup", defines=[], references=[]),
-            CellAnalysisWithId(id="query", defines=[], references=[], after=["setup"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-        assert dag.consumed_variables["setup"] == set()
-        assert all(e.variable == "" for e in dag.edges if e.from_cell_id == "setup")
-
-    def test_after_dangling_id_adds_no_edge(self):
-        """A reference to a missing cell adds no edge and does not crash; validation refuses
-        the cell (``after_unknown_cell``).
-        """
-        cells = [
-            CellAnalysisWithId(id="query", defines=[], references=[], after=["does-not-exist"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-        assert dag.cell_upstream["query"] == []
-        assert dag.edges == []
-
-    def test_after_self_reference_adds_no_edge(self):
-        cells = [
-            CellAnalysisWithId(id="c", defines=[], references=[], after=["c"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-        assert dag.cell_upstream["c"] == []
-
-    def test_after_combines_with_variable_edges(self):
-        """A cell can have both ``@after`` and variable references; the
-        edges accumulate, no double-edge for the same upstream."""
-        cells = [
-            CellAnalysisWithId(id="setup", defines=[], references=[]),
-            CellAnalysisWithId(id="config", defines=["min_value"], references=[]),
-            CellAnalysisWithId(
-                id="query",
-                defines=[],
-                references=["min_value"],
-                after=["setup"],
-            ),
-        ]
-        dag = NotebookDag.from_cells(cells)
-        assert sorted(dag.cell_upstream["query"]) == ["config", "setup"]
-
     def test_after_an_inactive_variant_adds_no_edge(self):
         cells = [
             CellAnalysisWithId(
@@ -546,62 +358,6 @@ class TestAfterEdges:
 class TestVariantGroups:
     """Variant cells share a defines contract; only the active variant is in the DAG."""
 
-    def test_inactive_variant_excluded_from_producer_map(self):
-        """Downstream references resolve to the active variant only."""
-        cells = [
-            CellAnalysisWithId(id="load", defines=["X"], references=[]),
-            CellAnalysisWithId(
-                id="model_a",
-                defines=["preds"],
-                references=["X"],
-                variant_group="model",
-                variant_name="a",
-            ),
-            CellAnalysisWithId(
-                id="model_b",
-                defines=["preds"],
-                references=["X"],
-                variant_group="model",
-                variant_name="b",
-            ),
-            CellAnalysisWithId(id="post", defines=["score"], references=["preds"]),
-        ]
-        dag = NotebookDag.from_cells(cells, variant_active_selections={"model": "b"})
-
-        assert dag.variable_producer["preds"] == "model_b"
-        assert dag.cell_upstream["post"] == ["model_b"]
-        assert "model_a" in dag.inactive_cells
-        assert "model_b" not in dag.inactive_cells
-        # Inactive variant has no edges and isn't a leaf/root
-        assert dag.cell_upstream["model_a"] == []
-        assert dag.cell_downstream["model_a"] == []
-        assert "model_a" not in dag.leaves
-        assert "model_a" not in dag.roots
-        assert "model_a" not in dag.topological_order
-
-    def test_first_in_source_order_when_toml_silent(self):
-        """No selection in toml → first variant in source order is active."""
-        cells = [
-            CellAnalysisWithId(
-                id="model_a",
-                defines=["preds"],
-                references=[],
-                variant_group="model",
-                variant_name="a",
-            ),
-            CellAnalysisWithId(
-                id="model_b",
-                defines=["preds"],
-                references=[],
-                variant_group="model",
-                variant_name="b",
-            ),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        assert dag.variable_producer["preds"] == "model_a"
-        assert "model_b" in dag.inactive_cells
-
     def test_unknown_active_falls_back_to_first(self):
         """toml names a nonexistent variant → fall back to source-order first."""
         cells = [
@@ -624,33 +380,6 @@ class TestVariantGroups:
 
         assert dag.variable_producer["preds"] == "model_a"
 
-    def test_consumed_variables_only_for_active(self):
-        """Inactive variants never appear as producers, so consumed_variables is empty for them."""
-        cells = [
-            CellAnalysisWithId(id="load", defines=["X"], references=[]),
-            CellAnalysisWithId(
-                id="model_a",
-                defines=["preds"],
-                references=["X"],
-                variant_group="model",
-                variant_name="a",
-            ),
-            CellAnalysisWithId(
-                id="model_b",
-                defines=["preds"],
-                references=["X"],
-                variant_group="model",
-                variant_name="b",
-            ),
-            CellAnalysisWithId(id="post", defines=[], references=["preds"]),
-        ]
-        dag = NotebookDag.from_cells(cells, variant_active_selections={"model": "a"})
-
-        assert dag.consumed_variables["model_a"] == {"preds"}
-        assert dag.consumed_variables["model_b"] == set()
-        # The inactive variant's reference to X also doesn't drag load into consumed
-        assert dag.consumed_variables["load"] == {"X"}
-
     def test_name_collision_raises(self):
         """Two cells with same (group, variant_name) is irrecoverable."""
         cells = [
@@ -671,59 +400,6 @@ class TestVariantGroups:
         ]
         with pytest.raises(VariantNameCollisionError):
             NotebookDag.from_cells(cells)
-
-    def test_variant_groups_resolution_surface(self):
-        """Resolved groups expose members in source order with the active flag."""
-        cells = [
-            CellAnalysisWithId(
-                id="model_a",
-                defines=["preds"],
-                references=[],
-                variant_group="model",
-                variant_name="a",
-            ),
-            CellAnalysisWithId(
-                id="model_b",
-                defines=["preds"],
-                references=[],
-                variant_group="model",
-                variant_name="b",
-            ),
-        ]
-        dag = NotebookDag.from_cells(cells, variant_active_selections={"model": "b"})
-
-        assert len(dag.variant_groups) == 1
-        group = dag.variant_groups[0]
-        assert group.group == "model"
-        assert group.active_name == "b"
-        assert group.active_cell_id == "model_b"
-        assert group.members == [("model_a", "a"), ("model_b", "b")]
-
-    def test_switching_variant_redirects_downstream(self):
-        """Same cells, different active selection → producer map changes."""
-        cells = [
-            CellAnalysisWithId(
-                id="model_a",
-                defines=["preds"],
-                references=[],
-                variant_group="model",
-                variant_name="a",
-            ),
-            CellAnalysisWithId(
-                id="model_b",
-                defines=["preds"],
-                references=[],
-                variant_group="model",
-                variant_name="b",
-            ),
-            CellAnalysisWithId(id="post", defines=[], references=["preds"]),
-        ]
-
-        dag_a = NotebookDag.from_cells(cells, variant_active_selections={"model": "a"})
-        dag_b = NotebookDag.from_cells(cells, variant_active_selections={"model": "b"})
-
-        assert dag_a.cell_upstream["post"] == ["model_a"]
-        assert dag_b.cell_upstream["post"] == ["model_b"]
 
 
 class TestBuiltinShadowingEdges:

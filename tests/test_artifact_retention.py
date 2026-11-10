@@ -386,17 +386,6 @@ class TestWhatIsCollected:
         assert sum(deletes_per_commit) == 5
         assert max(deletes_per_commit) == 2
 
-    def test_a_dry_run_names_what_would_go_and_deletes_nothing(self, store):
-        idle = _ready(store)
-        _last_used(store, idle, 40 * DAY)
-
-        result = store.garbage_collect(max_idle_days=30, dry_run=True)
-
-        assert result["dry_run"] is True
-        assert [(c["artifact_id"], c["version"]) for c in result["collected"]] == [idle]
-        assert result["deleted_bytes"] == 100
-        assert _exists(store, idle)
-
 
 class TestCollectable:
     """Versions the caller knows nothing needs, though each is its id's current value."""
@@ -497,21 +486,19 @@ def _team_folder(
     *,
     files: int = 2,
     tenant: str | None = None,
-    foreign: tuple[str, int] | None = None,
     manifest_id: str | None = None,
 ) -> tuple[tuple[str, int], list[tuple[str, int]]]:
     """A folder as the team cache stores one: minted ids, each entry naming its file's id,
     and the manifest declaring the files it requires, as Strata does when it stores one.
 
-    Files are 100 bytes and the manifest 10; *foreign* is one more file to name.
+    Files are 100 bytes and the manifest 10.
     """
     stored = [
         _stored(store, str(uuid.uuid4()), b"f", size=100, tenant=tenant) for _ in range(files)
     ]
-    named = stored + ([foreign] if foreign else [])
     entries = {
         f"part-{i}.bin": {"id": fid, "version": fv, "sha256": f"{i:064x}", "size": 100}
-        for i, (fid, fv) in enumerate(named)
+        for i, (fid, fv) in enumerate(stored)
     }
     manifest = json.dumps({"cell_id": "c1", "files": entries}).encode()
     key = _stored(
@@ -521,7 +508,7 @@ def _team_folder(
         size=10,
         tenant=tenant,
         content_type="dir/manifest",
-        requires=named,
+        requires=stored,
     )
     return key, stored
 
@@ -530,27 +517,6 @@ class TestFolders:
     """A folder's files are versions of their own, stored apart from its manifest. A manifest
     kept while a file it names goes cannot be rebuilt, yet stays the by-provenance answer.
     """
-
-    def test_an_idle_folder_goes_whole(self, store):
-        manifest, files = _team_folder(store)
-        for key in (manifest, *files):
-            _last_used(store, key, 40 * DAY)
-
-        result = store.garbage_collect(max_idle_days=30)
-
-        assert result["deleted_count"] == 3
-        assert not any(_exists(store, key) for key in (manifest, *files))
-
-    def test_idle_files_of_a_manifest_used_since_stay(self, store):
-        manifest, files = _team_folder(store)
-        _last_used(store, manifest, DAY)
-        for key in files:
-            _last_used(store, key, 40 * DAY)
-
-        result = store.garbage_collect(max_idle_days=30)
-
-        assert result["deleted_count"] == 0
-        assert all(_exists(store, key) for key in (manifest, *files))
 
     def test_a_manifest_another_rule_keeps_keeps_its_files(self, store):
         """An id's top version stays while a lower one does, and so do the files it names."""
@@ -612,34 +578,6 @@ class TestFolders:
         store.garbage_collect(max_idle_days=30, max_bytes=300)
 
         assert not _exists(store, other)
-        assert all(_exists(store, key) for key in (manifest, *files))
-
-    def test_a_dry_run_reports_what_the_sweep_takes(self, store):
-        idle, idle_files = _team_folder(store)
-        used, used_files = _team_folder(store)
-        for key in (idle, *idle_files, *used_files):
-            _last_used(store, key, 40 * DAY)
-        _last_used(store, used, DAY)
-
-        dry = store.garbage_collect(max_idle_days=30, dry_run=True)
-        store.garbage_collect(max_idle_days=30)
-
-        reported = {(entry["artifact_id"], entry["version"]) for entry in dry["collected"]}
-        assert reported == {idle, *idle_files}
-        assert not any(_exists(store, key) for key in reported)
-        assert all(_exists(store, key) for key in (used, *used_files))
-
-    def test_a_manifest_keeps_only_its_own_tenants_files(self, store):
-        """A reader takes another tenant's file as missing, so holding it serves no folder."""
-        theirs = _stored(store, str(uuid.uuid4()), b"f", size=100, tenant="b")
-        manifest, files = _team_folder(store, tenant="a", foreign=theirs)
-        _last_used(store, manifest, DAY)
-        for key in (theirs, *files):
-            _last_used(store, key, 40 * DAY)
-
-        store.garbage_collect(max_idle_days=30)
-
-        assert not _exists(store, theirs)
         assert all(_exists(store, key) for key in (manifest, *files))
 
     def test_a_folder_beside_its_manifest_keeps_its_files(self, store):

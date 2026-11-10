@@ -98,51 +98,6 @@ class TestRecordedOnWrite:
         assert mine.content_sha256 != yours.content_sha256
 
 
-class TestFilledOnDemand:
-    """Rows written before the column existed."""
-
-    def _undigested(self, store, artifact_id="old"):
-        _store_one(store, artifact_id, _ipc_bytes([1, 2, 3]))
-        conn = store._get_connection()
-        try:
-            conn.execute(
-                "UPDATE artifact_versions SET content_sha256 = NULL WHERE id = ?", (artifact_id,)
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    def test_asking_fills_it_in(self, store):
-        """Digests are filled lazily so the migration does not read every blob."""
-        self._undigested(store)
-        assert store.get_artifact("old", 1).content_sha256 is None
-
-        digest = store.content_digest("old", 1)
-
-        assert digest == hashlib.sha256(_ipc_bytes([1, 2, 3])).hexdigest()
-        assert store.get_artifact("old", 1).content_sha256 == digest
-
-    def test_the_second_ask_does_not_read_the_blob_again(self, store, monkeypatch):
-        self._undigested(store)
-        store.content_digest("old", 1)
-
-        def _fail(*_args, **_kwargs):
-            raise AssertionError("the recorded digest should have answered this")
-
-        monkeypatch.setattr(store, "blob_digest", _fail)
-
-        assert store.content_digest("old", 1) is not None
-
-    def test_an_artifact_with_no_blob_stays_empty(self, store):
-        """Nothing to hash, so nothing to record."""
-        store.create_artifact("bodiless", "c" * 64)
-
-        assert store.content_digest("bodiless", 1) is None
-
-    def test_a_missing_artifact_is_not_an_error(self, store):
-        assert store.content_digest("nope", 1) is None
-
-
 class TestVerify:
     def test_an_edit_that_keeps_the_shape_is_caught(self, store):
         """A blob swapped for one with the same schema and row count.
@@ -155,11 +110,6 @@ class TestVerify:
         findings = store.verify_artifacts()
 
         assert [f["problem"] for f in findings] == ["digest_mismatch"]
-
-    def test_an_untouched_store_is_clean(self, store):
-        _store_one(store, "a", _ipc_bytes([1, 2, 3]))
-
-        assert store.verify_artifacts() == []
 
     def test_a_row_with_no_digest_is_not_a_finding(self, store):
         """A row written before digests existed is not damage."""

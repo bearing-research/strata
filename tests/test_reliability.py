@@ -1,10 +1,9 @@
-"""Build reliability: lease claiming, heartbeat renewal, orphan recovery, idempotent finalize.
+"""Build reliability: lease claiming and renewal, the runner's heartbeat, and naming on dedup.
 
-Also checks finalize-and-name is atomic.
+The ledger's own lease and finalize rules are tested in vestigo.
 """
 
 import asyncio
-import time
 import uuid
 from unittest.mock import patch
 
@@ -51,27 +50,6 @@ def build_store(artifact_dir):
 
 
 @pytest.fixture
-def clock_build_store(artifact_dir):
-    """A build store whose clock the test advances by hand.
-
-    Sleeping past a lease measures timer resolution plus a SQLite round-trip, which flakes on
-    Windows' ~15ms ``time.time`` granularity.
-    """
-    from vestigo.build_store import BuildStore
-
-    # The shared database, not a file of its own: build rows carry a foreign key into
-    # artifact_versions, and the artifacts come from the artifact_store fixture.
-    now = [1000.0]
-    store = BuildStore(artifact_dir / "artifacts.sqlite", clock=lambda: now[0])
-
-    def advance(seconds: float) -> None:
-        now[0] += seconds
-
-    store.advance = advance  # type: ignore[attr-defined]
-    return store
-
-
-@pytest.fixture
 def transform_registry():
     reset_transform_registry()
     registry = TransformRegistry(
@@ -91,37 +69,6 @@ def transform_registry():
 
 
 class TestLeaseBasedClaiming:
-    def test_claim_build_sets_lease_owner(self, build_store, artifact_store):
-        """claim_build sets lease_owner and lease_expires_at."""
-        artifact_id = str(uuid.uuid4())
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash="test-hash",
-            transform_spec=TransformSpec(
-                executor="test_executor@v1",
-                params={},
-                inputs=[],
-            ),
-        )
-        build_id = str(uuid.uuid4())
-        build_store.create_build(
-            build_id=build_id,
-            artifact_id=artifact_id,
-            version=version,
-            executor_ref="test_executor@v1",
-        )
-
-        runner_id = "runner-1"
-        lease_duration = 60.0
-        result = build_store.claim_build(build_id, runner_id, lease_duration)
-
-        assert result is True
-        build = build_store.get_build(build_id)
-        assert build.state == "building"
-        assert build.lease_owner == runner_id
-        assert build.lease_expires_at is not None
-        assert build.lease_expires_at > time.time()
-
     def test_claim_build_fails_if_already_claimed(self, build_store, artifact_store):
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
@@ -150,31 +97,6 @@ class TestLeaseBasedClaiming:
         build = build_store.get_build(build_id)
         assert build.lease_owner == "runner-1"
 
-    def test_renew_lease_extends_expiry(self, clock_build_store, artifact_store):
-        artifact_id = str(uuid.uuid4())
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash="test-hash",
-        )
-        build_id = str(uuid.uuid4())
-        clock_build_store.create_build(
-            build_id=build_id,
-            artifact_id=artifact_id,
-            version=version,
-            executor_ref="test_executor@v1",
-        )
-        clock_build_store.claim_build(build_id, "runner-1", 60.0)
-
-        build = clock_build_store.get_build(build_id)
-        initial_expiry = build.lease_expires_at
-
-        clock_build_store.advance(30.0)
-        result = clock_build_store.renew_lease(build_id, "runner-1", 120.0)
-
-        assert result is True
-        build = clock_build_store.get_build(build_id)
-        assert build.lease_expires_at > initial_expiry
-
     def test_renew_lease_fails_for_wrong_owner(self, build_store, artifact_store):
         """renew_lease fails when the caller is not the lease owner."""
         artifact_id = str(uuid.uuid4())
@@ -195,188 +117,7 @@ class TestLeaseBasedClaiming:
         assert result is False
 
 
-class TestOrphanRecovery:
-    def test_list_expired_leases_finds_orphans(self, clock_build_store, artifact_store):
-        artifact_id = str(uuid.uuid4())
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash="test-hash",
-        )
-        build_id = str(uuid.uuid4())
-        clock_build_store.create_build(
-            build_id=build_id,
-            artifact_id=artifact_id,
-            version=version,
-            executor_ref="test_executor@v1",
-        )
-
-        clock_build_store.claim_build(build_id, "runner-1", 60.0)
-
-        # Inside the lease: nothing is an orphan yet.
-        assert clock_build_store.list_expired_leases() == []
-        clock_build_store.advance(59.0)
-        assert clock_build_store.list_expired_leases() == []
-
-        # Past it: the build is reclaimable.
-        clock_build_store.advance(2.0)
-        expired = clock_build_store.list_expired_leases()
-        assert len(expired) == 1
-        assert expired[0].build_id == build_id
-
-    def test_reclaim_expired_build(self, clock_build_store, artifact_store):
-        artifact_id = str(uuid.uuid4())
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash="test-hash",
-        )
-        build_id = str(uuid.uuid4())
-        clock_build_store.create_build(
-            build_id=build_id,
-            artifact_id=artifact_id,
-            version=version,
-            executor_ref="test_executor@v1",
-        )
-        clock_build_store.claim_build(build_id, "runner-1", 60.0)
-
-        clock_build_store.advance(61.0)
-
-        result = clock_build_store.reclaim_expired_build(build_id, "runner-2", 60.0)
-        assert result is True
-
-        # New owner, with a lease that runs from the reclaim.
-        build = clock_build_store.get_build(build_id)
-        assert build.lease_owner == "runner-2"
-        assert build.lease_expires_at == pytest.approx(1000.0 + 61.0 + 60.0)
-
-    def test_reclaim_fails_for_non_expired_lease(self, build_store, artifact_store):
-        artifact_id = str(uuid.uuid4())
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash="test-hash",
-        )
-        build_id = str(uuid.uuid4())
-        build_store.create_build(
-            build_id=build_id,
-            artifact_id=artifact_id,
-            version=version,
-            executor_ref="test_executor@v1",
-        )
-        build_store.claim_build(build_id, "runner-1", 60.0)
-
-        # Lease not expired yet.
-        result = build_store.reclaim_expired_build(build_id, "runner-2", 60.0)
-        assert result is False
-
-        build = build_store.get_build(build_id)
-        assert build.lease_owner == "runner-1"
-
-
-class TestIdempotentFinalize:
-    def test_finalize_same_artifact_twice_is_idempotent(self, artifact_store):
-        artifact_id = str(uuid.uuid4())
-        provenance_hash = f"hash-{uuid.uuid4()}"
-
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash=provenance_hash,
-            tenant="team-a",
-        )
-
-        result1 = artifact_store.finalize_artifact(
-            artifact_id=artifact_id,
-            version=version,
-            schema_json='{"type": "struct"}',
-            row_count=100,
-            byte_size=1000,
-        )
-        assert result1 is not None
-        assert result1.state == "ready"
-
-        result2 = artifact_store.finalize_artifact(
-            artifact_id=artifact_id,
-            version=version,
-            schema_json='{"type": "struct"}',
-            row_count=100,
-            byte_size=1000,
-        )
-        assert result2 is not None
-        assert result2.id == result1.id
-        assert result2.version == result1.version
-
-    def test_duplicate_provenance_returns_existing(self, artifact_store):
-        """An existing (tenant, provenance_hash) returns the existing artifact."""
-        provenance_hash = f"hash-{uuid.uuid4()}"
-        tenant = "team-a"
-
-        artifact1_id = str(uuid.uuid4())
-        version1 = artifact_store.create_artifact(
-            artifact_id=artifact1_id,
-            provenance_hash=provenance_hash,
-            tenant=tenant,
-        )
-        result1 = artifact_store.finalize_artifact(
-            artifact_id=artifact1_id,
-            version=version1,
-            schema_json='{"type": "struct"}',
-            row_count=100,
-            byte_size=1000,
-        )
-        assert result1.state == "ready"
-
-        artifact2_id = str(uuid.uuid4())
-        version2 = artifact_store.create_artifact(
-            artifact_id=artifact2_id,
-            provenance_hash=provenance_hash,
-            tenant=tenant,
-        )
-
-        result2 = artifact_store.finalize_artifact(
-            artifact_id=artifact2_id,
-            version=version2,
-            schema_json='{"type": "struct"}',
-            row_count=100,
-            byte_size=1000,
-        )
-        assert result2 is not None
-        assert result2.id == artifact1_id  # Returns the first artifact
-        assert result2.version == version1
-
-        # The second artifact is overtaken, not failed: it finished.
-        artifact2 = artifact_store.get_artifact(artifact2_id, version2)
-        assert artifact2.state == "superseded"
-
-
 class TestAtomicFinalizeAndName:
-    def test_finalize_and_set_name_atomic(self, artifact_store):
-        artifact_id = str(uuid.uuid4())
-        provenance_hash = f"hash-{uuid.uuid4()}"
-        tenant = "team-a"
-        name = "my-report"
-
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash=provenance_hash,
-            tenant=tenant,
-        )
-
-        result = artifact_store.finalize_and_set_name(
-            artifact_id=artifact_id,
-            version=version,
-            schema_json='{"type": "struct"}',
-            row_count=100,
-            byte_size=1000,
-            name=name,
-            tenant=tenant,
-        )
-
-        assert result is not None
-        assert result.state == "ready"
-
-        resolved = artifact_store.resolve_name(name, tenant=tenant)
-        assert resolved is not None
-        assert resolved.id == artifact_id
-        assert resolved.version == version
-
     def test_finalize_and_set_name_points_to_existing_on_duplicate(self, artifact_store):
         """On duplicate provenance the name points to the existing artifact."""
         provenance_hash = f"hash-{uuid.uuid4()}"

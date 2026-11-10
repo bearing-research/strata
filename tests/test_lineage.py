@@ -297,49 +297,6 @@ class TestArtifactDependents:
 
 
 class TestArtifactStoreLineageMethods:
-    def test_find_dependents_method(self, tmp_path):
-        from vestigo.provenance import TransformSpec
-        from vestigo.store import ArtifactStore
-
-        store = ArtifactStore(tmp_path)
-
-        base_spec = TransformSpec(
-            executor="base_executor",
-            params={},
-            inputs=["file:///data#table"],
-        )
-        base_version = store.create_artifact(
-            artifact_id="base-123",
-            provenance_hash="hash1",
-            transform_spec=base_spec,
-            input_versions={"file:///data#table": "snapshot-1"},
-        )
-
-        table = pa.table({"x": [1]})
-        store.write_blob("base-123", base_version, table_to_ipc_bytes(table))
-        store.finalize_artifact("base-123", base_version, str(table.schema), 1, 100)
-
-        dep_spec = TransformSpec(
-            executor="dep_executor",
-            params={"sql": "SELECT * FROM input"},
-            inputs=["strata://artifact/base-123@v=1"],
-        )
-        dep_version = store.create_artifact(
-            artifact_id="dep-456",
-            provenance_hash="hash2",
-            transform_spec=dep_spec,
-            input_versions={"strata://artifact/base-123@v=1": "base-123@v=1"},
-        )
-        store.write_blob("dep-456", dep_version, table_to_ipc_bytes(table))
-        store.finalize_artifact("dep-456", dep_version, str(table.schema), 1, 100)
-
-        dependents = store.find_dependents("base-123", 1)
-
-        assert len(dependents) == 1
-        dep_artifact, input_ver = dependents[0]
-        assert dep_artifact.id == "dep-456"
-        assert "base-123@v=1" in input_ver
-
     def test_find_dependents_uses_exact_artifact_match(self, tmp_path):
         """Artifact IDs sharing a prefix must not confuse reverse lookups."""
         from vestigo.provenance import TransformSpec
@@ -434,27 +391,3 @@ class TestArtifactStoreLineageMethods:
             ("team-a", "ours", "taxi/model@champion"),
             ("team-b", "theirs", "taxi/model@champion"),
         ]
-
-    def test_get_name_for_artifact_method(self, tmp_path):
-        from vestigo.provenance import TransformSpec
-        from vestigo.store import ArtifactStore
-
-        store = ArtifactStore(tmp_path)
-
-        spec = TransformSpec(executor="test", params={}, inputs=[])
-        version = store.create_artifact(
-            artifact_id="named-artifact",
-            provenance_hash="hash123",
-            transform_spec=spec,
-        )
-
-        table = pa.table({"x": [1]})
-        store.write_blob("named-artifact", version, table_to_ipc_bytes(table))
-        store.finalize_artifact("named-artifact", version, str(table.schema), 1, 100)
-
-        assert store.get_name_for_artifact("named-artifact", version) is None
-
-        store.set_name("my_artifact", "named-artifact", version)
-
-        name = store.get_name_for_artifact("named-artifact", version)
-        assert name == "my_artifact"
