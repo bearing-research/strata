@@ -3893,6 +3893,14 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A local package installed from a path is part of every cell's key.</strong> <code>uv.lock</code>
+  records a path dependency (<code>uv add --editable ../mylib</code>) by its path alone, so an edit
+  to the library served each cell the result computed from the old code. Now an editable
+  package's import roots enter by content, through <code>.strata/hashes.sqlite</code>, and editing
+  the library makes every cell stale with no sync needed; an edit while a cell runs
+  keeps that run's outputs for that run only. One installed without <code>--editable</code> counts
+  by what the last sync installed. Notebooks with such a package run
+  each cell once after the upgrade. (#1499)</li>
 <li><strong>A read-only local mount, and each <code>@each</code> item over one, is keyed by its files'
   content.</strong> Before, it was keyed by each file's size and modification time, so a
   rewrite that kept both (<code>rsync -t</code>, <code>cp -p</code>, an archive extracted again) served the

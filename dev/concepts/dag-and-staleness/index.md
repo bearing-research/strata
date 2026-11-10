@@ -55,7 +55,7 @@ A cell is out of date when no stored result matches its current provenance. This
 
 - Its source code changed
 - An upstream cell's output changed
-- The environment (`uv.lock`, or an `@env` it declares) changed
+- The environment (`uv.lock`, a local package the lock installs from a path, or an `@env` the cell declares) changed
 - A declared outside input moved: a mounted file, an `@table` snapshot, an `@fetch` URL's bytes, an `@dataset` alias
 
 A cell that still has a result and whose upstream moved reads **stale · upstream changed**. A cell you edited after it ran reads **stale · source changed**, and undoing the edit brings it back to **ready**, shown as cached, along with the cells downstream of it. A cell whose environment or declared outside input changed reads **stale · environment changed** or **stale · input changed**, and the cells downstream of it read stale too. When the change goes away, as when `uv.lock` returns to what it was, they read ready again without running. If an input cannot be read at all, or a run's record cannot say what moved, nothing is known to be wrong, so the cell reads **idle**. The `@fetch` and `@dataset` checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the `@table` catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.

@@ -3175,7 +3175,7 @@
 <ul>
 <li>Its source code changed</li>
 <li>An upstream cell's output changed</li>
-<li>The environment (<code>uv.lock</code>, or an <code>@env</code> it declares) changed</li>
+<li>The environment (<code>uv.lock</code>, a local package the lock installs from a path, or an <code>@env</code> the cell declares) changed</li>
 <li>A declared outside input moved: a mounted file, an <code>@table</code> snapshot, an <code>@fetch</code> URL's bytes, an <code>@dataset</code> alias</li>
 </ul>
 <p>A cell that still has a result and whose upstream moved reads <strong>stale · upstream changed</strong>. A cell you edited after it ran reads <strong>stale · source changed</strong>, and undoing the edit brings it back to <strong>ready</strong>, shown as cached, along with the cells downstream of it. A cell whose environment or declared outside input changed reads <strong>stale · environment changed</strong> or <strong>stale · input changed</strong>, and the cells downstream of it read stale too. When the change goes away, as when <code>uv.lock</code> returns to what it was, they read ready again without running. If an input cannot be read at all, or a run's record cannot say what moved, nothing is known to be wrong, so the cell reads <strong>idle</strong>. The <code>@fetch</code> and <code>@dataset</code> checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the <code>@table</code> catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.</p>
