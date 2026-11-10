@@ -49,6 +49,10 @@ _CAPABILITIES = AdapterCapabilities(
 _DUCKDB_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
+# ``PRAGMA database_size`` columns that are the process's, not the file's.
+_MEMORY_COLUMNS = frozenset({"memory_usage", "memory_limit"})
+
+
 class DuckDBAdapter:
     """Native-DBAPI driver adapter for DuckDB (embedded mode)."""
 
@@ -219,6 +223,7 @@ class DuckDBAdapter:
             try:
                 cursor.execute("PRAGMA database_size")
                 rows = cursor.fetchall() or []
+                columns = [column[0] for column in cursor.description or []]
             except Exception:  # noqa: BLE001
                 # Some DuckDB versions have no database_size row for in-memory connections.
                 return FreshnessToken(
@@ -232,11 +237,13 @@ class DuckDBAdapter:
                 is_session_only=True,
             )
 
-        # Columns vary across DuckDB versions; hash the whole row, robust to additive changes.
+        # Columns vary across DuckDB versions; hash the whole row, robust to additive changes,
+        # but its memory: another connection to the file in this process moves it.
+        kept = [i for i, name in enumerate(columns) if name not in _MEMORY_COLUMNS]
         h.update(b"database_size:")
         for row in sorted(rows, key=lambda r: str(r[0]) if r else ""):
-            for cell in row:
-                h.update(str(cell).encode())
+            for i in kept if columns else range(len(row)):
+                h.update(str(row[i]).encode())
                 h.update(b"\x00")
             h.update(b"\x00")
         return FreshnessToken(value=h.digest())

@@ -46,6 +46,7 @@ from strata.notebook.sql.lake import (
     lake_options,
     local_database_problem,
     locate_tables,
+    moved_mount,
     pin_snapshots,
     resolve_lake,
     snapshot_problem,
@@ -254,6 +255,8 @@ async def execute_sql_cell(
     # ---- probes (optional) -----------------------------------------
     freshness = None
     schema_fp = None
+    # What the probes gave, to compare after the query; a pinned snapshot cannot change.
+    probes: tuple[Any, Any] | None = None
     pin: SnapshotPin | None = None
     if pinned_lake is not None:
         # The snapshot ids are the state; an Iceberg snapshot fixes its schema too.
@@ -280,6 +283,7 @@ async def execute_sql_cell(
             )
         except Exception as exc:  # noqa: BLE001
             return _error_result(f"probe failed: {exc}", start_time)
+        probes = (freshness, schema_fp)
         if policy.snapshot_required and (freshness is None or not freshness.is_snapshot):
             return _error_result(
                 "@cache snapshot requires a durable snapshot ID; "
@@ -341,10 +345,28 @@ async def execute_sql_cell(
             start_time,
         )
 
+    # The query read the live database and mounts, after the key was taken from them. A
+    # result keyed on its rows, or never looked up, needs no check.
+    moved = (
+        None
+        if runs_every_time or annotations.nocache
+        else await asyncio.to_thread(
+            _moved_after_query,
+            adapter,
+            runtime_spec,
+            analysis.tables,
+            policy,
+            session.path / ".strata" / DIGESTS_FILE,
+            probes,
+            lake,
+        )
+    )
+
     blob = _serialize_arrow_ipc(table)
-    if runs_every_time:
-        # The hash can't see the unnamed table change, so fold in the rows:
-        # consumers re-run exactly when the data changed.
+    if runs_every_time or moved is not None:
+        # The hash can't see the unnamed table change, or the change during the query, so
+        # fold in the rows: no cache check finds them, and consumers re-run exactly when
+        # the data changed.
         provenance_hash = derive_subkey(
             provenance_hash, f"content={hashlib.sha256(blob).hexdigest()}"
         )
@@ -389,7 +411,7 @@ async def execute_sql_cell(
             "display_outputs": [display_output],
             "display_output": display_output,
             "stdout": "",
-            "stderr": "",
+            "stderr": f"{moved}; its result is not cached.\n" if moved is not None else "",
             "error": None,
             "cache_hit": False,
             "duration_ms": int(duration_ms),
@@ -1142,6 +1164,33 @@ def _run_probes(
     finally:
         _safely_close(probe_conn)
     return freshness, schema_fp
+
+
+def _moved_after_query(
+    adapter: DriverAdapter,
+    spec: ConnectionSpec,
+    tables: list[Any],
+    policy: Any,
+    digests_path: Path,
+    probes: tuple[Any, Any] | None,
+    lake: Lake | None,
+) -> str | None:
+    """Why the query's result is not what its key describes, or ``None``: the database
+    changed since the run probed it (*probes* is what the probes gave then), or cannot be
+    probed again, or a mount of its lake changed or cannot be listed again."""
+    if probes is not None:
+        try:
+            now = _run_probes(adapter, spec, tables, policy, digests_path)
+        except Exception as exc:  # noqa: BLE001
+            return f"the database of connection {spec.name!r} could not be probed again ({exc})"
+        if now != probes:
+            return f"the database of connection {spec.name!r} changed while the query ran"
+    if lake is None:
+        return None
+    try:
+        return moved_mount(lake)
+    except Exception as exc:  # noqa: BLE001
+        return f"the connection's mounts could not be checked again ({exc})"
 
 
 def _previous_pin(artifact_mgr: Any, canonical_id: str, basis: str) -> SnapshotPin | None:

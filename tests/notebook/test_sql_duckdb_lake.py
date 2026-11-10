@@ -1451,3 +1451,59 @@ class TestWhatCountsAsAReadStatement:
             "-- @sql connection=db write=true\nINSERT INTO t VALUES (1)\n", "sql"
         )
         assert annotation.sql is not None and annotation.sql.write is True
+
+
+@pytest.mark.asyncio
+async def test_a_mount_written_while_the_query_ran_is_never_served_after_it_is_put_back(
+    tmp_path, monkeypatch
+):
+    from strata.notebook.sql import cell_executor
+
+    _write_parquet(tmp_path / "raw" / "2026" / "a.parquet", [1, 2])
+    added = tmp_path / "raw" / "2026" / "b.parquet"
+    nb_dir = _notebook(
+        tmp_path,
+        {"c1": "-- @sql connection=lake\n-- @cache forever\nSELECT sum(k) AS total FROM raw\n"},
+        'driver = "duckdb"\npath = ":memory:"\nmounts = ["raw"]',
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    query = cell_executor._execute_query
+
+    def write_then_query(*args: Any, **kwargs: Any) -> Any:
+        if not (tmp_path / "written").exists():
+            (tmp_path / "written").touch()
+            _write_parquet(added, [10])
+        return query(*args, **kwargs)
+
+    monkeypatch.setattr(cell_executor, "_execute_query", write_then_query)
+
+    moved = await _run(nb_dir, session, "c1")
+
+    assert moved.success, moved.error
+    assert _rows(session, moved.artifact_uri) == [{"total": 13}]
+    assert "mount 'raw' changed while the query ran" in moved.stderr
+    # Back to the files the key was taken from: a hit would serve the total with b.
+    added.unlink()
+    again = await _run(nb_dir, session, "c1")
+    assert again.success, again.error
+    assert again.cache_hit is False
+    assert _rows(session, again.artifact_uri) == [{"total": 3}]
+
+
+def test_a_mount_that_cannot_be_listed_again_is_not_blamed_for_changing(monkeypatch):
+    from strata.notebook import mounts, nonce
+    from strata.notebook.sql.lake import Lake, moved_mount
+
+    raw = MountSpec(name="raw", uri="s3://bucket/raw")
+    lake = Lake(spec=ConnectionSpec(name="lake", driver="duckdb"), mount_resolver=object())
+    lake.mounts = [(raw, "raw:s3://bucket/raw:abc")]
+    monkeypatch.setattr(
+        mounts,
+        "mount_fingerprint_sync",
+        lambda _resolver, mount: f"{mount.name}:unresolved:{nonce.unresolved_nonce()}",
+    )
+
+    assert moved_mount(lake) == "mount 'raw' could not be listed again"
+    # Unlisted when the key was taken: that key is one no later run makes.
+    lake.mounts = [(raw, f"raw:unresolved:{nonce.unresolved_nonce()}")]
+    assert moved_mount(lake) is None

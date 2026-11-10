@@ -1514,3 +1514,112 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         from strata.notebook.models import CellStatus
 
         assert reopened.compute_staleness()["c1"].status != CellStatus.READY
+
+
+def _committing_during_the_query(monkeypatch: pytest.MonkeyPatch, db_path: Path) -> None:
+    """Another process commits to *db_path* once, while the query runs."""
+    from strata.notebook.sql import cell_executor
+
+    query = cell_executor._execute_query
+    done = []
+
+    def commit_then_query(*args: Any, **kwargs: Any) -> Any:
+        if not done:
+            done.append(True)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("UPDATE events SET value = 11 WHERE id = 1")
+                conn.commit()
+        return query(*args, **kwargs)
+
+    monkeypatch.setattr(cell_executor, "_execute_query", commit_then_query)
+
+
+@pytest.mark.asyncio
+async def test_a_database_written_while_the_query_ran_is_never_served_after_it_is_put_back(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    original = tmp_path / "original.db"
+    original.write_bytes(db_path.read_bytes())
+    nb_dir = _build_notebook_with_sql_cell(
+        tmp_path,
+        db_path=db_path,
+        cell_source="-- @sql connection=db\nSELECT value FROM events WHERE id = 1\n",
+    )
+    session = _make_session(nb_dir)
+    src = _read_cell(nb_dir, "c1")
+    _committing_during_the_query(monkeypatch, db_path)
+
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    moved = await execute_sql_cell(session, "c1", src)
+
+    assert moved["success"], moved.get("error")
+    assert "the database of connection 'db' changed while the query ran" in moved["stderr"]
+    # Back to the bytes the key was taken from: a hit would serve the committed row.
+    db_path.write_bytes(original.read_bytes())
+    again = await execute_sql_cell(session, "c1", src)
+    assert again["success"], again.get("error")
+    assert again["cache_hit"] is False
+    assert again["stderr"] == ""
+    assert _load_artifact_as_arrow(session, again["artifact_uri"]).to_pylist() == [{"value": 10}]
+    assert (await execute_sql_cell(session, "c1", src))["cache_hit"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_query_whose_database_cannot_be_probed_again_is_not_cached(tmp_path, monkeypatch):
+    from strata.notebook.sql import cell_executor
+
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    nb_dir = _build_notebook_with_sql_cell(
+        tmp_path, db_path=db_path, cell_source="-- @sql connection=db\nSELECT * FROM events\n"
+    )
+    session = _make_session(nb_dir)
+    src = _read_cell(nb_dir, "c1")
+    probes = cell_executor._run_probes
+    calls = []
+
+    def second_fails(*args: Any, **kwargs: Any) -> Any:
+        calls.append(True)
+        if len(calls) == 2:
+            raise OSError("gone")
+        return probes(*args, **kwargs)
+
+    monkeypatch.setattr(cell_executor, "_run_probes", second_fails)
+
+    first = await cell_executor.execute_sql_cell(session, "c1", src)
+
+    assert first["success"], first.get("error")
+    assert "could not be probed again (gone)" in first["stderr"]
+    assert (await cell_executor.execute_sql_cell(session, "c1", src))["cache_hit"] is False
+
+
+@pytest.mark.parametrize(
+    "cell_source",
+    [
+        "-- @sql connection=db\n-- @nocache\nSELECT * FROM events\n",
+        "-- @sql connection=db\nSELECT * FROM events\n",
+    ],
+    ids=["nocache", "named-at-run-time"],
+)
+@pytest.mark.asyncio
+async def test_a_result_no_cache_check_finds_is_not_checked_after_the_query(
+    tmp_path, monkeypatch, cell_source
+):
+    from strata.notebook.sql import cell_executor
+
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=cell_source)
+    session = _make_session(nb_dir)
+    if "nocache" not in cell_source:
+        _with_unresolved_table(monkeypatch)
+    monkeypatch.setattr(
+        cell_executor, "_moved_after_query", lambda *_a: pytest.fail("checked after the query")
+    )
+
+    result = await cell_executor.execute_sql_cell(session, "c1", _read_cell(nb_dir, "c1"))
+
+    assert result["success"], result.get("error")
