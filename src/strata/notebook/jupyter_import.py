@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import tomli_w
+from cellgraph.python import UNPARSEABLE, analyze_cell
 from packaging.requirements import InvalidRequirement, Requirement
 
 from strata.notebook.models import CellLanguage
@@ -251,7 +252,6 @@ def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
     useful than a refused import.
     """
     # Local: these modules import this one transitively through parser test fixtures.
-    from strata.notebook.analyzer import analyze_cell
     from strata.notebook.dag import CellAnalysisWithId, NotebookDag
     from strata.notebook.parser import parse_notebook
 
@@ -266,6 +266,12 @@ def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
         if cell.language != CellLanguage.PYTHON:
             continue
         cell_analysis = analyze_cell(cell.source)
+        if cell_analysis.too_deep:
+            result.warnings.append(
+                f"cell {cell.id[:8]} nests deeper than the analyzer can walk; "
+                "split the expression before running it"
+            )
+            continue
         if cell_analysis.error:
             result.warnings.append(f"cell {cell.id[:8]} fails to analyze: {cell_analysis.error}")
             continue
@@ -622,7 +628,7 @@ def _suppress_last_expression(source: str) -> str:
 
     try:
         tree = ast.parse(body)
-    except SyntaxError:
+    except UNPARSEABLE:
         return source
 
     if not tree.body or not isinstance(tree.body[-1], ast.Expr):
@@ -1054,11 +1060,12 @@ def _google_cloud_path(name: str) -> str:
 def _scan_imports(source: str) -> set[str]:
     """Collect top-level, non-stdlib module names a cell imports.
 
-    Returns an empty set on a syntax error; that surfaces when the cell runs.
+    Returns an empty set when the cell does not parse: a syntax error, or an expression
+    nested past the parser. The openable check reports either.
     """
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except UNPARSEABLE:
         return set()
 
     names: set[str] = set()

@@ -1158,6 +1158,21 @@ def test_import_openable_check_flags_cells_that_fail_to_analyze(tmp_path: Path) 
     assert any("fails to analyze" in w for w in result.warnings)
 
 
+@pytest.mark.parametrize("end", ["\n", ";\n"])
+def test_import_flags_a_cell_nested_past_the_parser(tmp_path: Path, end: str) -> None:
+    """A chain of 50,000 additions overflows the parser; the import warns, not crashes.
+
+    A trailing ``;`` takes the display-suppression rewrite, which parses too.
+    """
+    deep = "s = " + " + ".join(['"a"'] * 50_000) + end
+    ipynb = _make_ipynb(tmp_path, [_code_cell("import pandas as pd\n"), _code_cell(deep)])
+    result = import_notebook(ipynb)
+    assert result.code_cells == 2
+    assert any("nests deeper than the analyzer can walk" in w for w in result.warnings)
+    # The other cell's imports are still captured.
+    assert any(d.startswith("pandas") for d in result.captured_deps)
+
+
 def test_import_check_deps_skipped_when_uv_missing(tmp_path: Path, monkeypatch) -> None:
     """``check_deps=True`` records a skip warning if uv isn't on PATH."""
     ipynb = _make_ipynb(tmp_path, [_code_cell("import pandas as pd\n")])

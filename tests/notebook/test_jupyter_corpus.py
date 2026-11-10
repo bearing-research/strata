@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from cellgraph.python import analyze_cell
 
-from strata.notebook.analyzer import analyze_cell
 from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 from strata.notebook.jupyter_import import import_notebook
 from strata.notebook.parser import parse_notebook

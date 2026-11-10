@@ -1,8 +1,8 @@
 """Tests for DAG construction and analysis."""
 
 import pytest
+from cellgraph.python import analyze_cell
 
-from strata.notebook.analyzer import analyze_cell
 from strata.notebook.dag import (
     CellAnalysisWithId,
     DagEdge,
