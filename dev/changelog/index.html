@@ -4185,6 +4185,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A Jupyter import survives a cell Python cannot read.</strong> A cell nested past the parser,
+  such as a chain of tens of thousands of <code>+</code>, made the whole import fail; it now imports
+  with a warning, and the notebook refuses to run that cell until the expression is split.
+  Half an emoji in a cell's JSON (a lone surrogate) failed the import too; it now imports
+  as U+FFFD, with a warning naming the cell. (#1500, #1503)</li>
 <li><strong>A failed cell keeps its traceback through a reload.</strong> A reload or a reopen showed a red
   cell with no reason, and a later sync could wipe the traceback from an open page. The full
   traceback is saved beside the trimmed one, so its section comes back too. (#1455)</li>
