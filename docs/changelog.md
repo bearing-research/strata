@@ -317,6 +317,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A Jupyter import survives a cell Python cannot read.** A cell nested past the parser,
+  such as a chain of tens of thousands of `+`, made the whole import fail; it now imports
+  with a warning, and the notebook refuses to run that cell until the expression is split.
+  Half an emoji in a cell's JSON (a lone surrogate) failed the import too; it now imports
+  as U+FFFD, with a warning naming the cell. (#1500, #1503)
 - **A failed cell keeps its traceback through a reload.** A reload or a reopen showed a red
   cell with no reason, and a later sync could wipe the traceback from an open page. The full
   traceback is saved beside the trimmed one, so its section comes back too. (#1455)
