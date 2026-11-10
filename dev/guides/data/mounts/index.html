@@ -2987,6 +2987,14 @@ filesystem path for <code>file://</code> URIs). Use standard <code>Path</code> o
 joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc. The mount wins over an earlier
 cell that defines the same name, so the cell does not depend on that cell. The
 same holds for the names <code>@table</code>, <code>@fetch</code> and <code>@dataset</code> bind.</p>
+<p><strong>A relative local path is under the notebook's directory.</strong> <code># @mount shared ../shared ro</code>
+mounts the <code>shared</code> folder beside the notebook, wherever the notebook is checked out
+and whatever directory the server started in. The key holds the path as written, so two
+checkouts with the same files key the cell alike, and a team cache serves one's result to
+the other. Links in it are followed, so a notebook directory reached through a link reads
+the folder beside its target. An absolute path, or a <code>file://</code> URI, means that path on the
+server's machine. A mount holding a notebook (<code># @mount repo .. ro</code>) is not keyed by that
+notebook's <code>.strata/</code>, <code>.venv/</code>, <code>work/</code> or renv library, which its runs write.</p>
 <p><strong>A read-only remote mount is copied once per machine.</strong> Each remote file is
 kept once, by URI and version (etag, size and modification time), in the
 machine's mount cache, and the cell's path is a view of the prefix made of hard

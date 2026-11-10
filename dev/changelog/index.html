@@ -3893,6 +3893,16 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A relative local mount path is under the notebook's directory.</strong> <code># @mount shared
+  ../shared ro</code> resolved against the server's working directory, so it named a different
+  folder depending on where the server started, and a SQL cell's DuckDB view read it from
+  there too. Now it is the folder beside the notebook, for Python, R and SQL cells, and
+  the key holds the path as written, so two checkouts of a notebook key the cell alike.
+  <code>strata new --project-mount</code> writes its mount as <code>..</code> for the same reason. A mount
+  holding a notebook is not keyed by that notebook's <code>.strata/</code>, <code>.venv/</code> or <code>work/</code>,
+  which every run writes, and a bare path no longer warns of an unsupported scheme.
+  A relative mount sent to a remote executor is refused before it is sent, as a
+  <code>file://</code> one was. (#1502)</li>
 <li><strong>A local package installed from a path is part of every cell's key.</strong> <code>uv.lock</code>
   records a path dependency (<code>uv add --editable ../mylib</code>) by its path alone, so an edit
   to the library served each cell the result computed from the old code. Now an editable

@@ -3130,6 +3130,15 @@ joining, `.read_text()`, `.iterdir()`, etc. The mount wins over an earlier
 cell that defines the same name, so the cell does not depend on that cell. The
 same holds for the names `@table`, `@fetch` and `@dataset` bind.
 
+**A relative local path is under the notebook's directory.** `# @mount shared ../shared ro`
+mounts the `shared` folder beside the notebook, wherever the notebook is checked out
+and whatever directory the server started in. The key holds the path as written, so two
+checkouts with the same files key the cell alike, and a team cache serves one's result to
+the other. Links in it are followed, so a notebook directory reached through a link reads
+the folder beside its target. An absolute path, or a `file://` URI, means that path on the
+server's machine. A mount holding a notebook (`# @mount repo .. ro`) is not keyed by that
+notebook's `.strata/`, `.venv/`, `work/` or renv library, which its runs write.
+
 **A read-only remote mount is copied once per machine.** Each remote file is
 kept once, by URI and version (etag, size and modification time), in the
 machine's mount cache, and the cell's path is a view of the prefix made of hard
@@ -9828,7 +9837,7 @@ dependencies), and only missing scaffolding is added, so re-running it never
 orphans artifacts or loses settings.
 
 `--project-mount [NAME]` adds a notebook-level **read-only mount of `--parent`**
-(the project directory) as a `Path` variable `NAME` (default `project`) in every
+(the project directory, written as `..` so every checkout keys it alike) as a `Path` variable `NAME` (default `project`) in every
 cell, so cells read project files as `open(project / "file")` without absolute
 paths, even though a cell runs in the notebook's `work/` directory. The mount is **pinned**, so it never gets fingerprinted (no directory
 hashing, and the project's own churn never re-stales cells). This is the
@@ -10141,7 +10150,7 @@ Each mount becomes a `pathlib.Path` variable in the cell namespace. Cells access
 | Key | Type | Description |
 | --- | --- | --- |
 | `name` | string (required) | Identifier - injected as a `Path` variable in the cell. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
-| `uri` | string (required) | `file:///path`, `s3://bucket/prefix`, `gs://bucket/prefix`, `az://container/prefix`. |
+| `uri` | string (required) | `file:///path`, a path (`../data` is relative to the notebook's directory), `s3://bucket/prefix`, `gs://bucket/prefix`, `az://container/prefix`. |
 | `mode` | `"ro"` \| `"rw"` | Default `"ro"`. |
 | `pin` | string \| absent | Pinned version/etag - disables auto-fingerprinting. |
 | `options` | table | Backend storage options passed through to fsspec. Common keys: `anon`, `endpoint_url`, `profile`. On a service-mode server and on a remote worker only a few keys are allowed ([below](#mount-options-on-a-shared-server)). |
