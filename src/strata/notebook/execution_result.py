@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from strata.notebook.immutability import MutationWarning
+from strata.notebook.read_audit import ReadFinding
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,8 @@ class CellExecutionResult:
     artifact_uri: str | None = None
     execution_method: str = "cold"  # cold, warm, cached
     mutation_warnings: list[MutationWarning] = field(default_factory=list)
+    # What the run read that the cell does not declare (``read_audit.report``).
+    read_audit: list[ReadFinding] = field(default_factory=list)
     # Retries the prompt-cell validate-and-retry loop used; 0 on first-try pass or for
     # non-schema cells.
     validation_retries: int = 0

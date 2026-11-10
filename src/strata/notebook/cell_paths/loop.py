@@ -30,6 +30,7 @@ from strata.notebook.harness_user import (
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import CellLanguage, MountSpec, TableWriteSpec
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
+from strata.notebook.read_audit import ReadFinding, merge
 from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 
 if TYPE_CHECKING:
@@ -421,6 +422,7 @@ async def _run_loop(
     combined_stdout = run.stdout
     combined_stderr = run.stderr
     all_mutation_warnings = run.mutation_warnings
+    iteration_audits: list[list[ReadFinding]] = []
     final_display_files: dict[str, bytes] = {}
     context.folder_listings.pop(cell_id, None)
 
@@ -521,6 +523,7 @@ async def _run_loop(
             combined_stdout.append(result.get("stdout", ""))
             combined_stderr.append(result.get("stderr", ""))
             all_mutation_warnings.extend(result.get("mutation_warnings", []))
+            iteration_audits.append(result.get("read_audit") or [])
             final_result = result
 
             if not result.get("success", False):
@@ -910,6 +913,7 @@ async def _run_loop(
         artifact_uri=canonical_uri,
         execution_method="loop",
         mutation_warnings=all_mutation_warnings,
+        read_audit=merge(iteration_audits),
         moved_input=moved,
     )
 

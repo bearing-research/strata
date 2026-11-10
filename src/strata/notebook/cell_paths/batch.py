@@ -46,6 +46,7 @@ from strata.notebook.process_tree import (
     terminate_subprocess_tree,
 )
 from strata.notebook.provenance import safe_filename_stem
+from strata.notebook.read_audit import ReadFinding
 from strata.notebook.table_writes import TableWriteError, write_back_failed
 from strata.notebook.team_store import TeamPull
 
@@ -73,6 +74,7 @@ class BatchCellResult:
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     cache_hit: bool = False
     mutation_warnings: list[MutationWarning] = field(default_factory=list)
+    read_audit: list[ReadFinding] = field(default_factory=list)
     # None when the cell's time is unknown (it never started, or was killed): not 0,
     # which would price its later cache hits at nothing.
     duration_ms: float | None = None
@@ -98,7 +100,7 @@ class BatchContext:
 
     harness_path: Path
     harness_env: Callable[..., dict[str, str] | None]
-    work_dir_fields: Callable[..., dict[str, Any]]
+    harness_fields: Callable[..., dict[str, Any]]
     run_token: Callable[..., Any]
     compute_provenance: Callable[..., Awaitable[_CellProvenance]]
     canonical_output: Callable[..., Any]
@@ -197,7 +199,7 @@ async def run_batch(
             manifest = {
                 "cells": cell_specs,
                 "upstream_inputs": upstream_inputs,
-                **context.work_dir_fields(),
+                **context.harness_fields(),
             }
             manifest["run_token_on_stdin"] = True
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -530,6 +532,7 @@ async def batch_service_loop(
                         outputs=payload.get("outputs") or {},
                         display_outputs=display_outputs,
                         mutation_warnings=payload.get("mutation_warnings") or [],
+                        read_audit=payload.get("read_audit") or [],
                         duration_ms=payload.get("duration_ms"),
                     ),
                 )

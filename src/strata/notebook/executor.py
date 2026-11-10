@@ -124,6 +124,7 @@ from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
 from strata.notebook.env import (
     LocalPackages,
+    audit_scope,
     compute_execution_env_hash,
     local_packages,
     narrow_env_for_provenance,
@@ -2694,7 +2695,7 @@ class CellExecutor:
             "strata_url": self._cell_strata_url(),
             "strata_cell_id": cell_id,
             "strata_promote_url": self._ambient_promote_url(),
-            **self._work_dir_fields(),
+            **self._harness_fields(),
         }
         if loop_config is not None:
             manifest["loop"] = loop_config
@@ -2707,8 +2708,9 @@ class CellExecutor:
             json.dump(manifest, f)
         return manifest_path
 
-    def _work_dir_fields(self) -> dict[str, str]:
-        """Where a local cell runs, its notebook's ``work/``, made and handed over here.
+    def _harness_fields(self) -> dict[str, Any]:
+        """Where a local cell runs, its notebook's ``work/``, made and handed over here, and
+        what its read audit counts as the notebook's environment (``audit_scope``).
 
         Relative: every local harness starts in the notebook's directory, and a relative
         change needs no directory above it to be searchable by the cell's user.
@@ -2718,7 +2720,11 @@ class CellExecutor:
         except LocalExecutionRefused:
             harness_user = None  # the run is refused where the cell would start
         prepare_work_dir(self.session.path, harness_user)
-        return {"work_dir": WORK_DIR, "notebook_dir": str(self.session.path)}
+        return {
+            "work_dir": WORK_DIR,
+            "notebook_dir": str(self.session.path),
+            "audit": audit_scope(self.session.path),
+        }
 
     # ------------------------------------------------------------------
     # Prompt cell execution (LLM path)
@@ -3976,6 +3982,7 @@ class CellExecutor:
             duration_ms=duration_ms,
             execution_method=execution_method,
             mutation_warnings=mutation_warnings,
+            read_audit=result.get("read_audit") or [],
         )
 
     # ------------------------------------------------------------------
@@ -3986,7 +3993,7 @@ class CellExecutor:
         return BatchContext(
             harness_path=self.harness_path,
             harness_env=self._harness_env,
-            work_dir_fields=self._work_dir_fields,
+            harness_fields=self._harness_fields,
             run_token=self._run_token,
             compute_provenance=self._compute_cell_provenance,
             canonical_output=self._canonical_output,
