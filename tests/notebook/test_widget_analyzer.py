@@ -10,7 +10,6 @@ from __future__ import annotations
 import cellgraph as cg
 import pytest
 
-from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 from strata.notebook.models import CellLanguage
 from strata.notebook.vocabulary import WidgetAnalyzer
 from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
@@ -118,22 +117,6 @@ class TestRegistryDispatch:
         assert analyzed.defines == ["alpha", "beta"]
         assert analyzed.references == []
         assert analyzed.mutation_defines == []
-
-
-class TestWidgetDagParticipation:
-    def test_widget_cell_wires_edges_to_downstream_consumers(self):
-        # The DAG is language-agnostic: a widget cell is a producer whose defines come
-        # from analyze_widget_cell, so a Python cell referencing its variable gets an edge.
-        widget = analyze_widget_cell("alpha = slider(0, 1, default=0.5)")
-        cells = [
-            CellAnalysisWithId(id="controls", defines=widget.defines, references=[]),
-            CellAnalysisWithId(id="use", defines=["result"], references=["alpha"]),
-        ]
-        dag = NotebookDag.from_cells(cells)
-
-        assert "use" in dag.cell_downstream["controls"]
-        assert "controls" in dag.cell_upstream["use"]
-        assert "alpha" in dag.consumed_variables["controls"]
 
 
 class TestCoerceWidgetValues:

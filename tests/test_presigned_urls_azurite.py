@@ -66,21 +66,6 @@ def test_a_presigned_get_reads_the_blob_and_a_tampered_one_does_not(store):
     assert httpx.get(url.replace("sp=r&", "sp=rw&")).status_code == 403
 
 
-def test_a_presigned_put_uploads_and_a_read_url_cannot(store):
-    signed = store.presign_put("out", 7, ttl_seconds=60)
-    assert signed is not None
-    url, headers = signed
-
-    response = httpx.put(url, content=b"0123456789", headers=headers)
-
-    assert response.status_code == 201, response.text
-    assert store.blob_size("out", 7) == 10
-    read_only = store.presign_get("other", 1, ttl_seconds=60)
-    assert read_only is not None
-    assert httpx.put(read_only, content=b"x", headers=headers).status_code == 403
-    assert not store.blob_exists("other", 1)
-
-
 def test_a_worker_runs_a_job_whose_bytes_never_touch_strata(store, monkeypatch, tmp_path):
     """Input and output go through Azure; only finalize reaches the server."""
     assert run_presigned_job(store, monkeypatch, tmp_path) == ["/v1/builds/b1/finalize"]

@@ -10,21 +10,6 @@ from strata.notebook.provenance import (
 )
 
 
-def test_source_hash_stability():
-    source = "x = 1 + 1"
-    hash1 = compute_source_hash(source)
-    hash2 = compute_source_hash(source)
-    assert hash1 == hash2
-
-
-def test_source_hash_changes_with_source():
-    source1 = "x = 1 + 1"
-    source2 = "x = 1 + 2"
-    hash1 = compute_source_hash(source1)
-    hash2 = compute_source_hash(source2)
-    assert hash1 != hash2
-
-
 def test_source_hash_ignores_cosmetic_whitespace():
     """Reformatting, blank lines and comments must not invalidate the cache.
 

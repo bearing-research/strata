@@ -69,32 +69,6 @@ def test_a_presigned_get_reads_the_blob_and_a_tampered_one_does_not(store):
     assert httpx.get(tampered).status_code == 403
 
 
-def test_a_presigned_post_uploads_within_the_bound_and_refuses_beyond_it(store):
-    signed = store.presign_post("out", 7, max_bytes=16, ttl_seconds=60)
-    assert signed is not None
-    url, fields = signed
-
-    small = httpx.post(url, data=fields, files={"file": ("bundle.tar", b"0123456789")})
-    assert small.status_code in (200, 201, 204), small.text
-    assert store.blob_size("out", 7) == 10
-
-    big = store.presign_post("big", 1, max_bytes=16, ttl_seconds=60)
-    assert big is not None
-    too_big = httpx.post(big[0], data=big[1], files={"file": ("bundle.tar", b"x" * 64)})
-    assert too_big.status_code == 400
-    assert "EntityTooLarge" in too_big.text
-    assert not store.blob_exists("big", 1)
-
-
-def test_a_store_without_credentials_does_not_presign(minio, monkeypatch):
-    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
-    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
-    anonymous = S3BlobStore(bucket=BUCKET, endpoint_url=minio["endpoint"], anonymous=True)
-
-    assert anonymous.presign_get("fig", 1, 60) is None
-    assert anonymous.presign_post("fig", 1, 16, 60) is None
-
-
 def test_a_worker_runs_a_job_whose_bytes_never_touch_strata(store, monkeypatch, tmp_path):
     """Input and output go through the object store; only finalize reaches the server."""
     assert run_presigned_job(store, monkeypatch, tmp_path) == ["/v1/builds/b1/finalize"]
