@@ -628,7 +628,7 @@ def _suppress_last_expression(source: str) -> str:
 
     try:
         tree = ast.parse(body)
-    except SyntaxError:
+    except UNPARSEABLE:
         return source
 
     if not tree.body or not isinstance(tree.body[-1], ast.Expr):

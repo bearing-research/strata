@@ -1158,9 +1158,13 @@ def test_import_openable_check_flags_cells_that_fail_to_analyze(tmp_path: Path) 
     assert any("fails to analyze" in w for w in result.warnings)
 
 
-def test_import_flags_a_cell_nested_past_the_parser(tmp_path: Path) -> None:
-    """A chain of 50,000 additions overflows the parser; the import warns, not crashes."""
-    deep = "s = " + " + ".join(['"a"'] * 50_000) + "\n"
+@pytest.mark.parametrize("end", ["\n", ";\n"])
+def test_import_flags_a_cell_nested_past_the_parser(tmp_path: Path, end: str) -> None:
+    """A chain of 50,000 additions overflows the parser; the import warns, not crashes.
+
+    A trailing ``;`` takes the display-suppression rewrite, which parses too.
+    """
+    deep = "s = " + " + ".join(['"a"'] * 50_000) + end
     ipynb = _make_ipynb(tmp_path, [_code_cell("import pandas as pd\n"), _code_cell(deep)])
     result = import_notebook(ipynb)
     assert result.code_cells == 2
