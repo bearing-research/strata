@@ -384,7 +384,10 @@ def local_mount_root_problem(uri: str, config: Any, notebook_dir: Any = None) ->
     scheme, path = parse_mount_uri(uri)
     if scheme != "file":
         return None
-    root = Path(os.path.realpath(path or "/"))
+    local = Path(path or "/")
+    if not local.is_absolute() and notebook_dir is not None:
+        local = Path(notebook_dir) / local  # as the mount resolves it
+    root = Path(os.path.realpath(local))
     if len(root.parts) < 3:
         return f"its root {root} is too near the top of the filesystem"
     home = Path(os.path.realpath(Path.home()))
@@ -443,7 +446,13 @@ def _mount_sources(
     confined_config: Any | None = None,
 ) -> list[dict[str, Any]]:
     from strata.notebook.credentials import CredentialError, CredentialResolver
-    from strata.notebook.mounts import MountResolver, mount_fingerprint_sync, resolve_cell_mounts
+    from strata.notebook.mounts import (
+        MountResolver,
+        local_mount_path,
+        mount_fingerprint_sync,
+        parse_mount_uri,
+        resolve_cell_mounts,
+    )
 
     cell = session.notebook_state.get_cell(cell_id)
     declared = {
@@ -457,6 +466,7 @@ def _mount_sources(
         credential_resolver=CredentialResolver.from_config(
             session.lake_config(), env=dict(session.notebook_state.env), notebook=session.path
         ),
+        notebook_dir=session.path,
     )
     sources: list[dict[str, Any]] = []
     for name in sorted(set(names)):
@@ -481,7 +491,10 @@ def _mount_sources(
             raise LakeError(f"mount {name!r} is read-write; a SQL cell reads mounts read-only")
         lake.fingerprints.append(fingerprint)
         lake.mounts.append((mount, fingerprint))
-        sources.append({"name": name, "uri": mount.uri, "storage_options": storage_options})
+        scheme, path = parse_mount_uri(mount.uri)
+        # DuckDB would read a relative path from the server's working directory.
+        uri = str(local_mount_path(path, session.path)) if scheme == "file" else mount.uri
+        sources.append({"name": name, "uri": uri, "storage_options": storage_options})
     lake.mount_resolver = resolver
     return sources
 

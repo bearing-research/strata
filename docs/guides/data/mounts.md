@@ -17,6 +17,12 @@ joining, `.read_text()`, `.iterdir()`, etc. The mount wins over an earlier
 cell that defines the same name, so the cell does not depend on that cell. The
 same holds for the names `@table`, `@fetch` and `@dataset` bind.
 
+**A relative local path is under the notebook's directory.** `# @mount shared ../shared ro`
+mounts the `shared` folder beside the notebook, wherever the notebook is checked out
+and whatever directory the server started in. The key holds the path as written, so two
+checkouts with the same files key the cell alike, and a team cache serves one's result to
+the other. An absolute path, or a `file://` URI, means that path on the server's machine.
+
 **A read-only remote mount is copied once per machine.** Each remote file is
 kept once, by URI and version (etag, size and modification time), in the
 machine's mount cache, and the cell's path is a view of the prefix made of hard

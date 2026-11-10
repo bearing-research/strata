@@ -92,7 +92,7 @@ Each mount becomes a `pathlib.Path` variable in the cell namespace. Cells access
 | Key | Type | Description |
 | --- | --- | --- |
 | `name` | string (required) | Identifier - injected as a `Path` variable in the cell. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
-| `uri` | string (required) | `file:///path`, `s3://bucket/prefix`, `gs://bucket/prefix`, `az://container/prefix`. |
+| `uri` | string (required) | `file:///path`, a path (`../data` is relative to the notebook's directory), `s3://bucket/prefix`, `gs://bucket/prefix`, `az://container/prefix`. |
 | `mode` | `"ro"` \| `"rw"` | Default `"ro"`. |
 | `pin` | string \| absent | Pinned version/etag - disables auto-fingerprinting. |
 | `options` | table | Backend storage options passed through to fsspec. Common keys: `anon`, `endpoint_url`, `profile`. On a service-mode server and on a remote worker only a few keys are allowed ([below](#mount-options-on-a-shared-server)). |

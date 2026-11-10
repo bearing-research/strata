@@ -206,6 +206,21 @@ def _upload_staging(fs: Any, remote_uri: str, rm: ResolvedMount) -> None:
 # --- URI parsing ---
 
 
+def local_mount_path(path: str, notebook_dir: Path | None) -> Path:
+    """Where a local mount's *path* (from :func:`parse_mount_uri`) is.
+
+    A relative one is under the notebook's directory, so a committed ``../data`` means
+    the same folder wherever the notebook is checked out; its key holds the path as
+    written. Without *notebook_dir* there is nothing to resolve it against.
+    """
+    local = Path(path)
+    if local.is_absolute():
+        return local
+    if notebook_dir is None:
+        raise ValueError(f"the relative mount path {path!r} needs the notebook's directory")
+    return notebook_dir / local
+
+
 def parse_mount_uri(uri: str) -> tuple[str, str]:
     """Parse a mount URI into ``(scheme, path)``: ``s3://bucket/p`` gives ``("s3", "bucket/p")``.
 
@@ -257,7 +272,8 @@ for valid keys (s3fs, gcsfs, adlfs). Per-mount ``options`` from
 class MountResolver:
     """Resolves mount URIs to local paths for cell execution.
 
-    Local mounts must exist. Read-only remote mounts are views in ``mount_cache``;
+    Local mounts must exist, and a relative one is under ``notebook_dir``
+    (:func:`local_mount_path`). Read-only remote mounts are views in ``mount_cache``;
     read-write ones are staged under ``cache_dir``, which is the caller's own (per
     notebook or per job). ``credentials`` are per-scheme fsspec storage options.
     """
@@ -268,6 +284,7 @@ class MountResolver:
         credentials: MountCredentials | None = None,
         credential_resolver: CredentialResolver | None = None,
         mount_cache: MountCache | None = None,
+        notebook_dir: Path | None = None,
     ):
         # User-scoped, not a shared /tmp dir that invites cross-user cache poisoning.
         # Real callers always pass cache_dir.
@@ -278,6 +295,7 @@ class MountResolver:
         # instead of reaching the store anonymously.
         self.credential_resolver = credential_resolver or CredentialResolver()
         self.digests_path = self.cache_dir.parent / DIGESTS_FILE
+        self.notebook_dir = notebook_dir
         self._fsspec_available: bool | None = None
 
     def storage_options(self, mount: MountSpec) -> dict[str, Any]:
@@ -321,7 +339,8 @@ class MountResolver:
             scheme, path = parse_mount_uri(mount.uri)
 
             if scheme == "file":
-                resolved[mount.name] = await self._resolve_local(mount, path)
+                local = local_mount_path(path, self.notebook_dir)
+                resolved[mount.name] = await self._resolve_local(mount, str(local))
             else:
                 resolved[mount.name] = await self._resolve_remote(
                     mount,
@@ -654,6 +673,7 @@ class MountFingerprinter:
         digests_path: Path | None = None,
         read_bytes: int | None = None,
         on_progress: HashProgress | None = None,
+        notebook_dir: Path | None = None,
     ) -> str | None:
         """Compute the fingerprint for any mount spec.
 
@@ -675,7 +695,10 @@ class MountFingerprinter:
             if digests_path is None:
                 raise ValueError(f"mount {mount.name}: a local mount needs a digest cache")
             fingerprint = MountFingerprinter.fingerprint_local_sync(
-                Path(path), digests_path, read_bytes=read_bytes, on_progress=on_progress
+                local_mount_path(path, notebook_dir),
+                digests_path,
+                read_bytes=read_bytes,
+                on_progress=on_progress,
             )
             # Not read yet, which is not unavailable: a background job reads it.
             return nonce.unhashed_nonce() if fingerprint is None else fingerprint
@@ -1308,6 +1331,7 @@ def weigh_mount_sync(
             digests_path=resolver.digests_path,
             read_bytes=read_bytes,
             on_progress=on_progress,
+            notebook_dir=resolver.notebook_dir,
         )
         if mount.pin is not None and scheme != "file":
             weight = MountWeight(bytes=None, cached_bytes=None)

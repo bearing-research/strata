@@ -34,6 +34,13 @@ exhaustive commit history.
   (#1381)
 
 ### Changed
+- **A relative local mount path is under the notebook's directory.** `# @mount shared
+  ../shared ro` resolved against the server's working directory, so it named a different
+  folder depending on where the server started, and a SQL cell's DuckDB view read it from
+  there too. Now it is the folder beside the notebook, for Python, R and SQL cells, and
+  the key holds the path as written, so two checkouts of a notebook key the cell alike.
+  A relative mount sent to a remote executor is refused before it is sent, as a
+  `file://` one was. (#1500)
 - **A local package installed from a path is part of every cell's key.** `uv.lock`
   records a path dependency (`uv add --editable ../mylib`) by its path alone, so an edit
   to the library served each cell the result computed from the old code. Now an editable

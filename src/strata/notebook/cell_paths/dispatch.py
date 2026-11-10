@@ -404,7 +404,7 @@ async def dispatch_http(
             )
         input_specs = await anyio.to_thread.run_sync(_pack_folder_inputs, input_specs, output_dir)
     for mount in mount_specs:
-        if mount.uri.startswith("file://"):
+        if parse_mount_uri(mount.uri)[0] == "file":
             raise RuntimeError(
                 f"Remote executor workers do not support file:// mounts: '{mount.name}'"
             )
