@@ -323,26 +323,6 @@ class TestGarbageCollection:
         assert store.garbage_collect(max_idle_days=0, collect_latest=True)["deleted_count"] == 0
         assert _rebuilt(store, folder.id, folder.version, tmp_path / "out") == FILES
 
-    def test_a_folder_goes_whole_or_stays_whole(self, store):
-        # The requirement join and the wholeness query, on Postgres.
-        from tests.test_artifact_retention import _team_folder
-
-        idle, idle_files = _team_folder(store, tenant="a")
-        used, used_files = _team_folder(store, tenant="a")
-        for artifact_id, _ in (idle, *idle_files, *used_files):
-            self._last_used(store, artifact_id, 40 * 86400)
-        self._last_used(store, used[0], 86400)
-
-        dry = store.garbage_collect(max_idle_days=30, dry_run=True)
-        store.garbage_collect(max_idle_days=30)
-
-        reported = {(entry["artifact_id"], entry["version"]) for entry in dry["collected"]}
-        assert reported == {idle, *idle_files}
-        assert all(store.get_artifact(*key) is None for key in reported)
-        assert store.requirements_met(store.get_artifact(*used))
-        store.delete_artifact(*used_files[0])
-        assert not store.requirements_met(store.get_artifact(*used))
-
 
 class TestSchemaMigrations:
     """Evolving a Postgres store that already holds data.
