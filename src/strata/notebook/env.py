@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import tomllib
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
@@ -485,6 +486,106 @@ def _import_roots(site_packages: Path, record: bytes) -> list[Path]:
             if entry and not entry.startswith(("#", "import ", "import\t")):
                 roots.append(site_packages / entry)
     return roots
+
+
+# notebook directory -> (what its lock and site-packages were, its audit scope)
+_audit_scopes: dict[Path, tuple[tuple[tuple[int, int, int], ...], dict[str, Any]]] = {}
+_audit_scopes_lock = threading.Lock()
+
+
+def audit_scope(notebook_dir: Path) -> dict[str, Any]:
+    """What a run's read audit (``read_audit.report``) counts as the notebook's environment.
+
+    ``package_roots``: the import roots of its local path packages, which their key holds
+    (:class:`LocalPackages`). ``site_packages`` and ``unlocked``: the venv's site-packages,
+    and what each dist the lock's runtime closure does not hold installs at its top
+    (``{"rogue": "rogue"}``; a namespace package's one level down, ``google/x``), with
+    ``unlocked_roots`` the folders their ``.pth`` files add. Empty without a lock: then
+    nothing says what is locked. Kept until the lock or a site-packages folder changes.
+    """
+    venv = notebook_dir / ".venv"
+    site_dirs = sorted(venv.glob("lib/python*/site-packages")) + sorted(
+        venv.glob("Lib/site-packages")
+    )
+    try:
+        stamp = tuple(
+            (st.st_mtime_ns, st.st_size, st.st_ino)
+            for st in (path.stat() for path in [notebook_dir / "uv.lock", *site_dirs])
+        )
+    except OSError:
+        return {}
+    with _audit_scopes_lock:
+        cached = _audit_scopes.get(notebook_dir)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    scope = _read_audit_scope(notebook_dir, site_dirs)
+    with _audit_scopes_lock:
+        _audit_scopes[notebook_dir] = (stamp, scope)
+    return scope
+
+
+def _read_audit_scope(notebook_dir: Path, site_dirs: list[Path]) -> dict[str, Any]:
+    try:
+        data = tomllib.loads((notebook_dir / "uv.lock").read_text("utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return {}
+    closure = _runtime_packages(data)
+    if closure is None:
+        return {}
+    locked = {canonicalize_name(pkg["name"]) for pkg in closure}
+    locked.update(
+        canonicalize_name(pkg["name"])
+        for pkg in data.get("package") or []
+        if _is_project_root(pkg) and isinstance(pkg.get("name"), str)
+    )
+    package_roots: list[str] = []
+    for pkg in closure:
+        source = pkg.get("source")
+        editable = source.get("editable") if isinstance(source, dict) else None
+        if not isinstance(editable, str) or _is_project_root(pkg):
+            continue
+        record = _installed_record(notebook_dir / ".venv", pkg["name"])
+        roots = _import_roots(*record) if record is not None else []
+        package_roots.extend(str(root) for root in roots or [notebook_dir / editable])
+    unlocked: dict[str, str] = {}
+    unlocked_roots: dict[str, str] = {}
+    for site_packages in site_dirs:
+        for dist_info in sorted(site_packages.glob("*.dist-info")):
+            name = dist_info.name.split("-")[0]
+            if canonicalize_name(name) in locked:
+                continue
+            try:
+                record = (dist_info / "RECORD").read_bytes()
+            except OSError:
+                continue
+            for top in _record_tops(record):
+                unlocked.setdefault(top, name)
+            for root in _import_roots(site_packages, record):
+                unlocked_roots.setdefault(str(root), name)
+    return {
+        "package_roots": package_roots,
+        "site_packages": [str(path) for path in site_dirs],
+        "unlocked": unlocked,
+        "unlocked_roots": unlocked_roots,
+    }
+
+
+def _record_tops(record: bytes) -> set[str]:
+    """What a ``RECORD`` installs at the top of site-packages: a module or package, and in a
+    namespace package (a top folder with no ``__init__.py``) the level below."""
+    paths = [line.split(",", 1)[0] for line in record.decode("utf-8", "replace").splitlines()]
+    paths = [p for p in paths if p and not p.startswith("../")]
+    packages = {p.split("/")[0] for p in paths if p.count("/") == 1 and p.endswith("/__init__.py")}
+    tops: set[str] = set()
+    for path in paths:
+        parts = path.split("/")
+        if parts[0].endswith((".dist-info", ".pth")) or parts[0] == "__pycache__":
+            continue
+        if len(parts) > 1 and parts[0] not in packages:
+            tops.add("/".join(parts[:2]))
+        else:
+            tops.add(parts[0])
+    return tops
 
 
 def narrow_env_for_provenance(

@@ -44,6 +44,7 @@ _channel = _load_local_module("run_channel.py", "_nb_run_channel")
 _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 _work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
 _traceback = _load_local_module("cell_traceback.py", "_nb_cell_traceback")
+_audit = _load_local_module("read_audit.py", "_nb_read_audit")
 
 # Harness-injected, not user inputs: excluded from mutation fingerprinting.
 _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
@@ -540,7 +541,7 @@ def _run_one_batched_cell(
             started = time.perf_counter()
             try:
                 try:
-                    with display_capture.capture_side_effects():
+                    with display_capture.capture_side_effects(), _audit.recording() as observed:
                         display_value = _exec_with_display(source, namespace, cell_id)
                 except Exception as exc:
                     hint = _work_dir.hint(exc, manifest)
@@ -557,6 +558,13 @@ def _run_one_batched_cell(
                     )
                     return ("cell_error", "cell_error")
 
+                read_audit = _audit.report(
+                    observed,
+                    source=source,
+                    mounts=mount_manifest,
+                    run_dir=str(output_dir),
+                    scope=manifest.get("audit"),
+                )
                 # Catches mutations the static analyzer can't see (aliases, helper-fn
                 # mutation, bare mutators).
                 mutation_warnings = list(_immut.detect_mutations(namespace, input_snapshots))
@@ -619,6 +627,7 @@ def _run_one_batched_cell(
                     "source_hash": source_hash,
                     "env_hash": env_hash,
                     "mutation_warnings": mutation_warnings,
+                    "read_audit": read_audit,
                     "build_env": build_env_identity(),
                 },
             )
@@ -883,21 +892,29 @@ def main():
             loop_until_expr = (
                 loop_config.get("until_expr") if isinstance(loop_config, dict) else None
             )
-            (
-                outputs,
-                display_values,
-                stdout_text,
-                stderr_text,
-                mutation_warnings,
-                loop_state,
-            ) = execute_cell(
-                source,
-                inputs,
-                mutation_defines=manifest.get("mutation_defines") or [],
-                loop_until_expr=loop_until_expr,
-                stdout_capture=stdout_buffer,
-                stderr_capture=stderr_buffer,
-                cell_id=manifest.get("strata_cell_id"),
+            with _audit.recording() as observed:
+                (
+                    outputs,
+                    display_values,
+                    stdout_text,
+                    stderr_text,
+                    mutation_warnings,
+                    loop_state,
+                ) = execute_cell(
+                    source,
+                    inputs,
+                    mutation_defines=manifest.get("mutation_defines") or [],
+                    loop_until_expr=loop_until_expr,
+                    stdout_capture=stdout_buffer,
+                    stderr_capture=stderr_buffer,
+                    cell_id=manifest.get("strata_cell_id"),
+                )
+            read_audit = _audit.report(
+                observed,
+                source=source,
+                mounts=manifest.get("mounts") or {},
+                run_dir=str(output_dir),
+                scope=manifest.get("audit"),
             )
             # Reported here: inputs deserialize before console capture starts.
             if _ser.x64_was_enabled_here():
@@ -937,6 +954,7 @@ def main():
             "stdout": stdout_text,
             "stderr": stderr_text,
             "mutation_warnings": mutation_warnings,
+            "read_audit": read_audit,
             "build_env": build_env_identity(),
         }
         if loop_state is not None:

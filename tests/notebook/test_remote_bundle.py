@@ -193,3 +193,15 @@ def test_a_bundle_from_an_older_worker_has_no_displays(tmp_path):
     pack_notebook_output_bundle(bundle_path, result, output_dir)
 
     assert unpack_notebook_output_bundle(bundle_path, tmp_path / "u")["displays"] == []
+
+
+def test_a_workers_read_audit_survives_the_bundle(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    finding = {"code": "undeclared_read", "items": ["/data/a.csv"], "total": 1, "partial": False}
+    result = {"success": True, "variables": {}, "stdout": "", "stderr": "", "read_audit": [finding]}
+
+    bundle_path = tmp_path / "bundle.tar"
+    pack_notebook_output_bundle(bundle_path, result, output_dir)
+
+    assert unpack_notebook_output_bundle(bundle_path, tmp_path / "out")["read_audit"] == [finding]
