@@ -1,6 +1,6 @@
-"""Build reliability: lease claiming, heartbeat renewal, orphan recovery, idempotent finalize.
+"""Build reliability: lease claiming and renewal, the runner's heartbeat, and naming on dedup.
 
-Also checks finalize-and-name is atomic.
+The ledger's own lease and finalize rules are tested in vestigo.
 """
 
 import asyncio

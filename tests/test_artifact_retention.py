@@ -486,21 +486,19 @@ def _team_folder(
     *,
     files: int = 2,
     tenant: str | None = None,
-    foreign: tuple[str, int] | None = None,
     manifest_id: str | None = None,
 ) -> tuple[tuple[str, int], list[tuple[str, int]]]:
     """A folder as the team cache stores one: minted ids, each entry naming its file's id,
     and the manifest declaring the files it requires, as Strata does when it stores one.
 
-    Files are 100 bytes and the manifest 10; *foreign* is one more file to name.
+    Files are 100 bytes and the manifest 10.
     """
     stored = [
         _stored(store, str(uuid.uuid4()), b"f", size=100, tenant=tenant) for _ in range(files)
     ]
-    named = stored + ([foreign] if foreign else [])
     entries = {
         f"part-{i}.bin": {"id": fid, "version": fv, "sha256": f"{i:064x}", "size": 100}
-        for i, (fid, fv) in enumerate(named)
+        for i, (fid, fv) in enumerate(stored)
     }
     manifest = json.dumps({"cell_id": "c1", "files": entries}).encode()
     key = _stored(
@@ -510,7 +508,7 @@ def _team_folder(
         size=10,
         tenant=tenant,
         content_type="dir/manifest",
-        requires=named,
+        requires=stored,
     )
     return key, stored
 
