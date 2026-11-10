@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import tomli_w
-from cellgraph.python import analyze_cell
+from cellgraph.python import UNPARSEABLE, analyze_cell
 from packaging.requirements import InvalidRequirement, Requirement
 
 from strata.notebook.models import CellLanguage
@@ -266,6 +266,12 @@ def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
         if cell.language != CellLanguage.PYTHON:
             continue
         cell_analysis = analyze_cell(cell.source)
+        if cell_analysis.too_deep:
+            result.warnings.append(
+                f"cell {cell.id[:8]} nests deeper than the analyzer can walk; "
+                "split the expression before running it"
+            )
+            continue
         if cell_analysis.error:
             result.warnings.append(f"cell {cell.id[:8]} fails to analyze: {cell_analysis.error}")
             continue
@@ -1054,11 +1060,12 @@ def _google_cloud_path(name: str) -> str:
 def _scan_imports(source: str) -> set[str]:
     """Collect top-level, non-stdlib module names a cell imports.
 
-    Returns an empty set on a syntax error; that surfaces when the cell runs.
+    Returns an empty set when the cell does not parse: a syntax error, or an expression
+    nested past the parser. The openable check reports either.
     """
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except UNPARSEABLE:
         return set()
 
     names: set[str] = set()
