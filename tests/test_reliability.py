@@ -1,4 +1,4 @@
-"""Build reliability: lease claiming and renewal, the runner's heartbeat, and naming on dedup.
+"""Build reliability: the runner's id, its lease settings, and its heartbeat.
 
 The ledger's own lease and finalize rules are tested in vestigo.
 """
@@ -66,101 +66,6 @@ def transform_registry():
     set_transform_registry(registry)
     yield registry
     reset_transform_registry()
-
-
-class TestLeaseBasedClaiming:
-    def test_claim_build_fails_if_already_claimed(self, build_store, artifact_store):
-        artifact_id = str(uuid.uuid4())
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash="test-hash",
-            transform_spec=TransformSpec(
-                executor="test_executor@v1",
-                params={},
-                inputs=[],
-            ),
-        )
-        build_id = str(uuid.uuid4())
-        build_store.create_build(
-            build_id=build_id,
-            artifact_id=artifact_id,
-            version=version,
-            executor_ref="test_executor@v1",
-        )
-
-        result1 = build_store.claim_build(build_id, "runner-1", 60.0)
-        assert result1 is True
-
-        result2 = build_store.claim_build(build_id, "runner-2", 60.0)
-        assert result2 is False
-
-        build = build_store.get_build(build_id)
-        assert build.lease_owner == "runner-1"
-
-    def test_renew_lease_fails_for_wrong_owner(self, build_store, artifact_store):
-        """renew_lease fails when the caller is not the lease owner."""
-        artifact_id = str(uuid.uuid4())
-        version = artifact_store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash="test-hash",
-        )
-        build_id = str(uuid.uuid4())
-        build_store.create_build(
-            build_id=build_id,
-            artifact_id=artifact_id,
-            version=version,
-            executor_ref="test_executor@v1",
-        )
-        build_store.claim_build(build_id, "runner-1", 60.0)
-
-        result = build_store.renew_lease(build_id, "runner-2", 60.0)
-        assert result is False
-
-
-class TestAtomicFinalizeAndName:
-    def test_finalize_and_set_name_points_to_existing_on_duplicate(self, artifact_store):
-        """On duplicate provenance the name points to the existing artifact."""
-        provenance_hash = f"hash-{uuid.uuid4()}"
-        tenant = "team-a"
-        name = "my-report"
-
-        artifact1_id = str(uuid.uuid4())
-        version1 = artifact_store.create_artifact(
-            artifact_id=artifact1_id,
-            provenance_hash=provenance_hash,
-            tenant=tenant,
-        )
-        artifact_store.finalize_artifact(
-            artifact_id=artifact1_id,
-            version=version1,
-            schema_json='{"type": "struct"}',
-            row_count=100,
-            byte_size=1000,
-        )
-
-        artifact2_id = str(uuid.uuid4())
-        version2 = artifact_store.create_artifact(
-            artifact_id=artifact2_id,
-            provenance_hash=provenance_hash,
-            tenant=tenant,
-        )
-
-        result = artifact_store.finalize_and_set_name(
-            artifact_id=artifact2_id,
-            version=version2,
-            schema_json='{"type": "struct"}',
-            row_count=100,
-            byte_size=1000,
-            name=name,
-            tenant=tenant,
-        )
-
-        assert result is not None
-        assert result.id == artifact1_id  # Returns the existing one
-
-        resolved = artifact_store.resolve_name(name, tenant=tenant)
-        assert resolved is not None
-        assert resolved.id == artifact1_id
 
 
 class TestBuildRunnerLeaseIntegration:

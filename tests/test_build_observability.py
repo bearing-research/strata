@@ -1,14 +1,9 @@
-"""Tests for build observability: Prometheus metrics, structured logging context, and build logs in
-BuildStore.
+"""Tests for build observability: Prometheus metrics and structured logging context.
+
+A build's stored logs are tested in vestigo.
 """
 
 from __future__ import annotations
-
-import sqlite3
-from pathlib import Path
-
-import pytest
-from vestigo.build_store import BuildStore
 
 from strata.observability.logging import BuildContext, get_request_context
 from strata.transforms.build_metrics import (
@@ -17,7 +12,6 @@ from strata.transforms.build_metrics import (
     init_build_metrics,
     reset_build_metrics,
 )
-from tests.conftest import seed_build_targets
 
 
 class TestBuildMetricsCollector:
@@ -260,133 +254,6 @@ class TestBuildContext:
             assert ctx["build_id"] == "build-123"
             assert "tenant_id" not in ctx
             assert "transform_ref" not in ctx
-
-
-class TestBuildStoreLogs:
-    @pytest.fixture
-    def build_store(self, tmp_path: Path) -> BuildStore:
-        """A temp build store whose database also holds artifacts, so the foreign key resolves."""
-        seed_build_targets(tmp_path)
-        return BuildStore(tmp_path / "artifacts.sqlite")
-
-    def test_complete_build_with_logs(self, build_store: BuildStore):
-        build = build_store.create_build(
-            build_id="build-123",
-            artifact_id="artifact-1",
-            version=1,
-            executor_ref="sql@v1",
-        )
-        assert build.logs is None
-
-        build_store.claim_build("build-123", "runner-1")
-
-        build_store.complete_build(
-            build_id="build-123",
-            output_byte_count=1000,
-            logs="[INFO] Transform completed successfully\n[DEBUG] Rows: 42",
-        )
-
-        build = build_store.get_build("build-123")
-        assert build is not None
-        assert build.state == "ready"
-        assert build.logs == "[INFO] Transform completed successfully\n[DEBUG] Rows: 42"
-
-    def test_fail_build_with_logs(self, build_store: BuildStore):
-        build_store.create_build(
-            build_id="build-456",
-            artifact_id="artifact-2",
-            version=1,
-            executor_ref="sql@v1",
-        )
-        build_store.claim_build("build-456", "runner-1")
-
-        build_store.fail_build(
-            build_id="build-456",
-            error_message="Syntax error",
-            error_code="SyntaxError",
-            logs="[ERROR] Invalid SQL at line 5\n[ERROR] Unexpected token 'FROM'",
-        )
-
-        build = build_store.get_build("build-456")
-        assert build is not None
-        assert build.state == "failed"
-        assert build.logs is not None
-        assert build.error_message is not None
-        assert "Invalid SQL" in build.logs
-        assert build.error_message == "Syntax error"
-
-    def test_complete_build_without_logs(self, build_store: BuildStore):
-        build_store.create_build(
-            build_id="build-789",
-            artifact_id="artifact-3",
-            version=1,
-            executor_ref="sql@v1",
-        )
-        build_store.claim_build("build-789", "runner-1")
-
-        build_store.complete_build(
-            build_id="build-789",
-            output_byte_count=500,
-        )
-
-        build = build_store.get_build("build-789")
-        assert build is not None
-        assert build.logs is None
-
-    def test_logs_column_migration(self, tmp_path: Path):
-        """The logs column is added via migration."""
-        db_path = tmp_path / "migration_test.sqlite"
-
-        # An old-style database without the logs column.
-        conn = sqlite3.connect(str(db_path))
-        conn.execute(
-            """
-            CREATE TABLE artifact_builds (
-                build_id TEXT PRIMARY KEY,
-                artifact_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                state TEXT NOT NULL DEFAULT 'pending',
-                executor_ref TEXT NOT NULL,
-                executor_url TEXT,
-                tenant_id TEXT,
-                principal_id TEXT,
-                created_at REAL NOT NULL,
-                started_at REAL,
-                completed_at REAL,
-                error_message TEXT,
-                error_code TEXT,
-                input_byte_count INTEGER,
-                output_byte_count INTEGER,
-                lease_owner TEXT,
-                lease_expires_at REAL,
-                input_uris TEXT,
-                params TEXT,
-                name TEXT
-            )
-            """
-        )
-        conn.commit()
-        conn.close()
-
-        # Opening it runs the migration.
-        store = BuildStore(db_path)
-
-        store.create_build(
-            build_id="build-migrated",
-            artifact_id="artifact-1",
-            version=1,
-            executor_ref="sql@v1",
-        )
-        store.claim_build("build-migrated", "runner-1")
-        store.complete_build(
-            build_id="build-migrated",
-            output_byte_count=100,
-            logs="Migration test logs",
-        )
-
-        build = store.get_build("build-migrated")
-        assert build is not None
-        assert build.logs == "Migration test logs"
 
 
 class TestBuildMetricsIntegration:
