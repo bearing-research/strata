@@ -3434,7 +3434,7 @@ database's rows.</p>
 <td>SQLite</td>
 <td>The sha256 of the database file and of its <code>-wal</code> sidecar, plus <code>PRAGMA data_version</code> / <code>schema_version</code></td>
 <td><strong>DB-wide</strong></td>
-<td>Any commit to the file, from any process, changes the token, so a write to one table invalidates cells reading another. A touch or a copy that leaves the bytes alone does not. A file is read only when the notebook's digest cache (<code>.strata/hashes.sqlite</code>) holds no sha256 for its stat, so an unchanged database costs a <code>stat</code>. On Windows, where a file's ctime is its creation time, a rewrite in place that keeps the size and restores the mtime is not seen. A <code>:memory:</code> database has only the pragmas.</td>
+<td>Any commit to the file, from any process, changes the token, so a write to one table invalidates cells reading another. A touch or a copy that leaves the bytes alone does not. A file is read only when the notebook's digest cache (<code>.strata/hashes.sqlite</code>) holds no sha256 for its stat, so an unchanged database costs a <code>stat</code>. A file past 64 MiB with no sha256 is not read before every run: it is keyed by its stat (inode, size, mtime and ctime), so a <code>touch</code> runs the cell again, and a copy over it at the same size and mtime still does, since the copy moves the ctime. On Windows, where a file's ctime is its creation time, a rewrite in place that keeps the size and restores the mtime is not seen. A <code>:memory:</code> database has only the pragmas.</td>
 </tr>
 <tr>
 <td>DuckDB</td>
