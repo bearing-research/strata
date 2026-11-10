@@ -60,7 +60,8 @@ def notebook_defines(notebook_dir: Path) -> set[str]:
     Uses ``analyze_cell`` because ``parse_notebook`` alone leaves
     ``cell.defines`` empty.
     """
-    from strata.notebook.analyzer import analyze_cell
+    from cellgraph.python import analyze_cell
+
     from strata.notebook.parser import parse_notebook
 
     # An un-primed scratchpad project has no notebook at the top level.

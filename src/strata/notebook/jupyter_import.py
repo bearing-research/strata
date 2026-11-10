@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import tomli_w
+from cellgraph.python import analyze_cell
 from packaging.requirements import InvalidRequirement, Requirement
 
 from strata.notebook.models import CellLanguage
@@ -251,7 +252,6 @@ def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
     useful than a refused import.
     """
     # Local: these modules import this one transitively through parser test fixtures.
-    from strata.notebook.analyzer import analyze_cell
     from strata.notebook.dag import CellAnalysisWithId, NotebookDag
     from strata.notebook.parser import parse_notebook
 
