@@ -245,7 +245,7 @@ exclude = ["src/strata/notebook/samples"]
 
 [tool.ty.rules]
 # Optional deps (ADBC drivers) use guarded imports
-unresolved-import = "warn"
+import-not-found = "warn"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
