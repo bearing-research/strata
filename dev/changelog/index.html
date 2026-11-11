@@ -4185,6 +4185,9 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A warm worker warns about mutations as a cold run does.</strong> A cell run on the warm pool
+  warned when it changed an input in place and passed it on, which a cold run rightly does
+  not, and never warned when two of its outputs shared one mutable object. (#1507)</li>
 <li><strong>A Jupyter import survives a cell Python cannot read.</strong> A cell nested past the parser,
   such as a chain of tens of thousands of <code>+</code>, made the whole import fail; it now imports
   with a warning, and the notebook refuses to run that cell until the expression is split.
