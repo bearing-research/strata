@@ -164,7 +164,7 @@ jobs:
           STRATA_POOL_POSTGRES_DSN: postgresql://pool:pool@localhost:5432/pool
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
-  # ty exits non-zero on errors; the unresolved-import warnings configured for
+  # ty exits non-zero on errors; the import-not-found warnings configured for
   # guarded optional deps (torch/jax) do not fail the build.
   type-check:
     name: Type Check (ty)
