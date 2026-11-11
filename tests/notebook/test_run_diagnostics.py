@@ -22,8 +22,11 @@ def _finding(code: str, *items: str, total: int | None = None, partial: bool = F
     return ReadFinding(code=code, items=list(items), total=total or len(items), partial=partial)
 
 
-def _messages(*findings: ReadFinding, notebook_dir: Path = Path("/nowhere/nb")) -> list[str]:
-    return [d.message for d in run_diagnostics(list(findings), [], notebook_dir=notebook_dir)]
+def _messages(
+    *findings: ReadFinding, notebook_dir: Path = Path("/nowhere/nb"), taken: tuple[str, ...] = ()
+) -> list[str]:
+    found = run_diagnostics(list(findings), [], notebook_dir=notebook_dir, taken=taken)
+    return [d.message for d in found]
 
 
 def _mounts(message: str) -> list[str]:
@@ -88,8 +91,82 @@ class TestTheMessage:
         assert "`/data/4.csv` and 295 more" in message
         assert "`/data/5.csv`" not in message
         assert message.endswith(
-            "The audit stopped recording at 10,000 paths, so there may be more."
+            "The audit did not record all of this run's reads, so there may be more."
         )
+
+    def test_a_failed_audit_says_only_that(self):
+        (message,) = _messages(_finding("audit_failed", "KeyError: 'x'", partial=True))
+
+        assert (
+            message
+            == "The read audit failed (`KeyError: 'x'`), so this run's reads were not checked."
+        )
+
+    def test_a_folder_holding_the_notebook_is_never_a_mount(self, tmp_path):
+        # A mount over the notebook keys the cell on every cell's source and notebook.toml.
+        notebook_dir = tmp_path / "nb"
+        (beside,) = _messages(
+            _finding("undeclared_read", str(notebook_dir / "a.csv")), notebook_dir=notebook_dir
+        )
+        (above,) = _messages(
+            _finding(
+                "undeclared_read", str(tmp_path / "shared" / "a.csv"), str(tmp_path / "b.yaml")
+            ),
+            notebook_dir=notebook_dir,
+        )
+
+        assert _mounts(beside) == []
+        assert "Move it into a folder of its own and mount that." in beside
+        assert _mounts(above) == ["shared ../shared"]
+        assert f"Move the ones directly in `{tmp_path}` into a folder, and mount that." in above
+
+    def test_a_path_with_a_space_is_mounted_as_a_uri(self, tmp_path):
+        notebook_dir = tmp_path / "nb"
+        (beside,) = _messages(
+            _finding("undeclared_read", str(tmp_path / "My Data" / "a.csv")),
+            notebook_dir=notebook_dir,
+        )
+        (away,) = _messages(_finding("undeclared_read", "/x/My Data/a.csv"))
+
+        assert _mounts(beside) == ["my_data file:../My%20Data"]
+        assert _mounts(away) == ["my_data file:///x/My%20Data"]
+
+    def test_a_name_the_cell_uses_is_not_suggested(self):
+        (read, listed) = _messages(
+            _finding("undeclared_read", "/data/a.csv"),
+            _finding("undeclared_listing", "/data"),
+            taken=("data",),
+        )
+
+        # Not the cell's own name, and the same one for the same folder.
+        assert _mounts(read) == ["data_2 /data"]
+        assert _mounts(listed) == ["data_2 /data"]
+
+    def test_listing_the_home_folder_names_a_folder_of_its_own(self):
+        home = os.path.expanduser("~")
+        (message,) = _messages(_finding("undeclared_listing", home))
+
+        assert message == (
+            f"This cell listed `{home}`, which no mount covers, so its cached result will not "
+            f"change when a file is added or removed. In place of `{home}`, list a folder of "
+            "its own, and mount that."
+        )
+
+    def test_an_import_names_its_import_root(self, tmp_path):
+        notebook_dir = tmp_path / "nb"
+        package = tmp_path / "helpers" / "mypkg"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+        (in_package,) = _messages(
+            _finding("undeclared_import", str(package / "core.py")), notebook_dir=notebook_dir
+        )
+        (in_notebook,) = _messages(
+            _finding("undeclared_import", str(notebook_dir / "hx.py")), notebook_dir=notebook_dir
+        )
+
+        assert "`uv add --editable ../helpers`" in in_package
+        assert "--editable ." not in in_notebook
+        assert f"Move the ones directly in `{notebook_dir}` into a folder" in in_notebook
 
     def test_each_kind_names_its_own_fix(self, tmp_path):
         found = run_diagnostics(
@@ -127,6 +204,13 @@ class TestTheMessage:
             "mutated_input",
             "Cell mutated df. Return a copy",
         )
+
+    def test_a_mutation_every_iteration_makes_is_one(self):
+        warning = {"var_name": "df", "message": "Cell mutated df", "suggestion": "Return a copy"}
+
+        found = run_diagnostics([], [warning, dict(warning)], notebook_dir=Path("/nb"))
+
+        assert _codes(found) == ["mutated_input"]
 
 
 def _session(notebook_dir: Path) -> NotebookSession:
@@ -191,7 +275,11 @@ class TestARun:
         assert _codes(hit.run_diagnostics) == ["undeclared_read"]
         assert hit.run_diagnostics == first.run_diagnostics
 
-    async def test_the_fix_it_names_clears_it(self, tmp_path, outside):
+    @pytest.mark.parametrize("folder", ["outside", "my data"])
+    async def test_the_fix_it_names_clears_it(self, tmp_path, folder):
+        outside = tmp_path / folder
+        outside.mkdir()
+        (outside / "events.csv").write_text("a,b\n1,2\n")
         notebook_dir = _notebook(tmp_path, ("c", _reads(outside)))
         session = _session(notebook_dir)
         first = await CellExecutor(session).execute_cell("c", _reads(outside))
@@ -207,6 +295,32 @@ class TestARun:
         assert result.run_diagnostics == []
         assert session.notebook_state.get_cell("c").run_diagnostics == []
         assert load_runtime_state(notebook_dir).cells["c"].run_diagnostics == []
+
+    async def test_its_fix_does_not_reuse_a_name_the_cell_defines(self, tmp_path, outside):
+        source = f"outside = 1\n{_reads(outside)}"
+        notebook_dir = _notebook(tmp_path, ("c", source))
+
+        result = await CellExecutor(_session(notebook_dir)).execute_cell("c", source)
+
+        assert _mounts(result.run_diagnostics[0]["message"]) == [f"outside_2 {outside}"]
+
+    async def test_a_failure_replaces_them_only_with_its_own(self, tmp_path, outside):
+        notebook_dir = _notebook(tmp_path, ("c", _reads(outside)))
+        session = _session(notebook_dir)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("c", _reads(outside))).success
+        before = session.notebook_state.get_cell("c").run_diagnostics
+
+        # Its result still reads the file: they stand.
+        failed = await executor.execute_cell("c", "raise ValueError('no')\n")
+        assert not failed.success
+        assert session.notebook_state.get_cell("c").run_diagnostics == before
+        assert load_runtime_state(notebook_dir).cells["c"].run_diagnostics != []
+
+        reads_then_fails = f"{_reads(outside)}import json\njson.loads(text)\n"
+        failed = await executor.execute_cell("c", reads_then_fails)
+        assert not failed.success
+        assert _codes(failed.run_diagnostics) == ["undeclared_read"]
 
     async def test_a_run_all_shows_each_cells_on_its_frame(self, tmp_path, outside, monkeypatch):
         from strata.notebook import ws
@@ -245,7 +359,35 @@ class TestARun:
         assert hit.cache_hit
         assert _codes(hit.run_diagnostics) == ["undeclared_read"]
 
-    async def test_an_each_cell_shows_what_every_instance_read(self, tmp_path, outside):
+    async def test_a_run_all_store_failure_still_shows_them(self, tmp_path, outside, monkeypatch):
+        from strata.notebook import ws
+
+        # A consumed top-level lambda is not stored: the batch ends on persist_failed.
+        source = f"{_reads(outside)}add = lambda x: x + 1\n"
+        notebook_dir = _notebook(tmp_path, ("r", source), ("q", "y = add(1)\n"))
+        session = _session(notebook_dir)
+        sent: list[dict[str, Any]] = []
+
+        async def record(notebook_id: str, message: dict[str, Any], **kwargs: Any) -> None:
+            sent.append(message)
+
+        class _Manager:
+            def get_session(self, notebook_id: str) -> NotebookSession:
+                return session
+
+        monkeypatch.setattr(ws, "_broadcast_message", record)
+        monkeypatch.setattr(ws, "_get_session_manager", lambda: _Manager())
+        await ws._execute_run_all(
+            None, session, ["r", "q"], ws.NotebookExecutionState(), session.id
+        )
+
+        (frame,) = [m["payload"] for m in sent if m["type"] == "cell_error"]
+        assert frame["cell_id"] == "r"
+        assert _codes(frame["run_diagnostics"]) == ["undeclared_read"]
+
+    async def test_an_each_cell_shows_what_every_instance_read(
+        self, tmp_path, outside, monkeypatch
+    ):
         (outside / "more.csv").write_text("c\n3\n")
         each = f"# @each name in names\nout = open({str(outside)!r} + '/' + name).read()\n"
         notebook_dir = _notebook(
@@ -257,10 +399,22 @@ class TestARun:
         session = _session(notebook_dir)
         executor = CellExecutor(session)
         assert (await executor.execute_cell("a", 'names = ["events.csv", "more.csv"]\n')).success
+        from strata.notebook import session as session_module
+
+        writes: list[str] = []
+        persist = session_module.persist_cell_run_diagnostics
+
+        def counted(notebook_dir: Path, cell_id: str, diagnostics: list[dict]) -> None:
+            writes.append(cell_id)
+            persist(notebook_dir, cell_id, diagnostics)
+
+        monkeypatch.setattr(session_module, "persist_cell_run_diagnostics", counted)
 
         result = await executor.execute_cell("b", each)
 
         assert result.success, result.error
+        # The cell's, once; not each instance's on the way.
+        assert writes == ["b"]
         (shown,) = session.notebook_state.get_cell("b").run_diagnostics
         assert shown.code == "undeclared_read"
         assert "2 files" in shown.message

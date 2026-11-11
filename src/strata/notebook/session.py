@@ -1363,8 +1363,20 @@ class NotebookSession:
         return affected
 
     def _set_run_diagnostics(self, cell: Any, result: Any) -> None:
+        if not result.success and not result.read_audit and not result.mutation_warnings:
+            # A failure that found nothing (perhaps never ran) says nothing of the result
+            # the cell still holds, which its diagnostics describe.
+            return
+        # Names the fix must not reuse: a second mount of one name, or a mount over a
+        # variable, would not read what it says.
+        taken = (
+            {mount.name for mount in cell.mounts}
+            | {mount.name for mount in parse_annotations(cell.source, cell.language).mounts}
+            | set(cell.defines)
+            | set(cell.references)
+        )
         diagnostics = run_diagnostics(
-            result.read_audit, result.mutation_warnings, notebook_dir=self.path
+            result.read_audit, result.mutation_warnings, notebook_dir=self.path, taken=taken
         )
         if diagnostics == cell.run_diagnostics:
             return
@@ -1374,8 +1386,13 @@ class NotebookSession:
             self.path, cell.id, [d.model_dump(mode="json") for d in diagnostics]
         )
 
-    def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None:
-        """Persist transient execution metadata onto the session cell state."""
+    def apply_execution_result_metadata(
+        self, cell_id: str, result: Any, *, instance: bool = False
+    ) -> None:
+        """Persist transient execution metadata onto the session cell state.
+
+        An *instance* is one of a fan-out's: the cell's diagnostics wait for all of them.
+        """
         cell = self.notebook_state.get_cell(cell_id)
         if cell is None:
             return
@@ -1418,7 +1435,8 @@ class NotebookSession:
             update_cell_console_output(self.path, cell_id, result.stdout or "", result.stderr or "")
             # Under the same rule as the console: a hit with no record of its own says
             # nothing of what its run read.
-            self._set_run_diagnostics(cell, result)
+            if not instance:
+                self._set_run_diagnostics(cell, result)
         result.run_diagnostics = [d.model_dump(mode="json") for d in cell.run_diagnostics]
         if result.success and result.display_outputs:
             cell.display_outputs = [CellOutput(**output) for output in result.display_outputs]

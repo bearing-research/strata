@@ -9,6 +9,7 @@ import {
   Copy,
   FlaskConical,
   Hourglass,
+  Info,
   Pencil,
   Play,
   Plus,
@@ -605,13 +606,24 @@ const annotationDiagnosticsTitle = computed(() =>
 )
 // The last run's findings share the pill: what it read undeclared, what it mutated.
 const runDiagnostics = computed(() => props.cell.runDiagnostics ?? [])
+// An info finding (a subprocess the audit cannot see into) is a note, not a warning.
+const runWarnings = computed(() => runDiagnostics.value.filter((d) => d.severity !== 'info'))
+const runNotesOnly = computed(
+  () => !annotationDiagnostics.value.length && !runWarnings.value.length,
+)
 const diagnosticsLabel = computed(() => {
   const ofSource = annotationDiagnostics.value.length
-  const ofRun = runDiagnostics.value.length
-  const n = ofSource + ofRun
+  const warnings = runWarnings.value.length
+  const notes = runDiagnostics.value.length - warnings
+  const n = ofSource + warnings + notes
+  const plural = (count: number, noun: string) => (count === 1 ? `1 ${noun}` : `${count} ${noun}s`)
   if (!n) return ''
-  if (!ofRun) return n === 1 ? '1 annotation issue' : `${n} annotation issues`
-  if (!ofSource) return n === 1 ? '1 run warning' : `${n} run warnings`
+  if (!warnings && !notes) return plural(n, 'annotation issue')
+  if (!ofSource) {
+    return [warnings && plural(warnings, 'run warning'), notes && plural(notes, 'run note')]
+      .filter(Boolean)
+      .join(', ')
+  }
   return `${n} issues`
 })
 const diagnosticsTitle = computed(() =>
@@ -1023,10 +1035,13 @@ function outputKey(output: CellOutput, index: number): string {
               <span
                 v-if="diagnosticsLabel"
                 class="annotation-diagnostic-badge"
-                :class="{ 'run-only': !annotationDiagnostics.length }"
+                :class="{
+                  'run-only': !annotationDiagnostics.length && runWarnings.length,
+                  'run-notes': runNotesOnly,
+                }"
                 :title="diagnosticsTitle"
               >
-                <TriangleAlert /> {{ diagnosticsLabel }}
+                <Info v-if="runNotesOnly" /><TriangleAlert v-else /> {{ diagnosticsLabel }}
               </span>
               <span v-if="cell.isModuleCell" class="module-cell-badge" :title="moduleExportsTitle">
                 module
@@ -2101,6 +2116,10 @@ function outputKey(output: CellOutput, index: number): string {
 .annotation-diagnostic-badge.run-only {
   background: var(--tint-warning);
   color: var(--accent-warning);
+}
+.annotation-diagnostic-badge.run-notes {
+  background: var(--tint-info);
+  color: var(--accent-info);
 }
 
 /* Module-cell marker */

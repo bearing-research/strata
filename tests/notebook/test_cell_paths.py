@@ -163,7 +163,7 @@ def _fakes(cell: SimpleNamespace, failure: CellExecutionResult | None = None):
         persist_display_outputs=lambda cell_id, displays: calls.persisted.append(
             (cell_id, displays)
         ),
-        apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
+        apply_execution_result_metadata=lambda cell_id, result, **_: calls.applied.append(
             (cell_id, result)
         ),
     )
@@ -1344,7 +1344,7 @@ class TestFanout:
             record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
                 (args, kwargs)
             ),
-            apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
+            apply_execution_result_metadata=lambda cell_id, result, **_: calls.applied.append(
                 (cell_id, result)
             ),
             persist_display_outputs=lambda cell_id, displays: calls.persisted.append(
@@ -1751,7 +1751,7 @@ class TestR:
             record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
                 (args, kwargs)
             ),
-            apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
+            apply_execution_result_metadata=lambda cell_id, result, **_: calls.applied.append(
                 (cell_id, result)
             ),
             persist_display_outputs=lambda cell_id, outputs: calls.persisted.append(
@@ -3473,7 +3473,7 @@ class TestPython:
             record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
                 (args, kwargs)
             ),
-            apply_execution_result_metadata=lambda cell_id, res: calls.applied.append(
+            apply_execution_result_metadata=lambda cell_id, res, **_: calls.applied.append(
                 (cell_id, res)
             ),
             persist_display_outputs=lambda cell_id, outputs: calls.persisted.append(

@@ -598,7 +598,9 @@ async def run_python_cell(
                     reads=prov.reads(*context.moved(cell_id)),
                     key_parts=prov.key_parts,
                 )
-            host.apply_execution_result_metadata(cell_id, cached_result)
+            host.apply_execution_result_metadata(
+                cell_id, cached_result, instance=fanout_variant is not None
+            )
             return cached_result
 
         # ④ Cache miss: execute the cell.
@@ -930,7 +932,9 @@ async def run_python_cell(
                 cell_id,
                 exec_result.display_outputs if exec_result.success else None,
             )
-            host.apply_execution_result_metadata(cell_id, exec_result)
+            host.apply_execution_result_metadata(
+                cell_id, exec_result, instance=fanout_variant is not None
+            )
             return exec_result
 
     except asyncio.CancelledError:

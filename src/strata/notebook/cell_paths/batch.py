@@ -550,6 +550,8 @@ async def batch_service_loop(
                         error=response.get("error"),
                         stdout=payload.get("stdout", ""),
                         stderr=payload.get("stderr", ""),
+                        mutation_warnings=payload.get("mutation_warnings") or [],
+                        read_audit=payload.get("read_audit") or [],
                         duration_ms=payload.get("duration_ms"),
                     ),
                 )

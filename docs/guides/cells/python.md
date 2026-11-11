@@ -270,7 +270,7 @@ imported, and says which of those nothing declares, with the fix:
 | --- | --- | --- |
 | `undeclared_read` | a file outside every mount | `# @mount <name> <dir> ro`, and read it through `<name>` |
 | `undeclared_listing` | a directory listed outside every mount | the same mount, over the directory |
-| `undeclared_import` | a module loaded from a file outside the environment | make it a package and `uv add --editable <dir>` |
+| `undeclared_import` | a module loaded from a file outside the environment | make its import root a package and `uv add --editable <dir>` |
 | `unlocked_package` | a module whose package `uv.lock` does not hold | `uv add <package>` |
 | `work_dir_read` | a file in `work/` this run did not write | return the data from the cell that writes it |
 | `subprocess_run` | the cell started a program | its reads are not seen; declare them as mounts |
@@ -280,14 +280,18 @@ This cell read `/data/events.csv`, which no mount covers, so its cached result w
 change when the file does. Add `# @mount data /data ro` and read `data / "events.csv"`.
 ```
 
-The mount is named after its folder, and a folder in or beside the notebook is written
-as a [relative path](../data/mounts.md) (`../data`). Files share the mount of their
-nearest common folder, though never the home folder or the root. A file the run wrote
-before reading it is its own, and the interpreter, the venv, system folders and the
-dot-folders tools keep in the home folder are left out.
+The mount is named after its folder, never with a name the cell already uses, and a
+folder in or beside the notebook is written as a [relative path](../data/mounts.md)
+(`../data`); one with a space in it as a `file:` URI (`file:../My%20Data`). Files share
+the mount of their nearest common folder, though never the root, the home folder, the
+notebook's folder or one above it: a mount over the notebook would key the cell on every
+other cell. A file the run wrote before reading it is its own, and the interpreter, the
+venv, system folders and the dot-folders tools keep in the home folder are left out.
 
 The findings show in the header pill and the run report, as mutation warnings do,
-and a cache hit shows them again. They never block a run or change its status or key.
+and a cache hit shows them again. `subprocess_run` and a failed audit are notes, not
+warnings. They never block a run or change its status or key. They describe the result
+the cell holds, so a failed run replaces them only when it found something itself.
 Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
 what they read is not reported.
 

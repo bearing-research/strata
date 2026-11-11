@@ -10,14 +10,15 @@ from __future__ import annotations
 import keyword
 import os
 import re
-from collections.abc import Sequence
+import shlex
+from collections.abc import Iterable, Sequence
 from pathlib import Path
+from urllib.parse import quote
 
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import AnnotationDiagnostic, DiagnosticSeverity
 from strata.notebook.read_audit import (
     AUDIT_FAILED,
-    PATH_CAP,
     SUBPROCESS_RUN,
     UNDECLARED_IMPORT,
     UNDECLARED_LISTING,
@@ -37,29 +38,37 @@ def run_diagnostics(
     mutation_warnings: Sequence[MutationWarning],
     *,
     notebook_dir: Path,
+    taken: Iterable[str] = (),
 ) -> list[AnnotationDiagnostic]:
-    """One diagnostic per kind of finding, then one per mutation warning."""
-    diagnostics = [_finding(finding, notebook_dir) for finding in read_audit]
-    for warning in mutation_warnings:
-        suggestion = warning.get("suggestion")
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.WARN,
-                code=MUTATED_INPUT,
-                message=f"{warning['message']}. {suggestion}" if suggestion else warning["message"],
-            )
-        )
+    """One diagnostic per kind of finding, then one per distinct mutation warning.
+
+    A suggested mount is named after its folder, never with a name in *taken* (the
+    cell's mounts and variables).
+    """
+    names = _Names(taken)
+    diagnostics = [_finding(finding, notebook_dir, names) for finding in read_audit]
+    # A loop's iterations and a fan-out's instances each warn of the same mutation.
+    messages = dict.fromkeys(
+        f"{warning['message']}. {warning['suggestion']}"
+        if warning.get("suggestion")
+        else warning["message"]
+        for warning in mutation_warnings
+    )
+    diagnostics.extend(
+        AnnotationDiagnostic(severity=DiagnosticSeverity.WARN, code=MUTATED_INPUT, message=m)
+        for m in messages
+    )
     return diagnostics
 
 
-def _finding(finding: ReadFinding, notebook_dir: Path) -> AnnotationDiagnostic:
+def _finding(finding: ReadFinding, notebook_dir: Path, names: _Names) -> AnnotationDiagnostic:
     code = finding["code"]
     items = finding["items"]
     severity = DiagnosticSeverity.WARN
     if code == UNDECLARED_READ:
-        message = _read(items, finding["total"], notebook_dir)
+        message = _read(items, finding["total"], notebook_dir, names)
     elif code == UNDECLARED_LISTING:
-        message = _listing(items, finding["total"], notebook_dir)
+        message = _listing(items, finding["total"], notebook_dir, names)
     elif code == UNDECLARED_IMPORT:
         message = _import(items, finding["total"], notebook_dir)
     elif code == UNLOCKED_PACKAGE:
@@ -74,13 +83,14 @@ def _finding(finding: ReadFinding, notebook_dir: Path) -> AnnotationDiagnostic:
         message = f"The read audit failed ({_list(items)}), so this run's reads were not checked."
     else:
         message = f"This run read {_list(items)}, which the cell does not declare."
-    if finding["partial"]:
-        message += f" The audit stopped recording at {PATH_CAP:,} paths, so there may be more."
+    if finding["partial"] and code != AUDIT_FAILED:
+        # At its path cap, or on a call the hook could not read.
+        message += " The audit did not record all of this run's reads, so there may be more."
     return AnnotationDiagnostic(severity=severity, code=code, message=message)
 
 
-def _read(items: list[str], total: int, notebook_dir: Path) -> str:
-    mounts, loose = _mounts([os.path.dirname(path) for path in items], notebook_dir)
+def _read(items: list[str], total: int, notebook_dir: Path, names: _Names) -> str:
+    mounts, loose = _mounts([os.path.dirname(path) for path in items], notebook_dir, names)
     if total == 1:
         what = f"This cell read {_code(items[0])}, which no mount covers"
         if mounts:
@@ -91,31 +101,49 @@ def _read(items: list[str], total: int, notebook_dir: Path) -> str:
             fix = "Move it into a folder of its own and mount that."
         return f"{what}, so its cached result will not change when the file does. {fix}"
     what = f"This cell read {total} files no mount covers ({_shown(items, total)})"
-    fix = _mount_fix(mounts, loose, "read them")
+    fix = _mount_fix(mounts, loose, "read them", "Move the ones directly in {} into a folder")
     return f"{what}, so its cached result will not change when they do. {fix}"
 
 
-def _listing(items: list[str], total: int, notebook_dir: Path) -> str:
-    mounts, loose = _mounts(items, notebook_dir)
+def _listing(items: list[str], total: int, notebook_dir: Path, names: _Names) -> str:
+    mounts, loose = _mounts(items, notebook_dir, names)
+    if total == 1:
+        what = f"This cell listed {_code(items[0])}, which no mount covers"
+    else:
+        what = f"This cell listed {total} directories no mount covers ({_shown(items, total)})"
     if total == 1 and mounts:
         ((name, _, written),) = mounts
-        what = f"This cell listed {_code(items[0])}, which no mount covers"
         fix = f"Add {_annotation(name, written)} and list {_code(name)}."
     else:
-        noun = _code(items[0]) if total == 1 else f"{total} directories"
-        what = f"This cell listed {noun} no mount covers ({_shown(items, total)})"
-        fix = _mount_fix(mounts, loose, "list them")
+        fix = _mount_fix(mounts, loose, "list them", "In place of {}, list a folder of its own")
     return f"{what}, so its cached result will not change when a file is added or removed. {fix}"
 
 
 def _import(items: list[str], total: int, notebook_dir: Path) -> str:
-    roots = sorted(_roots(sorted({os.path.dirname(path) for path in items})))
+    # Its import root, where its package's pyproject.toml goes: above its packages.
+    roots = sorted({_import_root(os.path.dirname(path)) for path in items})
     noun = _code(items[0]) if total == 1 else f"{total} modules ({_shown(items, total)})"
-    edits = _join([_code(f"uv add --editable {_written(root, notebook_dir)}") for root in roots])
+    fixes = []
+    edits = [
+        _code(f"uv add --editable {shlex.quote(_written(root, notebook_dir))}")
+        for root in roots
+        if _mountable(root, notebook_dir)
+    ]
+    if edits:
+        more = [f"{len(edits) - SHOWN} more like them"] if len(edits) > SHOWN else []
+        fixes.append(
+            f"Make {'it' if len(edits) == 1 else 'each'} a package and "
+            f"{_join(edits[:SHOWN] + more)}, which keys its source."
+        )
+    loose = [_code(root) for root in roots if not _mountable(root, notebook_dir)]
+    if loose:
+        fixes.append(
+            f"Move the ones directly in {_join(loose)} into a folder, make that a package "
+            f"and {_code('uv add --editable')} it."
+        )
     return (
         f"This cell imported {noun} from outside the notebook's environment, so its cached "
-        f"result will not change when that source does. Make it a package and {edits}, "
-        "which keys its source."
+        f"result will not change when that source does. {' '.join(fixes)}"
     )
 
 
@@ -153,22 +181,21 @@ def _subprocess(items: list[str], total: int) -> str:
     )
 
 
-def _mounts(dirs: list[str], notebook_dir: Path) -> tuple[list[tuple[str, str, str]], list[str]]:
+def _mounts(
+    dirs: list[str], notebook_dir: Path, names: _Names
+) -> tuple[list[tuple[str, str, str]], list[str]]:
     """A mount ``(name, path, as written)`` per group of *dirs*, over their nearest common one,
-    and the directories no mount should cover (the home folder, the root).
+    and the directories no mount should cover (see :func:`_mountable`).
 
     Written relative to the notebook when it is in or beside it, so the fix holds
     wherever the project is checked out.
     """
-    taken: set[str] = set()
     mounts, loose = [], []
-    for root in sorted(_roots(sorted(set(dirs)))):
-        if not _mountable(root):
+    for root in sorted(_roots(sorted(set(dirs)), notebook_dir)):
+        if _mountable(root, notebook_dir):
+            mounts.append((names(root), root, _written(root, notebook_dir)))
+        else:
             loose.append(root)
-            continue
-        name = _name(root, taken)
-        taken.add(name)
-        mounts.append((name, root, _written(root, notebook_dir)))
     return mounts, loose
 
 
@@ -177,13 +204,13 @@ def _written(root: str, notebook_dir: Path) -> str:
     rel = os.path.relpath(os.path.realpath(root), os.path.realpath(notebook_dir))
     if rel.startswith(os.path.join(os.pardir, os.pardir)):
         return root
-    # ``./`` so ``uv add`` reads a path, not a package name.
-    return rel if rel.startswith(os.pardir) or rel == os.curdir else f".{os.sep}{rel}"
+    # ``./`` so ``uv add`` reads a path, not a package name. Never ``.``: not mountable.
+    return rel if rel.startswith(os.pardir) else f".{os.sep}{rel}"
 
 
-def _roots(dirs: list[str]) -> list[str]:
+def _roots(dirs: list[str], notebook_dir: Path) -> list[str]:
     common = os.path.commonpath(dirs)
-    if _mountable(common):
+    if _mountable(common, notebook_dir):
         return [common]
     groups: dict[str, list[str]] = {}
     for path in dirs:
@@ -193,31 +220,58 @@ def _roots(dirs: list[str]) -> list[str]:
     roots = []
     for head, group in groups.items():
         # A file right in an unmountable directory (the home folder): that one, still.
-        roots.extend([common] if head == "" else _roots(group))
+        roots.extend([common] if head == "" else _roots(group, notebook_dir))
     return roots
 
 
-def _mountable(path: str) -> bool:
-    """Not the root, the home folder or a folder above it: a mount reads everything in it."""
-    home = os.path.expanduser("~")
-    return path != os.sep and not (home == path or home.startswith(path.rstrip(os.sep) + os.sep))
+def _mountable(path: str, notebook_dir: Path) -> bool:
+    """Not the root, nor the home folder, the notebook's or a folder above either: a mount
+    reads everything in it, and one over the notebook keys the cell on every other cell.
+    """
+    real = os.path.realpath(path)
+    over = (os.path.realpath(os.path.expanduser("~")), os.path.realpath(notebook_dir))
+    return real != os.sep and not any(
+        below == real or below.startswith(real.rstrip(os.sep) + os.sep) for below in over
+    )
 
 
-def _name(root: str, taken: set[str]) -> str:
-    base = re.sub(r"\W+", "_", os.path.basename(root.rstrip(os.sep))).strip("_").lower()
-    if not base or base[0].isdigit() or keyword.iskeyword(base):
-        base = f"data_{base}".rstrip("_")
-    name, n = base, 2
-    while name in taken:
-        name, n = f"{base}_{n}", n + 1
-    return name
+def _import_root(directory: str) -> str:
+    while os.path.isfile(os.path.join(directory, "__init__.py")):
+        directory = os.path.dirname(directory)
+    return directory
+
+
+class _Names:
+    """A mount name per folder, the same for it in every diagnostic of a run."""
+
+    def __init__(self, taken: Iterable[str]) -> None:
+        self._taken = set(taken)
+        self._named: dict[str, str] = {}
+
+    def __call__(self, root: str) -> str:
+        if root not in self._named:
+            base = re.sub(r"\W+", "_", os.path.basename(root.rstrip(os.sep))).strip("_").lower()
+            if not base or base[0].isdigit() or keyword.iskeyword(base):
+                base = f"data_{base}".rstrip("_")
+            name, n = base, 2
+            while name in self._taken:
+                name, n = f"{base}_{n}", n + 1
+            self._taken.add(name)
+            self._named[root] = name
+        return self._named[root]
 
 
 def _annotation(name: str, root: str) -> str:
+    if any(c.isspace() for c in root):
+        # The annotation splits on whitespace; a ``file:`` URI is percent-decoded.
+        root = f"file://{quote(root)}" if os.path.isabs(root) else f"file:{quote(root)}"
     return _code(f"# @mount {name} {root} ro")
 
 
-def _mount_fix(mounts: list[tuple[str, str, str]], loose: list[str], verb: str) -> str:
+def _mount_fix(
+    mounts: list[tuple[str, str, str]], loose: list[str], verb: str, instead: str
+) -> str:
+    """Add the *mounts*; and for the *loose* folders, *instead* (``{}`` for where) them."""
     fixes = []
     if mounts:
         adds = [_annotation(name, written) for name, _, written in mounts[:SHOWN]]
@@ -226,8 +280,7 @@ def _mount_fix(mounts: list[tuple[str, str, str]], loose: list[str], verb: str) 
         through = "that mount" if len(mounts) == 1 else "those mounts"
         fixes.append(f"Add {_join(adds)}, and {verb} through {through}.")
     if loose:
-        where = _join([_code(path) for path in loose])
-        fixes.append(f"Move the ones directly in {where} into a folder, and mount that.")
+        fixes.append(f"{instead.format(_join([_code(path) for path in loose]))}, and mount that.")
     return " ".join(fixes)
 
 

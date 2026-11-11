@@ -440,7 +440,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             if args.format == "human" and not args.quiet:
                 _print_cell_line(entry)
                 for diagnostic in result.run_diagnostics:
-                    print(f"      {_yellow('⚠')} {diagnostic['message']}")
+                    mark = "ℹ" if diagnostic["severity"] == "info" else _yellow("⚠")
+                    print(f"      {mark} {diagnostic['message']}")
 
     total_ms = int((time.monotonic() - start) * 1000)
     any_failed = any(r["status"] == "error" for r in results)
