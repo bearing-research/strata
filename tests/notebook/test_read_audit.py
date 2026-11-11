@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -15,7 +16,14 @@ from strata.notebook.env import audit_scope
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import MountSpec
 from strata.notebook.parser import parse_notebook
-from strata.notebook.read_audit import ReadFinding, fingerprint, merge, recording, report
+from strata.notebook.read_audit import (
+    CHANGED_DURING_RUN,
+    ReadFinding,
+    fingerprint,
+    merge,
+    recording,
+    report,
+)
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import (
     add_cell_to_notebook,
@@ -209,19 +217,61 @@ class TestTheRecord:
 
         st = os.stat(data / "a.txt")
         assert _stats(local) == {
-            "undeclared_read": {
-                str(data / "a.txt"): [
-                    st.st_dev,
-                    st.st_ino,
-                    st.st_size,
-                    st.st_mtime_ns,
-                    st.st_ctime_ns,
-                ]
-            },
+            "undeclared_read": {str(data / "a.txt"): [st.st_size, st.st_mtime_ns]},
             "undeclared_listing": {str(data): fingerprint(str(data))},
         }
         # A worker's paths are its own: the server could not stat them again.
         assert _stats(remote) == {}
+
+    def test_a_file_changed_during_the_run_is_changed_already(self, data):
+        with recording() as observed:
+            (data / "a.txt").read_text()
+            (data / "b.txt").read_text()
+        # Another process, while the cell still ran.
+        (data / "a.txt").write_text("changed by someone else")
+
+        (finding,) = report(observed, source="", mounts={}, run_dir="/x", scope={})
+
+        assert finding["fingerprints"] == {
+            str(data / "a.txt"): CHANGED_DURING_RUN,
+            str(data / "b.txt"): fingerprint(str(data / "b.txt")),
+        }
+
+    @pytest.mark.parametrize("mode", ["w", "r+"])
+    def test_a_file_the_run_read_then_changed_is_as_the_run_left_it(self, data, mode):
+        with recording() as observed:
+            (data / "a.txt").read_text()
+            with open(data / "a.txt", mode) as f:
+                f.write("the run's own, longer")
+
+        (finding,) = report(observed, source="", mounts={}, run_dir="/x", scope={})
+
+        assert finding["fingerprints"] == {str(data / "a.txt"): fingerprint(str(data / "a.txt"))}
+
+    def test_opening_a_directory_is_not_a_listing(self, data):
+        with recording() as observed:
+            fd = os.open(data, os.O_RDONLY)
+            os.close(fd)
+
+        # Its fingerprint lists it, which the hook must not take for the cell's.
+        assert observed.listings == set()
+
+    def test_a_listing_is_its_names(self, data, tmp_path):
+        before = fingerprint(str(data))
+        # An atomic save: a sibling written, then renamed over the file.
+        (data / ".a.txt.tmp").write_text("saved again")
+        os.replace(data / ".a.txt.tmp", data / "a.txt")
+        assert fingerprint(str(data)) == before
+
+        (data / "c.txt").write_text("c")
+        assert fingerprint(str(data)) != before
+
+    def test_a_copy_with_its_times_is_the_same_file(self, data, tmp_path):
+        before = fingerprint(str(data / "a.txt"))
+        # A new inode (a copied notebook, a restarted container's overlay), same file.
+        shutil.copy2(data / "a.txt", tmp_path / "copy.txt")
+        os.replace(tmp_path / "copy.txt", data / "a.txt")
+        assert fingerprint(str(data / "a.txt")) == before
 
     def test_a_path_gone_by_the_report_has_no_fingerprint(self, data):
         with recording() as observed:
@@ -233,18 +283,20 @@ class TestTheRecord:
         assert finding["items"] == [str(data / "a.txt")]
         assert finding["fingerprints"] == {}
 
-    def test_a_loop_keeps_the_first_iterations_fingerprint(self):
-        def read(st: int) -> ReadFinding:
+    def test_a_loop_keeps_its_newest_iterations_fingerprint(self):
+        def read(*st: int) -> ReadFinding:
             return ReadFinding(
                 code="undeclared_read",
                 items=["/a"],
                 total=1,
                 partial=False,
-                fingerprints={"/a": [st]},
+                fingerprints={"/a": list(st)},
             )
 
-        # A change after the first, even during the run, is a change.
-        assert merge([[read(1)], [read(2)]]) == [read(1)]
+        # A later iteration's own write is the cell's, not a change after its result.
+        assert merge([[read(1)], [read(2)]]) == [read(2)]
+        # A change while any iteration ran stays one.
+        assert merge([[read(1)], [read()], [read(2)]]) == [read()]
 
 
 def _lock(notebook_dir: Path, *packages: str) -> None:
