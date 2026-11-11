@@ -23,6 +23,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
+from tests.notebook.pool_helpers import warm_again
 
 
 def _codes(findings: list[ReadFinding]) -> dict[str, list[str]]:
@@ -384,14 +385,15 @@ class TestARun:
     async def test_a_warm_run_reports_what_a_cold_one_does(self, tmp_path, outside, warm_pool):
         runs = _runs(outside)
         session = _session(tmp_path, *runs.items())
+
         executor = CellExecutor(session, await warm_pool(session))
 
         for cell_id, source in runs.items():
+            await warm_again(executor.pool)
             result = await executor.execute_cell(cell_id, source)
             assert result.success, result.error
             assert result.execution_method == "warm"
             assert _codes(result.read_audit) == _expected(outside)[cell_id], cell_id
-            await warm_pool(session)  # one cell per worker
 
     async def test_a_batch_reports_each_read_for_the_cell_that_made_it(self, tmp_path, outside):
         runs = _runs(outside)
