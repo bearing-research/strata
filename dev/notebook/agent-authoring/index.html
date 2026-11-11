@@ -3465,7 +3465,9 @@ unknown workers, …) without calling any LLM.</p>
 </tbody>
 </table>
 <p><code>run --format json</code> reports per-cell <code>status</code>, <code>error</code> (and its <code>traceback</code> and
-<code>traceback_full</code> when the cell raised), and <code>cache_hit</code>,
+<code>traceback_full</code> when the cell raised), <code>cache_hit</code>, and <code>run_diagnostics</code> when the
+run read a file or imported a module it does not declare (each names the mount or
+<code>uv add</code> that fixes it),
 and skips downstream cells when an upstream fails (<code>"reason": "upstream
 failed"</code>) - fix the first error and re-run; everything already correct is
 a cache hit.</p>

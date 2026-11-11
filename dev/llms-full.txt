@@ -1965,7 +1965,45 @@ df = upstream_df.copy()  # make a private copy
 df["total"] = df["a"] + df["b"]
 ```
 
-Warnings surface as a pill on the cell and a structured entry in the execution log.
+Warnings show in the cell's header pill, beside its annotation issues, and in the run
+report (`strata run`, `strata cell run`, MCP `run_cell`) as `mutated_input` rows of
+`run_diagnostics`. A cache hit shows them again, since the result it serves is the same.
+
+## Reads the cell does not declare
+
+A cell's key holds what it declares: its source, upstream values, the lockfile, its mounts,
+`@table`, `@fetch` and `@dataset`. A file it opens around them is not in the key, so its
+cached result stays when that file changes. Each run records what it read, listed and
+imported, and says which of those nothing declares, with the fix:
+
+| Code | When | Fix |
+| --- | --- | --- |
+| `undeclared_read` | a file outside every mount | `# @mount <name> <dir> ro`, and read it through `<name>` |
+| `undeclared_listing` | a directory listed outside every mount | the same mount, over the directory |
+| `undeclared_import` | a module loaded from a file outside the environment | make its import root a package and `uv add --editable <dir>` |
+| `unlocked_package` | a module whose package `uv.lock` does not hold | `uv add <package>` |
+| `work_dir_read` | a file in `work/` this run did not write | return the data from the cell that writes it |
+| `subprocess_run` | the cell started a program | its reads are not seen; declare them as mounts |
+
+```text
+This cell read `/data/events.csv`, which no mount covers, so its cached result will not
+change when the file does. Add `# @mount data /data ro` and read `data / "events.csv"`.
+```
+
+The mount is named after its folder, never with a name the cell already uses, and a
+folder in or beside the notebook is written as a [relative path](https://bearingresearch.com/strata/dev/guides/data/mounts/)
+(`../data`); one with a space in it as a `file:` URI (`file:../My%20Data`). Files share
+the mount of their nearest common folder, though never the root, the home folder, the
+notebook's folder or one above it: a mount over the notebook would key the cell on every
+other cell. A file the run wrote before reading it is its own, and the interpreter, the
+venv, system folders and the dot-folders tools keep in the home folder are left out.
+
+The findings show in the header pill and the run report, as mutation warnings do,
+and a cache hit shows them again. `subprocess_run` and a failed audit are notes, not
+warnings. They never block a run or change its status or key. They describe the result
+the cell holds, so a failed run replaces them only when it found something itself.
+Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
+what they read is not reported.
 
 ## Where a cell runs: `work/`
 
@@ -6885,7 +6923,7 @@ details stay in the server log.
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |
-| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. A cell that raised has its `traceback` and `traceback_full`. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
+| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. A cell that raised has its `traceback` and `traceback_full`; `run_diagnostics` names what the run read without declaring it, each with its fix. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
 | `cancel_cell(session_id, cell_id)` | Cancel the cell's run, whoever started it, as the browser's stop button does: the run stops and the cell is left idle. A `run_cell` waiting on it returns `status: error` with `error_code: cancelled`. Returns `{cell_id, cancelled, status}`; `cancelled` is `false` when the cell was not running. |
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
@@ -7186,7 +7224,9 @@ unknown workers, …) without calling any LLM.
 | Wrong logic, missing dependency in `pyproject.toml` | `run` |
 
 `run --format json` reports per-cell `status`, `error` (and its `traceback` and
-`traceback_full` when the cell raised), and `cache_hit`,
+`traceback_full` when the cell raised), `cache_hit`, and `run_diagnostics` when the
+run read a file or imported a module it does not declare (each names the mount or
+`uv add` that fixes it),
 and skips downstream cells when an upstream fails (`"reason": "upstream
 failed"`) - fix the first error and re-run; everything already correct is
 a cache hit.
@@ -9698,7 +9738,11 @@ entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
 `cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
 `error` / `reason` where applicable, `traceback` when the cell raised, starting
 at the cell's first frame, `traceback_full` with the harness frames too, and
-`error_code` when the failure has a stable name, such as `fetch_pin_mismatch`). A
+`error_code` when the failure has a stable name, such as `fetch_pin_mismatch`), and
+`run_diagnostics` when the run read a file it does not declare or mutated an input:
+`{severity, code, message}` rows, each naming its fix (see
+[Reads the cell does not declare](https://bearingresearch.com/strata/dev/guides/cells/python/#reads-the-cell-does-not-declare)).
+The human format prints each under its cell. A
 cache hit replays the stdout/stderr of the run behind it, cached by provenance
 along with its outputs (`--force` re-executes). A result pulled from a team store
 brings no console, so `stdout` is absent there. Errors and pre-flight diagnostics go to
@@ -9953,7 +9997,8 @@ server's run modes, so remote execution has the same three modes as local.
 
 `--format json` (default) writes a single clean JSON object to **stdout** - the
 executor's logs go to stderr, so the stdout stream stays parseable. A cell that
-raised has its `traceback` and `traceback_full`, as in `strata run`:
+raised has its `traceback` and `traceback_full`, and a run that read around its
+declarations has its `run_diagnostics`, as in `strata run`:
 
 ```bash
 strata cell run nb featurize --format json | jq '{status, cache_hit, error}'
@@ -12694,10 +12739,10 @@ All messages are JSON with this shape:
 | Type                      | Payload                                                                                                                  | Description                                      |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
 | `cell_status`             | `{ "cell_id": "...", "status": "running", "remote_worker": "...", "remote_transport": "...", "remote_build_state": "...", "staleness_reasons": [...], "causality": {...} }` | Status changed. Only `cell_id` and `status` are always present: the `remote_*` fields come with `running` for a remote cell (`remote_build_state` is `starting` while a worker provisions the job), `staleness_reasons` and `causality` with a staleness update. A remote cell on a worker that queues its jobs gets two more `running` frames during the run, with `remote_build_state` `starting` and then `running`; they update the badge and do not start a new run. While `starting`, a frame may also carry `remote_queue_position` and `remote_queue_detail`, the dispatcher's report on a queued job, and while `running`, `remote_queue_detail` alone, its sentence on where the job runs. Another such frame follows each time the report changes. A `running` frame without `remote_build_state` starts a run: clear the cell's console (see [Console](#console)) |
-| `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...] }` | Execution result, including rich visible outputs. `outputs` maps each stored variable to its preview; `_` is the last displayed value. On a cache hit `duration_ms` is the load time, and `saved_ms` is what the hit saved (0 when no earlier run priced it). `artifact_uris` maps each stored variable to its artifact. `stdout` / `stderr` are the run's whole console and replace what `cell_console` built (see [Console](#console)). A remote run adds `remote_worker`, `remote_transport`, `remote_build_id` and `remote_build_state`. An entry of `outputs` or `displays` keeps fields this server does not know, since the harness that wrote it may be a worker on another version |
+| `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...], "run_diagnostics": [...] }` | Execution result, including rich visible outputs. `outputs` maps each stored variable to its preview; `_` is the last displayed value. On a cache hit `duration_ms` is the load time, and `saved_ms` is what the hit saved (0 when no earlier run priced it). `artifact_uris` maps each stored variable to its artifact. `run_diagnostics` holds `{severity, code, message}` rows for what the run read without declaring it and the inputs it mutated, each naming its fix; they replace the cell's, and a cache hit carries those of the run behind it (see [Reads the cell does not declare](https://bearingresearch.com/strata/dev/guides/cells/python/#reads-the-cell-does-not-declare)). `stdout` / `stderr` are the run's whole console and replace what `cell_console` built (see [Console](#console)). A remote run adds `remote_worker`, `remote_transport`, `remote_build_id` and `remote_build_state`. An entry of `outputs` or `displays` keeps fields this server does not know, since the harness that wrote it may be a worker on another version |
 | `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed - clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. `kind: "notice"` is a provider-degradation message to show beside the stream, not part of its content. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "...", "chunk_seq": 0 }`                                                | Console output. Append `text` to the cell's console for `stream`. A remote cell's output arrives while it runs, numbered per stream by `chunk_seq` from 0: chunk 0 starts that stream's console for the run, so replace what the last run left. `chunk_seq` is `null` on console sent when the cell finishes: for a cell that streamed nothing (every local cell), that frame is the stream's whole console for the run (see [Console](#console)) |
-| `cell_error`              | `{ "cell_id": "...", "error": "...", "traceback": "...", "traceback_full": "...", "stdout": "...", "stderr": "...", "suggest_install": "...", "suggest_install_language": "python" }` | Execution error. `error` is one line (and any hint); `traceback`, when the cell raised, starts at the cell's first frame and ends with the error line, and `traceback_full` keeps the harness frames before it. `stdout` / `stderr` are the failed run's whole console and replace it, as on `cell_output`; a cell that failed before it ran (a fetch pin mismatch, a missing input) sends them empty. Only an internal server error carries neither, and leaves the console as it was. `error_code`, when present, is a stable name to branch on (`fetch_pin_mismatch`: a `# @fetch ... sha256=` pin no longer matches the URL's bytes). `suggest_install` names a missing package to offer installing, with `python` or `r` for which installer. A remote run adds the `remote_*` fields of `cell_output` plus `remote_error_code` |
+| `cell_error`              | `{ "cell_id": "...", "error": "...", "traceback": "...", "traceback_full": "...", "stdout": "...", "stderr": "...", "run_diagnostics": [...], "suggest_install": "...", "suggest_install_language": "python" }` | Execution error. `error` is one line (and any hint); `traceback`, when the cell raised, starts at the cell's first frame and ends with the error line, and `traceback_full` keeps the harness frames before it. `stdout` / `stderr` are the failed run's whole console and replace it, as on `cell_output`; a cell that failed before it ran (a fetch pin mismatch, a missing input) sends them empty. Only an internal server error carries neither, and leaves the console as it was. `error_code`, when present, is a stable name to branch on (`fetch_pin_mismatch`: a `# @fetch ... sha256=` pin no longer matches the URL's bytes). `suggest_install` names a missing package to offer installing, with `python` or `r` for which installer. `run_diagnostics` is as on `cell_output`, and absent from an internal server error. A remote run adds the `remote_*` fields of `cell_output` plus `remote_error_code` |
 | `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "until_reached": false, "duration_ms": 128 }` | Per-iteration update from a `@loop` cell. `until_reached` is true on the iteration where `@loop_until` held |
 | `cell_inputs`             | `{ "cell_id": "...", "machine": "local", "inputs": [{ "kind": "mount", "name": "data", "uri": "s3://bucket/data", "bytes": 5368709120, "cached_bytes": 1073741824 }] }` | What a cell's `@mount`, `@table` and `@fetch` inputs weigh on `machine`, sent before a run reads them, and after a `cell_source_update` that changes its `@mount`, `@table`, `@fetch` or `@worker` lines, when the estimate differs from the cell's last; an empty `inputs` means it reads none now. `bytes` is a read-only remote mount's listing, a table snapshot's data files (an upper bound on what a scan reads) or a fetch's size; `cached_bytes` is what the machine already holds. Either is absent when not known: a pinned mount is not listed, and a pool's machine is not known before dispatch. On a remote worker, `cached_bytes` is the worker's own cache, which it reports through [`POST /v1/mount-cache/cached`](https://bearingresearch.com/strata/dev/reference/executor-protocol/#post-v1mount-cachecached-optional). `credential` names a [named credential](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials) when the input reads through one. `rw` and `file://` mounts move nothing and are left out. `notebook_state` carries each cell's last estimate as `inputs` and `inputs_machine` |
 | `cell_variant_progress`   | `{ "cell_id": "...", "variant": "rf", "index": 1, "total": 3, "success": true, "duration_ms": 128, "error": null }`        | Per-variant update from a `# @per_variant` fan-out cell |

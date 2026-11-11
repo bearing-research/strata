@@ -255,7 +255,45 @@ df = upstream_df.copy()  # make a private copy
 df["total"] = df["a"] + df["b"]
 ```
 
-Warnings surface as a pill on the cell and a structured entry in the execution log.
+Warnings show in the cell's header pill, beside its annotation issues, and in the run
+report (`strata run`, `strata cell run`, MCP `run_cell`) as `mutated_input` rows of
+`run_diagnostics`. A cache hit shows them again, since the result it serves is the same.
+
+## Reads the cell does not declare
+
+A cell's key holds what it declares: its source, upstream values, the lockfile, its mounts,
+`@table`, `@fetch` and `@dataset`. A file it opens around them is not in the key, so its
+cached result stays when that file changes. Each run records what it read, listed and
+imported, and says which of those nothing declares, with the fix:
+
+| Code | When | Fix |
+| --- | --- | --- |
+| `undeclared_read` | a file outside every mount | `# @mount <name> <dir> ro`, and read it through `<name>` |
+| `undeclared_listing` | a directory listed outside every mount | the same mount, over the directory |
+| `undeclared_import` | a module loaded from a file outside the environment | make its import root a package and `uv add --editable <dir>` |
+| `unlocked_package` | a module whose package `uv.lock` does not hold | `uv add <package>` |
+| `work_dir_read` | a file in `work/` this run did not write | return the data from the cell that writes it |
+| `subprocess_run` | the cell started a program | its reads are not seen; declare them as mounts |
+
+```text
+This cell read `/data/events.csv`, which no mount covers, so its cached result will not
+change when the file does. Add `# @mount data /data ro` and read `data / "events.csv"`.
+```
+
+The mount is named after its folder, never with a name the cell already uses, and a
+folder in or beside the notebook is written as a [relative path](https://bearingresearch.com/strata/dev/guides/data/mounts/)
+(`../data`); one with a space in it as a `file:` URI (`file:../My%20Data`). Files share
+the mount of their nearest common folder, though never the root, the home folder, the
+notebook's folder or one above it: a mount over the notebook would key the cell on every
+other cell. A file the run wrote before reading it is its own, and the interpreter, the
+venv, system folders and the dot-folders tools keep in the home folder are left out.
+
+The findings show in the header pill and the run report, as mutation warnings do,
+and a cache hit shows them again. `subprocess_run` and a failed audit are notes, not
+warnings. They never block a run or change its status or key. They describe the result
+the cell holds, so a failed run replaces them only when it found something itself.
+Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
+what they read is not reported.
 
 ## Where a cell runs: `work/`
 

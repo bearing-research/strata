@@ -3450,7 +3450,11 @@ entry per cell (<code>id</code>, <code>status</code> ∈ <code>ok|error|skipped<
 <code>cache_hit</code>, plus <code>stdout</code> / <code>stderr</code> - truncated at 10k chars - and
 <code>error</code> / <code>reason</code> where applicable, <code>traceback</code> when the cell raised, starting
 at the cell's first frame, <code>traceback_full</code> with the harness frames too, and
-<code>error_code</code> when the failure has a stable name, such as <code>fetch_pin_mismatch</code>). A
+<code>error_code</code> when the failure has a stable name, such as <code>fetch_pin_mismatch</code>), and
+<code>run_diagnostics</code> when the run read a file it does not declare or mutated an input:
+<code>{severity, code, message}</code> rows, each naming its fix (see
+<a href="../../guides/cells/python/#reads-the-cell-does-not-declare">Reads the cell does not declare</a>).
+The human format prints each under its cell. A
 cache hit replays the stdout/stderr of the run behind it, cached by provenance
 along with its outputs (<code>--force</code> re-executes). A result pulled from a team store
 brings no console, so <code>stdout</code> is absent there. Errors and pre-flight diagnostics go to
@@ -3671,7 +3675,8 @@ $SID &lt;cell_id&gt; --rerun</code>). The server owns its venv, so the remote pa
 server's run modes, so remote execution has the same three modes as local.</p>
 <p><code>--format json</code> (default) writes a single clean JSON object to <strong>stdout</strong> - the
 executor's logs go to stderr, so the stdout stream stays parseable. A cell that
-raised has its <code>traceback</code> and <code>traceback_full</code>, as in <code>strata run</code>:</p>
+raised has its <code>traceback</code> and <code>traceback_full</code>, and a run that read around its
+declarations has its <code>run_diagnostics</code>, as in <code>strata run</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>run<span class="w"> </span>nb<span class="w"> </span>featurize<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'{status, cache_hit, error}'</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>strata<span class="w"> </span>cell<span class="w"> </span><span class="nb">test</span><span class="w"> </span>nb<span class="w"> </span>featurize<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.cases[] | select(.outcome != "passed")'</span>
 </code></pre></div>

@@ -34,6 +34,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   take `./warehouse#<namespace>.<table>`, resolved from the notebook's directory
   wherever the server was started, so a committed notebook names no absolute path.
   (#1381)
+- **A cell says when its result depends on a file it does not declare.** Each run
+  records what it opens, lists, imports and starts. A file outside every mount, a module
+  from outside the environment, a package `uv.lock` does not hold, or a file another run
+  left in `work/` shows in the cell's header pill and in the run report (`strata run`,
+  `strata cell run`, MCP `run_cell`), each with its fix: the mount to add, written
+  relative to the notebook when the folder is beside it, or the `uv add`. A cache hit says
+  it again. It never changes a key, a status or what is cached. Mutation warnings show in
+  the same pill, for the first time in the UI, and `strata run --format json` reports
+  both as `run_diagnostics`, in place of its `mutation_warnings`. (#1504, #1509)
 
 ### Changed
 - **A relative local mount path is under the notebook's directory.** `# @mount shared

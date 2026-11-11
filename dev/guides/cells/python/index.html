@@ -969,6 +969,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reads-the-cell-does-not-declare" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reads the cell does not declare
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-a-cell-runs-work" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3244,6 +3255,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reads-the-cell-does-not-declare" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reads the cell does not declare
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-a-cell-runs-work" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3482,7 +3504,71 @@ which any writer can use:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">upstream_df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>  <span class="c1"># make a private copy</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">df</span><span class="p">[</span><span class="s2">"total"</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"a"</span><span class="p">]</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s2">"b"</span><span class="p">]</span>
 </code></pre></div>
-<p>Warnings surface as a pill on the cell and a structured entry in the execution log.</p>
+<p>Warnings show in the cell's header pill, beside its annotation issues, and in the run
+report (<code>strata run</code>, <code>strata cell run</code>, MCP <code>run_cell</code>) as <code>mutated_input</code> rows of
+<code>run_diagnostics</code>. A cache hit shows them again, since the result it serves is the same.</p>
+<h2 id="reads-the-cell-does-not-declare">Reads the cell does not declare<a class="headerlink" href="#reads-the-cell-does-not-declare" title="Permanent link">&para;</a></h2>
+<p>A cell's key holds what it declares: its source, upstream values, the lockfile, its mounts,
+<code>@table</code>, <code>@fetch</code> and <code>@dataset</code>. A file it opens around them is not in the key, so its
+cached result stays when that file changes. Each run records what it read, listed and
+imported, and says which of those nothing declares, with the fix:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>When</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>undeclared_read</code></td>
+<td>a file outside every mount</td>
+<td><code># @mount &lt;name&gt; &lt;dir&gt; ro</code>, and read it through <code>&lt;name&gt;</code></td>
+</tr>
+<tr>
+<td><code>undeclared_listing</code></td>
+<td>a directory listed outside every mount</td>
+<td>the same mount, over the directory</td>
+</tr>
+<tr>
+<td><code>undeclared_import</code></td>
+<td>a module loaded from a file outside the environment</td>
+<td>make its import root a package and <code>uv add --editable &lt;dir&gt;</code></td>
+</tr>
+<tr>
+<td><code>unlocked_package</code></td>
+<td>a module whose package <code>uv.lock</code> does not hold</td>
+<td><code>uv add &lt;package&gt;</code></td>
+</tr>
+<tr>
+<td><code>work_dir_read</code></td>
+<td>a file in <code>work/</code> this run did not write</td>
+<td>return the data from the cell that writes it</td>
+</tr>
+<tr>
+<td><code>subprocess_run</code></td>
+<td>the cell started a program</td>
+<td>its reads are not seen; declare them as mounts</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>This cell read `/data/events.csv`, which no mount covers, so its cached result will not
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>change when the file does. Add `# @mount data /data ro` and read `data / "events.csv"`.
+</code></pre></div>
+<p>The mount is named after its folder, never with a name the cell already uses, and a
+folder in or beside the notebook is written as a <a href="../../data/mounts/">relative path</a>
+(<code>../data</code>); one with a space in it as a <code>file:</code> URI (<code>file:../My%20Data</code>). Files share
+the mount of their nearest common folder, though never the root, the home folder, the
+notebook's folder or one above it: a mount over the notebook would key the cell on every
+other cell. A file the run wrote before reading it is its own, and the interpreter, the
+venv, system folders and the dot-folders tools keep in the home folder are left out.</p>
+<p>The findings show in the header pill and the run report, as mutation warnings do,
+and a cache hit shows them again. <code>subprocess_run</code> and a failed audit are notes, not
+warnings. They never block a run or change its status or key. They describe the result
+the cell holds, so a failed run replaces them only when it found something itself.
+Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
+what they read is not reported.</p>
 <h2 id="where-a-cell-runs-work">Where a cell runs: <code>work/</code><a class="headerlink" href="#where-a-cell-runs-work" title="Permanent link">&para;</a></h2>
 <p>A cell runs in its notebook's <code>work/</code> directory, not beside <code>notebook.toml</code>. A file it writes by a relative path (<code>plt.savefig("fig.png")</code>) lands in <code>work/fig.png</code>, and a later cell reads it back by the same path. <code>work/</code> is made on the first run and kept between runs. The <code>.gitignore</code> that <code>strata new</code> writes leaves it out of git, exports and snapshots leave it out too, and it is never on <code>sys.path</code>, so a file a cell wrote there is not imported in place of a library. R cells run there as well.</p>
 <p>A file beside the notebook is one directory up: read it as <code>../data.csv</code>. A Python cell that opens <code>data.csv</code> and finds it only beside the notebook fails with a hint saying so. A SQL connection's relative <code>path</code> still resolves against the notebook's directory.</p>

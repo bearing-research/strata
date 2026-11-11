@@ -3278,7 +3278,7 @@ details stay in the server log.</p>
 </tr>
 <tr>
 <td><code>run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)</code></td>
-<td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live. A cell that raised has its <code>traceback</code> and <code>traceback_full</code>. With <code>confirm_reads</code>, a run over the server's read threshold returns <code>status: error</code>, <code>error_code: large_read</code> and the estimate in <code>reads</code> instead; <code>approve_reads</code> runs it.</td>
+<td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live. A cell that raised has its <code>traceback</code> and <code>traceback_full</code>; <code>run_diagnostics</code> names what the run read without declaring it, each with its fix. With <code>confirm_reads</code>, a run over the server's read threshold returns <code>status: error</code>, <code>error_code: large_read</code> and the estimate in <code>reads</code> instead; <code>approve_reads</code> runs it.</td>
 </tr>
 <tr>
 <td><code>cancel_cell(session_id, cell_id)</code></td>
