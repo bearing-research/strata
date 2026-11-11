@@ -249,6 +249,9 @@ import-not-found = "warn"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Every async fixture is function-scoped, so this is today's behavior, now stated. A wider
+# async fixture must set its own loop_scope to match, or it runs on each test's loop.
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 # Repo root on sys.path so tests can import the non-packaged `evals` suite
 # (the shipped package `strata` is imported from the installed venv, not here).
