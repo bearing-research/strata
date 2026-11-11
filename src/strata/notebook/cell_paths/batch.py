@@ -389,7 +389,8 @@ async def batch_service_loop(
     end_reason = "subprocess_died"
     failed_cell_id: str | None = None
     team_pulls: dict[str, TeamPull] = {}
-    hit_consoles: dict[str, tuple[bool, int]] = {}
+    # Parent-side fields of a hit's console record, by cell: what the harness does not echo.
+    hit_consoles: dict[str, dict[str, Any]] = {}
 
     async def _record(cell_id: str, result: BatchCellResult) -> None:
         cell_results[cell_id] = result
@@ -496,10 +497,12 @@ async def batch_service_loop(
             team_pull = response.pop("team_pull", None)
             if team_pull is not None:
                 team_pulls[payload.get("cell_id", "")] = team_pull
-            hit_consoles[payload.get("cell_id", "")] = (
-                response.pop("replaces_console", False),
-                response.pop("hit_run_ms", 0),
-            )
+            hit_consoles[payload.get("cell_id", "")] = {
+                "replaces_console": response.pop("replaces_console", False),
+                "hit_run_ms": response.pop("hit_run_ms", 0),
+                "read_audit": response.pop("read_audit", []),
+                "mutation_warnings": response.pop("mutation_warnings", []),
+            }
             # Answered once here instead of at each cache-check return; the cell's ambient
             # client needs it to name what it promotes.
             response["input_uris"] = upstream_artifact_uris(
@@ -569,8 +572,7 @@ async def batch_service_loop(
                         display_outputs=payload.get("display_outputs") or [],
                         duration_ms=payload.get("duration_ms"),
                         team_pull=team_pulls.get(active_cell_id),
-                        replaces_console=hit_consoles[active_cell_id][0],
-                        hit_run_ms=hit_consoles[active_cell_id][1],
+                        **hit_consoles[active_cell_id],
                     ),
                 )
             if watchdog_state is not None:
@@ -884,6 +886,8 @@ async def batch_service_cache_check(
         "stderr": console.get("stderr", ""),
         "replaces_console": console["replaces_console"],
         "hit_run_ms": console.get("hit_run_ms", 0),
+        "read_audit": console.get("read_audit", []),
+        "mutation_warnings": console.get("mutation_warnings", []),
         "team_pull": team_pull,
     }
 
@@ -1002,6 +1006,8 @@ async def batch_service_persist(
             env_hash=env_hash,
             display_count=len(persisted_displays),
             duration_ms=float(payload.get("duration_ms") or 0.0),
+            read_audit=payload.get("read_audit") or [],
+            mutation_warnings=payload.get("mutation_warnings") or [],
         )
 
     # Offer it to the team, as a single run does. Inert unless configured, and it

@@ -222,7 +222,9 @@ if TYPE_CHECKING:
     from strata.config import StrataConfig
     from strata.notebook.datasets import DatasetInput
     from strata.notebook.executor_host import ExecutorHost
+    from strata.notebook.immutability import MutationWarning
     from strata.notebook.pool import WarmProcessPool
+    from strata.notebook.read_audit import ReadFinding
 
 logger = logging.getLogger(__name__)
 
@@ -3554,6 +3556,8 @@ class CellExecutor:
         display_count: int | None = None,
         duration_ms: float,
         variant: str | None = None,
+        read_audit: list[ReadFinding] | None = None,
+        mutation_warnings: list[MutationWarning] | None = None,
     ) -> None:
         """Persist a cell's console output as a provenance-keyed artifact.
 
@@ -3563,11 +3567,17 @@ class CellExecutor:
         ran under this provenance (cache hit, ready on reopen).
         ``display_count`` records how many displays the run made, which a run with
         none leaves no display artifact to say. ``duration_ms`` is what the run cost,
-        hence what a hit on this record saves.
+        hence what a hit on this record saves. *read_audit* and *mutation_warnings* are
+        what a hit's result depends on beyond its key, which the hit says again.
         """
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id, variant)
-        blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
+        record: dict[str, Any] = {"stdout": stdout, "stderr": stderr}
+        if read_audit:
+            record["read_audit"] = read_audit
+        if mutation_warnings:
+            record["mutation_warnings"] = mutation_warnings
+        blob = json.dumps(record).encode("utf-8")
         params = self._fetch_params(cell_id)
         if display_count is not None:
             params["display_count"] = str(display_count)

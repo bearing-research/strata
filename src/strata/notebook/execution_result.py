@@ -16,6 +16,10 @@ class CachedConsole:
     stdout: str
     stderr: str
     run_ms: int = 0
+    # What the run read that the cell does not declare, and the inputs it mutated: the
+    # result depends on them, so a hit says so too.
+    read_audit: list[ReadFinding] = field(default_factory=list)
+    mutation_warnings: list[MutationWarning] = field(default_factory=list)
 
 
 def hit_console(console: CachedConsole | None, *, shows_this_key: bool) -> dict[str, Any]:
@@ -23,7 +27,8 @@ def hit_console(console: CachedConsole | None, *, shows_this_key: bool) -> dict[
 
     With no record (a team pull, or a store from before every cell kept one) a console
     from this key stays and one from another key goes: nothing here says what this run
-    printed, and the other key's output would read as if it did.
+    printed, and the other key's output would read as if it did. Its run diagnostics
+    go with it.
     """
     if console is None:
         return {"replaces_console": not shows_this_key}
@@ -32,6 +37,8 @@ def hit_console(console: CachedConsole | None, *, shows_this_key: bool) -> dict[
         "stderr": console.stderr,
         "replaces_console": True,
         "hit_run_ms": console.run_ms,
+        "read_audit": console.read_audit,
+        "mutation_warnings": console.mutation_warnings,
     }
 
 
@@ -69,6 +76,9 @@ class CellExecutionResult:
     mutation_warnings: list[MutationWarning] = field(default_factory=list)
     # What the run read that the cell does not declare (``read_audit.report``).
     read_audit: list[ReadFinding] = field(default_factory=list)
+    # Those and the mutation warnings as the cell shows them; the session sets them when
+    # it applies the result (``run_diagnostics``), as ``AnnotationDiagnostic`` dicts.
+    run_diagnostics: list[dict[str, Any]] = field(default_factory=list)
     # Retries the prompt-cell validate-and-retry loop used; 0 on first-try pass or for
     # non-schema cells.
     validation_retries: int = 0

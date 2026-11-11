@@ -315,6 +315,8 @@ export interface Cell {
   shadowWarnings?: string[]
   /** Annotation validation diagnostics (set on open/reload, never during typing) */
   annotationDiagnostics?: AnnotationDiagnostic[]
+  /** What the last run read without declaring it, and the inputs it mutated (set by a run) */
+  runDiagnostics?: AnnotationDiagnostic[]
   /** What the inputs weighed when the cell last started, from ``cell_inputs`` */
   inputWeights?: InputWeight[]
   /** The machine those inputs are read on */

@@ -44,6 +44,8 @@ class CellRuntime:
     last_error: str | None = None
     last_error_full: str | None = None
     last_error_source_hash: str | None = None
+    # What the last run read without declaring it, as the cell shows it (``run_diagnostics``).
+    run_diagnostics: list[dict[str, Any]] = field(default_factory=list)
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
     test_result: dict[str, Any] | None = None
@@ -80,6 +82,7 @@ class CellRuntime:
             or self.last_key_parts
             or self.last_reopen_identity
             or self.last_error
+            or self.run_diagnostics
             or self.display_outputs
             or self.display
             or self.test_result
@@ -238,6 +241,16 @@ def persist_cell_error(
     entry.last_error = error or None
     entry.last_error_full = error_full if error else None
     entry.last_error_source_hash = source_hash if error else None
+    save_runtime_state(notebook_dir, state)
+
+
+def persist_cell_run_diagnostics(
+    notebook_dir: Path, cell_id: str, diagnostics: list[dict[str, Any]]
+) -> None:
+    """Record (or clear) what a cell's last run read without declaring it."""
+    state = load_runtime_state(notebook_dir)
+    entry = state.get_or_create_cell(cell_id)
+    entry.run_diagnostics = diagnostics
     save_runtime_state(notebook_dir, state)
 
 

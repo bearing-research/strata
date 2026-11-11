@@ -600,13 +600,24 @@ const annotationSummaryTitle = computed(() => {
 })
 
 const annotationDiagnostics = computed(() => props.cell.annotationDiagnostics ?? [])
-const annotationDiagnosticsLabel = computed(() => {
-  const n = annotationDiagnostics.value.length
-  if (!n) return ''
-  return n === 1 ? '1 annotation issue' : `${n} annotation issues`
-})
 const annotationDiagnosticsTitle = computed(() =>
   annotationDiagnostics.value.map((d) => `${d.code}: ${d.message}`).join('\n'),
+)
+// The last run's findings share the pill: what it read undeclared, what it mutated.
+const runDiagnostics = computed(() => props.cell.runDiagnostics ?? [])
+const diagnosticsLabel = computed(() => {
+  const ofSource = annotationDiagnostics.value.length
+  const ofRun = runDiagnostics.value.length
+  const n = ofSource + ofRun
+  if (!n) return ''
+  if (!ofRun) return n === 1 ? '1 annotation issue' : `${n} annotation issues`
+  if (!ofSource) return n === 1 ? '1 run warning' : `${n} run warnings`
+  return `${n} issues`
+})
+const diagnosticsTitle = computed(() =>
+  [...annotationDiagnostics.value, ...runDiagnostics.value]
+    .map((d) => `${d.code}: ${d.message}`)
+    .join('\n'),
 )
 
 // Module-cell tooltip: the symbols downstream cells can reference.
@@ -1010,11 +1021,12 @@ function outputKey(output: CellOutput, index: number): string {
                 +{{ hiddenAnnotationSummaryCount }}
               </span>
               <span
-                v-if="annotationDiagnosticsLabel"
+                v-if="diagnosticsLabel"
                 class="annotation-diagnostic-badge"
-                :title="annotationDiagnosticsTitle"
+                :class="{ 'run-only': !annotationDiagnostics.length }"
+                :title="diagnosticsTitle"
               >
-                <TriangleAlert /> {{ annotationDiagnosticsLabel }}
+                <TriangleAlert /> {{ diagnosticsLabel }}
               </span>
               <span v-if="cell.isModuleCell" class="module-cell-badge" :title="moduleExportsTitle">
                 module
@@ -2083,6 +2095,12 @@ function outputKey(output: CellOutput, index: number): string {
   font-size: 10px;
   font-weight: 600;
   cursor: help;
+}
+
+/* A run's findings warn; they never block a run. */
+.annotation-diagnostic-badge.run-only {
+  background: var(--tint-warning);
+  color: var(--accent-warning);
 }
 
 /* Module-cell marker */

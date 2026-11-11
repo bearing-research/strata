@@ -80,6 +80,7 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
     read_venv_runtime_python_version,
 )
+from strata.notebook.run_diagnostics import run_diagnostics
 from strata.notebook.runtime_state import (
     MAX_EXECUTION_SAMPLES,
     EnvironmentRuntime,
@@ -87,6 +88,7 @@ from strata.notebook.runtime_state import (
     how_last_got,
     load_runtime_state,
     persist_cell_execution_sample,
+    persist_cell_run_diagnostics,
     persist_environment_synced_lockfile_hash,
     save_runtime_state,
 )
@@ -750,6 +752,7 @@ class NotebookSession:
             cell.last_source_hash = previous.last_source_hash
             cell.last_env_hash = previous.last_env_hash
             cell.last_key_parts = previous.last_key_parts
+            cell.run_diagnostics = list(previous.run_diagnostics)
             cell.widget_values = dict(previous.widget_values)
 
     def _restore_alternate_scheme_outputs(self, cell: Any) -> None:
@@ -1359,6 +1362,18 @@ class NotebookSession:
             queue.extend(self.dag.cell_downstream.get(nid, []))
         return affected
 
+    def _set_run_diagnostics(self, cell: Any, result: Any) -> None:
+        diagnostics = run_diagnostics(
+            result.read_audit, result.mutation_warnings, notebook_dir=self.path
+        )
+        if diagnostics == cell.run_diagnostics:
+            return
+        cell.run_diagnostics = diagnostics
+        # Runtime state, not notebook.toml; written only when they change.
+        persist_cell_run_diagnostics(
+            self.path, cell.id, [d.model_dump(mode="json") for d in diagnostics]
+        )
+
     def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None:
         """Persist transient execution metadata onto the session cell state."""
         cell = self.notebook_state.get_cell(cell_id)
@@ -1401,6 +1416,10 @@ class NotebookSession:
             from strata.notebook.writer import update_cell_console_output
 
             update_cell_console_output(self.path, cell_id, result.stdout or "", result.stderr or "")
+            # Under the same rule as the console: a hit with no record of its own says
+            # nothing of what its run read.
+            self._set_run_diagnostics(cell, result)
+        result.run_diagnostics = [d.model_dump(mode="json") for d in cell.run_diagnostics]
         if result.success and result.display_outputs:
             cell.display_outputs = [CellOutput(**output) for output in result.display_outputs]
             cell.display_output = cell.display_outputs[-1]
@@ -1701,6 +1720,8 @@ class NotebookSession:
             stdout=str(payload.get("stdout", "")),
             stderr=str(payload.get("stderr", "")),
             run_ms=int(artifact.params.get("build_duration_ms") or 0),
+            read_audit=payload.get("read_audit") or [],
+            mutation_warnings=payload.get("mutation_warnings") or [],
         )
 
     def _cached_console_record(

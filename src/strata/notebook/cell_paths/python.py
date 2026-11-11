@@ -881,6 +881,8 @@ async def run_python_cell(
                             display_count=len(exec_result.display_outputs),
                             duration_ms=exec_result.duration_ms,
                             variant=fanout_variant,
+                            read_audit=exec_result.read_audit,
+                            mutation_warnings=exec_result.mutation_warnings,
                         )
 
                 # ⑥ Sync back read-write mounts. A worker syncs its own and reports what

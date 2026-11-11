@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from strata.notebook.layout import cell_source_path
 from strata.notebook.models import (
+    AnnotationDiagnostic,
     CellLanguage,
     CellMeta,
     CellOutput,
@@ -271,6 +272,11 @@ def parse_notebook(directory: Path) -> NotebookState:
                 error=runtime_cell.last_error if runtime_cell else None,
                 error_full=runtime_cell.last_error_full if runtime_cell else None,
                 error_source_hash=(runtime_cell.last_error_source_hash if runtime_cell else None),
+                run_diagnostics=(
+                    [AnnotationDiagnostic(**d) for d in runtime_cell.run_diagnostics]
+                    if runtime_cell
+                    else []
+                ),
                 widget_values=dict(runtime_cell.widget_values) if runtime_cell else {},
                 inputs=inputs.get("inputs", []),
                 inputs_machine=inputs.get("machine"),

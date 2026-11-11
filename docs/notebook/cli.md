@@ -46,7 +46,11 @@ entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
 `cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
 `error` / `reason` where applicable, `traceback` when the cell raised, starting
 at the cell's first frame, `traceback_full` with the harness frames too, and
-`error_code` when the failure has a stable name, such as `fetch_pin_mismatch`). A
+`error_code` when the failure has a stable name, such as `fetch_pin_mismatch`), and
+`run_diagnostics` when the run read a file it does not declare or mutated an input:
+`{severity, code, message}` rows, each naming its fix (see
+[Reads the cell does not declare](../guides/cells/python.md#reads-the-cell-does-not-declare)).
+The human format prints each under its cell. A
 cache hit replays the stdout/stderr of the run behind it, cached by provenance
 along with its outputs (`--force` re-executes). A result pulled from a team store
 brings no console, so `stdout` is absent there. Errors and pre-flight diagnostics go to
@@ -301,7 +305,8 @@ server's run modes, so remote execution has the same three modes as local.
 
 `--format json` (default) writes a single clean JSON object to **stdout** - the
 executor's logs go to stderr, so the stdout stream stays parseable. A cell that
-raised has its `traceback` and `traceback_full`, as in `strata run`:
+raised has its `traceback` and `traceback_full`, and a run that read around its
+declarations has its `run_diagnostics`, as in `strata run`:
 
 ```bash
 strata cell run nb featurize --format json | jq '{status, cache_hit, error}'

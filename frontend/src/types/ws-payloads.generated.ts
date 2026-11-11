@@ -86,6 +86,7 @@ export interface CellErrorPayload {
   traceback?: string | null
   traceback_full?: string | null
   error_code?: string | null
+  run_diagnostics?: AnnotationDiagnostic[] | null
   suggest_install?: string | null
   suggest_install_language?: string | null
   remote_worker?: string | null
@@ -138,6 +139,7 @@ export interface CellOutputPayload {
   artifact_uri?: string | null
   execution_method?: string | null
   mutation_warnings: MutationWarning[]
+  run_diagnostics?: AnnotationDiagnostic[] | null
   displays?: DisplayOutput[] | null
   display?: DisplayOutput | null
   artifact_uris?: Record<string, string> | null
@@ -303,6 +305,8 @@ export interface CellView {
   variant_active: boolean
   /** Validation findings for the cell's source annotations */
   annotation_diagnostics: AnnotationDiagnostic[]
+  /** What the cell's last run read without declaring it, and the inputs it mutated (``run_diagnostics.py``); replaced by its next run */
+  run_diagnostics: AnnotationDiagnostic[]
   /** Whether this is a leaf node (no downstream consumers) */
   is_leaf: boolean
   /** Staleness status */

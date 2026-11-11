@@ -134,6 +134,7 @@ def _store_failure_result(
         error=store_error or STORE_FAILED,
         execution_method=result.execution_method,
         mutation_warnings=result.mutation_warnings,
+        read_audit=result.read_audit,
     )
 
 
@@ -149,6 +150,7 @@ def _mount_sync_failure_result(result: CellExecutionResult, exc: Exception) -> C
         error=f"Cell executed successfully but failed to sync read-write mounts: {exc}",
         execution_method=result.execution_method,
         mutation_warnings=result.mutation_warnings,
+        read_audit=result.read_audit,
     )
 
 

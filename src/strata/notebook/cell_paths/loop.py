@@ -890,6 +890,8 @@ async def _run_loop(
             env_hash=env_hash,
             display_count=len(display_outputs),
             duration_ms=loop_duration_ms,
+            read_audit=merge(iteration_audits),
+            mutation_warnings=all_mutation_warnings,
         )
 
     duration_ms = loop_duration_ms

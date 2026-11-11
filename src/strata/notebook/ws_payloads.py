@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from strata.notebook.annotations import AnnotationsWirePayload
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
+    AnnotationDiagnostic,
     CellState,
     CellTestCase,
     CellTestResult,
@@ -631,6 +632,8 @@ class CellOutputPayload(WsPayload):
     artifact_uri: str | None
     execution_method: str | None
     mutation_warnings: list[MutationWarning]
+    # What the run read without declaring it, and what it mutated; replaces the cell's.
+    run_diagnostics: list[AnnotationDiagnostic] | None = None
     displays: list[DisplayOutput] | None = None
     display: DisplayOutput | None = None
     # Every stored variable's artifact, each of which may be promoted.
@@ -658,6 +661,8 @@ class CellErrorPayload(WsPayload):
     # With the harness frames that lead to the cell, which ``traceback`` leaves out.
     traceback_full: str | None = None
     error_code: str | None = None
+    # As on ``cell_output``; absent from a failure the server raised itself.
+    run_diagnostics: list[AnnotationDiagnostic] | None = None
     suggest_install: str | None = None
     # ``python`` or ``r``: which install endpoint the suggestion is for.
     suggest_install_language: str | None = None

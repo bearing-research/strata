@@ -398,12 +398,15 @@ class TestAHitWithNoRecord:
         assert not _snapshot(session, "c").exists()
 
     def test_the_fields(self):
-        console = CachedConsole(stdout="o", stderr="e", run_ms=7)
+        audit = [{"code": "undeclared_read", "items": ["/a"], "total": 1, "partial": False}]
+        console = CachedConsole(stdout="o", stderr="e", run_ms=7, read_audit=audit)
         assert hit_console(console, shows_this_key=True) == {
             "stdout": "o",
             "stderr": "e",
             "replaces_console": True,
             "hit_run_ms": 7,
+            "read_audit": audit,
+            "mutation_warnings": [],
         }
         assert hit_console(None, shows_this_key=True) == {"replaces_console": False}
         assert hit_console(None, shows_this_key=False) == {"replaces_console": True}
