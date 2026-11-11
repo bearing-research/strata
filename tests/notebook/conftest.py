@@ -180,6 +180,11 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     monkeypatch.setattr("strata.notebook.harness_user._process_table", dict)
 
     if request.node.get_closest_marker("integration"):
+        # A real sync. uv clones each file into a new venv on macOS, and macOS checks every
+        # new binary on its first load, one at a time: pyarrow's ~2 s, queued behind
+        # xdist's other workers, outlasts a warm worker's ready bound. A hardlink shares
+        # the cache's file, checked once.
+        monkeypatch.setenv("UV_LINK_MODE", "hardlink")
         return
 
     monkeypatch.setattr("strata.notebook.writer._uv_sync", _fake_uv_sync)
