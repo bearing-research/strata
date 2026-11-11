@@ -2581,21 +2581,34 @@ class Person:
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.warm_pool
+    @pytest.mark.parametrize(
+        ("upstream", "source", "warned"),
+        [
+            pytest.param("x = 1", "del x\ny = 2", ["x"], id="a deleted input"),
+            # Exported, so downstream gets the mutated list: nothing to warn.
+            pytest.param("xs = [1, 2]", "xs[0] = 9", [], id="an exported mutated input"),
+            pytest.param(
+                "x = 1",
+                "params = [1.0, 2.0]\ntrainer = {'params': params}",
+                ["params"],
+                id="two outputs sharing a list",
+            ),
+        ],
+    )
     async def test_warm_execution_reports_same_mutation_warnings_as_cold(
-        self, sample_notebook, warm_pool
+        self, sample_notebook, warm_pool, upstream, source, warned
     ):
         """Warm workers should preserve mutation warnings emitted by cold execution."""
         cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
         cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
-        cell1.source = "x = 1"
-        cell2.source = "del x\ny = 2"
+        cell1.source = upstream
+        cell2.source = source
         sample_notebook.re_analyze_cell("cell1")
         sample_notebook.re_analyze_cell("cell2")
 
         cold_result = await CellExecutor(sample_notebook).execute_cell("cell2", cell2.source)
         assert cold_result.success is True
-        assert cold_result.mutation_warnings
-        assert cold_result.mutation_warnings[0]["var_name"] == "x"
+        assert [w["var_name"] for w in cold_result.mutation_warnings] == warned
 
         pool = await warm_pool(sample_notebook)
         # The cold run stored cell2's (empty) console, so a plain run would be a cache hit;

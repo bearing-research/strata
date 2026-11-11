@@ -350,7 +350,14 @@ def execute_harness(manifest: dict) -> dict:
             except Exception:
                 continue
 
-        mutation_warnings = list(_immut.detect_mutations(namespace, input_snapshots))
+        # As the cold harness does: an exported mutated input reaches downstream as published,
+        # and outputs sharing a mutable object decouple once stored apart.
+        mutation_warnings = list(
+            _immut.detect_mutations(namespace, input_snapshots, exported_names=set(variables))
+        )
+        mutation_warnings.extend(
+            _immut.detect_shared_mutable_outputs({name: namespace[name] for name in variables})
+        )
         read_audit = _audit.report(
             observed,
             source=source,
