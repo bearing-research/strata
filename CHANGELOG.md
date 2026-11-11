@@ -325,6 +325,11 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Uploads and table reads close what they open.** An artifact upload, an import, a worker's
+  execute request and the reference executor left each form part's spooled temp file open, and
+  every `@table` read, `@write_table` write, table export and catalog read in SQL left its
+  Iceberg catalog's SQLite connection open; each waited for the collector. The server also
+  closes its own catalogs when it stops. (#1513)
 - **A warm worker warns about mutations as a cold run does.** A cell run on the warm pool
   warned when it changed an input in place and passed it on, which a cold run rightly does
   not, and never warned when two of its outputs shared one mutable object. (#1507)

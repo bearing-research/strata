@@ -6,9 +6,11 @@ and nothing the refused upload wrote is left behind.
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import tempfile
+import warnings
 
 import httpx
 import pyarrow as pa
@@ -154,6 +156,26 @@ def test_an_upload_under_the_cap_is_stored(served, method, path, metadata):
     response = _chunked(method, f"{base}{path}", files)
 
     assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize(("method", "path", "metadata"), _ROUTES)
+def test_an_upload_closes_the_parts_it_parsed(served, method, path, metadata):
+    """Each part is a spooled temp file; one left open warns when the collector finds it."""
+    base, _, _ = served
+    data = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))
+    files = {
+        "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
+        "data": ("data.arrow", data, "application/vnd.apache.arrow.stream"),
+    }
+    gc.collect()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ResourceWarning)
+        response = httpx.request(method, f"{base}{path}", files=files, timeout=10)
+        gc.collect()
+
+    assert response.status_code == 200, response.text
+    assert [str(w.message) for w in caught if "SpooledTemporaryFile" in str(w.message)] == []
 
 
 @pytest.fixture

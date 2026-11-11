@@ -1279,125 +1279,127 @@ def create_notebook_executor_app(
 
     @app.post("/v1/notebook-execute", dependencies=[Depends(require_worker_token)])
     async def execute(http_request: Request) -> Response:
-        form = await http_request.form()
-        metadata_file = form.get("metadata")
-        if metadata_file is None or isinstance(metadata_file, str):
-            raise HTTPException(status_code=400, detail="Missing metadata")
+        async with http_request.form() as form:
+            metadata_file = form.get("metadata")
+            if metadata_file is None or isinstance(metadata_file, str):
+                raise HTTPException(status_code=400, detail="Missing metadata")
 
-        try:
-            metadata = json.loads((await metadata_file.read()).decode("utf-8"))
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid metadata: {exc}")
+            try:
+                metadata = json.loads((await metadata_file.read()).decode("utf-8"))
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid metadata: {exc}")
 
-        protocol_version = metadata.get("protocol_version")
-        if protocol_version != NOTEBOOK_EXECUTOR_PROTOCOL_VERSION:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Unsupported protocol version: {protocol_version}. "
-                    f"Expected: {NOTEBOOK_EXECUTOR_PROTOCOL_VERSION}"
-                ),
+            protocol_version = metadata.get("protocol_version")
+            if protocol_version != NOTEBOOK_EXECUTOR_PROTOCOL_VERSION:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unsupported protocol version: {protocol_version}. "
+                        f"Expected: {NOTEBOOK_EXECUTOR_PROTOCOL_VERSION}"
+                    ),
+                )
+
+            source = str(metadata.get("source", ""))
+            timeout_seconds = float(metadata.get("timeout_seconds", 30.0))
+            raw_inputs = metadata.get("inputs", {})
+            raw_mounts = metadata.get("mounts", [])
+            runtime_env = metadata.get("env", {})
+
+            return await _run_notebook_execution(
+                source=source,
+                timeout_seconds=timeout_seconds,
+                raw_inputs=raw_inputs,
+                raw_mounts=raw_mounts,
+                runtime_env=runtime_env,
+                form=form,
+                build_id=str(metadata.get("build_id") or "") or None,
+                cell_id=str(metadata.get("cell_id") or "") or None,
+                trace_carrier=dict(http_request.headers),
+                mutation_defines=metadata.get("mutation_defines"),
+                tables=metadata.get("tables"),
+                environment=metadata.get("environment"),
+                language=str(metadata.get("language") or "python"),
             )
-
-        source = str(metadata.get("source", ""))
-        timeout_seconds = float(metadata.get("timeout_seconds", 30.0))
-        raw_inputs = metadata.get("inputs", {})
-        raw_mounts = metadata.get("mounts", [])
-        runtime_env = metadata.get("env", {})
-
-        return await _run_notebook_execution(
-            source=source,
-            timeout_seconds=timeout_seconds,
-            raw_inputs=raw_inputs,
-            raw_mounts=raw_mounts,
-            runtime_env=runtime_env,
-            form=form,
-            build_id=str(metadata.get("build_id") or "") or None,
-            cell_id=str(metadata.get("cell_id") or "") or None,
-            trace_carrier=dict(http_request.headers),
-            mutation_defines=metadata.get("mutation_defines"),
-            tables=metadata.get("tables"),
-            environment=metadata.get("environment"),
-            language=str(metadata.get("language") or "python"),
-        )
 
     @app.post("/v1/execute", dependencies=[Depends(require_worker_token)])
     async def execute_protocol_v1(http_request: Request) -> Response:
         """Execute notebook cells using the standard executor v1 metadata envelope."""
-        form = await http_request.form()
-        metadata_file = form.get("metadata")
-        if metadata_file is None or isinstance(metadata_file, str):
-            raise HTTPException(status_code=400, detail="Missing metadata")
+        async with http_request.form() as form:
+            metadata_file = form.get("metadata")
+            if metadata_file is None or isinstance(metadata_file, str):
+                raise HTTPException(status_code=400, detail="Missing metadata")
 
-        try:
-            metadata = json.loads((await metadata_file.read()).decode("utf-8"))
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid metadata: {exc}")
+            try:
+                metadata = json.loads((await metadata_file.read()).decode("utf-8"))
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid metadata: {exc}")
 
-        protocol_version = metadata.get("protocol_version", EXECUTOR_PROTOCOL_VERSION)
-        if protocol_version != EXECUTOR_PROTOCOL_VERSION:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Unsupported protocol version: {protocol_version}. "
-                    f"Expected: {EXECUTOR_PROTOCOL_VERSION}"
-                ),
+            protocol_version = metadata.get("protocol_version", EXECUTOR_PROTOCOL_VERSION)
+            if protocol_version != EXECUTOR_PROTOCOL_VERSION:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unsupported protocol version: {protocol_version}. "
+                        f"Expected: {EXECUTOR_PROTOCOL_VERSION}"
+                    ),
+                )
+
+            transform = metadata.get("transform", {})
+            transform_ref = str(transform.get("ref", ""))
+            if transform_ref != NOTEBOOK_EXECUTOR_TRANSFORM_REF:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unsupported transform: {transform_ref}. "
+                        f"Expected: {NOTEBOOK_EXECUTOR_TRANSFORM_REF}"
+                    ),
+                )
+
+            params = transform.get("params", {})
+            source = str(params.get("source", ""))
+            timeout_seconds = float(params.get("timeout_seconds", 30.0))
+            raw_mounts = params.get("mounts", [])
+            runtime_env = params.get("env", {})
+            input_descriptors = metadata.get("inputs", [])
+
+            if not isinstance(input_descriptors, list):
+                raise HTTPException(status_code=400, detail="inputs must be a list")
+
+            raw_inputs: dict[str, dict[str, Any]] = {}
+            for descriptor in input_descriptors:
+                if not isinstance(descriptor, dict):
+                    raise HTTPException(
+                        status_code=400, detail="input descriptor must be an object"
+                    )
+                name = str(descriptor.get("name", "")).strip()
+                if not name:
+                    raise HTTPException(status_code=400, detail="input descriptor missing name")
+                content_type = str(descriptor.get("format", "pickle/object"))
+                # The recorded filename is case-safe (uppercase names get a hash suffix).
+                # Older clients omit it, and their {name}{ext} matched the upload name.
+                recorded_file = str(descriptor.get("file", "")).strip()
+                raw_inputs[name] = {
+                    "content_type": content_type,
+                    "file": recorded_file or f"{name}{_input_extension(content_type)}",
+                }
+                if isinstance(descriptor.get("injected"), dict):
+                    raw_inputs[name]["injected"] = descriptor["injected"]
+
+            return await _run_notebook_execution(
+                source=source,
+                timeout_seconds=timeout_seconds,
+                raw_inputs=raw_inputs,
+                raw_mounts=raw_mounts,
+                runtime_env=runtime_env,
+                form=form,
+                build_id=str(metadata.get("build_id") or "") or None,
+                cell_id=str(metadata.get("cell_id") or "") or None,
+                trace_carrier=dict(http_request.headers),
+                environment=params.get("environment"),
+                language=str(params.get("language") or "python"),
+                mutation_defines=params.get("mutation_defines"),
+                tables=params.get("tables"),
             )
-
-        transform = metadata.get("transform", {})
-        transform_ref = str(transform.get("ref", ""))
-        if transform_ref != NOTEBOOK_EXECUTOR_TRANSFORM_REF:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Unsupported transform: {transform_ref}. "
-                    f"Expected: {NOTEBOOK_EXECUTOR_TRANSFORM_REF}"
-                ),
-            )
-
-        params = transform.get("params", {})
-        source = str(params.get("source", ""))
-        timeout_seconds = float(params.get("timeout_seconds", 30.0))
-        raw_mounts = params.get("mounts", [])
-        runtime_env = params.get("env", {})
-        input_descriptors = metadata.get("inputs", [])
-
-        if not isinstance(input_descriptors, list):
-            raise HTTPException(status_code=400, detail="inputs must be a list")
-
-        raw_inputs: dict[str, dict[str, Any]] = {}
-        for descriptor in input_descriptors:
-            if not isinstance(descriptor, dict):
-                raise HTTPException(status_code=400, detail="input descriptor must be an object")
-            name = str(descriptor.get("name", "")).strip()
-            if not name:
-                raise HTTPException(status_code=400, detail="input descriptor missing name")
-            content_type = str(descriptor.get("format", "pickle/object"))
-            # The recorded filename is case-safe (uppercase names get a hash suffix).
-            # Older clients omit it, and their {name}{ext} matched the upload name.
-            recorded_file = str(descriptor.get("file", "")).strip()
-            raw_inputs[name] = {
-                "content_type": content_type,
-                "file": recorded_file or f"{name}{_input_extension(content_type)}",
-            }
-            if isinstance(descriptor.get("injected"), dict):
-                raw_inputs[name]["injected"] = descriptor["injected"]
-
-        return await _run_notebook_execution(
-            source=source,
-            timeout_seconds=timeout_seconds,
-            raw_inputs=raw_inputs,
-            raw_mounts=raw_mounts,
-            runtime_env=runtime_env,
-            form=form,
-            build_id=str(metadata.get("build_id") or "") or None,
-            cell_id=str(metadata.get("cell_id") or "") or None,
-            trace_carrier=dict(http_request.headers),
-            environment=params.get("environment"),
-            language=str(params.get("language") or "python"),
-            mutation_defines=params.get("mutation_defines"),
-            tables=params.get("tables"),
-        )
 
     @app.post("/v1/execute-manifest", dependencies=[Depends(require_worker_token)])
     async def execute_manifest(http_request: Request) -> Response:

@@ -75,8 +75,8 @@ def resolve_table_read(
 
     try:
         # A provider per call: its catalog cache holds this notebook's secrets.
-        catalog = PyIcebergCatalog(config, env, notebook=notebook)
-        table = catalog.load_table(spec.uri)
+        with PyIcebergCatalog(config, env, notebook=notebook) as catalog:
+            table = catalog.load_table(spec.uri)
     except (NoSuchTableError, WarehouseNotFound) as e:
         raise TableNotThere(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
     except Exception as e:

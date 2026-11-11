@@ -66,16 +66,17 @@ def export_artifact(
             f"{artifact.id}@v={artifact.version} is not readable (state={artifact.state})"
         )
     data = artifact_arrow_table(store, artifact)
-    written = IcebergWriter(PyIcebergCatalog(config)).write(
-        table_uri,
-        data,
-        artifact_id=artifact.id,
-        version=artifact.version,
-        provenance_hash=artifact.provenance_hash,
-        promoted_by=promoted_by,
-        alias=alias,
-        tenant=tenant,
-    )
+    with PyIcebergCatalog(config) as catalogs:
+        written = IcebergWriter(catalogs).write(
+            table_uri,
+            data,
+            artifact_id=artifact.id,
+            version=artifact.version,
+            provenance_hash=artifact.provenance_hash,
+            promoted_by=promoted_by,
+            alias=alias,
+            tenant=tenant,
+        )
     store.set_tag(artifact.id, artifact.version, EXPORT_TAG, table_uri, tenant=tenant)
     return written
 
@@ -99,9 +100,10 @@ def move_alias_tag(
     if not table_uri:
         return None
     try:
-        return IcebergWriter(PyIcebergCatalog(config)).tag(
-            table_uri, alias, artifact_id=artifact_id, version=version
-        )
+        with PyIcebergCatalog(config) as catalogs:
+            return IcebergWriter(catalogs).tag(
+                table_uri, alias, artifact_id=artifact_id, version=version
+            )
     except Exception:
         logger.warning(
             "Could not move a table tag to follow an alias",

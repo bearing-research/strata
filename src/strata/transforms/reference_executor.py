@@ -204,44 +204,43 @@ def create_executor_app(executor: BaseExecutor | None = None):
         """
         import json
 
-        form = await http_request.form()
+        async with http_request.form() as form:
+            metadata_file = form.get("metadata")
+            if not isinstance(metadata_file, UploadFile):
+                raise HTTPException(status_code=400, detail="Missing metadata")
 
-        metadata_file = form.get("metadata")
-        if not isinstance(metadata_file, UploadFile):
-            raise HTTPException(status_code=400, detail="Missing metadata")
+            try:
+                metadata_bytes = await metadata_file.read()
+                meta = json.loads(metadata_bytes)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid metadata: {e}")
 
-        try:
-            metadata_bytes = await metadata_file.read()
-            meta = json.loads(metadata_bytes)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid metadata: {e}")
+            protocol_version = meta.get("protocol_version", "v1")
+            if protocol_version != EXECUTOR_PROTOCOL_VERSION:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported protocol version: {protocol_version}. "
+                    f"Expected: {EXECUTOR_PROTOCOL_VERSION}",
+                )
 
-        protocol_version = meta.get("protocol_version", "v1")
-        if protocol_version != EXECUTOR_PROTOCOL_VERSION:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported protocol version: {protocol_version}. "
-                f"Expected: {EXECUTOR_PROTOCOL_VERSION}",
+            transform = meta.get("transform", {})
+            transform_ref = transform.get("ref", "")
+            params = transform.get("params", {})
+
+            supported_refs = executor.get_transform_refs()
+            if not any(transform_ref.startswith(ref.split("@")[0]) for ref in supported_refs):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported transform: {transform_ref}. Supported: {supported_refs}",
+                )
+
+            inputs = parse_arrow_inputs(
+                {
+                    name: await part.read()
+                    for name, part in form.items()
+                    if isinstance(part, UploadFile) and name.startswith("input")
+                }
             )
-
-        transform = meta.get("transform", {})
-        transform_ref = transform.get("ref", "")
-        params = transform.get("params", {})
-
-        supported_refs = executor.get_transform_refs()
-        if not any(transform_ref.startswith(ref.split("@")[0]) for ref in supported_refs):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported transform: {transform_ref}. Supported: {supported_refs}",
-            )
-
-        inputs = parse_arrow_inputs(
-            {
-                name: await part.read()
-                for name, part in form.items()
-                if isinstance(part, UploadFile) and name.startswith("input")
-            }
-        )
 
         result = executor.execute(transform_ref, params, inputs)
 

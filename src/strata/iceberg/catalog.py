@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, Self
 from urllib.parse import urlparse
 
 import pyarrow as pa
@@ -46,6 +46,10 @@ class CatalogProvider(Protocol):
 
     def forget_named_catalogs(self) -> None:
         """Drop what was built from the named-catalog settings, which have changed."""
+        ...
+
+    def close(self) -> None:
+        """Release what the catalogs built hold open, such as a database connection."""
         ...
 
 
@@ -402,9 +406,24 @@ class PyIcebergCatalog:
 
     def forget_named_catalogs(self) -> None:
         """Drop every named catalog built, so the next use reads the current settings."""
+        # Dropped, not closed: another thread may be loading a table through one.
         with self._lock:
             for key in [key for key in self._catalogs if key.startswith("catalog:")]:
                 del self._catalogs[key]
+
+    def close(self) -> None:
+        """Close every catalog built: a ``SqlCatalog`` holds a pool of database connections."""
+        with self._lock:
+            catalogs = list(self._catalogs.values())
+            self._catalogs.clear()
+        for catalog in catalogs:
+            catalog.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
     def _invalidate_catalog(self, warehouse_path: str | None) -> None:
         """Drop a cached catalog so the next access rebuilds its connection."""

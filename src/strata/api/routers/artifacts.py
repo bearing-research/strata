@@ -194,44 +194,47 @@ async def _put_artifact(
 
     if "multipart/form-data" in content_type:
         # Multipart: metadata JSON + Arrow IPC data
-        form = await _capped(request).form()
+        async with _capped(request).form() as form:
+            metadata_file = form.get("metadata")
+            if metadata_file is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing 'metadata' field in multipart request",
+                )
+            if isinstance(metadata_file, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail="'metadata' field must be a file, not form data",
+                )
+            metadata_content = await _read_metadata(metadata_file)
+            try:
+                metadata = json_module.loads(metadata_content)
+            except json_module.JSONDecodeError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {e}")
 
-        metadata_file = form.get("metadata")
-        if metadata_file is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Missing 'metadata' field in multipart request",
-            )
-        if isinstance(metadata_file, str):
-            raise HTTPException(
-                status_code=400,
-                detail="'metadata' field must be a file, not form data",
-            )
-        metadata_content = await _read_metadata(metadata_file)
-        try:
-            metadata = json_module.loads(metadata_content)
-        except json_module.JSONDecodeError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {e}")
+            inputs = metadata.get("inputs", [])
+            transform_dict = metadata.get("transform", {})
+            artifact_name = metadata.get("name")
 
-        inputs = metadata.get("inputs", [])
-        transform_dict = metadata.get("transform", {})
-        artifact_name = metadata.get("name")
-
-        data_file = form.get("data")
-        if data_file is None:
-            raise HTTPException(status_code=400, detail="Missing 'data' field in multipart request")
-        if isinstance(data_file, str):
-            raise HTTPException(
-                status_code=400,
-                detail="'data' field must be a file, not form data",
+            data_file = form.get("data")
+            if data_file is None:
+                raise HTTPException(
+                    status_code=400, detail="Missing 'data' field in multipart request"
+                )
+            if isinstance(data_file, str):
+                raise HTTPException(
+                    status_code=400,
+                    detail="'data' field must be a file, not form data",
+                )
+            content_sha256, byte_size = await anyio.to_thread.run_sync(
+                _spool_upload, data_file.file, data_path
             )
-        content_sha256, byte_size = await anyio.to_thread.run_sync(
-            _spool_upload, data_file.file, data_path
-        )
-        try:
-            schema_json, row_count = await anyio.to_thread.run_sync(_arrow_stream_shape, data_path)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid Arrow IPC data: {e}")
+            try:
+                schema_json, row_count = await anyio.to_thread.run_sync(
+                    _arrow_stream_shape, data_path
+                )
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid Arrow IPC data: {e}")
 
     else:
         # JSON body (legacy format). Parsed whole in memory, so held to the metadata limit;
@@ -515,21 +518,23 @@ async def _import_artifact(
         if not isinstance(metadata, dict):
             raise HTTPException(status_code=400, detail="The body must be a JSON object")
     else:
-        form = await _capped(request).form()
-        metadata_file = form.get("metadata")
-        data_file = form.get("data")
-        if metadata_file is None or isinstance(metadata_file, str):
-            raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
+        async with _capped(request).form() as form:
+            metadata_file = form.get("metadata")
+            data_file = form.get("data")
+            if metadata_file is None or isinstance(metadata_file, str):
+                raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
 
-        try:
-            metadata = json_module.loads(await _read_metadata(metadata_file))
-        except json_module.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
-        if not isinstance(metadata, dict):
-            raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
-        if data_file is not None and not isinstance(data_file, str):
-            blob = workdir / "blob"
-            received_digest, _ = await anyio.to_thread.run_sync(_spool_upload, data_file.file, blob)
+            try:
+                metadata = json_module.loads(await _read_metadata(metadata_file))
+            except json_module.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
+            if not isinstance(metadata, dict):
+                raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
+            if data_file is not None and not isinstance(data_file, str):
+                blob = workdir / "blob"
+                received_digest, _ = await anyio.to_thread.run_sync(
+                    _spool_upload, data_file.file, blob
+                )
 
     artifact_id = str(metadata.get("id") or "").strip()
     if not artifact_id:
@@ -751,37 +756,37 @@ async def _put_artifact_by_provenance(
     """The by-provenance PUT route's body, with a path to hold the uploaded bytes."""
     import json as json_module
 
-    form = await _capped(request).form()
-    metadata_file = form.get("metadata")
-    data_file = form.get("data")
-    if metadata_file is None or isinstance(metadata_file, str):
-        raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
-    if data_file is None or isinstance(data_file, str):
-        raise HTTPException(status_code=400, detail="Missing 'data' file field")
+    async with _capped(request).form() as form:
+        metadata_file = form.get("metadata")
+        data_file = form.get("data")
+        if metadata_file is None or isinstance(metadata_file, str):
+            raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
+        if data_file is None or isinstance(data_file, str):
+            raise HTTPException(status_code=400, detail="Missing 'data' file field")
 
-    try:
-        metadata = json_module.loads(await _read_metadata(metadata_file))
-    except json_module.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
-    if not isinstance(metadata, dict):
-        raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
+        try:
+            metadata = json_module.loads(await _read_metadata(metadata_file))
+        except json_module.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
+        if not isinstance(metadata, dict):
+            raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
 
-    content_type = metadata.get("content_type")
-    if not content_type:
-        raise HTTPException(
-            status_code=400,
-            detail="Missing 'content_type': a reader cannot decode the blob without it",
+        content_type = metadata.get("content_type")
+        if not content_type:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing 'content_type': a reader cannot decode the blob without it",
+            )
+        # Unknown stays None: a recorded 0 makes verify report a mismatch for every Arrow result.
+        row_count = metadata.get("row_count")
+        if row_count is not None and (type(row_count) is not int or row_count < 0):
+            raise HTTPException(
+                status_code=400, detail="Metadata 'row_count' must be a non-negative integer"
+            )
+
+        content_sha256, byte_size = await anyio.to_thread.run_sync(
+            _spool_upload, data_file.file, data_path
         )
-    # Unknown stays None: a recorded 0 makes verify report a mismatch for every Arrow result.
-    row_count = metadata.get("row_count")
-    if row_count is not None and (type(row_count) is not int or row_count < 0):
-        raise HTTPException(
-            status_code=400, detail="Metadata 'row_count' must be a non-negative integer"
-        )
-
-    content_sha256, byte_size = await anyio.to_thread.run_sync(
-        _spool_upload, data_file.file, data_path
-    )
     return await anyio.to_thread.run_sync(
         functools.partial(
             _store_put_by_provenance,
