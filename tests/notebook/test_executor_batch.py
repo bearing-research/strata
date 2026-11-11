@@ -506,7 +506,7 @@ async def test_batch_warns_on_inplace_input_mutation_end_to_end(tmp_path: Path):
     analyzer cannot recapture.
     """
     src_make = "import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})\n"
-    src_mutate = "alias = df\nalias.drop(index=[0], inplace=True)\nn = len(df)\n"
+    src_mutate = "alias = df\nalias.loc[0, 'a'] = 9\nn = len(df)\n"
     session = _make_session_with_cells(
         tmp_path,
         [("make", src_make), ("mutate", src_mutate)],
