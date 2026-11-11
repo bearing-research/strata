@@ -210,6 +210,12 @@ strata dag       <notebook_dir>            # dependency edges + topological orde
 strata status    <notebook_dir>            # per-cell status + staleness summary
 ```
 
+A ready cell whose result read a file it does not declare, and that file changed since,
+shows `·may be out of date` in `status` and a `hint:` in `cell show`; in JSON, its
+`changed_reads` lists the files. A plain run would hit the same cache: `cell run --rerun`
+reads them again (see
+[When such a file changes](../guides/cells/python.md#when-such-a-file-changes)).
+
 Every `<cell_id>` here and below is the id from `notebook.toml` or `cell list`,
 not the cell's `# @name`.
 

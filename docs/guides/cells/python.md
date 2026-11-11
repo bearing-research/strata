@@ -295,6 +295,22 @@ the cell holds, so a failed run replaces them only when it found something itsel
 Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
 what they read is not reported.
 
+### When such a file changes
+
+A local run also notes each such file as it read it (its size and modification time) and
+each folder it listed by the names in it. When one of them changes, the cell stays ready,
+since its key did not move and a plain run would get the same cached result, but it says
+the result may be out of date: a **may be out of date** badge in the UI, `changed_reads`
+in `strata status`, `strata cell show` and MCP `status`, and a hint naming the files. A
+plain run that hits the cache keeps saying it. A file that changed while the run had it
+is out of date as soon as the run ends; one the run wrote itself is not. Rerun the cell
+(↻, `strata cell run --rerun`) to read them again, or mount them so the key follows
+them. Nothing watches the files: a ready cell's are checked whenever staleness is
+worked out (opening the notebook, an edit, after a run) and whenever its status is
+read (`strata status`, `strata cell show`, MCP `status`, a page reload), over up to 100
+per cell, the files it read before the modules it imported. A remote worker's run is not
+checked: its files are on the worker.
+
 ## Where a cell runs: `work/`
 
 A cell runs in its notebook's `work/` directory, not beside `notebook.toml`. A file it writes by a relative path (`plt.savefig("fig.png")`) lands in `work/fig.png`, and a later cell reads it back by the same path. `work/` is made on the first run and kept between runs. The `.gitignore` that `strata new` writes leaves it out of git, exports and snapshots leave it out too, and it is never on `sys.path`, so a file a cell wrote there is not imported in place of a library. R cells run there as well.

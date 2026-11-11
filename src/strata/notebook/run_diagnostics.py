@@ -61,6 +61,21 @@ def run_diagnostics(
     return diagnostics
 
 
+def changed_reads_hint(paths: Sequence[str], rerun: str) -> str:
+    """What a ready cell says when files its result read undeclared have changed since.
+
+    Its key did not move, so a plain run would hit the same cache: *rerun* names the
+    run that reads them again.
+    """
+    one = len(paths) == 1
+    noun = _code(paths[0]) if one else f"{len(paths)} files ({_shown(list(paths), len(paths))})"
+    them = "it" if one else "them"
+    return (
+        f"May be out of date: {noun} changed after this result read {them}, and the cache "
+        f"does not see {them}. {rerun} reads {them} again; a mount over {them} keys {them}."
+    )
+
+
 def _finding(finding: ReadFinding, notebook_dir: Path, names: _Names) -> AnnotationDiagnostic:
     code = finding["code"]
     items = finding["items"]

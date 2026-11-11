@@ -2109,6 +2109,9 @@ async def get_session(session_id: str, request: Request) -> JSONResponse:
     if not session or not session_visible_to_caller(session):
         raise HTTPException(status_code=404, detail="Session not found")
 
+    with timing.phase("changed_reads"):
+        # Nothing watches a cell's undeclared reads: a reconnect or `strata status` checks.
+        await anyio.to_thread.run_sync(session.refresh_changed_reads)
     with timing.phase("serialize"):
         data = session.serialize_notebook_state()
         data["session_id"] = session.id

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import re
 from pathlib import Path
@@ -12,7 +14,7 @@ import pytest
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.read_audit import ReadFinding, fingerprint
-from strata.notebook.run_diagnostics import run_diagnostics
+from strata.notebook.run_diagnostics import changed_reads_hint, run_diagnostics
 from strata.notebook.runtime_state import load_runtime_state
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -203,6 +205,13 @@ class TestTheMessage:
         assert (diagnostic.code, diagnostic.message) == (
             "mutated_input",
             "Cell mutated df. Return a copy",
+        )
+
+    def test_the_stale_hint_names_the_files_and_the_rerun(self):
+        assert changed_reads_hint(["/a", "/b"], "Rerunning") == (
+            "May be out of date: 2 files (`/a`, `/b`) changed after this result read them, "
+            "and the cache does not see them. Rerunning reads them again; a mount over them "
+            "keys them."
         )
 
     def test_a_mutation_every_iteration_makes_is_one(self):
@@ -471,3 +480,216 @@ class TestARun:
 
         assert hit.cache_hit
         assert hit.run_diagnostics == result.run_diagnostics
+
+
+class TestTheStaleHint:
+    """A file a ready cell's result read undeclared changes: it may be out of date."""
+
+    async def _ran(self, tmp_path: Path, outside: Path) -> tuple[NotebookSession, Path]:
+        notebook_dir = _notebook(tmp_path, ("c", _reads(outside)))
+        session = _session(notebook_dir)
+        assert (await CellExecutor(session).execute_cell("c", _reads(outside))).success
+        return session, notebook_dir
+
+    async def test_a_changed_file_is_named_and_the_cell_stays_ready(self, tmp_path, outside):
+        session, _ = await self._ran(tmp_path, outside)
+        events = str(outside / "events.csv")
+        assert session.compute_staleness()["c"].changed_reads == []
+
+        (outside / "events.csv").write_text("a,b\n9,9\n")
+        staleness = session.compute_staleness()["c"]
+
+        assert (staleness.status, staleness.changed_reads) == ("ready", [events])
+        assert session.notebook_state.get_cell("c").serialize()["changed_reads"] == [events]
+        # The key did not move: a plain run hits, and still says so.
+        hit = await CellExecutor(session).execute_cell("c", _reads(outside))
+        assert hit.cache_hit
+        assert session.compute_staleness()["c"].changed_reads == [events]
+        # A rerun reads it again.
+        await CellExecutor(session).execute_cell_rerun("c", _reads(outside))
+        assert session.compute_staleness()["c"].changed_reads == []
+
+    async def test_a_deleted_file_has_changed(self, tmp_path, outside):
+        session, _ = await self._ran(tmp_path, outside)
+
+        (outside / "events.csv").unlink()
+
+        assert session.compute_staleness()["c"].changed_reads == [str(outside / "events.csv")]
+
+    async def test_a_cell_keeps_its_data_reads_before_its_imports(
+        self, tmp_path, outside, monkeypatch
+    ):
+        from strata.notebook import session as session_module
+
+        # Code order would put the import first: undeclared_import < undeclared_read.
+        (outside / "helper_mod.py").write_text("X = 1\n")
+        source = (
+            f"import sys\nsys.path.insert(0, {str(outside)!r})\nimport helper_mod\n"
+            f"{_reads(outside)}"
+        )
+        notebook_dir = _notebook(tmp_path, ("c", source))
+        session = _session(notebook_dir)
+        monkeypatch.setattr(session_module, "CHECKED_READS", 1)
+
+        assert (await CellExecutor(session).execute_cell("c", source)).success
+
+        events = str(outside / "events.csv")
+        assert list(session.notebook_state.get_cell("c").read_fingerprints) == [events]
+        # The same after a reopen, which reads them back sorted.
+        reopened = parse_notebook(notebook_dir).cells[0]
+        assert list(reopened.read_fingerprints) == [events]
+
+    async def test_a_cell_that_is_not_ready_is_not_checked(self, tmp_path, outside, monkeypatch):
+        from strata.notebook import session as session_module
+
+        session, notebook_dir = await self._ran(tmp_path, outside)
+        edited = f"{_reads(outside)}more = 1\n"
+        write_cell(notebook_dir, "c", edited)
+        session.notebook_state.get_cell("c").source = edited
+        session.re_analyze_cell("c")
+        stats: list[str] = []
+        monkeypatch.setattr(session_module, "fingerprint", lambda p: stats.append(p) or None)
+
+        assert session.compute_staleness()["c"].status == "stale"
+        assert stats == []
+
+    async def test_a_run_that_ends_during_the_check_keeps_its_own(self, tmp_path, outside):
+        session, _ = await self._ran(tmp_path, outside)
+        session.compute_staleness()
+        (outside / "events.csv").write_text("changed\n")
+        checked = session._changed_reads()
+        assert checked["c"][1] == [str(outside / "events.csv")]
+        # The rerun that read the change lands between the check and its word.
+        cell = session.notebook_state.get_cell("c")
+        cell.read_fingerprints = {
+            str(outside / "events.csv"): fingerprint(str(outside / "events.csv"))
+        }
+
+        assert session._hint_changed_reads(checked) == []
+        assert cell.staleness.changed_reads == []
+
+    async def test_a_status_between_passes_checks_again(self, tmp_path, outside):
+        from strata.notebook.ops import LocalNotebookOps
+
+        session, _ = await self._ran(tmp_path, outside)
+        session.compute_staleness()
+        ops = LocalNotebookOps.from_session(session)
+        assert ops.status().cells[0].changed_reads == []
+
+        # An editor's save: no flush, no run, no pass.
+        (outside / "events.csv").write_text("changed\n")
+
+        assert ops.status().cells[0].changed_reads == [str(outside / "events.csv")]
+
+    async def test_a_stale_cell_says_only_that(self, tmp_path, outside):
+        session, notebook_dir = await self._ran(tmp_path, outside)
+        (outside / "events.csv").write_text("changed\n")
+        edited = f"{_reads(outside)}more = 1\n"
+        write_cell(notebook_dir, "c", edited)
+        session.notebook_state.get_cell("c").source = edited
+        session.re_analyze_cell("c")
+
+        staleness = session.compute_staleness()["c"]
+
+        assert staleness.status == "stale"
+        assert staleness.changed_reads == []
+
+    async def test_its_status_frame_carries_it(self, tmp_path, outside, monkeypatch):
+        from strata.notebook import ws
+
+        session, _ = await self._ran(tmp_path, outside)
+        session.compute_staleness()
+        sent: list[dict[str, Any]] = []
+
+        async def record(notebook_id: str, message: dict[str, Any], **kwargs: Any) -> None:
+            sent.append(message)
+
+        monkeypatch.setattr(ws, "_broadcast_message", record)
+        before = session.capture_cell_state_snapshot()
+        (outside / "events.csv").write_text("changed\n")
+
+        await ws._refresh_and_broadcast_changed_staleness(session, session.id, before)
+        # On the loop the pass does not stat; the task after it does, and says so.
+        assert [m for m in sent if m["type"] == "cell_status"] == []
+        await asyncio.gather(*ws._changed_reads_tasks)
+
+        (frame,) = [m["payload"] for m in sent if m["type"] == "cell_status"]
+        assert frame == {
+            "cell_id": "c",
+            "status": "ready",
+            "staleness_reasons": [],
+            "changed_reads": [str(outside / "events.csv")],
+        }
+
+    async def test_a_cache_hit_after_a_run_keeps_it(self, tmp_path, outside, monkeypatch):
+        from strata.notebook import session as session_module
+        from strata.notebook import ws
+
+        session, _ = await self._ran(tmp_path, outside)
+        (outside / "events.csv").write_text("changed\n")
+        session.compute_staleness()
+        sent: list[dict[str, Any]] = []
+
+        async def record(notebook_id: str, message: dict[str, Any], **kwargs: Any) -> None:
+            sent.append(message)
+
+        monkeypatch.setattr(ws, "_broadcast_message", record)
+        before = session.capture_cell_state_snapshot()
+        assert (await CellExecutor(session).execute_cell("c", _reads(outside))).cache_hit
+
+        # A stat on the loop would hang on a dead network mount.
+        def no_stat(path: str) -> None:
+            raise AssertionError(f"stat on the loop: {path}")
+
+        with monkeypatch.context() as m:
+            m.setattr(session_module, "fingerprint", no_stat)
+            await ws._refresh_and_broadcast_changed_staleness(
+                session, session.id, before, preserve_ready_cell_id="c"
+            )
+        await asyncio.gather(*ws._changed_reads_tasks)
+
+        assert session.notebook_state.get_cell("c").staleness.changed_reads == [
+            str(outside / "events.csv")
+        ]
+        assert [m for m in sent if m["type"] == "cell_status"] == []
+
+    async def test_an_environment_change_broadcast_carries_it(self, tmp_path, outside, monkeypatch):
+        from strata.notebook import ws
+
+        session, _ = await self._ran(tmp_path, outside)
+        (outside / "events.csv").write_text("changed\n")
+        session.compute_staleness()
+        sent: list[dict[str, Any]] = []
+
+        async def record(notebook_id: str, message: dict[str, Any]) -> None:
+            sent.append(message)
+
+        monkeypatch.setattr(ws, "broadcast_notebook_message", record)
+
+        await session._broadcast_environment_staleness_updates(["c"])
+
+        (frame,) = [m["payload"] for m in sent]
+        assert frame["changed_reads"] == [str(outside / "events.csv")]
+
+    async def test_strata_status_and_cell_show_say_it(self, tmp_path, outside, capsys):
+        from strata import cli
+
+        _, notebook_dir = await self._ran(tmp_path, outside)
+        (outside / "events.csv").write_text("changed\n")
+        capsys.readouterr()
+
+        assert cli.main(["status", str(notebook_dir), "--format", "human"]) == 0
+        (line,) = [line for line in capsys.readouterr().out.splitlines() if " c " in line]
+        assert line.split() == ["ready", "c", "·may", "be", "out", "of", "date"]
+        assert cli.main(["status", str(notebook_dir)]) == 0
+        (row,) = json.loads(capsys.readouterr().out)["cells"]
+        assert row["changed_reads"] == [str(outside / "events.csv")]
+        assert cli.main(["cell", "show", str(notebook_dir), "c"]) == 0
+        assert json.loads(capsys.readouterr().out)["changed_reads"] == [str(outside / "events.csv")]
+        assert cli.main(["cell", "show", str(notebook_dir), "c", "--format", "human"]) == 0
+        shown = capsys.readouterr().out
+        assert (
+            f"hint:     May be out of date: `{outside / 'events.csv'}` changed after this "
+            "result read it"
+        ) in shown
+        assert "`strata cell run --rerun` reads it again" in shown

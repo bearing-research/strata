@@ -1043,7 +1043,10 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         """Return a compact per-cell status + staleness summary for a session.
 
         Use it to see which cells are ready, stale (and why), or idle before
-        deciding what to run.
+        deciding what to run. A ready cell with ``changed_reads`` read those files
+        without declaring them, and they changed since: its cached result may be out
+        of date, and a ``normal`` run would hit the same cache, so run it with
+        ``rerun`` (or declare the files as a mount).
         """
         return _status(session_manager, session_id)
 

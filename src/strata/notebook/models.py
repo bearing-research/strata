@@ -339,6 +339,14 @@ class CellStaleness(BaseModel):
     reasons: list[StalenessReason] = Field(
         default_factory=list, description="List of staleness reasons"
     )
+    changed_reads: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Of a ready cell: files its result read without declaring them that have "
+            "changed since. A hint, not a status: the key did not move, so a plain run "
+            "would hit the same cache"
+        ),
+    )
 
 
 class ArtifactInfo(BaseModel):
@@ -911,6 +919,7 @@ class CellState(BaseModel):
             if self.staleness and self.staleness.reasons
             else []
         )
+        data["changed_reads"] = list(self.staleness.changed_reads) if self.staleness else []
         data["annotations"] = parse_annotations(self.source, self.language).to_wire_payload()
 
         # A widget's value is runtime state that every reader of the cell needs, and

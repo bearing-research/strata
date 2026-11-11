@@ -97,6 +97,8 @@ class CellView(BaseModel):
     status: str
     source: str
     staleness_reasons: list[str]
+    # Ready, but files it read without declaring them changed since: may be out of date.
+    changed_reads: list[str] = Field(default_factory=list)
     # Promised by the MCP `get_notebook` description.
     defines: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
@@ -211,6 +213,8 @@ class CellStatusRow(BaseModel):
     language: str
     status: str
     staleness_reasons: list[str]
+    # Ready, but files it read without declaring them changed since: may be out of date.
+    changed_reads: list[str] = Field(default_factory=list)
     # Answers "do I already have this?" without a call per cell.
     defines: list[str] = Field(default_factory=list)
 
@@ -437,6 +441,8 @@ class LocalNotebookOps:
         reach ``@fetch`` URLs and ``@table`` catalogs.
         """
         if self._staleness_computed:
+            # The server keeps staleness current, but nothing watches undeclared reads.
+            self._session.refresh_changed_reads()
             return
         self._staleness_computed = True
         # One command: a background hash would outlive nothing that reads it.
@@ -1283,6 +1289,7 @@ def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
         status=data["status"],
         source=data.get("source") or "",
         staleness_reasons=list(data.get("staleness_reasons") or []),
+        changed_reads=list(data.get("changed_reads") or []),
         defines=list(data.get("defines") or []),
         references=list(data.get("references") or []),
         upstream_ids=list(data.get("upstream_ids") or []),
@@ -1325,6 +1332,7 @@ def _status_row_from_wire(data: dict[str, Any]) -> CellStatusRow:
         language=data["language"],
         status=data["status"],
         staleness_reasons=list(data.get("staleness_reasons") or []),
+        changed_reads=list(data.get("changed_reads") or []),
         defines=list(data.get("defines") or []),
     )
 

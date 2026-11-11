@@ -351,6 +351,31 @@ def test_list_cells_includes_remote_execution_metadata(
     assert cell_payload["remote_error_code"] is None
 
 
+def test_a_session_read_checks_its_ready_cells_reads_again(client, tmp_path):
+    """Nothing watches a cell's undeclared reads: `strata status` against the server checks."""
+    from strata.notebook.models import CellStaleness, CellStatus
+    from strata.notebook.read_audit import fingerprint
+
+    notebook_dir = create_notebook(tmp_path, "nb")
+    add_cell_to_notebook(notebook_dir, "cell-1")
+    write_cell(notebook_dir, "cell-1", "x = 1")
+    data = tmp_path / "data.csv"
+    data.write_text("a\n")
+    session_id = open_session_id(client, notebook_dir)
+    cell = get_session_manager().get_session(session_id).notebook_state.cells[0]
+    cell.status = CellStatus.READY
+    cell.staleness = CellStaleness(status=CellStatus.READY)
+    cell.read_fingerprints = {str(data): fingerprint(str(data))}
+    assert (
+        client.get(f"/v1/notebooks/sessions/{session_id}").json()["cells"][0]["changed_reads"] == []
+    )
+
+    data.write_text("changed\n")
+
+    response = client.get(f"/v1/notebooks/sessions/{session_id}")
+    assert response.json()["cells"][0]["changed_reads"] == [str(data)]
+
+
 def test_open_notebook_not_found(client):
     response = client.post("/v1/notebooks/open", json={"path": "/nonexistent/notebook"})
     assert response.status_code == 404
