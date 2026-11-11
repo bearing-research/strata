@@ -325,6 +325,9 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A warm worker warns about mutations as a cold run does.** A cell run on the warm pool
+  warned when it changed an input in place and passed it on, which a cold run rightly does
+  not, and never warned when two of its outputs shared one mutable object. (#1507)
 - **A Jupyter import survives a cell Python cannot read.** A cell nested past the parser,
   such as a chain of tens of thousands of `+`, made the whole import fail; it now imports
   with a warning, and the notebook refuses to run that cell until the expression is split.
