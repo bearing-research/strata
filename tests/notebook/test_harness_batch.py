@@ -703,7 +703,7 @@ def test_batch_injects_ambient_client(batch_pipes):
 def test_batch_warns_on_inplace_mutation_of_input(batch_pipes):
     """An in-place mutation of an upstream DataFrame warns in the cell's persist frame.
 
-    Uses the aliased form (``alias = df; alias.drop(inplace=True)``) that only runtime
+    Uses the aliased form (``alias = df; alias.loc[...] = ...``) that only runtime
     detection catches; a batch cannot recapture, so it warns.
     """
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
@@ -721,7 +721,7 @@ def test_batch_warns_on_inplace_mutation_of_input(batch_pipes):
         },
         {
             "cell_id": "mutate",
-            "source": "alias = df\nalias.drop(index=[0], inplace=True)",
+            "source": "alias = df\nalias.loc[0, 'a'] = 9",
             "consumed_vars": [],
             "references": ["df"],
             "env": {},

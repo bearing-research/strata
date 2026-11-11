@@ -16,7 +16,7 @@ from strata.notebook.immutability import (
 
 class TestMutationDetection:
     def test_dataframe_mutation_detection(self):
-        """A DataFrame mutated by an inplace operation is detected."""
+        """A DataFrame mutated in place is detected."""
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
 
         namespace = {"df": df}
@@ -26,7 +26,7 @@ class TestMutationDetection:
         assert snapshots[0].var_name == "df"
         assert snapshots[0].content_hash is not None
 
-        df.drop("a", axis=1, inplace=True)
+        del df["a"]
 
         warnings = detect_mutations(namespace, snapshots)
 

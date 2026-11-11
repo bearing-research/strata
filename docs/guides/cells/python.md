@@ -246,13 +246,13 @@ Walked through end-to-end in the [`library_cells`](../../examples/library_cells.
 
 A cell that changes an upstream value in place, where the source shows it (`df["col"] = ...`, `obj.attr = ...`, `df.drop(columns=[...], inplace=True)`), is read as producing a new version of that variable: the cell becomes its producer for downstream cells, and the upstream artifact is untouched.
 
-Some mutations can't be seen in the source: an alias (`d = df; d.drop(..., inplace=True)`), a helper function that mutates its argument, a bare mutator like `rows.append(x)`. Strata compares each input before and after the cell runs and raises a **mutation warning** for those, because the change is not stored: a downstream cell run on its own reads the value from before.
+Some mutations can't be seen in the source: an alias (`d = df; d["col"] = ...`), a helper function that mutates its argument, a bare mutator like `rows.append(x)`. Strata compares each input before and after the cell runs and raises a **mutation warning** for those, because the change is not stored: a downstream cell run on its own reads the value from before.
 
 The fix is to copy, or rebind, before mutating:
 
 ```python
 df = upstream_df.copy()  # make a private copy
-df.drop(columns=[...], inplace=True)
+df["total"] = df["a"] + df["b"]
 ```
 
 Warnings surface as a pill on the cell and a structured entry in the execution log.
