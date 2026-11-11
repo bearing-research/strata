@@ -9,6 +9,7 @@ import {
   Copy,
   FlaskConical,
   Hourglass,
+  Info,
   Pencil,
   Play,
   Plus,
@@ -600,13 +601,35 @@ const annotationSummaryTitle = computed(() => {
 })
 
 const annotationDiagnostics = computed(() => props.cell.annotationDiagnostics ?? [])
-const annotationDiagnosticsLabel = computed(() => {
-  const n = annotationDiagnostics.value.length
-  if (!n) return ''
-  return n === 1 ? '1 annotation issue' : `${n} annotation issues`
-})
 const annotationDiagnosticsTitle = computed(() =>
   annotationDiagnostics.value.map((d) => `${d.code}: ${d.message}`).join('\n'),
+)
+// The last run's findings share the pill: what it read undeclared, what it mutated.
+const runDiagnostics = computed(() => props.cell.runDiagnostics ?? [])
+// An info finding (a subprocess the audit cannot see into) is a note, not a warning.
+const runWarnings = computed(() => runDiagnostics.value.filter((d) => d.severity !== 'info'))
+const runNotesOnly = computed(
+  () => !annotationDiagnostics.value.length && !runWarnings.value.length,
+)
+const diagnosticsLabel = computed(() => {
+  const ofSource = annotationDiagnostics.value.length
+  const warnings = runWarnings.value.length
+  const notes = runDiagnostics.value.length - warnings
+  const n = ofSource + warnings + notes
+  const plural = (count: number, noun: string) => (count === 1 ? `1 ${noun}` : `${count} ${noun}s`)
+  if (!n) return ''
+  if (!warnings && !notes) return plural(n, 'annotation issue')
+  if (!ofSource) {
+    return [warnings && plural(warnings, 'run warning'), notes && plural(notes, 'run note')]
+      .filter(Boolean)
+      .join(', ')
+  }
+  return `${n} issues`
+})
+const diagnosticsTitle = computed(() =>
+  [...annotationDiagnostics.value, ...runDiagnostics.value]
+    .map((d) => `${d.code}: ${d.message}`)
+    .join('\n'),
 )
 
 // Module-cell tooltip: the symbols downstream cells can reference.
@@ -1010,11 +1033,15 @@ function outputKey(output: CellOutput, index: number): string {
                 +{{ hiddenAnnotationSummaryCount }}
               </span>
               <span
-                v-if="annotationDiagnosticsLabel"
+                v-if="diagnosticsLabel"
                 class="annotation-diagnostic-badge"
-                :title="annotationDiagnosticsTitle"
+                :class="{
+                  'run-only': !annotationDiagnostics.length && runWarnings.length,
+                  'run-notes': runNotesOnly,
+                }"
+                :title="diagnosticsTitle"
               >
-                <TriangleAlert /> {{ annotationDiagnosticsLabel }}
+                <Info v-if="runNotesOnly" /><TriangleAlert v-else /> {{ diagnosticsLabel }}
               </span>
               <span v-if="cell.isModuleCell" class="module-cell-badge" :title="moduleExportsTitle">
                 module
@@ -2083,6 +2110,16 @@ function outputKey(output: CellOutput, index: number): string {
   font-size: 10px;
   font-weight: 600;
   cursor: help;
+}
+
+/* A run's findings warn; they never block a run. */
+.annotation-diagnostic-badge.run-only {
+  background: var(--tint-warning);
+  color: var(--accent-warning);
+}
+.annotation-diagnostic-badge.run-notes {
+  background: var(--tint-info);
+  color: var(--accent-info);
 }
 
 /* Module-cell marker */

@@ -279,18 +279,22 @@ class TestExecutionFlow:
                 if cell_id == "c2"
                 else []
             )
-            return CellExecutionResult(
+            result = CellExecutionResult(
                 cell_id=cell_id, success=True, duration_ms=5, mutation_warnings=warns
             )
+            # As a real run does: the session turns the warnings into the cell's diagnostics.
+            self.session.apply_execution_result_metadata(cell_id, result)
+            return result
 
         with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
             rc = run_main([str(notebook_with_chain), "--no-sync", "--format", "json"])
         assert rc == 0
         payload = json.loads(capsys.readouterr().out)
         c2 = next(c for c in payload["cells"] if c["id"] == "c2")
-        assert c2["mutation_warnings"][0]["var_name"] == "df"
+        assert c2["run_diagnostics"][0]["code"] == "mutated_input"
+        assert "'df' was mutated in place" in c2["run_diagnostics"][0]["message"]
         c1 = next(c for c in payload["cells"] if c["id"] == "c1")
-        assert "mutation_warnings" not in c1  # only emitted when present
+        assert "run_diagnostics" not in c1  # only emitted when present
 
     def test_mutation_warnings_print_in_human_output(self, notebook_with_chain, capsys):
         from strata.notebook.executor import CellExecutionResult
@@ -301,9 +305,12 @@ class TestExecutionFlow:
                 if cell_id == "c2"
                 else []
             )
-            return CellExecutionResult(
+            result = CellExecutionResult(
                 cell_id=cell_id, success=True, duration_ms=5, mutation_warnings=warns
             )
+            # As a real run does: the session turns the warnings into the cell's diagnostics.
+            self.session.apply_execution_result_metadata(cell_id, result)
+            return result
 
         with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
             run_main([str(notebook_with_chain), "--no-sync"])
@@ -318,9 +325,12 @@ class TestExecutionFlow:
                 if cell_id == "c2"
                 else []
             )
-            return CellExecutionResult(
+            result = CellExecutionResult(
                 cell_id=cell_id, success=True, duration_ms=5, mutation_warnings=warns
             )
+            # As a real run does: the session turns the warnings into the cell's diagnostics.
+            self.session.apply_execution_result_metadata(cell_id, result)
+            return result
 
         with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
             run_main([str(notebook_with_chain), "--no-sync"])

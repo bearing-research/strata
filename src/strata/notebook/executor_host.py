@@ -87,7 +87,9 @@ class ExecutorHost(Protocol):
 
     def stored_display_outputs(self, artifacts: list[ArtifactVersion]) -> list[CellOutput]: ...
 
-    def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None: ...
+    def apply_execution_result_metadata(
+        self, cell_id: str, result: Any, *, instance: bool = False
+    ) -> None: ...
 
     def persist_display_outputs(
         self, cell_id: str, display_outputs: list[dict[str, Any]] | None

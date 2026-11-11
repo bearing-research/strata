@@ -2841,6 +2841,7 @@ async def _run_partition_batch(
             traceback_full=result.traceback_full,
             execution_method="batch" if not result.cache_hit else "cached",
             mutation_warnings=result.mutation_warnings,
+            read_audit=result.read_audit,
             replaces_console=result.replaces_console,
             hit_run_ms=result.hit_run_ms,
         )
@@ -3462,6 +3463,7 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
         "cell_id": cell_id,
         "stdout": result.stdout,
         "stderr": result.stderr,
+        "run_diagnostics": result.run_diagnostics,
     }
     if result.success:
         payload.update(

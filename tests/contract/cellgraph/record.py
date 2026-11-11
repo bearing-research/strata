@@ -422,9 +422,9 @@ async def _run_all_batch(notebook_dir: Path) -> tuple[dict[str, Any], Any]:
     results: dict[str, list[Any]] = {}
     real_apply = session.apply_execution_result_metadata
 
-    def apply(cell_id: str, result: Any) -> None:
+    def apply(cell_id: str, result: Any, **kwargs: Any) -> None:
         results.setdefault(cell_id, []).append(result)
-        real_apply(cell_id, result)
+        real_apply(cell_id, result, **kwargs)
 
     try:
         ops.use_existing_environment()

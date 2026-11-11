@@ -40,7 +40,7 @@ from strata.notebook.cell_paths.python import (
 from strata.notebook.cell_paths.r import RContext, run_r_cell
 from strata.notebook.cell_paths.sql import run_sql_cell
 from strata.notebook.cell_paths.widget import run_widget_cell
-from strata.notebook.execution_result import CellExecutionResult
+from strata.notebook.execution_result import CachedConsole, CellExecutionResult
 from strata.notebook.executor import CellExecutor
 from strata.notebook.harness_user import LocalExecutionRefused, UnsafeRunFile
 from strata.notebook.local_runs import RunFenced, RunRefused
@@ -163,7 +163,7 @@ def _fakes(cell: SimpleNamespace, failure: CellExecutionResult | None = None):
         persist_display_outputs=lambda cell_id, displays: calls.persisted.append(
             (cell_id, displays)
         ),
-        apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
+        apply_execution_result_metadata=lambda cell_id, result, **_: calls.applied.append(
             (cell_id, result)
         ),
     )
@@ -1344,7 +1344,7 @@ class TestFanout:
             record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
                 (args, kwargs)
             ),
-            apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
+            apply_execution_result_metadata=lambda cell_id, result, **_: calls.applied.append(
                 (cell_id, result)
             ),
             persist_display_outputs=lambda cell_id, displays: calls.persisted.append(
@@ -1751,7 +1751,7 @@ class TestR:
             record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
                 (args, kwargs)
             ),
-            apply_execution_result_metadata=lambda cell_id, result: calls.applied.append(
+            apply_execution_result_metadata=lambda cell_id, result, **_: calls.applied.append(
                 (cell_id, result)
             ),
             persist_display_outputs=lambda cell_id, outputs: calls.persisted.append(
@@ -1970,7 +1970,7 @@ class TestR:
             for n in (1, 2)
         ]
         team = SimpleNamespace(principal="p", build_env="linux", saved_ms=5, promotion=None)
-        console = SimpleNamespace(stdout="out", stderr="err", run_ms=9)
+        console = CachedConsole(stdout="out", stderr="err", run_ms=9)
         host, context, calls = self._fakes(
             monkeypatch,
             worker=self.LOCAL,
@@ -2840,7 +2840,7 @@ class TestBatchCacheCheck:
 
     async def test_a_display_with_no_blob_is_left_out(self, tmp_path):
         models = [CellOutput(content_type="json/object")]
-        console = SimpleNamespace(stdout="", stderr="", run_ms=0)
+        console = CachedConsole(stdout="", stderr="", run_ms=0)
         host, context, seen = _batch_fakes(tmp_path, displays=models, console=console)
         seen.latest["c.__display__0"] = _batch_art("d0")
 
@@ -2850,7 +2850,7 @@ class TestBatchCacheCheck:
         assert answer["cached_displays"] == []
 
     async def test_a_hit_answers_with_its_console(self, tmp_path):
-        console = SimpleNamespace(stdout="out", stderr="err", run_ms=9)
+        console = CachedConsole(stdout="out", stderr="err", run_ms=9)
         host, context, _ = _batch_fakes(tmp_path, console=console)
 
         answer = await self._check(host, context, tmp_path)
@@ -3359,7 +3359,7 @@ class TestPython:
         artifact_uri="strata://artifact/display@v=1",
         model_dump=lambda: {"kind": "display"},
     )
-    CONSOLE = SimpleNamespace(stdout="old out", stderr="old err", run_ms=9)
+    CONSOLE = CachedConsole(stdout="old out", stderr="old err", run_ms=9)
     LOCAL = SimpleNamespace(
         name="local", backend=WorkerBackendType.LOCAL, config=SimpleNamespace(url="", transport="")
     )
@@ -3473,7 +3473,7 @@ class TestPython:
             record_successful_execution_provenance=lambda *args, **kwargs: calls.recorded.append(
                 (args, kwargs)
             ),
-            apply_execution_result_metadata=lambda cell_id, res: calls.applied.append(
+            apply_execution_result_metadata=lambda cell_id, res, **_: calls.applied.append(
                 (cell_id, res)
             ),
             persist_display_outputs=lambda cell_id, outputs: calls.persisted.append(

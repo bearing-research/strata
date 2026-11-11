@@ -758,6 +758,13 @@ class CellState(BaseModel):
         default_factory=list,
         description="Validation findings for the cell's source annotations",
     )
+    run_diagnostics: list[AnnotationDiagnostic] = Field(
+        default_factory=list,
+        description=(
+            "What the cell's last run read without declaring it, and the inputs it "
+            "mutated (``run_diagnostics.py``); replaced by its next run"
+        ),
+    )
     is_leaf: bool = Field(
         default=False,
         description="Whether this is a leaf node (no downstream consumers)",

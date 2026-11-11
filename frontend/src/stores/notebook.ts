@@ -1,5 +1,6 @@
 import { reactive, computed, ref, watch } from 'vue'
 import type {
+  AnnotationDiagnostic,
   Cell,
   CellId,
   CellOutput,
@@ -751,6 +752,17 @@ function applySerializedExecutionMetadata(cell: Cell, raw: Record<string, any>) 
       : null
 }
 
+function parseDiagnostics(raw: any[]): AnnotationDiagnostic[] {
+  return raw
+    .filter((d: any) => d && typeof d.code === 'string')
+    .map((d: any) => ({
+      severity: d.severity === 'info' || d.severity === 'error' ? d.severity : 'warn',
+      code: String(d.code),
+      message: String(d.message ?? ''),
+      line: typeof d.line === 'number' ? d.line : null,
+    }))
+}
+
 function parseBackendAnnotations(raw: any): CellAnnotations | undefined {
   if (!raw) return undefined
   return {
@@ -981,15 +993,11 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
     : undefined
   localCell.annotations = parseBackendAnnotations(serverCell.annotations)
   localCell.annotationDiagnostics = Array.isArray(serverCell.annotation_diagnostics)
-    ? serverCell.annotation_diagnostics
-        .filter((d: any) => d && typeof d.code === 'string')
-        .map((d: any) => ({
-          severity: d.severity === 'info' || d.severity === 'error' ? d.severity : 'warn',
-          code: String(d.code),
-          message: String(d.message ?? ''),
-          line: typeof d.line === 'number' ? d.line : null,
-        }))
+    ? parseDiagnostics(serverCell.annotation_diagnostics)
     : undefined
+  if (Array.isArray(serverCell.run_diagnostics)) {
+    localCell.runDiagnostics = parseDiagnostics(serverCell.run_diagnostics)
+  }
   localCell.stalenessReasons = supportsStalenessDetail(localCell.status)
     ? serverCell.staleness_reasons || serverCell.staleness?.reasons || []
     : []
@@ -2113,6 +2121,7 @@ function initializeWebSocket() {
         // Only a failure suggests an install.
         cell.suggestInstall = undefined
         cell.suggestInstallLanguage = undefined
+        if (p.run_diagnostics) cell.runDiagnostics = parseDiagnostics(p.run_diagnostics)
       }
 
       setCellOutput(cellId, output, displayOutputs)
@@ -2213,6 +2222,7 @@ function initializeWebSocket() {
         cell.displayOutputs = []
         replaceConsole(cell, p)
         applyRemoteExecutionMetadata(cell, p)
+        if (p.run_diagnostics) cell.runDiagnostics = parseDiagnostics(p.run_diagnostics)
         const workerName = effectiveWorkerNameForCell(cell)
         const workerEntry = availableWorkers.value.find((worker) => worker.name === workerName)
         if (workerEntry?.backend === 'executor' || error.includes('Remote executor')) {
@@ -2290,14 +2300,7 @@ function initializeWebSocket() {
             cell.updatedBy = typeof sc.updated_by === 'string' ? sc.updated_by : null
           }
           if (Array.isArray(sc.annotation_diagnostics)) {
-            cell.annotationDiagnostics = sc.annotation_diagnostics
-              .filter((d: any) => d && typeof d.code === 'string')
-              .map((d: any) => ({
-                severity: d.severity === 'info' || d.severity === 'error' ? d.severity : 'warn',
-                code: String(d.code),
-                message: String(d.message ?? ''),
-                line: typeof d.line === 'number' ? d.line : null,
-              }))
+            cell.annotationDiagnostics = parseDiagnostics(sc.annotation_diagnostics)
           }
           if (typeof sc.is_module_cell === 'boolean') {
             cell.isModuleCell = sc.is_module_cell

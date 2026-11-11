@@ -166,6 +166,9 @@ class RunResult(BaseModel):
     traceback_full: str | None = None
     stdout: str = ""
     stderr: str = ""
+    # What the run read without declaring it, and what it mutated, each with its fix:
+    # ``{severity, code, message}`` rows, as the cell's header pill shows them.
+    run_diagnostics: list[dict[str, Any]] = Field(default_factory=list)
 
     # Every agent-facing run result, local or remote, passes through here.
     @field_validator("stdout", "stderr")
@@ -535,6 +538,7 @@ class LocalNotebookOps:
             traceback_full=result.traceback_full,
             stdout=result.stdout,
             stderr=result.stderr,
+            run_diagnostics=result.run_diagnostics,
         )
 
     async def run_tests(self, cell_id: str) -> TestRunResult:
@@ -1343,6 +1347,7 @@ def _run_result_from_wire(data: dict[str, Any]) -> RunResult:
         traceback_full=data.get("traceback_full"),
         stdout=data.get("stdout") or "",
         stderr=data.get("stderr") or "",
+        run_diagnostics=data.get("run_diagnostics") or [],
     )
 
 

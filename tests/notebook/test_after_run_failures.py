@@ -126,7 +126,7 @@ def _fail(monkeypatch, name: str, outcome: Exception | bool, calls: list[str]) -
     monkeypatch.setattr(_owner(name), name, failing)
 
 
-WARNING = {"var_name": "x", "suggestion": "rebind it"}
+WARNING = {"var_name": "x", "message": "x was mutated", "suggestion": "rebind it"}
 
 
 def _team_store_breaks(monkeypatch, error: BaseException = RuntimeError("no team")) -> list[str]:

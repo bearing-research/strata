@@ -157,7 +157,9 @@ class _FakeHost:
     ):
         return current_outputs
 
-    def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None:
+    def apply_execution_result_metadata(
+        self, cell_id: str, result: Any, *, instance: bool = False
+    ) -> None:
         return None
 
     def persist_display_outputs(self, cell_id: str, display_outputs: Any) -> None:

@@ -419,10 +419,10 @@ async def _run_notebook(args: argparse.Namespace) -> int:
                 entry["stdout"] = _truncate_console(result.stdout)
             if result.stderr:
                 entry["stderr"] = _truncate_console(result.stderr)
-            # Otherwise silent headless: a cell that mutates an input without exporting it
-            # leaves downstream cells reading the stale value.
-            if result.mutation_warnings:
-                entry["mutation_warnings"] = [dict(w) for w in result.mutation_warnings]
+            # Otherwise silent headless: a file read around the cell's declarations, or an
+            # input mutated without exporting it, leaves a result its key does not track.
+            if result.run_diagnostics:
+                entry["run_diagnostics"] = result.run_diagnostics
             if not result.success:
                 entry["error"] = result.error or "cell failed"
                 if result.traceback:
@@ -439,9 +439,9 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             results.append(entry)
             if args.format == "human" and not args.quiet:
                 _print_cell_line(entry)
-                for w in result.mutation_warnings:
-                    tail = f". {w['suggestion']}" if w.get("suggestion") else ""
-                    print(f"      {_yellow('⚠')} {w['message']}{tail}")
+                for diagnostic in result.run_diagnostics:
+                    mark = "ℹ" if diagnostic["severity"] == "info" else _yellow("⚠")
+                    print(f"      {mark} {diagnostic['message']}")
 
     total_ms = int((time.monotonic() - start) * 1000)
     any_failed = any(r["status"] == "error" for r in results)
@@ -1516,10 +1516,18 @@ async def _cell_add_run_async(args: argparse.Namespace, source: str) -> int:
         if result.stdout:
             print("--- stdout ---")
             print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+        _print_run_diagnostics(result.run_diagnostics)
         if result.error:
             print("--- error ---")
             print(result.error)
     return 0 if result.status == "ok" else 1
+
+
+def _print_run_diagnostics(diagnostics: list[dict[str, Any]]) -> None:
+    if diagnostics:
+        print("--- warnings ---")
+        for diagnostic in diagnostics:
+            print(f"{diagnostic['code']}: {diagnostic['message']}")
 
 
 def cell_edit_main(args: argparse.Namespace) -> int:
@@ -2003,6 +2011,7 @@ async def _cell_run_async(args: argparse.Namespace) -> int:
         if result.stdout:
             print("--- stdout ---")
             print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+        _print_run_diagnostics(result.run_diagnostics)
         if result.error:
             print("--- error ---")
             print(result.error)

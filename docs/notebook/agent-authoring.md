@@ -192,7 +192,9 @@ unknown workers, …) without calling any LLM.
 | Wrong logic, missing dependency in `pyproject.toml` | `run` |
 
 `run --format json` reports per-cell `status`, `error` (and its `traceback` and
-`traceback_full` when the cell raised), and `cache_hit`,
+`traceback_full` when the cell raised), `cache_hit`, and `run_diagnostics` when the
+run read a file or imported a module it does not declare (each names the mount or
+`uv add` that fixes it),
 and skips downstream cells when an upstream fails (`"reason": "upstream
 failed"`) - fix the first error and re-run; everything already correct is
 a cache hit.

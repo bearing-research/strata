@@ -20,6 +20,7 @@ from strata.notebook.cell_paths.context import _writes_entry
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.models import CellLanguage, MountMode, TableWriteSpec, WorkerBackendType
 from strata.notebook.mounts import MountWrite, moved_key, moved_parts
+from strata.notebook.read_audit import merge
 from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
 from strata.notebook.workers import resolve_worker_spec
 
@@ -235,6 +236,9 @@ def _finish_fanout(
     moved = _moved(results)
     duration_ms = (time.time() - start_time) * 1000
     failures = [(name, r) for name, r in results if not r.success]
+    # Each instance reads its own files; the cell's result depends on all of them.
+    read_audit = merge([r.read_audit for _, r in results])
+    mutation_warnings = [w for _, r in results for w in r.mutation_warnings]
     stdout = "\n".join(f"[variant={name}]\n{r.stdout}" for name, r in results if r.stdout)
     stderr = "\n".join(f"[variant={name}]\n{r.stderr}" for name, r in results if r.stderr)
     failure_traceback = None
@@ -257,6 +261,8 @@ def _finish_fanout(
             traceback=failure_traceback,
             traceback_full=failure_traceback_full,
             execution_method="fanout",
+            read_audit=read_audit,
+            mutation_warnings=mutation_warnings,
         )
     else:
         # Cached only when no instance ran: one recompute makes the cell a run.
@@ -278,6 +284,8 @@ def _finish_fanout(
             cache_hit=cache_hit,
             moved_input=moved,
             execution_method="fanout",
+            read_audit=read_audit,
+            mutation_warnings=mutation_warnings,
             # Before the record below moves the cell's last key on to this one.
             replaces_console=cache_hit
             and (
@@ -455,6 +463,8 @@ async def run_each_cell(
             source=source,
             env_hash=base.env_hash,
             duration_ms=finished.duration_ms,
+            read_audit=finished.read_audit,
+            mutation_warnings=finished.mutation_warnings,
         )
     return finished
 
