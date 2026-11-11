@@ -20,6 +20,7 @@ from tests.conftest import (
     service_auth,
     wait_for_server,
 )
+from tests.notebook.pool_helpers import warm_again
 
 # R availability: central skip markers, so the skip wording and the arrow
 # package probe live in one place.
@@ -225,7 +226,7 @@ async def warm_pool():
         )
         pools.append(pool)
         await pool.start()
-        assert pool._available.qsize() == 1, "the warm worker never signalled ready"
+        await warm_again(pool)
         return pool
 
     yield start

@@ -15,6 +15,7 @@ from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 from strata.notebook.ws import _execution_result_payload
+from tests.notebook.pool_helpers import warm_again
 
 
 def _run_as_harness(source: str) -> BaseException:
@@ -137,21 +138,29 @@ class TestTrimming:
         assert fields["error"] == "ValueError: no\ntry this"
 
 
+async def _run(executor: CellExecutor, cell_id: str, source: str) -> CellExecutionResult:
+    if executor.pool is not None:
+        await warm_again(executor.pool)
+    result = await executor.execute_cell(cell_id, source)
+    assert result.execution_method == ("cold" if executor.pool is None else "warm")
+    return result
+
+
 async def _assert_every_failure_reads_the_same(executor: CellExecutor) -> None:
     expected = "ZeroDivisionError: division by zero"
     for cell_id in ("expr", "stmt"):
-        result = await executor.execute_cell(cell_id, CELLS[cell_id])
+        result = await _run(executor, cell_id, CELLS[cell_id])
         assert not result.success
         assert result.error == expected
         _assert_starts_at_the_cell(result.traceback, expected)
         assert "harness" in result.traceback_full or "pool_worker" in result.traceback_full
         assert CELLS[cell_id].splitlines()[1] in result.traceback
 
-    result = await executor.execute_cell("lib", THROUGH_A_LIBRARY)
+    result = await _run(executor, "lib", THROUGH_A_LIBRARY)
     assert "decoder.py" in result.traceback
     assert "harness" not in result.traceback and "pool_worker" not in result.traceback
 
-    result = await executor.execute_cell("syntax", SYNTAX_ERROR)
+    result = await _run(executor, "syntax", SYNTAX_ERROR)
     assert result.error == "SyntaxError: invalid syntax (<cell syntax>, line 2)"
     assert result.traceback.startswith('  File "<cell syntax>", line 2')
     assert result.traceback.count("SyntaxError") == 1
@@ -166,12 +175,7 @@ class TestEveryPathAgrees:
     @pytest.mark.warm_pool
     async def test_a_warm_run(self, tmp_path, warm_pool):
         session = _session(tmp_path)
-        executor = CellExecutor(session, await warm_pool(session))
-
-        result = await executor.execute_cell("expr", EXPRESSION_LAST)
-
-        assert result.execution_method == "warm"
-        await _assert_every_failure_reads_the_same(executor)
+        await _assert_every_failure_reads_the_same(CellExecutor(session, await warm_pool(session)))
 
     async def test_a_run_all_batch(self, tmp_path):
         session = _session(tmp_path)
