@@ -307,6 +307,8 @@ export interface CellView {
   annotation_diagnostics: AnnotationDiagnostic[]
   /** What the cell's last run read without declaring it, and the inputs it mutated (``run_diagnostics.py``); replaced by its next run */
   run_diagnostics: AnnotationDiagnostic[]
+  /** Each undeclared path the run behind ``run_diagnostics`` read, as it left it (``read_audit.fingerprint``); a local run's only */
+  read_fingerprints: Record<string, number[]>
   /** Whether this is a leaf node (no downstream consumers) */
   is_leaf: boolean
   /** Staleness status */

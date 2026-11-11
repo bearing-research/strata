@@ -1378,12 +1378,18 @@ class NotebookSession:
         diagnostics = run_diagnostics(
             result.read_audit, result.mutation_warnings, notebook_dir=self.path, taken=taken
         )
-        if diagnostics == cell.run_diagnostics:
+        fingerprints = {
+            path: st
+            for finding in result.read_audit
+            for path, st in finding.get("fingerprints", {}).items()
+        }
+        if diagnostics == cell.run_diagnostics and fingerprints == cell.read_fingerprints:
             return
         cell.run_diagnostics = diagnostics
+        cell.read_fingerprints = fingerprints
         # Runtime state, not notebook.toml; written only when they change.
         persist_cell_run_diagnostics(
-            self.path, cell.id, [d.model_dump(mode="json") for d in diagnostics]
+            self.path, cell.id, [d.model_dump(mode="json") for d in diagnostics], fingerprints
         )
 
     def apply_execution_result_metadata(

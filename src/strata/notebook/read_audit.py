@@ -18,7 +18,7 @@ import sys
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 # Past this many paths a run's record stops growing and says it is partial.
 PATH_CAP = 10_000
@@ -34,6 +34,9 @@ SUBPROCESS_RUN = "subprocess_run"
 # The audit itself raised: the run stands, and says what it could not check.
 AUDIT_FAILED = "audit_failed"
 
+# The codes whose items are paths, which a local run fingerprints.
+_PATH_CODES = frozenset({UNDECLARED_READ, UNDECLARED_LISTING, UNDECLARED_IMPORT, WORK_DIR_READ})
+
 _WRITES = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_APPEND
 
 
@@ -47,6 +50,9 @@ class ReadFinding(TypedDict):
     total: int
     # The record stopped at PATH_CAP, so there may be more than ``total``.
     partial: bool
+    # A local run's paths as it left them (:func:`fingerprint`), so a later change to one
+    # can be told: only the server's own files can be checked again by the server.
+    fingerprints: NotRequired[dict[str, list[int]]]
 
 
 class Observed:
@@ -276,9 +282,22 @@ class _Unlocked:
         return None
 
 
-def _finding(code: str, items: set[str], partial: bool) -> ReadFinding:
+def fingerprint(path: str) -> list[int] | None:
+    """*path*'s ``(dev, ino, size, mtime_ns, ctime_ns)``, or None if it cannot be read."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return [st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns]
+
+
+def _finding(code: str, items: set[str], partial: bool, *, local: bool) -> ReadFinding:
     ordered = sorted(items)
-    return ReadFinding(code=code, items=ordered[:ITEM_CAP], total=len(ordered), partial=partial)
+    finding = ReadFinding(code=code, items=ordered[:ITEM_CAP], total=len(ordered), partial=partial)
+    if local and code in _PATH_CODES:
+        stats = {path: fingerprint(path) for path in finding["items"]}
+        finding["fingerprints"] = {path: st for path, st in stats.items() if st is not None}
+    return finding
 
 
 def report(
@@ -316,6 +335,7 @@ def _report(
     run_dir: str,
     scope: Mapping[str, Any] | None,
 ) -> list[ReadFinding]:
+    local = scope is not None
     scope = scope or {}
     covered = _Roots(
         [str(spec.get("local_path") or "") for spec in mounts.values()]
@@ -358,7 +378,7 @@ def _report(
 
     paths = (UNDECLARED_READ, UNDECLARED_LISTING, WORK_DIR_READ)
     return [
-        _finding(code, items, observed.partial and code in paths)
+        _finding(code, items, observed.partial and code in paths, local=local)
         for code, items in sorted(found.items())
     ]
 
@@ -368,6 +388,7 @@ def merge(runs: list[list[ReadFinding]]) -> list[ReadFinding]:
     items: dict[str, set[str]] = {}
     totals: dict[str, int] = {}
     partial: dict[str, bool] = {}
+    fingerprints: dict[str, dict[str, list[int]]] = {}
     for findings in runs:
         for finding in findings:
             code = finding["code"]
@@ -375,12 +396,24 @@ def merge(runs: list[list[ReadFinding]]) -> list[ReadFinding]:
             # Past the cap a run's items are a sample, so its total is a floor.
             totals[code] = max(totals.get(code, 0), finding["total"])
             partial[code] = partial.get(code, False) or finding["partial"]
-    return [
-        ReadFinding(
+            if "fingerprints" in finding:
+                # The first run's: a change after it, even during a later one, is a change.
+                seen = fingerprints.setdefault(code, {})
+                for path, st in finding["fingerprints"].items():
+                    seen.setdefault(path, st)
+    merged = []
+    for code, found in sorted(items.items()):
+        finding = ReadFinding(
             code=code,
             items=sorted(found)[:ITEM_CAP],
             total=max(totals[code], len(found)),
             partial=partial[code],
         )
-        for code, found in sorted(items.items())
-    ]
+        if code in fingerprints:
+            finding["fingerprints"] = {
+                path: fingerprints[code][path]
+                for path in finding["items"]
+                if path in fingerprints[code]
+            }
+        merged.append(finding)
+    return merged

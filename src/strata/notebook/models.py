@@ -765,6 +765,14 @@ class CellState(BaseModel):
             "mutated (``run_diagnostics.py``); replaced by its next run"
         ),
     )
+    read_fingerprints: dict[str, list[int]] = Field(
+        default_factory=dict,
+        exclude=True,
+        description=(
+            "Each undeclared path the run behind ``run_diagnostics`` read, as it left it "
+            "(``read_audit.fingerprint``); a local run's only"
+        ),
+    )
     is_leaf: bool = Field(
         default=False,
         description="Whether this is a leaf node (no downstream consumers)",
