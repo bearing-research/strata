@@ -170,14 +170,15 @@ def gone_tables(
     """
     from strata.iceberg.catalog import IcebergWriter, PyIcebergCatalog
 
-    writer = IcebergWriter(PyIcebergCatalog(config, env, notebook=notebook))
     gone: list[TableWriteSpec] = []
-    for spec in specs:
-        try:
-            if not writer.table_exists(spec.table):
-                gone.append(spec)
-        except Exception as exc:
-            logger.warning("Could not check that table %s still exists: %s", spec.table, exc)
+    with PyIcebergCatalog(config, env, notebook=notebook) as catalogs:
+        writer = IcebergWriter(catalogs)
+        for spec in specs:
+            try:
+                if not writer.table_exists(spec.table):
+                    gone.append(spec)
+            except Exception as exc:
+                logger.warning("Could not check that table %s still exists: %s", spec.table, exc)
     return gone
 
 
@@ -205,29 +206,30 @@ def write_cell_tables(
     tables = [(spec, _table(spec, outputs.get(spec.variable))) for spec in specs]
     authorize_table_writes(specs, config=config, env=env, notebook=notebook)
     principal, tenant = _request_scope()
-    writer = IcebergWriter(PyIcebergCatalog(config, env, notebook=notebook))
     written: list[TableWrite] = []
-    for spec, data in tables:
-        output = outputs[spec.variable]
-        try:
-            written.append(
-                writer.write(
-                    spec.table,
-                    data,
-                    artifact_id=output.artifact_id,
-                    version=output.version,
-                    provenance_hash=output.provenance_hash,
-                    promoted_by=principal,
-                    tenant=tenant,
-                    mode=spec.mode,
-                    on=spec.on,
-                    allow_foreign=bool(getattr(config, "notebook_table_writes_foreign", False)),
+    with PyIcebergCatalog(config, env, notebook=notebook) as catalogs:
+        writer = IcebergWriter(catalogs)
+        for spec, data in tables:
+            output = outputs[spec.variable]
+            try:
+                written.append(
+                    writer.write(
+                        spec.table,
+                        data,
+                        artifact_id=output.artifact_id,
+                        version=output.version,
+                        provenance_hash=output.provenance_hash,
+                        promoted_by=principal,
+                        tenant=tenant,
+                        mode=spec.mode,
+                        on=spec.on,
+                        allow_foreign=bool(getattr(config, "notebook_table_writes_foreign", False)),
+                    )
                 )
-            )
-        except TableOfAnotherTenant as exc:
-            raise TableWriteError(f"@write_table {spec.table}: {exc}") from exc
-        except Exception as exc:
-            raise TableWriteError(
-                f"@write_table {spec.variable} {spec.table} ({spec.mode}) failed: {exc}"
-            ) from exc
+            except TableOfAnotherTenant as exc:
+                raise TableWriteError(f"@write_table {spec.table}: {exc}") from exc
+            except Exception as exc:
+                raise TableWriteError(
+                    f"@write_table {spec.variable} {spec.table} ({spec.mode}) failed: {exc}"
+                ) from exc
     return written

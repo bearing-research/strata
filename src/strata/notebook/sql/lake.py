@@ -341,9 +341,8 @@ def _table_location(
     from strata.iceberg.catalog import PyIcebergCatalog
 
     try:
-        location = (
-            PyIcebergCatalog(config, env, notebook=notebook).load_table(table_spec.uri).location()
-        )
+        with PyIcebergCatalog(config, env, notebook=notebook) as catalog:
+            location = catalog.load_table(table_spec.uri).location()
     except Exception as exc:  # the catalog's own error types vary by backend
         raise LakeError(f"table {table_spec.uri}: {exc}") from exc
     return _directory(location)
