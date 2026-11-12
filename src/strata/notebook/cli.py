@@ -209,7 +209,8 @@ async def _drain_warm_pool(session: Any) -> None:
             elif hasattr(pool, "shutdown_nowait"):
                 pool.shutdown_nowait()
         except Exception:
-            pass
+            # Cleanup on the way out: a pool that will not drain must not fail the run.
+            logging.getLogger(__name__).debug("the %s did not drain", name, exc_info=True)
 
 
 @contextmanager

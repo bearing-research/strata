@@ -252,10 +252,7 @@ class TestS3EndToEnd:
             table_name = "events"
             table_id = f"{namespace}.{table_name}"
 
-            try:
-                catalog.create_namespace(namespace)
-            except Exception:
-                pass
+            catalog.create_namespace_if_not_exists(namespace)
 
             try:
                 table = catalog.load_table(table_id)
@@ -307,10 +304,7 @@ class TestS3PathHandling:
             table_name = "test_table"
             table_id = f"{namespace}.{table_name}"
 
-            try:
-                catalog.create_namespace(namespace)
-            except Exception:
-                pass
+            catalog.create_namespace_if_not_exists(namespace)
 
             try:
                 table = catalog.load_table(table_id)
