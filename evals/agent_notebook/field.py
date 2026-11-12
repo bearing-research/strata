@@ -95,11 +95,11 @@ def project_modules(cwd: str) -> frozenset[str]:
     names: set[str] = set()
     try:
         meta = tomllib.loads((root / "pyproject.toml").read_text())
-        name = meta.get("project", {}).get("name")
-        if isinstance(name, str):
-            names.add(re.sub(r"[-.]+", "_", name).lower())
     except (OSError, tomllib.TOMLDecodeError):
-        pass
+        meta = {}
+    name = meta.get("project", {}).get("name")
+    if isinstance(name, str):
+        names.add(re.sub(r"[-.]+", "_", name).lower())
     for base in (root, root / "src"):
         try:
             names.update(p.parent.name for p in base.glob("*/__init__.py"))
