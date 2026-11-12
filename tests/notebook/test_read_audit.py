@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import os
+import pickle
 import shutil
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 
+import cloudpickle
+import duckdb
+import pandas as pd
+import polars as pl
+import pyarrow as pa
+import pyarrow.dataset as ds
+import pyarrow.fs as pafs
+import pyarrow.ipc as ipc
+import pyarrow.parquet as pq
 import pytest
 
 from strata.notebook import read_audit
@@ -266,6 +277,13 @@ class TestTheRecord:
         (data / "c.txt").write_text("c")
         assert fingerprint(str(data)) != before
 
+    def test_a_listing_is_not_the_dot_names_a_tool_drops(self, data):
+        before = fingerprint(str(data))
+        (data / ".DS_Store").write_text("")
+        (data / ".a.txt.crc").write_text("")
+
+        assert fingerprint(str(data)) == before
+
     def test_a_copy_with_its_times_is_the_same_file(self, data, tmp_path):
         before = fingerprint(str(data / "a.txt"))
         # A new inode (a copied notebook, a restarted container's overlay), same file.
@@ -297,6 +315,419 @@ class TestTheRecord:
         assert merge([[read(1)], [read(2)]]) == [read(2)]
         # A change while any iteration ran stays one.
         assert merge([[read(1)], [read()], [read(2)]]) == [read()]
+
+
+class TestANativeReader:
+    """pyarrow, polars and duckdb open files in native code; their readers record them."""
+
+    @pytest.fixture
+    def dataset(self, data) -> Path:
+        folder = data / "dataset"
+        (folder / "year=2026").mkdir(parents=True)
+        for name in ("year=2026/a.parquet", "year=2026/b.parquet"):
+            pq.write_table(pa.table({"a": [1]}), folder / name)
+        return folder
+
+    # Lambdas, not the functions: collection runs before the wrappers are set, so
+    # `pl.read_parquet` here would be the original, and the test would bypass its wrapper.
+    @pytest.mark.parametrize(
+        "read",
+        [
+            lambda path: pq.read_table(path),
+            lambda path: pq.ParquetFile(path).read(),
+            lambda path: pd.read_parquet(path),
+            lambda path: pl.read_parquet(path),
+            lambda path: pl.scan_parquet(path).collect(),
+            lambda path: duckdb.read_parquet(str(path)).fetchall(),
+            lambda path: duckdb.connect().read_parquet(str(path)).fetchall(),
+            lambda path: pa.memory_map(str(path)).read(),
+        ],
+        ids=[
+            "pq.read_table",
+            "pq.ParquetFile",
+            "pd.read_parquet",
+            "pl.read_parquet",
+            "pl.scan_parquet",
+            "duckdb.read_parquet",
+            "connection.read_parquet",
+            "pa.memory_map",
+        ],
+    )
+    def test_its_file_is_read(self, data, read):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        with recording() as observed:
+            read(data / "t.parquet")
+
+        assert _report(observed) == {"undeclared_read": [str(data / "t.parquet")]}
+
+    def test_a_folder_is_each_file_in_it_and_its_listings(self, dataset):
+        with recording() as observed:
+            pq.read_table(dataset)
+
+        assert _report(observed) == {
+            "undeclared_listing": [str(dataset), str(dataset / "year=2026")],
+            "undeclared_read": [
+                str(dataset / "year=2026" / "a.parquet"),
+                str(dataset / "year=2026" / "b.parquet"),
+            ],
+        }
+
+    def test_a_glob_is_what_it_matches(self, dataset):
+        with recording() as observed:
+            pl.read_parquet(dataset / "year=2026" / "a*.parquet")
+
+        assert _report(observed) == {
+            "undeclared_listing": [str(dataset / "year=2026")],
+            "undeclared_read": [str(dataset / "year=2026" / "a.parquet")],
+        }
+
+    def test_a_list_and_a_file_uri_are_their_files(self, dataset):
+        a, b = sorted((dataset / "year=2026").iterdir())
+        with recording() as observed:
+            pl.read_parquet([a, f"file://{b}"])
+
+        assert _report(observed) == {"undeclared_read": [str(a), str(b)]}
+
+    def test_a_buffer_and_another_filesystems_path_are_not_files_here(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        # The same name in the cwd: read as a local path, it would be this one.
+        pq.write_table(pa.table({"a": [1]}), "t.parquet")
+        subtree = pafs.SubTreeFileSystem(str(data), pafs.LocalFileSystem())
+        body = (data / "t.parquet").read_bytes()
+        with recording() as observed:
+            pq.read_table(pa.BufferReader(body))
+            pq.read_table("t.parquet", filesystem=subtree)
+
+        assert _report(observed) == {}
+
+    def test_a_local_filesystems_path_is_a_file(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        with recording() as observed:
+            pq.read_table(str(data / "t.parquet"), filesystem=pafs.LocalFileSystem())
+
+        assert _report(observed) == {"undeclared_read": [str(data / "t.parquet")]}
+
+    def test_a_path_in_the_home_is_where_the_reader_expands_it(self, data, monkeypatch):
+        monkeypatch.setenv("HOME", str(data))
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        with recording() as observed:
+            pl.read_parquet("~/t.parquet")
+
+        assert _report(observed) == {"undeclared_read": [str(data / "t.parquet")]}
+
+    def test_a_map_opened_to_write_is_the_runs_write(self, data):
+        (data / "m.bin").write_bytes(b"0000")
+        with recording() as observed:
+            with pa.memory_map(str(data / "m.bin"), "r+") as mapped:
+                mapped.write(b"11")
+
+        # Its fingerprint is then as the run left it, not a change during the run.
+        assert observed.written == {str(data / "m.bin")}
+
+    def test_a_reader_imported_during_the_run_is_wrapped(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        script = textwrap.dedent(
+            f"""\
+            import importlib.util, sys
+            spec = importlib.util.spec_from_file_location("audit", {read_audit.__file__!r})
+            audit = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(audit)
+            assert "polars" not in sys.modules
+            with audit.recording() as observed:
+                import polars as pl
+                pl.read_parquet({str(data / "t.parquet")!r})
+            print({str(data / "t.parquet")!r} in observed.files)
+            # Its own loader, not a patched one: a zip's loader loads other modules too.
+            loader = sys.modules["polars"].__spec__.loader
+            print(type(loader).__name__, "exec_module" in vars(loader._loader))
+            """
+        )
+
+        out = subprocess.run(
+            [sys.executable, "-I", "-c", script], capture_output=True, text=True, check=True
+        )
+
+        assert out.stdout.split() == ["True", "_WrappingLoader", "False"]
+
+    def test_an_audit_that_fails_does_not_fail_the_read(self, data, monkeypatch):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+
+        def broken(self, source, mode):
+            raise RuntimeError("audit bug")
+
+        monkeypatch.setattr(read_audit.Observed, "native", broken)
+        with recording() as observed:
+            table = pq.read_table(data / "t.parquet")
+
+        assert table.num_rows == 1
+        assert observed.partial
+
+    def test_a_name_with_pattern_characters_is_that_file(self, data, monkeypatch):
+        # Not a glob: pyarrow reads the file of that name, and not the one it would match.
+        pq.write_table(pa.table({"a": [1]}), data / "t[1].parquet")
+        pq.write_table(pa.table({"a": [1]}), data / "t1.parquet")
+        # Nor is the folder a relative pattern is under one: here the cwd, the run's work/.
+        under = data / "exp[2]"
+        under.mkdir()
+        pq.write_table(pa.table({"a": [1]}), under / "u.parquet")
+        monkeypatch.chdir(under)
+        with recording() as observed:
+            pq.read_table(data / "t[1].parquet")
+            pl.read_parquet("u*.parquet")
+
+        assert _report(observed) == {
+            "undeclared_read": [str(data / "t[1].parquet")],
+            "work_dir_read": [str(under / "u.parquet")],
+        }
+
+    def test_another_filesystem_passed_by_position_is_not_here(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        pq.write_table(pa.table({"a": [1]}), "t.parquet")
+        subtree = pafs.SubTreeFileSystem(str(data), pafs.LocalFileSystem())
+        with recording() as observed:
+            pq.ParquetDataset("t.parquet", subtree).read()
+            ds.dataset("t.parquet", None, "parquet", subtree).to_table()
+
+        assert _report(observed) == {}
+
+    @pytest.mark.parametrize(
+        "write",
+        [
+            lambda path: pq.write_table(pa.table({"a": [1]}), path),
+            lambda path: pd.DataFrame({"a": [1]}).to_parquet(path),
+            lambda path: pl.DataFrame({"a": [1]}).write_parquet(path),
+            lambda path: pl.LazyFrame({"a": [1]}).sink_parquet(path),
+            lambda path: duckdb.sql("select 1 as a").write_parquet(str(path)),
+        ],
+        ids=["pq.write_table", "df.to_parquet", "pl.write_parquet", "pl.sink_parquet", "duckdb"],
+    )
+    def test_a_file_a_writer_made_is_the_runs_own(self, data, write):
+        with recording() as observed:
+            write(data / "out.parquet")
+            pq.read_table(data / "out.parquet")
+
+        assert _report(observed) == {}
+
+    def test_an_ipc_writer_that_writes_at_close_made_its_file(self, data):
+        table = pa.table({"a": [1]})
+        with recording() as observed:
+            with ipc.new_file(str(data / "out.arrow"), table.schema) as writer:
+                writer.write_table(table)
+            ipc.open_file(str(data / "out.arrow")).read_all()
+
+        assert _report(observed) == {}
+
+    def test_a_writer_adding_to_a_folder_made_only_its_new_file(self, data):
+        folder = data / "flat"
+        folder.mkdir()
+        pq.write_table(pa.table({"a": [1]}), folder / "a.parquet")
+        with recording() as observed:
+            pq.write_to_dataset(pa.table({"a": [2]}), folder)
+            pq.read_table(folder)
+
+        assert len(list(folder.iterdir())) == 2
+        assert _report(observed) == {
+            "undeclared_listing": [str(folder)],
+            "undeclared_read": [str(folder / "a.parquet")],
+        }
+
+    def test_a_folders_bookkeeping_is_not_read(self, dataset):
+        (dataset / "_SUCCESS").write_text("")
+        (dataset / "year=2026" / ".a.parquet.crc").write_text("")
+        (dataset / "_temporary").mkdir()
+        (dataset / "_temporary" / "0.parquet").write_text("")
+        with recording() as observed:
+            pq.read_table(dataset)
+
+        assert _report(observed) == {
+            "undeclared_listing": [str(dataset), str(dataset / "year=2026")],
+            "undeclared_read": [
+                str(dataset / "year=2026" / "a.parquet"),
+                str(dataset / "year=2026" / "b.parquet"),
+            ],
+        }
+
+    def test_a_delta_tables_log_is_read(self, dataset):
+        # The log says which files are the table: a delete that drops whole files is a
+        # new log entry, with the files still there.
+        (dataset / "_delta_log").mkdir()
+        (dataset / "_delta_log" / "0.json").write_text("{}")
+        with recording() as observed:
+            pq.read_table(dataset)
+
+        assert str(dataset / "_delta_log" / "0.json") in _report(observed)["undeclared_read"]
+
+    def test_the_folders_a_writer_made_are_the_runs_own(self, data):
+        out = data / "out"
+        with recording() as observed:
+            pq.write_to_dataset(pa.table({"a": [1, 2], "k": [1, 2]}), out, partition_cols=["k"])
+            pq.read_table(out)
+
+        assert _report(observed) == {}
+
+    def test_a_lazy_sink_is_the_runs_own_before_it_writes(self, data):
+        with recording() as observed:
+            pl.LazyFrame({"a": [1]}).sink_parquet(data / "out.parquet", lazy=True).collect()
+            pl.read_parquet(data / "out.parquet")
+
+        assert _report(observed) == {}
+
+    def test_a_writer_that_raised_made_its_file_all_the_same(self, data):
+        def make_then_fail(table, where):
+            with recording_of.hushed():  # as native code writes, unseen by the hook
+                Path(where).write_bytes(b"half")
+            raise OSError("disk full")
+
+        writer = read_audit._native(make_then_fail, "where", None, writes=True, at=("x", "w"))
+        with recording() as recording_of:
+            with pytest.raises(OSError):
+                writer(None, str(data / "out.parquet"))
+
+        assert recording_of.files == {str(data / "out.parquet"): True}
+
+    def test_a_writers_folder_past_the_cap_is_not_told_from_before(self, data, monkeypatch):
+        # Before and after would each stop at the cap, on files that need not match.
+        monkeypatch.setattr(read_audit, "PATH_CAP", 3)
+        folder = data / "big"
+        folder.mkdir()
+        for name in "bcd":
+            (folder / f"{name}.parquet").write_text("")
+        with recording() as observed:
+            assert observed.files_at(folder) is None
+
+        assert observed.partial
+
+    def test_another_threads_fingerprint_does_not_hide_a_read(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        held, done = threading.Event(), threading.Event()
+
+        def fingerprinting(observed):
+            with observed.hushed():
+                held.set()
+                done.wait(timeout=30)
+
+        with recording() as observed:
+            thread = threading.Thread(target=fingerprinting, args=(observed,))
+            thread.start()
+            assert held.wait(timeout=30), "the other thread never fingerprinted"
+            pq.read_table(data / "t.parquet")
+            done.set()
+            thread.join()
+
+        assert _report(observed) == {"undeclared_read": [str(data / "t.parquet")]}
+
+    def test_a_folder_is_walked_once_a_run(self, dataset, monkeypatch):
+        walks = []
+        walk = read_audit._walk
+
+        def counted(path, **kwargs):
+            walks.append(path)
+            return walk(path, **kwargs)
+
+        monkeypatch.setattr(read_audit, "_walk", counted)
+        with recording():
+            pq.read_table(dataset)
+            pq.read_table(dataset)
+
+        assert walks == [str(dataset)]
+
+    def test_a_walk_stops_at_the_cap(self, data, monkeypatch):
+        monkeypatch.setattr(read_audit, "PATH_CAP", 1)
+        for part in ("k=1", "k=2", "k=3"):
+            (data / "ds" / part).mkdir(parents=True)
+            pq.write_table(pa.table({"a": [1]}), data / "ds" / part / "a.parquet")
+        walked = []
+        walk = os.walk
+
+        def counted(top, *args, **kwargs):
+            for step in walk(top, *args, **kwargs):
+                walked.append(step[0])
+                yield step
+
+        monkeypatch.setattr(os, "walk", counted)
+        with recording() as observed:
+            pq.read_table(data / "ds")
+
+        # Stopped in k=2, at the first file past the cap: k=3 is never walked.
+        assert walked == [str(data / "ds"), str(data / "ds" / "k=1"), str(data / "ds" / "k=2")]
+        assert observed.partial
+
+    def test_a_record_partial_already_still_takes_a_folder(self, dataset):
+        with recording() as observed:
+            observed.partial = True  # an earlier listing past the cap, say
+            pq.read_table(dataset)
+
+        assert set(observed.files) == {
+            str(dataset / "year=2026" / "a.parquet"),
+            str(dataset / "year=2026" / "b.parquet"),
+        }
+
+    def test_one_call_through_several_readers_records_once(self, dataset, monkeypatch):
+        calls = []
+        native = read_audit.Observed.native
+
+        def counted(self, source, mode):
+            calls.append(source)
+            native(self, source, mode)
+
+        monkeypatch.setattr(read_audit.Observed, "native", counted)
+        with recording():
+            pd.read_parquet(dataset)
+
+        assert calls == [str(dataset)]
+
+    def test_a_polars_line_reader_is_wrapped(self, data):
+        with recording() as observed:
+            pl.read_lines(data / "a.txt")
+            pl.scan_lines(data / "b.txt").collect()
+
+        assert _report(observed) == {"undeclared_read": [str(data / "a.txt"), str(data / "b.txt")]}
+
+    def test_bytes_are_content_not_a_path(self, data):
+        # Taken as a path, the bytes would name this file.
+        Path("a\n1\n").write_text("")
+        with recording() as observed:
+            pl.read_csv(b"a\n1\n")
+
+        assert _report(observed) == {}
+
+    def test_another_copy_of_the_module_replaces_the_wrappers_not_nests_them(self, data):
+        # The harness loads the file by path; a process running it again holds copies.
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        script = textwrap.dedent(
+            f"""\
+            import importlib.util, sys
+            import pyarrow.parquet as pq
+
+            def load(name):
+                spec = importlib.util.spec_from_file_location(name, {read_audit.__file__!r})
+                audit = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(audit)
+                return audit
+
+            for i in range(3):
+                with load(f"audit{{i}}").recording() as observed:
+                    pq.read_table({str(data / "t.parquet")!r})
+            finders = [f for f in sys.meta_path if type(f).__name__ == "_WrapOnImport"]
+            print(len(finders), hasattr(pq.read_table.__wrapped__, "__wrapped__"))
+            print({str(data / "t.parquet")!r} in observed.files)
+            """
+        )
+
+        out = subprocess.run(
+            [sys.executable, "-I", "-c", script], capture_output=True, text=True, check=True
+        )
+
+        assert out.stdout.split() == ["1", "False", "True"]
+
+    @pytest.mark.parametrize(
+        "dump", [pickle.dumps, cloudpickle.dumps], ids=["pickle", "cloudpickle"]
+    )
+    def test_a_wrapped_reader_pickles_as_itself(self, dump):
+        with recording():
+            for reader in (pq.read_table, pl.DataFrame.write_parquet, pq.ParquetFile.__init__):
+                assert reader.__wrapped__
+                assert pickle.loads(dump(reader)) is reader
 
 
 def _lock(notebook_dir: Path, *packages: str) -> None:
@@ -386,6 +817,7 @@ def outside(tmp_path) -> Path:
     folder.mkdir()
     (folder / "events.csv").write_text("a,b\n1,2\n")
     (folder / "util_for_audit.py").write_text("VALUE = 41\n")
+    pq.write_table(pa.table({"a": [1, 2]}), folder / "events.parquet")
     return folder.resolve()
 
 
@@ -405,6 +837,18 @@ def _runs(outside: Path) -> dict[str, str]:
             "Path('mine.txt').write_text('x')\n"
             "back = Path('mine.txt').read_text()\n"
         ),
+        # Read in native code, where the hook sees no open: the wrapped readers record it.
+        # pyarrow alone: it is the one reader a new notebook's venv (the warm pool's) has.
+        "native": textwrap.dedent(
+            f"""\
+            import pyarrow.csv
+            import pyarrow.parquet as pq
+            rows = (
+                pq.read_table({str(outside / "events.parquet")!r}).num_rows
+                + pyarrow.csv.read_csv({str(outside / "events.csv")!r}).num_rows
+            )
+            """
+        ),
     }
 
 
@@ -413,6 +857,9 @@ def _expected(outside: Path) -> dict[str, dict[str, list[str]]]:
         "reads": {"undeclared_read": [str(outside / "events.csv")]},
         "imports": {"undeclared_import": [str(outside / "util_for_audit.py")]},
         "own": {},
+        "native": {
+            "undeclared_read": [str(outside / "events.csv"), str(outside / "events.parquet")]
+        },
     }
 
 
@@ -449,6 +896,39 @@ class TestARun:
 
     async def test_a_read_through_a_mount_is_declared(self, tmp_path, outside):
         source = "text = (data / 'events.csv').read_text()\n"
+        session = _session(tmp_path, ("c", source))
+        update_notebook_mounts(session.path, [MountSpec(name="data", uri=str(outside))])
+        session = NotebookSession(parse_notebook(session.path), session.path)
+        session.refresh_environment_runtime()
+
+        result = await CellExecutor(session).execute_cell("c", source)
+
+        assert result.success, result.error
+        assert result.read_audit == []
+
+    async def test_polars_and_duckdb_imported_by_the_cell_are_wrapped(self, tmp_path, outside):
+        source = textwrap.dedent(
+            f"""\
+            import duckdb
+            import polars as pl
+            rows = (
+                pl.scan_parquet({str(outside / "events.parquet")!r}).collect().height
+                + len(duckdb.read_csv({str(outside / "events.csv")!r}).fetchall())
+            )
+            """
+        )
+        session = _session(tmp_path, ("c", source))
+
+        result = await CellExecutor(session).execute_cell("c", source)
+
+        assert result.success, result.error
+        assert _codes(result.read_audit) == {
+            "undeclared_read": [str(outside / "events.csv"), str(outside / "events.parquet")]
+        }
+        assert _stats(result.read_audit) == _unchanged(result.read_audit)
+
+    async def test_a_native_read_through_a_mount_is_declared(self, tmp_path, outside):
+        source = "import polars as pl\nrows = pl.read_parquet(data / 'events.parquet').height\n"
         session = _session(tmp_path, ("c", source))
         update_notebook_mounts(session.path, [MountSpec(name="data", uri=str(outside))])
         session = NotebookSession(parse_notebook(session.path), session.path)

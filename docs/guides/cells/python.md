@@ -292,13 +292,26 @@ The findings show in the header pill and the run report, as mutation warnings do
 and a cache hit shows them again. `subprocess_run` and a failed audit are notes, not
 warnings. They never block a run or change its status or key. They describe the result
 the cell holds, so a failed run replaces them only when it found something itself.
-Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
-what they read is not reported.
+pyarrow, polars and DuckDB read files in native code, where Python sees no open, so
+their readers that take a path are wrapped in the cell's process and say what they were
+given: pyarrow's `parquet`, `dataset`, `feather`, `orc`, `csv`, `json` and `ipc` readers
+and `memory_map`, `pd.read_parquet`, polars' file readers (`read_*` and `scan_*`, not
+`read_database` or `scan_iceberg`), and DuckDB's `read_parquet`, `read_csv` and
+`read_json` (on the module or a connection). A folder counts as each file in it but the
+`_` and `.` ones a dataset skips (`_SUCCESS`, `.crc`), though a Delta table's
+`_delta_log` is read, since it says which files are the table. A glob counts as what it
+matches. Their writers (pyarrow's, `DataFrame.to_parquet`, polars' `write_*` and
+`sink_*`, a DuckDB relation's `write_parquet` and `write_csv`) make files and folders that
+are the run's own, as `open(path, "w")` does, so reading them back is not a finding. A file named
+in DuckDB SQL (`select * from 'x.parquet'`, `COPY ... TO`), one opened with
+`pyarrow.OSFile`, and a path on another filesystem (`filesystem=` other than the local
+one) are not seen.
 
 ### When such a file changes
 
 A local run also notes each such file as it read it (its size and modification time) and
-each folder it listed by the names in it. When one of them changes, the cell stays ready,
+each folder it listed by the names in it, but not the `.` ones a tool drops (a
+`.DS_Store`). When one of them changes, the cell stays ready,
 since its key did not move and a plain run would get the same cached result, but it says
 the result may be out of date: a **may be out of date** badge in the UI, `changed_reads`
 in `strata status`, `strata cell show` and MCP `status`, and a hint naming the files. A
