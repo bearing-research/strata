@@ -48,6 +48,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   cell stays ready (a plain run still hits the cache) and says its result may be out
   of date: a badge in the UI, `changed_reads` in `strata status`, `strata cell show`
   and MCP, each naming the rerun or the mount that fixes it. (#1512, #1514)
+- **A cell says what pyarrow, polars and DuckDB read for it.** They open files in
+  native code, where the read audit saw nothing, so a parquet file read with
+  `pq.read_table`, `pd.read_parquet`, `pl.scan_parquet` or `duckdb.read_csv` went
+  unreported. Their readers that take a path are now wrapped in the cell's process and
+  report it like any other read, with its mount and the stale hint. A file their
+  writers make is the run's own, so reading it back is not reported. A file named in
+  DuckDB SQL is still not seen. (#1516)
 
 ### Changed
 - **A relative local mount path is under the notebook's directory.** `# @mount shared
