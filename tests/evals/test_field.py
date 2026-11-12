@@ -14,8 +14,9 @@ from evals.agent_notebook.field import build_report, classify_bash, read_session
 
 @pytest.fixture(autouse=True)
 def _eval_runs_under_private_tmp(monkeypatch):
-    # pytest's own temp folder is where these transcripts' projects live, not an eval run.
-    monkeypatch.setattr(field, "_TEMP_ROOTS", ("/private/tmp/",))
+    # The transcripts' projects live in pytest's temp folder, which may be under a real
+    # eval root (/private/tmp on macOS); eval runs here live under a root nothing else uses.
+    monkeypatch.setattr(field, "_TEMP_ROOTS", ("/eval-runs/",))
 
 
 @pytest.fixture
@@ -140,7 +141,7 @@ class TestAReport:
         _transcript(tmp_path / "a" / "1.jsonl", "/w/a", ("2026-09-02T00:00:00Z", *python))
         _transcript(tmp_path / "a" / "2.jsonl", "/w/a", ("2026-08-30T00:00:00Z", *python))
         _transcript(
-            tmp_path / "b" / "3.jsonl", "/private/tmp/eval-run", ("2026-09-02T00:00:00Z", *python)
+            tmp_path / "b" / "3.jsonl", "/eval-runs/run-1", ("2026-09-02T00:00:00Z", *python)
         )
         _transcript(
             tmp_path / "a" / "1" / "subagents" / "agent-1.jsonl",
