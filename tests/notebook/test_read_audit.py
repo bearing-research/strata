@@ -320,6 +320,8 @@ class TestANativeReader:
             pq.write_table(pa.table({"a": [1]}), folder / name)
         return folder
 
+    # Lambdas, not the functions: collection runs before the wrappers are set, so
+    # `pl.read_parquet` here would be the original, and the test would bypass its wrapper.
     @pytest.mark.parametrize(
         "read",
         [
