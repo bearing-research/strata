@@ -265,6 +265,9 @@ timeout_method = "thread"
 # Anything left open (a file, socket or database connection) fails the test that leaked it; see
 # tests/conftest.py::_collect_after_each_test. A __del__ that raises is an error too.
 filterwarnings = [
+    # A warning our code raises, or a library raises at our call, is an error.
+    # One from inside a library's own code is the library's to fix: it stays a warning.
+    "error:::(strata|tests)",
     "error::ResourceWarning",
     "error::pytest.PytestUnraisableExceptionWarning",
 ]
