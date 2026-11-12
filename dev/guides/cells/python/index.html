@@ -3601,11 +3601,24 @@ venv, system folders and the dot-folders tools keep in the home folder are left 
 and a cache hit shows them again. <code>subprocess_run</code> and a failed audit are notes, not
 warnings. They never block a run or change its status or key. They describe the result
 the cell holds, so a failed run replaces them only when it found something itself.
-Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
-what they read is not reported.</p>
+pyarrow, polars and DuckDB read files in native code, where Python sees no open, so
+their readers that take a path are wrapped in the cell's process and say what they were
+given: pyarrow's <code>parquet</code>, <code>dataset</code>, <code>feather</code>, <code>orc</code>, <code>csv</code>, <code>json</code> and <code>ipc</code> readers
+and <code>memory_map</code>, <code>pd.read_parquet</code>, polars' file readers (<code>read_*</code> and <code>scan_*</code>, not
+<code>read_database</code> or <code>scan_iceberg</code>), and DuckDB's <code>read_parquet</code>, <code>read_csv</code> and
+<code>read_json</code> (on the module or a connection). A folder counts as each file in it but the
+<code>_</code> and <code>.</code> ones a dataset skips (<code>_SUCCESS</code>, <code>.crc</code>), though a Delta table's
+<code>_delta_log</code> is read, since it says which files are the table. A glob counts as what it
+matches. Their writers (pyarrow's, <code>DataFrame.to_parquet</code>, polars' <code>write_*</code> and
+<code>sink_*</code>, a DuckDB relation's <code>write_parquet</code> and <code>write_csv</code>) make files and folders that
+are the run's own, as <code>open(path, "w")</code> does, so reading them back is not a finding. A file named
+in DuckDB SQL (<code>select * from 'x.parquet'</code>, <code>COPY ... TO</code>), one opened with
+<code>pyarrow.OSFile</code>, and a path on another filesystem (<code>filesystem=</code> other than the local
+one) are not seen.</p>
 <h3 id="when-such-a-file-changes">When such a file changes<a class="headerlink" href="#when-such-a-file-changes" title="Permanent link">&para;</a></h3>
 <p>A local run also notes each such file as it read it (its size and modification time) and
-each folder it listed by the names in it. When one of them changes, the cell stays ready,
+each folder it listed by the names in it, but not the <code>.</code> ones a tool drops (a
+<code>.DS_Store</code>). When one of them changes, the cell stays ready,
 since its key did not move and a plain run would get the same cached result, but it says
 the result may be out of date: a <strong>may be out of date</strong> badge in the UI, <code>changed_reads</code>
 in <code>strata status</code>, <code>strata cell show</code> and MCP <code>status</code>, and a hint naming the files. A

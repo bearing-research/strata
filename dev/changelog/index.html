@@ -3904,6 +3904,14 @@ exhaustive commit history.</p>
   cell stays ready (a plain run still hits the cache) and says its result may be out
   of date: a badge in the UI, <code>changed_reads</code> in <code>strata status</code>, <code>strata cell show</code>
   and MCP, each naming the rerun or the mount that fixes it. (#1512, #1514)</li>
+<li><strong>A cell says what pyarrow, polars and DuckDB read for it.</strong> They open files in
+  native code, where the read audit saw nothing, so a parquet file read with
+  <code>pq.read_table</code>, <code>pd.read_parquet</code>, <code>pl.scan_parquet</code> or <code>duckdb.read_csv</code> went
+  unreported. Their readers that take a path are now wrapped in the cell's process and
+  report it like any other read, with its mount and the stale hint. A file their
+  writers make is the run's own, so reading it back is not reported. A folder's listing
+  leaves out its <code>.</code> names, so a <code>.DS_Store</code> a tool drops is no stale hint. A file named
+  in DuckDB SQL is still not seen. (#1516)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
