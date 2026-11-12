@@ -1,0 +1,19 @@
+[project]
+name = "harbor"
+version = "0.1.0"
+description = "Order events, pricing and shipping for the harbor marketplace."
+requires-python = ">=3.12"
+dependencies = ["fleet", "pandas>=2.2", "pyarrow>=17", "matplotlib>=3.9"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv.sources]
+fleet = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/fleet"]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.12"]
+build-backend = "uv_build"

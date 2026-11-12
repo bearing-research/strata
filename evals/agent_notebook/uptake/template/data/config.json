@@ -1,0 +1,6 @@
+{
+  "owner": "logistics-platform",
+  "timeout_s": 12,
+  "regions": ["north", "south", "east", "west", "central"],
+  "alerts": { "error_rate": 0.06, "latency_p95_ms": 900 }
+}
