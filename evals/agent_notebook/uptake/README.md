@@ -1,8 +1,7 @@
 # Uptake task bank
 
 The un-primed tasks that measure whether an agent reaches for the Strata scratchpad
-on its own (design note `design-agent-uptake.md`, section 5). Nothing here runs an
-agent; the A/B runner that does comes next.
+on its own (design note `design-agent-uptake.md`, section 5).
 
 - **`template/`:** `harbor`, a small uv workspace with an editable sibling package
   (`packages/fleet`), a seeded bug (`tests/test_text.py` fails), and a slow
@@ -27,3 +26,37 @@ for question, expect in zip(task.turns, task.expected(work)):
     reply = ...  # the agent's answer to question.prompt
     expect.passes(reply, work)
 ```
+
+## Running trials
+
+POSIX only (macOS, Linux). Each trial runs headless Claude Code (`claude -p`,
+stream-json) in a fresh copy of the project (built, `uv sync`ed, committed) with its
+own `CLAUDE_CONFIG_DIR`, so nothing from your own config reaches it. That dir has no
+login, so `ANTHROPIC_API_KEY` must be set, and every run is billed to it. An iteration
+task's follow-ups are sent one at a time with `--resume`.
+
+| Arm | Setup |
+| --- | --- |
+| A, control | `strata` on `PATH` answers "command not found"; a `PreToolUse` hook denies any Bash command that runs it |
+| B, today | the shipped `strata-scratchpad` skill in the config dir; this checkout's `strata` on `PATH` |
+
+```bash
+uv run python -m evals.agent_notebook.uptake run --arm A --out runs/ --split train --runs 3
+uv run python -m evals.agent_notebook.uptake run --arm B --out runs/ --task iter_west
+uv run python -m evals.agent_notebook.uptake report runs/
+```
+
+`run` skips trials already in `--out`, so an interrupted batch picks up where it
+stopped. Each trial folder keeps the project as the agent left it, each turn's stream,
+the load counter and `trial.json`. A trial is **discarded**, never scored, when a turn's
+`system/init` event does not show the arm's setup (a strata MCP server in any arm; the
+skill missing in B or present in A), when a turn never reached the model, or when a
+resumed turn starts a new session.
+
+`report` gives, per arm and kind: completion, strata use (for must-not tasks, the false
+positive rate), payoff (`load_events()` ran once in the whole trial), median wall time,
+cost, each rate with its 95% Wilson interval; and each arm against A: completion and
+payoff differences (Newcombe) and the ratio of median wall times (bootstrap). It warns
+when more than 10% of an arm's runs were discarded or arm A used strata, either of which
+means the numbers are not to be trusted. The model, Claude Code, uv and Strata versions
+are recorded with each trial.
