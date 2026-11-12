@@ -235,7 +235,9 @@ class TestTheLoadCounter:
     def _load(self, work: Path, log: Path, *args: str, **env: str) -> None:
         env = {
             **os.environ,
-            "PYTHONPATH": f"{work / 'src'}:{work / 'packages' / 'fleet' / 'src'}",
+            "PYTHONPATH": os.pathsep.join(
+                [str(work / "src"), str(work / "packages" / "fleet" / "src")]
+            ),
             "HARBOR_LOAD_LOG": str(log),
             "HARBOR_LOAD_SECONDS": "0",
             **env,

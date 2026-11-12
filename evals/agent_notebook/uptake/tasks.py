@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 import json
 import math
+import os
 import random
 import re
 import subprocess
@@ -147,7 +148,8 @@ class Task:
 def _project_python(workspace: Path, *args: str) -> bool:
     """Whether a command in the workspace's code (eval interpreter, its sources on the
     path) exits 0."""
-    env = {"PYTHONPATH": f"{workspace / 'src'}:{workspace / 'packages' / 'fleet' / 'src'}"}
+    sources = [workspace / "src", workspace / "packages" / "fleet" / "src"]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, sources))}
     done = subprocess.run(
         [sys.executable, *args], cwd=workspace, env=env, capture_output=True, timeout=300
     )
@@ -170,7 +172,7 @@ def _month(frame: pd.DataFrame, month: int) -> pd.DataFrame:
 
 
 def _date_words(day: date) -> tuple[str, ...]:
-    return (day.isoformat(), day.strftime("%B %-d"), day.strftime("%b %-d"))
+    return (day.isoformat(), f"{day:%B} {day.day}", f"{day:%b} {day.day}")
 
 
 def _p95(values: pd.Series) -> float:
