@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 
 import cloudpickle
@@ -276,6 +277,13 @@ class TestTheRecord:
         (data / "c.txt").write_text("c")
         assert fingerprint(str(data)) != before
 
+    def test_a_listing_is_not_the_dot_names_a_tool_drops(self, data):
+        before = fingerprint(str(data))
+        (data / ".DS_Store").write_text("")
+        (data / ".a.txt.crc").write_text("")
+
+        assert fingerprint(str(data)) == before
+
     def test_a_copy_with_its_times_is_the_same_file(self, data, tmp_path):
         before = fingerprint(str(data / "a.txt"))
         # A new inode (a copied notebook, a restarted container's overlay), same file.
@@ -429,6 +437,9 @@ class TestANativeReader:
                 import polars as pl
                 pl.read_parquet({str(data / "t.parquet")!r})
             print({str(data / "t.parquet")!r} in observed.files)
+            # Its own loader, not a patched one: a zip's loader loads other modules too.
+            loader = sys.modules["polars"].__spec__.loader
+            print(type(loader).__name__, "exec_module" in vars(loader._loader))
             """
         )
 
@@ -436,7 +447,7 @@ class TestANativeReader:
             [sys.executable, "-I", "-c", script], capture_output=True, text=True, check=True
         )
 
-        assert out.stdout.strip() == "True"
+        assert out.stdout.split() == ["True", "_WrappingLoader", "False"]
 
     def test_an_audit_that_fails_does_not_fail_the_read(self, data, monkeypatch):
         pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
@@ -523,8 +534,8 @@ class TestANativeReader:
     def test_a_folders_bookkeeping_is_not_read(self, dataset):
         (dataset / "_SUCCESS").write_text("")
         (dataset / "year=2026" / ".a.parquet.crc").write_text("")
-        (dataset / "_delta_log").mkdir()
-        (dataset / "_delta_log" / "0.json").write_text("{}")
+        (dataset / "_temporary").mkdir()
+        (dataset / "_temporary" / "0.parquet").write_text("")
         with recording() as observed:
             pq.read_table(dataset)
 
@@ -535,6 +546,111 @@ class TestANativeReader:
                 str(dataset / "year=2026" / "b.parquet"),
             ],
         }
+
+    def test_a_delta_tables_log_is_read(self, dataset):
+        # The log says which files are the table: a delete that drops whole files is a
+        # new log entry, with the files still there.
+        (dataset / "_delta_log").mkdir()
+        (dataset / "_delta_log" / "0.json").write_text("{}")
+        with recording() as observed:
+            pq.read_table(dataset)
+
+        assert str(dataset / "_delta_log" / "0.json") in _report(observed)["undeclared_read"]
+
+    def test_the_folders_a_writer_made_are_the_runs_own(self, data):
+        out = data / "out"
+        with recording() as observed:
+            pq.write_to_dataset(pa.table({"a": [1, 2], "k": [1, 2]}), out, partition_cols=["k"])
+            pq.read_table(out)
+
+        assert _report(observed) == {}
+
+    def test_a_lazy_sink_is_the_runs_own_before_it_writes(self, data):
+        with recording() as observed:
+            pl.LazyFrame({"a": [1]}).sink_parquet(data / "out.parquet", lazy=True).collect()
+            pl.read_parquet(data / "out.parquet")
+
+        assert _report(observed) == {}
+
+    def test_a_writer_that_raised_made_its_file_all_the_same(self, data):
+        def make_then_fail(table, where):
+            with recording_of.hushed():  # as native code writes, unseen by the hook
+                Path(where).write_bytes(b"half")
+            raise OSError("disk full")
+
+        writer = read_audit._native(make_then_fail, "where", None, writes=True, at=("x", "w"))
+        with recording() as recording_of:
+            with pytest.raises(OSError):
+                writer(None, str(data / "out.parquet"))
+
+        assert recording_of.files == {str(data / "out.parquet"): True}
+
+    def test_a_writers_folder_past_the_cap_is_not_told_from_before(self, data, monkeypatch):
+        # Before and after would each stop at the cap, on files that need not match.
+        monkeypatch.setattr(read_audit, "PATH_CAP", 3)
+        folder = data / "big"
+        folder.mkdir()
+        for name in "bcd":
+            (folder / f"{name}.parquet").write_text("")
+        with recording() as observed:
+            assert observed.files_at(folder) is None
+
+        assert observed.partial
+
+    def test_another_threads_fingerprint_does_not_hide_a_read(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        held, done = threading.Event(), threading.Event()
+
+        def fingerprinting(observed):
+            with observed.hushed():
+                held.set()
+                done.wait(timeout=30)
+
+        with recording() as observed:
+            thread = threading.Thread(target=fingerprinting, args=(observed,))
+            thread.start()
+            assert held.wait(timeout=30), "the other thread never fingerprinted"
+            pq.read_table(data / "t.parquet")
+            done.set()
+            thread.join()
+
+        assert _report(observed) == {"undeclared_read": [str(data / "t.parquet")]}
+
+    def test_a_folder_is_walked_once_a_run(self, dataset, monkeypatch):
+        walks = []
+        walk = read_audit._walk
+
+        def counted(path, **kwargs):
+            walks.append(path)
+            return walk(path, **kwargs)
+
+        monkeypatch.setattr(read_audit, "_walk", counted)
+        with recording():
+            pq.read_table(dataset)
+            pq.read_table(dataset)
+
+        assert walks == [str(dataset)]
+
+    def test_a_walk_stops_at_the_cap(self, data, monkeypatch):
+        monkeypatch.setattr(read_audit, "PATH_CAP", 1)
+        for part in ("k=1", "k=2", "k=3"):
+            (data / "ds" / part).mkdir(parents=True)
+            pq.write_table(pa.table({"a": [1]}), data / "ds" / part / "a.parquet")
+        walked = []
+        walk = os.walk
+
+        def counted(top, *args, **kwargs):
+            for step in walk(top, *args, **kwargs):
+                walked.append(step[0])
+                yield step
+
+        monkeypatch.setattr(os, "walk", counted)
+        with recording() as observed:
+            pq.read_table(data / "ds")
+
+        # Stopped in k=2, at the first file past the cap: k=3 is never walked.
+        assert walked == [str(data / "ds"), str(data / "ds" / "k=1"), str(data / "ds" / "k=2")]
+        assert observed.partial
 
     def test_a_record_partial_already_still_takes_a_folder(self, dataset):
         with recording() as observed:

@@ -22,7 +22,7 @@ import os
 import stat
 import sys
 import threading
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
@@ -141,8 +141,10 @@ _NATIVE_WRITERS: tuple[tuple[str, str, str], ...] = (
 _NATIVE_MODULES = frozenset(module for module, *_ in _NATIVE_READERS + _NATIVE_WRITERS)
 
 # What a dataset's discovery skips in a folder (pyarrow's ``ignore_prefixes``): ``_SUCCESS``,
-# ``_delta_log``, ``.crc`` files are a writer's bookkeeping, not data read.
+# ``.crc`` files are a writer's bookkeeping, not data read. A Delta table's log says which
+# of its files are the table, so it is read.
 _BOOKKEEPING = ("_", ".")
+_DELTA_LOG = "_delta_log"
 
 
 class ReadFinding(TypedDict):
@@ -175,11 +177,29 @@ class Observed:
         self.read_as: dict[str, list[int] | None] = {}
         self.written: set[str] = set()
         self.listings: set[str] = set()
+        # Folders a native writer made: the run's own, so listing them is no finding.
+        self.made: set[str] = set()
         self.programs: set[str] = set()
         self.modules_before = frozenset(sys.modules)
         self.work_dir = os.getcwd()
         self.partial = False
-        self.quiet = False
+        # Folders a native reader walked, once a run.
+        self._walked: set[str] = set()
+        # Per thread: one thread's fingerprinting must not hide another thread's reads.
+        self._hush = threading.local()
+
+    @property
+    def quiet(self) -> bool:
+        """Whether this thread is the audit's own work, which the hook does not record."""
+        return getattr(self._hush, "on", False)
+
+    @contextmanager
+    def hushed(self) -> Generator[None]:
+        was, self._hush.on = self.quiet, True
+        try:
+            yield
+        finally:
+            self._hush.on = was
 
     def _path(self, path: Any) -> str | None:
         if path is None:
@@ -220,33 +240,45 @@ class Observed:
         A folder or a glob is listed here, which the hook records as listings.
         """
         for found in _native_paths(source, globs=True):
-            for file in _files_in(found, data_only=True):
+            if found in self._walked:
+                continue
+            if os.path.isdir(found):
+                self._walked.add(found)
+            for file, is_dir in _walk(found, data_only=True):
                 if len(self.files) >= PATH_CAP:
                     self.partial = True
                     return
-                self.open(file, mode, None)
+                if not is_dir:
+                    self.open(file, mode, None)
 
-    def files_at(self, target: Any) -> dict[str, list[int] | None]:
-        """What a native writer's *target* holds now, unseen by the hook."""
-        self.quiet = True
-        try:
-            held: dict[str, list[int] | None] = {}
+    def files_at(self, target: Any) -> dict[str, list[int] | None] | None:
+        """What a native writer's *target* holds now, folders as None, unseen by the hook;
+        None past PATH_CAP, where a before and an after would not hold the same files."""
+        held: dict[str, list[int] | None] = {}
+        with self.hushed():
             for found in _native_paths(target, globs=False):
-                for file in _files_in(found, data_only=False):
+                for path, is_dir in _walk(found, data_only=False):
                     if len(held) >= PATH_CAP:
                         self.partial = True
-                        return held
-                    held[file] = fingerprint(file)
-            return held
-        finally:
-            self.quiet = False
+                        return None
+                    held[path] = None if is_dir else fingerprint(path)
+        return held
 
     def native_write(self, target: Any, before: Mapping[str, list[int] | None]) -> None:
         """What a native writer made or changed at *target*: the run's own, as an ``open``
-        to write is."""
-        for file, now in self.files_at(target).items():
-            if file not in before or before[file] != now:
-                self.open(file, "w", None)
+        to write is, and the folders it made."""
+        after = self.files_at(target)
+        for path, now in (after or {}).items():
+            if now is None and path not in before:
+                self.made.add(path)
+            elif now is not None and (path not in before or before[path] != now):
+                self.open(path, "w", None)
+
+    def native_write_later(self, target: Any) -> None:
+        """A writer that writes when collected (a polars ``lazy=True`` sink): its target is
+        the run's own from now, as it cannot be seen being made."""
+        for text in _texts(target):
+            self.open(os.path.abspath(os.path.expanduser(text)), "w", None)
 
     def listing(self, path: Any) -> None:
         name = self._path(path)
@@ -260,11 +292,8 @@ class Observed:
 
     def _fingerprint(self, name: str) -> list[int] | None:
         # A directory's fingerprint lists it, which comes back through the hook.
-        self.quiet = True
-        try:
+        with self.hushed():
             return fingerprint(name)
-        finally:
-            self.quiet = False
 
     def program(self, program: Any) -> None:
         if isinstance(program, (list, tuple)):
@@ -278,11 +307,19 @@ def _native_paths(source: Any, *, globs: bool) -> list[str]:
     """The paths here a native call names: its own if it exists, else, with *globs*, what
     the pattern in it matches (polars globs). A literal ``[`` or ``?`` in a name is a
     name, as pyarrow reads it."""
+    return [path for text in _texts(source) for path in _native_path(text, globs=globs)]
+
+
+def _texts(source: Any) -> list[str]:
+    """The paths in *source* as text: a str or path, or a list of them."""
     if isinstance(source, (list, tuple)):
-        return [path for item in source for path in _native_paths(item, globs=globs)]
+        return [text for item in source for text in _texts(item)]
     if not isinstance(source, (str, os.PathLike)):
         return []
-    text = os.fsdecode(source).removeprefix("file://")
+    return [os.fsdecode(source).removeprefix("file://")]
+
+
+def _native_path(text: str, *, globs: bool) -> list[str]:
     name = os.path.abspath(os.path.expanduser(text))
     if os.path.exists(name):
         return [name]
@@ -300,20 +337,23 @@ def _native_paths(source: Any, *, globs: bool) -> list[str]:
     return sorted(os.path.join(root, path) if root else path for path in found)
 
 
-def _files_in(path: str, *, data_only: bool) -> list[str]:
-    """*path* if a file, else the files under it; with *data_only*, those a dataset's
-    discovery reads (no ``_BOOKKEEPING`` names)."""
+def _walk(path: str, *, data_only: bool) -> Iterator[tuple[str, bool]]:
+    """*path* and, for a folder, what is under it, each with whether it is a folder; with
+    *data_only*, what a dataset's discovery reads (no ``_BOOKKEEPING`` names but the
+    Delta log). Lazily: a caller past a cap stops the walk."""
     if not os.path.isdir(path):
-        return [path]
-    found = []
+        yield path, False
+        return
+
+    def kept(name: str) -> bool:
+        return not data_only or name == _DELTA_LOG or not name.startswith(_BOOKKEEPING)
+
     for root, dirs, files in os.walk(path):
-        dirs[:] = sorted(d for d in dirs if not (data_only and d.startswith(_BOOKKEEPING)))
-        found.extend(
-            os.path.join(root, file)
-            for file in sorted(files)
-            if not (data_only and file.startswith(_BOOKKEEPING))
-        )
-    return found
+        yield root, True
+        dirs[:] = sorted(d for d in dirs if kept(d))
+        for file in sorted(files):
+            if kept(file):
+                yield os.path.join(root, file), False
 
 
 _current: Observed | None = None
@@ -374,9 +414,10 @@ def _path_argument(
     kwargs: dict[str, Any],
     param: str,
     mode: str | None,
-) -> tuple[Any, str] | None:
-    """The path a call names in *param*, and its mode; None for one on another filesystem
-    (pyarrow's or fsspec's), which is not a local file."""
+) -> tuple[Any, str, bool] | None:
+    """The path a call names in *param*, its mode, and whether it writes only when collected
+    (polars' ``lazy=True``); None for one on another filesystem (pyarrow's or fsspec's),
+    which is not a local file."""
     arguments = dict(kwargs)
     if signature is not None:
         try:
@@ -397,7 +438,7 @@ def _path_argument(
     if filesystem is not None and type(filesystem).__name__ != "LocalFileSystem":
         return None
     how = arguments.get(mode, "r") if mode else "r"
-    return arguments.get(param), how if isinstance(how, str) else "r"
+    return arguments.get(param), how if isinstance(how, str) else "r", arguments.get("lazy") is True
 
 
 def _native(
@@ -416,26 +457,28 @@ def _native(
         if observed is None or observed.quiet or getattr(_in_native, "call", False):
             return fn(*args, **kwargs)
         _in_native.call = True
+        named = before = None
         try:
-            named = before = None
             try:
                 named = _path_argument(signature, args, kwargs, param, mode)
-                if named is not None and writes:
+                if named is not None and writes and named[2]:
+                    observed.native_write_later(named[0])
+                elif named is not None and writes:
                     before = observed.files_at(named[0])
                 elif named is not None:
-                    observed.native(*named)
+                    observed.native(named[0], named[1])
             except Exception:
                 # The cell's own call must not fail on the audit; the record is partial.
                 observed.partial = True
-            result = fn(*args, **kwargs)
+            return fn(*args, **kwargs)
+        finally:
+            _in_native.call = False
             if named is not None and before is not None:
+                # A writer that raised may have made its file all the same.
                 try:
                     observed.native_write(named[0], before)
                 except Exception:
                     observed.partial = True
-            return result
-        finally:
-            _in_native.call = False
 
     # Where pickle looks it up, so it pickles by reference, as the original did.
     native.__module__, native.__qualname__ = at
@@ -506,19 +549,29 @@ class _WrapOnImport:
                 break
         else:
             return None
-        exec_module = getattr(spec.loader, "exec_module", None)
-        if exec_module is None:
+        if getattr(spec.loader, "exec_module", None) is None:
             return spec
-
-        def exec_and_wrap(module: Any) -> None:
-            exec_module(module)
-            _wrap_natives(name)
-
-        try:
-            spec.loader.exec_module = exec_and_wrap
-        except AttributeError:
-            pass  # a loader that takes no attributes: its readers stay unwrapped
+        # A loader of its own, not a patched one: a zip's loader loads its other modules too.
+        spec.loader = _WrappingLoader(spec.loader, name)
         return spec
+
+
+class _WrappingLoader:
+    """*loader*, wrapping *name*'s native entry points once it has run the module."""
+
+    def __init__(self, loader: Any, name: str) -> None:
+        self._loader, self._name = loader, name
+
+    def __getattr__(self, attribute: str) -> Any:
+        return getattr(self._loader, attribute)
+
+    def create_module(self, spec: Any) -> Any:
+        create = getattr(self._loader, "create_module", None)
+        return create(spec) if create is not None else None
+
+    def exec_module(self, module: Any) -> None:
+        self._loader.exec_module(module)
+        _wrap_natives(self._name)
 
 
 def _home(*parts: str) -> str:
@@ -660,13 +713,14 @@ def fingerprint(path: str) -> list[int] | None:
 
     Neither device nor inode: a container restart or a copied notebook changes them and
     not the content. A directory's own mtime moves whenever anything in it is replaced
-    (an editor's or Strata's atomic save), so a listing is its names.
+    (an editor's or Strata's atomic save), so a listing is its names, but not the ``.``
+    ones: a ``.DS_Store`` or a ``.crc`` a tool drops changes no result.
     """
     try:
         st = os.stat(path)
         if not stat.S_ISDIR(st.st_mode):
             return [st.st_size, st.st_mtime_ns]
-        names = "\0".join(sorted(os.listdir(path)))
+        names = "\0".join(sorted(n for n in os.listdir(path) if not n.startswith(".")))
     except OSError:
         return None
     return [int.from_bytes(hashlib.sha256(names.encode(errors="surrogateescape")).digest()[:8])]
@@ -756,7 +810,9 @@ def _report(
             continue
         found.setdefault(WORK_DIR_READ if work.holds(path) else UNDECLARED_READ, set()).add(path)
 
-    uncovered = {p for p in observed.listings if not covered.holds(p) and not work.holds(p)}
+    uncovered = {
+        p for p in observed.listings - observed.made if not covered.holds(p) and not work.holds(p)
+    }
     if uncovered:
         imports = _import_dirs()
         listed = {p for p in uncovered if p not in imports and os.path.realpath(p) not in imports}

@@ -53,8 +53,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `pq.read_table`, `pd.read_parquet`, `pl.scan_parquet` or `duckdb.read_csv` went
   unreported. Their readers that take a path are now wrapped in the cell's process and
   report it like any other read, with its mount and the stale hint. A file their
-  writers make is the run's own, so reading it back is not reported. A file named in
-  DuckDB SQL is still not seen. (#1516)
+  writers make is the run's own, so reading it back is not reported. A folder's listing
+  leaves out its `.` names, so a `.DS_Store` a tool drops is no stale hint. A file named
+  in DuckDB SQL is still not seen. (#1516)
 
 ### Changed
 - **A relative local mount path is under the notebook's directory.** `# @mount shared
