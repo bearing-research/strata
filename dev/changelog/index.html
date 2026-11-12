@@ -4199,6 +4199,13 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Downloads close the stored blob however the client leaves, and dropped catalogs close.</strong>
+  An artifact's data, a signed build blob, a publication, an output folder's file and a
+  scan stream kept the stored blob open when the client went away before or during the
+  body. A named catalog dropped for new credentials and a catalog rebuilt after its
+  connection failed kept their connection pools open, and stopping the cache warmer did
+  not wait for the plans its cancelled jobs were still running. <code>strata run</code> and the
+  notebook CLI also leave no R warm worker running when they finish. (#1515)</li>
 <li><strong>Uploads and table reads close what they open.</strong> An artifact upload, an import, a worker's
   execute request and the reference executor left each form part's spooled temp file open, and
   every <code>@table</code> read, <code>@write_table</code> write, table export and catalog read in SQL left its
