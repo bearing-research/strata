@@ -205,7 +205,8 @@ jobs:
 
     env:
       # The unit run, through diffcone in the steps below (Windows skips the
-      # notebook subsystem).
+      # notebook subsystem). -n logical, not auto: auto counts physical cores,
+      # 2 of the Linux runner's 4 vCPUs, and 4 workers run the suite in about half the time.
       UNIT_TEST_ARGS: >-
         tests/
         --ignore=tests/test_e2e_artifacts.py
@@ -222,7 +223,7 @@ jobs:
         --ignore=tests/notebook/test_e2e_mounts_azure.py
         --ignore=tests/notebook/test_e2e_mounts_gcs.py
         --ignore=tests/notebook/test_e2e_duckdb_lake.py
-        -n auto --dist loadscope --tb=short
+        -n logical --dist loadscope --tb=short
       WINDOWS_UNIT_TEST_ARGS: >-
         tests/
         --ignore=tests/test_e2e_artifacts.py
@@ -234,7 +235,7 @@ jobs:
         --ignore=tests/test_postgres_store_strata.py
         --ignore=tests/test_migrate_to_postgres.py
         --ignore=tests/notebook
-        -n auto --dist loadscope --tb=short
+        -n logical --dist loadscope --tb=short
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
