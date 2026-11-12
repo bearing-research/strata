@@ -1,0 +1,9 @@
+[project]
+name = "fleet"
+version = "0.1.0"
+description = "Regions, distances and rates shared by harbor's services."
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.12"]
+build-backend = "uv_build"
