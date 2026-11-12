@@ -251,9 +251,14 @@ def test_a_scripted_launcher_shows_the_session_and_sigterm_stops_its_server(tmp_
         env=env,
     )
     lines: queue.Queue[str] = queue.Queue()
-    threading.Thread(
-        target=lambda: [lines.put(line) for line in launcher.stdout], daemon=True
-    ).start()
+
+    def _read() -> None:
+        # The server holds the pipe too, so EOF comes only once both are gone.
+        with launcher.stdout:
+            for line in launcher.stdout:
+                lines.put(line)
+
+    threading.Thread(target=_read, daemon=True).start()
     server_pid: int | None = None
     try:
         line = ""
@@ -269,6 +274,7 @@ def test_a_scripted_launcher_shows_the_session_and_sigterm_stops_its_server(tmp_
     finally:
         if launcher.poll() is None:
             launcher.kill()
+            launcher.wait()
         if server_pid is not None and _alive(server_pid):
             os.kill(server_pid, signal.SIGKILL)
 

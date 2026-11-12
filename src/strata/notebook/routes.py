@@ -3579,7 +3579,7 @@ async def get_cell_folder_file(
     """
     from base64 import b64encode
 
-    from strata.api.served_bytes import data_headers
+    from strata.api.served_bytes import BlobResponse, data_headers
     from strata.notebook import output_dirs
 
     artifact_id = _folder_artifact_id(session, cell_id, name, variant)
@@ -3606,14 +3606,10 @@ async def get_cell_folder_file(
 
     entry, reader = await anyio.to_thread.run_sync(_open_file)
 
-    def _chunks():
-        with reader as f:
-            while chunk := f.read(1024 * 1024):
-                yield chunk
-
     digest = b64encode(bytes.fromhex(entry["sha256"])).decode()
-    return StreamingResponse(
-        _chunks(),
+    return BlobResponse(
+        reader,
+        chunk_size=1024 * 1024,
         media_type="application/octet-stream",
         headers={
             **data_headers(),

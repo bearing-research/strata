@@ -178,20 +178,20 @@ def _hold_renv_lock_in_subprocess(notebook_dir: Path):
     """Spawn a child process that holds *notebook_dir*'s renv lock."""
     lock_path = notebook_dir / ".strata" / "renv-process.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.Popen(
+    with subprocess.Popen(
         [sys.executable, "-c", _LOCK_HOLDER_SCRIPT, str(lock_path)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
-    )
-    try:
-        assert proc.stdout is not None
-        assert proc.stdout.readline().strip() == "held"
-        yield
-    finally:
-        assert proc.stdin is not None
-        proc.stdin.close()
-        proc.wait(timeout=30)
+    ) as proc:
+        try:
+            assert proc.stdout is not None
+            assert proc.stdout.readline().strip() == "held"
+            yield
+        finally:
+            assert proc.stdin is not None
+            proc.stdin.close()
+            proc.wait(timeout=30)
 
 
 class TestRenvCrossProcessLock:

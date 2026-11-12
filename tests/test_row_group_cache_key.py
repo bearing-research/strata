@@ -8,6 +8,7 @@ rows it deletes, its schema, and how the table reads files (format version, name
 from __future__ import annotations
 
 import sys
+from contextlib import nullcontext
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -23,7 +24,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _catalog(tmp_path):
+@pytest.fixture
+def lake(tmp_path):
+    """A local catalog with an empty namespace ``db``, and the uri of its table ``db.t``."""
     from pyiceberg.catalog.sql import SqlCatalog
 
     warehouse = tmp_path / "warehouse"
@@ -32,13 +35,14 @@ def _catalog(tmp_path):
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=warehouse.as_uri()
     )
     catalog.create_namespace("db")
-    return catalog, f"{warehouse.as_uri()}#db.t"
+    yield catalog, f"{warehouse.as_uri()}#db.t"
+    catalog.close()
 
 
 @pytest.fixture
-def table(tmp_path):
+def table(lake):
     """``db.t`` with ids 0-9 in one data file of three row groups: 0-3, 4-7, 8-9."""
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = lake
     table = catalog.create_table(
         "db.t",
         schema=pa.schema([("id", pa.int64())]),
@@ -50,7 +54,8 @@ def table(tmp_path):
 
 
 def _scan(config, uri, planner=None, snapshot_id=None) -> tuple[list, list]:
-    plan = (planner or ReadPlanner(config)).plan(uri, snapshot_id=snapshot_id)
+    with nullcontext(planner) if planner else ReadPlanner(config) as planner:
+        plan = planner.plan(uri, snapshot_id=snapshot_id)
     fetcher = CachedFetcher(config)
     rows = [row for task in plan.tasks for row in fetcher.fetch(task).to_pylist()]
     return rows, plan.tasks
@@ -121,13 +126,13 @@ def test_an_equality_delete_misses_the_row_groups_it_may_meet(tmp_path, table):
     assert tasks[-1].cached is False
 
 
-def test_a_name_mapping_change_is_not_served_from_the_cache(tmp_path):
+def test_a_name_mapping_change_is_not_served_from_the_cache(tmp_path, lake):
     """A file without field ids reads by the name mapping, a property that makes no snapshot."""
     from pyiceberg.schema import Schema
     from pyiceberg.table.name_mapping import MappedField, NameMapping
     from pyiceberg.types import LongType, NestedField
 
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = lake
     table = catalog.create_table(
         "db.t",
         schema=Schema(
@@ -139,20 +144,20 @@ def test_a_name_mapping_change_is_not_served_from_the_cache(tmp_path):
     pq.write_table(pa.table({"a": pa.array([1], pa.int64()), "b": pa.array([2], pa.int64())}), path)
     table.add_files([path.as_uri()])
     config = _config(tmp_path)
-    planner = ReadPlanner(config)
-    assert _scan(config, uri, planner)[0] == [{"a": 1, "b": 2}]
+    with ReadPlanner(config) as planner:
+        assert _scan(config, uri, planner)[0] == [{"a": 1, "b": 2}]
 
-    swapped = NameMapping(
-        [MappedField(field_id=1, names=["b"]), MappedField(field_id=2, names=["a"])]
-    )
-    with table.transaction() as transaction:
-        transaction.set_properties({"schema.name-mapping.default": swapped.model_dump_json()})
+        swapped = NameMapping(
+            [MappedField(field_id=1, names=["b"]), MappedField(field_id=2, names=["a"])]
+        )
+        with table.transaction() as transaction:
+            transaction.set_properties({"schema.name-mapping.default": swapped.model_dump_json()})
 
-    assert _scan(config, uri, planner)[0] == [{"a": 2, "b": 1}]
+        assert _scan(config, uri, planner)[0] == [{"a": 2, "b": 1}]
 
 
-def test_a_format_version_upgrade_gives_new_keys(tmp_path):
-    catalog, uri = _catalog(tmp_path)
+def test_a_format_version_upgrade_gives_new_keys(tmp_path, lake):
+    catalog, uri = lake
     table = catalog.create_table(
         "db.t", schema=pa.schema([("id", pa.int64())]), properties={"format-version": "1"}
     )
@@ -189,12 +194,12 @@ def test_a_path_written_again_with_other_bytes_is_another_key():
     assert key(1024).to_hex() != key(2048).to_hex()
 
 
-def test_a_recreated_table_reading_a_rewritten_path_is_not_served_the_old_rows(tmp_path):
+def test_a_recreated_table_reading_a_rewritten_path_is_not_served_the_old_rows(tmp_path, lake):
     """Dropped, recreated, and given the same path with other bytes of the same size."""
     from pyiceberg.schema import Schema
     from pyiceberg.types import LongType, NestedField
 
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = lake
     path = tmp_path / "part-00000.parquet"
     config = _config(tmp_path)
 

@@ -75,6 +75,7 @@ def cache_client(tmp_path):
         # No ``with``: lifespan never runs, so _cache_warmer stays None.
         yield TestClient(app), state
     finally:
+        state.planner.close()
         server_module._state = original
         reset_artifact_store()
 
@@ -113,7 +114,8 @@ def warehouse_uri(tmp_path):
             }
         )
     )
-    return f"file://{wh}#test_db.events"
+    yield f"file://{wh}#test_db.events"
+    catalog.close()
 
 
 async def _ran_while_cache_call_held(monkeypatch, state, method: str, call):
@@ -275,8 +277,10 @@ class TestWarmSync:
         def stalled_plan(*args, **kwargs):
             # A guard, so a plan that is never released ends with the test.
             release.wait(timeout=30)
-            done.set()
-            return plan(*args, **kwargs)
+            try:
+                return plan(*args, **kwargs)
+            finally:
+                done.set()
 
         state.config = state.config.model_copy(update={"plan_timeout_seconds": 0.05})
         state.planner.plan = stalled_plan
@@ -285,6 +289,8 @@ class TestWarmSync:
             answered_before_the_plan_ended = not done.is_set()
         finally:
             release.set()
+            # The plan outlives the request; it must end before the fixture closes the planner.
+            done.wait(timeout=30)
 
         assert resp.status_code == 200, resp.text
         assert answered_before_the_plan_ended

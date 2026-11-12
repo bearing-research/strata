@@ -17,7 +17,7 @@ from typing import Any
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 from vestigo.store import BuildLeaseLost
 
@@ -26,6 +26,7 @@ from strata.api.dependencies import (
     build_transport_available,
     runtime_build_store,
 )
+from strata.api.served_bytes import BlobResponse
 from strata.services.build import build_service
 from strata.transforms.signed_urls import lease_attempt, lease_token
 from strata.types import BuildStatusResponse
@@ -289,22 +290,14 @@ def download_artifact_signed(
 
     byte_size = artifact.byte_size or 0
 
-    def _iter_signed_blob():
-        with reader_cm as f:
-            while True:
-                chunk = f.read(BLOB_STREAM_CHUNK_BYTES)
-                if not chunk:
-                    break
-                yield chunk
-
     headers = {
         "Content-Disposition": f'attachment; filename="{artifact_id}_v{version_int}.arrow"',
     }
     if byte_size:
         headers["Content-Length"] = str(byte_size)
 
-    return StreamingResponse(
-        _iter_signed_blob(),
+    return BlobResponse(
+        reader_cm,
         media_type="application/vnd.apache.arrow.stream",
         headers=headers,
     )

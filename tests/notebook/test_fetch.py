@@ -85,6 +85,7 @@ class _Origin:
 
     def close(self):
         self.server.shutdown()
+        self.server.server_close()
 
 
 @pytest.fixture
@@ -533,6 +534,7 @@ class _EgressProxy:
 
     def close(self):
         self.server.shutdown()
+        self.server.server_close()
 
 
 @pytest.fixture

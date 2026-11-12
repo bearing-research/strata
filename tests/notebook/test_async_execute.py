@@ -188,6 +188,7 @@ def run_cell(tmp_path, monkeypatch, notebook_executor_server, notebook_personal_
     yield _run
     for facade in facades:
         facade.server.shutdown()
+        facade.server.server_close()
 
 
 async def test_provisioning_does_not_spend_the_cells_timeout(run_cell):

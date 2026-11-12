@@ -143,6 +143,7 @@ async def test_only_a_worker_that_advertises_it_is_sent_the_lock(tmp_path):
         assert await executor._locked_environment(older) is None
     finally:
         server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.locked_environments
@@ -210,6 +211,7 @@ class TestAWorkerThatCannotBeAsked:
             assert await workers.worker_advertises(worker, "locked_environments") is False
         finally:
             server.shutdown()
+            server.server_close()
 
     @pytest.mark.asyncio
     async def test_a_worker_that_is_up_and_unwell_has_not(self, tmp_path):
@@ -223,6 +225,7 @@ class TestAWorkerThatCannotBeAsked:
             assert await workers.worker_advertises(worker, "locked_environments") is None
         finally:
             server.shutdown()
+            server.server_close()
 
     def test_the_probe_outlasts_the_worker_it_asks(self):
         """On a GPU box the first ``/health`` shells out to nvidia-smi with its own timeout; a
@@ -322,6 +325,7 @@ class TestTheWorkerSide:
             again = await worker_env.ensure_environment(spec)
         finally:
             server.shutdown()
+            server.server_close()
 
         build = f"{sys.implementation.name}-{platform.python_version()}{sys.abiflags}"
         assert served == [f"/envs/{spec['key']}/{build}/{sysconfig.get_platform()}"], (
@@ -368,6 +372,7 @@ class TestTheWorkerSide:
             again = await worker_env.ensure_environment(spec)
         finally:
             server.shutdown()
+            server.server_close()
 
         assert len(served) == 1 and served[0].startswith(f"/envs/{spec['key']}/")
         assert prepared.installed is True
@@ -392,6 +397,7 @@ class TestTheWorkerSide:
                 await worker_env.ensure_environment(self._spec())
         finally:
             server.shutdown()
+            server.server_close()
 
         assert len(served) == 1
 
@@ -426,6 +432,7 @@ class TestTheWorkerSide:
                 await worker_env.ensure_environment(self._spec())
         finally:
             server.shutdown()
+            server.server_close()
 
     @pytest.mark.parametrize(
         ("step", "message"),

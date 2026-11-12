@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,7 @@ class Observer:
 
 def _db(tmp_path: Path) -> Path:
     db = tmp_path / "orders.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, region TEXT, gross REAL)")
         conn.executemany(
             "INSERT INTO orders VALUES (?,?,?)", [(1, "North", 100.0), (2, "South", 500.0)]
@@ -142,7 +143,7 @@ async def test_comments_and_quoted_semicolons_survive_together(tmp_path):
     result = await _run(session, "w")
 
     assert result is not None and result.success, result and result.error
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT label FROM notes").fetchall() == [("quoted;semicolon",)]
 
 
@@ -257,7 +258,7 @@ async def test_a_statement_after_a_comment_keeps_its_row_count(tmp_path):
     misaligned, so kinds fell back to a text guess that reads "WITH" as non-DML.
     """
     db = tmp_path / "w.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("CREATE TABLE totals(n INTEGER)")
         conn.commit()
     nb = _notebook(

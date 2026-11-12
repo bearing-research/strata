@@ -7,6 +7,7 @@ or ``VACUUM INTO``. Personal mode stays unconfined.
 
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 
 import duckdb
@@ -157,7 +158,7 @@ async def test_only_service_mode_refuses_a_sqlite_write_cell_attaching_another_f
     import sqlite3
 
     other = tmp_path / "other.sqlite"
-    with sqlite3.connect(other) as conn:
+    with closing(sqlite3.connect(other)) as conn, conn:
         conn.execute("CREATE TABLE secret(x)")
     config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
     monkeypatch.setattr(NotebookSession, "lake_config", lambda self: config)
@@ -367,7 +368,7 @@ class TestDatabaseFile:
         shared = tmp_path / "shared" / "warehouse.sqlite"
         shared.parent.mkdir()
         for path in (metadata, other, shared):
-            with sqlite3.connect(path) as conn:
+            with closing(sqlite3.connect(path)) as conn, conn:
                 conn.execute("CREATE TABLE secret(x)")
                 conn.execute("INSERT INTO secret VALUES ('token')")
         return {"metadata": metadata, "other": other, "shared": shared}
@@ -427,7 +428,7 @@ class TestDatabaseFile:
         assert not result.success
         assert "connection 'db'" in (result.error or "")
         for path in (server["metadata"], server["other"]):
-            with sqlite3.connect(path) as conn:
+            with closing(sqlite3.connect(path)) as conn, conn:
                 assert conn.execute("SELECT x FROM secret").fetchall() == [("token",)]
 
     @pytest.mark.parametrize("where", ["own", "shared"])
@@ -442,7 +443,7 @@ class TestDatabaseFile:
         path = "own.sqlite" if where == "own" else str(server["shared"])
         nb_dir, source = self._notebook(tmp_path, f'path = "{path}"')
         if where == "own":
-            with sqlite3.connect(nb_dir / path) as conn:
+            with closing(sqlite3.connect(nb_dir / path)) as conn, conn:
                 conn.execute("CREATE TABLE secret(x)")
                 conn.execute("INSERT INTO secret VALUES ('mine')")
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
@@ -471,7 +472,7 @@ class TestDatabaseFile:
 
         nb_dir, source = TestDatabaseFile._notebook(tmp_path, "")
         own = nb_dir / "own.sqlite"
-        with sqlite3.connect(own) as conn:
+        with closing(sqlite3.connect(own)) as conn, conn:
             conn.execute("CREATE TABLE secret(x)")
             conn.execute("INSERT INTO secret VALUES ('mine')")
         link = nb_dir / "link.sqlite"

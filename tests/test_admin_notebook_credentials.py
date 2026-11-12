@@ -69,12 +69,13 @@ def server(tmp_path, monkeypatch):
         raise RuntimeError("stop before any network")
 
     monkeypatch.setattr(fsspec, "filesystem", _filesystem)
-    return SimpleNamespace(
+    yield SimpleNamespace(
         client=TestClient(app, headers=_headers("admin:notebook-credentials")),
         config=config,
         state=state,
         fetched=fetched,
     )
+    state.planner.catalog.close()
 
 
 def _session(parent, source: str):

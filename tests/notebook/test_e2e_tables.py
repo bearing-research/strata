@@ -36,28 +36,37 @@ def setup():
         yield client, Path(tmpdir)
 
 
-def _build_warehouse(tmp: Path, *, empty: bool = False):
+@pytest.fixture
+def build_warehouse():
     """One-table Iceberg warehouse, written once unless *empty*; returns (table, table_uri)."""
     import pyarrow as pa
     from pyiceberg.catalog.sql import SqlCatalog
     from pyiceberg.schema import Schema
     from pyiceberg.types import LongType, NestedField
 
-    warehouse_path = tmp / "warehouse"
-    warehouse_path.mkdir()
-    catalog = SqlCatalog(
-        "strata",
-        **{
-            "uri": f"sqlite:///{warehouse_path / 'catalog.db'}",
-            "warehouse": str(warehouse_path),
-        },
-    )
-    catalog.create_namespace("db")
-    schema = Schema(NestedField(1, "id", LongType(), required=False))
-    table = catalog.create_table("db.events", schema)
-    if not empty:
-        table.append(pa.table({"id": pa.array([1, 2, 3], type=pa.int64())}))
-    return table, f"file://{warehouse_path}#db.events"
+    catalogs = []
+
+    def _build(tmp: Path, *, empty: bool = False):
+        warehouse_path = tmp / "warehouse"
+        warehouse_path.mkdir()
+        catalog = SqlCatalog(
+            "strata",
+            **{
+                "uri": f"sqlite:///{warehouse_path / 'catalog.db'}",
+                "warehouse": str(warehouse_path),
+            },
+        )
+        catalogs.append(catalog)
+        catalog.create_namespace("db")
+        schema = Schema(NestedField(1, "id", LongType(), required=False))
+        table = catalog.create_table("db.events", schema)
+        if not empty:
+            table.append(pa.table({"id": pa.array([1, 2, 3], type=pa.int64())}))
+        return table, f"file://{warehouse_path}#db.events"
+
+    yield _build
+    for catalog in catalogs:
+        catalog.close()
 
 
 def _append_row(table) -> None:
@@ -67,9 +76,9 @@ def _append_row(table) -> None:
 
 
 class TestTableInjection:
-    def test_table_variables_injected(self, setup):
+    def test_table_variables_injected(self, setup, build_warehouse):
         client, tmp = setup
-        table, uri = _build_warehouse(tmp)
+        table, uri = build_warehouse(tmp)
         snapshot_id = table.current_snapshot().snapshot_id
 
         nb = (
@@ -91,10 +100,10 @@ class TestTableInjection:
 
 
 class TestTableStaleness:
-    def test_append_makes_cell_recompute(self, setup):
+    def test_append_makes_cell_recompute(self, setup, build_warehouse):
         """New data in the lake → the cell re-runs and sees the new snapshot."""
         client, tmp = setup
-        table, uri = _build_warehouse(tmp)
+        table, uri = build_warehouse(tmp)
         first_snapshot = table.current_snapshot().snapshot_id
 
         nb = (
@@ -126,10 +135,10 @@ class TestTableStaleness:
                 assert rerun["payload"]["cache_hit"] is False
                 assert str(rerun["payload"]["outputs"]["snap"]["preview"]) == str(new_snapshot)
 
-    def test_pinned_table_ignores_append(self, setup):
+    def test_pinned_table_ignores_append(self, setup, build_warehouse):
         """A snapshot pin freezes the cell to that snapshot forever."""
         client, tmp = setup
-        table, uri = _build_warehouse(tmp)
+        table, uri = build_warehouse(tmp)
         pinned = table.current_snapshot().snapshot_id
 
         nb = (
@@ -151,7 +160,7 @@ class TestTableStaleness:
                 again = execute_cell_and_wait(ws, "c1")
                 assert again["payload"]["cache_hit"] is True
 
-    def test_table_cell_stays_ready_after_downstream_runs(self, setup):
+    def test_table_cell_stays_ready_after_downstream_runs(self, setup, build_warehouse):
         """An executed ``@table`` cell stays READY across a staleness recompute.
 
         Fails if ``compute_staleness`` leaves the snapshot fingerprint out of the provenance hash
@@ -160,7 +169,7 @@ class TestTableStaleness:
         from strata.notebook.models import CellStatus
 
         client, tmp = setup
-        table, uri = _build_warehouse(tmp)
+        table, uri = build_warehouse(tmp)
 
         nb = (
             NotebookBuilder(tmp)
@@ -184,9 +193,11 @@ class TestTableStaleness:
 
 
 class TestEmptyTable:
-    def test_a_table_never_written_injects_no_snapshot_and_is_never_cached(self, setup):
+    def test_a_table_never_written_injects_no_snapshot_and_is_never_cached(
+        self, setup, build_warehouse
+    ):
         client, tmp = setup
-        table, uri = _build_warehouse(tmp, empty=True)
+        table, uri = build_warehouse(tmp, empty=True)
 
         nb = NotebookBuilder(tmp).add_cell(
             "c1", f"# @table events {uri}\nsnap = str(events_snapshot)"

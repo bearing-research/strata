@@ -32,12 +32,12 @@ def _warehouse(tmp_path: Path):
 
     warehouse = tmp_path / "warehouse"
     warehouse.mkdir()
-    catalog = SqlCatalog(
+    with SqlCatalog(
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-    )
-    catalog.create_namespace("db")
-    table = catalog.create_table("db.events", Schema(NestedField(1, "id", LongType())))
-    table.append(pa.table({"id": pa.array([1, 2], type=pa.int64())}))
+    ) as catalog:
+        catalog.create_namespace("db")
+        table = catalog.create_table("db.events", Schema(NestedField(1, "id", LongType())))
+        table.append(pa.table({"id": pa.array([1, 2], type=pa.int64())}))
     return table, f"file://{warehouse}#db.events"
 
 
@@ -87,7 +87,8 @@ class TestATableCell:
         session = _session(tmp_path, {"c1": f"# @table events {uri}\nsnap = events_snapshot\n"})
         await _run(session, "c1")
 
-        table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+        with table.catalog:
+            table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
         await _run(session, "c1")
         second = table.current_snapshot().snapshot_id
         assert _index(session)["c1"][0]["snapshot_id"] == second
@@ -100,7 +101,8 @@ class TestATableCell:
     async def test_a_pinned_table_records_its_pin(self, tmp_path):
         table, uri = _warehouse(tmp_path)
         first = table.current_snapshot().snapshot_id
-        table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+        with table.catalog:
+            table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
         session = _session(
             tmp_path, {"c1": f"# @table events {uri} snapshot={first}\nsnap = events_snapshot\n"}
         )
@@ -117,7 +119,8 @@ class TestATableCell:
         await _run(session, "c1")
         before = _index(session)
 
-        table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+        with table.catalog:
+            table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
         cell = session.notebook_state.get_cell("c1")
         cell.source = good + "raise ValueError('no')\n"
         session.re_analyze_cell("c1")
@@ -137,7 +140,8 @@ class TestATableCell:
         await _run(session, "c1")
         before = _index(session)
 
-        table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+        with table.catalog:
+            table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
         cell = session.notebook_state.get_cell("c1")
         cell.source = head + "rows = {'not': 'a table'}\n"
         session.re_analyze_cell("c1")
@@ -162,7 +166,8 @@ class TestATableCell:
             raise RuntimeError("bucket unreachable")
 
         monkeypatch.setattr(MountResolver, "sync_back", fails)
-        table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+        with table.catalog:
+            table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
         failed = await CellExecutor(session).execute_cell("c1", head + "snap = 2\n")
 
         assert not failed.success
@@ -199,7 +204,8 @@ class TestATableCell:
         check = batch_path.batch_service_cache_check
 
         async def moved_first(*args, **kwargs):
-            table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+            with table.catalog:
+                table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
             return await check(*args, **kwargs)
 
         monkeypatch.setattr(batch_path, "batch_service_cache_check", moved_first)

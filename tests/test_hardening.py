@@ -120,13 +120,14 @@ def temp_warehouse(tmp_path):
     )
     table.append(data)
 
-    return {
+    yield {
         "warehouse_path": warehouse_path,
         "table_uri": f"file://{warehouse_path}#test_db.events",
         "catalog": catalog,
         "table": table,
         "num_rows": num_rows,
     }
+    catalog.close()
 
 
 class TestRestartPersistence:
@@ -136,10 +137,10 @@ class TestRestartPersistence:
 
         config = StrataConfig(cache_dir=cache_dir)
 
-        planner1 = ReadPlanner(config)
         fetcher1 = CachedFetcher(config)
 
-        plan1 = planner1.plan(table_uri)
+        with ReadPlanner(config) as planner1:
+            plan1 = planner1.plan(table_uri)
         batches1 = fetcher1.execute_plan(plan1)
         total_rows1 = sum(b.num_rows for b in batches1)
 
@@ -147,10 +148,10 @@ class TestRestartPersistence:
         assert len(cache_entries) > 0, "Cache should have entries after first run"
 
         # Simulate a restart with fresh planner and fetcher instances.
-        planner2 = ReadPlanner(config)
         fetcher2 = CachedFetcher(config)
 
-        plan2 = planner2.plan(table_uri)
+        with ReadPlanner(config) as planner2:
+            plan2 = planner2.plan(table_uri)
 
         cache_hits = 0
         for task in plan2.tasks:
@@ -174,8 +175,8 @@ class TestRestartPersistence:
 
         config = StrataConfig(cache_dir=cache_dir)
 
-        planner1 = ReadPlanner(config)
-        plan1 = planner1.plan(table_uri)
+        with ReadPlanner(config) as planner1:
+            plan1 = planner1.plan(table_uri)
 
         store = get_metadata_store(cache_dir)
         stats1 = store.stats()
@@ -184,9 +185,8 @@ class TestRestartPersistence:
         # Simulate a restart: reset in-memory caches but keep SQLite.
         reset_caches()
 
-        planner2 = ReadPlanner(config)
-
-        plan2 = planner2.plan(table_uri)
+        with ReadPlanner(config) as planner2:
+            plan2 = planner2.plan(table_uri)
 
         get_metadata_store(cache_dir)
 
@@ -200,24 +200,24 @@ class TestCorruptedCacheSelfHealing:
         table_uri = temp_warehouse["table_uri"]
 
         config = StrataConfig(cache_dir=cache_dir)
-        planner = ReadPlanner(config)
-        fetcher = CachedFetcher(config)
+        with ReadPlanner(config) as planner:
+            fetcher = CachedFetcher(config)
 
-        plan = planner.plan(table_uri)
-        batches1 = fetcher.execute_plan(plan)
-        total_rows1 = sum(b.num_rows for b in batches1)
+            plan = planner.plan(table_uri)
+            batches1 = fetcher.execute_plan(plan)
+            total_rows1 = sum(b.num_rows for b in batches1)
 
-        cache_files = list((cache_dir / f"v{CACHE_VERSION}").rglob(f"*{CACHE_FILE_EXTENSION}"))
-        assert len(cache_files) > 0
+            cache_files = list((cache_dir / f"v{CACHE_VERSION}").rglob(f"*{CACHE_FILE_EXTENSION}"))
+            assert len(cache_files) > 0
 
-        corrupted_file = cache_files[0]
+            corrupted_file = cache_files[0]
 
-        corrupted_file.write_bytes(b"CORRUPTED DATA - NOT VALID ARROW IPC")
+            corrupted_file.write_bytes(b"CORRUPTED DATA - NOT VALID ARROW IPC")
 
-        # A fresh fetcher simulates a restart.
-        fetcher2 = CachedFetcher(config)
+            # A fresh fetcher simulates a restart.
+            fetcher2 = CachedFetcher(config)
 
-        plan2 = planner.plan(table_uri)
+            plan2 = planner.plan(table_uri)
         batches2 = fetcher2.execute_plan(plan2)
         total_rows2 = sum(b.num_rows for b in batches2)
 
@@ -238,10 +238,10 @@ class TestCorruptedCacheSelfHealing:
         table_uri = temp_warehouse["table_uri"]
 
         config = StrataConfig(cache_dir=cache_dir)
-        planner = ReadPlanner(config)
         fetcher = CachedFetcher(config)
 
-        plan = planner.plan(table_uri)
+        with ReadPlanner(config) as planner:
+            plan = planner.plan(table_uri)
         fetcher.execute_plan(plan)
 
         meta_files = list((cache_dir / f"v{CACHE_VERSION}").rglob(f"*{CACHE_META_EXTENSION}"))
@@ -267,9 +267,9 @@ class TestConcurrentRequestsNoThunderingHerd:
 
         def worker():
             try:
-                planner = ReadPlanner(config)
                 fetcher = CachedFetcher(config)
-                plan = planner.plan(table_uri)
+                with ReadPlanner(config) as planner:
+                    plan = planner.plan(table_uri)
                 batches = fetcher.execute_plan(plan)
                 results.append(sum(b.num_rows for b in batches))
             except Exception as e:
@@ -360,8 +360,8 @@ class TestStaleMetadataInvalidation:
 
         config = StrataConfig(cache_dir=cache_dir)
 
-        planner1 = ReadPlanner(config)
-        plan1 = planner1.plan(temp_warehouse["table_uri"])
+        with ReadPlanner(config) as planner1:
+            plan1 = planner1.plan(temp_warehouse["table_uri"])
 
         store = get_metadata_store(cache_dir)
         stats1 = store.stats()
@@ -381,8 +381,8 @@ class TestStaleMetadataInvalidation:
         store.cleanup_stale_parquet_meta()
 
         reset_caches()
-        planner2 = ReadPlanner(config)
-        plan2 = planner2.plan(temp_warehouse["table_uri"])
+        with ReadPlanner(config) as planner2:
+            plan2 = planner2.plan(temp_warehouse["table_uri"])
 
         # May keep the same row-group count if the new data fits in existing files.
         assert len(plan2.tasks) >= len(plan1.tasks)
@@ -396,10 +396,10 @@ class TestLargeScanStreaming:
         table_uri = temp_warehouse["table_uri"]
 
         config = StrataConfig(cache_dir=cache_dir)
-        planner = ReadPlanner(config)
         fetcher = CachedFetcher(config)
 
-        plan = planner.plan(table_uri)
+        with ReadPlanner(config) as planner:
+            plan = planner.plan(table_uri)
 
         batch_count = 0
         total_rows = 0
@@ -417,10 +417,10 @@ class TestLargeScanStreaming:
         table_uri = temp_warehouse["table_uri"]
 
         config = StrataConfig(cache_dir=cache_dir)
-        planner = ReadPlanner(config)
         fetcher = CachedFetcher(config)
 
-        plan = planner.plan(table_uri)
+        with ReadPlanner(config) as planner:
+            plan = planner.plan(table_uri)
 
         segment_count = 0
         total_bytes = 0
@@ -442,10 +442,10 @@ class TestLargeScanStreaming:
         table_uri = temp_warehouse["table_uri"]
 
         config = StrataConfig(cache_dir=cache_dir)
-        planner = ReadPlanner(config)
         fetcher = CachedFetcher(config)
 
-        plan = planner.plan(table_uri)
+        with ReadPlanner(config) as planner:
+            plan = planner.plan(table_uri)
         batches = fetcher.execute_plan(plan)
         total_size = sum(b.nbytes for b in batches)
 
@@ -577,19 +577,19 @@ class TestStreamingIntegration:
         warehouse_path = tmp_path / "empty_warehouse"
         warehouse_path.mkdir()
 
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata",
             uri=f"sqlite:///{warehouse_path / 'catalog.db'}",
             warehouse=str(warehouse_path),
-        )
-        catalog.create_namespace("test_db")
+        ) as catalog:
+            catalog.create_namespace("test_db")
 
-        schema = Schema(NestedField(1, "id", LongType(), required=False))
-        table = catalog.create_table("test_db.empty_table", schema)
+            schema = Schema(NestedField(1, "id", LongType(), required=False))
+            table = catalog.create_table("test_db.empty_table", schema)
 
-        # This creates a snapshot with no data files.
-        empty_data = pa.table({"id": pa.array([], type=pa.int64())})
-        table.append(empty_data)
+            # This creates a snapshot with no data files.
+            empty_data = pa.table({"id": pa.array([], type=pa.int64())})
+            table.append(empty_data)
 
         table_uri = f"file://{warehouse_path}#test_db.empty_table"
 
@@ -1310,18 +1310,18 @@ class TestCacheVersioning:
         table_uri = temp_warehouse["table_uri"]
 
         config = StrataConfig(cache_dir=cache_dir)
-        planner = ReadPlanner(config)
-        fetcher = CachedFetcher(config)
+        with ReadPlanner(config) as planner:
+            fetcher = CachedFetcher(config)
 
-        plan = planner.plan(table_uri)
-        fetcher.execute_plan(plan)
+            plan = planner.plan(table_uri)
+            fetcher.execute_plan(plan)
 
-        old_version_dir = cache_dir / "v0" / "ab" / "cd"
-        old_version_dir.mkdir(parents=True)
-        (old_version_dir / "fake_old_cache.arrowstream").write_bytes(b"old data")
+            old_version_dir = cache_dir / "v0" / "ab" / "cd"
+            old_version_dir.mkdir(parents=True)
+            (old_version_dir / "fake_old_cache.arrowstream").write_bytes(b"old data")
 
-        fetcher2 = CachedFetcher(config)
-        plan2 = planner.plan(table_uri)
+            fetcher2 = CachedFetcher(config)
+            plan2 = planner.plan(table_uri)
 
         cache_hits = sum(1 for t in plan2.tasks if fetcher2.cache.contains(t.cache_key))
         assert cache_hits == len(plan2.tasks), "Should hit current version cache"

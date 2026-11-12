@@ -434,6 +434,7 @@ class TestTheRRegistry:
             again = await worker_env.ensure_r_library(_r_environment(), rscript)
         finally:
             server.shutdown()
+            server.server_close()
         return log, served, prepared, again
 
     async def test_supplies_the_library_instead_of_a_restore(self, tmp_path, monkeypatch):

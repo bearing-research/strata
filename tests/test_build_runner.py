@@ -1004,7 +1004,8 @@ class TestInputAcquisition:
 
         change(before)
         # Admission: the version it records for the table input.
-        admitted = table_input_version(ReadPlanner(build_runner.runtime_config).plan(table_uri))
+        with ReadPlanner(build_runner.runtime_config) as planner:
+            admitted = table_input_version(planner.plan(table_uri))
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
@@ -1052,7 +1053,8 @@ class TestInputAcquisition:
         table = temp_warehouse["catalog"].create_table("test_db.later", events.schema())
         table_uri = temp_warehouse["table_uri"].replace("#test_db.events", "#test_db.later")
 
-        admitted = table_input_version(ReadPlanner(build_runner.runtime_config).plan(table_uri))
+        with ReadPlanner(build_runner.runtime_config) as planner:
+            admitted = table_input_version(planner.plan(table_uri))
         assert admitted.startswith("empty:")
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(

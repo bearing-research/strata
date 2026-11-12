@@ -48,12 +48,12 @@ def _warehouse(tmp_path: Path) -> tuple[Path, str]:
 def _load(warehouse: Path, catalog_name: str = "strata"):
     from pyiceberg.catalog.sql import SqlCatalog
 
-    catalog = SqlCatalog(
+    with SqlCatalog(
         catalog_name,
         uri=f"sqlite:///{warehouse / 'catalog.db'}",
         warehouse=str(warehouse),
-    )
-    return catalog.load_table("lab.readings")
+    ) as catalog:
+        return catalog.load_table("lab.readings")
 
 
 def _rows(warehouse: Path, catalog_name: str = "strata") -> list[tuple[int, int]]:
@@ -241,7 +241,8 @@ class TestAWritingCell:
         source = _source(uri, '{"id": [1], "v": [10]}')
         session = _session(tmp_path, source)
         assert (await _run(session, source)).success
-        _catalog(warehouse).drop_table("lab.readings")
+        with _catalog(warehouse) as catalog:
+            catalog.drop_table("lab.readings")
 
         again = await _run(session, source)
 
@@ -273,14 +274,16 @@ class TestAWritingCell:
         )
         session = _session(tmp_path, source)
         assert (await _run(session, source)).success
-        _catalog(warehouse).drop_table("lab.readings")
+        with _catalog(warehouse) as catalog:
+            catalog.drop_table("lab.readings")
 
         again = await _run(session, source)
 
         assert again.cache_hit
         assert _rows(warehouse) == [(1, 10)]
         # Still there, so not appended to a second time.
-        assert _catalog(warehouse).load_table("lab.other").scan().to_arrow().num_rows == 1
+        with _catalog(warehouse) as catalog:
+            assert catalog.load_table("lab.other").scan().to_arrow().num_rows == 1
 
     async def test_a_write_back_that_fails_fails_the_cell(self, tmp_path, monkeypatch):
         warehouse, uri = _warehouse(tmp_path)
@@ -288,7 +291,8 @@ class TestAWritingCell:
         source = _logged(_source(uri, '{"id": [1], "v": [10]}'), log)
         session = _session(tmp_path, source)
         assert (await _run(session, source)).success
-        _catalog(warehouse).drop_table("lab.readings")
+        with _catalog(warehouse) as catalog:
+            catalog.drop_table("lab.readings")
         log.unlink()
         write = IcebergWriter.write
 
@@ -356,7 +360,8 @@ class TestAWritingCell:
         session = _session(tmp_path, source)
         specs = _batch_specs(session, source)
         assert (await CellExecutor(session).execute_batch(specs)).completed
-        _catalog(warehouse).drop_table("lab.readings")
+        with _catalog(warehouse) as catalog:
+            catalog.drop_table("lab.readings")
         log.unlink()
 
         def refused(*_args, **_kwargs):
@@ -370,7 +375,8 @@ class TestAWritingCell:
         assert "catalog is read-only" in result.error
         # Running it instead would append to the table still there a second time.
         assert not log.exists()
-        assert _catalog(warehouse).load_table("lab.other").scan().to_arrow().num_rows == 1
+        with _catalog(warehouse) as catalog:
+            assert catalog.load_table("lab.other").scan().to_arrow().num_rows == 1
 
     async def test_a_loop_writes_a_deleted_warehouse_from_its_hit(self, tmp_path, monkeypatch):
         warehouse, uri = _warehouse(tmp_path)
@@ -432,7 +438,8 @@ class TestAWritingCell:
         session = _session(tmp_path, source)
         assert (await _run(session, source)).success
         log.unlink()
-        _catalog(warehouse).drop_table("lab.readings")
+        with _catalog(warehouse) as catalog:
+            catalog.drop_table("lab.readings")
 
         again = await _run(session, source)
 
@@ -440,7 +447,8 @@ class TestAWritingCell:
         assert again.cache_hit
         assert not log.exists()
         assert _rows(warehouse) == [(1, 1), (2, 1)]
-        assert _catalog(warehouse).load_table("lab.other").scan().to_arrow().num_rows == 2
+        with _catalog(warehouse) as catalog:
+            assert catalog.load_table("lab.other").scan().to_arrow().num_rows == 2
 
     async def test_a_per_variant_cell_writes_every_variant_back(self, tmp_path):
         warehouse, uri = _warehouse(tmp_path)
@@ -521,13 +529,13 @@ class TestAWritingCell:
         warehouse.mkdir()
         from pyiceberg.catalog.sql import SqlCatalog
 
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-        )
-        catalog.create_namespace("lab")
-        catalog.create_table(
-            "lab.readings", schema=pa.schema([("id", pa.int64()), ("v", pa.int64())])
-        ).append(pa.table({"id": [7], "v": [70]}))
+        ) as catalog:
+            catalog.create_namespace("lab")
+            catalog.create_table(
+                "lab.readings", schema=pa.schema([("id", pa.int64()), ("v", pa.int64())])
+            ).append(pa.table({"id": [7], "v": [70]}))
         source = _source(uri, '{"id": [1], "v": [10]}')
         session = _session(tmp_path, source)
 
@@ -559,13 +567,13 @@ class TestAWritingCell:
 
         warehouse, uri = _warehouse(tmp_path)
         warehouse.mkdir()
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-        )
-        catalog.create_namespace("lab")
-        catalog.create_table(
-            "lab.readings", schema=pa.schema([("id", pa.int64()), ("v", pa.int64())])
-        ).append(pa.table({"id": [7], "v": [70]}))
+        ) as catalog:
+            catalog.create_namespace("lab")
+            catalog.create_table(
+                "lab.readings", schema=pa.schema([("id", pa.int64()), ("v", pa.int64())])
+            ).append(pa.table({"id": [7], "v": [70]}))
         monkeypatch.setattr(
             CellExecutor,
             "_lake_config",
@@ -964,13 +972,13 @@ class TestASyncedTable:
 
         warehouse, uri = _warehouse(tmp_path)
         warehouse.mkdir()
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-        )
-        catalog.create_namespace("lab")
-        catalog.create_table(
-            "lab.readings", schema=pa.schema([("id", pa.int64()), ("v", pa.int64())])
-        ).append(pa.table({"id": [7], "v": [70]}))
+        ) as catalog:
+            catalog.create_namespace("lab")
+            catalog.create_table(
+                "lab.readings", schema=pa.schema([("id", pa.int64()), ("v", pa.int64())])
+            ).append(pa.table({"id": [7], "v": [70]}))
         monkeypatch.setattr(
             CellExecutor,
             "_lake_config",

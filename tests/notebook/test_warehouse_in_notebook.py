@@ -79,7 +79,8 @@ async def test_a_cell_writes_and_another_reads_it_beside_the_notebook(tmp_path, 
     session = _session(tmp_path / "nb", WRITES, READS)
 
     await _run(session, "a")
-    table = _catalog(session.path / "wh").load_table("lab.rows")
+    with _catalog(session.path / "wh") as catalog:
+        table = catalog.load_table("lab.rows")
     assert table.scan().to_arrow().num_rows == 3
     assert not (elsewhere / "wh").exists()
 
@@ -97,7 +98,8 @@ async def test_two_notebooks_with_the_same_source_have_a_warehouse_each(tmp_path
 
     assert (one.path / "wh" / "catalog.db").exists()
     assert (other.path / "wh" / "catalog.db").exists()
-    assert str(one.path / "wh") in _catalog(one.path / "wh").load_table("lab.rows").location()
+    with _catalog(one.path / "wh") as catalog:
+        assert str(one.path / "wh") in catalog.load_table("lab.rows").location()
 
 
 async def test_a_new_write_makes_the_reader_run_again(tmp_path):
@@ -106,9 +108,9 @@ async def test_a_new_write_makes_the_reader_run_again(tmp_path):
     first = await _run(session, "b")
     assert (await _run(session, "b")).cache_hit
 
-    _catalog(session.path / "wh").load_table("lab.rows").append(
-        _catalog(session.path / "wh").load_table("lab.rows").scan().to_arrow()
-    )
+    with _catalog(session.path / "wh") as catalog:
+        table = catalog.load_table("lab.rows")
+        table.append(table.scan().to_arrow())
 
     again = await _run(session, "b")
     assert not again.cache_hit

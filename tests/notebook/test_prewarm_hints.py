@@ -47,6 +47,7 @@ def dispatcher():
     server = _Dispatcher()
     yield server
     server.server.shutdown()
+    server.server.server_close()
 
 
 @pytest.fixture(autouse=True)
@@ -133,6 +134,7 @@ async def test_a_worker_without_a_hints_route_changes_nothing(tmp_path):
         assert not await prewarm.send_hint(session, "gpu", "focus")
     finally:
         plain.server.shutdown()
+        plain.server.server_close()
 
     unreachable = _session(tmp_path / "gone", "http://127.0.0.1:1/v1/execute")
     assert not await prewarm.send_hint(unreachable, "gpu", "focus")

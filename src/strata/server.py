@@ -569,7 +569,7 @@ async def _graceful_shutdown(state: ServerState) -> None:
 
     state._planning_executor.shutdown(wait=False)
     state._fetch_executor.shutdown(wait=False)
-    state.planner.catalog.close()
+    state.planner.close()
 
     # No `ssh -L` children may outlive the server; remote workers stay up for reuse.
     from strata.notebook.routes import shutdown_worker_supervisor

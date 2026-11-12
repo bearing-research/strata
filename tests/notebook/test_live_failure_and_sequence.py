@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,7 @@ class Observer:
 
 def _notebook(tmp_path: Path, cells: list[tuple[str, str, str]]) -> Path:
     db = tmp_path / "orders.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, region TEXT, gross REAL)")
         conn.executemany(
             "INSERT INTO orders VALUES (?,?,?)", [(1, "North", 100.0), (2, "South", 500.0)]
@@ -172,7 +173,7 @@ async def test_a_write_cell_runs_the_statement_the_cell_declares(tmp_path):
     result = await _run(session, "w")
 
     assert result is not None and result.success, result and result.error
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT total FROM alias_totals").fetchall() == [(6,)]
 
 
@@ -199,7 +200,7 @@ async def test_a_multi_statement_write_still_runs_each_statement(tmp_path):
     result = await _run(session, "w")
 
     assert result is not None and result.success, result and result.error
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT v FROM t ORDER BY v").fetchall() == [
             ("a; not a separator",),
             ("b",),

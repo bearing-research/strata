@@ -395,11 +395,11 @@ def _empty_table(tmp_path) -> str:
 
     warehouse = tmp_path / "empty"
     warehouse.mkdir()
-    catalog = SqlCatalog(
+    with SqlCatalog(
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-    )
-    catalog.create_namespace("db")
-    catalog.create_table("db.empty", Schema(NestedField(1, "id", LongType())))
+    ) as catalog:
+        catalog.create_namespace("db")
+        catalog.create_table("db.empty", Schema(NestedField(1, "id", LongType())))
     return f"file://{warehouse}#db.empty"
 
 

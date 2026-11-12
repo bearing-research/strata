@@ -53,19 +53,31 @@ class TestResolution:
         assert named_catalog(uri, config) == (None, uri)
 
 
-def _sql_catalog(tmp_path, name: str) -> tuple[dict[str, str], SqlCatalog]:
-    warehouse = tmp_path / name
-    warehouse.mkdir()
-    properties = {
-        "type": "sql",
-        "uri": f"sqlite:///{warehouse / 'catalog.db'}",
-        "warehouse": warehouse.as_uri(),
-    }
-    return properties, SqlCatalog(name, **{k: v for k, v in properties.items() if k != "type"})
+@pytest.fixture
+def sql_catalog(tmp_path):
+    """Makes SQL catalogs under *tmp_path*, each closed after the test."""
+    made = []
+
+    def make(name: str) -> tuple[dict[str, str], SqlCatalog]:
+        warehouse = tmp_path / name
+        warehouse.mkdir()
+        properties = {
+            "type": "sql",
+            "uri": f"sqlite:///{warehouse / 'catalog.db'}",
+            "warehouse": warehouse.as_uri(),
+        }
+        catalog = SqlCatalog(name, **{k: v for k, v in properties.items() if k != "type"})
+        made.append(catalog)
+        return properties, catalog
+
+    yield make
+    for catalog in made:
+        catalog.close()
 
 
 def _rows(config, uri: str, snapshot_id: int | None = None) -> list[int]:
-    plan = ReadPlanner(config).plan(uri, snapshot_id=snapshot_id)
+    with ReadPlanner(config) as planner:
+        plan = planner.plan(uri, snapshot_id=snapshot_id)
     fetcher = create_fetcher()
     return sorted(
         value for task in plan.tasks for value in fetcher.fetch(task).column("id").to_pylist()
@@ -74,9 +86,11 @@ def _rows(config, uri: str, snapshot_id: int | None = None) -> list[int]:
 
 @windows
 class TestScanningByName:
-    def test_two_catalogs_are_read_by_name_and_a_pin_reads_its_snapshot(self, tmp_path):
-        north_props, north = _sql_catalog(tmp_path, "north")
-        south_props, south = _sql_catalog(tmp_path, "south")
+    def test_two_catalogs_are_read_by_name_and_a_pin_reads_its_snapshot(
+        self, tmp_path, sql_catalog
+    ):
+        north_props, north = sql_catalog("north")
+        south_props, south = sql_catalog("south")
         schema = pa.schema([("id", pa.int64())])
         for catalog, ids in ((north, [1, 2]), (south, [10])):
             catalog.create_namespace("taxi")
@@ -89,22 +103,23 @@ class TestScanningByName:
         assert _rows(config, "south:taxi.trips") == [10]
         assert _rows(config, "north:taxi.trips", snapshot_id=first) == [1, 2]
 
-    def test_the_table_identity_names_the_catalog(self, tmp_path):
-        props, catalog = _sql_catalog(tmp_path, "north")
+    def test_the_table_identity_names_the_catalog(self, tmp_path, sql_catalog):
+        props, catalog = sql_catalog("north")
         catalog.create_namespace("taxi")
         catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())])).append(
             pa.table({"id": [1]})
         )
 
-        plan = ReadPlanner(_config(tmp_path, {"north": props})).plan("north:taxi.trips")
+        with ReadPlanner(_config(tmp_path, {"north": props})) as planner:
+            plan = planner.plan("north:taxi.trips")
 
         assert plan.table_identity.catalog == "north"
 
-    def test_a_table_annotation_resolves_through_the_named_catalog(self, tmp_path):
+    def test_a_table_annotation_resolves_through_the_named_catalog(self, tmp_path, sql_catalog):
         from strata.notebook.models import TableSpec
         from strata.notebook.tables import resolve_table_snapshot
 
-        props, catalog = _sql_catalog(tmp_path, "north")
+        props, catalog = sql_catalog("north")
         catalog.create_namespace("taxi")
         table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
         table.append(pa.table({"id": [1]}))
@@ -114,8 +129,10 @@ class TestScanningByName:
         spec = TableSpec(name="trips", uri="north:taxi.trips")
         assert resolve_table_snapshot(spec, config) == current
 
-    def test_credentials_the_catalog_hands_the_table_reach_the_fetcher(self, tmp_path, monkeypatch):
-        props, catalog = _sql_catalog(tmp_path, "north")
+    def test_credentials_the_catalog_hands_the_table_reach_the_fetcher(
+        self, tmp_path, sql_catalog, monkeypatch
+    ):
+        props, catalog = sql_catalog("north")
         catalog.create_namespace("taxi")
         catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())])).append(
             pa.table({"id": [1]})
@@ -127,16 +144,16 @@ class TestScanningByName:
             lambda location, properties: seen.append((location, properties)),
         )
 
-        ReadPlanner(_config(tmp_path, {"north": {**props, "s3.access-key-id": "vended"}})).plan(
-            "north:taxi.trips"
-        )
+        config = _config(tmp_path, {"north": {**props, "s3.access-key-id": "vended"}})
+        with ReadPlanner(config) as planner:
+            planner.plan("north:taxi.trips")
 
         ((location, properties),) = seen
         assert location.endswith("taxi/trips")
         assert properties["s3.access-key-id"] == "vended"
 
-    def test_a_catalog_provider_can_be_injected(self, tmp_path):
-        props, catalog = _sql_catalog(tmp_path, "north")
+    def test_a_catalog_provider_can_be_injected(self, tmp_path, sql_catalog):
+        props, catalog = sql_catalog("north")
         catalog.create_namespace("taxi")
         catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())])).append(
             pa.table({"id": [1]})
@@ -151,7 +168,8 @@ class TestScanningByName:
                 calls.append(table_uri)
                 return super().load_table(table_uri)
 
-        ReadPlanner(config, catalog=Recording(config)).plan("north:taxi.trips")
+        with ReadPlanner(config, catalog=Recording(config)) as planner:
+            planner.plan("north:taxi.trips")
 
         assert calls == ["north:taxi.trips"]
 
@@ -161,8 +179,8 @@ class TestANamedCredential:
     """A catalog names a credential, so its config carries no secret."""
 
     @staticmethod
-    def _configured(tmp_path, credentials):
-        props, catalog = _sql_catalog(tmp_path, "north")
+    def _configured(tmp_path, sql_catalog, credentials):
+        props, catalog = sql_catalog("north")
         catalog.create_namespace("taxi")
         catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())])).append(
             pa.table({"id": [1, 2]})
@@ -177,9 +195,13 @@ class TestANamedCredential:
         )
         return config, uri
 
-    def test_the_credential_supplies_the_catalog_s_properties(self, tmp_path, monkeypatch):
+    def test_the_credential_supplies_the_catalog_s_properties(
+        self, tmp_path, sql_catalog, monkeypatch
+    ):
         config, uri = self._configured(
-            tmp_path, {"north-db": {"uri": "${NORTH_URI}", "s3.access-key-id": "${NORTH_KEY}"}}
+            tmp_path,
+            sql_catalog,
+            {"north-db": {"uri": "${NORTH_URI}", "s3.access-key-id": "${NORTH_KEY}"}},
         )
         monkeypatch.setenv("NORTH_URI", uri)
         monkeypatch.setenv("NORTH_KEY", "from-the-vault")
@@ -196,24 +218,26 @@ class TestANamedCredential:
         assert "strata_credential" not in seen[0]
 
     def test_a_notebook_s_env_resolves_it_and_never_reaches_another_reader(
-        self, tmp_path, monkeypatch
+        self, tmp_path, sql_catalog, monkeypatch
     ):
         from strata.notebook.models import TableSpec
         from strata.notebook.tables import resolve_table_snapshot
 
-        config, server_uri = self._configured(tmp_path, {"north-db": {"uri": "${NORTH_URI}"}})
+        config, server_uri = self._configured(
+            tmp_path, sql_catalog, {"north-db": {"uri": "${NORTH_URI}"}}
+        )
         notebook_uris, snapshots = [], []
         for name, ids in (("east", [5]), ("west", [6, 7])):
             warehouse = tmp_path / name
             warehouse.mkdir()
             uri = f"sqlite:///{warehouse / 'catalog.db'}"
             # Named north: a SQL catalog finds only rows written under its own name.
-            catalog = SqlCatalog("north", uri=uri, warehouse=warehouse.as_uri())
-            catalog.create_namespace("taxi")
-            table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
-            table.append(pa.table({"id": ids}))
+            with SqlCatalog("north", uri=uri, warehouse=warehouse.as_uri()) as catalog:
+                catalog.create_namespace("taxi")
+                table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
+                table.append(pa.table({"id": ids}))
+                snapshots.append(catalog.load_table("taxi.trips").current_snapshot().snapshot_id)
             notebook_uris.append(uri)
-            snapshots.append(catalog.load_table("taxi.trips").current_snapshot().snapshot_id)
         spec = TableSpec(name="trips", uri="north:taxi.trips")
         monkeypatch.delenv("NORTH_URI", raising=False)
 
@@ -223,11 +247,11 @@ class TestANamedCredential:
         monkeypatch.setenv("NORTH_URI", server_uri)
         assert _rows(config, "north:taxi.trips") == [1, 2]
 
-    def test_a_missing_credential_fails_naming_it(self, tmp_path):
+    def test_a_missing_credential_fails_naming_it(self, tmp_path, sql_catalog):
         from strata.notebook.models import TableSpec
         from strata.notebook.tables import resolve_table_snapshot
 
-        config, _ = self._configured(tmp_path, {})
+        config, _ = self._configured(tmp_path, sql_catalog, {})
 
         with pytest.raises(ValueError, match="credential 'north-db' is not defined"):
             resolve_table_snapshot(TableSpec(name="trips", uri="north:taxi.trips"), config)
@@ -391,11 +415,15 @@ class TestAclNamesTheCatalog:
 class TestARestrictedCatalogCredential:
     """``notebook_credential_paths``: a project's catalog only for that project's notebooks."""
 
-    def test_an_at_table_resolves_only_under_the_directory(self, tmp_path, monkeypatch):
+    def test_an_at_table_resolves_only_under_the_directory(
+        self, tmp_path, sql_catalog, monkeypatch
+    ):
         from strata.notebook.models import TableSpec
         from strata.notebook.tables import resolve_table_snapshot
 
-        config, uri = TestANamedCredential._configured(tmp_path, {"north-db": {"uri": "${NORTH}"}})
+        config, uri = TestANamedCredential._configured(
+            tmp_path, sql_catalog, {"north-db": {"uri": "${NORTH}"}}
+        )
         config = config.model_copy(
             update={"notebook_credential_paths": {"north-db": [str(tmp_path / "lab-a")]}}
         )

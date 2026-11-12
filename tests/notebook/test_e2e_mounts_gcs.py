@@ -270,6 +270,7 @@ async def test_a_keyless_mount_reads_through_workload_identity_federation(
         )
     finally:
         service.server.shutdown()
+        service.server.server_close()
 
     assert result.success, f"cell errored: {result.error}"
     assert result.outputs["content"]["preview"] == "hello, keyless"

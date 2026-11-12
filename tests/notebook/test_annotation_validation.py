@@ -650,13 +650,13 @@ class TestTableAnnotationValidation:
         from strata.notebook.models import TableSpec
         from strata.notebook.tables import resolve_table_snapshot
 
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata", uri=f"sqlite:///{tmp_path}/catalog.db", warehouse=f"file://{tmp_path}"
-        )
-        catalog.create_namespace(("db",))
-        catalog.create_namespace(("db", "sch"))
-        data = pa.table({"x": [1]})
-        catalog.create_table("db.sch.events", schema=data.schema).append(data)
+        ) as catalog:
+            catalog.create_namespace(("db",))
+            catalog.create_namespace(("db", "sch"))
+            data = pa.table({"x": [1]})
+            catalog.create_table("db.sch.events", schema=data.schema).append(data)
         uri = f"file://{tmp_path}#db.sch.events"
 
         snapshot = resolve_table_snapshot(

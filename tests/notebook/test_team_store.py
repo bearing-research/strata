@@ -1372,6 +1372,7 @@ async def test_each_callers_offered_results_carry_that_callers_principal(tmp_pat
         fixed = [h["X-Strata-Principal"] for h in offered]
     finally:
         server.shutdown()
+        server.server_close()
 
     assert forwarded == ["ana", "ben"]
     assert fixed == ["server:7"]

@@ -1047,16 +1047,15 @@ class TestADenyOnOneAddressCoversTheTable:
             set_principal(None)
 
         # One table behind every name the deny now covers.
-        catalogs = PyIcebergCatalog(
-            StrataConfig(
-                deployment_mode="service",
-                auth_mode="trusted_proxy",
-                proxy_token="test-token",
-                **overrides,
-            )
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            **overrides,
         )
         uris = (self.S3, *self.ALIASES)
-        assert len({catalogs.load_table(uri).metadata_location for uri in uris}) == 1
+        with PyIcebergCatalog(config) as catalogs:
+            assert len({catalogs.load_table(uri).metadata_location for uri in uris}) == 1
 
     def test_an_allow_still_names_only_the_address_it_was_written_for(
         self, temp_warehouse, tmp_path, monkeypatch

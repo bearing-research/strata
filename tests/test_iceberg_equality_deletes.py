@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import sys
+from contextlib import nullcontext
 from decimal import Decimal
 
 import pyarrow as pa
@@ -36,7 +37,9 @@ pytestmark = pytest.mark.skipif(
 PEOPLE = pa.schema([("id", pa.int64()), ("name", pa.string())])
 
 
-def _catalog(tmp_path):
+@pytest.fixture
+def lake(tmp_path):
+    """An empty namespace ``db`` and the uri of its table ``db.t``."""
     from pyiceberg.catalog.sql import SqlCatalog
 
     warehouse = tmp_path / "warehouse"
@@ -45,13 +48,14 @@ def _catalog(tmp_path):
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=warehouse.as_uri()
     )
     catalog.create_namespace("db")
-    return catalog, f"{warehouse.as_uri()}#db.t"
+    yield catalog, f"{warehouse.as_uri()}#db.t"
+    catalog.close()
 
 
 @pytest.fixture
-def people(tmp_path):
+def people(lake, tmp_path):
     """``db.t``: ids 1-4 and a null id, three rows to a row group, at sequence 1."""
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = lake
     catalog.create_table(
         "db.t", schema=PEOPLE, properties={"write.parquet.row-group-limit": "3"}
     ).append(
@@ -78,7 +82,8 @@ def _delete(catalog, **columns) -> None:
 
 
 def _scan(config, uri, columns=None, planner=None, filters=None):
-    plan = (planner or ReadPlanner(config)).plan(uri, columns=columns, filters=filters)
+    with nullcontext(planner) if planner else ReadPlanner(config) as planner:
+        plan = planner.plan(uri, columns=columns, filters=filters)
     fetcher = CachedFetcher(config)
     batches = [fetcher.fetch(task) for task in plan.tasks]
     return pa.Table.from_batches(batches, schema=plan.schema), plan
@@ -140,9 +145,9 @@ def test_a_filtered_scan_still_applies_a_delete_whose_keys_miss_the_filter(peopl
     ],
     ids=["date", "decimal"],
 )
-def test_a_null_key_of_any_type_deletes_the_null_rows(tmp_path, key_type, values):
+def test_a_null_key_of_any_type_deletes_the_null_rows(tmp_path, lake, key_type, values):
     """Null keys of date and decimal type, which cannot be cast from an int fill."""
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = lake
     schema = pa.schema([("k", key_type), ("name", pa.string())])
     catalog.create_table("db.t", schema=schema).append(
         pa.table({"k": pa.array(values, key_type), "name": ["a", "b", "nul"]}, schema=schema)
@@ -254,8 +259,8 @@ def test_a_key_column_the_file_predates_is_null_in_it(people):
     assert _names(_scan(config, uri)[0]) == []
 
 
-def test_a_promoted_key_matches_after_widening(tmp_path):
-    catalog, uri = _catalog(tmp_path)
+def test_a_promoted_key_matches_after_widening(tmp_path, lake):
+    catalog, uri = lake
     catalog.create_table("db.t", schema=pa.schema([("id", pa.int32()), ("name", pa.string())]))
     _table(catalog).append(pa.table({"id": pa.array([1, 2], pa.int32()), "name": ["ann", "bo"]}))
     with _table(catalog).update_schema() as update:
@@ -277,12 +282,12 @@ NANOS = 1_704_153_600_000_000_123  # 2024-01-02 plus 123 ns
     ],
     ids=["microseconds", "other nanoseconds"],
 )
-def test_a_nanosecond_key_is_compared_at_the_tables_unit(tmp_path, deleted):
+def test_a_nanosecond_key_is_compared_at_the_tables_unit(tmp_path, lake, deleted):
     """A file holding nanoseconds is matched at the table's microseconds.
 
     A JVM writer deletes a row by the microsecond value it read.
     """
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = lake
     schema = pa.schema([("ts", pa.timestamp("us")), ("name", pa.string())])
     catalog.create_table("db.t", schema=schema).append(
         pa.table({"ts": [datetime.datetime(2024, 1, 1)], "name": ["a"]}, schema=schema)
@@ -357,8 +362,8 @@ def test_positional_and_equality_deletes_on_one_file(people, tmp_path):
         strata.planner.plan_files = real_plan_files
 
 
-def test_a_delete_in_one_partition_leaves_the_others(tmp_path):
-    catalog, uri = _catalog(tmp_path)
+def test_a_delete_in_one_partition_leaves_the_others(tmp_path, lake):
+    catalog, uri = lake
     schema = Schema(
         NestedField(1, "id", LongType(), required=False),
         NestedField(2, "region", StringType(), required=False),
@@ -381,13 +386,13 @@ def test_a_delete_in_one_partition_leaves_the_others(tmp_path):
     assert result.column("region").to_pylist() == ["us"]
 
 
-def test_an_identity_partition_column_the_file_omits_reads_its_partition_value(tmp_path):
+def test_an_identity_partition_column_the_file_omits_reads_its_partition_value(tmp_path, lake):
     """A Hive-layout file often omits its identity partition column.
 
     Each file reads its own partition value (also from a restarted planner's persisted manifest), so
     a delete keyed on it matches.
     """
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = lake
     schema = Schema(
         NestedField(1, "id", LongType(), required=False),
         NestedField(2, "region", StringType(), required=False),
@@ -424,9 +429,11 @@ def test_an_identity_partition_column_the_file_omits_reads_its_partition_value(t
     deleted = pa.table({"id": pa.array([2], pa.int64()), "region": ["eu"]})
     commit_files(table, equality_delete(table, deleted, partition=Record("eu")))
     store = MetadataStore(config.cache_dir / "metadata.sqlite")
-    ReadPlanner(config, manifest_cache=ManifestCache(store=store)).plan(uri)
-    restarted = ReadPlanner(config, manifest_cache=ManifestCache(store=store))
-    assert rows(_scan(config, uri, planner=restarted)[0]) == [expected[0], expected[1], expected[3]]
+    with ReadPlanner(config, manifest_cache=ManifestCache(store=store)) as planner:
+        planner.plan(uri)
+    with ReadPlanner(config, manifest_cache=ManifestCache(store=store)) as restarted:
+        scanned, _ = _scan(config, uri, planner=restarted)
+    assert rows(scanned) == [expected[0], expected[1], expected[3]]
     assert store.manifest_hits == 1
 
 
@@ -465,9 +472,10 @@ def test_parsed_delete_files_are_held_to_the_row_limit(people, monkeypatch):
     catalog, uri, config = people
     _delete(catalog, id=pa.array([1, 2], pa.int64()))
     _delete(catalog, id=pa.array([3, 4], pa.int64()))
-    (first, second) = sorted(
-        ReadPlanner(config).plan(uri).tasks[0].equality_deletes, key=lambda d: d.file_path
-    )
+    with ReadPlanner(config) as planner:
+        (first, second) = sorted(
+            planner.plan(uri).tasks[0].equality_deletes, key=lambda d: d.file_path
+        )
     opened = []
     real_open = lake_files.open_parquet
     monkeypatch.setattr(
@@ -489,8 +497,11 @@ def test_a_row_group_over_the_equality_delete_limit_is_refused(people, tmp_path)
     _delete(catalog, id=pa.array([2, 4], pa.int64()))
     config = StrataConfig(cache_dir=tmp_path / "limit-cache", max_equality_delete_rows=1)
 
-    with pytest.raises(UnsupportedTableFormatError, match="2 pending equality deletes") as e:
-        ReadPlanner(config).plan(uri)
+    with (
+        ReadPlanner(config) as planner,
+        pytest.raises(UnsupportedTableFormatError, match="2 pending equality deletes") as e,
+    ):
+        planner.plan(uri)
     assert "rewrite_data_files" in str(e.value)
     assert "max_equality_delete_rows" in str(e.value)
 
@@ -505,8 +516,11 @@ def test_a_delete_file_strata_cannot_read_is_refused(people):
         ),
     )
 
-    with pytest.raises(UnsupportedTableFormatError, match="AVRO equality delete file"):
-        ReadPlanner(config).plan(uri)
+    with (
+        ReadPlanner(config) as planner,
+        pytest.raises(UnsupportedTableFormatError, match="AVRO equality delete file"),
+    ):
+        planner.plan(uri)
 
 
 def test_the_persisted_manifest_keeps_the_equality_deletes(people):
@@ -515,10 +529,11 @@ def test_the_persisted_manifest_keeps_the_equality_deletes(people):
     # Loading a config creates no directories; the server makes them at startup.
     config.cache_dir.mkdir(parents=True, exist_ok=True)
     store = MetadataStore(config.cache_dir / "metadata.sqlite")
-    ReadPlanner(config, manifest_cache=ManifestCache(store=store)).plan(uri)
+    with ReadPlanner(config, manifest_cache=ManifestCache(store=store)) as planner:
+        planner.plan(uri)
 
-    restarted = ReadPlanner(config, manifest_cache=ManifestCache(store=store))
-    table, _ = _scan(config, uri, planner=restarted)
+    with ReadPlanner(config, manifest_cache=ManifestCache(store=store)) as restarted:
+        table, _ = _scan(config, uri, planner=restarted)
     assert _names(table) == ["ann", "cy", "dee", "nul"]
     assert store.manifest_hits == 1
 

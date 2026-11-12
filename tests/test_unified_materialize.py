@@ -63,12 +63,13 @@ def temp_warehouse(tmp_path):
 
     table.append(data)
 
-    return {
+    yield {
         "warehouse_path": warehouse_path,
         "table_uri": f"file://{warehouse_path}#test_db.events",
         "catalog": catalog,
         "table": table,
     }
+    catalog.close()
 
 
 @pytest.fixture

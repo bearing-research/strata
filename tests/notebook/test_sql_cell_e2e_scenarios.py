@@ -7,6 +7,7 @@ snapshot policy on non-snapshot drivers, NULL binds, and empty results.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ adbc_sqlite = pytest.importorskip("adbc_driver_sqlite")
 
 
 def _seed_sqlite(path: Path) -> None:
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)")
         conn.executemany(
             "INSERT INTO events (id, name, value) VALUES (?, ?, ?)",
@@ -127,7 +128,7 @@ async def test_sql_injection_via_bind_does_not_alter_database(tmp_path):
     assert table.num_rows == 0
 
     # Critical: the events table is intact.
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         (count,) = conn.execute("SELECT COUNT(*) FROM events").fetchone()
         assert count == 3
         names = sorted(r[0] for r in conn.execute("SELECT name FROM events"))
@@ -392,7 +393,7 @@ class TestAnOutsideWriteIsSeen:
         assert first.success, first.error
         assert _load_arrow(session, first.artifact_uri).column("total").to_pylist() == [60]
 
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn, conn:
             conn.execute("INSERT INTO events (id, name, value) VALUES (4, 'delta', 40)")
             conn.commit()
 
@@ -424,7 +425,7 @@ class TestAnOutsideWriteIsSeen:
 
         db_path = tmp_path / "events.db"
         _seed_sqlite(db_path)
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn, conn:
             conn.execute("PRAGMA journal_mode=WAL")
         source = "-- @sql connection=db\nSELECT sum(value) AS total FROM events\n"
         nb_dir = _build_notebook(tmp_path, db_path=db_path, cells=[("sql", "sql", source)])
@@ -507,7 +508,7 @@ class TestACellThatAlwaysRunsMovesItsConsumers:
         assert (await run("sql")).cache_hit is False
         assert (await run("count")).cache_hit is True
 
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn, conn:
             conn.execute("INSERT INTO events (id, name, value) VALUES (4, 'delta', 40)")
             conn.commit()
 

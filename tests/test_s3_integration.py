@@ -125,6 +125,12 @@ def s3_config(minio_container, s3_catalog_db, tmp_path_factory):
     )
 
 
+@pytest.fixture
+def planner(s3_config):
+    with ReadPlanner(s3_config) as planner:
+        yield planner
+
+
 @pytest.fixture(scope="module")
 def s3_table(minio_container, s3_config, s3_catalog_db):
     """An Iceberg table in MinIO; returns ``s3://bucket/warehouse#namespace.table``."""
@@ -165,15 +171,14 @@ def s3_table(minio_container, s3_config, s3_catalog_db):
     test_data = create_test_data(num_rows=1000)
     table.append(test_data)
 
-    return f"{warehouse_path}#{table_id}"
+    yield f"{warehouse_path}#{table_id}"
+    catalog.close()
 
 
 class TestS3EndToEnd:
     """End-to-end tests for the S3 storage backend."""
 
-    def test_planner_resolves_s3_table(self, s3_config, s3_table):
-        planner = ReadPlanner(s3_config)
-
+    def test_planner_resolves_s3_table(self, planner, s3_table):
         plan = planner.plan(s3_table)
 
         assert plan.snapshot_id > 0
@@ -183,9 +188,8 @@ class TestS3EndToEnd:
         for task in plan.tasks:
             assert task.file_path.startswith("s3://"), f"Expected S3 path, got: {task.file_path}"
 
-    def test_fetcher_reads_s3_data(self, s3_config, s3_table):
+    def test_fetcher_reads_s3_data(self, s3_config, s3_table, planner):
         """Fetcher reads row groups from S3."""
-        planner = ReadPlanner(s3_config)
         plan = planner.plan(s3_table)
 
         s3_fs = s3_config.get_s3_filesystem()
@@ -198,8 +202,7 @@ class TestS3EndToEnd:
         assert "id" in batch.schema.names
         assert "category" in batch.schema.names
 
-    def test_column_projection_on_s3(self, s3_config, s3_table):
-        planner = ReadPlanner(s3_config)
+    def test_column_projection_on_s3(self, s3_config, s3_table, planner):
         columns = ["id", "value"]
 
         plan = planner.plan(s3_table, columns=columns)
@@ -212,10 +215,8 @@ class TestS3EndToEnd:
 
         assert set(batch.schema.names) == set(columns)
 
-    def test_filter_pruning_on_s3(self, s3_config, s3_table):
+    def test_filter_pruning_on_s3(self, s3_config, s3_table, planner):
         """Row-group pruning works on S3 files."""
-        planner = ReadPlanner(s3_config)
-
         # ids are 0-999, so id > 2000 matches nothing.
         filters = [Filter(column="id", op=FilterOp.GT, value=2000)]
 
@@ -231,12 +232,12 @@ class TestS3EndToEnd:
 
             assert table.num_rows >= 0  # May be 0 if properly pruned
 
-    def test_multiple_row_groups(self, minio_container, s3_config, s3_catalog_db):
+    def test_multiple_row_groups(self, minio_container, s3_config, s3_catalog_db, planner):
         config = minio_container.get_config()
         bucket = "test-warehouse"
         warehouse_path = f"s3://{bucket}/warehouse"
 
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata",
             uri=f"sqlite:///{s3_catalog_db}",
             warehouse=warehouse_path,
@@ -246,29 +247,27 @@ class TestS3EndToEnd:
                 "s3.secret-access-key": config["secret_key"],
                 "s3.region": "us-east-1",
             },
-        )
+        ) as catalog:
+            namespace = "multi"
+            table_name = "events"
+            table_id = f"{namespace}.{table_name}"
 
-        namespace = "multi"
-        table_name = "events"
-        table_id = f"{namespace}.{table_name}"
+            try:
+                catalog.create_namespace(namespace)
+            except Exception:
+                pass
 
-        try:
-            catalog.create_namespace(namespace)
-        except Exception:
-            pass
+            try:
+                table = catalog.load_table(table_id)
+            except Exception:
+                table = catalog.create_table(table_id, TEST_SCHEMA)
 
-        try:
-            table = catalog.load_table(table_id)
-        except Exception:
-            table = catalog.create_table(table_id, TEST_SCHEMA)
-
-        # Several appends make several files/row groups.
-        for i in range(3):
-            data = create_test_data(num_rows=500, seed=i)
-            table.append(data)
+            # Several appends make several files/row groups.
+            for i in range(3):
+                data = create_test_data(num_rows=500, seed=i)
+                table.append(data)
 
         table_uri = f"{warehouse_path}#{table_id}"
-        planner = ReadPlanner(s3_config)
         plan = planner.plan(table_uri)
 
         assert len(plan.tasks) >= 1
@@ -293,7 +292,7 @@ class TestS3PathHandling:
         endpoint = _get_s3_endpoint(config)
 
         catalog_db = tmp_path_factory.mktemp("special_catalog") / "catalog.db"
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata",
             uri=f"sqlite:///{catalog_db}",
             warehouse=warehouse_path,
@@ -303,24 +302,23 @@ class TestS3PathHandling:
                 "s3.secret-access-key": config["secret_key"],
                 "s3.region": "us-east-1",
             },
-        )
+        ) as catalog:
+            namespace = "special_ns"
+            table_name = "test_table"
+            table_id = f"{namespace}.{table_name}"
 
-        namespace = "special_ns"
-        table_name = "test_table"
-        table_id = f"{namespace}.{table_name}"
+            try:
+                catalog.create_namespace(namespace)
+            except Exception:
+                pass
 
-        try:
-            catalog.create_namespace(namespace)
-        except Exception:
-            pass
+            try:
+                table = catalog.load_table(table_id)
+            except Exception:
+                table = catalog.create_table(table_id, TEST_SCHEMA)
 
-        try:
-            table = catalog.load_table(table_id)
-        except Exception:
-            table = catalog.create_table(table_id, TEST_SCHEMA)
-
-        data = create_test_data(num_rows=100)
-        table.append(data)
+            data = create_test_data(num_rows=100)
+            table.append(data)
 
         # Points at this test's own catalog.
         special_config = StrataConfig(
@@ -341,8 +339,8 @@ class TestS3PathHandling:
         )
 
         table_uri = f"{warehouse_path}#{table_id}"
-        planner = ReadPlanner(special_config)
-        plan = planner.plan(table_uri)
+        with ReadPlanner(special_config) as planner:
+            plan = planner.plan(table_uri)
 
         assert len(plan.tasks) > 0
         assert "data-lake_v2" in plan.tasks[0].file_path
@@ -351,10 +349,8 @@ class TestS3PathHandling:
 class TestS3ErrorHandling:
     """S3 error scenarios."""
 
-    def test_invalid_bucket_raises_error(self, s3_config):
+    def test_invalid_bucket_raises_error(self, planner):
         """A non-existent bucket raises."""
-        planner = ReadPlanner(s3_config)
-
         with pytest.raises(Exception):
             # The bucket does not exist.
             planner.plan("s3://nonexistent-bucket/warehouse#ns.table")
@@ -371,19 +367,15 @@ class TestS3ErrorHandling:
             s3_region="us-east-1",
         )
 
-        planner = ReadPlanner(bad_config)
-
-        with pytest.raises(Exception):
+        with ReadPlanner(bad_config) as planner, pytest.raises(Exception):
             planner.plan("s3://test-warehouse/warehouse#ns.table")
 
 
 class TestS3Latency:
     """S3 latency characteristics."""
 
-    def test_metadata_caching_reduces_latency(self, s3_config, s3_table):
+    def test_metadata_caching_reduces_latency(self, planner, s3_table):
         """Metadata caching speeds up later planning."""
-        planner = ReadPlanner(s3_config)
-
         start = time.perf_counter()
         plan1 = planner.plan(s3_table)
         cold_time = time.perf_counter() - start
@@ -417,16 +409,16 @@ class TestPlanningWhileTheStoreIsDown:
             }
             catalog_db = tmp_path_factory.mktemp("outage_catalog") / "catalog.db"
             warehouse = "s3://lake/warehouse"
-            catalog = SqlCatalog(
+            with SqlCatalog(
                 "strata", uri=f"sqlite:///{catalog_db}", warehouse=warehouse, **store
-            )
-            catalog.create_namespace("ns")
-            events = catalog.create_table("ns.events", TEST_SCHEMA)
-            data = create_test_data(num_rows=2000)
-            # Two data files, so a filter on id keeps only the first.
-            events.append(data.slice(0, 1000))
-            events.append(data.slice(1000, 1000))
-            catalog.create_table("ns.other", TEST_SCHEMA).append(data.slice(0, 10))
+            ) as catalog:
+                catalog.create_namespace("ns")
+                events = catalog.create_table("ns.events", TEST_SCHEMA)
+                data = create_test_data(num_rows=2000)
+                # Two data files, so a filter on id keeps only the first.
+                events.append(data.slice(0, 1000))
+                events.append(data.slice(1000, 1000))
+                catalog.create_table("ns.other", TEST_SCHEMA).append(data.slice(0, 10))
 
             strata_config = StrataConfig(
                 cache_dir=tmp_path_factory.mktemp("outage_cache"),
@@ -439,20 +431,21 @@ class TestPlanningWhileTheStoreIsDown:
             events_uri = f"{warehouse}#ns.events"
             low = [Filter("id", FilterOp.LT, 500)]
             # Filtered only: no unfiltered manifest resolution is persisted.
-            planned = ReadPlanner(strata_config).plan(events_uri, filters=low)
+            with ReadPlanner(strata_config) as planner:
+                planned = planner.plan(events_uri, filters=low)
             assert len({task.file_path for task in planned.tasks}) == 1
 
             minio.get_wrapped_container().stop()
             # As a restart: no manifest resolution in memory.
             reset_caches()
 
-            planner = ReadPlanner(strata_config)
-            # metadata.json, the manifest list and the manifests come from the cache.
-            again = planner.plan(events_uri, filters=low)
-            assert again.snapshot_id == planned.snapshot_id
-            assert [t.file_path for t in again.tasks] == [t.file_path for t in planned.tasks]
+            with ReadPlanner(strata_config) as planner:
+                # metadata.json, the manifest list and the manifests come from the cache.
+                again = planner.plan(events_uri, filters=low)
+                assert again.snapshot_id == planned.snapshot_id
+                assert [t.file_path for t in again.tasks] == [t.file_path for t in planned.tasks]
 
-            # Never read, so it needs the store.
-            with pytest.raises(OSError) as excinfo:
-                planner.plan(f"{warehouse}#ns.other")
+                # Never read, so it needs the store.
+                with pytest.raises(OSError) as excinfo:
+                    planner.plan(f"{warehouse}#ns.other")
             assert object_store_unreachable(excinfo.value)

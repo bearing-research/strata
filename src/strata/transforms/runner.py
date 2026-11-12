@@ -759,18 +759,20 @@ class BuildRunner:
         planner = self.scan_planner
         fetcher = self.scan_fetcher
 
-        if planner is None or fetcher is None:
-            runtime_config = self.runtime_config or StrataConfig.load()
-            planner = planner or ReadPlanner(runtime_config)
-            fetcher = fetcher or CachedFetcher(runtime_config)
+        with contextlib.ExitStack() as stack:
+            if planner is None or fetcher is None:
+                runtime_config = self.runtime_config or StrataConfig.load()
+                # A planner built here is this scan's alone, and its catalog holds connections.
+                planner = planner or stack.enter_context(ReadPlanner(runtime_config))
+                fetcher = fetcher or CachedFetcher(runtime_config)
 
-        plan = planner.plan(
-            table_uri=table_uri,
-            snapshot_id=snapshot_id,
-            columns=None,  # All columns
-            filters=None,
-            schema_id=schema_id,
-        )
+            plan = planner.plan(
+                table_uri=table_uri,
+                snapshot_id=snapshot_id,
+                columns=None,  # All columns
+                filters=None,
+                schema_id=schema_id,
+            )
 
         import pyarrow as pa
 

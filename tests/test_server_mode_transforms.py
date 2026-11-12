@@ -1645,13 +1645,13 @@ class TestServiceModeReviewFindings:
 
         monkeypatch.setattr(ParquetMetadataCache, "_load_metadata", unreachable)
         server_module._state._draining = False  # a MagicMock attribute is truthy
-        server_module._state.planner = ReadPlanner(server_mode_config)
-
-        response = server_mode_app.post(
-            path,
-            json={"inputs": [temp_warehouse["table_uri"]], "transform": transform},
-            headers=_auth_headers(scopes="admin:*"),
-        )
+        with ReadPlanner(server_mode_config) as planner:
+            server_module._state.planner = planner
+            response = server_mode_app.post(
+                path,
+                json={"inputs": [temp_warehouse["table_uri"]], "transform": transform},
+                headers=_auth_headers(scopes="admin:*"),
+            )
 
         assert response.status_code == 503, response.text
         assert response.headers["Retry-After"] == "5"

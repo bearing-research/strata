@@ -520,15 +520,15 @@ def _apply(
         else:
             os.environ[step["name"]] = step["value"]
     elif op == "iceberg_create":
-        catalog = _iceberg_catalog(notebook_dir, step["catalog"])
-        namespace, _ = step["table"].split(".")
-        catalog.create_namespace_if_not_exists(namespace)
-        table = catalog.create_table(step["table"], _rows([]).schema)
-        if step.get("rows"):
-            table.append(_rows(step["rows"]))
+        with _iceberg_catalog(notebook_dir, step["catalog"]) as catalog:
+            namespace, _ = step["table"].split(".")
+            catalog.create_namespace_if_not_exists(namespace)
+            table = catalog.create_table(step["table"], _rows([]).schema)
+            if step.get("rows"):
+                table.append(_rows(step["rows"]))
     elif op == "iceberg_append":
-        catalog = _iceberg_catalog(notebook_dir, step["catalog"])
-        catalog.load_table(step["table"]).append(_rows(step["rows"]))
+        with _iceberg_catalog(notebook_dir, step["catalog"]) as catalog:
+            catalog.load_table(step["table"]).append(_rows(step["rows"]))
     elif op == "seed_dataset":
         _seed_dataset(registry, step["name"], step["value"])
     elif op == "run_all":

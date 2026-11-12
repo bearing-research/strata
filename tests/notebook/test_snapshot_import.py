@@ -6,6 +6,7 @@ import hashlib
 import json
 import tomllib
 import zipfile
+from contextlib import closing
 
 import cellgraph as cg
 import pytest
@@ -731,7 +732,7 @@ class TestACellCachedUnderItsOwnScheme:
         from strata.notebook.executor import CellExecutor
 
         db = tmp_path / "events.db"
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             conn.execute("CREATE TABLE events (id INTEGER PRIMARY KEY)")
             conn.executemany("INSERT INTO events VALUES (?)", [(1,), (2,)])
         nb = create_notebook(tmp_path / "src", "Sql", initialize_environment=False)

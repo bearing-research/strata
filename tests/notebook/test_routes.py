@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2166,7 +2167,7 @@ def test_get_connection_schema_endpoint_lists_tables_and_columns(client, tmp_pat
     pytest.importorskip("adbc_driver_sqlite")
 
     db_path = tmp_path / "warehouse.db"
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.executescript(
             """
             CREATE TABLE events (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
@@ -2217,7 +2218,7 @@ def _service_mode_sessions(monkeypatch, tmp_path):
 
     store = tmp_path / "state" / "artifacts" / "artifacts.sqlite"
     store.parent.mkdir(parents=True)
-    with sqlite3.connect(store) as conn:
+    with closing(sqlite3.connect(store)) as conn, conn:
         conn.execute("CREATE TABLE artifact_publications (token TEXT)")
     config = StrataConfig(
         cache_dir=tmp_path / "state" / "cache",

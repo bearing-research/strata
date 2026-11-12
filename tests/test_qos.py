@@ -103,12 +103,13 @@ def qos_warehouse(tmp_path):
     )
     large_table.append(large_data)
 
-    return {
+    yield {
         "warehouse_path": warehouse_path,
         "small_table_uri": f"file://{warehouse_path}#test_db.small_table",
         "large_table_uri": f"file://{warehouse_path}#test_db.large_table",
         "catalog": catalog,
     }
+    catalog.close()
 
 
 class TestQoSMetrics:

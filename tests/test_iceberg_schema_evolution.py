@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import sys
+from contextlib import nullcontext
 
 import pyarrow as pa
 import pytest
@@ -48,7 +49,8 @@ def lake(tmp_path):
     catalog.load_table("db.t").append(
         pa.table({"id": pa.array([1, 2], pa.int64()), "x": pa.array([10, 20], pa.int64())})
     )
-    return catalog, f"{warehouse.as_uri()}#db.t", StrataConfig(cache_dir=tmp_path / "cache")
+    yield catalog, f"{warehouse.as_uri()}#db.t", StrataConfig(cache_dir=tmp_path / "cache")
+    catalog.close()
 
 
 def _evolve(catalog, change) -> None:
@@ -57,9 +59,8 @@ def _evolve(catalog, change) -> None:
 
 
 def _scan(config, uri, columns=None, snapshot_id=None, filters=None, planner=None):
-    plan = (planner or ReadPlanner(config)).plan(
-        uri, columns=columns, snapshot_id=snapshot_id, filters=filters
-    )
+    with nullcontext(planner) if planner else ReadPlanner(config) as planner:
+        plan = planner.plan(uri, columns=columns, snapshot_id=snapshot_id, filters=filters)
     fetcher = CachedFetcher(config)
     batches = [fetcher.fetch(task) for task in plan.tasks]
     return pa.Table.from_batches(batches, schema=plan.schema), plan
@@ -159,15 +160,8 @@ def test_a_projected_scan_caching_whole_row_groups_reads_the_evolved_file(lake, 
     assert sorted(table.column("y").to_pylist()) == [10, 20]
 
 
-def test_a_promoted_type_reads_at_its_new_width(tmp_path):
-    from pyiceberg.catalog.sql import SqlCatalog
-
-    warehouse = tmp_path / "warehouse"
-    warehouse.mkdir()
-    catalog = SqlCatalog(
-        "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=warehouse.as_uri()
-    )
-    catalog.create_namespace("db")
+def test_a_promoted_type_reads_at_its_new_width(tmp_path, empty_lake):
+    catalog, uri = empty_lake
     catalog.create_table(
         "db.t", schema=pa.schema([("id", pa.int32()), ("v", pa.float32())])
     ).append(pa.table({"id": pa.array([1], pa.int32()), "v": pa.array([1.5], pa.float32())}))
@@ -179,7 +173,7 @@ def test_a_promoted_type_reads_at_its_new_width(tmp_path):
     )
     config = StrataConfig(cache_dir=tmp_path / "cache")
 
-    table, _ = _scan(config, f"{warehouse.as_uri()}#db.t")
+    table, _ = _scan(config, uri)
     assert table.schema.field("id").type == pa.int64()
     assert table.schema.field("v").type == pa.float64()
     assert _rows(table) == [{"id": 1, "v": 1.5}, {"id": 2, "v": 2.5}]
@@ -200,12 +194,13 @@ def test_a_scan_naming_a_snapshot_reads_that_snapshots_schema(lake):
 def test_a_schema_change_is_not_served_from_the_cache_of_the_old_schema(lake):
     """A schema change makes no snapshot, so the snapshot alone cannot key the cache."""
     catalog, uri, config = lake
-    planner = ReadPlanner(config)  # one planner, as a server has
-    assert _rows(_scan(config, uri, planner=planner)[0]) == [{"id": 1, "x": 10}, {"id": 2, "x": 20}]
-    _evolve(catalog, lambda u: u.delete_column("x"))
-    _evolve(catalog, lambda u: u.add_column("x", LongType()))
+    with ReadPlanner(config) as planner:  # one planner, as a server has
+        first, _ = _scan(config, uri, planner=planner)
+        assert _rows(first) == [{"id": 1, "x": 10}, {"id": 2, "x": 20}]
+        _evolve(catalog, lambda u: u.delete_column("x"))
+        _evolve(catalog, lambda u: u.add_column("x", LongType()))
 
-    table, plan = _scan(config, uri, planner=planner)
+        table, plan = _scan(config, uri, planner=planner)
     assert plan.schema_id != catalog.load_table("db.t").current_snapshot().schema_id
     assert _rows(table) == [{"id": 1, "x": None}, {"id": 2, "x": None}]
 
@@ -249,16 +244,9 @@ def test_the_scan_provenance_names_a_schema_that_is_not_the_snapshots():
     assert provenance(2) != provenance(3)
 
 
-def test_a_filter_on_a_renamed_column_still_prunes_by_its_statistics(tmp_path):
+def test_a_filter_on_a_renamed_column_still_prunes_by_its_statistics(tmp_path, empty_lake):
     """Row-group statistics are found under the file's own name for the column."""
-    from pyiceberg.catalog.sql import SqlCatalog
-
-    warehouse = tmp_path / "warehouse"
-    warehouse.mkdir()
-    catalog = SqlCatalog(
-        "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=warehouse.as_uri()
-    )
-    catalog.create_namespace("db")
+    catalog, uri = empty_lake
     catalog.create_table(
         "db.t",
         schema=pa.schema([("id", pa.int64()), ("x", pa.int64())]),
@@ -271,7 +259,7 @@ def test_a_filter_on_a_renamed_column_still_prunes_by_its_statistics(tmp_path):
     _evolve(catalog, lambda u: u.rename_column("x", "y"))
 
     config = StrataConfig(cache_dir=tmp_path / "cache")
-    _, plan = _scan(config, f"{warehouse.as_uri()}#db.t", filters=[Filter("y", FilterOp.GT, 25)])
+    _, plan = _scan(config, uri, filters=[Filter("y", FilterOp.GT, 25)])
     assert [task.row_group_id for task in plan.tasks] == [1]
     assert plan.pruned_row_groups == 1
 
@@ -308,7 +296,8 @@ def nested(tmp_path):
             }
         )
     )
-    return catalog, f"{warehouse.as_uri()}#db.t", StrataConfig(cache_dir=tmp_path / "cache")
+    yield catalog, f"{warehouse.as_uri()}#db.t", StrataConfig(cache_dir=tmp_path / "cache")
+    catalog.close()
 
 
 def test_nested_fields_are_matched_by_field_id(nested):
@@ -434,11 +423,11 @@ def test_a_nested_type_iceberg_cannot_read_is_refused():
     assert _unreadable(struct, struct) is None
 
 
-def test_a_file_storing_a_struct_where_the_table_says_list_is_refused(tmp_path):
+def test_a_file_storing_a_struct_where_the_table_says_list_is_refused(tmp_path, empty_lake):
     from strata.planner import UnsupportedTableFormatError
     from tests.iceberg_fixtures import commit_files, data_file
 
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = empty_lake
     table = catalog.create_table(
         "db.t", schema=pa.schema([("id", pa.int64()), ("s", pa.list_(pa.int64()))])
     )
@@ -448,8 +437,11 @@ def test_a_file_storing_a_struct_where_the_table_says_list_is_refused(tmp_path):
     rows = pa.table({"id": pa.array([2], pa.int64()), "s": pa.array([{"a": 1}], struct)})
     commit_files(table, data_file(table, rows))
 
-    with pytest.raises(UnsupportedTableFormatError, match="cannot be read as"):
-        ReadPlanner(StrataConfig(cache_dir=tmp_path / "cache")).plan(uri)
+    with (
+        ReadPlanner(StrataConfig(cache_dir=tmp_path / "cache")) as planner,
+        pytest.raises(UnsupportedTableFormatError, match="cannot be read as"),
+    ):
+        planner.plan(uri)
 
 
 def test_an_unchanged_table_reads_its_files_as_written(lake):
@@ -459,7 +451,9 @@ def test_an_unchanged_table_reads_its_files_as_written(lake):
     assert [task.file_columns for task in plan.tasks] == [None]
 
 
-def _catalog(tmp_path):
+@pytest.fixture
+def empty_lake(tmp_path):
+    """A local catalog with an empty namespace ``db``, and the uri of its table ``db.t``."""
     from pyiceberg.catalog.sql import SqlCatalog
 
     warehouse = tmp_path / "warehouse"
@@ -468,10 +462,11 @@ def _catalog(tmp_path):
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=warehouse.as_uri()
     )
     catalog.create_namespace("db")
-    return catalog, f"{warehouse.as_uri()}#db.t"
+    yield catalog, f"{warehouse.as_uri()}#db.t"
+    catalog.close()
 
 
-def test_a_file_holding_nanosecond_timestamps_reads_at_the_tables_unit(tmp_path):
+def test_a_file_holding_nanosecond_timestamps_reads_at_the_tables_unit(tmp_path, empty_lake):
     """A registered file can hold nanoseconds (INT96 reads as nanoseconds too).
 
     pyiceberg truncates to the table's microseconds, and so does the scan.
@@ -480,7 +475,7 @@ def test_a_file_holding_nanosecond_timestamps_reads_at_the_tables_unit(tmp_path)
 
     from tests.iceberg_fixtures import commit_files, data_file
 
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = empty_lake
     schema = pa.schema([("id", pa.int64()), ("ts", pa.timestamp("us"))])
     catalog.create_table("db.t", schema=schema).append(
         pa.table(
@@ -509,7 +504,7 @@ def test_a_file_holding_nanosecond_timestamps_reads_at_the_tables_unit(tmp_path)
     assert _rows(scanned)[1]["ts"] == datetime.datetime(2024, 1, 2)
 
 
-def test_a_required_column_made_optional_streams_as_one_schema(tmp_path):
+def test_a_required_column_made_optional_streams_as_one_schema(tmp_path, empty_lake):
     """The older file says `id` is not null, the newer one that it may be.
 
     Row groups must take the snapshot's nullability or the merge and plan schema reject the mix.
@@ -517,7 +512,7 @@ def test_a_required_column_made_optional_streams_as_one_schema(tmp_path):
     from pyiceberg.schema import Schema
     from pyiceberg.types import NestedField
 
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = empty_lake
     catalog.create_table(
         "db.t",
         schema=Schema(
@@ -573,11 +568,13 @@ def test_a_required_column_made_optional_streams_as_one_schema(tmp_path):
     ],
     ids=["struct child", "list element", "map value"],
 )
-def test_a_nested_field_made_optional_streams_as_one_schema(tmp_path, column, path, older, newer):
+def test_a_nested_field_made_optional_streams_as_one_schema(
+    tmp_path, empty_lake, column, path, older, newer
+):
     """The nested-field version of the nullability mix above."""
     from pyiceberg.schema import Schema
 
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = empty_lake
     table = catalog.create_table(
         "db.t",
         schema=Schema(
@@ -603,7 +600,7 @@ def test_a_nested_field_made_optional_streams_as_one_schema(tmp_path, column, pa
 NANOS = 1_704_153_600_000_000_123  # 2024-01-02 plus 123 ns
 
 
-def _nanos_inside(tmp_path, table_type, file_type, first, nanos, evolve=None):
+def _nanos_inside(empty_lake, table_type, file_type, first, nanos, evolve=None):
     """``db.t`` with *first* in ``s``, then a file holding *nanos* as *file_type*.
 
     Field ids are on the file's top-level columns only, so nested fields go by the name mapping.
@@ -612,7 +609,7 @@ def _nanos_inside(tmp_path, table_type, file_type, first, nanos, evolve=None):
 
     from tests.iceberg_fixtures import commit_files, data_file
 
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = empty_lake
     schema = pa.schema([("id", pa.int64()), ("s", table_type)])
     table = catalog.create_table("db.t", schema=schema)
     table.append(pa.table({"id": pa.array([1], pa.int64()), "s": pa.array([first], table_type)}))
@@ -647,23 +644,23 @@ JAN_1, JAN_2 = datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)
     ids=["struct", "list", "map"],
 )
 def test_nanosecond_timestamps_inside_a_nested_column_read_at_the_tables_unit(
-    tmp_path, table_type, file_type, first, nanos, expected
+    tmp_path, empty_lake, table_type, file_type, first, nanos, expected
 ):
     """A nested timestamp is truncated to microseconds inside a struct, list or map.
 
     pyiceberg refuses the lossy cast inside a list or map; the scan truncates in all three.
     """
-    _, uri = _nanos_inside(tmp_path, table_type, file_type, first, nanos)
+    _, uri = _nanos_inside(empty_lake, table_type, file_type, first, nanos)
 
     scanned, _ = _scan(StrataConfig(cache_dir=tmp_path / "cache"), uri)
     assert scanned.schema.field("s").type == table_type
     assert _rows(scanned) == [{"id": 1, "s": first}, {"id": 2, "s": expected}]
 
 
-def test_nanosecond_timestamps_inside_a_reshaped_struct_are_truncated(tmp_path):
+def test_nanosecond_timestamps_inside_a_reshaped_struct_are_truncated(tmp_path, empty_lake):
     """A struct rebuilt field by field still truncates its nanoseconds."""
     catalog, uri = _nanos_inside(
-        tmp_path,
+        empty_lake,
         pa.struct([("t", US)]),
         pa.struct([("t", NS)]),
         {"t": JAN_1},
@@ -676,7 +673,7 @@ def test_nanosecond_timestamps_inside_a_reshaped_struct_are_truncated(tmp_path):
     assert _rows(scanned)[1]["s"] == {"t": JAN_2, "c": None}
 
 
-def test_a_column_older_files_predate_reads_its_v3_initial_default(tmp_path):
+def test_a_column_older_files_predate_reads_its_v3_initial_default(tmp_path, empty_lake):
     """Files older than a v3 column read its initial-default, not null.
 
     pyiceberg cannot write one yet, so the table's metadata gains it in memory.
@@ -687,7 +684,7 @@ def test_a_column_older_files_predate_reads_its_v3_initial_default(tmp_path):
 
     from strata.iceberg.catalog import PyIcebergCatalog
 
-    catalog, uri = _catalog(tmp_path)
+    catalog, uri = empty_lake
     schema = pa.schema([("id", pa.int64())])
     catalog.create_table("db.t", schema=schema).append(
         pa.table({"id": pa.array([1], pa.int64())}, schema=schema)
@@ -714,5 +711,6 @@ def test_a_column_older_files_predate_reads_its_v3_initial_default(tmp_path):
             return patched
 
     config = StrataConfig(cache_dir=tmp_path / "cache")
-    scanned, _ = _scan(config, uri, planner=ReadPlanner(config, catalog=WithDefault(config)))
+    with ReadPlanner(config, catalog=WithDefault(config)) as planner:
+        scanned, _ = _scan(config, uri, planner=planner)
     assert scanned.to_pylist() == [{"id": 1, "team": "red"}]

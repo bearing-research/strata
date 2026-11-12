@@ -101,8 +101,8 @@ class CacheWarmer:
         self._job_semaphore = asyncio.Semaphore(max_concurrent_jobs)
 
         self._cleanup_task: asyncio.Task | None = None
-        # Row-group fetches running in threads, which cancelling their job does not stop.
-        self._fetches: set[asyncio.Future] = set()
+        # Plans and row-group fetches running in threads, which cancelling their job does not stop.
+        self._threads: set[asyncio.Future] = set()
 
     async def start(self) -> None:
         """Start background cleanup task."""
@@ -125,10 +125,16 @@ class CacheWarmer:
                     job.cancelled = True
                     task.cancel()
                     cancelled.append(task)
-        # Wait them out, and the fetches their threads are still running, so none is still
-        # fetching after shutdown moves on.
+        # Wait them out, and the plans and fetches their threads are still running, so none is
+        # still reading after shutdown moves on.
         await asyncio.gather(*cancelled, return_exceptions=True)
-        await asyncio.gather(*self._fetches, return_exceptions=True)
+        await asyncio.gather(*self._threads, return_exceptions=True)
+
+    def _plan_done(self, planning: asyncio.Future) -> None:
+        self._threads.discard(planning)
+        # Retrieved, so a plan that fails after its job was cancelled is not logged as unseen.
+        if not planning.cancelled():
+            planning.exception()
 
     async def start_job(
         self,
@@ -280,8 +286,8 @@ class CacheWarmer:
 
                 loop = asyncio.get_event_loop()
                 fetch = loop.run_in_executor(None, fetch_row_group, task)
-                self._fetches.add(fetch)
-                fetch.add_done_callback(self._fetches.discard)
+                self._threads.add(fetch)
+                fetch.add_done_callback(self._threads.discard)
                 # Shielded: cancelling the job cannot stop the thread, so stop waits for it.
                 return await asyncio.shield(fetch)
 
@@ -309,13 +315,19 @@ class CacheWarmer:
             try:
                 # Off the loop: planning reads the catalog and manifests from the object store.
                 # to_thread copies the context, so the plan runs as the job's tenant.
-                plan = await asyncio.to_thread(
-                    self._planner.plan,
-                    table_uri=table_uri,
-                    snapshot_id=request.snapshot_id,
-                    columns=request.columns,
-                    filters=[],
+                planning = asyncio.ensure_future(
+                    asyncio.to_thread(
+                        self._planner.plan,
+                        table_uri=table_uri,
+                        snapshot_id=request.snapshot_id,
+                        columns=request.columns,
+                        filters=[],
+                    )
                 )
+                self._threads.add(planning)
+                planning.add_done_callback(self._plan_done)
+                # Shielded as a fetch is: cancelling the job cannot stop the thread.
+                plan = await asyncio.shield(planning)
                 if job.authorize is not None:
                     job.authorize(table_uri, plan.table_identity)
 
