@@ -3601,6 +3601,11 @@ view. They open the notebook locally - no server, no env sync:</p>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>strata<span class="w"> </span>dag<span class="w">       </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># dependency edges + topological order</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>strata<span class="w"> </span>status<span class="w">    </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># per-cell status + staleness summary</span>
 </code></pre></div>
+<p>A ready cell whose result read a file it does not declare, and that file changed since,
+shows <code>·may be out of date</code> in <code>status</code> and a <code>hint:</code> in <code>cell show</code>; in JSON, its
+<code>changed_reads</code> lists the files. A plain run would hit the same cache: <code>cell run --rerun</code>
+reads them again (see
+<a href="../../guides/cells/python/#when-such-a-file-changes">When such a file changes</a>).</p>
 <p>Every <code>&lt;cell_id&gt;</code> here and below is the id from <code>notebook.toml</code> or <code>cell list</code>,
 not the cell's <code># @name</code>.</p>
 <p>Each takes <code>--format human|json</code> (JSON is the default - these are agent-first).

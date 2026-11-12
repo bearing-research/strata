@@ -2005,6 +2005,22 @@ the cell holds, so a failed run replaces them only when it found something itsel
 Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
 what they read is not reported.
 
+### When such a file changes
+
+A local run also notes each such file as it read it (its size and modification time) and
+each folder it listed by the names in it. When one of them changes, the cell stays ready,
+since its key did not move and a plain run would get the same cached result, but it says
+the result may be out of date: a **may be out of date** badge in the UI, `changed_reads`
+in `strata status`, `strata cell show` and MCP `status`, and a hint naming the files. A
+plain run that hits the cache keeps saying it. A file that changed while the run had it
+is out of date as soon as the run ends; one the run wrote itself is not. Rerun the cell
+(↻, `strata cell run --rerun`) to read them again, or mount them so the key follows
+them. Nothing watches the files: a ready cell's are checked whenever staleness is
+worked out (opening the notebook, an edit, after a run) and whenever its status is
+read (`strata status`, `strata cell show`, MCP `status`, a page reload), over up to 100
+per cell, the files it read before the modules it imported. A remote worker's run is not
+checked: its files are on the worker.
+
 ## Where a cell runs: `work/`
 
 A cell runs in its notebook's `work/` directory, not beside `notebook.toml`. A file it writes by a relative path (`plt.savefig("fig.png")`) lands in `work/fig.png`, and a later cell reads it back by the same path. `work/` is made on the first run and kept between runs. The `.gitignore` that `strata new` writes leaves it out of git, exports and snapshots leave it out too, and it is never on `sys.path`, so a file a cell wrote there is not imported in place of a library. R cells run there as well.
@@ -6922,7 +6938,7 @@ details stay in the server log.
 | `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. For a swept variable, each variant's cell and the name `lineage` takes for it. |
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
-| `status(session_id)` | Per-cell status + staleness summary. |
+| `status(session_id)` | Per-cell status + staleness summary. A ready cell's `changed_reads` lists files it read without declaring them that changed since: its result may be out of date, and only a `rerun` reads them again. |
 | `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. A cell that raised has its `traceback` and `traceback_full`; `run_diagnostics` names what the run read without declaring it, each with its fix. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
 | `cancel_cell(session_id, cell_id)` | Cancel the cell's run, whoever started it, as the browser's stop button does: the run stops and the cell is left idle. A `run_cell` waiting on it returns `status: error` with `error_code: cancelled`. Returns `{cell_id, cancelled, status}`; `cancelled` is `false` when the cell was not running. |
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
@@ -9902,6 +9918,12 @@ strata dag       <notebook_dir>            # dependency edges + topological orde
 strata status    <notebook_dir>            # per-cell status + staleness summary
 ```
 
+A ready cell whose result read a file it does not declare, and that file changed since,
+shows `·may be out of date` in `status` and a `hint:` in `cell show`; in JSON, its
+`changed_reads` lists the files. A plain run would hit the same cache: `cell run --rerun`
+reads them again (see
+[When such a file changes](https://bearingresearch.com/strata/dev/guides/cells/python/#when-such-a-file-changes)).
+
 Every `<cell_id>` here and below is the id from `notebook.toml` or `cell list`,
 not the cell's `# @name`.
 
@@ -12738,7 +12760,7 @@ All messages are JSON with this shape:
 
 | Type                      | Payload                                                                                                                  | Description                                      |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| `cell_status`             | `{ "cell_id": "...", "status": "running", "remote_worker": "...", "remote_transport": "...", "remote_build_state": "...", "staleness_reasons": [...], "causality": {...} }` | Status changed. Only `cell_id` and `status` are always present: the `remote_*` fields come with `running` for a remote cell (`remote_build_state` is `starting` while a worker provisions the job), `staleness_reasons` and `causality` with a staleness update. A remote cell on a worker that queues its jobs gets two more `running` frames during the run, with `remote_build_state` `starting` and then `running`; they update the badge and do not start a new run. While `starting`, a frame may also carry `remote_queue_position` and `remote_queue_detail`, the dispatcher's report on a queued job, and while `running`, `remote_queue_detail` alone, its sentence on where the job runs. Another such frame follows each time the report changes. A `running` frame without `remote_build_state` starts a run: clear the cell's console (see [Console](#console)) |
+| `cell_status`             | `{ "cell_id": "...", "status": "running", "remote_worker": "...", "remote_transport": "...", "remote_build_state": "...", "staleness_reasons": [...], "causality": {...} }` | Status changed. Only `cell_id` and `status` are always present: the `remote_*` fields come with `running` for a remote cell (`remote_build_state` is `starting` while a worker provisions the job), `staleness_reasons` and `causality` with a staleness update. A `ready` cell may carry `changed_reads`: files its result read without declaring them that changed since, so it may be out of date (see [When such a file changes](https://bearingresearch.com/strata/dev/guides/cells/python/#when-such-a-file-changes)). Every status frame says it, and a frame without it means none. A remote cell on a worker that queues its jobs gets two more `running` frames during the run, with `remote_build_state` `starting` and then `running`; they update the badge and do not start a new run. While `starting`, a frame may also carry `remote_queue_position` and `remote_queue_detail`, the dispatcher's report on a queued job, and while `running`, `remote_queue_detail` alone, its sentence on where the job runs. Another such frame follows each time the report changes. A `running` frame without `remote_build_state` starts a run: clear the cell's console (see [Console](#console)) |
 | `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...], "run_diagnostics": [...] }` | Execution result, including rich visible outputs. `outputs` maps each stored variable to its preview; `_` is the last displayed value. On a cache hit `duration_ms` is the load time, and `saved_ms` is what the hit saved (0 when no earlier run priced it). `artifact_uris` maps each stored variable to its artifact. `run_diagnostics` holds `{severity, code, message}` rows for what the run read without declaring it and the inputs it mutated, each naming its fix; they replace the cell's, and a cache hit carries those of the run behind it (see [Reads the cell does not declare](https://bearingresearch.com/strata/dev/guides/cells/python/#reads-the-cell-does-not-declare)). `stdout` / `stderr` are the run's whole console and replace what `cell_console` built (see [Console](#console)). A remote run adds `remote_worker`, `remote_transport`, `remote_build_id` and `remote_build_state`. An entry of `outputs` or `displays` keeps fields this server does not know, since the harness that wrote it may be a worker on another version |
 | `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed - clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. `kind: "notice"` is a provider-degradation message to show beside the stream, not part of its content. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "...", "chunk_seq": 0 }`                                                | Console output. Append `text` to the cell's console for `stream`. A remote cell's output arrives while it runs, numbered per stream by `chunk_seq` from 0: chunk 0 starts that stream's console for the run, so replace what the last run left. `chunk_seq` is `null` on console sent when the cell finishes: for a cell that streamed nothing (every local cell), that frame is the stream's whole console for the run (see [Console](#console)) |

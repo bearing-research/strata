@@ -3899,6 +3899,11 @@ exhaustive commit history.</p>
   it again. It never changes a key, a status or what is cached. Mutation warnings show in
   the same pill, for the first time in the UI, and <code>strata run --format json</code> reports
   both as <code>run_diagnostics</code>, in place of its <code>mutation_warnings</code>. (#1504, #1509)</li>
+<li><strong>A ready cell says when a file its result read undeclared has changed.</strong>
+  A local run notes each file it read without declaring it. When one changes, the
+  cell stays ready (a plain run still hits the cache) and says its result may be out
+  of date: a badge in the UI, <code>changed_reads</code> in <code>strata status</code>, <code>strata cell show</code>
+  and MCP, each naming the rerun or the mount that fixes it. (#1512, #1514)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>

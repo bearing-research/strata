@@ -3274,7 +3274,7 @@ details stay in the server log.</p>
 </tr>
 <tr>
 <td><code>status(session_id)</code></td>
-<td>Per-cell status + staleness summary.</td>
+<td>Per-cell status + staleness summary. A ready cell's <code>changed_reads</code> lists files it read without declaring them that changed since: its result may be out of date, and only a <code>rerun</code> reads them again.</td>
 </tr>
 <tr>
 <td><code>run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)</code></td>
