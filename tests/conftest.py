@@ -828,3 +828,7 @@ def rebinding_dns(monkeypatch) -> RebindingDNS:
         socket, "getaddrinfo", lambda *args, **kwargs: dns.getaddrinfo(*args, real=real, **kwargs)
     )
     return dns
+
+
+if os.environ.get("GCPROBE_DIR"):  # throwaway measurement, not for merging
+    from tests._gcprobe import pytest_runtest_logreport, pytest_sessionfinish  # noqa: F401
