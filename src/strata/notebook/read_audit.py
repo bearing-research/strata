@@ -6,9 +6,9 @@ file it reads around them is invisible to the key, and its cached result outlive
 file's change. This is an audit, never a key: an ``sys.addaudithook`` hook records the
 files a cell opens and the directories it lists, a ``sys.modules`` diff the modules it
 loads, and the programs it starts, and :func:`report` sorts out what no declaration
-covers. Native readers (pyarrow, polars, duckdb) open files without an ``open`` event, so
-their entry points that take a path are wrapped as their modules are imported
-(``_NATIVE_READERS``) and record it.
+covers. Native readers and writers (pyarrow, polars, duckdb) open files without an
+``open`` event, so their entry points that take a path are wrapped as their modules are
+imported (``_NATIVE_READERS``, ``_NATIVE_WRITERS``) and record it.
 """
 
 from __future__ import annotations
@@ -17,9 +17,11 @@ import ast
 import functools
 import glob
 import hashlib
+import inspect
 import os
 import stat
 import sys
+import threading
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -46,9 +48,9 @@ _WRITES = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_APPEND
 
 # Entry points that open a path in native code, where the hook sees no ``open``: (module,
 # attribute, the parameter holding the path, the one holding the mode). A class is
-# wrapped at its ``__init__``, a ``Class.method`` after its ``self``; one missing in the
-# installed version is skipped. DuckDB SQL strings and ``pyarrow.OSFile`` (an immutable
-# type) are out of reach.
+# wrapped at its ``__init__``; one missing in the installed version is skipped. pandas
+# reads Parquet through pyarrow. DuckDB SQL strings and the immutable types
+# (``pyarrow.OSFile``, ``pyarrow.csv.CSVWriter``) are out of reach.
 _NATIVE_READERS: tuple[tuple[str, str, str, str | None], ...] = (
     ("pyarrow", "memory_map", "path", "mode"),
     ("pyarrow", "input_stream", "source", None),
@@ -75,7 +77,6 @@ _NATIVE_READERS: tuple[tuple[str, str, str, str | None], ...] = (
     ("pyarrow.json", "open_json", "input_file", None),
     ("pyarrow.ipc", "open_file", "source", None),
     ("pyarrow.ipc", "open_stream", "source", None),
-    ("pandas", "read_parquet", "path", None),
     *(
         ("polars", name, "source", None)
         for name in (
@@ -92,6 +93,8 @@ _NATIVE_READERS: tuple[tuple[str, str, str, str | None], ...] = (
             "read_ipc_stream",
             "read_ipc_schema",
             "scan_ipc",
+            "read_lines",
+            "scan_lines",
             "read_avro",
             "read_excel",
             "read_ods",
@@ -105,7 +108,41 @@ _NATIVE_READERS: tuple[tuple[str, str, str, str | None], ...] = (
         for name in ("read_parquet", "from_parquet", "read_csv", "from_csv_auto", "read_json")
     ),
 )
-_READER_MODULES = frozenset(module for module, *_ in _NATIVE_READERS)
+# (module, attribute, the parameter holding the path): what they write is the run's own.
+_NATIVE_WRITERS: tuple[tuple[str, str, str], ...] = (
+    ("pyarrow", "output_stream", "source"),
+    ("pyarrow", "create_memory_map", "path"),
+    ("pyarrow.parquet", "write_table", "where"),
+    ("pyarrow.parquet", "ParquetWriter", "where"),
+    ("pyarrow.parquet", "write_to_dataset", "root_path"),
+    ("pyarrow.parquet", "write_metadata", "where"),
+    ("pyarrow.dataset", "write_dataset", "base_dir"),
+    ("pyarrow.feather", "write_feather", "dest"),
+    ("pyarrow.orc", "write_table", "where"),
+    ("pyarrow.orc", "ORCWriter", "where"),
+    ("pyarrow.csv", "write_csv", "output_file"),
+    ("pyarrow.ipc", "new_file", "sink"),
+    ("pyarrow.ipc", "new_stream", "sink"),
+    # It opens pyarrow's own stream, which the hook does not see.
+    ("pandas", "DataFrame.to_parquet", "path"),
+    *(
+        ("polars", f"DataFrame.write_{name}", "file")
+        for name in ("parquet", "csv", "ipc", "ipc_stream", "ndjson", "json", "avro")
+    ),
+    ("polars", "DataFrame.write_excel", "workbook"),
+    ("polars", "DataFrame.write_delta", "target"),
+    *(("polars", f"LazyFrame.sink_{name}", "path") for name in ("parquet", "csv", "ipc", "ndjson")),
+    ("polars", "LazyFrame.sink_delta", "target"),
+    *(
+        ("duckdb", f"DuckDBPyRelation.{name}", "file_name")
+        for name in ("write_parquet", "to_parquet", "write_csv", "to_csv")
+    ),
+)
+_NATIVE_MODULES = frozenset(module for module, *_ in _NATIVE_READERS + _NATIVE_WRITERS)
+
+# What a dataset's discovery skips in a folder (pyarrow's ``ignore_prefixes``): ``_SUCCESS``,
+# ``_delta_log``, ``.crc`` files are a writer's bookkeeping, not data read.
+_BOOKKEEPING = ("_", ".")
 
 
 class ReadFinding(TypedDict):
@@ -178,34 +215,38 @@ class Observed:
     def native(self, source: Any, mode: str) -> None:
         """A path a native reader was given: a file, a folder of them, a glob, or a list.
 
-        A buffer or an open file is skipped (its ``open`` was seen), and so is a path that
-        is not here (a remote URI). A folder or a glob is listed here, which the hook
-        records as listings.
+        A buffer, bytes (polars reads them as the file's content) or an open file is
+        skipped (its ``open`` was seen), and so is a path that is not here (a remote URI).
+        A folder or a glob is listed here, which the hook records as listings.
         """
-        if isinstance(source, (list, tuple)):
-            for item in source:
-                self.native(item, mode)
-            return
-        if not isinstance(source, (str, bytes, os.PathLike)):
-            return
-        text = os.fsdecode(source).removeprefix("file://")
-        name = self._path(os.path.expanduser(text))
-        if name is None:
-            return
-        if glob.has_magic(name):
-            names = sorted(glob.glob(name, recursive=True))
-        else:
-            names = [name]
-        for found in names:
-            if os.path.isdir(found):
-                for root, dirs, files in os.walk(found):
-                    dirs.sort()
-                    for file in sorted(files):
-                        if self.partial:
-                            return
-                        self.open(os.path.join(root, file), mode, None)
-            elif os.path.exists(found):
-                self.open(found, mode, None)
+        for found in _native_paths(source, globs=True):
+            for file in _files_in(found, data_only=True):
+                if len(self.files) >= PATH_CAP:
+                    self.partial = True
+                    return
+                self.open(file, mode, None)
+
+    def files_at(self, target: Any) -> dict[str, list[int] | None]:
+        """What a native writer's *target* holds now, unseen by the hook."""
+        self.quiet = True
+        try:
+            held: dict[str, list[int] | None] = {}
+            for found in _native_paths(target, globs=False):
+                for file in _files_in(found, data_only=False):
+                    if len(held) >= PATH_CAP:
+                        self.partial = True
+                        return held
+                    held[file] = fingerprint(file)
+            return held
+        finally:
+            self.quiet = False
+
+    def native_write(self, target: Any, before: Mapping[str, list[int] | None]) -> None:
+        """What a native writer made or changed at *target*: the run's own, as an ``open``
+        to write is."""
+        for file, now in self.files_at(target).items():
+            if file not in before or before[file] != now:
+                self.open(file, "w", None)
 
     def listing(self, path: Any) -> None:
         name = self._path(path)
@@ -233,8 +274,53 @@ class Observed:
             self.programs.add(os.path.basename(text.split()[0]) if text.strip() else text)
 
 
+def _native_paths(source: Any, *, globs: bool) -> list[str]:
+    """The paths here a native call names: its own if it exists, else, with *globs*, what
+    the pattern in it matches (polars globs). A literal ``[`` or ``?`` in a name is a
+    name, as pyarrow reads it."""
+    if isinstance(source, (list, tuple)):
+        return [path for item in source for path in _native_paths(item, globs=globs)]
+    if not isinstance(source, (str, os.PathLike)):
+        return []
+    text = os.fsdecode(source).removeprefix("file://")
+    name = os.path.abspath(os.path.expanduser(text))
+    if os.path.exists(name):
+        return [name]
+    if not globs or not glob.has_magic(text):
+        return []
+    # Only the cell's own text is a pattern, not the folder it is under.
+    if text.startswith("~"):
+        head, _, pattern = text.partition(os.sep)
+        root = os.path.expanduser(head)
+    elif os.path.isabs(text):
+        root, pattern = None, text
+    else:
+        root, pattern = os.getcwd(), text
+    found = glob.glob(pattern, root_dir=root, recursive=True)
+    return sorted(os.path.join(root, path) if root else path for path in found)
+
+
+def _files_in(path: str, *, data_only: bool) -> list[str]:
+    """*path* if a file, else the files under it; with *data_only*, those a dataset's
+    discovery reads (no ``_BOOKKEEPING`` names)."""
+    if not os.path.isdir(path):
+        return [path]
+    found = []
+    for root, dirs, files in os.walk(path):
+        dirs[:] = sorted(d for d in dirs if not (data_only and d.startswith(_BOOKKEEPING)))
+        found.extend(
+            os.path.join(root, file)
+            for file in sorted(files)
+            if not (data_only and file.startswith(_BOOKKEEPING))
+        )
+    return found
+
+
 _current: Observed | None = None
 _installed = False
+# Set while a wrapped native call runs: pandas calls pyarrow, which calls itself, on the
+# one path, and only the outermost call records it.
+_in_native = threading.local()
 
 
 def _on_event(event: str, args: tuple[Any, ...]) -> None:
@@ -268,8 +354,8 @@ def recording() -> Generator[Observed]:
     if not _installed:
         sys.addaudithook(_on_event)
         sys.meta_path.insert(0, _WrapOnImport())
-        for module in _READER_MODULES & set(sys.modules):
-            _wrap_readers(module)
+        for module in _NATIVE_MODULES & set(sys.modules):
+            _wrap_natives(module)
         _installed = True
     observed = Observed()
     _current = observed
@@ -279,34 +365,86 @@ def recording() -> Generator[Observed]:
         _current = None
 
 
-def _reader(fn: Callable[..., Any], param: str, mode: str | None, at: int) -> Callable[..., Any]:
-    """*fn*, recording the path its *param* (positional at *at*) names, then calling it."""
+def _path_argument(
+    signature: inspect.Signature | None,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    param: str,
+    mode: str | None,
+) -> tuple[Any, str] | None:
+    """The path a call names in *param*, and its mode; None for one on another filesystem
+    (pyarrow's or fsspec's), which is not a local file."""
+    arguments = dict(kwargs)
+    if signature is not None:
+        try:
+            bound = signature.bind_partial(*args, **kwargs).arguments
+        except TypeError:
+            bound = {}  # the call itself raises
+        for name, value in bound.items():
+            kind = signature.parameters[name].kind
+            if kind is inspect.Parameter.VAR_KEYWORD:
+                arguments.update(value)
+            elif kind is not inspect.Parameter.VAR_POSITIONAL:
+                arguments[name] = value
+    if param not in arguments and (signature is None or param not in signature.parameters):
+        # A ``*args`` signature (duckdb's ``read_csv``): the path comes first, after a self.
+        positional = args[1:] if signature and "self" in signature.parameters else args
+        arguments[param] = positional[0] if positional else None
+    filesystem = arguments.get("filesystem")
+    if filesystem is not None and type(filesystem).__name__ != "LocalFileSystem":
+        return None
+    how = arguments.get(mode, "r") if mode else "r"
+    return arguments.get(param), how if isinstance(how, str) else "r"
+
+
+def _native(
+    fn: Callable[..., Any], param: str, mode: str | None, *, writes: bool, at: tuple[str, str]
+) -> Callable[..., Any]:
+    """*fn*, recording the path its *param* names: before the call for a reader, what it
+    made or changed after it for a writer. *at* is the module and name it is set at."""
+    try:
+        signature: inspect.Signature | None = inspect.signature(fn)
+    except (TypeError, ValueError):
+        signature = None
 
     @functools.wraps(fn)
-    def reader(*args: Any, **kwargs: Any) -> Any:
+    def native(*args: Any, **kwargs: Any) -> Any:
         observed = _current
-        # A path on another filesystem (pyarrow's or fsspec's) is not a local file.
-        filesystem = kwargs.get("filesystem")
-        local = filesystem is None or type(filesystem).__name__ == "LocalFileSystem"
-        if observed is not None and not observed.quiet and local:
+        if observed is None or observed.quiet or getattr(_in_native, "call", False):
+            return fn(*args, **kwargs)
+        _in_native.call = True
+        try:
+            named = before = None
             try:
-                source = kwargs[param] if param in kwargs else args[at] if len(args) > at else None
-                how = kwargs.get(mode, "r") if mode else "r"
-                if mode and mode not in kwargs and len(args) > at + 1:
-                    how = args[at + 1]
-                observed.native(source, how if isinstance(how, str) else "r")
+                named = _path_argument(signature, args, kwargs, param, mode)
+                if named is not None and writes:
+                    before = observed.files_at(named[0])
+                elif named is not None:
+                    observed.native(*named)
             except Exception:
                 # The cell's own call must not fail on the audit; the record is partial.
                 observed.partial = True
-        return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
+            if named is not None and before is not None:
+                try:
+                    observed.native_write(named[0], before)
+                except Exception:
+                    observed.partial = True
+            return result
+        finally:
+            _in_native.call = False
 
-    return reader
+    # Where pickle looks it up, so it pickles by reference, as the original did.
+    native.__module__, native.__qualname__ = at
+    return native
 
 
-def _wrap_readers(module_name: str) -> None:
-    """Wrap *module_name*'s native readers in place."""
+def _wrap_natives(module_name: str) -> None:
+    """Wrap *module_name*'s native readers and writers in place."""
     module = sys.modules.get(module_name)
-    for name, attribute, param, mode in _NATIVE_READERS:
+    entries = [(*reader, False) for reader in _NATIVE_READERS]
+    entries += [(name, attribute, param, None, True) for name, attribute, param in _NATIVE_WRITERS]
+    for name, attribute, param, mode, writes in entries:
         if name != module_name or module is None:
             continue
         *path, last = attribute.split(".")
@@ -314,23 +452,29 @@ def _wrap_readers(module_name: str) -> None:
         for part in path:
             owner = getattr(owner, part, None)
         target = getattr(owner, last, None)
-        at = 1 if path else 0
+        qualname = attribute
         if isinstance(target, type):
-            owner, last, target, at = target, "__init__", target.__init__, 1
+            owner, last, target, qualname = (
+                target,
+                "__init__",
+                target.__init__,
+                f"{attribute}.__init__",
+            )
         if target is None:
             continue
+        wrapper = _native(target, param, mode, writes=writes, at=(module_name, qualname))
         try:
-            setattr(owner, last, _reader(target, param, mode, at))
+            setattr(owner, last, wrapper)
         except (AttributeError, TypeError):
             continue  # an immutable type
 
 
 class _WrapOnImport:
-    """A ``sys.meta_path`` finder that finds nothing itself: it wraps a native reader's
-    module's entry points once the finder after it has loaded the module."""
+    """A ``sys.meta_path`` finder that finds nothing itself: it wraps a native reader's or
+    writer's module's entry points once the finder after it has loaded the module."""
 
     def find_spec(self, name: str, path: Any, target: Any = None) -> Any:
-        if name not in _READER_MODULES:
+        if name not in _NATIVE_MODULES:
             return None
         for finder in sys.meta_path:
             find = getattr(finder, "find_spec", None)
@@ -347,7 +491,7 @@ class _WrapOnImport:
 
         def exec_and_wrap(module: Any) -> None:
             exec_module(module)
-            _wrap_readers(name)
+            _wrap_natives(name)
 
         try:
             spec.loader.exec_module = exec_and_wrap

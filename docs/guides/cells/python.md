@@ -295,11 +295,16 @@ the cell holds, so a failed run replaces them only when it found something itsel
 pyarrow, polars and DuckDB read files in native code, where Python sees no open, so
 their readers that take a path are wrapped in the cell's process and say what they were
 given: pyarrow's `parquet`, `dataset`, `feather`, `orc`, `csv`, `json` and `ipc` readers
-and `memory_map`, `pd.read_parquet`, polars' `read_*` and `scan_*`, and DuckDB's
-`read_parquet`, `read_csv` and `read_json` (on the module or a connection). A folder
-counts as each file in it, and a glob as what it matches. A file named in DuckDB SQL
-(`select * from 'x.parquet'`), one opened with `pyarrow.OSFile`, and a path on another
-filesystem (`filesystem=` other than the local one) are not seen.
+and `memory_map`, `pd.read_parquet`, polars' file readers (`read_*` and `scan_*`, not
+`read_database` or `scan_iceberg`), and DuckDB's `read_parquet`, `read_csv` and
+`read_json` (on the module or a connection). A folder counts as each file in it but the
+`_` and `.` ones a dataset skips (`_SUCCESS`, `_delta_log`), and a glob as what it
+matches. Their writers (pyarrow's, `DataFrame.to_parquet`, polars' `write_*` and
+`sink_*`, a DuckDB relation's `write_parquet` and `write_csv`) make files that are the
+run's own, as `open(path, "w")` does, so reading one back is not a finding. A file named
+in DuckDB SQL (`select * from 'x.parquet'`, `COPY ... TO`), one opened with
+`pyarrow.OSFile`, and a path on another filesystem (`filesystem=` other than the local
+one) are not seen.
 
 ### When such a file changes
 
