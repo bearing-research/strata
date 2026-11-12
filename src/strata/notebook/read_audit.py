@@ -6,18 +6,21 @@ file it reads around them is invisible to the key, and its cached result outlive
 file's change. This is an audit, never a key: an ``sys.addaudithook`` hook records the
 files a cell opens and the directories it lists, a ``sys.modules`` diff the modules it
 loads, and the programs it starts, and :func:`report` sorts out what no declaration
-covers. Native readers (pyarrow's parquet, polars, duckdb) open files without an
-``open`` event, so they are not seen.
+covers. Native readers (pyarrow, polars, duckdb) open files without an ``open`` event, so
+their entry points that take a path are wrapped as their modules are imported
+(``_NATIVE_READERS``) and record it.
 """
 
 from __future__ import annotations
 
 import ast
+import functools
+import glob
 import hashlib
 import os
 import stat
 import sys
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
@@ -40,6 +43,69 @@ AUDIT_FAILED = "audit_failed"
 _PATH_CODES = frozenset({UNDECLARED_READ, UNDECLARED_LISTING, UNDECLARED_IMPORT, WORK_DIR_READ})
 
 _WRITES = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+# Entry points that open a path in native code, where the hook sees no ``open``: (module,
+# attribute, the parameter holding the path, the one holding the mode). A class is
+# wrapped at its ``__init__``, a ``Class.method`` after its ``self``; one missing in the
+# installed version is skipped. DuckDB SQL strings and ``pyarrow.OSFile`` (an immutable
+# type) are out of reach.
+_NATIVE_READERS: tuple[tuple[str, str, str, str | None], ...] = (
+    ("pyarrow", "memory_map", "path", "mode"),
+    ("pyarrow", "input_stream", "source", None),
+    *(
+        ("pyarrow.parquet", name, param, None)
+        for name, param in (
+            ("read_table", "source"),
+            ("read_pandas", "source"),
+            ("ParquetFile", "source"),
+            ("ParquetDataset", "path_or_paths"),
+            ("read_metadata", "where"),
+            ("read_schema", "where"),
+        )
+    ),
+    ("pyarrow.dataset", "dataset", "source", None),
+    ("pyarrow.dataset", "parquet_dataset", "metadata_path", None),
+    ("pyarrow.feather", "read_table", "source", None),
+    ("pyarrow.feather", "read_feather", "source", None),
+    ("pyarrow.orc", "read_table", "source", None),
+    ("pyarrow.orc", "ORCFile", "source", None),
+    ("pyarrow.csv", "read_csv", "input_file", None),
+    ("pyarrow.csv", "open_csv", "input_file", None),
+    ("pyarrow.json", "read_json", "input_file", None),
+    ("pyarrow.json", "open_json", "input_file", None),
+    ("pyarrow.ipc", "open_file", "source", None),
+    ("pyarrow.ipc", "open_stream", "source", None),
+    ("pandas", "read_parquet", "path", None),
+    *(
+        ("polars", name, "source", None)
+        for name in (
+            "read_parquet",
+            "scan_parquet",
+            "read_parquet_schema",
+            "read_parquet_metadata",
+            "read_csv",
+            "scan_csv",
+            "read_ndjson",
+            "scan_ndjson",
+            "read_json",
+            "read_ipc",
+            "read_ipc_stream",
+            "read_ipc_schema",
+            "scan_ipc",
+            "read_avro",
+            "read_excel",
+            "read_ods",
+            "read_delta",
+            "scan_delta",
+        )
+    ),
+    *(
+        ("duckdb", f"{owner}{name}", "path_or_buffer", None)
+        for owner in ("", "DuckDBPyConnection.")
+        for name in ("read_parquet", "from_parquet", "read_csv", "from_csv_auto", "read_json")
+    ),
+)
+_READER_MODULES = frozenset(module for module, *_ in _NATIVE_READERS)
 
 
 class ReadFinding(TypedDict):
@@ -109,6 +175,38 @@ class Observed:
             # The event fires ahead of the open: this is the file the run reads.
             self.read_as[name] = self._fingerprint(name)
 
+    def native(self, source: Any, mode: str) -> None:
+        """A path a native reader was given: a file, a folder of them, a glob, or a list.
+
+        A buffer or an open file is skipped (its ``open`` was seen), and so is a path that
+        is not here (a remote URI). A folder or a glob is listed here, which the hook
+        records as listings.
+        """
+        if isinstance(source, (list, tuple)):
+            for item in source:
+                self.native(item, mode)
+            return
+        if not isinstance(source, (str, bytes, os.PathLike)):
+            return
+        text = os.fsdecode(source).removeprefix("file://")
+        name = self._path(os.path.expanduser(text))
+        if name is None:
+            return
+        if glob.has_magic(name):
+            names = sorted(glob.glob(name, recursive=True))
+        else:
+            names = [name]
+        for found in names:
+            if os.path.isdir(found):
+                for root, dirs, files in os.walk(found):
+                    dirs.sort()
+                    for file in sorted(files):
+                        if self.partial:
+                            return
+                        self.open(os.path.join(root, file), mode, None)
+            elif os.path.exists(found):
+                self.open(found, mode, None)
+
     def listing(self, path: Any) -> None:
         name = self._path(path)
         if name is None or name in self.listings:
@@ -169,6 +267,9 @@ def recording() -> Generator[Observed]:
     global _current, _installed
     if not _installed:
         sys.addaudithook(_on_event)
+        sys.meta_path.insert(0, _WrapOnImport())
+        for module in _READER_MODULES & set(sys.modules):
+            _wrap_readers(module)
         _installed = True
     observed = Observed()
     _current = observed
@@ -176,6 +277,83 @@ def recording() -> Generator[Observed]:
         yield observed
     finally:
         _current = None
+
+
+def _reader(fn: Callable[..., Any], param: str, mode: str | None, at: int) -> Callable[..., Any]:
+    """*fn*, recording the path its *param* (positional at *at*) names, then calling it."""
+
+    @functools.wraps(fn)
+    def reader(*args: Any, **kwargs: Any) -> Any:
+        observed = _current
+        # A path on another filesystem (pyarrow's or fsspec's) is not a local file.
+        filesystem = kwargs.get("filesystem")
+        local = filesystem is None or type(filesystem).__name__ == "LocalFileSystem"
+        if observed is not None and not observed.quiet and local:
+            try:
+                source = kwargs[param] if param in kwargs else args[at] if len(args) > at else None
+                how = kwargs.get(mode, "r") if mode else "r"
+                if mode and mode not in kwargs and len(args) > at + 1:
+                    how = args[at + 1]
+                observed.native(source, how if isinstance(how, str) else "r")
+            except Exception:
+                # The cell's own call must not fail on the audit; the record is partial.
+                observed.partial = True
+        return fn(*args, **kwargs)
+
+    return reader
+
+
+def _wrap_readers(module_name: str) -> None:
+    """Wrap *module_name*'s native readers in place."""
+    module = sys.modules.get(module_name)
+    for name, attribute, param, mode in _NATIVE_READERS:
+        if name != module_name or module is None:
+            continue
+        *path, last = attribute.split(".")
+        owner: Any = module
+        for part in path:
+            owner = getattr(owner, part, None)
+        target = getattr(owner, last, None)
+        at = 1 if path else 0
+        if isinstance(target, type):
+            owner, last, target, at = target, "__init__", target.__init__, 1
+        if target is None:
+            continue
+        try:
+            setattr(owner, last, _reader(target, param, mode, at))
+        except (AttributeError, TypeError):
+            continue  # an immutable type
+
+
+class _WrapOnImport:
+    """A ``sys.meta_path`` finder that finds nothing itself: it wraps a native reader's
+    module's entry points once the finder after it has loaded the module."""
+
+    def find_spec(self, name: str, path: Any, target: Any = None) -> Any:
+        if name not in _READER_MODULES:
+            return None
+        for finder in sys.meta_path:
+            find = getattr(finder, "find_spec", None)
+            if finder is self or find is None:
+                continue
+            spec = find(name, path, target)
+            if spec is not None:
+                break
+        else:
+            return None
+        exec_module = getattr(spec.loader, "exec_module", None)
+        if exec_module is None:
+            return spec
+
+        def exec_and_wrap(module: Any) -> None:
+            exec_module(module)
+            _wrap_readers(name)
+
+        try:
+            spec.loader.exec_module = exec_and_wrap
+        except AttributeError:
+            pass  # a loader that takes no attributes: its readers stay unwrapped
+        return spec
 
 
 def _home(*parts: str) -> str:

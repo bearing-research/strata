@@ -9,6 +9,12 @@ import sys
 import textwrap
 from pathlib import Path
 
+import duckdb
+import pandas as pd
+import polars as pl
+import pyarrow as pa
+import pyarrow.fs as pafs
+import pyarrow.parquet as pq
 import pytest
 
 from strata.notebook import read_audit
@@ -299,6 +305,147 @@ class TestTheRecord:
         assert merge([[read(1)], [read()], [read(2)]]) == [read()]
 
 
+class TestANativeReader:
+    """pyarrow, polars and duckdb open files in native code; their readers record them."""
+
+    @pytest.fixture
+    def dataset(self, data) -> Path:
+        folder = data / "dataset"
+        (folder / "year=2026").mkdir(parents=True)
+        for name in ("year=2026/a.parquet", "year=2026/b.parquet"):
+            pq.write_table(pa.table({"a": [1]}), folder / name)
+        return folder
+
+    @pytest.mark.parametrize(
+        "read",
+        [
+            lambda path: pq.read_table(path),
+            lambda path: pq.ParquetFile(path).read(),
+            lambda path: pd.read_parquet(path),
+            lambda path: pl.read_parquet(path),
+            lambda path: pl.scan_parquet(path).collect(),
+            lambda path: duckdb.read_parquet(str(path)).fetchall(),
+            lambda path: duckdb.connect().read_parquet(str(path)).fetchall(),
+            lambda path: pa.memory_map(str(path)).read(),
+        ],
+        ids=[
+            "pq.read_table",
+            "pq.ParquetFile",
+            "pd.read_parquet",
+            "pl.read_parquet",
+            "pl.scan_parquet",
+            "duckdb.read_parquet",
+            "connection.read_parquet",
+            "pa.memory_map",
+        ],
+    )
+    def test_its_file_is_read(self, data, read):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        with recording() as observed:
+            read(data / "t.parquet")
+
+        assert _report(observed) == {"undeclared_read": [str(data / "t.parquet")]}
+
+    def test_a_folder_is_each_file_in_it_and_its_listings(self, dataset):
+        with recording() as observed:
+            pq.read_table(dataset)
+
+        assert _report(observed) == {
+            "undeclared_listing": [str(dataset), str(dataset / "year=2026")],
+            "undeclared_read": [
+                str(dataset / "year=2026" / "a.parquet"),
+                str(dataset / "year=2026" / "b.parquet"),
+            ],
+        }
+
+    def test_a_glob_is_what_it_matches(self, dataset):
+        with recording() as observed:
+            pl.read_parquet(dataset / "year=2026" / "a*.parquet")
+
+        assert _report(observed) == {
+            "undeclared_listing": [str(dataset / "year=2026")],
+            "undeclared_read": [str(dataset / "year=2026" / "a.parquet")],
+        }
+
+    def test_a_list_and_a_file_uri_are_their_files(self, dataset):
+        a, b = sorted((dataset / "year=2026").iterdir())
+        with recording() as observed:
+            pl.read_parquet([a, f"file://{b}"])
+
+        assert _report(observed) == {"undeclared_read": [str(a), str(b)]}
+
+    def test_a_buffer_and_another_filesystems_path_are_not_files_here(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        # The same name in the cwd: read as a local path, it would be this one.
+        pq.write_table(pa.table({"a": [1]}), "t.parquet")
+        subtree = pafs.SubTreeFileSystem(str(data), pafs.LocalFileSystem())
+        body = (data / "t.parquet").read_bytes()
+        with recording() as observed:
+            pq.read_table(pa.BufferReader(body))
+            pq.read_table("t.parquet", filesystem=subtree)
+
+        assert _report(observed) == {}
+
+    def test_a_local_filesystems_path_is_a_file(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        with recording() as observed:
+            pq.read_table(str(data / "t.parquet"), filesystem=pafs.LocalFileSystem())
+
+        assert _report(observed) == {"undeclared_read": [str(data / "t.parquet")]}
+
+    def test_a_path_in_the_home_is_where_the_reader_expands_it(self, data, monkeypatch):
+        monkeypatch.setenv("HOME", str(data))
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        with recording() as observed:
+            pl.read_parquet("~/t.parquet")
+
+        assert _report(observed) == {"undeclared_read": [str(data / "t.parquet")]}
+
+    def test_a_map_opened_to_write_is_the_runs_write(self, data):
+        (data / "m.bin").write_bytes(b"0000")
+        with recording() as observed:
+            with pa.memory_map(str(data / "m.bin"), "r+") as mapped:
+                mapped.write(b"11")
+
+        # Its fingerprint is then as the run left it, not a change during the run.
+        assert observed.written == {str(data / "m.bin")}
+
+    def test_a_reader_imported_during_the_run_is_wrapped(self, data):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        script = textwrap.dedent(
+            f"""\
+            import importlib.util, sys
+            spec = importlib.util.spec_from_file_location("audit", {read_audit.__file__!r})
+            audit = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(audit)
+            assert "polars" not in sys.modules
+            with audit.recording() as observed:
+                import polars as pl
+                pl.read_parquet({str(data / "t.parquet")!r})
+            print({str(data / "t.parquet")!r} in observed.files)
+            """
+        )
+
+        out = subprocess.run(
+            [sys.executable, "-I", "-c", script], capture_output=True, text=True, check=True
+        )
+
+        assert out.stdout.strip() == "True"
+
+    def test_an_audit_that_fails_does_not_fail_the_read(self, data, monkeypatch):
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+
+        def broken(self, source, mode):
+            raise RuntimeError("audit bug")
+
+        monkeypatch.setattr(read_audit.Observed, "native", broken)
+        with recording() as observed:
+            table = pq.read_table(data / "t.parquet")
+
+        assert table.num_rows == 1
+        assert observed.partial
+
+
 def _lock(notebook_dir: Path, *packages: str) -> None:
     lines = [
         "version = 1",
@@ -386,6 +533,7 @@ def outside(tmp_path) -> Path:
     folder.mkdir()
     (folder / "events.csv").write_text("a,b\n1,2\n")
     (folder / "util_for_audit.py").write_text("VALUE = 41\n")
+    pq.write_table(pa.table({"a": [1, 2]}), folder / "events.parquet")
     return folder.resolve()
 
 
@@ -405,6 +553,18 @@ def _runs(outside: Path) -> dict[str, str]:
             "Path('mine.txt').write_text('x')\n"
             "back = Path('mine.txt').read_text()\n"
         ),
+        # Read in native code, where the hook sees no open: the wrapped readers record it.
+        # pyarrow alone: it is the one reader a new notebook's venv (the warm pool's) has.
+        "native": textwrap.dedent(
+            f"""\
+            import pyarrow.csv
+            import pyarrow.parquet as pq
+            rows = (
+                pq.read_table({str(outside / "events.parquet")!r}).num_rows
+                + pyarrow.csv.read_csv({str(outside / "events.csv")!r}).num_rows
+            )
+            """
+        ),
     }
 
 
@@ -413,6 +573,9 @@ def _expected(outside: Path) -> dict[str, dict[str, list[str]]]:
         "reads": {"undeclared_read": [str(outside / "events.csv")]},
         "imports": {"undeclared_import": [str(outside / "util_for_audit.py")]},
         "own": {},
+        "native": {
+            "undeclared_read": [str(outside / "events.csv"), str(outside / "events.parquet")]
+        },
     }
 
 
@@ -449,6 +612,39 @@ class TestARun:
 
     async def test_a_read_through_a_mount_is_declared(self, tmp_path, outside):
         source = "text = (data / 'events.csv').read_text()\n"
+        session = _session(tmp_path, ("c", source))
+        update_notebook_mounts(session.path, [MountSpec(name="data", uri=str(outside))])
+        session = NotebookSession(parse_notebook(session.path), session.path)
+        session.refresh_environment_runtime()
+
+        result = await CellExecutor(session).execute_cell("c", source)
+
+        assert result.success, result.error
+        assert result.read_audit == []
+
+    async def test_polars_and_duckdb_imported_by_the_cell_are_wrapped(self, tmp_path, outside):
+        source = textwrap.dedent(
+            f"""\
+            import duckdb
+            import polars as pl
+            rows = (
+                pl.scan_parquet({str(outside / "events.parquet")!r}).collect().height
+                + len(duckdb.read_csv({str(outside / "events.csv")!r}).fetchall())
+            )
+            """
+        )
+        session = _session(tmp_path, ("c", source))
+
+        result = await CellExecutor(session).execute_cell("c", source)
+
+        assert result.success, result.error
+        assert _codes(result.read_audit) == {
+            "undeclared_read": [str(outside / "events.csv"), str(outside / "events.parquet")]
+        }
+        assert _stats(result.read_audit) == _unchanged(result.read_audit)
+
+    async def test_a_native_read_through_a_mount_is_declared(self, tmp_path, outside):
+        source = "import polars as pl\nrows = pl.read_parquet(data / 'events.parquet').height\n"
         session = _session(tmp_path, ("c", source))
         update_notebook_mounts(session.path, [MountSpec(name="data", uri=str(outside))])
         session = NotebookSession(parse_notebook(session.path), session.path)

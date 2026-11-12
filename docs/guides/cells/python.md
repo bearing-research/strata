@@ -292,8 +292,14 @@ The findings show in the header pill and the run report, as mutation warnings do
 and a cache hit shows them again. `subprocess_run` and a failed audit are notes, not
 warnings. They never block a run or change its status or key. They describe the result
 the cell holds, so a failed run replaces them only when it found something itself.
-Some readers open files without Python seeing it (pyarrow's parquet, polars, DuckDB), so
-what they read is not reported.
+pyarrow, polars and DuckDB read files in native code, where Python sees no open, so
+their readers that take a path are wrapped in the cell's process and say what they were
+given: pyarrow's `parquet`, `dataset`, `feather`, `orc`, `csv`, `json` and `ipc` readers
+and `memory_map`, `pd.read_parquet`, polars' `read_*` and `scan_*`, and DuckDB's
+`read_parquet`, `read_csv` and `read_json` (on the module or a connection). A folder
+counts as each file in it, and a glob as what it matches. A file named in DuckDB SQL
+(`select * from 'x.parquet'`), one opened with `pyarrow.OSFile`, and a path on another
+filesystem (`filesystem=` other than the local one) are not seen.
 
 ### When such a file changes
 
