@@ -277,6 +277,7 @@ def parse_notebook(directory: Path) -> NotebookState:
                     if runtime_cell
                     else []
                 ),
+                read_fingerprints=dict(runtime_cell.read_fingerprints) if runtime_cell else {},
                 widget_values=dict(runtime_cell.widget_values) if runtime_cell else {},
                 inputs=inputs.get("inputs", []),
                 inputs_machine=inputs.get("machine"),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -15,7 +16,14 @@ from strata.notebook.env import audit_scope
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import MountSpec
 from strata.notebook.parser import parse_notebook
-from strata.notebook.read_audit import ReadFinding, merge, recording, report
+from strata.notebook.read_audit import (
+    CHANGED_DURING_RUN,
+    ReadFinding,
+    fingerprint,
+    merge,
+    recording,
+    report,
+)
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import (
     add_cell_to_notebook,
@@ -28,6 +36,19 @@ from tests.notebook.pool_helpers import warm_again
 
 def _codes(findings: list[ReadFinding]) -> dict[str, list[str]]:
     return {finding["code"]: finding["items"] for finding in findings}
+
+
+def _stats(findings: list[ReadFinding]) -> dict[str, dict[str, list[int]]]:
+    return {f["code"]: f["fingerprints"] for f in findings if "fingerprints" in f}
+
+
+def _unchanged(findings: list[ReadFinding]) -> dict[str, dict[str, list[int]]]:
+    """What the findings' fingerprints should be: each path as it is now."""
+    return {
+        f["code"]: {path: fingerprint(path) for path in f["items"]}
+        for f in findings
+        if f["code"] not in ("unlocked_package", "subprocess_run", "audit_failed")
+    }
 
 
 def _report(observed, *, source="", mounts=None, run_dir="/nonexistent-run", scope=None):
@@ -185,6 +206,98 @@ class TestTheRecord:
 
         assert merge([[read("/a")], [read("/a", "/b")], []]) == [read("/a", "/b")]
 
+    def test_a_local_run_fingerprints_each_path_it_names(self, data):
+        with recording() as observed:
+            (data / "a.txt").read_text()
+            os.listdir(data)
+            subprocess.run(["true"], check=True)
+
+        local = report(observed, source="", mounts={}, run_dir="/x", scope={})
+        remote = report(observed, source="", mounts={}, run_dir="/x", scope=None)
+
+        st = os.stat(data / "a.txt")
+        assert _stats(local) == {
+            "undeclared_read": {str(data / "a.txt"): [st.st_size, st.st_mtime_ns]},
+            "undeclared_listing": {str(data): fingerprint(str(data))},
+        }
+        # A worker's paths are its own: the server could not stat them again.
+        assert _stats(remote) == {}
+
+    def test_a_file_changed_during_the_run_is_changed_already(self, data):
+        with recording() as observed:
+            (data / "a.txt").read_text()
+            (data / "b.txt").read_text()
+        # Another process, while the cell still ran.
+        (data / "a.txt").write_text("changed by someone else")
+
+        (finding,) = report(observed, source="", mounts={}, run_dir="/x", scope={})
+
+        assert finding["fingerprints"] == {
+            str(data / "a.txt"): CHANGED_DURING_RUN,
+            str(data / "b.txt"): fingerprint(str(data / "b.txt")),
+        }
+
+    @pytest.mark.parametrize("mode", ["w", "r+"])
+    def test_a_file_the_run_read_then_changed_is_as_the_run_left_it(self, data, mode):
+        with recording() as observed:
+            (data / "a.txt").read_text()
+            with open(data / "a.txt", mode) as f:
+                f.write("the run's own, longer")
+
+        (finding,) = report(observed, source="", mounts={}, run_dir="/x", scope={})
+
+        assert finding["fingerprints"] == {str(data / "a.txt"): fingerprint(str(data / "a.txt"))}
+
+    def test_opening_a_directory_is_not_a_listing(self, data):
+        with recording() as observed:
+            fd = os.open(data, os.O_RDONLY)
+            os.close(fd)
+
+        # Its fingerprint lists it, which the hook must not take for the cell's.
+        assert observed.listings == set()
+
+    def test_a_listing_is_its_names(self, data, tmp_path):
+        before = fingerprint(str(data))
+        # An atomic save: a sibling written, then renamed over the file.
+        (data / ".a.txt.tmp").write_text("saved again")
+        os.replace(data / ".a.txt.tmp", data / "a.txt")
+        assert fingerprint(str(data)) == before
+
+        (data / "c.txt").write_text("c")
+        assert fingerprint(str(data)) != before
+
+    def test_a_copy_with_its_times_is_the_same_file(self, data, tmp_path):
+        before = fingerprint(str(data / "a.txt"))
+        # A new inode (a copied notebook, a restarted container's overlay), same file.
+        shutil.copy2(data / "a.txt", tmp_path / "copy.txt")
+        os.replace(tmp_path / "copy.txt", data / "a.txt")
+        assert fingerprint(str(data / "a.txt")) == before
+
+    def test_a_path_gone_by_the_report_has_no_fingerprint(self, data):
+        with recording() as observed:
+            (data / "a.txt").read_text()
+            (data / "a.txt").unlink()
+
+        (finding,) = report(observed, source="", mounts={}, run_dir="/x", scope={})
+
+        assert finding["items"] == [str(data / "a.txt")]
+        assert finding["fingerprints"] == {}
+
+    def test_a_loop_keeps_its_newest_iterations_fingerprint(self):
+        def read(*st: int) -> ReadFinding:
+            return ReadFinding(
+                code="undeclared_read",
+                items=["/a"],
+                total=1,
+                partial=False,
+                fingerprints={"/a": list(st)},
+            )
+
+        # A later iteration's own write is the cell's, not a change after its result.
+        assert merge([[read(1)], [read(2)]]) == [read(2)]
+        # A change while any iteration ran stays one.
+        assert merge([[read(1)], [read()], [read(2)]]) == [read()]
+
 
 def _lock(notebook_dir: Path, *packages: str) -> None:
     lines = [
@@ -313,6 +426,7 @@ class TestARun:
             result = await executor.execute_cell(cell_id, source)
             assert result.success, result.error
             assert _codes(result.read_audit) == _expected(outside)[cell_id], cell_id
+            assert _stats(result.read_audit) == _unchanged(result.read_audit), cell_id
 
     async def test_an_audit_that_fails_does_not_fail_the_run(self, tmp_path):
         source = textwrap.dedent(
@@ -379,6 +493,7 @@ class TestARun:
         assert _codes(result.read_audit) == {
             "undeclared_read": [str(outside / "0.txt"), str(outside / "1.txt")]
         }
+        assert _stats(result.read_audit) == _unchanged(result.read_audit)
 
     @pytest.mark.integration
     @pytest.mark.warm_pool
@@ -394,6 +509,7 @@ class TestARun:
             assert result.success, result.error
             assert result.execution_method == "warm"
             assert _codes(result.read_audit) == _expected(outside)[cell_id], cell_id
+            assert _stats(result.read_audit) == _unchanged(result.read_audit), cell_id
 
     async def test_a_batch_reports_each_read_for_the_cell_that_made_it(self, tmp_path, outside):
         runs = _runs(outside)
@@ -428,3 +544,5 @@ class TestARun:
             "reads_work": {"work_dir_read": [str(work / "shared.txt")]},
             "again": {"undeclared_import": [str(outside / "util_for_audit.py")]},
         }
+        for r in result.cell_results:
+            assert _stats(r.read_audit) == _unchanged(r.read_audit), r.cell_id

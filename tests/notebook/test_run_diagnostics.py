@@ -11,7 +11,7 @@ import pytest
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
-from strata.notebook.read_audit import ReadFinding
+from strata.notebook.read_audit import ReadFinding, fingerprint
 from strata.notebook.run_diagnostics import run_diagnostics
 from strata.notebook.runtime_state import load_runtime_state
 from strata.notebook.session import NotebookSession
@@ -259,21 +259,49 @@ class TestARun:
         assert shown.code == "undeclared_read"
         assert str(outside / "events.csv") in shown.message
         assert result.run_diagnostics == [shown.model_dump(mode="json")]
+        cell = session.notebook_state.get_cell("c")
+        events = str(outside / "events.csv")
+        assert cell.read_fingerprints == {events: fingerprint(events)}
+        # Server-side only: not in what a client gets.
+        assert "read_fingerprints" not in cell.serialize()
         reopened = _session(notebook_dir).notebook_state.get_cell("c")
         assert reopened.run_diagnostics == [shown]
+        assert reopened.read_fingerprints == cell.read_fingerprints
+
+    async def test_a_rerun_records_the_file_as_it_read_it_again(self, tmp_path, outside):
+        notebook_dir = _notebook(tmp_path, ("c", _reads(outside)))
+        session = _session(notebook_dir)
+        executor = CellExecutor(session)
+        first = await executor.execute_cell("c", _reads(outside))
+        events = str(outside / "events.csv")
+        (outside / "events.csv").write_text("a,b\n1,2\n3,4\n")
+
+        again = await executor.execute_cell_rerun("c", _reads(outside))
+
+        # The same message; the file it read is not the same.
+        assert again.run_diagnostics == first.run_diagnostics
+        assert session.notebook_state.get_cell("c").read_fingerprints == {
+            events: fingerprint(events)
+        }
+        reopened = _session(notebook_dir).notebook_state.get_cell("c")
+        assert reopened.read_fingerprints == {events: fingerprint(events)}
 
     async def test_a_cache_hit_says_it_again(self, tmp_path, outside):
         notebook_dir = _notebook(tmp_path, ("c", _reads(outside)))
         first = await CellExecutor(_session(notebook_dir)).execute_cell("c", _reads(outside))
         # A fresh session: what the hit shows comes from the run's record, not from memory.
         session = _session(notebook_dir)
-        session.notebook_state.get_cell("c").run_diagnostics = []
+        cell = session.notebook_state.get_cell("c")
+        recorded = cell.read_fingerprints
+        cell.run_diagnostics = []
+        cell.read_fingerprints = {}
 
         hit = await CellExecutor(session).execute_cell("c", _reads(outside))
 
         assert hit.cache_hit
         assert _codes(hit.run_diagnostics) == ["undeclared_read"]
         assert hit.run_diagnostics == first.run_diagnostics
+        assert recorded and cell.read_fingerprints == recorded
 
     @pytest.mark.parametrize("folder", ["outside", "my data"])
     async def test_the_fix_it_names_clears_it(self, tmp_path, folder):
@@ -294,7 +322,9 @@ class TestARun:
         assert result.success, result.error
         assert result.run_diagnostics == []
         assert session.notebook_state.get_cell("c").run_diagnostics == []
+        assert session.notebook_state.get_cell("c").read_fingerprints == {}
         assert load_runtime_state(notebook_dir).cells["c"].run_diagnostics == []
+        assert load_runtime_state(notebook_dir).cells["c"].read_fingerprints == {}
 
     async def test_its_fix_does_not_reuse_a_name_the_cell_defines(self, tmp_path, outside):
         source = f"outside = 1\n{_reads(outside)}"
@@ -404,9 +434,9 @@ class TestARun:
         writes: list[str] = []
         persist = session_module.persist_cell_run_diagnostics
 
-        def counted(notebook_dir: Path, cell_id: str, diagnostics: list[dict]) -> None:
+        def counted(notebook_dir: Path, cell_id: str, *args: Any) -> None:
             writes.append(cell_id)
-            persist(notebook_dir, cell_id, diagnostics)
+            persist(notebook_dir, cell_id, *args)
 
         monkeypatch.setattr(session_module, "persist_cell_run_diagnostics", counted)
 

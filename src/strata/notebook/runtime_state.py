@@ -46,6 +46,8 @@ class CellRuntime:
     last_error_source_hash: str | None = None
     # What the last run read without declaring it, as the cell shows it (``run_diagnostics``).
     run_diagnostics: list[dict[str, Any]] = field(default_factory=list)
+    # And the stat of each undeclared path that run read, as it left it.
+    read_fingerprints: dict[str, list[int]] = field(default_factory=dict)
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
     test_result: dict[str, Any] | None = None
@@ -83,6 +85,7 @@ class CellRuntime:
             or self.last_reopen_identity
             or self.last_error
             or self.run_diagnostics
+            or self.read_fingerprints
             or self.display_outputs
             or self.display
             or self.test_result
@@ -245,12 +248,16 @@ def persist_cell_error(
 
 
 def persist_cell_run_diagnostics(
-    notebook_dir: Path, cell_id: str, diagnostics: list[dict[str, Any]]
+    notebook_dir: Path,
+    cell_id: str,
+    diagnostics: list[dict[str, Any]],
+    fingerprints: dict[str, list[int]],
 ) -> None:
     """Record (or clear) what a cell's last run read without declaring it."""
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
     entry.run_diagnostics = diagnostics
+    entry.read_fingerprints = fingerprints
     save_runtime_state(notebook_dir, state)
 
 

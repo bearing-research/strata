@@ -13,12 +13,14 @@ covers. Native readers (pyarrow's parquet, polars, duckdb) open files without an
 from __future__ import annotations
 
 import ast
+import hashlib
 import os
+import stat
 import sys
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 # Past this many paths a run's record stops growing and says it is partial.
 PATH_CAP = 10_000
@@ -34,6 +36,9 @@ SUBPROCESS_RUN = "subprocess_run"
 # The audit itself raised: the run stands, and says what it could not check.
 AUDIT_FAILED = "audit_failed"
 
+# The codes whose items are paths, which a local run fingerprints.
+_PATH_CODES = frozenset({UNDECLARED_READ, UNDECLARED_LISTING, UNDECLARED_IMPORT, WORK_DIR_READ})
+
 _WRITES = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_APPEND
 
 
@@ -47,6 +52,14 @@ class ReadFinding(TypedDict):
     total: int
     # The record stopped at PATH_CAP, so there may be more than ``total``.
     partial: bool
+    # A local run's paths as it read them (:func:`fingerprint`), so a later change to one
+    # can be told: only the server's own files can be checked again by the server.
+    # CHANGED_DURING_RUN for one that changed while the run had it.
+    fingerprints: NotRequired[dict[str, list[int]]]
+
+
+# Matches no path's fingerprint: the file changed between the run's read and its end.
+CHANGED_DURING_RUN: list[int] = []
 
 
 class Observed:
@@ -55,11 +68,15 @@ class Observed:
     def __init__(self) -> None:
         # Absolute path -> whether this run's first open of it wrote.
         self.files: dict[str, bool] = {}
+        # Each path's fingerprint at its first read or listing, and the files written.
+        self.read_as: dict[str, list[int] | None] = {}
+        self.written: set[str] = set()
         self.listings: set[str] = set()
         self.programs: set[str] = set()
         self.modules_before = frozenset(sys.modules)
         self.work_dir = os.getcwd()
         self.partial = False
+        self.quiet = False
 
     def _path(self, path: Any) -> str | None:
         if path is None:
@@ -72,16 +89,25 @@ class Observed:
 
     def open(self, path: Any, mode: Any, flags: Any) -> None:
         name = self._path(path)
-        if name is None or name in self.files:
+        if name is None:
+            return
+        if isinstance(mode, str):
+            wrote = any(c in mode for c in "wax")
+            changes = wrote or "+" in mode
+        else:
+            wrote = isinstance(flags, int) and bool(flags & _WRITES)
+            changes = wrote or (isinstance(flags, int) and bool(flags & os.O_RDWR))
+        if changes:
+            self.written.add(name)
+        if name in self.files:
             return
         if len(self.files) >= PATH_CAP:
             self.partial = True
             return
-        if isinstance(mode, str):
-            wrote = any(c in mode for c in "wax")
-        else:
-            wrote = isinstance(flags, int) and bool(flags & _WRITES)
         self.files[name] = wrote
+        if not wrote:
+            # The event fires ahead of the open: this is the file the run reads.
+            self.read_as[name] = self._fingerprint(name)
 
     def listing(self, path: Any) -> None:
         name = self._path(path)
@@ -91,6 +117,15 @@ class Observed:
             self.partial = True
             return
         self.listings.add(name)
+        self.read_as.setdefault(name, self._fingerprint(name))
+
+    def _fingerprint(self, name: str) -> list[int] | None:
+        # A directory's fingerprint lists it, which comes back through the hook.
+        self.quiet = True
+        try:
+            return fingerprint(name)
+        finally:
+            self.quiet = False
 
     def program(self, program: Any) -> None:
         if isinstance(program, (list, tuple)):
@@ -106,7 +141,7 @@ _installed = False
 
 def _on_event(event: str, args: tuple[Any, ...]) -> None:
     observed = _current
-    if observed is None:
+    if observed is None or observed.quiet:
         return
     try:
         if event == "open":
@@ -276,9 +311,48 @@ class _Unlocked:
         return None
 
 
-def _finding(code: str, items: set[str], partial: bool) -> ReadFinding:
+def fingerprint(path: str) -> list[int] | None:
+    """A file's ``[size, mtime_ns]``, a directory's ``[hash of its entry names]``, or
+    None if it cannot be read.
+
+    Neither device nor inode: a container restart or a copied notebook changes them and
+    not the content. A directory's own mtime moves whenever anything in it is replaced
+    (an editor's or Strata's atomic save), so a listing is its names.
+    """
+    try:
+        st = os.stat(path)
+        if not stat.S_ISDIR(st.st_mode):
+            return [st.st_size, st.st_mtime_ns]
+        names = "\0".join(sorted(os.listdir(path)))
+    except OSError:
+        return None
+    return [int.from_bytes(hashlib.sha256(names.encode(errors="surrogateescape")).digest()[:8])]
+
+
+def _fingerprints(observed: Observed, paths: list[str]) -> dict[str, list[int]]:
+    """Each path as the run read it, or CHANGED_DURING_RUN if it changed while the run
+    had it. A file the run wrote too is as the run left it; a gone one has none."""
+    found: dict[str, list[int]] = {}
+    for path in paths:
+        now = fingerprint(path)
+        if now is None:
+            continue
+        read_as = observed.read_as.get(path)
+        if path in observed.written or read_as is None or read_as == now:
+            found[path] = now
+        else:
+            found[path] = CHANGED_DURING_RUN
+    return found
+
+
+def _finding(
+    code: str, items: set[str], partial: bool, *, observed: Observed | None
+) -> ReadFinding:
     ordered = sorted(items)
-    return ReadFinding(code=code, items=ordered[:ITEM_CAP], total=len(ordered), partial=partial)
+    finding = ReadFinding(code=code, items=ordered[:ITEM_CAP], total=len(ordered), partial=partial)
+    if observed is not None and code in _PATH_CODES:
+        finding["fingerprints"] = _fingerprints(observed, finding["items"])
+    return finding
 
 
 def report(
@@ -316,6 +390,7 @@ def _report(
     run_dir: str,
     scope: Mapping[str, Any] | None,
 ) -> list[ReadFinding]:
+    local = scope is not None
     scope = scope or {}
     covered = _Roots(
         [str(spec.get("local_path") or "") for spec in mounts.values()]
@@ -358,7 +433,9 @@ def _report(
 
     paths = (UNDECLARED_READ, UNDECLARED_LISTING, WORK_DIR_READ)
     return [
-        _finding(code, items, observed.partial and code in paths)
+        _finding(
+            code, items, observed.partial and code in paths, observed=observed if local else None
+        )
         for code, items in sorted(found.items())
     ]
 
@@ -368,6 +445,7 @@ def merge(runs: list[list[ReadFinding]]) -> list[ReadFinding]:
     items: dict[str, set[str]] = {}
     totals: dict[str, int] = {}
     partial: dict[str, bool] = {}
+    fingerprints: dict[str, dict[str, list[int]]] = {}
     for findings in runs:
         for finding in findings:
             code = finding["code"]
@@ -375,12 +453,26 @@ def merge(runs: list[list[ReadFinding]]) -> list[ReadFinding]:
             # Past the cap a run's items are a sample, so its total is a floor.
             totals[code] = max(totals.get(code, 0), finding["total"])
             partial[code] = partial.get(code, False) or finding["partial"]
-    return [
-        ReadFinding(
+            if "fingerprints" in finding:
+                # The newest run's, which a later iteration's own write leaves as it ends;
+                # a change during any run stays one.
+                seen = fingerprints.setdefault(code, {})
+                for path, st in finding["fingerprints"].items():
+                    if seen.get(path) != CHANGED_DURING_RUN:
+                        seen[path] = st
+    merged = []
+    for code, found in sorted(items.items()):
+        finding = ReadFinding(
             code=code,
             items=sorted(found)[:ITEM_CAP],
             total=max(totals[code], len(found)),
             partial=partial[code],
         )
-        for code, found in sorted(items.items())
-    ]
+        if code in fingerprints:
+            finding["fingerprints"] = {
+                path: fingerprints[code][path]
+                for path in finding["items"]
+                if path in fingerprints[code]
+            }
+        merged.append(finding)
+    return merged
