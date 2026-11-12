@@ -45,7 +45,7 @@ exhaustive commit history.
   A local run notes each file it read without declaring it. When one changes, the
   cell stays ready (a plain run still hits the cache) and says its result may be out
   of date: a badge in the UI, `changed_reads` in `strata status`, `strata cell show`
-  and MCP, each naming the rerun or the mount that fixes it. (#1512)
+  and MCP, each naming the rerun or the mount that fixes it. (#1512, #1514)
 
 ### Changed
 - **A relative local mount path is under the notebook's directory.** `# @mount shared
