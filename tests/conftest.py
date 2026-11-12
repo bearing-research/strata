@@ -69,16 +69,39 @@ def prepared_venv(notebook_dir: Path) -> None:
         python.chmod(0o755)
 
 
-@pytest.fixture(autouse=True, scope="module")
-def _collect_after_each_module():
+def _collect_everything() -> None:
     """Thaw what the tests froze and collect it: what one test kept and a later one dropped."""
-    yield
     gc.unfreeze()
     gc.collect()
+    gc.freeze()
+
+
+_MODULES_PER_THAW = 10
+_modules_done = 0
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _collect_after_the_session():
+    """Its teardown runs in the last test's, so what the last thaw missed still fails a test."""
+    yield
+    _collect_everything()
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _collect_after_some_modules(_collect_after_the_session):
+    """A full collect walks every object the suite has loaded, so only every tenth module runs one.
+
+    A leak it finds is blamed on that module's last test, not the one that dropped it.
+    """
+    global _modules_done
+    yield
+    _modules_done += 1
+    if _modules_done % _MODULES_PER_THAW == 0:
+        _collect_everything()
 
 
 @pytest.fixture(autouse=True)
-def _collect_after_each_test(_collect_after_each_module):
+def _collect_after_each_test(_collect_after_some_modules):
     """Collect once the test's other fixtures are torn down.
 
     An object left open warns when it is collected, and a ResourceWarning is an error here:
