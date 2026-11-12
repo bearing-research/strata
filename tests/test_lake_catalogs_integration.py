@@ -56,7 +56,8 @@ def _free_port() -> int:
 
 def _rows(config: StrataConfig, uri: str, snapshot_id: int | None = None) -> list[int]:
     s3 = config.get_s3_filesystem() if config.s3_endpoint_url else None
-    plan = ReadPlanner(config).plan(uri, snapshot_id=snapshot_id)
+    with ReadPlanner(config) as planner:
+        plan = planner.plan(uri, snapshot_id=snapshot_id)
     fetcher = create_fetcher(s3_filesystem=s3)
     return sorted(v for task in plan.tasks for v in fetcher.fetch(task).column("id").to_pylist())
 
@@ -237,18 +238,20 @@ def test_a_gcs_warehouse_scans(tmp_path, fake_gcs):
         io.GCS_SERVICE_HOST: fake_gcs,
         **_gcs_token(),
     }
-    catalog = SqlCatalog("lake", **{k: v for k, v in properties.items() if k != "type"})
-    first = _two_snapshots(catalog)
-    files = [task.file.file_path for task in catalog.load_table("taxi.trips").scan().plan_files()]
-    assert all(path.startswith("gs://") for path in files)
-    config = StrataConfig(
-        cache_dir=tmp_path / "cache",
-        catalogs={"lake": properties},
-        gcs_anonymous=True,
-        gcs_endpoint_override=fake_gcs,
-    )
+    with SqlCatalog("lake", **{k: v for k, v in properties.items() if k != "type"}) as catalog:
+        first = _two_snapshots(catalog)
+        files = [
+            task.file.file_path for task in catalog.load_table("taxi.trips").scan().plan_files()
+        ]
+        assert all(path.startswith("gs://") for path in files)
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            catalogs={"lake": properties},
+            gcs_anonymous=True,
+            gcs_endpoint_override=fake_gcs,
+        )
 
-    _reads_by_name_and_pin(config, "lake", catalog, first)
+        _reads_by_name_and_pin(config, "lake", catalog, first)
 
 
 def _reads_request_warehouse(config: StrataConfig, uri: str, first: int) -> None:
@@ -263,13 +266,13 @@ def test_a_gcs_request_warehouse_reads_with_the_gcs_settings(tmp_path, fake_gcs)
     from pyiceberg.catalog.sql import SqlCatalog
 
     meta = tmp_path / "meta.sqlite"
-    writer = SqlCatalog(
+    with SqlCatalog(
         "strata",
         uri=f"sqlite:///{meta}",
         warehouse="gs://lake/wh",
         **{io.GCS_SERVICE_HOST: fake_gcs, **_gcs_token()},
-    )
-    first = _two_snapshots(writer)
+    ) as writer:
+        first = _two_snapshots(writer)
     config = StrataConfig(
         cache_dir=tmp_path / "cache",
         metadata_db=meta,
@@ -337,7 +340,8 @@ def test_an_azure_request_warehouse_reads_with_the_azure_settings(tmp_path, azur
         if file_io == "pyarrow"
         else f"abfs://lake@{azurite.account_name}.dfs.core.windows.net/wh"
     )
-    first = _two_snapshots(_azure_writer(tmp_path, azurite, warehouse))
+    with _azure_writer(tmp_path, azurite, warehouse) as writer:
+        first = _two_snapshots(writer)
     settings: dict[str, Any] = {
         "adlfs": {"azure_connection_string": azurite.get_connection_string()},
         "adlfs-endpoint": {},
@@ -355,12 +359,16 @@ def test_pyarrow_cannot_read_a_table_recorded_under_the_account_host(tmp_path, a
     So no rewrite of the requested warehouse URI makes such a table readable without adlfs.
     """
     host = f"abfs://lake@{azurite.account_name}.dfs.core.windows.net/wh"
-    _two_snapshots(_azure_writer(tmp_path, azurite, host))
+    with _azure_writer(tmp_path, azurite, host) as writer:
+        _two_snapshots(writer)
     config = _azure_config(tmp_path, azurite, **_PYARROW_FILE_IO)
 
     for warehouse in (host, "abfs://lake/wh"):
-        with pytest.raises(OSError, match=f"lake@{azurite.account_name}"):
-            ReadPlanner(config).plan(f"{warehouse}#taxi.trips")
+        with (
+            ReadPlanner(config) as planner,
+            pytest.raises(OSError, match=f"lake@{azurite.account_name}"),
+        ):
+            planner.plan(f"{warehouse}#taxi.trips")
 
 
 REST_IMAGE = "apache/iceberg-rest-fixture:1.9.2"

@@ -112,12 +112,13 @@ def temp_warehouse(tmp_path):
 
     table.append(data)
 
-    return {
+    yield {
         "warehouse_path": warehouse_path,
         "table_uri": f"file://{warehouse_path}#test_db.events",
         "catalog": catalog,
         "table": table,
     }
+    catalog.close()
 
 
 class TestCacheWarmerIntegration:
@@ -177,6 +178,7 @@ class TestCacheWarmerIntegration:
             await server_module._state._cache_warmer.stop()
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
     @pytest.mark.asyncio
@@ -208,9 +210,10 @@ class TestCacheWarmerIntegration:
                 assert response.status_code == 200
                 assert response.json()["jobs"] == []
 
+                # A warehouse that is not there: the job fails before it opens a catalog.
                 await client.post(
                     "/v1/cache/warm/async",
-                    json={"tables": ["ns.table1"]},
+                    json={"tables": ["file:///nonexistent#ns.table1"]},
                 )
 
                 await asyncio.sleep(0.1)
@@ -223,6 +226,7 @@ class TestCacheWarmerIntegration:
             await server_module._state._cache_warmer.stop()
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
     @pytest.mark.asyncio
@@ -257,6 +261,7 @@ class TestCacheWarmerIntegration:
             await server_module._state._cache_warmer.stop()
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
     @pytest.mark.asyncio
@@ -291,6 +296,7 @@ class TestCacheWarmerIntegration:
             await server_module._state._cache_warmer.stop()
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
 
@@ -431,6 +437,7 @@ class TestCacheWarmingRealTables:
             await server_module._state._cache_warmer.stop()
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
     @pytest.mark.asyncio
@@ -498,6 +505,7 @@ class TestCacheWarmingRealTables:
             await server_module._state._cache_warmer.stop()
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
     @pytest.mark.asyncio
@@ -572,6 +580,7 @@ class TestCacheWarmingRealTables:
             await server_module._state._cache_warmer.stop()
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
     @pytest.mark.asyncio
@@ -641,6 +650,7 @@ class TestCacheWarmingRealTables:
             await server_module._state._cache_warmer.stop()
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
 
@@ -798,6 +808,37 @@ async def test_stop_waits_for_the_fetches_it_cancels():
     await warmer.stop()
 
     assert fetched.is_set()
+
+
+@pytest.mark.asyncio
+async def test_stop_waits_for_the_plans_it_cancels():
+    """A plan runs in a thread too, reading the catalog that shutdown closes once stop returns."""
+    import threading
+
+    from strata.types import WarmAsyncRequest
+
+    loop = asyncio.get_running_loop()
+    entered, release = threading.Event(), threading.Event()
+    planned = asyncio.Event()
+
+    warmer = _one_table_warmer(lambda task: b"")
+    plan = warmer._planner.plan
+
+    def planning(**kw):
+        entered.set()
+        release.wait(timeout=30)
+        loop.call_soon_threadsafe(planned.set)
+        return plan(**kw)
+
+    warmer._planner.plan = planning
+    await warmer.start()
+    job_id = await warmer.start_job(WarmAsyncRequest(tables=["file:///wh#ns.t"]))
+    assert await asyncio.to_thread(entered.wait, 30)
+    warmer._jobs[job_id]._task.add_done_callback(lambda _task: release.set())
+
+    await warmer.stop()
+
+    assert planned.is_set()
 
 
 @pytest.mark.asyncio

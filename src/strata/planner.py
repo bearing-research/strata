@@ -4,7 +4,7 @@ import hashlib
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -326,7 +326,8 @@ class ReadPlanner:
         catalog: CatalogProvider | None = None,
     ) -> None:
         self.config = config
-        # Injectable for deployments with their own catalog access (and tests).
+        # Injectable for deployments with their own catalog access (and tests); the planner
+        # owns what it is given, and closes it.
         self.catalog = catalog if catalog is not None else PyIcebergCatalog(config)
         lake_files.configure(config)
         cache_dir = config.cache_dir
@@ -352,6 +353,16 @@ class ReadPlanner:
             tuple[str, str, int, str, str],
             tuple[tuple[Column, ...] | None, dict[int, str], dict[int, Any]],
         ] = LRUCache(10_000)
+
+    def close(self) -> None:
+        """Close the catalogs this planner reads through."""
+        self.catalog.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
     def plan(
         self,

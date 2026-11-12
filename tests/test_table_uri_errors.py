@@ -37,6 +37,7 @@ def client(tmp_path):
     try:
         yield TestClient(app, raise_server_exceptions=False)
     finally:
+        server_module._state.planner.close()
         server_module._state = original
         reset_artifact_store()
 
@@ -95,9 +96,8 @@ def warehouse(tmp_path):
 
     wh = tmp_path / "warehouse"
     wh.mkdir()
-    SqlCatalog("strata", uri=f"sqlite:///{wh / 'catalog.db'}", warehouse=str(wh)).create_namespace(
-        "ns"
-    )
+    with SqlCatalog("strata", uri=f"sqlite:///{wh / 'catalog.db'}", warehouse=str(wh)) as catalog:
+        catalog.create_namespace("ns")
     return wh
 
 

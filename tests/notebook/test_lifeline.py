@@ -161,13 +161,13 @@ def test_the_harness_dies_with_its_spawner(tmp_path: Path, path: str) -> None:
         time.sleep(600)
         """)
     )
-    parent = subprocess.Popen(
+    with subprocess.Popen(
         [sys.executable, "-c", _PRELUDE + _PARENTS[path], str(tmp_path), str(_HARNESS), *extra],
         cwd=tmp_path,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-    )
-    _assert_dies_with(parent, pid_file, "harness")
+    ) as parent:
+        _assert_dies_with(parent, pid_file, "harness")
 
 
 # Rscript and ssh cannot watch the lifeline themselves, so they run under a wrapper
@@ -229,7 +229,7 @@ def test_a_wrapped_child_dies_with_its_spawner(tmp_path: Path, path: str) -> Non
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "STRATA_TEST_PID_FILE": str(pid_file),
     }
-    parent = subprocess.Popen(
+    with subprocess.Popen(
         [
             sys.executable,
             "-c",
@@ -241,5 +241,5 @@ def test_a_wrapped_child_dies_with_its_spawner(tmp_path: Path, path: str) -> Non
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-    )
-    _assert_dies_with(parent, pid_file, "child")
+    ) as parent:
+        _assert_dies_with(parent, pid_file, "child")

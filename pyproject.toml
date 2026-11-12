@@ -262,6 +262,12 @@ pythonpath = ["."]
 # main thread, where SIGALRM cannot reach. Override with @pytest.mark.timeout(N).
 timeout = 180
 timeout_method = "thread"
+# Anything left open (a file, socket or database connection) fails the test that leaked it; see
+# tests/conftest.py::_collect_after_each_test. A __del__ that raises is an error too.
+filterwarnings = [
+    "error::ResourceWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests requiring external services",

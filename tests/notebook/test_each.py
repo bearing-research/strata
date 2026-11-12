@@ -750,20 +750,20 @@ class TestRetention:
 def _table(warehouse: Path) -> list[tuple[str, int]]:
     from pyiceberg.catalog.sql import SqlCatalog
 
-    catalog = SqlCatalog(
+    with SqlCatalog(
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-    )
-    rows = catalog.load_table("lab.rows").scan().to_arrow().sort_by("id")
+    ) as catalog:
+        rows = catalog.load_table("lab.rows").scan().to_arrow().sort_by("id")
     return list(zip(rows["id"].to_pylist(), rows["v"].to_pylist(), strict=True))
 
 
 def _snapshots(warehouse: Path) -> list:
     from pyiceberg.catalog.sql import SqlCatalog
 
-    catalog = SqlCatalog(
+    with SqlCatalog(
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-    )
-    return list(catalog.load_table("lab.rows").snapshots())
+    ) as catalog:
+        return list(catalog.load_table("lab.rows").snapshots())
 
 
 @windows

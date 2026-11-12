@@ -18,6 +18,7 @@ class _Catalog:
     def __init__(self, outcomes):
         self._outcomes = list(outcomes)
         self.calls = 0
+        self.closed = False
 
     def load_table(self, table_id):
         self.calls += 1
@@ -25,6 +26,9 @@ class _Catalog:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+    def close(self):
+        self.closed = True
 
 
 @pytest.fixture
@@ -59,6 +63,7 @@ class TestCatalogRebuiltAfterIoError:
         assert catalog.load_table("db.events") is sentinel
         assert broken.calls == 1
         assert healthy.calls == 1
+        assert broken.closed and not healthy.closed
 
     def test_a_real_error_is_not_retried(self, catalog, monkeypatch):
         only = _Catalog([Exception("Table does not exist: db.events")])

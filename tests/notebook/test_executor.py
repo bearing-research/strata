@@ -3068,12 +3068,12 @@ class TestLoopCellExecution:
 
         warehouse = tmp_path / "warehouse"
         warehouse.mkdir()
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-        )
-        catalog.create_namespace("db")
-        table = catalog.create_table("db.events", Schema(NestedField(1, "id", LongType())))
-        table.append(pa.table({"id": pa.array([1], type=pa.int64())}))
+        ) as catalog:
+            catalog.create_namespace("db")
+            table = catalog.create_table("db.events", Schema(NestedField(1, "id", LongType())))
+            table.append(pa.table({"id": pa.array([1], type=pa.int64())}))
         uri = f"file://{warehouse}#db.events"
         notebook_dir, session = loop_notebook
         loop_source = (

@@ -40,11 +40,12 @@ def mini_warehouse(tmp_path):
     table = catalog.create_table("db.events", schema)
     table.append(pa.table({"id": pa.array([1, 2, 3], type=pa.int64())}))
 
-    return {
+    yield {
         "table": table,
         "uri": f"file://{warehouse_path}#db.events",
         "snapshot_id": table.current_snapshot().snapshot_id,
     }
+    catalog.close()
 
 
 @pytest.fixture
@@ -156,11 +157,11 @@ class TestFingerprintTables:
 
         warehouse = tmp_path / "empty"
         warehouse.mkdir()
-        catalog = SqlCatalog(
+        with SqlCatalog(
             "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-        )
-        catalog.create_namespace("db")
-        catalog.create_table("db.events", Schema(NestedField(1, "id", LongType())))
+        ) as catalog:
+            catalog.create_namespace("db")
+            catalog.create_table("db.events", Schema(NestedField(1, "id", LongType())))
         spec = TableSpec(name="events", uri=f"file://{warehouse}#db.events")
 
         fp1, snaps = fingerprint_tables([spec], config)

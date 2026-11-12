@@ -8,17 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import anyio.to_thread
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
+from strata.api.served_bytes import ClosingStreamingResponse
 from strata.fast_io import IncrementalIpcMerger, validate_ipc_stream
 from strata.observability.logging import get_logger
 from strata.observability.pool_metrics import get_pool_tracker
@@ -26,31 +26,11 @@ from strata.streaming import QoSRejected
 from strata.streaming.scan_builds import record_scan_complete
 
 if TYPE_CHECKING:
-    from starlette.types import Receive, Scope, Send
-
     from strata.server import ServerState
 
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["streams"])
-
-
-class _ClosingStreamingResponse(StreamingResponse):
-    """A streaming response that runs ``on_close`` once it is done sending, however it ends.
-
-    A generator's ``finally`` runs only if the body was iterated; a client gone before the
-    first chunk never starts it.
-    """
-
-    def __init__(self, content: Any, *, on_close: Callable[[], Awaitable[None]], **kwargs: Any):
-        super().__init__(content, **kwargs)
-        self._on_close = on_close
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        try:
-            await super().__call__(scope, receive, send)
-        finally:
-            await self._on_close()
 
 
 def _resolve_stream_owner(state: ServerState, stream_id: str) -> str | None:
@@ -198,7 +178,7 @@ async def get_stream(stream_id: str, request: Request):
             stream_state.completed_at = time.time()
             state.streams.schedule_cleanup(stream_id, scan_id)
 
-        return _ClosingStreamingResponse(
+        return ClosingStreamingResponse(
             serve_passthrough(),
             on_close=close_passthrough,
             media_type="application/vnd.apache.arrow.stream",
@@ -241,18 +221,20 @@ async def get_stream(stream_id: str, request: Request):
     reader_cm = await anyio.to_thread.run_sync(
         store.open_blob_reader, stream_state.artifact_id, stream_state.artifact_version
     )
+    # Entered here and exited by the response, once each: a reader that is a generator's
+    # context manager (Azure's) cannot be exited unentered, or twice.
+    blob = reader_cm.__enter__() if reader_cm is not None else None
 
     async def serve_blob():
         bytes_out = 0
         try:
-            if reader_cm is not None:
-                with reader_cm as blob:
-                    while True:
-                        chunk = await anyio.to_thread.run_sync(blob.read, BLOB_STREAM_CHUNK_BYTES)
-                        if not chunk:
-                            break
-                        bytes_out += len(chunk)
-                        yield chunk
+            if blob is not None:
+                while True:
+                    chunk = await anyio.to_thread.run_sync(blob.read, BLOB_STREAM_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    bytes_out += len(chunk)
+                    yield chunk
             stream_state.bytes_streamed = bytes_out
         except (asyncio.CancelledError, GeneratorExit):
             state.metrics.record_client_disconnect()
@@ -260,8 +242,21 @@ async def get_stream(stream_id: str, request: Request):
         finally:
             state.streams.schedule_cleanup(stream_id, scan_id)
 
-    return StreamingResponse(
-        serve_blob(),
+    body = serve_blob()
+
+    async def close_blob() -> None:
+        # A client gone mid-send leaves the generator parked at a yield, its finally unrun
+        # until the collector finds it; one gone before the first chunk never starts it.
+        # Either way the reader is still open.
+        try:
+            await body.aclose()
+        finally:
+            if reader_cm is not None:
+                reader_cm.__exit__(None, None, None)
+
+    return ClosingStreamingResponse(
+        body,
+        on_close=close_blob,
         media_type="application/vnd.apache.arrow.stream",
         headers={
             "X-Arrow-Row-Count": str(artifact.row_count or 0),

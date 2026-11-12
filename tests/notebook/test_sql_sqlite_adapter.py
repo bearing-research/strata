@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 import pytest
@@ -687,7 +687,7 @@ def test_sqlite_list_schema_returns_tables_and_columns(tmp_path):
     import sqlite3
 
     db = tmp_path / "schema.db"
-    with sqlite3.connect(db) as raw:
+    with closing(sqlite3.connect(db)) as raw, raw:
         raw.executescript(
             """
             CREATE TABLE products (

@@ -86,12 +86,13 @@ def temp_warehouse_multi_files(tmp_path):
     )
     table.append(data3)
 
-    return {
+    yield {
         "warehouse_path": warehouse_path,
         "table_uri": f"file://{warehouse_path}#test_db.events",
         "catalog": catalog,
         "table": table,
     }
+    catalog.close()
 
 
 @pytest.fixture
@@ -99,6 +100,12 @@ def strata_config(tmp_path):
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     return StrataConfig(cache_dir=cache_dir)
+
+
+@pytest.fixture
+def planner(strata_config):
+    with ReadPlanner(strata_config) as planner:
+        yield planner
 
 
 class TestFilterFingerprint:
@@ -357,23 +364,17 @@ class TestFilterMatching:
 class TestTwoTierPruning:
     """Two-tier pruning: Iceberg files, then Parquet row groups."""
 
-    def test_planning_with_filters_includes_fingerprint(
-        self, temp_warehouse_multi_files, strata_config
-    ):
+    def test_planning_with_filters_includes_fingerprint(self, temp_warehouse_multi_files, planner):
         """The filter fingerprint is part of the cache key."""
-        planner = ReadPlanner(strata_config)
-
         filters = [Filter(column="value", op=FilterOp.LT, value=150)]
         plan = planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
 
         assert plan.filters == filters
 
     def test_different_filters_produce_separate_cache_entries(
-        self, temp_warehouse_multi_files, strata_config
+        self, temp_warehouse_multi_files, planner
     ):
         """Different filters use different manifest cache entries."""
-        planner = ReadPlanner(strata_config)
-
         filters1 = [Filter(column="value", op=FilterOp.LT, value=50)]
         planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters1)
 
@@ -384,10 +385,8 @@ class TestTwoTierPruning:
         # Each filter is different, so each misses.
         assert stats["filtered"]["misses"] >= 2
 
-    def test_same_filters_reuse_cache(self, temp_warehouse_multi_files, strata_config):
+    def test_same_filters_reuse_cache(self, temp_warehouse_multi_files, planner):
         """Same filters reuse the manifest cache entry."""
-        planner = ReadPlanner(strata_config)
-
         filters = [Filter(column="value", op=FilterOp.LT, value=150)]
 
         planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
@@ -397,29 +396,23 @@ class TestTwoTierPruning:
         stats = planner.manifest_cache.stats()
         assert stats["filtered"]["hits"] >= 1
 
-    def test_no_filters_uses_unfiltered_cache(self, temp_warehouse_multi_files, strata_config):
+    def test_no_filters_uses_unfiltered_cache(self, temp_warehouse_multi_files, planner):
         """A query without filters uses the unfiltered manifest cache."""
-        planner = ReadPlanner(strata_config)
-
         planner.plan(temp_warehouse_multi_files["table_uri"])
         planner.plan(temp_warehouse_multi_files["table_uri"])
 
         stats = planner.manifest_cache.stats()
         assert stats["unfiltered"]["hits"] >= 1
 
-    def test_filter_on_string_column(self, temp_warehouse_multi_files, strata_config):
-        planner = ReadPlanner(strata_config)
-
+    def test_filter_on_string_column(self, temp_warehouse_multi_files, planner):
         filters = [Filter(column="category", op=FilterOp.EQ, value="A")]
         plan = planner.plan(temp_warehouse_multi_files["table_uri"], filters=filters)
 
         assert plan.snapshot_id > 0
         assert len(plan.tasks) >= 0  # May or may not prune depending on stats
 
-    def test_combined_filters(self, temp_warehouse_multi_files, strata_config):
+    def test_combined_filters(self, temp_warehouse_multi_files, planner):
         """Multiple filters combine with AND."""
-        planner = ReadPlanner(strata_config)
-
         filters = [
             Filter(column="value", op=FilterOp.GE, value=50),
             Filter(column="value", op=FilterOp.LT, value=150),
@@ -430,12 +423,8 @@ class TestTwoTierPruning:
 
 
 class TestIcebergExpressionFallback:
-    def test_invalid_filter_falls_back_to_unfiltered(
-        self, temp_warehouse_multi_files, strata_config
-    ):
+    def test_invalid_filter_falls_back_to_unfiltered(self, temp_warehouse_multi_files, planner):
         """A failing Iceberg expression falls back to an unfiltered scan."""
-        planner = ReadPlanner(strata_config)
-
         # An unknown column exercises the fallback path when Iceberg cannot use a filter.
         filters = [Filter(column="nonexistent_column", op=FilterOp.EQ, value="test")]
 
@@ -448,33 +437,28 @@ class TestIcebergExpressionFallback:
 class TestScanProjectionContract:
     """A scan's ``columns`` list is validated and reflected in the response schema."""
 
-    def test_a_column_that_does_not_exist_is_refused(self, temp_warehouse, strata_config):
+    def test_a_column_that_does_not_exist_is_refused(self, temp_warehouse, planner):
         """An unknown column must not come back holding another column's data.
 
         ``get_field_index`` returns -1 for an unknown name, and ``batch.column(-1)`` is the last
         column.
         """
-        planner = ReadPlanner(strata_config)
-
         with pytest.raises(ValueError, match="no column"):
             planner.plan(temp_warehouse["table_uri"], columns=["id", "nope"])
 
-    def test_the_error_names_the_available_columns(self, temp_warehouse, strata_config):
-        planner = ReadPlanner(strata_config)
-
+    def test_the_error_names_the_available_columns(self, temp_warehouse, planner):
         with pytest.raises(ValueError) as exc:
             planner.plan(temp_warehouse["table_uri"], columns=["nope"])
         assert "nope" in str(exc.value)
         assert "value" in str(exc.value)
 
     def test_an_empty_result_advertises_the_same_columns_as_a_full_one(
-        self, temp_warehouse, strata_config
+        self, temp_warehouse, planner
     ):
         """``plan.schema`` is the response schema when there are no tasks.
 
         An unprojected schema makes the response shape depend on whether any rows matched.
         """
-        planner = ReadPlanner(strata_config)
         uri = temp_warehouse["table_uri"]
 
         matched = planner.plan(uri, columns=["id"])
@@ -488,9 +472,7 @@ class TestScanProjectionContract:
         assert matched.schema.names == ["id"]
         assert pruned.schema.names == ["id"]
 
-    def test_the_projection_order_is_the_requested_order(self, temp_warehouse, strata_config):
-        planner = ReadPlanner(strata_config)
-
+    def test_the_projection_order_is_the_requested_order(self, temp_warehouse, planner):
         plan = planner.plan(temp_warehouse["table_uri"], columns=["name", "id"])
         assert plan.schema.names == ["name", "id"]
 
@@ -509,8 +491,6 @@ class TestScanProjectionContract:
         with pytest.raises(KeyError):
             CachedFetcher._project_batch(batch, ["id", "nope"])
 
-    def test_an_unprojected_scan_still_reports_every_column(self, temp_warehouse, strata_config):
-        planner = ReadPlanner(strata_config)
-
+    def test_an_unprojected_scan_still_reports_every_column(self, temp_warehouse, planner):
         plan = planner.plan(temp_warehouse["table_uri"])
         assert plan.schema.names == ["id", "value", "name", "timestamp"]

@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -54,7 +55,7 @@ def test_build_labelled_keys_never_match_the_cache_lookup() -> None:
 def _fresh_store_tables(tmp_path: Path) -> set[str]:
     store = ArtifactStore(tmp_path)
     BuildStore(store.db_path, dialect=store.dialect)
-    with sqlite3.connect(store.db_path) as conn:
+    with closing(sqlite3.connect(store.db_path)) as conn, conn:
         rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     return {name for (name,) in rows if name != "sqlite_sequence"}
 

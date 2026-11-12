@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from strata.api.badge import badge_for
@@ -45,7 +45,7 @@ from strata.api.publication_page import (
     render_embed,
     render_publication,
 )
-from strata.api.served_bytes import served_media_type
+from strata.api.served_bytes import BlobResponse, served_media_type
 from strata.services.artifact import ArtifactService
 
 router = APIRouter(tags=["publications"])
@@ -399,13 +399,8 @@ def publication_data(token: str, store: ReadStore):
     if reader_cm is None:
         raise HTTPException(status_code=404, detail="The published bytes are gone")
 
-    def _iter_blob():
-        with reader_cm as reader:
-            while chunk := reader.read(1024 * 1024):
-                yield chunk
-
     media_type, headers = served_media_type(content_type_of(artifact))
-    return StreamingResponse(_iter_blob(), media_type=media_type, headers=headers)
+    return BlobResponse(reader_cm, media_type=media_type, headers=headers, chunk_size=1024 * 1024)
 
 
 # One archive build per publication at a time; a second request waits for the first's file.

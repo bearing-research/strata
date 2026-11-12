@@ -258,7 +258,8 @@ async def test_a_run_records_what_each_input_moved_and_where(tmp_path, remote, m
     finally:
         origin.close()
 
-    table.refresh()
+    with table.catalog:
+        table.refresh()
     table_bytes = sum(task.file.file_size_in_bytes for task in table.scan().plan_files())
     body = len(origin.body)
     assert before == [

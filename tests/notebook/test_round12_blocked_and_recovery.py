@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +56,7 @@ def inventory(tmp_path) -> Path:
     ends early when the first fails.
     """
     db = tmp_path / "stock.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("CREATE TABLE stock (sku TEXT, qty INTEGER)")
         conn.executemany("INSERT INTO stock VALUES (?,?)", [("a", 10), ("b", 20)])
         conn.commit()

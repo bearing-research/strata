@@ -8,6 +8,7 @@ without its result.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,7 @@ def orders(tmp_path) -> Path:
     at 200), so a stale display is distinguishable from a refreshed one.
     """
     db = tmp_path / "orders.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, region TEXT, gross REAL)")
         conn.executemany(
             "INSERT INTO orders VALUES (?,?,?)",

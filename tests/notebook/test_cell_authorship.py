@@ -254,11 +254,13 @@ class TestUpdatedAtStaysStructural:
         by it, so bumping it on an author change would reorder notebooks every
         time the browser and an agent take turns on a cell."""
         add_cell_to_notebook(notebook, "c1", None, author="local")
-        before = tomllib.load(open(notebook / "notebook.toml", "rb"))["updated_at"]
+        with open(notebook / "notebook.toml", "rb") as f:
+            before = tomllib.load(f)["updated_at"]
 
         write_cell(notebook, "c1", "x = 1", author="agent:claude")
 
-        after = tomllib.load(open(notebook / "notebook.toml", "rb"))
+        with open(notebook / "notebook.toml", "rb") as f:
+            after = tomllib.load(f)
         assert after["cells"][0]["updated_by"] == "agent:claude"
         assert after["updated_at"] == before
 

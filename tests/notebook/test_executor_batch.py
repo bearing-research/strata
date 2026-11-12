@@ -646,6 +646,7 @@ async def test_a_cell_in_a_batch_can_promote_what_it_reads(tmp_path: Path):
         )
     finally:
         server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.asyncio

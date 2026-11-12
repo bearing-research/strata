@@ -90,6 +90,12 @@ def strata_config(tmp_path):
     return StrataConfig(cache_dir=cache_dir)
 
 
+@pytest.fixture
+def planner(strata_config):
+    with ReadPlanner(strata_config) as planner:
+        yield planner
+
+
 class TestTableIdentity:
     def test_from_table_id(self):
         identity = TableIdentity.from_table_id("test_db.events")
@@ -218,18 +224,14 @@ class TestDiskCache:
 
 
 class TestReadPlanner:
-    def test_plan_basic(self, temp_warehouse, strata_config):
-        planner = ReadPlanner(strata_config)
-
+    def test_plan_basic(self, temp_warehouse, planner):
         plan = planner.plan(temp_warehouse["table_uri"])
 
         assert plan.snapshot_id > 0
         assert len(plan.tasks) > 0
         assert plan.total_row_groups > 0
 
-    def test_plan_with_projection(self, temp_warehouse, strata_config):
-        planner = ReadPlanner(strata_config)
-
+    def test_plan_with_projection(self, temp_warehouse, planner):
         plan = planner.plan(
             temp_warehouse["table_uri"],
             columns=["id", "value"],
@@ -239,9 +241,7 @@ class TestReadPlanner:
         for task in plan.tasks:
             assert task.columns == ["id", "value"]
 
-    def test_plan_with_filter_pruning(self, temp_warehouse, strata_config):
-        planner = ReadPlanner(strata_config)
-
+    def test_plan_with_filter_pruning(self, temp_warehouse, planner):
         planner.plan(temp_warehouse["table_uri"])
 
         # value ranges from 0 to 748.5 (500 rows * 1.5)
@@ -255,10 +255,8 @@ class TestReadPlanner:
 
 
 class TestCachedFetcher:
-    def test_fetch_and_cache(self, temp_warehouse, strata_config):
+    def test_fetch_and_cache(self, temp_warehouse, strata_config, planner):
         fetcher = CachedFetcher(strata_config)
-        planner = ReadPlanner(strata_config)
-
         plan = planner.plan(temp_warehouse["table_uri"])
         task = plan.tasks[0]
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 import sys
+from contextlib import nullcontext
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -46,7 +47,8 @@ def table(tmp_path):
     table.append(pa.table({"id": pa.array(range(10), pa.int64())}))
     (task,) = table.scan().plan_files()
     catalog.engine.dispose()
-    return {"uri": f"{warehouse.as_uri()}#db.t", "data_file": task.file.file_path, "table": table}
+    yield {"uri": f"{warehouse.as_uri()}#db.t", "data_file": task.file.file_path, "table": table}
+    catalog.close()
 
 
 def _delete_file(path, rows: dict[str, list[int]], file_format=FileFormat.PARQUET) -> DataFile:
@@ -93,7 +95,8 @@ def _config(tmp_path) -> StrataConfig:
 
 
 def _scan(config, uri, planner=None, filters=None) -> tuple[list[int], list]:
-    plan = (planner or ReadPlanner(config)).plan(uri, filters=filters)
+    with nullcontext(planner) if planner else ReadPlanner(config) as planner:
+        plan = planner.plan(uri, filters=filters)
     fetcher = CachedFetcher(config)
     ids = [v for task in plan.tasks for v in fetcher.fetch(task).column("id").to_pylist()]
     return ids, plan.tasks
@@ -115,7 +118,8 @@ def test_deleted_rows_are_absent_and_stay_absent_from_the_cache(tmp_path, table,
     assert ids == [0, 2, 3, 4, 6, 7, 9]
     assert all(task.cached for task in tasks)
     fetcher = CachedFetcher(config)
-    plan = ReadPlanner(config).plan(table["uri"])
+    with ReadPlanner(config) as planner:
+        plan = planner.plan(table["uri"])
     streamed = [
         v
         for task in plan.tasks
@@ -132,7 +136,8 @@ def test_a_projected_scan_caching_whole_row_groups_drops_the_rows_too(tmp_path, 
     attach(_delete_file(tmp_path / "d.parquet", {table["data_file"]: [1, 5, 8]}))
     config = StrataConfig(cache_dir=tmp_path / "cache", cache_granularity="row_group")
 
-    plan = ReadPlanner(config).plan(table["uri"], columns=["id"])
+    with ReadPlanner(config) as planner:
+        plan = planner.plan(table["uri"], columns=["id"])
     fetcher = CachedFetcher(config)
     ids = [v for task in plan.tasks for v in fetcher.fetch(task).column("id").to_pylist()]
     assert ids == [0, 2, 3, 4, 6, 7, 9]
@@ -142,7 +147,8 @@ def test_a_row_group_with_every_row_deleted_is_not_read(tmp_path, table, attach)
     attach(_delete_file(tmp_path / "d.parquet", {table["data_file"]: [4, 5, 6, 7]}))
     config = _config(tmp_path)
 
-    plan = ReadPlanner(config).plan(table["uri"])
+    with ReadPlanner(config) as planner:
+        plan = planner.plan(table["uri"])
     assert [task.row_group_id for task in plan.tasks] == [0, 2]
     assert plan.pruned_row_groups == 1
     assert _scan(config, table["uri"])[0] == [0, 1, 2, 3, 8, 9]
@@ -199,10 +205,11 @@ def test_the_persisted_manifest_keeps_the_deletes(tmp_path, table, attach):
     # Loading a config creates no directories; the server makes them at startup.
     config.cache_dir.mkdir(parents=True)
     store = MetadataStore(config.cache_dir / "metadata.sqlite")
-    ReadPlanner(config, manifest_cache=ManifestCache(store=store)).plan(table["uri"])
+    with ReadPlanner(config, manifest_cache=ManifestCache(store=store)) as planner:
+        planner.plan(table["uri"])
 
-    restarted = ReadPlanner(config, manifest_cache=ManifestCache(store=store))
-    ids, tasks = _scan(config, table["uri"], planner=restarted)
+    with ReadPlanner(config, manifest_cache=ManifestCache(store=store)) as restarted:
+        ids, tasks = _scan(config, table["uri"], planner=restarted)
     assert ids == [0, 2, 3, 4, 6, 7, 9]
     assert store.manifest_hits == 1
 
@@ -231,8 +238,11 @@ def test_a_metadata_store_from_another_version_is_discarded(tmp_path):
 def test_a_delete_file_strata_cannot_read_is_refused(tmp_path, table, attach):
     attach(_delete_file(tmp_path / "d.orc", {table["data_file"]: [1]}, FileFormat.ORC))
 
-    with pytest.raises(UnsupportedTableFormatError, match="ORC delete file"):
-        ReadPlanner(_config(tmp_path)).plan(table["uri"])
+    with (
+        ReadPlanner(_config(tmp_path)) as planner,
+        pytest.raises(UnsupportedTableFormatError, match="ORC delete file"),
+    ):
+        planner.plan(table["uri"])
 
 
 def test_a_delete_file_is_read_once(tmp_path):

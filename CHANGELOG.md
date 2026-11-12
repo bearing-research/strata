@@ -339,6 +339,13 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Downloads close the stored blob however the client leaves, and dropped catalogs close.**
+  An artifact's data, a signed build blob, a publication, an output folder's file and a
+  scan stream kept the stored blob open when the client went away before or during the
+  body. A named catalog dropped for new credentials and a catalog rebuilt after its
+  connection failed kept their connection pools open, and stopping the cache warmer did
+  not wait for the plans its cancelled jobs were still running. `strata run` and the
+  notebook CLI also leave no R warm worker running when they finish. (#1515)
 - **Uploads and table reads close what they open.** An artifact upload, an import, a worker's
   execute request and the reference executor left each form part's spooled temp file open, and
   every `@table` read, `@write_table` write, table export and catalog read in SQL left its

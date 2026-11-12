@@ -131,6 +131,14 @@ class TestRefusals:
         assert _stage(base, digest="not-a-digest").status_code == 422
 
 
+def _is_staged(store, digest) -> bool:
+    reader = store.open_staged_import(None, digest)
+    if reader is None:
+        return False
+    with reader:
+        return True
+
+
 class TestAbandonedUploads:
     def test_an_upload_nothing_imports_is_dropped_a_day_later(self, tmp_path):
         store = ArtifactStore(tmp_path / "store")
@@ -140,11 +148,11 @@ class TestAbandonedUploads:
 
         store.stage_import_blob(None, DIGEST, source, len(BLOB), now=0.0)
         store.stage_import_blob(None, other, source, len(BLOB), now=IMPORT_STAGING_TTL_SECONDS - 1)
-        assert store.open_staged_import(None, DIGEST) is not None
+        assert _is_staged(store, DIGEST)
 
         store.stage_import_blob(None, other, source, len(BLOB), now=IMPORT_STAGING_TTL_SECONDS + 1)
-        assert store.open_staged_import(None, DIGEST) is None
-        assert store.open_staged_import(None, other) is not None
+        assert not _is_staged(store, DIGEST)
+        assert _is_staged(store, other)
 
 
 def _headers(tenant: str, principal: str = "publisher", scopes: str = "artifacts:write"):

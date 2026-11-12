@@ -406,10 +406,13 @@ class PyIcebergCatalog:
 
     def forget_named_catalogs(self) -> None:
         """Drop every named catalog built, so the next use reads the current settings."""
-        # Dropped, not closed: another thread may be loading a table through one.
         with self._lock:
-            for key in [key for key in self._catalogs if key.startswith("catalog:")]:
-                del self._catalogs[key]
+            named = [key for key in self._catalogs if key.startswith("catalog:")]
+            dropped = [self._catalogs.pop(key) for key in named]
+        for catalog in dropped:
+            # Its idle connections close now; one a load in flight holds is left to it, and
+            # closes when the collector finds the pool it returns to.
+            catalog.close()
 
     def close(self) -> None:
         """Close every catalog built: a ``SqlCatalog`` holds a pool of database connections."""
@@ -428,7 +431,10 @@ class PyIcebergCatalog:
     def _invalidate_catalog(self, warehouse_path: str | None) -> None:
         """Drop a cached catalog so the next access rebuilds its connection."""
         with self._lock:
-            self._catalogs.pop(warehouse_path or "default", None)
+            catalog = self._catalogs.pop(warehouse_path or "default", None)
+        if catalog is not None:
+            # As in forget_named_catalogs: a load in flight keeps its own connection.
+            catalog.close()
 
     @staticmethod
     def parse_table_uri(table_uri: str) -> tuple[str | None, str]:

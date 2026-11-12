@@ -895,3 +895,23 @@ def test_a_timeout_notebook_toml_set_points_at_notebook_toml():
     assert "30.0s" in msg
     assert "'timeout' in notebook.toml" in msg
     assert "for a one-off run" not in msg
+
+
+async def test_a_run_drains_its_r_warm_pool_too():
+    """A notebook with R cells has an R pool as well; left running, its worker outlives the run."""
+    from types import SimpleNamespace
+
+    from strata.notebook.cli import _drain_warm_pool
+
+    drained = []
+
+    class Pool:
+        def __init__(self, name):
+            self.name = name
+
+        async def drain(self):
+            drained.append(self.name)
+
+    await _drain_warm_pool(SimpleNamespace(warm_pool=Pool("python"), r_warm_pool=Pool("r")))
+
+    assert drained == ["python", "r"]

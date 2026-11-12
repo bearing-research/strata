@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -351,7 +352,7 @@ class TestConnections:
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
         db = tmp_path / "events.db"
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             conn.execute("CREATE TABLE t (x INTEGER)")
         nb = create_notebook(tmp_path, "sqlcred")
         add_cell_to_notebook(nb, "c1", language="sql")

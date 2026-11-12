@@ -37,7 +37,8 @@ def empty_table(tmp_path):
         ),
     )
     catalog.engine.dispose()
-    return f"{wh.as_uri()}#ns.t", table
+    yield f"{wh.as_uri()}#ns.t", table
+    catalog.close()
 
 
 def _write(table, ids: list[int]) -> None:
@@ -77,6 +78,7 @@ def client(tmp_path):
     try:
         yield TestClient(app, raise_server_exceptions=False)
     finally:
+        server_module._state.planner.close()
         server_module._state = original
         reset_artifact_store()
 

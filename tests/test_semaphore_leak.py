@@ -68,12 +68,13 @@ def large_warehouse(tmp_path):
     )
     table.append(data)
 
-    return {
+    yield {
         "warehouse_path": warehouse_path,
         "table_uri": f"file://{warehouse_path}#test_db.large_events",
         "catalog": catalog,
         "table": table,
     }
+    catalog.close()
 
 
 class TestSemaphoreLeakRegression:
@@ -433,6 +434,7 @@ def in_process(tmp_path):
         yield TestClient(app, raise_server_exceptions=False), state
     finally:
         state.streams.shutdown_cleanups()
+        state.planner.close()
         server_module._state = original
         reset_artifact_store()
         reset_tenant_registry()

@@ -5,6 +5,7 @@ base fixtures (temp_warehouse, strata_config, server_with_client).
 """
 
 import asyncio
+import gc
 import io
 import os
 import shlex
@@ -66,6 +67,28 @@ def prepared_venv(notebook_dir: Path) -> None:
         # base interpreter without this venv's packages.
         python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
         python.chmod(0o755)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _collect_after_each_module():
+    """Thaw what the tests froze and collect it: what one test kept and a later one dropped."""
+    yield
+    gc.unfreeze()
+    gc.collect()
+
+
+@pytest.fixture(autouse=True)
+def _collect_after_each_test(_collect_after_each_module):
+    """Collect once the test's other fixtures are torn down.
+
+    An object left open warns when it is collected, and a ResourceWarning is an error here:
+    collecting now fails the test that leaked it, not whichever test the collector next runs in.
+    What survives is frozen, so the next test's collect walks only what that test made: a full
+    collect walks every object the suite has loaded, about a second each by the end of a run.
+    """
+    yield
+    gc.collect()
+    gc.freeze()
 
 
 @pytest.fixture(autouse=True)
@@ -568,12 +591,13 @@ def temp_warehouse(tmp_path):
     # tmpfs + Python 3.14. The returned ``catalog`` reconnects lazily.
     catalog.engine.dispose()
 
-    return {
+    yield {
         "warehouse_path": warehouse_path,
         "table_uri": f"{warehouse_uri}#test_db.events",
         "catalog": catalog,
         "table": table,
     }
+    catalog.close()
 
 
 @pytest.fixture
@@ -741,6 +765,7 @@ def in_process_server(tmp_path):
     for state in states:
         state._planning_executor.shutdown(wait=False)
         state._fetch_executor.shutdown(wait=False)
+        state.planner.close()
 
 
 class RebindingDNS:

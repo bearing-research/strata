@@ -1,5 +1,6 @@
 """Tests for metadata caching (Parquet metadata and manifest resolution)."""
 
+from contextlib import closing
 from pathlib import Path
 
 import pyarrow as pa
@@ -582,11 +583,12 @@ class TestPlannerWithMetadataCache:
         df = pa.Table.from_batches([batch])
         table.append(df)
 
-        return {
+        yield {
             "warehouse_path": warehouse_path,
             "table_uri": f"file://{warehouse_path}#test_ns.events",
             "catalog": catalog,
         }
+        catalog.close()
 
     def test_planner_uses_parquet_cache(self, warehouse_with_table):
         reset_caches()
@@ -595,21 +597,20 @@ class TestPlannerWithMetadataCache:
         from strata.planner import ReadPlanner
 
         config = StrataConfig()
-        planner = ReadPlanner(config)
+        with ReadPlanner(config) as planner:
+            table_uri = warehouse_with_table["table_uri"]
 
-        table_uri = warehouse_with_table["table_uri"]
+            plan1 = planner.plan(table_uri)
+            assert len(plan1.tasks) > 0
 
-        plan1 = planner.plan(table_uri)
-        assert len(plan1.tasks) > 0
+            pq_cache_stats = planner.parquet_cache.stats()
+            assert pq_cache_stats["misses"] >= 1
 
-        pq_cache_stats = planner.parquet_cache.stats()
-        assert pq_cache_stats["misses"] >= 1
+            plan2 = planner.plan(table_uri)
+            assert len(plan2.tasks) == len(plan1.tasks)
 
-        plan2 = planner.plan(table_uri)
-        assert len(plan2.tasks) == len(plan1.tasks)
-
-        pq_cache_stats = planner.parquet_cache.stats()
-        assert pq_cache_stats["hits"] >= 1
+            pq_cache_stats = planner.parquet_cache.stats()
+            assert pq_cache_stats["hits"] >= 1
 
     def test_planner_uses_manifest_cache(self, warehouse_with_table):
         reset_caches()
@@ -618,21 +619,20 @@ class TestPlannerWithMetadataCache:
         from strata.planner import ReadPlanner
 
         config = StrataConfig()
-        planner = ReadPlanner(config)
+        with ReadPlanner(config) as planner:
+            table_uri = warehouse_with_table["table_uri"]
 
-        table_uri = warehouse_with_table["table_uri"]
+            plan1 = planner.plan(table_uri)
+            assert len(plan1.tasks) > 0
 
-        plan1 = planner.plan(table_uri)
-        assert len(plan1.tasks) > 0
+            manifest_stats = planner.manifest_cache.stats()
+            assert manifest_stats["unfiltered"]["misses"] >= 1
 
-        manifest_stats = planner.manifest_cache.stats()
-        assert manifest_stats["unfiltered"]["misses"] >= 1
+            plan2 = planner.plan(table_uri)
+            assert len(plan2.tasks) == len(plan1.tasks)
 
-        plan2 = planner.plan(table_uri)
-        assert len(plan2.tasks) == len(plan1.tasks)
-
-        manifest_stats = planner.manifest_cache.stats()
-        assert manifest_stats["unfiltered"]["hits"] >= 1
+            manifest_stats = planner.manifest_cache.stats()
+            assert manifest_stats["unfiltered"]["hits"] >= 1
 
     def test_manifest_cache_isolated_per_warehouse(self, tmp_path):
         """Same table name in two warehouses must not share manifests."""
@@ -660,39 +660,38 @@ class TestPlannerWithMetadataCache:
             warehouse_path.mkdir()
             warehouse_uri = warehouse_path.as_uri()
             catalog_db = (warehouse_path / "catalog.db").as_posix()
-            catalog = SqlCatalog(
+            with SqlCatalog(
                 "strata",
                 **{
                     "uri": f"sqlite:///{catalog_db}",
                     "warehouse": warehouse_uri,
                 },
-            )
-            catalog.create_namespace("test_ns")
-            table = catalog.create_table("test_ns.events", schema)
-            batch = pa.RecordBatch.from_pydict(
-                {
-                    "id": values,
-                    "name": [f"item_{value}" for value in values],
-                }
-            )
-            table.append(pa.Table.from_batches([batch]))
+            ) as catalog:
+                catalog.create_namespace("test_ns")
+                table = catalog.create_table("test_ns.events", schema)
+                batch = pa.RecordBatch.from_pydict(
+                    {
+                        "id": values,
+                        "name": [f"item_{value}" for value in values],
+                    }
+                )
+                table.append(pa.Table.from_batches([batch]))
             return f"{warehouse_uri}#test_ns.events"
 
         table_uri_one = _create_warehouse(tmp_path / "one", [1, 2, 3])
         table_uri_two = _create_warehouse(tmp_path / "two", [10, 11, 12])
 
-        planner = ReadPlanner(StrataConfig())
+        with ReadPlanner(StrataConfig()) as planner:
+            plan_one = planner.plan(table_uri_one)
+            plan_two = planner.plan(table_uri_two)
 
-        plan_one = planner.plan(table_uri_one)
-        plan_two = planner.plan(table_uri_two)
+            warehouse_two_path = str((tmp_path / "two" / "warehouse").resolve())
+            assert len(plan_one.tasks) > 0
+            assert len(plan_two.tasks) > 0
+            assert all(task.file_path.startswith(warehouse_two_path) for task in plan_two.tasks)
 
-        warehouse_two_path = str((tmp_path / "two" / "warehouse").resolve())
-        assert len(plan_one.tasks) > 0
-        assert len(plan_two.tasks) > 0
-        assert all(task.file_path.startswith(warehouse_two_path) for task in plan_two.tasks)
-
-        manifest_stats = planner.manifest_cache.stats()
-        assert manifest_stats["unfiltered"]["misses"] >= 2
+            manifest_stats = planner.manifest_cache.stats()
+            assert manifest_stats["unfiltered"]["misses"] >= 2
 
     def test_different_snapshots_use_different_cache_entries(self, warehouse_with_table):
         reset_caches()
@@ -713,22 +712,22 @@ class TestPlannerWithMetadataCache:
         snap2_id = snapshots[1].snapshot_id
 
         config = StrataConfig()
-        planner = ReadPlanner(config)
-        table_uri = warehouse_with_table["table_uri"]
+        with ReadPlanner(config) as planner:
+            table_uri = warehouse_with_table["table_uri"]
 
-        planner.plan(table_uri, snapshot_id=snap1_id)
+            planner.plan(table_uri, snapshot_id=snap1_id)
 
-        planner.plan(table_uri, snapshot_id=snap2_id)
+            planner.plan(table_uri, snapshot_id=snap2_id)
 
-        # Different snapshots, so both miss.
-        manifest_stats = planner.manifest_cache.stats()
-        assert manifest_stats["unfiltered"]["misses"] >= 2
+            # Different snapshots, so both miss.
+            manifest_stats = planner.manifest_cache.stats()
+            assert manifest_stats["unfiltered"]["misses"] >= 2
 
-        planner.plan(table_uri, snapshot_id=snap1_id)
-        planner.plan(table_uri, snapshot_id=snap2_id)
+            planner.plan(table_uri, snapshot_id=snap1_id)
+            planner.plan(table_uri, snapshot_id=snap2_id)
 
-        manifest_stats = planner.manifest_cache.stats()
-        assert manifest_stats["unfiltered"]["hits"] >= 2
+            manifest_stats = planner.manifest_cache.stats()
+            assert manifest_stats["unfiltered"]["hits"] >= 2
 
 
 class TestMetadataStore:
@@ -1096,11 +1095,11 @@ class TestPreflightSizeRespectsProjection:
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
 
-        planner = ReadPlanner(StrataConfig(cache_dir=tmp_path / "c"))
-        uri = temp_warehouse["table_uri"]
+        with ReadPlanner(StrataConfig(cache_dir=tmp_path / "c")) as planner:
+            uri = temp_warehouse["table_uri"]
 
-        full = planner.plan(uri).estimated_bytes
-        projected = planner.plan(uri, columns=["id"]).estimated_bytes
+            full = planner.plan(uri).estimated_bytes
+            projected = planner.plan(uri, columns=["id"]).estimated_bytes
 
         assert projected < full
 
@@ -1111,9 +1110,10 @@ class TestPreflightSizeRespectsProjection:
         from strata.planner import ReadPlanner
 
         config = StrataConfig(cache_dir=tmp_path / "c")
-        planner, fetcher = ReadPlanner(config), CachedFetcher(config)
+        fetcher = CachedFetcher(config)
 
-        plan = planner.plan(temp_warehouse["table_uri"], columns=["id"])
+        with ReadPlanner(config) as planner:
+            plan = planner.plan(temp_warehouse["table_uri"], columns=["id"])
         actual = sum(b.nbytes for b in fetcher.execute_plan(plan))
 
         assert plan.estimated_bytes >= actual
@@ -1126,8 +1126,10 @@ class TestPreflightSizeRespectsProjection:
         config = StrataConfig(cache_dir=tmp_path / "c")
         uri = temp_warehouse["table_uri"]
 
-        cold = ReadPlanner(config).plan(uri, columns=["id"]).estimated_bytes
-        warm = ReadPlanner(config).plan(uri, columns=["id"]).estimated_bytes
+        with ReadPlanner(config) as planner:
+            cold = planner.plan(uri, columns=["id"]).estimated_bytes
+        with ReadPlanner(config) as planner:
+            warm = planner.plan(uri, columns=["id"]).estimated_bytes
 
         assert warm == cold
 
@@ -1136,11 +1138,11 @@ class TestPreflightSizeRespectsProjection:
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
 
-        planner = ReadPlanner(StrataConfig(cache_dir=tmp_path / "c"))
-        uri = temp_warehouse["table_uri"]
+        with ReadPlanner(StrataConfig(cache_dir=tmp_path / "c")) as planner:
+            uri = temp_warehouse["table_uri"]
 
-        full = planner.plan(uri).estimated_bytes
-        projected = planner.plan(uri, columns=["id"]).estimated_bytes
+            full = planner.plan(uri).estimated_bytes
+            projected = planner.plan(uri, columns=["id"]).estimated_bytes
 
         # A limit the narrow scan fits under and the wide scan does not.
         limit = (full + projected) // 2
@@ -1150,7 +1152,8 @@ class TestPreflightSizeRespectsProjection:
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
 
-        plan = ReadPlanner(StrataConfig(cache_dir=tmp_path / "c")).plan(temp_warehouse["table_uri"])
+        with ReadPlanner(StrataConfig(cache_dir=tmp_path / "c")) as planner:
+            plan = planner.plan(temp_warehouse["table_uri"])
 
         meta = pq.ParquetFile(plan.tasks[0].file_path).metadata
         assert plan.estimated_bytes == sum(
@@ -1242,15 +1245,14 @@ class TestPersistedColumnSizes:
         target = tmp_path / "legacy.parquet"
         target.write_bytes(b"not really parquet, only stat'd")
         legacy = json.dumps([{"num_rows": 5, "total_byte_size": 900, "column_stats": {}}])
-        conn = store._get_conn()
-        conn.execute(
-            """INSERT INTO parquet_meta
-               (file_path, schema_ipc, num_row_groups, row_groups_json,
-                column_names_json, file_mtime, file_size)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (str(target), b"", 1, legacy, json.dumps(["a"]), None, _size(target)),
-        )
-        conn.commit()
+        with closing(store._get_conn()) as conn, conn:
+            conn.execute(
+                """INSERT INTO parquet_meta
+                   (file_path, schema_ipc, num_row_groups, row_groups_json,
+                    column_names_json, file_mtime, file_size)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(target), b"", 1, legacy, json.dumps(["a"]), None, _size(target)),
+            )
 
         loaded = store.get_parquet_meta(str(target), _size(target))
         assert loaded.row_groups[0].column_sizes == {}
@@ -1494,20 +1496,21 @@ def test_a_table_recreated_at_the_same_paths_plans_from_its_own_footers(tmp_path
 
     # Long-lived, as the server's are.
     config = StrataConfig(cache_dir=tmp_path / "cache")
-    planner = ReadPlanner(config)
     fetcher = CachedFetcher(config)
 
     def scan(filters=None):
         plan = planner.plan(uri, filters=filters)
         return [row["id"] for task in plan.tasks for row in fetcher.fetch(task).to_pylist()]
 
-    register([1, 2, 3])
-    scan()  # Unfiltered, so the footer is read and cached.
-    register(list(range(100, 140)))
+    with catalog, ReadPlanner(config) as planner:
+        register([1, 2, 3])
+        scan()  # Unfiltered, so the footer is read and cached.
+        register(list(range(100, 140)))
 
-    filters = [Filter("id", FilterOp.GT, 5)] if filtered else None
-    assert scan(filters) == list(range(100, 140))
+        filters = [Filter("id", FilterOp.GT, 5)] if filtered else None
+        assert scan(filters) == list(range(100, 140))
     # A restarted server reads the persisted footers.
     reset_caches()
-    planner, fetcher = ReadPlanner(config), CachedFetcher(config)
-    assert scan(filters) == list(range(100, 140))
+    fetcher = CachedFetcher(config)
+    with ReadPlanner(config) as planner:
+        assert scan(filters) == list(range(100, 140))

@@ -126,6 +126,7 @@ def test_a_dispatchers_header_context_is_the_nearer_parent_than_the_manifests(sp
             response = client.post("/execute", json=manifest, headers=pool_context)
     finally:
         server.shutdown()
+        server.server_close()
 
     assert response.status_code == 200, response.text
     execution = _one(spans, "worker.execute")

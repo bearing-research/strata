@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ adbc_sqlite = pytest.importorskip("adbc_driver_sqlite")
 
 def _seed_sqlite(path: Path, first: int = 10) -> None:
     """Create a SQLite file with one table the cells can query, *first* the first value."""
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)")
         conn.executemany(
             "INSERT INTO events (id, name, value) VALUES (?, ?, ?)",
@@ -331,7 +332,7 @@ async def test_sql_cell_nocache_reruns_every_time(tmp_path, cell_source):
     assert second["cache_hit"] is False
     assert second["execution_method"] == "sql"
     if "INSERT" in cell_source:
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn, conn:
             assert conn.execute("SELECT COUNT(*) FROM events WHERE name = 'd'").fetchone() == (2,)
 
 
@@ -364,7 +365,7 @@ async def test_sql_cell_fingerprint_invalidates_on_schema_change(tmp_path):
     assert first["cache_hit"] is False
 
     # Mutate the schema from outside Strata.
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.execute("ALTER TABLE events ADD COLUMN extra TEXT")
         conn.commit()
 
@@ -403,7 +404,7 @@ async def test_sql_cell_read_only_enforces_no_writes(tmp_path):
     assert result["error"], "expected a non-empty error message"
 
     # Security boundary: the underlying DB row count is unchanged.
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         (count,) = conn.execute("SELECT COUNT(*) FROM events").fetchone()
         assert count == 3
 
@@ -727,7 +728,7 @@ async def test_sql_write_cell_creates_table_and_inserts_rows(tmp_path):
     result = await execute_sql_cell(session, "c1", src)
     assert result["success"], result.get("error")
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         rows = conn.execute("SELECT id, label FROM events ORDER BY id").fetchall()
     assert rows == [(1, "alpha"), (2, "beta")]
 
@@ -757,7 +758,7 @@ async def test_sql_write_cell_caches_within_session(tmp_path):
     assert second["success"]
     assert second["cache_hit"] is True
     # And the second call did NOT actually re-run the inserts.
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         (count,) = conn.execute("SELECT COUNT(*) FROM t").fetchone()
         assert count == 1
 
@@ -798,7 +799,7 @@ async def test_sql_write_false_still_blocks_writes(tmp_path):
 
     result = await execute_sql_cell(session, "c1", _read_cell(nb_dir, "c1"))
     assert result["success"] is False
-    with sqlite3.connect(tmp_path / "events.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "events.db")) as conn, conn:
         (count,) = conn.execute("SELECT COUNT(*) FROM events").fetchone()
         assert count == 3
 
@@ -911,7 +912,7 @@ async def test_sql_write_cell_resolves_bind_placeholders_from_upstream(tmp_path)
     seed_result = await executor.execute_cell("seed", seed_src)
     assert seed_result.success, seed_result.error
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         rows = conn.execute("SELECT label, n FROM t").fetchall()
     assert rows == [("alpha", 7)]
 
@@ -969,7 +970,7 @@ async def test_sql_write_cell_invalidates_on_upstream_value_change(tmp_path):
     assert second.cache_hit is False, (
         "write cell must re-execute when an upstream bind variable changes"
     )
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         rows = conn.execute("SELECT n FROM t").fetchall()
     assert rows == [(99,)]
 
@@ -1526,7 +1527,7 @@ def _committing_during_the_query(monkeypatch: pytest.MonkeyPatch, db_path: Path)
     def commit_then_query(*args: Any, **kwargs: Any) -> Any:
         if not done:
             done.append(True)
-            with sqlite3.connect(db_path) as conn:
+            with closing(sqlite3.connect(db_path)) as conn, conn:
                 conn.execute("UPDATE events SET value = 11 WHERE id = 1")
                 conn.commit()
         return query(*args, **kwargs)

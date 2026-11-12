@@ -255,6 +255,7 @@ class TestCacheHistogramIntegration:
         finally:
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state.planner.close()
             server_module._state = None
 
 

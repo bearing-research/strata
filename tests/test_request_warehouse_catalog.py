@@ -40,8 +40,8 @@ class TestPersonalModeKeepsTheFallback:
 
     @pytest.mark.parametrize("warehouse", ["gs://lake/wh", "az://lake/wh"])
     def test_a_gcs_or_azure_warehouse_builds_its_catalog_there(self, tmp_path, warehouse):
-        catalog = PyIcebergCatalog(_config(tmp_path, "personal"))._build_catalog(warehouse)
-        catalog.create_namespace("ns")
+        with PyIcebergCatalog(_config(tmp_path, "personal"))._build_catalog(warehouse) as catalog:
+            catalog.create_namespace("ns")
 
         assert catalog.properties["uri"] == f"sqlite:///{tmp_path / 'meta.sqlite'}"
         assert (tmp_path / "meta.sqlite").is_file()
@@ -51,7 +51,8 @@ class TestPersonalModeKeepsTheFallback:
         config = _config(tmp_path / "fresh", "personal")
         metadata_db = tmp_path / "fresh" / "meta.sqlite"
 
-        PyIcebergCatalog(config)._build_catalog("gs://lake/wh").create_namespace("ns")
+        with PyIcebergCatalog(config)._build_catalog("gs://lake/wh") as catalog:
+            catalog.create_namespace("ns")
 
         assert metadata_db.is_file()
 
@@ -61,6 +62,12 @@ class TestPersonalModeKeepsTheFallback:
         assert catalogs._get_default_catalog_uri(str(tmp_path / "wh")) == (
             f"sqlite:///{tmp_path / 'wh' / 'catalog.db'}"
         )
+
+
+def _built(config: StrataConfig, warehouse: str):
+    """The catalog built for *warehouse*, closed: these tests read only its properties."""
+    with PyIcebergCatalog(config)._build_catalog(warehouse) as catalog:
+        return catalog
 
 
 def _store_props(catalog, prefix: str) -> dict[str, str]:
@@ -79,7 +86,7 @@ class TestStoreSettingsReachTheCatalog:
             azure_account_name="acct",
         )
 
-        catalog = PyIcebergCatalog(config)._build_catalog("gs://lake/wh")
+        catalog = _built(config, "gs://lake/wh")
 
         assert _store_props(catalog, "gcs.") == {
             "gcs.default-bucket-location": "europe-west1",
@@ -90,7 +97,7 @@ class TestStoreSettingsReachTheCatalog:
     def test_a_bare_gcs_endpoint_gets_https(self, tmp_path):
         config = _config(tmp_path, "personal", gcs_endpoint_override="storage.example:443")
 
-        catalog = PyIcebergCatalog(config)._build_catalog("gs://lake/wh")
+        catalog = _built(config, "gs://lake/wh")
 
         assert catalog.properties["gcs.service.host"] == "https://storage.example:443"
 
@@ -99,12 +106,12 @@ class TestStoreSettingsReachTheCatalog:
         key = tmp_path / "key.json"
         config = _config(tmp_path, "personal", gcs_credentials_json=str(key))
 
-        PyIcebergCatalog(config)._build_catalog("gs://lake/wh")
+        _built(config, "gs://lake/wh")
 
         assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == str(key)
 
     def test_a_gcs_warehouse_with_nothing_configured_gets_no_gcs_props(self, tmp_path):
-        catalog = PyIcebergCatalog(_config(tmp_path, "personal"))._build_catalog("gs://lake/wh")
+        catalog = _built(_config(tmp_path, "personal"), "gs://lake/wh")
 
         assert _store_props(catalog, "gcs.") == {}
 
@@ -123,7 +130,7 @@ class TestStoreSettingsReachTheCatalog:
             gcs_endpoint_override="http://127.0.0.1:4443",
         )
 
-        catalog = PyIcebergCatalog(config)._build_catalog(warehouse)
+        catalog = _built(config, warehouse)
 
         assert _store_props(catalog, "adls.") == {
             "adls.account-name": "acct",
@@ -145,7 +152,7 @@ class TestStoreSettingsReachTheCatalog:
             azure_endpoint_url="http://127.0.0.1:10000",
         )
 
-        catalog = PyIcebergCatalog(config)._build_catalog("abfs://lake@devstoreaccount1/wh")
+        catalog = _built(config, "abfs://lake@devstoreaccount1/wh")
 
         assert catalog.properties["adls.connection-string"] == (
             "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=a2V5;"
@@ -162,7 +169,7 @@ class TestStoreSettingsReachTheCatalog:
             azure_endpoint_url="http://127.0.0.1:10000/devstoreaccount1",
         )
 
-        catalog = PyIcebergCatalog(config)._build_catalog("abfs://lake@devstoreaccount1/wh")
+        catalog = _built(config, "abfs://lake@devstoreaccount1/wh")
 
         assert catalog.properties["adls.connection-string"].endswith(
             ";BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1"
@@ -177,19 +184,19 @@ class TestStoreSettingsReachTheCatalog:
             azure_endpoint_url="http://127.0.0.1:10000",
         )
 
-        catalog = PyIcebergCatalog(config)._build_catalog("abfs://lake@acct/wh")
+        catalog = _built(config, "abfs://lake@acct/wh")
 
         assert "adls.connection-string" not in catalog.properties
 
     def test_an_azure_warehouse_gets_only_what_is_configured(self, tmp_path):
         config = _config(tmp_path, "personal", azure_account_name="acct")
 
-        catalog = PyIcebergCatalog(config)._build_catalog("abfs://lake@acct/wh")
+        catalog = _built(config, "abfs://lake@acct/wh")
 
         assert _store_props(catalog, "adls.") == {"adls.account-name": "acct"}
 
     def test_an_azure_warehouse_with_nothing_configured_gets_no_adls_props(self, tmp_path):
-        catalog = PyIcebergCatalog(_config(tmp_path, "personal"))._build_catalog("az://lake/wh")
+        catalog = _built(_config(tmp_path, "personal"), "az://lake/wh")
 
         assert _store_props(catalog, "adls.") == {}
 
@@ -201,7 +208,7 @@ class TestStoreSettingsReachTheCatalog:
             catalog_properties={"gcs.service.host": "http://override:1"},
         )
 
-        catalog = PyIcebergCatalog(config)._build_catalog("gs://lake/wh")
+        catalog = _built(config, "gs://lake/wh")
 
         assert catalog.properties["gcs.service.host"] == "http://override:1"
 
@@ -272,26 +279,25 @@ class TestTheRequestsWarehouseIsTheOneWritten:
         configured, requested = tmp_path / "configured", tmp_path / "requested"
         configured.mkdir()
         requested.mkdir()
-        catalogs = PyIcebergCatalog(
-            _config(
-                tmp_path,
-                "personal",
-                catalog_properties={
-                    "uri": f"sqlite:///{tmp_path / 'catalog.db'}",
-                    "warehouse": configured.as_uri(),
-                },
-            )
+        config = _config(
+            tmp_path,
+            "personal",
+            catalog_properties={
+                "uri": f"sqlite:///{tmp_path / 'catalog.db'}",
+                "warehouse": configured.as_uri(),
+            },
         )
         table_uri = f"{requested.as_uri()}#ns.t"
 
-        IcebergWriter(catalogs).write(
-            table_uri,
-            pa.table({"id": [1, 2]}),
-            artifact_id="a",
-            version=1,
-            provenance_hash="p",
-            promoted_by=None,
-        )
+        with PyIcebergCatalog(config) as catalogs:
+            IcebergWriter(catalogs).write(
+                table_uri,
+                pa.table({"id": [1, 2]}),
+                artifact_id="a",
+                version=1,
+                provenance_hash="p",
+                promoted_by=None,
+            )
 
         assert [p for p in requested.rglob("*") if p.is_file()]
         assert not [p for p in configured.rglob("*") if p.is_file()]

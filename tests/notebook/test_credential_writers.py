@@ -7,7 +7,7 @@ naming the credential; a listed one writes for a matching principal and fails fo
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import closing, nullcontext
 from pathlib import Path
 
 import pytest
@@ -255,7 +255,7 @@ class TestASqlWriteCell:
         )
         with principal_context(Principal(id=principal)):
             result = await execute_sql_cell(NotebookSession(parse_notebook(nb), nb), "c1", source)
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             tables = conn.execute("SELECT name FROM sqlite_master").fetchall()
         return result, tables
 

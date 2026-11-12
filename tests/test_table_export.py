@@ -51,6 +51,11 @@ def _catalog(warehouse) -> SqlCatalog:
     return SqlCatalog("strata", uri=f"sqlite:///{warehouse}/catalog.db", warehouse=str(warehouse))
 
 
+def _table(warehouse):
+    with _catalog(warehouse) as catalog:
+        return catalog.load_table("taxi.features")
+
+
 def _config(tmp_path):
     return SimpleNamespace(
         deployment_mode="personal",
@@ -67,7 +72,7 @@ def _config(tmp_path):
 
 
 def _written_versions(warehouse) -> list[tuple[str, str]]:
-    table = _catalog(warehouse).load_table("taxi.features")
+    table = _table(warehouse)
     return sorted(
         (snapshot.summary["strata.artifact_id"], snapshot.summary["strata.version"])
         for snapshot in table.snapshots()
@@ -93,7 +98,7 @@ class TestTheWriter:
         assert created.created is True
         assert overwritten.created is False
         assert _written_versions(warehouse) == [(first.id, "1"), (second.id, "2")]
-        table = _catalog(warehouse).load_table("taxi.features")
+        table = _table(warehouse)
         current = table.current_snapshot()
         assert current.snapshot_id == overwritten.snapshot_id
         assert current.summary["strata.provenance_hash"] == second.provenance_hash
@@ -109,10 +114,10 @@ class TestTheWriter:
         """
         warehouse = tmp_path / "wh"
         warehouse.mkdir()
-        catalog = _catalog(warehouse)
-        catalog.create_namespace("taxi")
         theirs = pa.table({"trip": [7, 8, 9]})
-        catalog.create_table("taxi.features", schema=theirs.schema).append(theirs)
+        with _catalog(warehouse) as catalog:
+            catalog.create_namespace("taxi")
+            catalog.create_table("taxi.features", schema=theirs.schema).append(theirs)
 
         store = notebook_store.artifact_store
         mine = _version(notebook_store, pa.table({"trip": [1]}), tag="1")
@@ -120,7 +125,7 @@ class TestTheWriter:
         with pytest.raises(ValueError, match="Strata did not write"):
             export_artifact(store, mine, f"{warehouse}#taxi.features", config=_config(tmp_path))
 
-        table = _catalog(warehouse).load_table("taxi.features")
+        table = _table(warehouse)
         assert table.scan().to_arrow().column("trip").to_pylist() == [7, 8, 9]
 
     def test_a_new_column_evolves_the_table_and_a_changed_type_is_refused(
@@ -147,7 +152,7 @@ class TestTheWriter:
                 config=config,
             )
 
-        table = _catalog(tmp_path / "wh").load_table("taxi.features")
+        table = _table(tmp_path / "wh")
         assert [f.name for f in table.schema().fields] == ["trip", "fare"]
         assert table.current_snapshot().snapshot_id == widened.snapshot_id
 
@@ -161,7 +166,7 @@ class TestTheWriter:
             alias="champion",
         )
 
-        refs = _catalog(tmp_path / "wh").load_table("taxi.features").refs()
+        refs = _table(tmp_path / "wh").refs()
         assert refs["champion"].snapshot_id == written.snapshot_id
 
     def test_what_is_not_a_table_is_refused(self, tmp_path, notebook_store):
@@ -247,7 +252,7 @@ class TestPromotingToATable:
 
         assert session.compute_staleness()["c1"].status.value != "ready"
         assert _written_versions(warehouse) == [(first.id, "1"), (second.id, "2")]
-        refs = _catalog(warehouse).load_table("taxi.features").refs()
+        refs = _table(warehouse).refs()
         assert refs["champion"].snapshot_id == again.table_snapshot
 
     def test_moving_the_alias_back_moves_the_tag(self, tmp_path, notebook_store, team):
@@ -264,7 +269,7 @@ class TestPromotingToATable:
         )
 
         assert response.status_code == 200, response.text
-        refs = _catalog(warehouse).load_table("taxi.features").refs()
+        refs = _table(warehouse).refs()
         assert refs["champion"].snapshot_id == was.table_snapshot
 
     def test_the_export_route_refuses_what_is_not_a_table(self, tmp_path, team):
@@ -304,7 +309,7 @@ def test_a_protected_alias_becomes_a_tag_when_it_is_approved(tmp_path, notebook_
             table=f"{warehouse}#taxi.features",
         )
         assert promoted.alias_pending is True
-        assert "champion" not in _catalog(warehouse).load_table("taxi.features").refs()
+        assert "champion" not in _table(warehouse).refs()
 
         approved = httpx.post(
             f"{ctx.base_url}/v1/registry/pending/approve",
@@ -313,7 +318,7 @@ def test_a_protected_alias_becomes_a_tag_when_it_is_approved(tmp_path, notebook_
         )
 
         assert approved.status_code == 200, approved.text
-        refs = _catalog(warehouse).load_table("taxi.features").refs()
+        refs = _table(warehouse).refs()
         assert refs["champion"].snapshot_id == promoted.table_snapshot
 
 
@@ -359,7 +364,7 @@ class TestInterleavedAliasMoves:
         assert response.status_code == 200, response.text
         assert moved == [200]
         assert httpx.get(url, timeout=30).json()["version"] == second.version
-        refs = _catalog(warehouse).load_table("taxi.features").refs()
+        refs = _table(warehouse).refs()
         assert refs["champion"].snapshot_id == now.table_snapshot
 
     def test_two_approvals(self, tmp_path, notebook_store, monkeypatch):
@@ -402,7 +407,7 @@ class TestInterleavedAliasMoves:
             assert response.status_code == 200, response.text
             assert moved == [200]
             assert httpx.get(url, timeout=30).json()["version"] == second.version
-            refs = _catalog(warehouse).load_table("taxi.features").refs()
+            refs = _table(warehouse).refs()
             assert refs["champion"].snapshot_id == promoted[second.version].table_snapshot
 
 
@@ -549,7 +554,7 @@ class TestWhoMayExport:
         # The same request against an allowed table goes through, so the refusal above is
         # the ACL and not a missing artifact.
         assert allowed.status_code == 200, allowed.text
-        assert _catalog(tmp_path / "wh").load_table("taxi.features") is not None
+        assert _table(tmp_path / "wh") is not None
 
     def test_an_artifact_read_from_a_denied_table_is_not_exported(self, tmp_path, monkeypatch):
         """Exporting copies the bytes into a table the caller can scan, so it is a read of them."""
@@ -581,7 +586,8 @@ class TestWhoMayExport:
         assert denied.status_code in (403, 404), denied.text
         # The same caller exports an artifact of allowed tables, so the refusal is the ACL.
         assert allowed.status_code == 200, allowed.text
-        assert not _catalog(tmp_path / "wh").table_exists("taxi.copy")
+        with _catalog(tmp_path / "wh") as catalog:
+            assert not catalog.table_exists("taxi.copy")
 
     def test_another_tenants_table_is_not_overwritten(self, tmp_path, monkeypatch):
         """The table ACL has no write verb, so the tenant that exported a table owns it."""
@@ -607,7 +613,7 @@ class TestWhoMayExport:
         assert other_tenant.status_code == 404, other_tenant.text
         assert other_tenant.json()["detail"] == "Table not found"
         assert same_tenant.status_code == 200, same_tenant.text
-        current = _catalog(tmp_path / "wh").load_table("taxi.features").current_snapshot()
+        current = _table(tmp_path / "wh").current_snapshot()
         assert current.summary["strata.artifact_id"] == "acme-v2"
         assert current.summary["strata.tenant"] == "acme"
         assert [a for a, _ in _written_versions(tmp_path / "wh")] == ["acme-v1", "acme-v2"]
@@ -634,7 +640,7 @@ def test_a_tenant_scoped_export_refuses_a_table_written_for_another(tmp_path, no
     with pytest.raises(TableOfAnotherTenant):
         export_artifact(store, second, uri, config=config, tenant="acme")
 
-    table = _catalog(tmp_path / "wh").load_table("taxi.features")
+    table = _table(tmp_path / "wh")
     assert table.scan().to_arrow().column("trip").to_pylist() == [3]
 
 
@@ -662,9 +668,9 @@ def test_a_named_catalogs_table_is_written_in_that_catalog(tmp_path, notebook_st
         promoted_by="scientist",
     )
 
-    named = PyIcebergCatalog(config)._get_named_catalog("lake")
-    table = named.load_table("taxi.features")
-    assert table.current_snapshot().snapshot_id == written.snapshot_id
-    assert table.scan().to_arrow().column("x").to_pylist() == [1, 2]
-    default = PyIcebergCatalog(config)._get_catalog(None)
-    assert not default.list_namespaces(), "the write leaked into the default catalog"
+    with PyIcebergCatalog(config) as catalogs:
+        table = catalogs._get_named_catalog("lake").load_table("taxi.features")
+        assert table.current_snapshot().snapshot_id == written.snapshot_id
+        assert table.scan().to_arrow().column("x").to_pylist() == [1, 2]
+        default = catalogs._get_catalog(None)
+        assert not default.list_namespaces(), "the write leaked into the default catalog"

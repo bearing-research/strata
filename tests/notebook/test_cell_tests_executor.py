@@ -184,14 +184,14 @@ async def test_run_cell_tests_gets_table_inputs(tmp_path):
 
     warehouse = tmp_path / "warehouse"
     warehouse.mkdir()
-    catalog = SqlCatalog(
+    with SqlCatalog(
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-    )
-    catalog.create_namespace("db")
-    table = catalog.create_table(
-        "db.events", Schema(NestedField(1, "id", LongType(), required=False))
-    )
-    table.append(pa.table({"id": pa.array([1, 2], type=pa.int64())}))
+    ) as catalog:
+        catalog.create_namespace("db")
+        table = catalog.create_table(
+            "db.events", Schema(NestedField(1, "id", LongType(), required=False))
+        )
+        table.append(pa.table({"id": pa.array([1, 2], type=pa.int64())}))
     snapshot_id = table.current_snapshot().snapshot_id
     uri = f"file://{warehouse}#db.events"
     session = _session_with(
@@ -311,11 +311,11 @@ async def test_a_passing_test_over_an_empty_table_stays_fresh(tmp_path, monkeypa
 
     warehouse = tmp_path / "warehouse"
     warehouse.mkdir()
-    catalog = SqlCatalog(
+    with SqlCatalog(
         "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
-    )
-    catalog.create_namespace("db")
-    catalog.create_table("db.events", Schema(NestedField(1, "id", LongType(), required=False)))
+    ) as catalog:
+        catalog.create_namespace("db")
+        catalog.create_table("db.events", Schema(NestedField(1, "id", LongType(), required=False)))
     uri = f"file://{warehouse}#db.events"
     session = _session_with(
         [("cell1", f"# @table events {uri}\ndef read():\n    return events_snapshot\n", None)]

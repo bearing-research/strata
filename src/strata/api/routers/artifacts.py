@@ -23,7 +23,6 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import Path as FastPath
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 from starlette.types import Message
@@ -46,7 +45,7 @@ from strata.api.dependencies import (
     store_for_scope,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
-from strata.api.served_bytes import data_headers
+from strata.api.served_bytes import BlobResponse, data_headers
 from strata.artifact.retention import requirements
 from strata.artifact.transfer import PROMOTION_TAG
 from strata.services.artifact import artifact_service
@@ -1350,18 +1349,10 @@ def get_artifact_data(
     if reader_cm is None:
         raise HTTPException(status_code=404, detail="Artifact data not found")
 
-    def _iter_blob():
-        with reader_cm as f:
-            while True:
-                chunk = f.read(BLOB_STREAM_CHUNK_BYTES)
-                if not chunk:
-                    break
-                yield chunk
-
     # Schema stays out of the headers (it may contain newlines); clients read it from the IPC
     # stream.
-    return StreamingResponse(
-        _iter_blob(),
+    return BlobResponse(
+        reader_cm,
         media_type="application/vnd.apache.arrow.stream",
         headers={
             "X-Arrow-Row-Count": str(artifact.row_count or 0),

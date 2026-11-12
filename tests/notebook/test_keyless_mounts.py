@@ -106,6 +106,7 @@ def token_service() -> Iterator[_TokenService]:
     service = _TokenService()
     yield service
     service.server.shutdown()
+    service.server.server_close()
 
 
 @pytest.fixture
@@ -122,6 +123,7 @@ def tls_token_service(tmp_path, monkeypatch) -> Iterator[_TokenService]:
     monkeypatch.setenv("AZURE_AUTHORITY_HOST", f"https://localhost:{service.port}")
     yield service
     service.server.shutdown()
+    service.server.server_close()
 
 
 def external_account_file(tmp_path: Path, token_file: Path, port: int) -> Path:

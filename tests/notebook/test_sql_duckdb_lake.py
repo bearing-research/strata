@@ -440,11 +440,11 @@ async def test_a_catalog_credential_set_only_in_the_notebook_env_resolves_its_sn
     warehouse = tmp_path / "warehouse"
     warehouse.mkdir()
     db_uri = f"sqlite:///{warehouse / 'catalog.db'}"
-    catalog = SqlCatalog("lake", uri=db_uri, warehouse=warehouse.as_uri())
-    catalog.create_namespace("taxi")
-    table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
-    table.append(pa.table({"id": [1]}))
-    snapshot = catalog.load_table("taxi.trips").current_snapshot().snapshot_id
+    with SqlCatalog("lake", uri=db_uri, warehouse=warehouse.as_uri()) as catalog:
+        catalog.create_namespace("taxi")
+        table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
+        table.append(pa.table({"id": [1]}))
+        snapshot = catalog.load_table("taxi.trips").current_snapshot().snapshot_id
     source = "-- @sql connection=lake\nSELECT id FROM lake.taxi.trips\n"
     nb_dir = _notebook(
         tmp_path, {"c1": source}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"'
@@ -659,6 +659,7 @@ class TestAGlueCatalog:
                 conn.execute(attach.replace("glue.eu-west-1.amazonaws.com/iceberg", local))
         finally:
             server.shutdown()
+            server.server_close()
 
         assert seen and seen[0].startswith("AWS4-HMAC-SHA256 Credential=AKIA1/")
         assert "/eu-west-1/glue/aws4_request" in seen[0]
