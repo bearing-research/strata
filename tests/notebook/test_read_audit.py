@@ -573,6 +573,35 @@ class TestANativeReader:
 
         assert _report(observed) == {}
 
+    def test_another_copy_of_the_module_replaces_the_wrappers_not_nests_them(self, data):
+        # The harness loads the file by path; a process running it again holds copies.
+        pq.write_table(pa.table({"a": [1]}), data / "t.parquet")
+        script = textwrap.dedent(
+            f"""\
+            import importlib.util, sys
+            import pyarrow.parquet as pq
+
+            def load(name):
+                spec = importlib.util.spec_from_file_location(name, {read_audit.__file__!r})
+                audit = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(audit)
+                return audit
+
+            for i in range(3):
+                with load(f"audit{{i}}").recording() as observed:
+                    pq.read_table({str(data / "t.parquet")!r})
+            finders = [f for f in sys.meta_path if type(f).__name__ == "_WrapOnImport"]
+            print(len(finders), hasattr(pq.read_table.__wrapped__, "__wrapped__"))
+            print({str(data / "t.parquet")!r} in observed.files)
+            """
+        )
+
+        out = subprocess.run(
+            [sys.executable, "-I", "-c", script], capture_output=True, text=True, check=True
+        )
+
+        assert out.stdout.split() == ["1", "False", "True"]
+
     @pytest.mark.parametrize(
         "dump", [pickle.dumps, cloudpickle.dumps], ids=["pickle", "cloudpickle"]
     )

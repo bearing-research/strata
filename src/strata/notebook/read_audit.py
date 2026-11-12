@@ -348,11 +348,14 @@ def recording() -> Generator[Observed]:
     """Record what the body does into the :class:`Observed` it yields.
 
     The hook stays installed after: one cannot be removed. Each harness process runs one
-    cell (a batch, one at a time), so it only ever records the run in progress.
+    cell (a batch, one at a time), so it only ever records the run in progress. The
+    harness loads this file by path, so a process running it in-process again holds
+    several copies; the newest one's finder and wrappers replace the others'.
     """
     global _current, _installed
     if not _installed:
         sys.addaudithook(_on_event)
+        sys.meta_path[:] = [f for f in sys.meta_path if not _is_finder(f)]
         sys.meta_path.insert(0, _WrapOnImport())
         for module in _NATIVE_MODULES & set(sys.modules):
             _wrap_natives(module)
@@ -462,11 +465,29 @@ def _wrap_natives(module_name: str) -> None:
             )
         if target is None:
             continue
+        while _is_wrapper(target):
+            target = target.__wrapped__  # another copy's: wrapping it would nest them
         wrapper = _native(target, param, mode, writes=writes, at=(module_name, qualname))
         try:
             setattr(owner, last, wrapper)
         except (AttributeError, TypeError):
             continue  # an immutable type
+
+
+def _is_wrapper(fn: Any) -> bool:
+    """Whether *fn* is a :func:`_native` wrapper, made by any copy of this module."""
+    code = getattr(fn, "__code__", None)
+    return (
+        hasattr(fn, "__wrapped__")
+        and code is not None
+        and code.co_name == "native"
+        and os.path.basename(code.co_filename) == os.path.basename(__file__)
+    )
+
+
+def _is_finder(finder: Any) -> bool:
+    """Whether *finder* is a :class:`_WrapOnImport`, from any copy of this module."""
+    return type(finder).__name__ == _WrapOnImport.__name__
 
 
 class _WrapOnImport:
@@ -478,7 +499,7 @@ class _WrapOnImport:
             return None
         for finder in sys.meta_path:
             find = getattr(finder, "find_spec", None)
-            if finder is self or find is None:
+            if _is_finder(finder) or find is None:
                 continue
             spec = find(name, path, target)
             if spec is not None:
