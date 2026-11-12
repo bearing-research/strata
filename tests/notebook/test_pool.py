@@ -43,6 +43,8 @@ class TestWarmProcessPool:
         if warm_proc is not None:  # May be None if startup failed
             assert warm_proc.process is not None
             assert warm_proc.ready is True
+            # Handed back as a caller does: drain kills only the processes still queued.
+            await pool.release_and_replace(warm_proc)
 
         await pool.drain()
 

@@ -196,19 +196,20 @@ async def _sync_environment(session: Any) -> tuple[bool, str | None]:
 
 
 async def _drain_warm_pool(session: Any) -> None:
-    """Release the warm process pool if one exists; drain errors are swallowed."""
-    pool = getattr(session, "warm_pool", None)
-    if pool is None:
-        return
-    try:
-        if hasattr(pool, "drain"):
-            maybe_awaitable = pool.drain()
-            if asyncio.iscoroutine(maybe_awaitable):
-                await maybe_awaitable
-        elif hasattr(pool, "shutdown_nowait"):
-            pool.shutdown_nowait()
-    except Exception:
-        pass
+    """Release the Python and R warm process pools that exist; drain errors are swallowed."""
+    for name in ("warm_pool", "r_warm_pool"):
+        pool = getattr(session, name, None)
+        if pool is None:
+            continue
+        try:
+            if hasattr(pool, "drain"):
+                maybe_awaitable = pool.drain()
+                if asyncio.iscoroutine(maybe_awaitable):
+                    await maybe_awaitable
+            elif hasattr(pool, "shutdown_nowait"):
+                pool.shutdown_nowait()
+        except Exception:
+            pass
 
 
 @contextmanager
