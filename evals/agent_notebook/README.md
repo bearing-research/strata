@@ -163,3 +163,20 @@ are in `docs/internal/design-agent-scratchpad-spike.md`.
 In `--driver replay` the same path scores a committed transcript (e.g.
 `scratch_distinct_cities.json`, a `strata cell add --run` run) so CI validates the
 scoring without a live agent.
+
+## Field metric
+
+`field.py` reads this machine's Claude Code transcripts (`~/.claude/projects`) and
+prints what agents actually did: how often the scratchpad was used (the skill, the
+Strata MCP tools, `strata cell` work), how much ad-hoc Python ran instead, and how much of
+that ran in the project's own environment importing its code, week by week. Eval and
+scratch runs (a working directory in a temporary folder) are left out. Its definitions
+are in the module docstring.
+
+```bash
+uv run python -m evals.agent_notebook.field --since 2026-09-01 --examples 20
+uv run python -m evals.agent_notebook.field --json > field.json
+```
+
+It reads only local files and prints aggregates, plus up to `--examples` sampled
+commands for reading why an agent bypassed the scratchpad.
