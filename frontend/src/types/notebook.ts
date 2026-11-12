@@ -239,6 +239,8 @@ export interface Cell {
   status: CellStatus
   /** Why the cell is stale (only present when status === 'stale') */
   stalenessReasons?: StalenessReason[]
+  // Ready, but files its result read without declaring them changed since.
+  changedReads?: string[]
   /** Legacy last visible output compatibility shim */
   output?: CellOutput
   /** Ordered visible outputs rendered for this cell */

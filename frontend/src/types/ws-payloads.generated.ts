@@ -166,6 +166,8 @@ export interface CellStaleness {
   status: CellStatus
   /** List of staleness reasons */
   reasons: StalenessReason[]
+  /** Of a ready cell: files its result read without declaring them that have changed since. A hint, not a status: the key did not move, so a plain run would hit the same cache */
+  changed_reads: string[]
 }
 
 export type CellStatus = 'idle' | 'running' | 'ready' | 'error' | 'stale'
@@ -180,6 +182,7 @@ export interface CellStatusPayload {
   remote_queue_detail?: string | null
   staleness_reasons?: string[] | null
   causality?: Record<string, unknown> | null
+  changed_reads?: string[] | null
 }
 
 export interface CellTestCase {
@@ -356,6 +359,7 @@ export interface CellView {
   /** Runtime-only current values of a widget cell's controls */
   widget_values: Record<string, unknown>
   staleness_reasons: string[]
+  changed_reads: string[]
   annotations: AnnotationsWirePayload
   widget?: WidgetModel | null
   is_module_cell?: boolean | null

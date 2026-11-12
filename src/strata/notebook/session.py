@@ -6,6 +6,7 @@ import asyncio
 import base64
 import functools
 import hashlib
+import itertools
 import json
 import logging
 import re
@@ -80,6 +81,13 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
     read_venv_runtime_python_version,
 )
+from strata.notebook.read_audit import (
+    UNDECLARED_IMPORT,
+    UNDECLARED_LISTING,
+    UNDECLARED_READ,
+    WORK_DIR_READ,
+    fingerprint,
+)
 from strata.notebook.run_diagnostics import run_diagnostics
 from strata.notebook.runtime_state import (
     MAX_EXECUTION_SAMPLES,
@@ -133,6 +141,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _ENVIRONMENT_JOB_HISTORY_LIMIT = 8
+# Per cell, the undeclared paths whose fingerprints are kept and checked again.
+CHECKED_READS = 100
+# Which a cell's fingerprints keep first: its data before its imports.
+_CHECKED_FIRST = (UNDECLARED_READ, WORK_DIR_READ, UNDECLARED_LISTING, UNDECLARED_IMPORT)
 
 _VARIANT_LINE_RE = re.compile(
     r"^(\s*#\s*@variant\s+\S+\s+)\S+(.*)$",
@@ -252,6 +264,7 @@ class CellStateSnapshot:
     status: str
     reasons: tuple[str, ...]
     causality: dict[str, Any] | None
+    changed_reads: tuple[str, ...] = ()
 
 
 @dataclass
@@ -836,7 +849,11 @@ class NotebookSession:
         return staleness
 
     def compute_staleness(
-        self, executing: str | None = None, *, hash_mounts: bool = True
+        self,
+        executing: str | None = None,
+        *,
+        hash_mounts: bool = True,
+        check_reads: bool = True,
     ) -> dict[str, CellStaleness]:
         """Compute staleness for all cells, updating ``cell.staleness`` and causality chains.
 
@@ -845,6 +862,8 @@ class NotebookSession:
         running during this recompute: its status stays running and it is left out of
         the returned map. A local mount too large to hash here is hashed by a task
         (``hash_mounts``, on the event loop only), which recomputes when it is done.
+        Without ``check_reads`` (on the loop) a ready cell keeps the changed reads it was
+        last told of, and :meth:`refresh_changed_reads` checks them later.
         """
         # Outside reads (an ``@fetch`` gets 60s) happen before the lock: they mutate
         # nothing, and holding the lock across them would block the broadcast path,
@@ -854,10 +873,79 @@ class NotebookSession:
             # Once for every cell, and outside the lock: it reads the files of a package.
             packages = local_packages(self.path)
             with self._staleness_lock:
+                told = self._told_changed_reads()
                 staleness = self._compute_staleness_locked(prefetched, packages, executing)
+                if not check_reads:
+                    self._hint_changed_reads(told, staleness)
+            if check_reads:
+                # Once the pass says which cells are ready, and outside the lock again.
+                changed = self._changed_reads()
+                with self._staleness_lock:
+                    self._hint_changed_reads(changed, staleness)
         if hash_mounts:
             self._hash_mounts()
         return staleness
+
+    def refresh_changed_reads(self) -> list[str]:
+        """Check the ready cells' undeclared reads again, without a staleness pass, and
+        return the cells whose changed reads changed.
+
+        Nothing watches those files, so a status asked for between passes (MCP
+        ``status``, a reconnecting client) checks them itself.
+        """
+        changed = self._changed_reads()
+        with self._staleness_lock:
+            return self._hint_changed_reads(changed)
+
+    def _told_changed_reads(self) -> dict[str, tuple[dict[str, list[int]], list[str]]]:
+        return {
+            cell.id: (cell.read_fingerprints, list(cell.staleness.changed_reads))
+            for cell in self.notebook_state.cells
+            if cell.staleness is not None and cell.staleness.changed_reads
+        }
+
+    @staticmethod
+    def _moved(cell: CellState) -> list[str]:
+        return [path for path, st in cell.read_fingerprints.items() if fingerprint(path) != st]
+
+    def _changed_reads(self) -> dict[str, tuple[dict[str, list[int]], list[str]]]:
+        """Per ready cell, the fingerprints checked and the paths that moved since.
+
+        Outside the lock: the stats may be slow (a network mount).
+        """
+        return {
+            cell.id: (cell.read_fingerprints, self._moved(cell))
+            for cell in self.notebook_state.cells
+            if cell.status == CellStatus.READY and cell.read_fingerprints
+        }
+
+    def _hint_changed_reads(
+        self,
+        changed: dict[str, tuple[dict[str, list[int]], list[str]]],
+        staleness_map: dict[str, CellStaleness] | None = None,
+    ) -> list[str]:
+        """Say on each ready cell which files its result read have changed since, and
+        return the cells that now say something else."""
+        told: list[str] = []
+        for cell_id, (checked, moved) in changed.items():
+            cell = self.notebook_state.get_cell(cell_id)
+            # A run that ended since the check has fingerprints of its own; a cell not in
+            # the map is running, and an error or stale cell has more to say.
+            if (
+                cell is None
+                or cell.read_fingerprints is not checked
+                or cell.status != CellStatus.READY
+                or cell.staleness is None
+                or cell.staleness.status != CellStatus.READY
+                or (staleness_map is not None and cell_id not in staleness_map)
+            ):
+                continue
+            if cell.staleness.changed_reads != moved:
+                told.append(cell_id)
+                cell.staleness = cell.staleness.model_copy(update={"changed_reads": moved})
+            if staleness_map is not None:
+                staleness_map[cell_id] = cell.staleness
+        return told
 
     def _hash_mounts(self) -> None:
         """Start one task per local mount staleness left unhashed, none for one in hand."""
@@ -1320,7 +1408,12 @@ class NotebookSession:
         if cell is None:
             return
 
-        cell.staleness = CellStaleness(status=CellStatus.READY, reasons=[])
+        # A cache hit is the result that read the changed files: it keeps saying so. A
+        # fresh run's new fingerprints dropped the old word in the pass before this.
+        told = cell.staleness.changed_reads if cell.staleness is not None else []
+        cell.staleness = CellStaleness(
+            status=CellStatus.READY, reasons=[], changed_reads=list(told)
+        )
         cell.status = CellStatus.READY
         self.causality_map.pop(cell_id, None)
 
@@ -1378,11 +1471,17 @@ class NotebookSession:
         diagnostics = run_diagnostics(
             result.read_audit, result.mutation_warnings, notebook_dir=self.path, taken=taken
         )
-        fingerprints = {
-            path: st
-            for finding in result.read_audit
-            for path, st in finding.get("fingerprints", {}).items()
-        }
+        by_code = {f["code"]: f.get("fingerprints", {}) for f in result.read_audit}
+        fingerprints = dict(
+            itertools.islice(
+                (
+                    (path, st)
+                    for code in _CHECKED_FIRST
+                    for path, st in by_code.get(code, {}).items()
+                ),
+                CHECKED_READS,
+            )
+        )
         if diagnostics == cell.run_diagnostics and fingerprints == cell.read_fingerprints:
             return
         cell.run_diagnostics = diagnostics
@@ -1851,6 +1950,7 @@ class NotebookSession:
                 status=status,
                 reasons=reasons,
                 causality=asdict(causality, dict_factory=skip_none) if causality else None,
+                changed_reads=tuple(cell.staleness.changed_reads if cell.staleness else ()),
             )
         return snapshot
 
@@ -3820,6 +3920,7 @@ class NotebookSession:
                 causality=asdict(causality, dict_factory=skip_none)
                 if causality is not None
                 else None,
+                changed_reads=(cell.staleness.changed_reads if cell.staleness else None) or None,
             )
 
             await broadcast_notebook_message(

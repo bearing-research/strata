@@ -445,6 +445,19 @@ function cancelThisCell() {
 
 const INCOMPLETE_EXPLANATION = "Strata can't tell what changed since the last run"
 
+// Ready, but a file its result read without declaring it changed since. Not stale: the key
+// did not move, so a plain run would serve the same result.
+const changedReadsTitle = computed(() => {
+  const paths = props.cell.changedReads ?? []
+  if (!paths.length || props.cell.status !== 'ready') return ''
+  const them = paths.length === 1 ? 'it' : 'them'
+  return [
+    `Changed after this result read ${them}, undeclared:`,
+    ...paths.map((path) => `  ${path}`),
+    `Rerunning the cell reads ${them} again; a mount over ${them} keys ${them}.`,
+  ].join('\n')
+})
+
 /** Causality summary for tooltip */
 const causalityTooltip = computed(() => {
   const c = props.cell.causality
@@ -1122,6 +1135,9 @@ function outputKey(output: CellOutput, index: number): string {
           </div>
           <div class="cell-meta-actions">
             <span v-if="durationText" class="duration">{{ durationText }}</span>
+            <span v-if="changedReadsTitle" class="changed-reads-badge" :title="changedReadsTitle">
+              may be out of date
+            </span>
             <button
               v-if="canExplainStaleness"
               class="causality-btn"
@@ -2148,6 +2164,15 @@ function outputKey(output: CellOutput, index: number): string {
 .causality-btn:hover {
   background: var(--tint-warning);
   border-color: var(--tint-warning);
+}
+.changed-reads-badge {
+  background: var(--tint-warning);
+  color: var(--accent-warning);
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: help;
 }
 
 @media (max-width: 900px) {

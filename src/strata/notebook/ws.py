@@ -424,6 +424,7 @@ async def _broadcast_staleness_updates(
                 [reason.value for reason in staleness.reasons] if staleness.reasons else []
             ),
             causality=asdict(causality, dict_factory=skip_none) if causality else None,
+            changed_reads=staleness.changed_reads or None,
         )
         await _broadcast_message(
             notebook_id,
@@ -470,8 +471,9 @@ async def _refresh_and_broadcast_changed_staleness(
     Recomputing first matters because a failed attempt may have re-run upstreams.
     """
     # Deliberately on-loop: this runs between a cell's result and its frames,
-    # and an await here would let other frames interleave out of order.
-    staleness_map = session.compute_staleness()
+    # and an await here would let other frames interleave out of order. The changed
+    # reads' stats may hang on a network mount, so a task checks them after.
+    staleness_map = session.compute_staleness(check_reads=False)
     if preserve_ready_cell_id is not None:
         # Ready even if the walk says idle (an uncached leaf still ran), unless
         # an upstream changed during the run: then it read the old value.
@@ -488,16 +490,34 @@ async def _refresh_and_broadcast_changed_staleness(
             staleness_map[preserve_ready_cell_id] = ran.staleness
         else:
             session.mark_executed_ready(preserve_ready_cell_id)
-            staleness_map[preserve_ready_cell_id] = CellStaleness(
-                status=CellStatus.READY,
-                reasons=[],
+            staleness_map[preserve_ready_cell_id] = (
+                ran.staleness
+                if ran is not None and ran.staleness is not None
+                else CellStaleness(status=CellStatus.READY, reasons=[])
             )
     if mark_error_cell_id is not None:
         for stale_id in session.mark_cell_error(mark_error_cell_id):
             staleness_map[stale_id] = CellStaleness(status=CellStatus.STALE, reasons=[])
         staleness_map[mark_error_cell_id] = CellStaleness(status=CellStatus.ERROR, reasons=[])
     await _broadcast_changed_staleness(session, notebook_id, previous_snapshot, staleness_map)
+    task = asyncio.create_task(refresh_changed_reads(session, notebook_id))
+    _changed_reads_tasks.add(task)
+    task.add_done_callback(_changed_reads_tasks.discard)
     return staleness_map
+
+
+# Held so a refresh is not collected while it runs.
+_changed_reads_tasks: set[asyncio.Task[None]] = set()
+
+
+async def refresh_changed_reads(session: NotebookSession, notebook_id: str) -> None:
+    """Check the ready cells' undeclared reads off the loop; broadcast the cells whose
+    changed reads changed."""
+    told = await anyio.to_thread.run_sync(session.refresh_changed_reads)
+    cells = [session.notebook_state.get_cell(cell_id) for cell_id in told]
+    changed = {cell.id: cell.staleness for cell in cells if cell and cell.staleness}
+    if changed:
+        await _broadcast_staleness_updates(session, notebook_id, changed)
 
 
 async def _broadcast_changed_staleness(
@@ -518,6 +538,7 @@ async def _broadcast_changed_staleness(
             status=staleness.status.value,
             reasons=tuple(reason.value for reason in staleness.reasons),
             causality=asdict(causality, dict_factory=skip_none) if causality else None,
+            changed_reads=tuple(staleness.changed_reads),
         )
         if previous_snapshot.get(cell.id) != current:
             changed[cell.id] = staleness

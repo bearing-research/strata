@@ -1295,6 +1295,11 @@ def _print_cell_human(cell: CellView) -> None:
     print(f"status:   {cell.status}")
     if cell.staleness_reasons:
         print(f"stale:    {', '.join(cell.staleness_reasons)}")
+    if cell.changed_reads:
+        from strata.notebook.run_diagnostics import changed_reads_hint
+
+        hint = changed_reads_hint(cell.changed_reads, "`strata cell run --rerun`")
+        print(f"hint:     {hint}")
     if cell.error:
         # Console and outputs stay JSON-only, but an error status is useless without
         # its traceback.
@@ -2140,5 +2145,7 @@ def status_main(args: argparse.Namespace) -> int:
         print(f"notebook: {status.name}  ({status.notebook_id})")
         for cell in status.cells:
             stale = " ·stale" if cell.staleness_reasons else ""
+            if cell.changed_reads:
+                stale = " ·may be out of date"
             print(f"  {cell.status:8} {cell.id:18} {cell.name}{stale}")
     return 0

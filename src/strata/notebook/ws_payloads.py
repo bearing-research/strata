@@ -54,6 +54,9 @@ class CellStatusPayload(WsPayload):
     remote_queue_detail: str | None = None
     staleness_reasons: list[str] | None = None
     causality: dict[str, Any] | None = None
+    # A ready cell's files read without declaring them that changed since: "may be out
+    # of date". Absent means none.
+    changed_reads: list[str] | None = None
 
 
 def cell_status_payload(
@@ -67,6 +70,7 @@ def cell_status_payload(
     remote_queue_detail: str | None = None,
     staleness_reasons: list[str] | None = None,
     causality: dict[str, Any] | None = None,
+    changed_reads: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a validated ``cell_status`` wire payload.
 
@@ -83,6 +87,7 @@ def cell_status_payload(
         remote_queue_detail=remote_queue_detail,
         staleness_reasons=staleness_reasons,
         causality=causality,
+        changed_reads=changed_reads,
     ).model_dump(mode="json", exclude_none=True)
 
 
@@ -729,6 +734,8 @@ class CellView(CellState, WsPayload):
     display_outputs: list[DisplayOutput] = Field(default_factory=list)  # ty: ignore[invalid-attribute-override]
     display_output: DisplayOutput | None = None  # ty: ignore[invalid-attribute-override]
     staleness_reasons: list[str]
+    # A ready cell's undeclared reads that changed since: it may be out of date.
+    changed_reads: list[str]
     annotations: AnnotationsWirePayload
     widget: WidgetModel | None = None
     is_module_cell: bool | None = None

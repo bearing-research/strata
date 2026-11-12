@@ -1004,6 +1004,7 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
   localCell.causality = supportsStalenessDetail(localCell.status)
     ? parseBackendCausality(serverCell.causality)
     : undefined
+  localCell.changedReads = serverCell.changed_reads || []
   localCell.shadowWarnings = Array.isArray(serverCell.shadow_warnings)
     ? serverCell.shadow_warnings
     : undefined
@@ -1303,6 +1304,7 @@ function parseBackendCellPayload(raw: any): Cell {
     causality: supportsStalenessDetail(raw.status)
       ? parseBackendCausality(raw.causality)
       : undefined,
+    changedReads: raw.changed_reads || [],
     output: undefined,
     displayOutputs: [],
     variantGroup: typeof raw.variant_group === 'string' ? raw.variant_group : null,
@@ -2065,6 +2067,8 @@ function initializeWebSocket() {
       } else if (cell && !supportsStalenessDetail(status)) {
         cell.stalenessReasons = []
       }
+      // Every status frame says it; absent means none.
+      if (cell) cell.changedReads = p.changed_reads ?? []
     })
 
     wsInstance.onMessage('cell_output', (msg: WsMessage) => {
