@@ -33,8 +33,15 @@ _phase = {"setup": 0.0, "call": 0.0, "teardown": 0.0}
 _start = time.perf_counter()
 
 
+_slow_teardowns = []
+
+
 def pytest_runtest_logreport(report):
     _phase[report.when] += report.duration
+    if report.when == "teardown":
+        _slow_teardowns.append((report.duration, report.nodeid))
+        _slow_teardowns.sort(reverse=True)
+        del _slow_teardowns[25:]
 
 
 def pytest_sessionfinish(session):
@@ -52,5 +59,7 @@ def pytest_sessionfinish(session):
         f.write(f"maxrss={rss_mb:.0f}MB frozen={gc.get_freeze_count()}\n")
         for k, v in _phase.items():
             f.write(f"  phase {k}: {v:.0f}s\n")
+        for d, nodeid in _slow_teardowns:
+            f.write(f"  teardown {d:.2f}s {nodeid}\n")
         for k, (s, n, m) in sorted(_t.items()):
             f.write(f"  {k}: {s:.1f}s over {n}, max {m:.2f}s\n")

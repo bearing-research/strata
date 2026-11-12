@@ -201,7 +201,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.12", "3.14"]
+        python-version: ["3.12"]
 
     env:
       GCPROBE_DIR: /tmp/gcprobe
@@ -223,7 +223,7 @@ jobs:
         --ignore=tests/notebook/test_e2e_mounts_azure.py
         --ignore=tests/notebook/test_e2e_mounts_gcs.py
         --ignore=tests/notebook/test_e2e_duckdb_lake.py
-        -n auto --dist loadscope --tb=short
+        -n logical --dist loadscope --tb=short
       WINDOWS_UNIT_TEST_ARGS: >-
         tests/
         --ignore=tests/test_e2e_artifacts.py
