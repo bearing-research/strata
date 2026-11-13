@@ -16,10 +16,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   server instructions, and each tool marked to stay loaded. A failure an agent can act
   on returns a `fix` line; `STRATA_MCP_TOOLS=all` lists the full set again. The advice
   agents get now comes from one file in the package, `strata/agent_guidance/scratchpad.md`.
-  (#1529, #1532)
+  (#1529, #1532, #1534)
 - **A cell knows which cell it is.** While a Python cell runs, `STRATA_CELL_ID` holds its
   id, in the cell's process and any process it starts, on the cold, warm and run-all
-  paths alike. (#1527, #1532)
+  paths alike. A run with no cell id unsets one the process inherited.
+  (#1527, #1532, #1534)
 - **A first-run path: `strata tutorial`, bundled samples and a tutorial on caching.**
   The wheel now ships two sample notebooks, so there is nothing to clone. `strata
   tutorial` lists them and `strata tutorial caching` opens a copy under a fresh name and
@@ -359,6 +360,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **`run_snippet` needs `notebook:write` as well as `notebook:execute`.** It adds a
+  cell before running it, so a caller allowed to run cells but not edit them could add
+  one. (#1534)
 - **Downloads close the stored blob however the client leaves, and dropped catalogs close.**
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the

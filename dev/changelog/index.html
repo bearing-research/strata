@@ -3872,10 +3872,11 @@ exhaustive commit history.</p>
   server instructions, and each tool marked to stay loaded. A failure an agent can act
   on returns a <code>fix</code> line; <code>STRATA_MCP_TOOLS=all</code> lists the full set again. The advice
   agents get now comes from one file in the package, <code>strata/agent_guidance/scratchpad.md</code>.
-  (#1529, #1532)</li>
+  (#1529, #1532, #1534)</li>
 <li><strong>A cell knows which cell it is.</strong> While a Python cell runs, <code>STRATA_CELL_ID</code> holds its
   id, in the cell's process and any process it starts, on the cold, warm and run-all
-  paths alike. (#1527, #1532)</li>
+  paths alike. A run with no cell id unsets one the process inherited.
+  (#1527, #1532, #1534)</li>
 <li><strong>A first-run path: <code>strata tutorial</code>, bundled samples and a tutorial on caching.</strong>
   The wheel now ships two sample notebooks, so there is nothing to clone. <code>strata
   tutorial</code> lists them and <code>strata tutorial caching</code> opens a copy under a fresh name and
@@ -4217,6 +4218,9 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>run_snippet</code> needs <code>notebook:write</code> as well as <code>notebook:execute</code>.</strong> It adds a
+  cell before running it, so a caller allowed to run cells but not edit them could add
+  one. (#1534)</li>
 <li><strong>Downloads close the stored blob however the client leaves, and dropped catalogs close.</strong>
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the

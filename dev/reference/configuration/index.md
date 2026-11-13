@@ -43,7 +43,7 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | ----------------------------------------- | ----------- | -------------------------------------------- |
 | `STRATA_HOST`                             | `127.0.0.1` | Server bind address                          |
 | `STRATA_PORT`                             | `8765`      | Server port                                  |
-| `STRATA_PUBLIC_BASE_URL`                  | request     | Origin readers reach this server on; set it behind a reverse proxy so published-artifact embed URLs are the public ones |
+| `STRATA_PUBLIC_BASE_URL`                  | request     | Origin readers reach this server on; set it behind a reverse proxy so published-artifact embed URLs and the MCP scratchpad's notebook link are the public ones |
 | `STRATA_PUBLIC_BASE_PATH`                 | _(empty)_   | Path a reverse proxy serves this server under (`/o/acme/lab`), whether or not the proxy strips it. The UI, its WebSocket, the API docs and publication links carry it. Empty means the root. See [Serving under a path](https://bearingresearch.com/strata/dev/deployment/modes/#serving-under-a-path) |
 | `STRATA_DEPLOYMENT_MODE`                  | `personal`  | `personal` or `service`                      |
 | `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` | `false`     | Allow non-localhost clients in personal mode |

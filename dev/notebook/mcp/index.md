@@ -29,7 +29,8 @@ REST routes and the WebSocket:
 |---|---|
 | `notebook:read` | `list_notebooks`, `get_notebook`, `get_cell`, `save_cell_output`, `get_variable`, `dag`, `status`, `list_workers`, `lineage`, `publish_preflight`, `scratchpad` |
 | `notebook:write` | `add_cell`, `edit_cell`, `remove_cell`, `move_cell`, `note`, `add_worker`, `set_default_worker`, `set_variant`, `remove_worker`, `disconnect_ssh_worker`, `promote` |
-| `notebook:execute` | `run_cell`, `cancel_cell`, `run_tests`, `run_snippet`, `run`, `set_widget_value`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
+| `notebook:write` and `notebook:execute` | `run_snippet`, `run`: each writes a cell's source, then runs it |
+| `notebook:execute` | `run_cell`, `cancel_cell`, `run_tests`, `set_widget_value`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
 | `artifacts:publish` | `publish` |
 
 Within a tenant, every open session is visible to any caller holding
@@ -114,7 +115,7 @@ sit behind Claude Code's tool search.
 
 A failure that is not the cell's own exception (no session or several, an
 unknown or non-Python cell, an environment that is not ready, an annotation that
-cannot be read, a busy notebook, which takes back a cell `run` had just added)
+cannot be read, a busy notebook, which leaves the cells as they were)
 returns `status: error` with a `fix` line naming the next step. The other tools
 stay registered and callable by name; `STRATA_MCP_TOOLS=all` lists them too.
 

@@ -3188,8 +3188,12 @@ REST routes and the WebSocket:</p>
 <td><code>add_cell</code>, <code>edit_cell</code>, <code>remove_cell</code>, <code>move_cell</code>, <code>note</code>, <code>add_worker</code>, <code>set_default_worker</code>, <code>set_variant</code>, <code>remove_worker</code>, <code>disconnect_ssh_worker</code>, <code>promote</code></td>
 </tr>
 <tr>
+<td><code>notebook:write</code> and <code>notebook:execute</code></td>
+<td><code>run_snippet</code>, <code>run</code>: each writes a cell's source, then runs it</td>
+</tr>
+<tr>
 <td><code>notebook:execute</code></td>
-<td><code>run_cell</code>, <code>cancel_cell</code>, <code>run_tests</code>, <code>run_snippet</code>, <code>run</code>, <code>set_widget_value</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
+<td><code>run_cell</code>, <code>cancel_cell</code>, <code>run_tests</code>, <code>set_widget_value</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
 </tr>
 <tr>
 <td><code>artifacts:publish</code></td>
@@ -3283,7 +3287,7 @@ sit behind Claude Code's tool search.</p>
 </table>
 <p>A failure that is not the cell's own exception (no session or several, an
 unknown or non-Python cell, an environment that is not ready, an annotation that
-cannot be read, a busy notebook, which takes back a cell <code>run</code> had just added)
+cannot be read, a busy notebook, which leaves the cells as they were)
 returns <code>status: error</code> with a <code>fix</code> line naming the next step. The other tools
 stay registered and callable by name; <code>STRATA_MCP_TOOLS=all</code> lists them too.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
