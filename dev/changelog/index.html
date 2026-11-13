@@ -3866,6 +3866,9 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell knows which cell it is.</strong> While a Python cell runs, <code>STRATA_CELL_ID</code> holds its
+  id, in the cell's process and any process it starts, on the cold, warm and run-all
+  paths alike. (#1527)</li>
 <li><strong>A first-run path: <code>strata tutorial</code>, bundled samples and a tutorial on caching.</strong>
   The wheel now ships two sample notebooks, so there is nothing to clone. <code>strata
   tutorial</code> lists them and <code>strata tutorial caching</code> opens a copy under a fresh name and

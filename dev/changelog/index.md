@@ -10,6 +10,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ## Unreleased
 
 ### Added
+- **A cell knows which cell it is.** While a Python cell runs, `STRATA_CELL_ID` holds its
+  id, in the cell's process and any process it starts, on the cold, warm and run-all
+  paths alike. (#1527)
 - **A first-run path: `strata tutorial`, bundled samples and a tutorial on caching.**
   The wheel now ships two sample notebooks, so there is nothing to clone. `strata
   tutorial` lists them and `strata tutorial caching` opens a copy under a fresh name and
