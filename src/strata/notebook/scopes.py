@@ -157,6 +157,7 @@ _READ_TOOLS = frozenset(
         "list_workers",
         "lineage",
         "publish_preflight",
+        "scratchpad",
     }
 )
 
@@ -183,6 +184,8 @@ _EXECUTE_TOOLS = frozenset(
         "cancel_cell",
         "run_tests",
         "run_snippet",
+        # Adds or edits a cell, then runs it.
+        "run",
         # Re-materializes the widget cell, so it is a run, gated like ``run_cell``.
         "set_widget_value",
         "add_dependency",

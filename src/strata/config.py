@@ -324,6 +324,11 @@ class StrataConfig(BaseSettings):
     # call is checked against its caller's scopes. Needs the ``[mcp]`` extra; without it the flag
     # warns and no-ops.
     mcp_enabled: bool = False
+    # ``scratchpad`` lists two tools (``run``, ``scratchpad``) over the server's one open
+    # session, with instructions; ``notebook`` lists the full session_id-taking set.
+    mcp_profile: Literal["notebook", "scratchpad"] = "notebook"
+    # ``all`` lists every registered tool whatever the profile.
+    mcp_tools: Literal["profile", "all"] = "profile"
     # Origins allowed to embed a notebook's app view in an ``<iframe>``; sets
     # ``Content-Security-Policy: frame-ancestors 'self' <origins>``. Empty (the default) means
     # same-origin only. A JSON array or comma-separated list of origins
