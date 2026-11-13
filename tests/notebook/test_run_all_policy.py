@@ -85,15 +85,34 @@ async def test_batchable_cells_run_together_and_the_rest_alone(monkeypatch):
     assert executor.runs == 1
 
 
-async def test_a_batch_of_one_or_with_batching_off_runs_alone(monkeypatch):
+async def test_a_batch_of_one_runs_alone(monkeypatch):
+    """Nothing to amortize: with batching on, a batchable run of one still runs alone."""
     _plan(monkeypatch, [("batch", ["a"]), ("batch", ["b", "c"])])
     steps = _Steps()
 
+    await run_all.run_all(_session({"a": [], "b": [], "c": []}), _Executor(), [], steps)
+
+    assert steps.calls == [("one", "a"), ("batch", ["b", "c"])]
+
+
+async def test_a_batch_left_with_one_cell_after_blocking_runs_alone(monkeypatch):
+    _plan(monkeypatch, [("single", ["p"]), ("batch", ["q", "r"])])
+    steps = _Steps(fails={"p"})
+
+    await run_all.run_all(_session({"p": [], "q": ["p"], "r": []}), _Executor(), [], steps)
+
+    assert steps.calls == [("one", "p"), ("blocked", "q"), ("one", "r")]
+
+
+async def test_with_batching_off_every_cell_runs_alone(monkeypatch):
+    _plan(monkeypatch, [("batch", ["a", "b"]), ("batch", ["c", "d"])])
+    steps = _Steps()
+
     await run_all.run_all(
-        _session({"a": [], "b": [], "c": []}), _Executor(), [], steps, batching=False
+        _session({"a": [], "b": [], "c": [], "d": []}), _Executor(), [], steps, batching=False
     )
 
-    assert steps.calls == [("one", "a"), ("one", "b"), ("one", "c")]
+    assert steps.calls == [("one", "a"), ("one", "b"), ("one", "c"), ("one", "d")]
 
 
 async def test_after_a_batch_fails_its_rest_run_alone_and_dependents_are_blocked(monkeypatch):

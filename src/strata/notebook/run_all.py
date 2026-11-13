@@ -9,6 +9,7 @@ own and keep the same policy.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Protocol
 
 from strata.notebook.executor import partition_batchable_runs
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
     from strata.notebook.dag import NotebookDag
     from strata.notebook.executor import CellExecutor
     from strata.notebook.session import NotebookSession
+
+logger = logging.getLogger(__name__)
 
 # A batch result's statuses that are neither a failure nor a cell the batch left.
 _CLEAN = ("ok", "cache_hit", "not_run")
@@ -121,7 +124,9 @@ async def run_all(
     # Each cell executes at most once: in display order a consumer above its
     # producer would materialise it, then the producer's row would run again.
     with executor.one_run():
-        for kind, cells_in_run in partition_batchable_runs(executor, runnable):
+        partition = partition_batchable_runs(executor, runnable)
+        logger.info("Run All: %d cells in %d partitioned runs", len(runnable), len(partition))
+        for kind, cells_in_run in partition:
             if had_failure and not continue_on_error:
                 break
             # A batch never checks for a failed producer, so take those cells out first.
