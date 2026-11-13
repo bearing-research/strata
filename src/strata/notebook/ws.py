@@ -2800,6 +2800,8 @@ async def _run_partition_batch(
                 # Read-set for runtime mutation detection (forms the static
                 # analyzer can't see).
                 "references": sorted(cell.references or []),
+                # Inputs the cell changes in place and passes on, as single-cell has them.
+                "mutation_defines": sorted(cell.mutation_defines or []),
                 "env": effective_env,
                 "mount_manifest": mount_manifest,
                 "table_manifest": table_manifest,
