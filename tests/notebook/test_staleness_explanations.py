@@ -10,6 +10,7 @@ import pytest
 from strata.notebook import nonce
 from strata.notebook.env import local_packages
 from strata.notebook.executor import CellExecutor
+from strata.notebook.inputs import InputFingerprints
 from strata.notebook.keys import cell_key
 from strata.notebook.runtime_state import load_runtime_state
 from strata.notebook.session import NotebookSession, SessionManager
@@ -400,10 +401,7 @@ async def test_a_sql_cell_changed_input_is_named_from_the_parts_strata_supplies(
             session,
             session.analysis,
             "c1",
-            mounts=[f"raw:file:///data:{component}"],
-            tables=[],
-            fetches=[],
-            datasets=[],
+            inputs=InputFingerprints(mounts=[f"raw:file:///data:{component}"]),
             env_hash="env",
         )
         return key.parts

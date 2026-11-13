@@ -49,29 +49,13 @@ def test_a_widget_key_covers_a_mount_declared_on_it(tmp_path):
     cell = session.notebook_state.get_cell("w")
     cell.mount_overrides = list(cell.mounts)
     outside = session._outside_world_for(cell)
-    assert outside.mount_fingerprints, "the mount reaches the widget"
+    assert outside.inputs.mounts, "the mount reaches the widget"
     env_hash = session.cell_env_hash(cell, local_packages(session.path))
-    fingerprints = [
-        outside.mount_fingerprints,
-        outside.table_fingerprints,
-        outside.fetch_fingerprints,
-        outside.dataset_fingerprints,
-    ]
-    key = cell_key(
-        session,
-        session.analysis,
-        "w",
-        mounts=outside.mount_fingerprints,
-        tables=outside.table_fingerprints,
-        fetches=outside.fetch_fingerprints,
-        datasets=outside.dataset_fingerprints,
-        env_hash=env_hash,
-    )
+    key = cell_key(session, session.analysis, "w", inputs=outside.inputs, env_hash=env_hash)
     assert key.parts is not None
     assert key.provenance_hash == cg.parts_digest(key.parts)
     assert key.parts["definition_key"] == compute_source_hash(cell.source, "widget")
-    kinds = dict(zip(("mount", "table", "fetch", "dataset"), fingerprints, strict=True))
-    assert key.parts["inputs"] == input_parts(kinds)
+    assert key.parts["inputs"] == input_parts(outside.inputs.by_kind())
 
 
 _CYCLE = "# @after c1\nx = 1\n"
@@ -96,7 +80,7 @@ def test_staleness_reads_an_input_an_edit_added_after_its_prefetch(tmp_path):
     data.mkdir()
     session = _session(tmp_path, [("c0", "python", "x = 1\n")])
     prefetched = session._outside_world_fingerprints()
-    assert prefetched["c0"].mount_fingerprints == []
+    assert prefetched["c0"].inputs.mounts == []
     session.notebook_state.get_cell("c0").source = f"# @mount d file://{data}\nx = 1\n"
     session.re_analyze_cell("c0")
 

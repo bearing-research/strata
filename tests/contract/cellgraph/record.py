@@ -622,30 +622,29 @@ def _keys(
     env_hash = session.cell_env_hash(cell, local_packages(session.path))
     if outside is None:
         outside = session._outside_world_for(cell)
-    fingerprints = {
-        "mounts": outside.mount_fingerprints,
-        "tables": outside.table_fingerprints,
-        "fetches": outside.fetch_fingerprints,
-        "datasets": outside.dataset_fingerprints,
-    }
     resolved = {
-        "mounts": outside.mount_fingerprints,
+        "mounts": outside.inputs.mounts,
         "has_rw_mount": outside.has_rw_mount,
-        "tables": outside.table_fingerprints,
-        "fetches": outside.fetch_fingerprints,
-        "datasets": outside.dataset_fingerprints,
+        "tables": outside.inputs.tables,
+        "fetches": outside.inputs.fetches,
+        "datasets": outside.inputs.datasets,
     }
 
     def key(instance: str | None = None) -> dict[str, Any]:
         found = cell_key(
-            session, session.analysis, cell.id, **fingerprints, env_hash=env_hash, instance=instance
+            session,
+            session.analysis,
+            cell.id,
+            inputs=outside.inputs,
+            env_hash=env_hash,
+            instance=instance,
         )
         upstream, digest = found.upstream, found.provenance_hash
         return {
             # As assembled, but sorted: their order follows set iteration, which varies
             # by process, and the key sorts them anyway.
             "upstream_hashes": sorted(upstream),
-            "input_hashes": sorted(cell_provenance_inputs(upstream, *fingerprints.values())),
+            "input_hashes": sorted(cell_provenance_inputs(upstream, outside.inputs)),
             "execution_key": digest,
         }
 

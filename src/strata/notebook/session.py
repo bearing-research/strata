@@ -51,6 +51,7 @@ from strata.notebook.env import (
 )
 from strata.notebook.execution_result import CachedConsole
 from strata.notebook.graph import analysis_with, analyze_notebook, mounts_of
+from strata.notebook.inputs import InputFingerprints
 from strata.notebook.keys import CellKey, InputNotFingerprinted, cell_key, input_parts
 from strata.notebook.models import (
     AnnotationDiagnostic,
@@ -211,11 +212,8 @@ class _OutsideWorld:
     and ``@fetch`` URLs, and the broadcast path takes the lock on the event loop.
     """
 
-    mount_fingerprints: list[str]
+    inputs: InputFingerprints
     has_rw_mount: bool
-    table_fingerprints: list[str]
-    fetch_fingerprints: list[str]
-    dataset_fingerprints: list[str]
 
 
 @dataclass
@@ -1070,10 +1068,7 @@ class NotebookSession:
             self,
             analysis,
             cell_id,
-            mounts=outside.mount_fingerprints,
-            tables=outside.table_fingerprints,
-            fetches=outside.fetch_fingerprints,
-            datasets=outside.dataset_fingerprints,
+            inputs=outside.inputs,
             env_hash=env_hash,
         )
 
@@ -1081,11 +1076,13 @@ class NotebookSession:
         """One cell's outside-world fingerprints."""
         mount_fingerprints, has_rw_mount = self._collect_mount_fingerprints(cell)
         return _OutsideWorld(
-            mount_fingerprints=mount_fingerprints,
+            inputs=InputFingerprints(
+                mounts=mount_fingerprints,
+                tables=self._collect_table_fingerprints(cell),
+                fetches=self._collect_fetch_fingerprints(cell),
+                datasets=self._collect_dataset_fingerprints(cell),
+            ),
             has_rw_mount=has_rw_mount,
-            table_fingerprints=self._collect_table_fingerprints(cell),
-            fetch_fingerprints=self._collect_fetch_fingerprints(cell),
-            dataset_fingerprints=self._collect_dataset_fingerprints(cell),
         )
 
     def _compute_staleness_locked(
@@ -1168,13 +1165,7 @@ class NotebookSession:
                 outside = self._outside_world_for(cell)
                 key = self._cell_key(analysis, cell_id, outside, env_hash)
 
-            inputs = cell_provenance_inputs(
-                key.upstream,
-                outside.mount_fingerprints,
-                outside.table_fingerprints,
-                outside.fetch_fingerprints,
-                outside.dataset_fingerprints,
-            )
+            inputs = cell_provenance_inputs(key.upstream, outside.inputs)
             test_inputs[cell_id] = cell_test_input_fingerprint(inputs, env_hash)
 
             if outside.has_rw_mount:
@@ -1295,14 +1286,7 @@ class NotebookSession:
         }
         # Missing only if the DAG moved meanwhile, and the next flush recomputes.
         if outside is not None:
-            parts["inputs"] = input_parts(
-                {
-                    "mount": outside.mount_fingerprints,
-                    "table": outside.table_fingerprints,
-                    "fetch": outside.fetch_fingerprints,
-                    "dataset": outside.dataset_fingerprints,
-                }
-            )
+            parts["inputs"] = input_parts(outside.inputs.by_kind())
         return parts
 
     def _upstream_moved_under(self, cell: CellState, source_hash: str, env_hash: str) -> bool:
