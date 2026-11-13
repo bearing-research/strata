@@ -23,6 +23,7 @@ test_cellgraph_traces.py   guard
 test_cellgraph_r_directives_trace.py   the R scenario's guard and replay, apart for CI's R job
 replay.py                  replays a trace through cellgraph
 test_replay.py             the replay of every other scenario
+test_reload_equivalence.py every run step's cells read the same in a freshly opened session
 test_vocabulary_parity.py  cellgraph's diagnostics against Strata's, on cells no scenario has
 diagnostics_corpus.py      every annotation line in a cell of every language
 diagnostics_oracle.json    what Strata's own validators reported on it, recorded once

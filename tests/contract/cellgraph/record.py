@@ -778,6 +778,22 @@ def record(name: str) -> dict[str, Any]:
 
 
 def _record(name: str) -> dict[str, Any]:
+    recorded = [
+        {"step": step, **_snapshot(notebook_dir, spy, run, session)}
+        for step, notebook_dir, spy, run, session in _steps(name)
+    ]
+    trace = {"trace_format": TRACE_FORMAT, "scenario": name, "steps": recorded}
+    _check_no_machine_paths(trace)
+    return trace
+
+
+def _steps(name: str) -> Iterator[tuple[dict[str, Any], Path, _Spy, Any, Any]]:
+    """Apply scenario *name*'s steps in a fresh copy under :data:`ROOT`.
+
+    Yields, after each step, the step, the notebook directory, the recording spy, and
+    for a run step its results and the session it ran in (else ``None``, ``None``).
+    The caller holds the scenario's lock.
+    """
     source = SCENARIOS / name
     notebook_dir = ROOT / name
     registry = ROOT / f"{name}-registry"
@@ -793,18 +809,14 @@ def _record(name: str) -> dict[str, Any]:
     registry.mkdir(parents=True)
     _home(name).mkdir()
 
-    recorded = []
     with _recording(name, notebook_dir, registry) as spy:
         for step in steps:
             spy.calls = {}
             ran = _apply(step, notebook_dir, registry)
             run, session = ran if ran is not None else (None, None)
-            recorded.append({"step": step, **_snapshot(notebook_dir, spy, run, session)})
-    trace = {"trace_format": TRACE_FORMAT, "scenario": name, "steps": recorded}
-    _check_no_machine_paths(trace)
+            yield step, notebook_dir, spy, run, session
     for path in scratch:
         shutil.rmtree(path, ignore_errors=True)
-    return trace
 
 
 def _check_no_machine_paths(trace: dict[str, Any]) -> None:
