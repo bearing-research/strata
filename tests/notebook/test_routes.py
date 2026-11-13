@@ -162,7 +162,6 @@ def test_open_notebook_with_a_bad_fetch_still_opens(client, tmp_path, case):
 
 def test_open_syncs_the_environment_in_a_job_off_the_event_loop(client, monkeypatch, tmp_path):
     """``uv sync`` and the renv restore run as an environment job, not inline in the route."""
-    from strata.notebook.session import NotebookSession
 
     notebook_dir = create_notebook(tmp_path, "Deferred Sync")
     (notebook_dir / "renv.lock").write_text('{"R": {"Version": "4.4.0"}, "Packages": {}}')
@@ -183,13 +182,15 @@ def test_open_syncs_the_environment_in_a_job_off_the_event_loop(client, monkeypa
 
     monkeypatch.setattr("strata.notebook.session._renv_sync", recording_renv_sync)
     submitted: list[str] = []
-    real_submit = NotebookSession.submit_environment_job
+    from strata.notebook.environment_jobs import EnvironmentJobs
+
+    real_submit = EnvironmentJobs.submit
 
     async def recording_submit(self, **kwargs):
         submitted.append(kwargs["action"])
         return await real_submit(self, **kwargs)
 
-    monkeypatch.setattr(NotebookSession, "submit_environment_job", recording_submit)
+    monkeypatch.setattr(EnvironmentJobs, "submit", recording_submit)
 
     response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
 
@@ -509,7 +510,11 @@ def test_create_notebook_endpoint_defers_initial_environment_sync(client, monkey
                 "environment_job": self.environment_job,
             }
 
-        async def submit_environment_job(self, *, action: str, **_kwargs):
+        @property
+        def environment_jobs(self):
+            return self
+
+        async def submit(self, *, action: str, **_kwargs):
             captured["environment_job_action"] = action
             self.environment_job = {
                 "id": "job-123",
@@ -880,7 +885,7 @@ def test_submit_environment_job_endpoint(client, monkeypatch, tmp_path):
         session.environment_job = job
         return job
 
-    monkeypatch.setattr(session, "submit_environment_job", _fake_submit_environment_job)
+    monkeypatch.setattr(session.environment_jobs, "submit", _fake_submit_environment_job)
 
     response = client.post(
         f"/v1/notebooks/{session_id}/environment/jobs",
@@ -928,7 +933,7 @@ def test_submit_environment_import_job_endpoint(client, monkeypatch, tmp_path):
         session.environment_job = job
         return job
 
-    monkeypatch.setattr(session, "submit_environment_job", _fake_submit_environment_job)
+    monkeypatch.setattr(session.environment_jobs, "submit", _fake_submit_environment_job)
 
     response = client.post(
         f"/v1/notebooks/{session_id}/environment/jobs",

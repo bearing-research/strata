@@ -177,12 +177,12 @@ def _use_existing_environment(session: Any) -> tuple[bool, str | None]:
 async def _sync_environment(session: Any) -> tuple[bool, str | None]:
     """Run ``uv sync`` through the session's environment jobs; return ``(ok, error_message)``."""
     try:
-        job = await session.submit_environment_job(action="sync")
+        job = await session.environment_jobs.submit(action="sync")
     except Exception as exc:
         return False, f"failed to submit env sync job: {exc}"
 
     try:
-        await session.wait_for_environment_job()
+        await session.environment_jobs.wait()
     except Exception as exc:
         return False, f"env sync raised: {exc}"
 

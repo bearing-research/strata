@@ -491,8 +491,8 @@ def _serialize_environment_payload(session: NotebookSession) -> dict:
     """
     return {
         "environment": session.serialize_environment_state(),
-        "environment_job": session.serialize_environment_job_state(),
-        "environment_job_history": session.serialize_environment_job_history(),
+        "environment_job": session.environment_jobs.serialize_state(),
+        "environment_job_history": session.environment_jobs.serialize_history(),
         "dependencies": _serialize_dependency_info_list(list_dependencies(session.path)),
         "resolved_dependencies": _serialize_dependency_info_list(
             list_resolved_dependencies(session.path)
@@ -562,7 +562,7 @@ def _raise_environment_busy(session: NotebookSession, message: str) -> None:
         detail={
             "message": message,
             "code": "ENVIRONMENT_BUSY",
-            "environment_job": session.serialize_environment_job_state(),
+            "environment_job": session.environment_jobs.serialize_state(),
         },
     )
 
@@ -834,13 +834,13 @@ async def _open_with_synced_environment(
     ):
         with timing.phase("session_env_sync"):
             try:
-                await session.submit_environment_job(action="sync")
+                await session.environment_jobs.submit(action="sync")
             except Exception as exc:
                 logger.exception("Failed to start the environment sync for %s", notebook_path)
                 session.environment_sync_state = "failed"
                 session.environment_sync_error = f"Failed to start notebook environment sync: {exc}"
                 session.environment_sync_notice = None
-            job_task = session.wait_for_environment_job_task()
+            job_task = session.environment_jobs.current_task()
             if job_task is not None:
                 # Shielded: a client that hangs up must not cancel the sync.
                 await asyncio.shield(job_task)
@@ -940,7 +940,7 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
             )
         with timing.phase("environment_job_submit"):
             try:
-                await session.submit_environment_job(action="sync")
+                await session.environment_jobs.submit(action="sync")
             except Exception as exc:
                 logger.exception(
                     "Failed to start initial environment bootstrap for %s",
@@ -1140,7 +1140,7 @@ async def import_jupyter_notebook(
 
     with timing.phase("environment_job_submit"):
         try:
-            await session.submit_environment_job(action="sync")
+            await session.environment_jobs.submit(action="sync")
         except Exception as exc:
             logger.exception(
                 "Failed to start initial environment bootstrap for imported %s",
@@ -1286,7 +1286,7 @@ async def import_snapshot_bundle(
 
     with timing.phase("environment_job_submit"):
         try:
-            await session.submit_environment_job(action="sync")
+            await session.environment_jobs.submit(action="sync")
         except Exception as exc:
             logger.exception(
                 "Failed to start initial environment bootstrap for imported %s",
@@ -1904,7 +1904,7 @@ async def submit_environment_job(
             )
 
     try:
-        await session.submit_environment_job(
+        await session.environment_jobs.submit(
             action=req.action,
             package=req.package,
             requirements_text=req.requirements,
@@ -2629,7 +2629,7 @@ async def update_notebook_python_version(
         )
 
     try:
-        await session.submit_environment_job(
+        await session.environment_jobs.submit(
             action="change_python",
             python_version=req.python_version,
         )
@@ -3783,7 +3783,7 @@ async def execute_cell(
             detail={
                 "message": environment_block_reason,
                 "code": "ENVIRONMENT_BUSY",
-                "environment_job": session.serialize_environment_job_state(),
+                "environment_job": session.environment_jobs.serialize_state(),
             },
         )
 
@@ -3909,7 +3909,7 @@ async def run_cell_tests_endpoint(notebook_id: str, session: SessionDep, cell_id
             detail={
                 "message": environment_block_reason,
                 "code": "ENVIRONMENT_BUSY",
-                "environment_job": session.serialize_environment_job_state(),
+                "environment_job": session.environment_jobs.serialize_state(),
             },
         )
 

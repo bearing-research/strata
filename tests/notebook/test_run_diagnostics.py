@@ -666,7 +666,7 @@ class TestTheStaleHint:
 
         monkeypatch.setattr(ws, "broadcast_notebook_message", record)
 
-        await session._broadcast_environment_staleness_updates(["c"])
+        await session.environment_jobs.broadcast_staleness_updates(["c"])
 
         (frame,) = [m["payload"] for m in sent]
         assert frame["changed_reads"] == [str(outside / "events.csv")]
