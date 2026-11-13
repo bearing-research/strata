@@ -630,3 +630,26 @@ class TestEnvAppliedBeforeDeserialization:
             "inputs were deserialized before the notebook's [env] was applied"
         )
         assert os.environ.get("STRATA_ORDER_PROBE") is None, "the override must not leak"
+
+
+@pytest.mark.parametrize("module", ["harness", "pool_worker"])
+@pytest.mark.parametrize("before", [None, "outer"])
+def test_the_cell_id_is_set_for_the_cell_and_put_back_after(module, before, monkeypatch):
+    """A reused warm worker, or a test calling in-process, must not keep a cell's id."""
+    import importlib
+
+    exec_with_display = importlib.import_module(f"strata.notebook.{module}")._exec_with_display
+    if before is None:
+        monkeypatch.delenv("STRATA_CELL_ID", raising=False)
+    else:
+        monkeypatch.setenv("STRATA_CELL_ID", before)
+    namespace: dict = {}
+
+    seen = exec_with_display("import os\nos.environ['STRATA_CELL_ID']", namespace, "c9")
+    assert seen == "c9"
+    with pytest.raises(ZeroDivisionError):
+        exec_with_display("1 / 0", namespace, "c9")
+
+    import os
+
+    assert os.environ.get("STRATA_CELL_ID") == before
