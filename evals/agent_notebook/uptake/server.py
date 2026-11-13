@@ -160,13 +160,17 @@ def scratchpad_server(
 
 
 def _stop_group(proc: subprocess.Popen) -> None:
-    """Stop the server and its group, cells and pools too, even if the server has died."""
-    with suppress(ProcessLookupError):
+    """Stop the server and its group, cells and pools too, even if the server has died.
+
+    On macOS ``killpg`` fails with EPERM, not ESRCH, when all that is left of the group
+    is zombies waiting to be reaped: nothing is left to stop, as with a group that is gone.
+    """
+    with suppress(ProcessLookupError, PermissionError):
         os.killpg(proc.pid, signal.SIGTERM)
     with suppress(subprocess.TimeoutExpired):
         proc.wait(timeout=30)
     # What outlived the server's own shutdown, or the server if it would not stop.
-    with suppress(ProcessLookupError):
+    with suppress(ProcessLookupError, PermissionError):
         os.killpg(proc.pid, signal.SIGKILL)
     proc.wait()
 

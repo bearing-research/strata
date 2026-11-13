@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -411,6 +412,8 @@ class TestArmCp:
                 os.kill(child, 0)
             except ProcessLookupError:
                 return True
+            except PermissionError:
+                return False  # macOS: a zombie its new parent has not reaped yet
             return False
 
         # Its new parent reaps it a moment after the signal.
@@ -418,6 +421,22 @@ class TestArmCp:
         while not gone() and time.monotonic() < deadline:
             time.sleep(0.05)
         assert gone()
+
+    def test_a_group_left_with_zombies_is_stopped_as_one_that_is_gone(self, monkeypatch):
+        # macOS answers killpg with EPERM, not ESRCH, while the group's last members wait
+        # to be reaped; it raced the server's SIGTERM in CI.
+        with subprocess.Popen(["true"], start_new_session=True) as proc:
+            proc.wait()
+            signals = []
+
+            def killpg(pgid, sig):
+                signals.append(sig)
+                raise PermissionError(1, "Operation not permitted")
+
+            monkeypatch.setattr(server.os, "killpg", killpg)
+            server._stop_group(proc)
+
+        assert signals == [signal.SIGTERM, signal.SIGKILL]
 
 
 class TestStats:
