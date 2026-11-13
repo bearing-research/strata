@@ -8,6 +8,13 @@ exhaustive commit history.
 ## Unreleased
 
 ### Added
+- **A scratchpad profile for the MCP server.** `STRATA_MCP_PROFILE=scratchpad` lists
+  two tools, `run` (add or replace a cell and run it) and `scratchpad` (what the
+  session already holds), over the server's one open session, with no `session_id`,
+  server instructions, and each tool marked to stay loaded. A failure an agent can act
+  on returns a `fix` line; `STRATA_MCP_TOOLS=all` lists the full set again. The advice
+  agents get now comes from one file in the package, `strata/agent_guidance/scratchpad.md`.
+  (#1529)
 - **A cell knows which cell it is.** While a Python cell runs, `STRATA_CELL_ID` holds its
   id, in the cell's process and any process it starts, on the cold, warm and run-all
   paths alike. (#1527)

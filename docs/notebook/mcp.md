@@ -27,9 +27,9 @@ REST routes and the WebSocket:
 
 | Scope | Tools |
 |---|---|
-| `notebook:read` | `list_notebooks`, `get_notebook`, `get_cell`, `save_cell_output`, `get_variable`, `dag`, `status`, `list_workers`, `lineage`, `publish_preflight` |
+| `notebook:read` | `list_notebooks`, `get_notebook`, `get_cell`, `save_cell_output`, `get_variable`, `dag`, `status`, `list_workers`, `lineage`, `publish_preflight`, `scratchpad` |
 | `notebook:write` | `add_cell`, `edit_cell`, `remove_cell`, `move_cell`, `note`, `add_worker`, `set_default_worker`, `set_variant`, `remove_worker`, `disconnect_ssh_worker`, `promote` |
-| `notebook:execute` | `run_cell`, `cancel_cell`, `run_tests`, `run_snippet`, `set_widget_value`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
+| `notebook:execute` | `run_cell`, `cancel_cell`, `run_tests`, `run_snippet`, `run`, `set_widget_value`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
 | `artifacts:publish` | `publish` |
 
 Within a tenant, every open session is visible to any caller holding
@@ -98,6 +98,25 @@ cell, a bad argument, a busy notebook) returns that reason in the tool error,
 for example `no open notebook session '…'; call list_notebooks first`. An
 unexpected server failure returns only `Error executing tool <name>`; the
 details stay in the server log.
+
+## Scratchpad profile
+
+With `STRATA_MCP_PROFILE=scratchpad` the server lists two tools instead of the
+full set, both over the server's **one** open session, so neither takes a
+`session_id`. The initialize response carries instructions telling the agent
+when to reach for them, and both tools are marked to stay loaded rather than
+sit behind Claude Code's tool search.
+
+| Tool | Description |
+| --- | --- |
+| `run(source, cell=None, fresh=False)` | Without `cell`, add a Python cell and run it; with `cell`, replace that cell's source and run it. `fresh=True` ignores this cell's cache (the `rerun` mode). Returns `cell`, `status`, `cache_hit`, `duration_ms`, `saved_ms` on a hit, `reran` (the upstream cells brought up to date first, each with why), `value` (what a trailing expression showed), `stdout` / `stderr`, `traceback`, `defines`, `path` (a file holding an image the cell showed) and `url` (the notebook in the web UI). |
+| `scratchpad(name=None)` | Without `name`: each cell's id, `defines`, `status`, why it is stale and what its last uncached run took, plus the notebook directory, the cells' `cwd` (its `work/`), the `python` they run on and the time the cache has saved. With `name`: the cell that defines it, its source and shown `value`, or the names that exist. |
+
+A failure that is not the cell's own exception (no session or several, an
+unknown cell, an environment that is not ready, an annotation that cannot be
+read, a busy notebook) returns `status: error` with a `fix` line naming the next
+step. The other tools stay registered and callable by name;
+`STRATA_MCP_TOOLS=all` lists them too.
 
 ## Tools
 

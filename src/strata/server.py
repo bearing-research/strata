@@ -1589,7 +1589,9 @@ def _mount_mcp_if_enabled() -> None:
     from strata.notebook.mcp_server import build_mcp_app
     from strata.notebook.routes import get_session_manager
 
-    mcp_app = build_mcp_app(get_session_manager())
+    mcp_app = build_mcp_app(
+        get_session_manager(), profile=config.mcp_profile, all_tools=config.mcp_tools == "all"
+    )
     if mcp_app is None:
         _mcp_extra_missing = True
         return

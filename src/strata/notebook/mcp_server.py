@@ -823,6 +823,225 @@ def _publish(
     }
 
 
+# --- scratchpad profile: two tools over the server's one session, no session_id ---
+
+SCRATCHPAD_TOOLS = frozenset({"run", "scratchpad"})
+
+# Staleness codes, in the agent's terms.
+_STALE_BECAUSE = {
+    "self": "its source changed",
+    "upstream": "an upstream cell changed",
+    "env": "the environment changed",
+    "external": "an input it declares changed",
+    "forced": "a rerun was asked for",
+    "checking": "its mounted files are being hashed",
+}
+
+
+class _Refused(Exception):
+    """A scratchpad call that cannot go ahead, with the step that unblocks it."""
+
+    def __init__(self, error: str, fix: str) -> None:
+        super().__init__(error)
+        self.fix = fix
+
+    def view(self) -> dict[str, Any]:
+        return {"status": "error", "error": str(self), "fix": self.fix}
+
+
+def _notebook_url(session_id: str) -> str:
+    """Where a person opens the session in the web UI."""
+    config = _server_config()
+    host = "127.0.0.1" if config.host in ("0.0.0.0", "::") else config.host
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{config.port}{config.public_base_path}/#/notebook/{session_id}"
+
+
+def _one_session(session_manager: SessionManager) -> tuple[str, Any]:
+    """The server's one open session, or a refusal saying how to get to one."""
+    open_sessions = [
+        (session_id, session)
+        for session_id in session_manager.list_sessions()
+        if (session := session_manager.get_session(session_id)) is not None
+        and session_visible_to_caller(session)
+    ]
+    if not open_sessions:
+        raise _Refused(
+            "no notebook is open on this server",
+            "open one: `strata agent --no-tui --server <this server's URL> <notebook dir>`",
+        )
+    if len(open_sessions) > 1:
+        raise _Refused(
+            f"{len(open_sessions)} notebooks are open on this server; the scratchpad uses one",
+            "close all but one of them in the notebook UI",
+        )
+    session_id, session = open_sessions[0]
+    session.touch()
+    return session_id, session
+
+
+def _stale_reason(reasons: list[str]) -> str:
+    return ", ".join(_STALE_BECAUSE.get(reason, reason) for reason in reasons)
+
+
+def _environment_fix(session: Any) -> str:
+    if session.environment_sync_state in ("failed", "unknown"):
+        return f"run `uv sync` in {session.path}, then call `run` again"
+    return "call `run` again once it finishes"
+
+
+def _last_cold_ms(session: Any, cell_id: str) -> int | None:
+    """What the cell's latest uncached run took."""
+    for sample in reversed(session.execution_history.get(cell_id, [])):
+        if not sample.cache_hit and sample.duration_ms is not None:
+            return int(sample.duration_ms)
+    return None
+
+
+def _shown(cell: dict[str, Any]) -> dict[str, Any] | None:
+    """The cell's last display output: what a trailing expression showed."""
+    outputs = cell["outputs"]
+    return outputs[-1] if outputs else None
+
+
+async def _scratch_run(
+    session_manager: SessionManager,
+    source: str,
+    cell: str | None = None,
+    fresh: bool = False,
+) -> dict[str, Any]:
+    """Add (or, given *cell*, replace) a Python cell, run it, and return a compact result."""
+    from strata.notebook.ops import _run_result_from_wire
+    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive, run_cells
+
+    try:
+        session_id, session = _one_session(session_manager)
+        if cell is not None and session.notebook_state.get_cell(cell) is None:
+            raise _Refused(
+                f"no cell {cell!r} in the scratchpad",
+                "call `scratchpad` for the cells there are, or leave out `cell` to add one",
+            )
+        # Before the cell is added, so a refusal leaves nothing behind.
+        block = session.environment_execution_block_message()
+        if block:
+            raise _Refused(block, _environment_fix(session))
+        if cell is None:
+            cell = (await _add_cell(session_manager, session_id, source))["id"]
+        else:
+            await _edit_cell(session_manager, session_id, cell, source)
+
+        mode: Literal["normal", "rerun"] = "rerun" if fresh else "normal"
+        rows = {row.id: row for row in LocalNotebookOps.from_session(session).status().cells}
+        reran = [
+            {
+                "cell": upstream,
+                "reason": _stale_reason(rows[upstream].staleness_reasons) or "it had not run",
+            }
+            # The plan lists the target too.
+            for upstream in run_cells(session, cell, mode)
+            if upstream != cell
+        ]
+        try:
+            result = await execute_cell_exclusive(session, cell, session_id, mode=mode)
+        except NotebookBusyError as exc:
+            raise _Refused(str(exc), f"call `run` again with cell={cell!r} once that run finishes")
+        if result is None:
+            raise _Refused(
+                f"the server failed running cell {cell!r}",
+                f"call `run` again with cell={cell!r} and fresh=True; "
+                "if it fails again, the server log has the cause",
+            )
+    except _Refused as refused:
+        return refused.view()
+
+    run = _run_result_from_wire(result.to_dict())
+    await _agent_note(session_id, "mcp", f"ran cell {cell} → {run.status}")
+    view = _get_cell(session_manager, session_id, cell)
+    out: dict[str, Any] = {
+        "cell": cell,
+        "status": run.status,
+        "cache_hit": run.cache_hit,
+        "duration_ms": int(run.duration_ms),
+    }
+    if run.cache_hit:
+        out["saved_ms"] = session.last_hit_saved_ms(cell)
+    if reran:
+        out["reran"] = reran
+    shown = _shown(view) if run.status == "ok" else None
+    if shown is not None and shown["content_type"] == "image/png":
+        out["path"] = _save_cell_output(session_manager, session_id, cell)["path"]
+    elif shown is not None:
+        out["value"] = shown["preview"]
+    if run.stdout:
+        out["stdout"] = run.stdout
+    if run.stderr:
+        out["stderr"] = run.stderr
+    if run.status == "error":
+        out["error"] = run.error
+        if run.traceback:
+            # The cell's own exception: the traceback is the next step.
+            out["traceback"] = run.traceback
+        elif run.error_code == "cancelled":
+            out["fix"] = f"the run was cancelled; call `run` again with cell={cell!r}"
+        else:
+            out["fix"] = f"fix what `error` names, then call `run` again with cell={cell!r}"
+    out["defines"] = view["defines"]
+    out["url"] = _notebook_url(session_id)
+    return out
+
+
+def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dict[str, Any]:
+    """The inventory, or with *name* the cell that defines it."""
+    from strata.notebook.layout import WORK_DIR
+
+    try:
+        session_id, session = _one_session(session_manager)
+    except _Refused as refused:
+        return refused.view()
+    url = _notebook_url(session_id)
+
+    if name is not None:
+        found = _get_variable(session_manager, session_id, name)
+        if not found["defined"]:
+            return {"variable": name, "defined": False, "available": found["available"]}
+        if "cell" not in found:
+            # A sweep or fan-out: no single defining cell.
+            return {**found, "url": url}
+        cell = found["cell"]
+        defined: dict[str, Any] = {
+            "variable": name,
+            "defined": True,
+            "cell": cell["id"],
+            "status": cell["status"],
+            "source": cell["source"],
+        }
+        shown = _shown(cell)
+        if shown is not None and shown["content_type"] != "image/png":
+            defined["value"] = shown["preview"]
+        return {**defined, "url": url}
+
+    cells = []
+    for row in LocalNotebookOps.from_session(session).status().cells:
+        entry: dict[str, Any] = {"cell": row.id, "defines": row.defines, "status": row.status}
+        if row.staleness_reasons:
+            entry["stale"] = _stale_reason(row.staleness_reasons)
+        if row.changed_reads:
+            entry["changed_reads"] = row.changed_reads
+        cold_ms = _last_cold_ms(session, row.id)
+        if cold_ms is not None:
+            entry["cold_ms"] = cold_ms
+        cells.append(entry)
+    return {
+        "notebook": str(session.path),
+        "cwd": str(session.path / WORK_DIR),
+        "python": str(session.venv_python) if session.venv_python else None,
+        "saved_ms": session.get_profiling_summary()["cache_savings_ms"],
+        "cells": cells,
+        "url": url,
+    }
+
+
 def _server_config():
     """The running server's config."""
     from strata.server import get_state
@@ -907,7 +1126,11 @@ def _mcp_import_failure(missing: str | None) -> str:
     )
 
 
-def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
+def build_mcp_app(
+    session_manager: SessionManager,
+    profile: Literal["notebook", "scratchpad"] = "notebook",
+    all_tools: bool = False,
+) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
     Mount it at ``/mcp``; the host app's lifespan must enter its lifespan (see
@@ -917,6 +1140,11 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     ----------
     session_manager : SessionManager
         The server's live session registry; tools resolve warm sessions from it.
+    profile : {"notebook", "scratchpad"}
+        ``scratchpad`` adds ``run`` and ``scratchpad`` and the server instructions,
+        and lists only those two; the rest stay callable.
+    all_tools : bool
+        List every registered tool whatever the profile.
     """
     try:
         from mcp.server.mcpserver import MCPServer
@@ -937,6 +1165,12 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         come from the same table the REST routes and WebSocket frames use.
         """
 
+        async def list_tools(self) -> list[Any]:
+            tools = await super().list_tools()
+            if profile == "scratchpad" and not all_tools:
+                return [tool for tool in tools if tool.name in SCRATCHPAD_TOOLS]
+            return tools
+
         async def call_tool(
             self, name: str, arguments: dict[str, Any], context: Any | None = None
         ) -> Any:
@@ -955,7 +1189,13 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
                         raise ToolError(f"{exc}: {exc.__cause__}") from exc.__cause__
                     raise
 
-    mcp = AuthorizingMCPServer("strata-notebook")
+    if profile == "scratchpad":
+        from strata.agent_guidance import section
+
+        instructions: str | None = section("instructions")
+    else:
+        instructions = None
+    mcp = AuthorizingMCPServer("strata-notebook", instructions=instructions)
 
     @mcp.tool()
     def list_notebooks() -> list[dict[str, Any]]:
@@ -1369,6 +1609,42 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         is empty. Withdrawing is ``strata artifact unpublish <token or id>``.
         """
         return _publish(session_manager, session_id, cell_id, variable, title)
+
+    if profile == "scratchpad":
+        # Kept in context instead of behind tool search; a user's alwaysLoad: false still wins.
+        always_load = {"anthropic/alwaysLoad": True}
+
+        @mcp.tool(meta=always_load)
+        async def run(source: str, cell: str | None = None, fresh: bool = False) -> dict[str, Any]:
+            """Run Python in the scratchpad and return the result; it stays for later calls.
+
+            Without ``cell``, adds a cell with ``source`` and runs it. With ``cell``,
+            replaces that cell's source and runs it: edit a cell rather than adding a
+            copy. A cell whose source and inputs are unchanged returns its stored
+            result (``cache_hit``, ``saved_ms``). ``fresh=True`` runs this cell again
+            whatever its cache says; upstream cells still come from the cache when
+            current.
+
+            Returns ``status`` (ok / error), ``value`` (what a trailing expression
+            showed), ``stdout`` / ``stderr``, ``traceback`` when the cell raised,
+            ``defines``, ``reran`` (upstream cells brought up to date first, and why),
+            ``path`` (a file holding an image the cell showed; read it to see the
+            plot) and ``url`` (the notebook, for a person). A failure that is not the
+            cell's own exception carries a ``fix`` line saying what to do next.
+            """
+            return await _scratch_run(session_manager, source, cell, fresh)
+
+        @mcp.tool(meta=always_load)
+        def scratchpad(name: str | None = None) -> dict[str, Any]:
+            """What the scratchpad already holds; look here before computing again.
+
+            Without ``name``: every cell's id, ``defines``, ``status``, why it is
+            stale, what its last uncached run took (``cold_ms``), plus the notebook
+            directory, the cells' ``cwd``, the ``python`` they run on and the time
+            the cache has saved. With ``name``: the cell defining that variable, its
+            source and shown ``value``, or the names that do exist.
+            """
+            return _scratchpad(session_manager, name)
 
     from mcp.server.transport_security import TransportSecuritySettings
 
