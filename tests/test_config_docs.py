@@ -28,13 +28,12 @@ _ENV_LOOKUP = re.compile(
 )
 _DOCUMENTED = re.compile(r"`(STRATA_[A-Z0-9_]+)`")
 
-# Internal plumbing the parent hands its harness child for batch execution, and what
-# Strata sets for a cell's own code to read; not operator settings.
+# Internal plumbing the parent hands its harness child for batch execution;
+# not operator settings.
 _NOT_OPERATOR_FACING = {
     "STRATA_BATCH_FRAME_FD",
     "STRATA_BATCH_RESP_FD",
     "STRATA_BATCH_OUTPUT_DIR",
-    "STRATA_CELL_ID",
 }
 
 

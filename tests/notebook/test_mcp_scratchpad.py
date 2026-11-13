@@ -16,6 +16,7 @@ from strata.agent_guidance import section
 from strata.notebook import mcp_server
 from strata.notebook.mcp_server import (
     SCRATCHPAD_TOOLS,
+    _add_cell,
     _edit_cell,
     _scratch_run,
     _scratchpad,
@@ -24,6 +25,7 @@ from strata.notebook.mcp_server import (
 from strata.notebook.scopes import CLASSIFIED_TOOLS, required_scope_for_tool
 from strata.notebook.session import SessionManager
 from strata.notebook.writer import create_notebook
+from strata.notebook.ws import NotebookBusyError
 from tests.notebook.e2e_fixtures import _reset_ws_globals
 
 
@@ -221,3 +223,54 @@ def test_every_tool_the_guidance_names_exists():
 def test_the_instructions_fit_what_claude_code_keeps():
     # Claude Code cuts server instructions at 4,096 characters.
     assert len(section("instructions")) < 4096
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_read_comes_back_with_its_fix(scratch, tmp_path):
+    sm, _ = scratch
+    data = tmp_path / "rows.txt"
+    data.write_text("1\n2\n")
+    out = await _scratch_run(sm, f"n = len(open({str(data)!r}).read().split())\nn")
+    assert out["status"] == "ok" and out["value"] == 2
+    (diagnostic,) = out["diagnostics"]
+    assert diagnostic["code"] == "undeclared_read"
+    assert "rows.txt" in diagnostic["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_cell_that_is_not_python_is_refused(scratch):
+    sm, session_id = scratch
+    cell = (await _add_cell(sm, session_id, "SELECT 1", language="sql"))["id"]
+
+    out = await _scratch_run(sm, "x = 1", cell=cell)
+    assert out["error"] == f"cell {cell!r} is a sql cell, and `run` writes Python"
+    assert sm.get_session(session_id).notebook_state.get_cell(cell).source == "SELECT 1"
+
+
+@pytest.mark.asyncio
+async def test_a_busy_notebook_takes_back_the_cell_it_added(scratch, monkeypatch):
+    sm, session_id = scratch
+    kept = (await _scratch_run(sm, "x = 1"))["cell"]
+
+    async def busy(*args, **kwargs):
+        raise NotebookBusyError("other")
+
+    monkeypatch.setattr(mcp_server, "_execute", busy)
+    added = await _scratch_run(sm, "y = 2")
+    assert added["fix"] == "call `run` again once that run finishes"
+    cells = sm.get_session(session_id).notebook_state.cells
+    assert [cell.id for cell in cells] == [kept]
+
+    edited = await _scratch_run(sm, "x = 3", cell=kept)
+    assert edited["fix"] == f"call `run` again with cell={kept!r} once that run finishes"
+    assert [cell.id for cell in cells] == [kept]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_upstream_is_named_as_failed(scratch):
+    sm, _ = scratch
+    upstream = await _scratch_run(sm, "x = 1 / 0")
+    assert upstream["status"] == "error"
+
+    out = await _scratch_run(sm, "y = x + 1")
+    assert out["reran"] == [{"cell": upstream["cell"], "reason": "it had failed"}]

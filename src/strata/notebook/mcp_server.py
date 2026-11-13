@@ -17,7 +17,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from strata.auth.principal import get_principal, principal_context
-from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
+from strata.notebook.ops import LocalNotebookOps, NotebookOpsError, RunResult
 from strata.notebook.scopes import required_scope_for_tool, session_visible_to_caller
 
 if TYPE_CHECKING:
@@ -39,21 +39,22 @@ def _resolve_ops(session_manager: SessionManager, session_id: str) -> LocalNoteb
     return LocalNotebookOps.from_session(_live_session(session_manager, session_id))
 
 
+def _visible_sessions(session_manager: SessionManager) -> list[tuple[str, Any]]:
+    """Every open ``(session_id, session)`` the caller may use."""
+    return [
+        (session_id, session)
+        for session_id in session_manager.list_sessions()
+        if (session := session_manager.get_session(session_id)) is not None
+        and session_visible_to_caller(session)
+    ]
+
+
 def _list_notebooks(session_manager: SessionManager) -> list[dict[str, Any]]:
     """Return one ``{session_id, name, path}`` entry per open session the caller may use."""
-    notebooks: list[dict[str, Any]] = []
-    for session_id in session_manager.list_sessions():
-        session = session_manager.get_session(session_id)
-        if session is None or not session_visible_to_caller(session):
-            continue
-        notebooks.append(
-            {
-                "session_id": session_id,
-                "name": session.notebook_state.name,
-                "path": str(session.path),
-            }
-        )
-    return notebooks
+    return [
+        {"session_id": session_id, "name": session.notebook_state.name, "path": str(session.path)}
+        for session_id, session in _visible_sessions(session_manager)
+    ]
 
 
 def _get_notebook(session_manager: SessionManager, session_id: str) -> dict[str, Any]:
@@ -222,10 +223,8 @@ async def _run_cell(
     Returns the agent-facing ``RunResult`` view, or with *confirm_reads* the large
     reads that stopped it (as the REST route's 409).
     """
-    from strata.notebook.ops import NotebookOpsError, _run_result_from_wire
     from strata.notebook.ws import (
         NotebookBusyError,
-        execute_cell_exclusive,
         large_read_message,
         reads_to_confirm,
         run_cells,
@@ -259,20 +258,30 @@ async def _run_cell(
         for read in asking:
             session.approve_reads(read.cell_id, read.machine, read.fingerprint)
 
-    # Same reservation as the WS handlers, so an agent run can't race a browser.
     try:
-        result = await execute_cell_exclusive(
-            session,
-            cell_id,
-            session_id,
-            mode=mode,  # type: ignore[arg-type]
-        )
+        run = await _execute(session, session_id, cell_id, mode)  # type: ignore[arg-type]
     except NotebookBusyError as exc:
         raise NotebookOpsError(f"{exc} Retry after the current run finishes.")
+    return run.model_dump(mode="json")
+
+
+async def _execute(
+    session: Any, session_id: str, cell_id: str, mode: Literal["normal", "rerun", "force"]
+) -> RunResult:
+    """Run a cell and narrate it, under the WS handlers' reservation so an agent run
+    can't race a browser's.
+
+    Raises ``NotebookBusyError`` while another run holds the notebook, and
+    ``NotebookOpsError`` when the executor itself failed (the server log has why).
+    """
+    from strata.notebook.ops import _run_result_from_wire
+    from strata.notebook.ws import execute_cell_exclusive
+
+    result = await execute_cell_exclusive(session, cell_id, session_id, mode=mode)
     if result is None:
         raise NotebookOpsError(f"cell {cell_id!r} could not be executed")
-    run = _run_result_from_wire(result.to_dict()).model_dump(mode="json")
-    await _agent_note(session_id, "mcp", f"ran cell {cell_id} → {run['status']}")
+    run = _run_result_from_wire(result.to_dict())
+    await _agent_note(session_id, "mcp", f"ran cell {cell_id} → {run.status}")
     return run
 
 
@@ -860,12 +869,7 @@ def _notebook_url(session_id: str) -> str:
 
 def _one_session(session_manager: SessionManager) -> tuple[str, Any]:
     """The server's one open session, or a refusal saying how to get to one."""
-    open_sessions = [
-        (session_id, session)
-        for session_id in session_manager.list_sessions()
-        if (session := session_manager.get_session(session_id)) is not None
-        and session_visible_to_caller(session)
-    ]
+    open_sessions = _visible_sessions(session_manager)
     if not open_sessions:
         raise _Refused(
             "no notebook is open on this server",
@@ -891,12 +895,11 @@ def _environment_fix(session: Any) -> str:
     return "call `run` again once it finishes"
 
 
-def _last_cold_ms(session: Any, cell_id: str) -> int | None:
-    """What the cell's latest uncached run took."""
-    for sample in reversed(session.execution_history.get(cell_id, [])):
-        if not sample.cache_hit and sample.duration_ms is not None:
-            return int(sample.duration_ms)
-    return None
+def _why_it_ran(row: Any) -> str:
+    """Why an upstream cell ran before the one asked for."""
+    if row.status == "error":
+        return "it had failed"
+    return _stale_reason(row.staleness_reasons) or "it had not run"
 
 
 def _shown(cell: dict[str, Any]) -> dict[str, Any] | None:
@@ -912,41 +915,50 @@ async def _scratch_run(
     fresh: bool = False,
 ) -> dict[str, Any]:
     """Add (or, given *cell*, replace) a Python cell, run it, and return a compact result."""
-    from strata.notebook.ops import _run_result_from_wire
-    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive, run_cells
+    from strata.notebook.ws import NotebookBusyError, run_cells
 
     try:
         session_id, session = _one_session(session_manager)
-        if cell is not None and session.notebook_state.get_cell(cell) is None:
-            raise _Refused(
-                f"no cell {cell!r} in the scratchpad",
-                "call `scratchpad` for the cells there are, or leave out `cell` to add one",
-            )
+        if cell is not None:
+            existing = session.notebook_state.get_cell(cell)
+            if existing is None:
+                raise _Refused(
+                    f"no cell {cell!r} in the scratchpad",
+                    "call `scratchpad` for the cells there are, or leave out `cell` to add one",
+                )
+            if existing.language != "python":
+                raise _Refused(
+                    f"cell {cell!r} is a {existing.language} cell, and `run` writes Python",
+                    "leave out `cell` to add a Python cell",
+                )
         # Before the cell is added, so a refusal leaves nothing behind.
         block = session.environment_execution_block_message()
         if block:
             raise _Refused(block, _environment_fix(session))
+        added = cell is None
         if cell is None:
             cell = (await _add_cell(session_manager, session_id, source))["id"]
         else:
             await _edit_cell(session_manager, session_id, cell, source)
 
         mode: Literal["normal", "rerun"] = "rerun" if fresh else "normal"
-        rows = {row.id: row for row in LocalNotebookOps.from_session(session).status().cells}
-        reran = [
-            {
-                "cell": upstream,
-                "reason": _stale_reason(rows[upstream].staleness_reasons) or "it had not run",
-            }
-            # The plan lists the target too.
-            for upstream in run_cells(session, cell, mode)
-            if upstream != cell
-        ]
+        # The plan lists the target too.
+        upstream = [cell_id for cell_id in run_cells(session, cell, mode) if cell_id != cell]
+        reran = []
+        if upstream:
+            rows = {row.id: row for row in LocalNotebookOps.from_session(session).status().cells}
+            reran = [
+                {"cell": cell_id, "reason": _why_it_ran(rows[cell_id])} for cell_id in upstream
+            ]
         try:
-            result = await execute_cell_exclusive(session, cell, session_id, mode=mode)
+            run = await _execute(session, session_id, cell, mode)
         except NotebookBusyError as exc:
+            if added:
+                # Not left behind for a retry without `cell` to duplicate.
+                await _remove_cell(session_manager, session_id, cell)
+                raise _Refused(str(exc), "call `run` again once that run finishes")
             raise _Refused(str(exc), f"call `run` again with cell={cell!r} once that run finishes")
-        if result is None:
+        except NotebookOpsError:
             raise _Refused(
                 f"the server failed running cell {cell!r}",
                 f"call `run` again with cell={cell!r} and fresh=True; "
@@ -955,8 +967,6 @@ async def _scratch_run(
     except _Refused as refused:
         return refused.view()
 
-    run = _run_result_from_wire(result.to_dict())
-    await _agent_note(session_id, "mcp", f"ran cell {cell} → {run.status}")
     view = _get_cell(session_manager, session_id, cell)
     out: dict[str, Any] = {
         "cell": cell,
@@ -977,6 +987,9 @@ async def _scratch_run(
         out["stdout"] = run.stdout
     if run.stderr:
         out["stderr"] = run.stderr
+    if run.run_diagnostics:
+        # What it read without declaring, or mutated, each with its fix.
+        out["diagnostics"] = run.run_diagnostics
     if run.status == "error":
         out["error"] = run.error
         if run.traceback:
@@ -1028,8 +1041,8 @@ def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dic
             entry["stale"] = _stale_reason(row.staleness_reasons)
         if row.changed_reads:
             entry["changed_reads"] = row.changed_reads
-        cold_ms = _last_cold_ms(session, row.id)
-        if cold_ms is not None:
+        cold_ms = session.get_estimated_duration(row.id)
+        if cold_ms:
             entry["cold_ms"] = cold_ms
         cells.append(entry)
     return {
@@ -1629,8 +1642,10 @@ def build_mcp_app(
             showed), ``stdout`` / ``stderr``, ``traceback`` when the cell raised,
             ``defines``, ``reran`` (upstream cells brought up to date first, and why),
             ``path`` (a file holding an image the cell showed; read it to see the
-            plot) and ``url`` (the notebook, for a person). A failure that is not the
-            cell's own exception carries a ``fix`` line saying what to do next.
+            plot), ``diagnostics`` (files it read without declaring them, or values
+            it mutated, each with its fix) and ``url`` (the notebook, for a person).
+            A failure that is not the cell's own exception carries a ``fix`` line
+            saying what to do next.
             """
             return await _scratch_run(session_manager, source, cell, fresh)
 
