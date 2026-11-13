@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -392,6 +393,31 @@ class TestArmCp:
             "url": "http://127.0.0.1:8799/mcp/",
             "alwaysLoad": True,
         }
+
+    def test_what_a_dead_server_started_is_stopped_with_it(self):
+        # The leader exits and leaves a child in its group, as a crashed server leaves a pool.
+        with subprocess.Popen(
+            ["sh", "-c", "sleep 60 & echo $!"],
+            stdout=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        ) as proc:
+            child = int(proc.stdout.readline())
+            proc.wait()
+            server._stop_group(proc)
+
+        def gone() -> bool:
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                return True
+            return False
+
+        # Its new parent reaps it a moment after the signal.
+        deadline = time.monotonic() + 10
+        while not gone() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert gone()
 
 
 class TestStats:

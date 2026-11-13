@@ -649,6 +649,9 @@ def test_the_cell_id_is_set_for_the_cell_and_put_back_after(module, before, monk
     assert seen == "c9"
     with pytest.raises(ZeroDivisionError):
         exec_with_display("1 / 0", namespace, "c9")
+    # A run without an id does not pass on the one this process inherited.
+    seen = exec_with_display("import os\nos.environ.get('STRATA_CELL_ID')", namespace, None)
+    assert seen is None
 
     import os
 

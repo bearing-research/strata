@@ -17,10 +17,13 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from strata.auth.principal import get_principal, principal_context
+from strata.notebook.models import StalenessReason
 from strata.notebook.ops import LocalNotebookOps, NotebookOpsError, RunResult
-from strata.notebook.scopes import required_scope_for_tool, session_visible_to_caller
+from strata.notebook.scopes import required_scopes_for_tool, session_visible_to_caller
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
     from starlette.applications import Starlette
 
     from strata.notebook.session import SessionManager
@@ -266,10 +269,14 @@ async def _run_cell(
 
 
 async def _execute(
-    session: Any, session_id: str, cell_id: str, mode: Literal["normal", "rerun", "force"]
+    session: Any,
+    session_id: str,
+    cell_id: str,
+    mode: Literal["normal", "rerun", "force"],
+    operation: Callable[[Any], Coroutine[Any, Any, Any]] | None = None,
 ) -> RunResult:
     """Run a cell and narrate it, under the WS handlers' reservation so an agent run
-    can't race a browser's.
+    can't race a browser's. *operation*, if given, runs the cell itself, inside it.
 
     Raises ``NotebookBusyError`` while another run holds the notebook, and
     ``NotebookOpsError`` when the executor itself failed (the server log has why).
@@ -277,7 +284,9 @@ async def _execute(
     from strata.notebook.ops import _run_result_from_wire
     from strata.notebook.ws import execute_cell_exclusive
 
-    result = await execute_cell_exclusive(session, cell_id, session_id, mode=mode)
+    result = await execute_cell_exclusive(
+        session, cell_id, session_id, mode=mode, operation=operation
+    )
     if result is None:
         raise NotebookOpsError(f"cell {cell_id!r} could not be executed")
     run = _run_result_from_wire(result.to_dict())
@@ -836,14 +845,14 @@ def _publish(
 
 SCRATCHPAD_TOOLS = frozenset({"run", "scratchpad"})
 
-# Staleness codes, in the agent's terms.
-_STALE_BECAUSE = {
-    "self": "its source changed",
-    "upstream": "an upstream cell changed",
-    "env": "the environment changed",
-    "external": "an input it declares changed",
-    "forced": "a rerun was asked for",
-    "checking": "its mounted files are being hashed",
+# Why a cell is stale, in the agent's terms.
+STALE_IN_AGENT_TERMS = {
+    StalenessReason.SELF: "its source changed",
+    StalenessReason.UPSTREAM: "an upstream cell changed",
+    StalenessReason.ENV: "the environment changed",
+    StalenessReason.EXTERNAL: "an input it declares changed",
+    StalenessReason.FORCED: "a rerun was asked for",
+    StalenessReason.CHECKING: "its mounted files are being hashed",
 }
 
 
@@ -861,10 +870,15 @@ class _Refused(Exception):
 def _notebook_url(session_id: str) -> str:
     """Where a person opens the session in the web UI."""
     config = _server_config()
-    host = "127.0.0.1" if config.host in ("0.0.0.0", "::") else config.host
-    if ":" in host:
-        host = f"[{host}]"
-    return f"http://{host}:{config.port}{config.public_base_path}/#/notebook/{session_id}"
+    if config.public_base_url:
+        # Behind a reverse proxy the bind address is not one a person can reach.
+        origin = config.public_base_url.rstrip("/")
+    else:
+        host = "127.0.0.1" if config.host in ("0.0.0.0", "::") else config.host
+        if ":" in host:
+            host = f"[{host}]"
+        origin = f"http://{host}:{config.port}"
+    return f"{origin}{config.public_base_path}/#/notebook/{session_id}"
 
 
 def _one_session(session_manager: SessionManager) -> tuple[str, Any]:
@@ -886,7 +900,7 @@ def _one_session(session_manager: SessionManager) -> tuple[str, Any]:
 
 
 def _stale_reason(reasons: list[str]) -> str:
-    return ", ".join(_STALE_BECAUSE.get(reason, reason) for reason in reasons)
+    return ", ".join(STALE_IN_AGENT_TERMS[StalenessReason(reason)] for reason in reasons)
 
 
 def _environment_fix(session: Any) -> str:
@@ -895,11 +909,12 @@ def _environment_fix(session: Any) -> str:
     return "call `run` again once it finishes"
 
 
-def _why_it_ran(row: Any) -> str:
+def _why_it_ran(cell: Any) -> str:
     """Why an upstream cell ran before the one asked for."""
-    if row.status == "error":
+    if cell.status == "error":
         return "it had failed"
-    return _stale_reason(row.staleness_reasons) or "it had not run"
+    reasons = cell.staleness.reasons if cell.staleness else []
+    return _stale_reason(reasons) or "it had not run"
 
 
 def _shown(cell: dict[str, Any]) -> dict[str, Any] | None:
@@ -915,7 +930,7 @@ async def _scratch_run(
     fresh: bool = False,
 ) -> dict[str, Any]:
     """Add (or, given *cell*, replace) a Python cell, run it, and return a compact result."""
-    from strata.notebook.ws import NotebookBusyError, run_cells
+    from strata.notebook.ws import NotebookBusyError, execute_cell_and_broadcast, run_cells
 
     try:
         session_id, session = _one_session(session_manager)
@@ -938,20 +953,25 @@ async def _scratch_run(
         added = cell is None
         if cell is None:
             cell = (await _add_cell(session_manager, session_id, source))["id"]
-        else:
-            await _edit_cell(session_manager, session_id, cell, source)
-
+        target: str = cell
         mode: Literal["normal", "rerun"] = "rerun" if fresh else "normal"
-        # The plan lists the target too.
-        upstream = [cell_id for cell_id in run_cells(session, cell, mode) if cell_id != cell]
-        reran = []
-        if upstream:
-            rows = {row.id: row for row in LocalNotebookOps.from_session(session).status().cells}
-            reran = [
-                {"cell": cell_id, "reason": _why_it_ran(rows[cell_id])} for cell_id in upstream
-            ]
+        reran: list[dict[str, str]] = []
+
+        async def edit_and_run(execution_state: Any) -> Any:
+            # Under the reservation, so a busy refusal leaves an edited cell as it was.
+            if not added:
+                await _edit_cell(session_manager, session_id, target, source)
+            # The plan lists the target too.
+            for cell_id in run_cells(session, target, mode):
+                upstream = session.notebook_state.get_cell(cell_id)
+                if cell_id != target and upstream is not None:
+                    reran.append({"cell": cell_id, "reason": _why_it_ran(upstream)})
+            return await execute_cell_and_broadcast(
+                session, target, execution_state, session_id, mode=mode
+            )
+
         try:
-            run = await _execute(session, session_id, cell, mode)
+            run = await _execute(session, session_id, cell, mode, operation=edit_and_run)
         except NotebookBusyError as exc:
             if added:
                 # Not left behind for a retry without `cell` to duplicate.
@@ -1188,11 +1208,10 @@ def build_mcp_app(
             self, name: str, arguments: dict[str, Any], context: Any | None = None
         ) -> Any:
             principal = _caller(context)
-            required = required_scope_for_tool(name)
-            if getattr(_server_config(), "principal_auth_enabled", False) and (
-                principal is None or not principal.has_scope(required)
-            ):
-                raise ToolError(f"'{name}' requires the {required} scope")
+            if getattr(_server_config(), "principal_auth_enabled", False):
+                for required in required_scopes_for_tool(name):
+                    if principal is None or not principal.has_scope(required):
+                        raise ToolError(f"'{name}' requires the {required} scope")
             with principal_context(principal):
                 try:
                     return await super().call_tool(name, arguments, context)
