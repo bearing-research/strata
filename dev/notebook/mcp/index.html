@@ -1720,6 +1720,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scratchpad-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scratchpad profile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tools" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3077,6 +3088,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scratchpad-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scratchpad profile
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tools" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3159,7 +3181,7 @@ REST routes and the WebSocket:</p>
 <tbody>
 <tr>
 <td><code>notebook:read</code></td>
-<td><code>list_notebooks</code>, <code>get_notebook</code>, <code>get_cell</code>, <code>save_cell_output</code>, <code>get_variable</code>, <code>dag</code>, <code>status</code>, <code>list_workers</code>, <code>lineage</code>, <code>publish_preflight</code></td>
+<td><code>list_notebooks</code>, <code>get_notebook</code>, <code>get_cell</code>, <code>save_cell_output</code>, <code>get_variable</code>, <code>dag</code>, <code>status</code>, <code>list_workers</code>, <code>lineage</code>, <code>publish_preflight</code>, <code>scratchpad</code></td>
 </tr>
 <tr>
 <td><code>notebook:write</code></td>
@@ -3167,7 +3189,7 @@ REST routes and the WebSocket:</p>
 </tr>
 <tr>
 <td><code>notebook:execute</code></td>
-<td><code>run_cell</code>, <code>cancel_cell</code>, <code>run_tests</code>, <code>run_snippet</code>, <code>set_widget_value</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
+<td><code>run_cell</code>, <code>cancel_cell</code>, <code>run_tests</code>, <code>run_snippet</code>, <code>run</code>, <code>set_widget_value</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
 </tr>
 <tr>
 <td><code>artifacts:publish</code></td>
@@ -3235,6 +3257,35 @@ cell, a bad argument, a busy notebook) returns that reason in the tool error,
 for example <code>no open notebook session '…'; call list_notebooks first</code>. An
 unexpected server failure returns only <code>Error executing tool &lt;name&gt;</code>; the
 details stay in the server log.</p>
+<h2 id="scratchpad-profile">Scratchpad profile<a class="headerlink" href="#scratchpad-profile" title="Permanent link">&para;</a></h2>
+<p>With <code>STRATA_MCP_PROFILE=scratchpad</code> the server lists two tools instead of the
+full set, both over the server's <strong>one</strong> open session, so neither takes a
+<code>session_id</code>. The initialize response carries instructions telling the agent
+when to reach for them, and both tools are marked to stay loaded rather than
+sit behind Claude Code's tool search.</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run(source, cell=None, fresh=False)</code></td>
+<td>Without <code>cell</code>, add a Python cell and run it; with <code>cell</code>, replace that cell's source and run it. <code>fresh=True</code> ignores this cell's cache (the <code>rerun</code> mode). Returns <code>cell</code>, <code>status</code>, <code>cache_hit</code>, <code>duration_ms</code>, <code>saved_ms</code> on a hit, <code>reran</code> (the upstream cells brought up to date first, each with why), <code>value</code> (what a trailing expression showed), <code>stdout</code> / <code>stderr</code>, <code>traceback</code>, <code>defines</code>, <code>path</code> (a file holding an image the cell showed) and <code>url</code> (the notebook in the web UI).</td>
+</tr>
+<tr>
+<td><code>scratchpad(name=None)</code></td>
+<td>Without <code>name</code>: each cell's id, <code>defines</code>, <code>status</code>, why it is stale and what its last uncached run took, plus the notebook directory, the cells' <code>cwd</code> (its <code>work/</code>), the <code>python</code> they run on and the time the cache has saved. With <code>name</code>: the cell that defines it, its source and shown <code>value</code>, or the names that exist.</td>
+</tr>
+</tbody>
+</table>
+<p>A failure that is not the cell's own exception (no session or several, an
+unknown cell, an environment that is not ready, an annotation that cannot be
+read, a busy notebook) returns <code>status: error</code> with a <code>fix</code> line naming the next
+step. The other tools stay registered and callable by name;
+<code>STRATA_MCP_TOOLS=all</code> lists them too.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

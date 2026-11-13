@@ -3721,6 +3721,16 @@ authentication. This is a startup error, not a warning:</p>
 <td>Mount the MCP server at <code>/mcp</code> so a coding agent can drive the live session. In service mode it requires principal auth (<code>trusted_proxy</code> or <code>api_key</code>); each tool call then runs as its caller and is checked against the notebook scopes. Requires the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/">Notebook → MCP</a></td>
 </tr>
 <tr>
+<td><code>STRATA_MCP_PROFILE</code></td>
+<td><code>notebook</code></td>
+<td><code>scratchpad</code> lists only <code>run</code> and <code>scratchpad</code>, over the server's one open session, and sends instructions; <code>notebook</code> lists the full <code>session_id</code>-taking set. See <a href="../../notebook/mcp/#scratchpad-profile">Notebook → MCP</a></td>
+</tr>
+<tr>
+<td><code>STRATA_MCP_TOOLS</code></td>
+<td><code>profile</code></td>
+<td><code>all</code> lists every registered MCP tool whatever the profile</td>
+</tr>
+<tr>
 <td><code>STRATA_ARROW_MEMORY_POOL</code></td>
 <td><code>None</code></td>
 <td>Arrow allocator: <code>default</code>, <code>system</code>, <code>jemalloc</code>, or <code>mimalloc</code>. Unset leaves the PyArrow default</td>
