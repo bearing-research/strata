@@ -85,7 +85,10 @@ def _versus(trials: list[dict[str, Any]], arm: str) -> dict[str, Any]:
             ]
 
         mine, control = scored(arm), scored("A")
-        if not mine or not control:
+        both = {t["task"] for t in mine} & {t["task"] for t in control}
+        mine = [t for t in mine if t["task"] in both]
+        control = [t for t in control if t["task"] in both]
+        if not both:
             continue
         row: dict[str, Any] = {
             "completion_diff": stats.newcombe(

@@ -53,7 +53,9 @@ _INLINE_PY = re.compile(
 )
 _JSON_TOOL = re.compile(r"\|\s*(?:\S*/)?python3?(?:\.\d+)?\s+-m\s+json\.tool\b")
 _WRITES = re.compile(r"\.write_(?:text|bytes)\(|\.writelines?\(|open\([^)]*['\"][wax]b?\+?['\"]")
-_CD = re.compile(r"(?:^|[;&|(]\s*)cd\s+(\S+)")
+# A `cd` at a command's start, after a separator or on its own line; its target ends at
+# the next separator, as in `cd /repo; ...`.
+_CD = re.compile(r"(?:^|[;&|(\n])\s*cd\s+([^\s;&|)]+)")
 _CAT_HEREDOC = re.compile(r"(?:^|[\s;&|(`])cat\s+>>?\s*\S+\s*<<")
 
 
@@ -140,7 +142,8 @@ def classify_bash(command: str, cwd: str) -> Counter[str]:
     else:
         kinds["compute"] += 1
         runner = found.group("runner") or ""
-        if "uv" in runner or ".venv/" in runner:
+        # `uv run`, or a venv's python; not a uv-managed interpreter's own path.
+        if runner.startswith("uv") or ".venv/" in runner:
             kinds["compute_project_env"] += 1
             modules = project_modules(command_dir(command, found.start(), cwd)) if cwd else ()
             if modules and re.search(
@@ -192,7 +195,9 @@ def read_session(path: Path) -> Session:
                 session.skill_trigger_days.append(str(record.get("timestamp", ""))[:10])
             elif name == "Bash":
                 command = str(args.get("command", ""))
-                kinds = classify_bash(command, session.cwd)
+                # Each record has the cwd the call ran from; a `cd` earlier persists.
+                cwd = record.get("cwd")
+                kinds = classify_bash(command, cwd if isinstance(cwd, str) else session.cwd)
                 for kind, count in kinds.items():
                     setattr(session, kind, getattr(session, kind) + count)
                 if kinds["compute_project_env"]:

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -115,6 +116,9 @@ class TestAReply:
             0.03,
         ]
 
+    def test_a_suffix_that_is_no_scale_is_read_as_written(self):
+        assert numbers_in("about $8.6Mn, or 3kn") == [8.6, 3.0]
+
     def test_a_number_within_tolerance_passes(self, built):
         exact = Number(179_935, rel=0)
         close = Number(8_579_481.0, rel=0.001)
@@ -136,6 +140,11 @@ class TestAReply:
         assert Word(("west",)).passes("The West leads.", built)
         assert not Word(("west",)).passes("Only the north-west and western ones.", built)
         assert not Word(("p01",)).passes("p010 leads", built)
+        assert Word(("Tuesday",)).passes("Tuesdays are busiest.", built)
+        dates = bank.Word(bank._date_words(date(2026, 2, 17)))
+        for said in ("February 17th, 2026", "17 February", "Feb 17", "on 2026-02-17."):
+            assert dates.passes(said, built), said
+        assert not dates.passes("February 1 and 7", built)
         both = Word(("east", "west"), every=True)
         assert both.passes("east and west", built)
         assert not both.passes("east and north", built)

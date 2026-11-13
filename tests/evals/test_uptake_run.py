@@ -35,7 +35,7 @@ def claude(tmp_path) -> str:
     return str(path)
 
 
-def _trial(tmp_path, claude, monkeypatch, task_id, arm, script, **env):
+def _trial(tmp_path, claude, monkeypatch, task_id, arm, script, timeout=600.0, **env):
     monkeypatch.setenv("FAKE_SCRIPT", json.dumps(script))
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -48,6 +48,7 @@ def _trial(tmp_path, claude, monkeypatch, task_id, arm, script, **env):
         rows=20_000,
         load_seconds=0,
         sync=False,
+        timeout=timeout,
         pinned={"model": "fake"},
     )
 
@@ -77,6 +78,7 @@ class TestATrial:
             for line in (tmp_path / "trial" / "config" / "calls.jsonl").read_text().splitlines()
         ]
         assert "--resume" not in calls[0]
+        assert all("stdin-null=True" in call for call in calls)
         assert {c[c.index("--resume") + 1] for c in calls[1:]} == {trial.session_id}
         assert [t.passed for t in trial.turns] == [True, True, False, True]
         assert not trial.completed
@@ -97,6 +99,57 @@ class TestATrial:
         assert done.discarded is None and done.completed
         assert run.uses_strata({"name": "Skill", "input": {"skill": "strata-scratchpad"}})
 
+    def test_its_answers_are_computed_before_the_agent_touches_the_data(
+        self, tmp_path, claude, monkeypatch
+    ):
+        script = [["rm data/events.parquet", "Tuesday"]]
+
+        trial = _trial(tmp_path, claude, monkeypatch, "plot_daily_events", "A", script)
+
+        assert trial.completed
+
+    def test_stdin_is_never_the_runners(self, tmp_path, claude, monkeypatch):
+        # Run from a pipe that never closes, as from another agent's shell.
+        read, write = os.pipe()
+        saved = os.dup(0)
+        os.dup2(read, 0)
+        try:
+            _trial(tmp_path, claude, monkeypatch, "neutral_modpow", "A", [[None, "246"]])
+        finally:
+            os.dup2(saved, 0)
+            for fd in (saved, read, write):
+                os.close(fd)
+
+        (call,) = (tmp_path / "trial" / "config" / "calls.jsonl").read_text().splitlines()
+        assert "stdin-null=True" in call
+
+    def test_a_turn_past_its_timeout_is_discarded_and_saved(self, tmp_path, claude, monkeypatch):
+        script = [[None, "x"]] * 4
+
+        trial = _trial(
+            tmp_path, claude, monkeypatch, "iter_west", "A", script, timeout=2, FAKE_HANG="1"
+        )
+
+        assert trial.discarded == "turn 1: timed out after 2 s"
+        saved = json.loads((tmp_path / "trial" / "trial.json").read_text())
+        assert saved["discarded"] == trial.discarded
+
+    def test_it_refuses_a_folder_whose_parents_reach_the_agent(self, tmp_path, claude):
+        (tmp_path / "repo").mkdir()
+        (tmp_path / "repo" / "CLAUDE.md").write_text("Use the strata scratchpad.")
+
+        with pytest.raises(ValueError, match="CLAUDE.md would reach the agent"):
+            run.run_trial(
+                TASKS_BY_ID["neutral_modpow"],
+                "A",
+                0,
+                tmp_path / "repo" / "runs" / "t",
+                claude=claude,
+                sync=False,
+            )
+        assert run.isolation_problem(tmp_path / "elsewhere" / "t") is None
+        assert main(["run", "--arm", "A", "--out", str(tmp_path / "repo" / "runs")]) == 2
+
     def test_the_workspace_is_a_committed_repo(self, tmp_path, claude, monkeypatch):
         _trial(tmp_path, claude, monkeypatch, "neutral_modpow", "A", [[None, "246"]])
 
@@ -114,8 +167,8 @@ class TestPreflight:
     def test_arm_b_without_its_skill_is_discarded(self, tmp_path, claude, monkeypatch):
         prepare = run.prepare_arm
 
-        def without_skill(arm, config, bin_dir):
-            prepare(arm, config, bin_dir)
+        def without_skill(arm, config, bin_dir, path):
+            prepare(arm, config, bin_dir, path)
             shutil.rmtree(config / "skills")
 
         monkeypatch.setattr(run, "prepare_arm", without_skill)
@@ -166,7 +219,7 @@ class TestPreflight:
 class TestArmA:
     def test_strata_is_not_found_and_its_commands_are_denied(self, tmp_path):
         config, bin_dir = tmp_path / "config", tmp_path / "bin"
-        run.prepare_arm("A", config, bin_dir)
+        run.prepare_arm("A", config, bin_dir, "")
         env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
 
         missing = subprocess.run(["sh", "-c", "strata --version"], env=env, capture_output=True)
@@ -182,8 +235,31 @@ class TestArmA:
         assert decide("strata cell add ./s -c 'x = 1' --run") == 2
         assert decide("cd x && uv run strata ls") == 2
         assert decide("~/.local/bin/strata --version") == 2
+        assert decide("strata-notebook --help") == 2
+        assert decide("python3 -c 'from strata.notebook import x'") == 2
         assert decide("python3 -c 'print(1)'") == 0
         assert decide("grep -r stratagem .") == 0
+
+    def test_every_strata_command_on_the_path_is_not_found(self, tmp_path):
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        for name in ("strata-notebook", "strata-worker", "uv"):
+            (tools / name).write_text("#!/bin/sh\necho ran\n")
+            (tools / name).chmod(0o755)
+        bin_dir = tmp_path / "bin"
+        run.prepare_arm("A", tmp_path / "config", bin_dir, str(tools))
+        env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{tools}"}
+
+        def code(name: str) -> int:
+            return subprocess.run([name], env=env, capture_output=True).returncode
+
+        assert (code("strata-notebook"), code("strata-worker"), code("uv")) == (127, 127, 0)
+
+    def test_the_agents_path_leaves_out_the_evals_own_env(self, monkeypatch):
+        own = str(Path(sys.prefix) / "bin")
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+
+        assert run.agent_path(f"{own}{os.pathsep}/usr/bin") == "/usr/bin"
 
     def test_the_agent_env_leaves_the_eval_process_out(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDECODE", "1")
@@ -191,7 +267,7 @@ class TestArmA:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://proxy")
 
-        env = run.agent_env(tmp_path / "c", tmp_path / "b", tmp_path / "l", 20)
+        env = run.agent_env(tmp_path / "c", tmp_path / "b", "/usr/bin", tmp_path / "l", 20)
 
         assert "CLAUDECODE" not in env and "VIRTUAL_ENV" not in env
         assert "ANTHROPIC_BASE_URL" not in env and env["ANTHROPIC_API_KEY"] == "k"
@@ -256,6 +332,17 @@ class TestTheReport:
             "arm A used strata in 1 runs",
         ]
         assert "arm B vs A" in report.render(summary)
+
+    def test_an_arm_is_compared_with_a_on_the_tasks_both_ran(self):
+        trials = [
+            _saved("A", "iter_west", wall=100),
+            _saved("A", "iter_january", wall=1000),
+            _saved("B", "iter_west", wall=50),
+        ]
+
+        row = report.summarize(trials)["versus_control"]["B"]["iteration"]
+
+        assert row["median_wall_ratio"][0] == 0.5
 
     def test_the_cli_runs_trials_once_and_reports(self, tmp_path, claude, monkeypatch, capsys):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
