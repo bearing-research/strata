@@ -369,8 +369,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   pre-mutation value, which it does not. The batch now knows which inputs the cell passes
   on, and a test pins cold and batch to the same warnings. (#1535)
 - **A run that fails on the server's side stops its harness.** A cell run or a Run All batch
-  that ended by an exception other than a cancel or a timeout (a callback that raised, a
-  broken pipe) left the harness running the cell's code, unreaped, and its pipe readers
+  that ended by an exception other than a cancel or a timeout, such as a callback that
+  raised, left the harness running the cell's code, unreaped, and its pipe readers
   pending. Every exit now stops the harness's process tree first, and a batch does so
   before its folder is removed. (#1540)
 - **Downloads close the stored blob however the client leaves, and dropped catalogs close.**
