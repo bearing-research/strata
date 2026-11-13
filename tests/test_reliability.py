@@ -4,6 +4,7 @@ The ledger's own lease and finalize rules are tested in vestigo.
 """
 
 import asyncio
+import threading
 import uuid
 from unittest.mock import patch
 
@@ -143,14 +144,20 @@ class TestBuildRunnerLeaseIntegration:
 
         original_renew = build_store.renew_lease
         renew_calls = []
+        # Set from the heartbeat's worker thread on the first renewal that succeeds.
+        renewed = threading.Event()
 
         def track_renew(bid, owner, duration):
             result = original_renew(bid, owner, duration)
             renew_calls.append((bid, owner, result))
+            if result:
+                renewed.set()
             return result
 
         with patch.object(build_store, "renew_lease", track_renew):
-            # Run slowly so the heartbeat fires.
+            # Hold the build, claimed and running, until the heartbeat has renewed its
+            # lease. A fixed sleep raced the 0.5 s heartbeat on slow runners (Windows CI):
+            # no beat fell inside the build's window, and nothing was renewed.
             async def slow_execute(build, already_claimed=False):
                 if not already_claimed:
                     build_store.claim_build(
@@ -158,12 +165,12 @@ class TestBuildRunnerLeaseIntegration:
                         build_runner._runner_id,
                         build_runner.config.lease_duration_seconds,
                     )
-                await asyncio.sleep(0.8)  # Let the heartbeat run.
+                await asyncio.to_thread(renewed.wait, 10)
                 build_store.complete_build(build.build_id)
 
             with patch.object(build_runner, "_execute_build", slow_execute):
                 await build_runner.start()
-                await asyncio.sleep(1.2)
+                await asyncio.to_thread(renewed.wait, 15)
                 await build_runner.stop()
 
         successful_renewals = [c for c in renew_calls if c[2]]
