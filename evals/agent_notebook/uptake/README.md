@@ -46,6 +46,7 @@ about Strata. `run` refuses such an `--out`; use one under `/tmp`.
 | --- | --- |
 | A, control | every `strata*` command on `PATH` answers "command not found"; a `PreToolUse` hook denies any Bash command that runs one or imports `strata` |
 | B, today | the shipped `strata-scratchpad` skill in the config dir; this checkout's `strata` on `PATH` |
+| Cp, the design's C' | a Strata server of the trial's own (`STRATA_MCP_PROFILE=scratchpad`, every store under the trial folder) with one notebook open, whose environment has the project installed editable; a user-scope HTTP MCP entry for it, `alwaysLoad: true`, written with `claude mcp add-json` |
 
 ```bash
 uv run python -m evals.agent_notebook.uptake run --arm A --out /tmp/uptake-runs/ --split train --runs 3
@@ -56,9 +57,11 @@ uv run python -m evals.agent_notebook.uptake report /tmp/uptake-runs/
 `run` skips trials already in `--out`, so an interrupted batch picks up where it
 stopped. Each trial folder keeps the project as the agent left it, each turn's stream,
 the load counter and `trial.json`. A trial is **discarded**, never scored, when a turn's
-`system/init` event does not show the arm's setup (a strata MCP server in any arm; the
-skill missing in B or present in A), when a turn never reached the model, when a
-resumed turn starts a new session, or when a turn runs past its timeout (30 min).
+`system/init` event does not show the arm's setup (in Cp, anything but `strata`
+connected with `run` and `scratchpad` loaded; a strata MCP server in A or B; the skill
+missing in B or present in A or Cp), when Cp's server does not come up, when a turn
+never reached the model, when a resumed turn starts a new session, or when a turn runs
+past its timeout (30 min).
 
 `report` gives, per arm and kind: completion, strata use (for must-not tasks, the
 false positive rate), payoff (`load_events()` ran once in the whole trial), median

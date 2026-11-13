@@ -17,14 +17,17 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import server
 from . import workspace as ws
 from .tasks import Task
 
-ARMS = ("A", "B")
+# Cp is the design's C': arm C with a hand-written MCP entry, before the installer (P4).
+ARMS = ("A", "B", "Cp")
 MODEL = "claude-opus-5-5"
 REPO = Path(__file__).resolve().parents[3]
 SKILL = REPO / "src" / "strata" / ".agents" / "skills" / "strata-scratchpad"
@@ -183,6 +186,9 @@ def prepare_arm(arm: str, config: Path, bin_dir: Path, path: str) -> None:
     elif arm == "B":
         shutil.copytree(SKILL, config / "skills" / "strata-scratchpad")
         (bin_dir / "strata").symlink_to(Path(sys.executable).parent / "strata")
+    elif arm == "Cp":
+        # Its MCP entry is written once its server is up (server.scratchpad_server).
+        pass
     else:
         raise ValueError(f"unknown arm {arm!r}; expected one of {ARMS}")
 
@@ -191,11 +197,18 @@ def preflight(arm: str, init: dict[str, Any] | None) -> str | None:
     """Why the stream's ``system/init`` event does not show *arm*'s setup, or None."""
     if init is None:
         return "no init event"
-    servers = [s.get("name") for s in init.get("mcp_servers") or []]
-    if any("strata" in str(name) for name in servers):
-        return f"a strata MCP server is connected: {servers}"
+    servers = {str(s.get("name")): s.get("status") for s in init.get("mcp_servers") or []}
+    strata = {name: status for name, status in servers.items() if "strata" in name}
     skill = "strata-scratchpad" in (init.get("skills") or [])
-    if arm == "A" and skill:
+    if arm == "Cp":
+        if strata != {server.SERVER_NAME: "connected"}:
+            return f"want only {server.SERVER_NAME!r} connected of the strata servers: {strata}"
+        missing = sorted(set(server.TOOLS) - set(init.get("tools") or []))
+        if missing:
+            return f"the scratchpad tools are not loaded: {missing}"
+    elif strata:
+        return f"a strata MCP server is connected: {strata}"
+    if arm != "B" and skill:
         return "the strata-scratchpad skill is loaded"
     if arm == "B" and not skill:
         return "the strata-scratchpad skill is missing"
@@ -275,6 +288,45 @@ def run_trial(
     env = agent_env(config, bin_dir, path, load_log, load_seconds)
     # Before the agent can touch the workspace's data; a files check reads it after.
     expected = task.expected(work)
+    try:
+        with (
+            server.scratchpad_server(
+                trial_dir / "scratchpad",
+                work,
+                env,
+                claude=claude,
+                load_log=load_log,
+                load_seconds=load_seconds,
+            )
+            if arm == "Cp"
+            else nullcontext()
+        ):
+            _run_turns(
+                trial, task, trial_dir, work, env, claude=claude, model=model, timeout=timeout
+            )
+    except server.SetupError as exc:
+        trial.discarded = f"setup: {exc}"
+    trial.loads = _loads(load_log)
+    if trial.discarded is None:
+        for turn, expect in zip(trial.turns, expected, strict=True):
+            turn.passed = not turn.is_error and expect.passes(turn.reply, work)
+    (trial_dir / "trial.json").write_text(json.dumps(trial.to_json(), indent=2))
+    return trial
+
+
+def _run_turns(
+    trial: Trial,
+    task: Task,
+    trial_dir: Path,
+    work: Path,
+    env: dict[str, str],
+    *,
+    claude: str,
+    model: str,
+    timeout: float,
+) -> None:
+    """Send the task's turns one at a time, stopping at the first discarded one."""
+    load_log = trial_dir / "loads.jsonl"
     for index, question in enumerate(task.turns):
         command = [claude, "-p", question.prompt, "--model", model]
         if trial.session_id:
@@ -307,7 +359,7 @@ def run_trial(
         init, result, tools = read_stream(done.stdout)
         turn = Turn(question.prompt, wall_s=time.time() - started, tools=tools)
         trial.turns.append(turn)
-        problem = preflight(arm, init) or _broken_turn(init, result, done, trial.session_id)
+        problem = preflight(trial.arm, init) or _broken_turn(init, result, done, trial.session_id)
         if problem:
             trial.discarded = f"turn {index}: {problem}"
             break
@@ -320,12 +372,6 @@ def run_trial(
         turn.loads = sum(
             started <= line["at"] <= started + turn.wall_s for line in _loads(load_log)
         )
-    trial.loads = _loads(load_log)
-    if trial.discarded is None:
-        for turn, expect in zip(trial.turns, expected, strict=True):
-            turn.passed = not turn.is_error and expect.passes(turn.reply, work)
-    (trial_dir / "trial.json").write_text(json.dumps(trial.to_json(), indent=2))
-    return trial
 
 
 def _broken_turn(

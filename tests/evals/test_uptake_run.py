@@ -8,11 +8,12 @@ import os
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from evals.agent_notebook.uptake import report, run, stats
+from evals.agent_notebook.uptake import report, run, server, stats
 from evals.agent_notebook.uptake.__main__ import main
 from evals.agent_notebook.uptake.tasks import TASKS_BY_ID
 
@@ -273,6 +274,100 @@ class TestArmA:
         assert "ANTHROPIC_BASE_URL" not in env and env["ANTHROPIC_API_KEY"] == "k"
         assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "c")
         assert env["PATH"].startswith(str(tmp_path / "b"))
+
+
+class TestArmCp:
+    # As a real Cp turn's init event shows it (Claude Code 2.1.323).
+    INIT = {
+        "skills": ["debug"],
+        "mcp_servers": [{"name": "strata", "status": "connected", "source": "user"}],
+        "tools": ["Bash", "mcp__strata__run", "mcp__strata__scratchpad"],
+    }
+
+    def test_preflight_wants_its_server_connected_with_both_tools(self):
+        assert run.preflight("Cp", self.INIT) is None
+        failed = {**self.INIT, "mcp_servers": [{"name": "strata", "status": "failed"}]}
+        assert run.preflight("Cp", failed).startswith("want only 'strata' connected")
+        plugin = {
+            **self.INIT,
+            "mcp_servers": [
+                *self.INIT["mcp_servers"],
+                {"name": "plugin:strata-scratchpad:strata", "status": "connected"},
+            ],
+        }
+        assert run.preflight("Cp", plugin).startswith("want only 'strata' connected")
+        deferred = {**self.INIT, "tools": ["Bash", "mcp__strata__run"]}
+        assert run.preflight("Cp", deferred) == (
+            "the scratchpad tools are not loaded: ['mcp__strata__scratchpad']"
+        )
+        skilled = {**self.INIT, "skills": ["strata-scratchpad"]}
+        assert run.preflight("Cp", skilled) == "the strata-scratchpad skill is loaded"
+
+    def test_its_turns_run_while_its_server_is_up(self, tmp_path, claude, monkeypatch):
+        events = []
+
+        @contextmanager
+        def fake_server(root, project, agent_env, *, claude, load_log, load_seconds):
+            calls = Path(agent_env["CLAUDE_CONFIG_DIR"]) / "calls.jsonl"
+            events.append(("up", project.name, calls.exists()))
+            yield "http://127.0.0.1:1"
+            events.append(("down", len(calls.read_text().splitlines())))
+
+        monkeypatch.setattr(server, "scratchpad_server", fake_server)
+
+        trial = _trial(
+            tmp_path,
+            claude,
+            monkeypatch,
+            "neutral_modpow",
+            "Cp",
+            [[None, "246"]],
+            FAKE_SERVERS="strata",
+            FAKE_TOOLS="mcp__strata__run,mcp__strata__scratchpad",
+        )
+
+        assert trial.discarded is None and trial.turns[0].passed
+        assert events == [("up", "harbor", False), ("down", 1)]
+
+    def test_a_server_that_does_not_come_up_discards_the_trial(self, tmp_path, claude, monkeypatch):
+        @contextmanager
+        def broken(*args, **kwargs):
+            raise server.SetupError("the server exited (1) waiting for health")
+            yield
+
+        monkeypatch.setattr(server, "scratchpad_server", broken)
+
+        trial = _trial(tmp_path, claude, monkeypatch, "neutral_modpow", "Cp", [[None, "246"]])
+
+        assert trial.discarded == "setup: the server exited (1) waiting for health"
+        assert trial.turns == []
+        saved = json.loads((tmp_path / "trial" / "trial.json").read_text())
+        assert saved["discarded"] == trial.discarded
+
+    def test_its_server_keeps_everything_under_its_root(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", "/home/me/.strata/artifacts")
+        monkeypatch.setenv("STRATA_MCP_TOOLS", "all")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        root = tmp_path / "srv"
+
+        env = server.server_env(root, 8799, tmp_path / "loads.jsonl", 20.0)
+
+        stored = ("HOME", "STRATA_CACHE_DIR", "STRATA_ARTIFACT_DIR", "STRATA_METADATA_DB")
+        stored += ("STRATA_NOTEBOOK_STORAGE_DIR", "STRATA_WORKER_ENV_ROOT")
+        assert all(Path(env[name]).is_relative_to(root) for name in stored)
+        assert "STRATA_MCP_TOOLS" not in env and "ANTHROPIC_API_KEY" not in env
+        assert (env["STRATA_MCP_ENABLED"], env["STRATA_MCP_PROFILE"]) == ("true", "scratchpad")
+        assert (env["STRATA_HOST"], env["STRATA_PORT"]) == ("127.0.0.1", "8799")
+        assert env["HARBOR_LOAD_LOG"] == str(tmp_path / "loads.jsonl")
+
+    def test_its_entry_is_user_scope_and_always_loaded(self):
+        command = server.mcp_entry_command("claude", "http://127.0.0.1:8799")
+        assert command[:6] == ["claude", "mcp", "add-json", "-s", "user", "strata"]
+        assert json.loads(command[6]) == {
+            "type": "http",
+            "url": "http://127.0.0.1:8799/mcp/",
+            "alwaysLoad": True,
+        }
 
 
 class TestStats:

@@ -3,7 +3,8 @@ tests: an init event listing the config dir's skills, at most one Bash call that
 really runs, then the reply.
 
 ``FAKE_SCRIPT`` (JSON, one ``[command or null, reply]`` per turn) says what each turn
-does; ``FAKE_SERVERS`` names MCP servers to report connected; ``FAKE_NEW_SESSION`` is
+does; ``FAKE_SERVERS`` names MCP servers to report connected and ``FAKE_TOOLS`` the
+tools to list; ``FAKE_NEW_SESSION`` is
 a turn that starts a new session instead of resuming; ``FAKE_API_ERROR``, a turn that
 fails before reaching the model; ``FAKE_HANG``, a turn that never ends. Each call's
 argv, and whether its stdin is the null device, go to ``calls.jsonl``.
@@ -53,6 +54,7 @@ def main(args: list[str]) -> int:
             "session_id": session,
             "skills": skills,
             "mcp_servers": servers,
+            "tools": [t for t in os.environ.get("FAKE_TOOLS", "").split(",") if t],
         }
     )
     if command:
