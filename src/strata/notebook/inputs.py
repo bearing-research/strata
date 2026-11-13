@@ -1,9 +1,10 @@
-"""What a cell reads from outside the notebook, by kind: the one place the kinds are named.
+"""What a cell reads from outside the notebook, by kind: the one module that names the kinds.
 
 A cell's key folds in one fingerprint per declared outside input. The staleness pass
 (``NotebookSession._outside_world_for``) and a run (``CellExecutor._compute_cell_provenance``)
 each gather them, and both hand them on as one :class:`InputFingerprints`, so a new kind
-is added here, not in every signature and dict that carries them.
+is added in this module (to :data:`PREFIX`, a field and :meth:`InputFingerprints.by_kind`),
+not in every signature and dict that carries them.
 """
 
 from __future__ import annotations
