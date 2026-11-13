@@ -12,7 +12,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import docker
 import httpx
 import pytest
 from testcontainers.core.container import DockerContainer
@@ -30,18 +29,10 @@ from strata.notebook.writer import (
     write_cell,
 )
 from tests.conftest import start_container_or_skip
+from tests.docker_helpers import docker_daemon_reachable
 from tests.notebook.test_keyless_mounts import _TokenService, external_account_file
 
-
-def _docker_daemon_reachable() -> bool:
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 
