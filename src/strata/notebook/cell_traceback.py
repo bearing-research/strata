@@ -21,10 +21,13 @@ def cell_id_set(cell_id: str | None) -> Generator[None]:
     """Set ``STRATA_CELL_ID`` for the cell's code and what it starts, then put it back.
 
     Put back so a reused worker's next cell, or a caller in this process, keeps its own.
+    Without an id it is unset: an inherited one names some other cell.
     """
     previous = os.environ.get(CELL_ID_VAR)
     if cell_id:
         os.environ[CELL_ID_VAR] = cell_id
+    else:
+        os.environ.pop(CELL_ID_VAR, None)
     try:
         yield
     finally:

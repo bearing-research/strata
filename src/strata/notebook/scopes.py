@@ -183,9 +183,6 @@ _EXECUTE_TOOLS = frozenset(
         # As the WS ``cell_cancel`` frame.
         "cancel_cell",
         "run_tests",
-        "run_snippet",
-        # Adds or edits a cell, then runs it.
-        "run",
         # Re-materializes the widget cell, so it is a run, gated like ``run_cell``.
         "set_widget_value",
         "add_dependency",
@@ -194,19 +191,26 @@ _EXECUTE_TOOLS = frozenset(
     }
 )
 
+# Add or replace a cell's source, then run it: both, as an edit and a run would.
+_WRITE_AND_EXECUTE_TOOLS = frozenset({"run_snippet", "run"})
+
 _OTHER_TOOL_SCOPES = {"publish": "artifacts:publish"}
 
-CLASSIFIED_TOOLS = _READ_TOOLS | _WRITE_TOOLS | _EXECUTE_TOOLS | set(_OTHER_TOOL_SCOPES)
+CLASSIFIED_TOOLS = (
+    _READ_TOOLS | _WRITE_TOOLS | _EXECUTE_TOOLS | _WRITE_AND_EXECUTE_TOOLS | set(_OTHER_TOOL_SCOPES)
+)
 """Every tool the table was written against; a test holds the MCP server to it."""
 
 
-def required_scope_for_tool(name: str) -> str:
-    """Return the scope an MCP tool requires (fail-closed default)."""
+def required_scopes_for_tool(name: str) -> tuple[str, ...]:
+    """Return the scopes an MCP tool requires, all of them (fail-closed default)."""
     if name in _READ_TOOLS:
-        return NOTEBOOK_SCOPE_READ
+        return (NOTEBOOK_SCOPE_READ,)
     if name in _WRITE_TOOLS:
-        return NOTEBOOK_SCOPE_WRITE
-    return _OTHER_TOOL_SCOPES.get(name, NOTEBOOK_SCOPE_EXECUTE)
+        return (NOTEBOOK_SCOPE_WRITE,)
+    if name in _WRITE_AND_EXECUTE_TOOLS:
+        return (NOTEBOOK_SCOPE_WRITE, NOTEBOOK_SCOPE_EXECUTE)
+    return (_OTHER_TOOL_SCOPES.get(name, NOTEBOOK_SCOPE_EXECUTE),)
 
 
 def session_visible_to_caller(session: NotebookSession) -> bool:

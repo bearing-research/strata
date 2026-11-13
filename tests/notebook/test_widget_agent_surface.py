@@ -17,7 +17,7 @@ from strata.notebook.runtime_state import load_runtime_state
 from strata.notebook.scopes import (
     CLASSIFIED_TOOLS,
     NOTEBOOK_SCOPE_EXECUTE,
-    required_scope_for_tool,
+    required_scopes_for_tool,
 )
 from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -196,4 +196,4 @@ async def test_setting_a_control_tells_an_attached_viewer(widget_nb, monkeypatch
 
 def test_the_new_tool_is_in_the_scope_table():
     assert "set_widget_value" in CLASSIFIED_TOOLS
-    assert required_scope_for_tool("set_widget_value") == NOTEBOOK_SCOPE_EXECUTE
+    assert required_scopes_for_tool("set_widget_value") == (NOTEBOOK_SCOPE_EXECUTE,)

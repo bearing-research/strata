@@ -13,7 +13,7 @@ import pytest
 
 from strata.notebook.mcp_server import _get_variable, _lineage, _set_variant
 from strata.notebook.parser import parse_notebook
-from strata.notebook.scopes import CLASSIFIED_TOOLS, NOTEBOOK_SCOPE_WRITE, required_scope_for_tool
+from strata.notebook.scopes import CLASSIFIED_TOOLS, NOTEBOOK_SCOPE_WRITE, required_scopes_for_tool
 from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.writer import set_variant_mode
 from tests.notebook.test_cli import _build_notebook
@@ -125,7 +125,7 @@ def test_set_variant_needs_something_to_set(tmp_path):
 
 def test_set_variant_is_classified_as_a_write(tmp_path):
     assert "set_variant" in CLASSIFIED_TOOLS
-    assert required_scope_for_tool("set_variant") == NOTEBOOK_SCOPE_WRITE
+    assert required_scopes_for_tool("set_variant") == (NOTEBOOK_SCOPE_WRITE,)
 
 
 def test_a_fanout_consumer_records_every_instance_it_read(tmp_path):

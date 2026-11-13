@@ -11,34 +11,42 @@ import re
 from types import SimpleNamespace
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 from strata.agent_guidance import section
-from strata.notebook import mcp_server
+from strata.notebook import mcp_server, ws
 from strata.notebook.mcp_server import (
     SCRATCHPAD_TOOLS,
+    STALE_IN_AGENT_TERMS,
     _add_cell,
     _edit_cell,
     _scratch_run,
     _scratchpad,
     build_mcp_app,
 )
-from strata.notebook.scopes import CLASSIFIED_TOOLS, required_scope_for_tool
+from strata.notebook.models import StalenessReason
+from strata.notebook.scopes import CLASSIFIED_TOOLS, required_scopes_for_tool
 from strata.notebook.session import SessionManager
 from strata.notebook.writer import create_notebook
-from strata.notebook.ws import NotebookBusyError
+from strata.types import Principal
 from tests.notebook.e2e_fixtures import _reset_ws_globals
+
+
+def _config(**overrides):
+    settings = {
+        "host": "0.0.0.0",
+        "port": 8765,
+        "public_base_url": None,
+        "public_base_path": "",
+        "principal_auth_enabled": False,
+    }
+    return SimpleNamespace(**{**settings, **overrides})
 
 
 @pytest.fixture(autouse=True)
 def _server(monkeypatch):
     """What the tools read of the running server's config; WS state reset around each test."""
-    monkeypatch.setattr(
-        mcp_server,
-        "_server_config",
-        lambda: SimpleNamespace(
-            host="0.0.0.0", port=8765, public_base_path="", principal_auth_enabled=False
-        ),
-    )
+    monkeypatch.setattr(mcp_server, "_server_config", _config)
     _reset_ws_globals()
     yield
     _reset_ws_globals()
@@ -194,8 +202,32 @@ def test_the_scratchpad_profile_lists_two_always_loaded_tools_with_instructions(
     assert _listed(app) == {name: {"anthropic/alwaysLoad": True} for name in SCRATCHPAD_TOOLS}
     assert app.state.mcp_server.instructions == section("instructions")
     assert SCRATCHPAD_TOOLS <= CLASSIFIED_TOOLS
-    assert required_scope_for_tool("run") == "notebook:execute"
-    assert required_scope_for_tool("scratchpad") == "notebook:read"
+    assert required_scopes_for_tool("scratchpad") == ("notebook:read",)
+
+
+@pytest.mark.parametrize("tool", ["run", "run_snippet"])
+def test_a_tool_that_writes_a_cell_and_runs_it_needs_both_scopes(tool, monkeypatch):
+    monkeypatch.setattr(mcp_server, "_server_config", lambda: _config(principal_auth_enabled=True))
+    runner = Principal(id="runner", scopes=frozenset({"notebook:execute"}))
+    monkeypatch.setattr(mcp_server, "_caller", lambda context: runner)
+    app = build_mcp_app(SessionManager(), profile="scratchpad")
+
+    with pytest.raises(ToolError, match=f"'{tool}' requires the notebook:write scope"):
+        asyncio.run(app.state.mcp_server.call_tool(tool, {"source": "x = 1"}))
+    assert required_scopes_for_tool(tool) == ("notebook:write", "notebook:execute")
+
+
+def test_every_staleness_reason_has_words_for_the_agent():
+    assert STALE_IN_AGENT_TERMS.keys() == set(StalenessReason)
+
+
+def test_the_link_uses_the_public_url_behind_a_proxy(monkeypatch):
+    monkeypatch.setattr(
+        mcp_server,
+        "_server_config",
+        lambda: _config(public_base_url="https://lab.example.com/", public_base_path="/o/acme"),
+    )
+    assert mcp_server._notebook_url("s1") == "https://lab.example.com/o/acme/#/notebook/s1"
 
 
 def test_unlisted_tools_stay_callable_and_all_lists_them():
@@ -248,22 +280,27 @@ async def test_a_cell_that_is_not_python_is_refused(scratch):
 
 
 @pytest.mark.asyncio
-async def test_a_busy_notebook_takes_back_the_cell_it_added(scratch, monkeypatch):
+async def test_a_busy_notebook_leaves_the_cells_as_they_were(scratch, monkeypatch):
     sm, session_id = scratch
     kept = (await _scratch_run(sm, "x = 1"))["cell"]
 
-    async def busy(*args, **kwargs):
-        raise NotebookBusyError("other")
+    async def busy(execution_state, requested_cell):
+        return "other"
 
-    monkeypatch.setattr(mcp_server, "_execute", busy)
+    monkeypatch.setattr(ws, "_reserve_execution_request", busy)
+
+    def cells():
+        # A reload replaces the state, so read it fresh.
+        return [(c.id, c.source) for c in sm.get_session(session_id).notebook_state.cells]
+
     added = await _scratch_run(sm, "y = 2")
     assert added["fix"] == "call `run` again once that run finishes"
-    cells = sm.get_session(session_id).notebook_state.cells
-    assert [cell.id for cell in cells] == [kept]
+    assert cells() == [(kept, "x = 1")]
 
     edited = await _scratch_run(sm, "x = 3", cell=kept)
     assert edited["fix"] == f"call `run` again with cell={kept!r} once that run finishes"
-    assert [cell.id for cell in cells] == [kept]
+    # Not rewritten under the run that holds the notebook.
+    assert cells() == [(kept, "x = 1")]
 
 
 @pytest.mark.asyncio

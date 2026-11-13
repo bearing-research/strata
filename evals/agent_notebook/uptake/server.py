@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import httpx
@@ -59,7 +59,7 @@ def _host_env() -> dict[str, str]:
 
 def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> dict[str, str]:
     """The server's environment: everything it stores under *root*, nothing of the host's
-    Strata settings or API keys, and the load counter its cells inherit."""
+    Strata or Anthropic settings, and the load counter its cells inherit."""
 
     def uv_dir(*args: str) -> str:
         return subprocess.run(
@@ -154,14 +154,21 @@ def scratchpad_server(
             _bring_up(url, proc, notebook, agent_env, claude=claude, timeout=timeout)
         yield url
     finally:
-        if proc is not None and proc.poll() is None:
-            os.killpg(proc.pid, signal.SIGTERM)
-            try:
-                proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait()
+        if proc is not None:
+            _stop_group(proc)
         log.close()
+
+
+def _stop_group(proc: subprocess.Popen) -> None:
+    """Stop the server and its group, cells and pools too, even if the server has died."""
+    with suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGTERM)
+    with suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=30)
+    # What outlived the server's own shutdown, or the server if it would not stop.
+    with suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
 
 
 def _prepare_notebook(root: Path, project: Path) -> Path:

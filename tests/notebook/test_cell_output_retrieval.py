@@ -20,7 +20,7 @@ from strata.notebook.parser import parse_notebook
 from strata.notebook.scopes import (
     CLASSIFIED_TOOLS,
     NOTEBOOK_SCOPE_READ,
-    required_scope_for_tool,
+    required_scopes_for_tool,
 )
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -281,4 +281,4 @@ def test_local_and_remote_agree_on_a_text_content_type(tmp_path: Path, monkeypat
 
 def test_the_new_tool_is_classified(tmp_path: Path):
     assert "save_cell_output" in CLASSIFIED_TOOLS
-    assert required_scope_for_tool("save_cell_output") == NOTEBOOK_SCOPE_READ
+    assert required_scopes_for_tool("save_cell_output") == (NOTEBOOK_SCOPE_READ,)

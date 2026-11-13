@@ -181,7 +181,8 @@ class StrataConfig(BaseSettings):
 
     # The origin readers reach this server on, when it differs from what the server sees (behind a
     # reverse proxy ``request.base_url`` is the internal address, which published pages and oEmbed
-    # would advertise). Only publication URLs consult this; unset, the request's own origin is used.
+    # would advertise). The links the server hands out use it (publications, the MCP scratchpad's
+    # notebook link); unset, they use the address the server sees.
     public_base_url: str | None = None
     # The path a reverse proxy serves this server under (``/o/acme/lab``), with or without the proxy
     # stripping it. Empty means the root. Every URL the server and the UI build carries it.
