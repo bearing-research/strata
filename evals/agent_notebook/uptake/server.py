@@ -108,10 +108,12 @@ def _until(ready, what: str, proc: subprocess.Popen, timeout: float) -> None:
         if proc.poll() is not None:
             raise SetupError(f"the server exited ({proc.returncode}) waiting for {what}")
         try:
-            if ready():
-                return
+            up = ready()
         except httpx.HTTPError:
-            pass
+            # Not listening yet.
+            up = False
+        if up:
+            return
         time.sleep(0.5)
     raise SetupError(f"timed out waiting for {what}")
 

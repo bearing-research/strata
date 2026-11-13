@@ -331,10 +331,8 @@ class TestArmCp:
         assert events == [("up", "harbor", False), ("down", 1)]
 
     def test_a_server_that_does_not_come_up_discards_the_trial(self, tmp_path, claude, monkeypatch):
-        @contextmanager
         def broken(*args, **kwargs):
             raise server.SetupError("the server exited (1) waiting for health")
-            yield
 
         monkeypatch.setattr(server, "scratchpad_server", broken)
 
