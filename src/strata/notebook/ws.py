@@ -23,7 +23,7 @@ import anyio.to_thread
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from strata.notebook import console_relay, prewarm
+from strata.notebook import console_relay, prewarm, run_all
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.authorship import resolve_author
 from strata.notebook.cascade import CascadePlanner
@@ -33,9 +33,7 @@ from strata.notebook.executor import (
     CellExecutor,
     _CellProvenance,
     effective_worker_name,
-    partition_batchable_runs,
 )
-from strata.notebook.harness_user import LocalExecutionRefused, resolve_harness_user
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
 from strata.notebook.models import (
@@ -2598,130 +2596,62 @@ async def _execute_run_all(
     force: bool = False,
     continue_on_error: bool = True,
 ) -> None:
-    """Execute all requested notebook cells in notebook order.
+    """Execute all requested notebook cells in notebook order, broadcasting each.
 
-    *force* means rerun-all: every cell bypasses its own cache. Runs of consecutive
-    batchable cells go through ``CellExecutor.execute_batch``; the rest (workers,
-    loops, explicit timeouts, RW mounts) run one at a time. After a failure, cells
-    that read from the failed one are blocked, or the run stops when
-    *continue_on_error* is False.
+    *force* means rerun-all: every cell bypasses its own cache. The plan and the
+    failure policy are :func:`strata.notebook.run_all.run_all`'s; this supplies the
+    steps that run a batch or a cell and tell clients about it.
     """
     del websocket
 
     executor = _make_executor_with_progress(session, notebook_id)
-
-    requested_ids = set(cell_ids)
-    runnable = [
-        cell
-        for cell in session.notebook_state.cells
-        if cell.id in requested_ids and cell.source.strip()
-    ]
-    partition = partition_batchable_runs(executor, runnable)
+    runnable = run_all.runnable_cells(session, cell_ids)
     prewarm.hint_in_background(session, _step_workers(session, (c.id for c in runnable)), "run_all")
-    batching_allowed = True
-    try:
-        resolve_harness_user()
-    except LocalExecutionRefused:
-        batching_allowed = False
-
     logger.info(
-        "Run all for notebook %s: %d cells, %d partitioned runs (force=%s, continue_on_error=%s)",
+        "Run all for notebook %s: %d cells (force=%s, continue_on_error=%s)",
         notebook_id,
         len(runnable),
-        len(partition),
         force,
         continue_on_error,
     )
 
-    had_failure = False
-    # Failed cells and their dependents; a dependent must not run on the
-    # pre-failure artifacts and report success.
-    failed: set[str] = set()
-    # Each cell executes at most once: in display order a consumer above its
-    # producer would materialise it, then the producer's row would run again.
-    with executor.one_run():
-        try:
-            execution_state.run_all_cells = frozenset(c.id for c in runnable)
-            for kind, cells_in_run in partition:
-                if had_failure and not continue_on_error:
-                    break
-                # A batch never checks for a failed producer, so take those cells out first.
-                kept = []
-                for cell in cells_in_run:
-                    if _upstream_that_failed(session, cell.id, failed) is not None:
-                        await _mark_blocked_by_failure(session, notebook_id, cell.id)
-                        failed.add(cell.id)
-                    else:
-                        kept.append(cell)
-                cells_in_run = kept
+    class _Steps:
+        async def run_batch(self, cells: list[Any]) -> Any:
+            return await _run_partition_batch(
+                session=session,
+                executor=executor,
+                cells_in_run=cells,
+                notebook_id=notebook_id,
+                force=force,
+                execution_state=execution_state,
+            )
 
-                # Single-cell for size-1 batches (nothing to amortize) and for a
-                # host that refuses cell code (each cell then shows the refusal;
-                # a refused batch would leave the rest silently idle).
-                if kind == "batch" and len(cells_in_run) >= 2 and batching_allowed:
-                    batch_result = await _run_partition_batch(
-                        session=session,
-                        executor=executor,
-                        cells_in_run=cells_in_run,
-                        notebook_id=notebook_id,
-                        force=force,
-                        execution_state=execution_state,
-                    )
-                    if not batch_result.completed:
-                        had_failure = True
-                        # Cells after the failure are not_run. With continue_on_error, run
-                        # them single-cell; any with a failed upstream is marked blocked.
-                        not_run_ids = {
-                            r.cell_id for r in batch_result.cell_results if r.status == "not_run"
-                        }
-                        # Any status that is neither clean nor not_run.
-                        failed.update(
-                            r.cell_id
-                            for r in batch_result.cell_results
-                            if r.status not in ("ok", "cache_hit", "not_run")
-                        )
-                        for cell in cells_in_run:
-                            if cell.id not in not_run_ids:
-                                continue
-                            if not continue_on_error:
-                                break
-                            if _upstream_that_failed(session, cell.id, failed) is not None:
-                                await _mark_blocked_by_failure(session, notebook_id, cell.id)
-                                failed.add(cell.id)
-                                continue
-                            ok = await _run_partition_single_cell(
-                                session=session,
-                                executor=executor,
-                                cell=cell,
-                                notebook_id=notebook_id,
-                                force=force,
-                                execution_state=execution_state,
-                            )
-                            if not ok:
-                                failed.add(cell.id)
-                    continue
+        async def run_one(self, cell: Any) -> bool:
+            return await _run_partition_single_cell(
+                session=session,
+                executor=executor,
+                cell=cell,
+                notebook_id=notebook_id,
+                force=force,
+                execution_state=execution_state,
+            )
 
-                for cell in cells_in_run:
-                    if had_failure and not continue_on_error:
-                        break
-                    if _upstream_that_failed(session, cell.id, failed) is not None:
-                        await _mark_blocked_by_failure(session, notebook_id, cell.id)
-                        failed.add(cell.id)
-                        continue
-                    ok = await _run_partition_single_cell(
-                        session=session,
-                        executor=executor,
-                        cell=cell,
-                        notebook_id=notebook_id,
-                        force=force,
-                        execution_state=execution_state,
-                    )
-                    if not ok:
-                        had_failure = True
-                        failed.add(cell.id)
-        finally:
-            execution_state.running_cell = None
-            execution_state.run_all_cells = frozenset()
+        async def blocked(self, cell_id: str) -> None:
+            await _broadcast_blocked_by_failure(notebook_id, cell_id)
+
+    execution_state.run_all_cells = frozenset(c.id for c in runnable)
+    try:
+        await run_all.run_all(
+            session,
+            executor,
+            runnable,
+            _Steps(),
+            continue_on_error=continue_on_error,
+            batching=run_all.batching_allowed(),
+        )
+    finally:
+        execution_state.running_cell = None
+        execution_state.run_all_cells = frozenset()
 
 
 async def _run_partition_batch(
@@ -2962,40 +2892,11 @@ async def _run_partition_batch(
     return batch_result
 
 
-def _upstream_that_failed(session: NotebookSession, cell_id: str, failed: set[str]) -> str | None:
-    """The failed cell this one reads from, directly or through others.
+async def _broadcast_blocked_by_failure(notebook_id: str, cell_id: str) -> None:
+    """Tell clients a cell did not run because what it reads from failed.
 
-    Run All walks display order, not topological order, so a consumer can precede
-    its producer.
+    ``run_all.mark_blocked`` has already marked it stale.
     """
-    dag = session.dag
-    if dag is None or not failed:
-        return None
-    seen: set[str] = set()
-    queue = list(dag.cell_upstream.get(cell_id, []))
-    while queue:
-        upstream_id = queue.pop()
-        if upstream_id in seen:
-            continue
-        seen.add(upstream_id)
-        if upstream_id in failed:
-            return upstream_id
-        queue.extend(dag.cell_upstream.get(upstream_id, []))
-    return None
-
-
-async def _mark_blocked_by_failure(
-    session: NotebookSession, notebook_id: str, cell_id: str
-) -> None:
-    """Say a cell did not run because what it reads from failed.
-
-    Stale rather than error: nothing went wrong in this cell, and its last result is
-    still the last thing it computed.
-    """
-    cell = session.notebook_state.get_cell(cell_id)
-    if cell is not None:
-        cell.status = CellStatus.STALE
-        cell.staleness = CellStaleness(status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM])
     await _broadcast_message(
         notebook_id,
         _make_message(
