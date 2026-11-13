@@ -367,7 +367,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   place and passes it on (`xs[0] = 9`, with a later cell reading `xs`) ran warning-free
   alone or in a warm worker, but Run All's batch warned that downstream would see the
   pre-mutation value, which it does not. The batch now knows which inputs the cell passes
-  on, and a test pins cold and batch to the same warnings.
+  on, and a test pins cold and batch to the same warnings. (#1535)
 - **Downloads close the stored blob however the client leaves, and dropped catalogs close.**
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the
