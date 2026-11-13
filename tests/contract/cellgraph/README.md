@@ -116,7 +116,7 @@ snapshot holds:
 - **Fetch.** The `fetch_dataset` scenario serves its `serve/` folder on
   `127.0.0.1:47613`, a fixed port, because the URL is in the key.
 - **Worker.** The `worker` scenario runs the notebook HTTP executor in the recorder's
-  process on `127.0.0.1:47614`. The worker names a `runtime_id`, so its URL is not in
+  process on `127.0.0.1:29614`. The worker names a `runtime_id`, so its URL is not in
   the keys.
 
 ## Scenarios
