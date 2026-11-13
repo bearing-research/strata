@@ -51,8 +51,10 @@ PLACEHOLDER = "@NB@"
 _TEXT_SUFFIXES = {".py", ".r", ".R", ".sql", ".prompt", ".toml"}
 # The fetch scenario's URLs are in its keys, so its server listens on a fixed port.
 FETCH_PORT = 47613
-# The worker scenario's URL is in its notebook.toml, so its worker also has a fixed port.
-WORKER_PORT = 47614
+# The worker scenario's URL is in its notebook.toml, so its worker also has a fixed port,
+# below Linux's ephemeral range (32768-60999): inside it, any test's outgoing connection
+# can hold the port as its local end, and the bind fails (EADDRINUSE).
+WORKER_PORT = 29614
 
 # What a scenario needs from the machine beyond the dev environment.
 REQUIRES = {"r_directives": "Rscript"}
