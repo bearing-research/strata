@@ -1,30 +1,32 @@
 """Whether a Docker daemon answers, for the modules whose tests need one."""
 
+import os
 import socket
-from contextlib import closing
+from urllib.parse import urlsplit
 
-import docker
-from docker.constants import DEFAULT_UNIX_SOCKET, IS_WINDOWS_PLATFORM
-from docker.utils import kwargs_from_env
+_DEFAULT_HOST = (
+    "npipe:////./pipe/docker_engine" if os.name == "nt" else "unix:///var/run/docker.sock"
+)
 
 
 def docker_daemon_reachable() -> bool:
-    """Whether the daemon docker-py would use answers a ping.
+    """Whether the daemon ``DOCKER_HOST`` names, or the platform's default, accepts a connection.
 
-    A unix socket is tried here first: docker-py leaves the socket of a failed connect to the
-    collector, and the suite fails on whichever later test that collection lands in. Windows
-    has no unix sockets; docker-py uses a named pipe there.
+    Not docker-py: its unix connect leaves the socket of a failed attempt to the collector, and
+    the suite fails on whichever later test that collection lands in.
     """
-    base_url = kwargs_from_env().get("base_url") or DEFAULT_UNIX_SOCKET
-    if not IS_WINDOWS_PLATFORM and "unix://" in base_url:
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
-                probe.connect(base_url.split("unix://", 1)[1])
-        except OSError:
-            return False
+    url = urlsplit(os.environ.get("DOCKER_HOST") or _DEFAULT_HOST)
     try:
-        with closing(docker.from_env()) as client:
-            client.ping()
-    except Exception:
+        if url.scheme in ("unix", "http+unix") and hasattr(socket, "AF_UNIX"):
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                probe.connect(url.path)
+        elif url.scheme == "tcp" and url.hostname:
+            with socket.create_connection((url.hostname, url.port or 2375), timeout=5):
+                pass
+        elif url.scheme == "npipe":
+            return os.path.exists(url.path.replace("/", "\\"))
+        else:
+            return False
+    except OSError:
         return False
     return True
