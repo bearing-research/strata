@@ -8,6 +8,7 @@ import cellgraph as cg
 import pytest
 
 from strata.notebook.executor import CellExecutor
+from strata.notebook.inputs import InputFingerprints
 from strata.notebook.keys import InputNotFingerprinted, cell_key
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
@@ -75,10 +76,7 @@ def test_a_fallback_key_takes_an_item_key_with_a_colon(tmp_path: Path):
             session,
             analysis,
             "c0",
-            mounts=[],
-            tables=[],
-            fetches=[],
-            datasets=[],
+            inputs=InputFingerprints(),
             env_hash="e",
             instance=cg.Item(key, "d"),
         ).provenance_hash
@@ -99,6 +97,4 @@ def test_a_host_keyed_cell_with_an_unreadable_upstream_has_no_key(tmp_path: Path
     assert c0 is not None
     c0.artifact_uris = {"x": f"strata://artifact/nb_{session.notebook_state.id}_cell_c0_var_x@v=1"}
     with pytest.raises(InputNotFingerprinted, match="output:c0.x"):
-        cell_key(
-            session, analysis, "q", mounts=[], tables=[], fetches=[], datasets=[], env_hash="e"
-        )
+        cell_key(session, analysis, "q", inputs=InputFingerprints(), env_hash="e")

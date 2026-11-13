@@ -141,6 +141,7 @@ from strata.notebook.harness_user import (
     read_run_file,
     resolve_harness_user,
 )
+from strata.notebook.inputs import InputFingerprints
 from strata.notebook.keys import cell_key, inactive_variant_refusal
 from strata.notebook.layout import WORK_DIR
 from strata.notebook.local_runs import (
@@ -323,6 +324,16 @@ class _CellProvenance:
     # The local path packages as the run keyed them, checked again after it.
     local_packages: LocalPackages | None = None
 
+    @property
+    def inputs(self) -> InputFingerprints:
+        """The outside-input fingerprints it is keyed over."""
+        return InputFingerprints(
+            mounts=self.mount_fingerprints,
+            tables=self.table_fingerprints,
+            fetches=self.fetch_fingerprints,
+            datasets=self.dataset_fingerprints,
+        )
+
     def for_instance(self, instance: str | cg.Item) -> _CellProvenance:
         """The same provenance for one fan-out instance, over the inputs it reads."""
         return self._rehashed(instance=instance)
@@ -351,10 +362,7 @@ class _CellProvenance:
             changed.session,
             changed.analysis,
             changed.cell_id,
-            mounts=changed.mount_fingerprints,
-            tables=changed.table_fingerprints,
-            fetches=changed.fetch_fingerprints,
-            datasets=changed.dataset_fingerprints,
+            inputs=changed.inputs,
             env_hash=changed.env_hash,
             instance=changed.instance,
         )
@@ -1049,10 +1057,12 @@ class CellExecutor:
             self.session,
             analysis,
             cell_id,
-            mounts=mount_fingerprints,
-            tables=table_fingerprints,
-            fetches=fetch_fingerprints,
-            datasets=dataset_fingerprints,
+            inputs=InputFingerprints(
+                mounts=mount_fingerprints,
+                tables=table_fingerprints,
+                fetches=fetch_fingerprints,
+                datasets=dataset_fingerprints,
+            ),
             env_hash=env_hash,
         )
 

@@ -10,6 +10,10 @@ and a cell test's input fingerprint.
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from strata.notebook.inputs import InputFingerprints
 
 
 def compute_source_hash(source: str, language: str = "python") -> str:
@@ -37,25 +41,13 @@ def safe_filename_stem(variable_name: str) -> str:
     return variable_name
 
 
-def cell_provenance_inputs(
-    input_hashes: list[str],
-    mount_fingerprints: list[str],
-    table_fingerprints: list[str],
-    fetch_fingerprints: list[str],
-    dataset_fingerprints: list[str],
-) -> list[str]:
+def cell_provenance_inputs(input_hashes: list[str], inputs: InputFingerprints) -> list[str]:
     """Every input of a cell's provenance hash besides its source and env.
 
     The executor keys a run on these and ``compute_staleness`` rechecks it on them: one
     missing from either leaves the cell stale forever.
     """
-    return (
-        input_hashes
-        + mount_fingerprints
-        + table_fingerprints
-        + fetch_fingerprints
-        + dataset_fingerprints
-    )
+    return input_hashes + inputs.in_hash_order()
 
 
 def compute_provenance_hash(

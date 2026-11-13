@@ -117,7 +117,7 @@ def test_two_checkouts_key_a_relative_mount_alike(tmp_path):
     def mounts(nb_dir: Path) -> list[str]:
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
         cell = session.notebook_state.get_cell("c1")
-        return session._outside_world_for(cell).mount_fingerprints
+        return session._outside_world_for(cell).inputs.mounts
 
     assert mounts(first) == mounts(second)
     (tmp_path / "b" / "shared" / "a.txt").write_text("changed")
@@ -160,7 +160,7 @@ def test_two_checkouts_key_the_project_mount_alike(tmp_path):
         write_cell(nb_dir, "c1", "files = list(project.iterdir())\n")
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
         cell = session.notebook_state.get_cell("c1")
-        return session._outside_world_for(cell).mount_fingerprints
+        return session._outside_world_for(cell).inputs.mounts
 
     assert mounts(tmp_path / "a") == mounts(tmp_path / "b")
 
