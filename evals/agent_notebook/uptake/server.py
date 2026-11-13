@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -33,6 +34,29 @@ class SetupError(RuntimeError):
     """The arm's server could not be brought up; the trial is discarded."""
 
 
+# What can go wrong bringing the server up: a refused or odd HTTP answer, a missing
+# key or bad JSON in it, a command that would not run.
+_SETUP_FAILURES = (httpx.HTTPError, KeyError, ValueError, OSError, subprocess.SubprocessError)
+
+
+@contextmanager
+def _as_setup_error() -> Iterator[None]:
+    try:
+        yield
+    except _SETUP_FAILURES as exc:
+        raise SetupError(f"{type(exc).__name__}: {exc}") from exc
+
+
+# The runner's own settings, which would point uv, Python or Strata at its environment.
+_HOST_ONLY = re.compile(
+    r"^(STRATA_|ANTHROPIC_|CLAUDE|HARBOR_|VIRTUAL_ENV$|PYTHON(PATH|HOME)$|UV_PROJECT)"
+)
+
+
+def _host_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if not _HOST_ONLY.match(k)}
+
+
 def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> dict[str, str]:
     """The server's environment: everything it stores under *root*, nothing of the host's
     Strata settings or API keys, and the load counter its cells inherit."""
@@ -42,11 +66,7 @@ def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> di
             ["uv", *args], capture_output=True, text=True, check=True
         ).stdout.strip()
 
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.startswith(("STRATA_", "ANTHROPIC_", "CLAUDE", "HARBOR_", "VIRTUAL_ENV"))
-    }
+    env = _host_env()
     env.update(
         # Some paths fall back to ~/.strata whatever the settings say.
         HOME=str(root / "home"),
@@ -110,6 +130,40 @@ def scratchpad_server(
     """A running scratchpad-profile server over one open notebook under *root* that
     can import *project*; its MCP entry is written to the agent's config dir. Yields
     the server's URL and stops the server on exit."""
+    with _as_setup_error():
+        notebook = _prepare_notebook(root, project)
+        port = _free_port()
+        env = server_env(root, port, load_log, load_seconds)
+        log = open(root / "server.log", "w")  # noqa: SIM115 - closed in the finally below
+    url = f"http://127.0.0.1:{port}"
+    proc: subprocess.Popen | None = None
+    try:
+        with _as_setup_error():
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "strata"],
+                cwd=root,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                # Its own group, so stopping it takes its cells and pools along.
+                start_new_session=True,
+            )
+            _bring_up(url, proc, notebook, agent_env, claude=claude, timeout=timeout)
+        yield url
+    finally:
+        if proc is not None and proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+        log.close()
+
+
+def _prepare_notebook(root: Path, project: Path) -> Path:
+    """A notebook in the server's storage dir whose environment can import *project*."""
     from strata.notebook.writer import create_notebook
 
     # The server opens notebooks only inside its storage dir.
@@ -119,6 +173,7 @@ def scratchpad_server(
     added = subprocess.run(
         ["uv", "add", "--quiet", "--editable", str(project)],
         cwd=notebook,
+        env=_host_env(),
         capture_output=True,
         text=True,
     )
@@ -127,52 +182,42 @@ def scratchpad_server(
     # macOS checks each binary of a fresh venv on its first load, 10 s and more in all; a
     # user's own environment is past that, so it is paid here, before the agent's clock.
     warmed = subprocess.run(
-        [str(notebook / ".venv" / "bin" / "python"), "-c", _WARM], capture_output=True, text=True
+        [str(notebook / ".venv" / "bin" / "python"), "-c", _WARM],
+        env=_host_env(),
+        capture_output=True,
+        text=True,
     )
     if warmed.returncode:
         raise SetupError(f"the notebook's environment cannot import: {warmed.stderr[-300:]}")
+    return notebook
 
-    port = _free_port()
-    url = f"http://127.0.0.1:{port}"
-    with open(root / "server.log", "w") as log:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "strata"],
-            cwd=root,
-            env=server_env(root, port, load_log, load_seconds),
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            # Its own group, so stopping it takes its cells and pools along.
-            start_new_session=True,
-        )
-        try:
-            _until(lambda: httpx.get(f"{url}/health").is_success, "health", proc, timeout)
-            opened = httpx.post(
-                f"{url}/v1/notebooks/open", json={"path": str(notebook)}, timeout=timeout
-            )
-            if not opened.is_success:
-                raise SetupError(f"opening the notebook failed: {opened.text[:300]}")
-            session_id = opened.json()["session_id"]
 
-            def synced() -> bool:
-                payload = httpx.get(f"{url}/v1/notebooks/{session_id}/environment").json()
-                state = payload["environment"]["sync_state"]
-                if state in ("failed", "fallback"):
-                    raise SetupError(f"the notebook's environment is {state}")
-                return state == "ready"
+def _bring_up(
+    url: str,
+    proc: subprocess.Popen,
+    notebook: Path,
+    agent_env: dict[str, str],
+    *,
+    claude: str,
+    timeout: float,
+) -> None:
+    """Wait for the server, open the notebook, wait for its environment, register it."""
+    _until(lambda: httpx.get(f"{url}/health").is_success, "health", proc, timeout)
+    opened = httpx.post(f"{url}/v1/notebooks/open", json={"path": str(notebook)}, timeout=timeout)
+    if not opened.is_success:
+        raise SetupError(f"opening the notebook failed: {opened.text[:300]}")
+    session_id = opened.json()["session_id"]
 
-            _until(synced, "the notebook's environment", proc, timeout)
-            registered = subprocess.run(
-                mcp_entry_command(claude, url), env=agent_env, capture_output=True, text=True
-            )
-            if registered.returncode:
-                raise SetupError(f"claude mcp add-json failed: {registered.stderr.strip()}")
-            yield url
-        finally:
-            if proc.poll() is None:
-                os.killpg(proc.pid, signal.SIGTERM)
-                try:
-                    proc.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                    proc.wait()
+    def synced() -> bool:
+        payload = httpx.get(f"{url}/v1/notebooks/{session_id}/environment").json()
+        state = payload["environment"]["sync_state"]
+        if state in ("failed", "fallback"):
+            raise SetupError(f"the notebook's environment is {state}")
+        return state == "ready"
+
+    _until(synced, "the notebook's environment", proc, timeout)
+    registered = subprocess.run(
+        mcp_entry_command(claude, url), env=agent_env, capture_output=True, text=True
+    )
+    if registered.returncode:
+        raise SetupError(f"claude mcp add-json failed: {registered.stderr.strip()}")

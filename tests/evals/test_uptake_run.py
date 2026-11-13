@@ -11,6 +11,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+import httpx
 import pytest
 
 from evals.agent_notebook.uptake import report, run, server, stats
@@ -348,6 +349,8 @@ class TestArmCp:
         monkeypatch.setenv("STRATA_ARTIFACT_DIR", "/home/me/.strata/artifacts")
         monkeypatch.setenv("STRATA_MCP_TOOLS", "all")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        monkeypatch.setenv("PYTHONPATH", "/repo/src")
+        monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/repo/.venv")
         root = tmp_path / "srv"
 
         env = server.server_env(root, 8799, tmp_path / "loads.jsonl", 20.0)
@@ -356,9 +359,32 @@ class TestArmCp:
         stored += ("STRATA_NOTEBOOK_STORAGE_DIR", "STRATA_WORKER_ENV_ROOT")
         assert all(Path(env[name]).is_relative_to(root) for name in stored)
         assert "STRATA_MCP_TOOLS" not in env and "ANTHROPIC_API_KEY" not in env
+        assert "PYTHONPATH" not in env and "UV_PROJECT_ENVIRONMENT" not in env
         assert (env["STRATA_MCP_ENABLED"], env["STRATA_MCP_PROFILE"]) == ("true", "scratchpad")
         assert (env["STRATA_HOST"], env["STRATA_PORT"]) == ("127.0.0.1", "8799")
         assert env["HARBOR_LOAD_LOG"] == str(tmp_path / "loads.jsonl")
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            KeyError("environment"),
+            ValueError("Expecting value"),
+            httpx.ReadTimeout("timed out"),
+            subprocess.CalledProcessError(2, ["uv", "cache", "dir"]),
+        ],
+    )
+    def test_a_failure_bringing_it_up_is_a_setup_error(self, failure):
+        with pytest.raises(server.SetupError, match=type(failure).__name__):
+            with server._as_setup_error():
+                raise failure
+
+    def test_its_own_refusals_and_other_errors_pass_through(self):
+        with pytest.raises(server.SetupError, match="^uv add failed$"):
+            with server._as_setup_error():
+                raise server.SetupError("uv add failed")
+        with pytest.raises(ZeroDivisionError):
+            with server._as_setup_error():
+                raise ZeroDivisionError
 
     def test_its_entry_is_user_scope_and_always_loaded(self):
         command = server.mcp_entry_command("claude", "http://127.0.0.1:8799")
