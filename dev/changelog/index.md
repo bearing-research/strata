@@ -363,6 +363,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **`run_snippet` needs `notebook:write` as well as `notebook:execute`.** It adds a
   cell before running it, so a caller allowed to run cells but not edit them could add
   one. (#1534)
+- **Run All warns about a mutation as a single run does.** A cell that changes an input in
+  place and passes it on (`xs[0] = 9`, with a later cell reading `xs`) ran warning-free
+  alone or in a warm worker, but Run All's batch warned that downstream would see the
+  pre-mutation value, which it does not. The batch now knows which inputs the cell passes
+  on, and a test pins cold and batch to the same warnings. (#1535)
 - **Downloads close the stored blob however the client leaves, and dropped catalogs close.**
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the
