@@ -61,7 +61,7 @@ class Context:
 
 _NUMBER = re.compile(
     r"(?<![\w.])(-?\d[\d,]*(?:\.\d+)?(?:[eE]-?\d+)?)"
-    r"(?:\s*(million|thousand|billion|[MkKB]n?)\b)?"
+    r"(?:\s*(million|thousand|billion|bn|[MkKB])\b)?"
 )
 _SCALE = {"thousand": 1e3, "k": 1e3, "million": 1e6, "m": 1e6, "billion": 1e9, "b": 1e9, "bn": 1e9}
 
@@ -100,14 +100,16 @@ class Number:
 
 @dataclass(frozen=True)
 class Word:
-    """Any of *options* in the reply, as a whole word, ignoring case; with *every*, all."""
+    """Any of *options* in the reply, as a whole word, ignoring case; with *every*, all.
+    A word may carry an ordinal or plural ending: "17th", "Tuesdays"."""
 
     options: tuple[str, ...]
     every: bool = False
 
     def passes(self, text: str, workspace: Path) -> bool:
         def said(word: str) -> bool:
-            return re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text, re.I) is not None
+            pattern = rf"(?<![\w-]){re.escape(word)}(?:st|nd|rd|th|s|'s)?(?![\w-])"
+            return re.search(pattern, text, re.I) is not None
 
         return (all if self.every else any)(said(w) for w in self.options)
 
@@ -172,7 +174,13 @@ def _month(frame: pd.DataFrame, month: int) -> pd.DataFrame:
 
 
 def _date_words(day: date) -> tuple[str, ...]:
-    return (day.isoformat(), f"{day:%B} {day.day}", f"{day:%b} {day.day}")
+    return (
+        day.isoformat(),
+        f"{day:%B} {day.day}",
+        f"{day:%b} {day.day}",
+        f"{day.day} {day:%B}",
+        f"{day.day} {day:%b}",
+    )
 
 
 def _p95(values: pd.Series) -> float:

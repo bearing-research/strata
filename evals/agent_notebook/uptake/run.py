@@ -29,9 +29,10 @@ MODEL = "claude-opus-5-5"
 REPO = Path(__file__).resolve().parents[3]
 SKILL = REPO / "src" / "strata" / ".agents" / "skills" / "strata-scratchpad"
 
-# A Bash command that runs strata: the word at a command's start, after a separator or
-# whitespace (`uv run strata`), or at the end of a path (`~/.local/bin/strata`).
-_STRATA_COMMAND = r"(?:^|[\s;&|(`/])strata(?:\s|$)"
+# A Bash command that runs strata or one of its commands (`strata-notebook`): the word at
+# a command's start, after a separator or whitespace (`uv run strata`), or at the end of a
+# path (`~/.local/bin/strata`); or Python that imports it.
+_STRATA_COMMAND = r"(?:^|[\s;&|(`/])strata(?:-\w[\w-]*)?(?:\s|$)|\b(?:import|from)\s+strata\b"
 _RUNS_STRATA = re.compile(_STRATA_COMMAND)
 # The variables of the process running the eval that must not reach the agent's.
 _DROP = re.compile(r"^(CLAUDE|ANTHROPIC_(?!API_KEY$)|VIRTUAL_ENV$|PYTHON(PATH|HOME)$|UV_PROJECT)")
@@ -44,7 +45,19 @@ if re.search({_STRATA_COMMAND!r}, command):
     print("strata is not available in this environment.", file=sys.stderr)
     sys.exit(2)
 """
-_MISSING = '#!/bin/sh\necho "strata: command not found" >&2\nexit 127\n'
+_MISSING = '#!/bin/sh\necho "{name}: command not found" >&2\nexit 127\n'
+# What in a folder above a trial would reach its agent: Claude Code loads memory and
+# settings from every parent folder, and git, uv and pytest look up for their roots.
+_LEAKS = (
+    "CLAUDE.md",
+    "CLAUDE.local.md",
+    ".claude/CLAUDE.md",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".mcp.json",
+    ".git",
+    "pyproject.toml",
+)
 
 
 @dataclass
@@ -120,14 +133,42 @@ def pins(model: str, claude: str) -> dict[str, str]:
     }
 
 
-def prepare_arm(arm: str, config: Path, bin_dir: Path) -> None:
-    """Write *arm*'s setup into a fresh config dir and the bin dir put first on PATH."""
+def isolation_problem(trial_dir: Path) -> str | None:
+    """What in a folder above *trial_dir* would reach a trial's agent, or None."""
+    for parent in trial_dir.resolve().parents:
+        for name in _LEAKS:
+            if (parent / name).exists():
+                return f"{parent / name} would reach the agent; put trials under /tmp"
+    return None
+
+
+def agent_path(path: str) -> str:
+    """*path* without the eval's own environment: its python can import strata."""
+    own = {Path(sys.prefix) / "bin", Path(sys.prefix) / "Scripts"}
+    if os.environ.get("VIRTUAL_ENV"):
+        own.add(Path(os.environ["VIRTUAL_ENV"]) / "bin")
+    return os.pathsep.join(
+        entry for entry in path.split(os.pathsep) if entry and Path(entry) not in own
+    )
+
+
+def prepare_arm(arm: str, config: Path, bin_dir: Path, path: str) -> None:
+    """Write *arm*'s setup into a fresh config dir and the bin dir put before *path*."""
     config.mkdir(parents=True)
     bin_dir.mkdir(parents=True)
-    strata = bin_dir / "strata"
     if arm == "A":
-        strata.write_text(_MISSING)
-        strata.chmod(0o755)
+        # Every strata command anywhere on the path, not just `strata`, is not found.
+        names = {"strata"} | {
+            entry.name
+            for folder in path.split(os.pathsep)
+            if Path(folder).is_dir()
+            for entry in Path(folder).iterdir()
+            if entry.name.startswith("strata")
+        }
+        for name in names:
+            shim = bin_dir / name
+            shim.write_text(_MISSING.format(name=name))
+            shim.chmod(0o755)
         hook = config / "deny_strata.py"
         hook.write_text(_DENY_HOOK)
         command = f"{shlex.quote(sys.executable)} {shlex.quote(str(hook))}"
@@ -141,7 +182,7 @@ def prepare_arm(arm: str, config: Path, bin_dir: Path) -> None:
         (config / "settings.json").write_text(json.dumps(settings, indent=2))
     elif arm == "B":
         shutil.copytree(SKILL, config / "skills" / "strata-scratchpad")
-        strata.symlink_to(Path(sys.executable).parent / "strata")
+        (bin_dir / "strata").symlink_to(Path(sys.executable).parent / "strata")
     else:
         raise ValueError(f"unknown arm {arm!r}; expected one of {ARMS}")
 
@@ -161,11 +202,13 @@ def preflight(arm: str, init: dict[str, Any] | None) -> str | None:
     return None
 
 
-def agent_env(config: Path, bin_dir: Path, load_log: Path, load_seconds: float) -> dict[str, str]:
+def agent_env(
+    config: Path, bin_dir: Path, path: str, load_log: Path, load_seconds: float
+) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not _DROP.match(k)}
     env.update(
         CLAUDE_CONFIG_DIR=str(config),
-        PATH=f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        PATH=f"{bin_dir}{os.pathsep}{path}",
         HARBOR_LOAD_LOG=str(load_log),
         HARBOR_LOAD_SECONDS=str(load_seconds),
     )
@@ -221,11 +264,17 @@ def run_trial(
     pinned: dict[str, str] | None = None,
 ) -> Trial:
     """Run *task* once under *arm* in *trial_dir*, and write ``trial.json`` there."""
+    problem = isolation_problem(trial_dir)
+    if problem:
+        raise ValueError(problem)
     trial = Trial(task.id, task.kind, arm, run, pinned or pins(model, claude))
     config, bin_dir, load_log = trial_dir / "config", trial_dir / "bin", trial_dir / "loads.jsonl"
-    prepare_arm(arm, config, bin_dir)
+    path = agent_path(os.environ.get("PATH", ""))
+    prepare_arm(arm, config, bin_dir, path)
     work = prepare_workspace(trial_dir / "harbor", rows=rows, sync=sync)
-    env = agent_env(config, bin_dir, load_log, load_seconds)
+    env = agent_env(config, bin_dir, path, load_log, load_seconds)
+    # Before the agent can touch the workspace's data; a files check reads it after.
+    expected = task.expected(work)
     for index, question in enumerate(task.turns):
         command = [claude, "-p", question.prompt, "--model", model]
         if trial.session_id:
@@ -238,9 +287,22 @@ def run_trial(
             "--verbose",
         ]
         started = time.time()
-        done = subprocess.run(
-            command, cwd=work, env=env, capture_output=True, text=True, timeout=timeout
-        )
+        try:
+            done = subprocess.run(
+                command,
+                cwd=work,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stream = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout or ""
+            (trial_dir / f"turn{index}.jsonl").write_text(stream)
+            trial.turns.append(Turn(question.prompt, wall_s=time.time() - started))
+            trial.discarded = f"turn {index}: timed out after {timeout:.0f} s"
+            break
         (trial_dir / f"turn{index}.jsonl").write_text(done.stdout)
         init, result, tools = read_stream(done.stdout)
         turn = Turn(question.prompt, wall_s=time.time() - started, tools=tools)
@@ -260,7 +322,7 @@ def run_trial(
         )
     trial.loads = _loads(load_log)
     if trial.discarded is None:
-        for turn, expect in zip(trial.turns, task.expected(work), strict=True):
+        for turn, expect in zip(trial.turns, expected, strict=True):
             turn.passed = not turn.is_error and expect.passes(turn.reply, work)
     (trial_dir / "trial.json").write_text(json.dumps(trial.to_json(), indent=2))
     return trial

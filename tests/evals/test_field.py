@@ -68,6 +68,18 @@ class TestABashCall:
             'uv run python -c "import proj"', str(tmp_path)
         )
 
+    def test_a_cd_ends_at_its_separator_or_line(self, project, tmp_path):
+        for command in (
+            f'cd {project}; uv run python -c "import proj"',
+            f"cd {project}\nuv run python - <<'EOF'\nimport proj\nEOF",
+        ):
+            assert _kinds(command, str(tmp_path))["compute_imports_project"] == 1, command
+
+    def test_a_uv_managed_interpreter_is_not_the_project_env(self):
+        command = "~/.local/share/uv/python/cpython-3.12/bin/python3 -c 'print(1)'"
+
+        assert _kinds(command) == {"compute": 1}
+
     def test_a_script_that_writes_files_is_an_edit_though_it_prints(self):
         command = (
             "python3 - <<'EOF'\nfrom pathlib import Path\np = Path('a.py')\n"
@@ -128,6 +140,18 @@ class TestASession:
         # Dated by its own record, not the session's start.
         assert session.skill_trigger_days == ["2026-09-03"]
         assert not session.subagent
+
+    def test_a_call_runs_from_its_own_records_cwd(self, tmp_path, project):
+        path = _transcript(
+            tmp_path / "p" / "s.jsonl",
+            str(tmp_path),
+            ("2026-09-01T10:00:00Z", "Bash", {"command": 'uv run python -c "import proj"'}),
+        )
+        records = [json.loads(line) for line in path.read_text().splitlines()]
+        records[-1]["cwd"] = str(project)  # the session cd'd into the project first
+        path.write_text("".join(json.dumps(r) + "\n" for r in records))
+
+        assert read_session(path).compute_imports_project == 1
 
     def test_a_subagents_transcript_is_one(self, tmp_path):
         path = _transcript(tmp_path / "p" / "s" / "subagents" / "agent-1.jsonl", "/w")

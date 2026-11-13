@@ -44,6 +44,10 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    problem = run.isolation_problem(args.out / "trial")
+    if problem:
+        print(problem, file=sys.stderr)
+        return 2
     if args.task:
         tasks = [TASKS_BY_ID[task_id] for task_id in args.task]
     elif args.split == "all":
