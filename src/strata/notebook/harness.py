@@ -442,6 +442,7 @@ def _run_one_batched_cell(
     source = cell["source"]
     consumed_vars: list[str] = list(cell.get("consumed_vars") or [])
     references: list[str] = list(cell.get("references") or [])
+    mutation_defines: set[str] = set(cell.get("mutation_defines") or [])
     cell_env: dict = cell.get("env") or {}
     mount_manifest: dict = cell.get("mount_manifest") or {}
     table_manifest: dict = cell.get("table_manifest") or {}
@@ -572,8 +573,13 @@ def _run_one_batched_cell(
                     scope=manifest.get("audit"),
                 )
                 # Catches mutations the static analyzer can't see (aliases, helper-fn
-                # mutation, bare mutators).
-                mutation_warnings = list(_immut.detect_mutations(namespace, input_snapshots))
+                # mutation, bare mutators). An input the cell changes in place and
+                # passes on reaches downstream as published, as in a single run.
+                mutation_warnings = list(
+                    _immut.detect_mutations(
+                        namespace, input_snapshots, exported_names=mutation_defines
+                    )
+                )
                 mutation_warnings.extend(
                     _immut.detect_shared_mutable_outputs(
                         {vn: namespace[vn] for vn in consumed_vars if vn in namespace}
