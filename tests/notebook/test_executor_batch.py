@@ -232,6 +232,20 @@ async def test_batch_env_overrides_reach_cell(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_each_cell_in_a_batch_sees_its_own_id(tmp_path: Path):
+    # A batch returns only what a later cell reads, so each cell checks for itself.
+    first = "import os\nmine = os.environ['STRATA_CELL_ID']\nassert mine == 'c1'\n"
+    second = "import os\nassert (mine, os.environ['STRATA_CELL_ID']) == ('c1', 'c2')\n"
+    session = _make_session_with_cells(tmp_path, [("c1", first), ("c2", second)])
+    specs = _populate_consumed_vars([_cell_spec("c1", first), _cell_spec("c2", second)], session)
+
+    result = await CellExecutor(session).execute_batch(specs)
+
+    assert result.completed, result.end_reason
+    assert {r.cell_id: r.status for r in result.cell_results} == {"c1": "ok", "c2": "ok"}
+
+
+@pytest.mark.asyncio
 async def test_batch_cached_displays_round_trip(tmp_path: Path):
     """Second batch invocation cache-hits and restores display outputs.
 

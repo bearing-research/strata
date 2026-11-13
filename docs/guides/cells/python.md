@@ -332,6 +332,8 @@ A file beside the notebook is one directory up: read it as `../data.csv`. A Pyth
 
 A cell on a [worker](../../notebook/workers.md) runs in a `work/` of its own, made for the run and removed with it. To keep a file from a worker run, write it to an [`# @output_dir`](../../reference/annotations/python.md#output_dir) folder.
 
+While a Python cell runs, `STRATA_CELL_ID` holds its id, in the cell and in any process it starts. Code that runs both in cells and from plain scripts can read it to tell the two apart, for example to log which cell did a slow load.
+
 ## Python-cell annotations
 
 | Annotation         | What it does                                     |

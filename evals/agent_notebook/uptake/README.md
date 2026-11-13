@@ -7,8 +7,8 @@ on its own (design note `design-agent-uptake.md`, section 5).
   (`packages/fleet`), a seeded bug (`tests/test_text.py` fails), and a slow
   `harbor.data.load_events()` (20 s, `HARBOR_LOAD_SECONDS`). Each load appends a
   line to the file named by `HARBOR_LOAD_LOG`, so a run's loads are counted outside
-  the agent's reach. A line is tagged with `STRATA_CELL_ID` when that is set; the
-  cell harness does not set it yet (P1 adds it), so today a cell's load is untagged.
+  the agent's reach. A line is tagged with `STRATA_CELL_ID`, which a Strata cell's
+  process has set, so a load done in a cell names the cell.
 - **`workspace.py`:** `build(dest)` copies the template and writes 1M seeded order
   events to `data/events.parquet`. Their shape gives each question one answer.
 - **`tasks.py`:** 29 tasks of five kinds: iteration (four turns over the same

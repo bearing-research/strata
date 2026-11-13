@@ -48,6 +48,17 @@ def sample_notebook(tmp_path):
     return session
 
 
+# What the cell sees, and what a process it starts sees.
+_CELL_ID_SOURCE = """
+import os, subprocess, sys
+child = subprocess.run(
+    [sys.executable, "-c", "import os; print(os.environ['STRATA_CELL_ID'])"],
+    capture_output=True, text=True, check=True,
+).stdout.strip()
+seen = [os.environ["STRATA_CELL_ID"], child]
+"""
+
+
 class TestRevertHitsTheCache:
     """Reverting a cell edit must not recompute a result the store already holds.
 
@@ -2451,6 +2462,22 @@ def add(y):
         assert result.success is True
         assert result.execution_method == "warm"
         assert result.outputs["x"]["preview"] == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    @pytest.mark.parametrize(
+        "warm", [False, pytest.param(True, marks=pytest.mark.warm_pool)], ids=["cold", "warm"]
+    )
+    async def test_a_cell_and_what_it_starts_know_which_cell_it_is(
+        self, sample_notebook, warm_pool, warm
+    ):
+        pool = await warm_pool(sample_notebook) if warm else None
+        executor = CellExecutor(sample_notebook, pool)
+        result = await executor.execute_cell("cell1", _CELL_ID_SOURCE)
+
+        assert result.success is True, result.error
+        assert result.execution_method == ("warm" if warm else "cold")
+        assert result.outputs["seen"]["preview"] == ["cell1", "cell1"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration

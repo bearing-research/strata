@@ -131,6 +131,10 @@ def _exec_with_display(source: str, namespace: dict, cell_id: str | None) -> Any
     """Execute source; if the last statement is a bare expression, eval and return it."""
     import ast as _ast
 
+    # The cell's code, and any process it starts, can tell which cell it runs in.
+    if cell_id:
+        os.environ["STRATA_CELL_ID"] = cell_id
+
     filename = _traceback.cell_filename(cell_id)
     # Before the parse: a cell that doesn't parse has a line to quote too.
     _traceback.remember_source(filename, source)
