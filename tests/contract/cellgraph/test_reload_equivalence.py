@@ -44,8 +44,8 @@ def _differences(live: Any, reopened: Any) -> dict[str, dict[str, Any]]:
         before, after = live.serialize_cell(cell), reopened.serialize_cell(other)
         differ = {
             key: {"live": before.get(key), "reopened": after.get(key)}
-            for key in sorted(set(before) | set(after) - PROCESS_LOCAL)
-            if key not in PROCESS_LOCAL and before.get(key) != after.get(key)
+            for key in sorted((set(before) | set(after)) - PROCESS_LOCAL)
+            if before.get(key) != after.get(key)
         }
         if differ:
             found[cell.id] = differ
