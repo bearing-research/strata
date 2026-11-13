@@ -370,7 +370,7 @@ exhaustive commit history.
   that ended by an exception other than a cancel or a timeout (a callback that raised, a
   broken pipe) left the harness running the cell's code, unreaped, and its pipe readers
   pending. Every exit now stops the harness's process tree first, and a batch does so
-  before its folder is removed.
+  before its folder is removed. (#1540)
 - **Downloads close the stored blob however the client leaves, and dropped catalogs close.**
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the
