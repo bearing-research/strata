@@ -3273,7 +3273,7 @@ sit behind Claude Code's tool search.</p>
 <tbody>
 <tr>
 <td><code>run(source, cell=None, fresh=False)</code></td>
-<td>Without <code>cell</code>, add a Python cell and run it; with <code>cell</code>, replace that cell's source and run it. <code>fresh=True</code> ignores this cell's cache (the <code>rerun</code> mode). Returns <code>cell</code>, <code>status</code>, <code>cache_hit</code>, <code>duration_ms</code>, <code>saved_ms</code> on a hit, <code>reran</code> (the upstream cells brought up to date first, each with why), <code>value</code> (what a trailing expression showed), <code>stdout</code> / <code>stderr</code>, <code>traceback</code>, <code>defines</code>, <code>path</code> (a file holding an image the cell showed) and <code>url</code> (the notebook in the web UI).</td>
+<td>Without <code>cell</code>, add a Python cell and run it; with <code>cell</code>, replace that cell's source and run it. <code>fresh=True</code> ignores this cell's cache (the <code>rerun</code> mode). Returns <code>cell</code>, <code>status</code>, <code>cache_hit</code>, <code>duration_ms</code>, <code>saved_ms</code> on a hit, <code>reran</code> (the upstream cells brought up to date first, each with why), <code>value</code> (what a trailing expression showed), <code>stdout</code> / <code>stderr</code>, <code>traceback</code>, <code>diagnostics</code> (files it read without declaring them, or values it mutated, each with its fix), <code>defines</code>, <code>path</code> (a file holding an image the cell showed) and <code>url</code> (the notebook in the web UI). A <code>cell</code> that is not Python is refused.</td>
 </tr>
 <tr>
 <td><code>scratchpad(name=None)</code></td>
@@ -3282,10 +3282,10 @@ sit behind Claude Code's tool search.</p>
 </tbody>
 </table>
 <p>A failure that is not the cell's own exception (no session or several, an
-unknown cell, an environment that is not ready, an annotation that cannot be
-read, a busy notebook) returns <code>status: error</code> with a <code>fix</code> line naming the next
-step. The other tools stay registered and callable by name;
-<code>STRATA_MCP_TOOLS=all</code> lists them too.</p>
+unknown or non-Python cell, an environment that is not ready, an annotation that
+cannot be read, a busy notebook, which takes back a cell <code>run</code> had just added)
+returns <code>status: error</code> with a <code>fix</code> line naming the next step. The other tools
+stay registered and callable by name; <code>STRATA_MCP_TOOLS=all</code> lists them too.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
