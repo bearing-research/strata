@@ -196,6 +196,7 @@ from strata.notebook.table_writes import (
     TableWriteError,
     authorize_table_writes,
     gone_tables,
+    write_back_failed,
     write_cell_tables,
 )
 from strata.notebook.team_store import (
@@ -1307,17 +1308,22 @@ class CellExecutor:
             )
         self._write_cell_tables(specs, outputs)
 
-    async def _restore_gone_tables(self, cell_id: str, source: str) -> None:
+    async def _restore_gone_tables(self, cell_id: str, source: str) -> str | None:
         """Before a hit is served, write its stored outputs into any table that is gone.
 
         Only those: a table still there holds them already, and an append would double.
-
-        Raises:
-            TableWriteError: as for a run's write.
+        Returns why the hit cannot be served when a write fails, else ``None``. Every path
+        fails the cell on it rather than running it, which would append to a table still
+        there.
         """
         gone = await self._gone_tables(source)
-        if gone:
+        if not gone:
+            return None
+        try:
             await anyio.to_thread.run_sync(self._write_back, cell_id, gone)
+        except TableWriteError as exc:
+            return write_back_failed(exc)
+        return None
 
     def _validate_output_hit(
         self,
