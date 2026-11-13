@@ -192,11 +192,11 @@ jobs:
     name: Unit Tests - Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     # Backstop for a deadlocked test, below GitHub's 6h cap; the per-test
-    # pytest-timeout normally trips first and dumps the stack. 45, not 30: a
-    # normal macOS run takes about 13 minutes and a congested runner crossed 30.
+    # pytest-timeout normally trips first and dumps the stack. 60: a macOS run of
+    # the whole suite takes 25-35 minutes on 3 cores, and a slow runner crossed 45.
     # On main every cell records diffcone evidence, running the suite under a
     # tracer (1.5-4x slower), hence 90 there.
-    timeout-minutes: ${{ github.event_name == 'push' && 90 || 45 }}
+    timeout-minutes: ${{ github.event_name == 'push' && 90 || 60 }}
     strategy:
       fail-fast: false
       matrix:
