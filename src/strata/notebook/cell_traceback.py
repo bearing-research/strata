@@ -1,4 +1,4 @@
-"""How a cell's failure reads, the same from every harness.
+"""What every harness does the same around a cell's code, and how its failure reads.
 
 Loaded by path into the harnesses, so stdlib only. They compile a cell's source under
 ``cell_filename``, which is how a traceback tells the cell's frames from their own.
@@ -7,8 +7,32 @@ Loaded by path into the harnesses, so stdlib only. They compile a cell's source 
 from __future__ import annotations
 
 import linecache
+import os
 import traceback
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
+
+CELL_ID_VAR = "STRATA_CELL_ID"
+
+
+@contextmanager
+def cell_id_set(cell_id: str | None) -> Generator[None]:
+    """Set ``STRATA_CELL_ID`` for the cell's code and what it starts, then put it back.
+
+    Put back so a reused worker's next cell, or a caller in this process, keeps its own.
+    """
+    previous = os.environ.get(CELL_ID_VAR)
+    if cell_id:
+        os.environ[CELL_ID_VAR] = cell_id
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(CELL_ID_VAR, None)
+        else:
+            os.environ[CELL_ID_VAR] = previous
+
 
 _CELL_PREFIX = "<cell"
 
