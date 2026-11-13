@@ -70,6 +70,7 @@ from strata.notebook.mounts import (
 )
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
+from strata.notebook.run_scope import RunScope
 from strata.notebook.serializer import ContentType
 from strata.notebook.table_writes import TableWriteError, write_back_failed
 from strata.notebook.team_store import TeamPull
@@ -1123,10 +1124,7 @@ async def run_harness(
     # New process group so cancel can signal the whole descendant tree (DataLoader
     # workers, multiprocessing pools); ``proc.kill()`` alone leaks children.
 
-    from strata.notebook.process_tree import (
-        subprocess_kwargs_for_new_group,
-        terminate_subprocess_tree,
-    )
+    from strata.notebook.process_tree import subprocess_kwargs_for_new_group
 
     hand_over(manifest_path.parent, harness_user)
     lifeline_fds, lifeline_vars = lifeline_handoff()
@@ -1140,69 +1138,58 @@ async def run_harness(
         read_fd, write_fd = os.pipe()
         events_fds = (write_fd,)
         events_vars = {EVENTS_FD_ENV: str(write_fd)}
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(host.path),
-            stdin=asyncio.subprocess.PIPE if run_token is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # ``uv run`` must find the notebook's .venv, not the server's environment.
-            env=uv_env(identity_env(harness_env({**lifeline_vars, **events_vars}), harness_user)),
-            pass_fds=(*lifeline_fds, *events_fds),
-            **spawn_kwargs(harness_user),
-            **subprocess_kwargs_for_new_group(),
+    async with RunScope("Cell execution") as scope:
+        try:
+            proc = scope.own(
+                await asyncio.create_subprocess_exec(
+                    *cmd,
+                    cwd=str(host.path),
+                    stdin=asyncio.subprocess.PIPE if run_token is not None else None,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    # ``uv run`` must find the notebook's .venv, not the server's environment.
+                    env=uv_env(
+                        identity_env(harness_env({**lifeline_vars, **events_vars}), harness_user)
+                    ),
+                    pass_fds=(*lifeline_fds, *events_fds),
+                    **spawn_kwargs(harness_user),
+                    **subprocess_kwargs_for_new_group(),
+                )
+            )
+        except BaseException:
+            if read_fd >= 0:
+                os.close(read_fd)
+            raise
+        finally:
+            for fd in events_fds:
+                os.close(fd)
+        # Leaving the scope by any exception (cancellation, the timeout below, anything
+        # else) stops the harness's process tree and the relay.
+        relay = (
+            scope.start(relay_events(read_fd, on_event, proc))
+            if events_fds and on_event is not None
+            else None
         )
-    except BaseException:
-        if read_fd >= 0:
-            os.close(read_fd)
-        raise
-    finally:
-        for fd in events_fds:
-            os.close(fd)
-    relay = (
-        asyncio.create_task(relay_events(read_fd, on_event, proc))
-        if events_fds and on_event is not None
-        else None
-    )
 
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(None if run_token is None else f"{run_token}\n".encode()),
-            timeout=timeout_seconds,
-        )
-    except asyncio.CancelledError:
-        logger.info(
-            "Cell execution cancelled; terminating harness subprocess tree pid=%s",
-            proc.pid,
-        )
-        if relay is not None:
-            relay.cancel()
         try:
-            await asyncio.shield(terminate_subprocess_tree(proc))
-        except Exception:
-            logger.exception(
-                "Failed to terminate cancelled harness subprocess tree pid=%s",
-                proc.pid,
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(None if run_token is None else f"{run_token}\n".encode()),
+                timeout=timeout_seconds,
             )
-        raise
-    except TimeoutError:
-        if relay is not None:
-            relay.cancel()
-        await terminate_subprocess_tree(proc)
-        raise TimeoutError()
-    # The harness has exited, so every line it wrote is in the pipe; EOF follows
-    # unless a child of the cell still holds the write end, which the harness kept
-    # from them, so a short wait is the guard, not the mechanism.
-    fenced = None
-    if relay is not None:
-        try:
-            fenced = await asyncio.wait_for(relay, timeout=EVENTS_DRAIN_SECONDS)
         except TimeoutError:
-            logger.warning(
-                "Event pipe of cell run pid=%s still open after exit; stopped reading",
-                proc.pid,
-            )
+            raise TimeoutError() from None
+        # The harness has exited, so every line it wrote is in the pipe; EOF follows
+        # unless a child of the cell still holds the write end, which the harness kept
+        # from them, so a short wait is the guard, not the mechanism.
+        fenced = None
+        if relay is not None:
+            try:
+                fenced = await asyncio.wait_for(relay, timeout=EVENTS_DRAIN_SECONDS)
+            except TimeoutError:
+                logger.warning(
+                    "Event pipe of cell run pid=%s still open after exit; stopped reading",
+                    proc.pid,
+                )
     if fenced is not None:
         return _fenced_result(fenced)
 

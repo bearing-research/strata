@@ -3116,6 +3116,8 @@ class TestRunBatch:
 
         monkeypatch.setattr(batch.asyncio, "create_subprocess_exec", create_subprocess_exec)
         monkeypatch.setattr(batch, "terminate_subprocess_tree", terminate)
+        # What RunScope calls when the run ends by an exception.
+        monkeypatch.setattr("strata.notebook.process_tree.terminate_subprocess_tree", terminate)
         monkeypatch.setattr(batch, "resolve_harness_user", lambda: self.USER)
         monkeypatch.setattr(batch, "hand_over", lambda path, user: seen.handed.append((path, user)))
         monkeypatch.setattr(batch, "identity_env", lambda env, user: {"env": env, "user": user})
@@ -3197,6 +3199,47 @@ class TestRunBatch:
 
         assert harness.terminated == [harness.proc]
         assert (ran.completed, ran.end_reason) == (False, "subprocess_died")
+
+    async def test_a_failing_callback_ends_the_process_tree_before_the_files_go(
+        self, tmp_path, harness, monkeypatch
+    ):
+        """Not only a cancel or a timeout: any exception stops the harness first."""
+        harness.frames = [_frame("cell_start", cell_id="c")]
+        harness.hangs = True
+        tmpdir_at_stop = []
+
+        async def on_cell_start(cell_id):
+            raise RuntimeError("broadcast failed")
+
+        terminate = batch.terminate_subprocess_tree  # the fixture's
+
+        async def recording(proc):
+            tmpdir_at_stop.append(harness.tmpdir.exists())
+            await terminate(proc)
+
+        monkeypatch.setattr("strata.notebook.process_tree.terminate_subprocess_tree", recording)
+        with pytest.raises(RuntimeError, match="broadcast failed"):
+            await self._run(tmp_path, on_cell_start=on_cell_start)
+
+        assert harness.terminated == [harness.proc]
+        assert tmpdir_at_stop == [True]
+        assert not harness.tmpdir.exists()
+
+    async def test_a_cancel_ends_the_process_tree(self, tmp_path, harness):
+        harness.frames = [_frame("cell_start", cell_id="c")]
+        harness.hangs = True
+        started = asyncio.Event()
+
+        async def on_cell_start(cell_id):
+            started.set()
+
+        run = asyncio.create_task(self._run(tmp_path, on_cell_start=on_cell_start))
+        await asyncio.wait_for(started.wait(), timeout=10)
+        run.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await run
+        assert harness.terminated == [harness.proc]
 
     async def test_a_cell_timeout_names_the_cell_and_reports_it(self, tmp_path, harness):
         harness.frames = [_frame("cell_start", cell_id="c")]
@@ -4563,7 +4606,12 @@ class TestPythonHarness:
 
     @pytest.mark.parametrize(
         ("outcome", "raised"),
-        [(TimeoutError(), TimeoutError), (asyncio.CancelledError(), asyncio.CancelledError)],
+        [
+            (TimeoutError(), TimeoutError),
+            (asyncio.CancelledError(), asyncio.CancelledError),
+            # Any other exception too, not only the two the path named.
+            (OSError("the pipe broke"), OSError),
+        ],
     )
     async def test_an_interrupted_run_ends_the_tree_and_the_relay(
         self, spawned, tmp_path, outcome, raised
