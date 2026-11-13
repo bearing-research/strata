@@ -13,7 +13,6 @@ import socket
 from pathlib import Path
 from typing import Any
 
-import docker
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -30,17 +29,9 @@ from strata.notebook.writer import (
     write_cell,
 )
 from tests.conftest import MINIO_IMAGE, make_azurite, service_auth, start_container_or_skip
+from tests.docker_helpers import docker_daemon_reachable
 
-
-def _docker_daemon_reachable() -> bool:
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 from testcontainers.community.minio import MinioContainer  # noqa: E402

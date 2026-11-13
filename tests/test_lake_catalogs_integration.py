@@ -13,6 +13,7 @@ import socket
 import tarfile
 import time
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -26,17 +27,9 @@ from strata.notebook.models import TableSpec
 from strata.notebook.tables import resolve_table_snapshot
 from strata.planner import ReadPlanner
 from tests.conftest import MINIO_IMAGE, make_azurite, start_container_or_skip
+from tests.docker_helpers import docker_daemon_reachable
 
-
-def _docker_daemon_reachable() -> bool:
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 from testcontainers.community.minio import MinioContainer  # noqa: E402
@@ -383,10 +376,11 @@ MAVEN_JARS = (
 
 
 @pytest.fixture(scope="module")
-def java_equality_writer(tmp_path_factory) -> tuple[Path, str]:
+def java_equality_writer(request, tmp_path_factory) -> tuple[Path, str]:
     """Compiled tests/java/EqualityDeletes.java (Iceberg's Java writer): directory, classpath."""
     root = tmp_path_factory.mktemp("java")
     client = docker.from_env()
+    request.addfinalizer(client.close)
     try:
         client.images.pull(JDK_IMAGE)
         client.images.pull(REST_IMAGE)
@@ -426,27 +420,28 @@ def test_rows_iceberg_java_deleted_by_key_are_not_scanned(
     catalog.create_table("taxi.trips", schema=SCHEMA)
     catalog.load_table("taxi.trips").append(pa.table({"id": pa.array([1, 2, 3, 4], pa.int64())}))
 
-    docker.from_env().containers.run(
-        JDK_IMAGE,
-        [
-            "java",
-            "-cp",
-            classpath,
-            "EqualityDeletes",
-            "http://localhost:8181",
-            "taxi.trips",
-            "id",
-            "2",
-            "4",
-        ],
-        network_mode=f"container:{container.get_wrapped_container().id}",
-        volumes={
-            str(root): {"bind": "/w", "mode": "ro"},
-            str(warehouse): {"bind": str(warehouse), "mode": "rw"},
-        },
-        user="0",
-        remove=True,
-    )
+    with closing(docker.from_env()) as client:
+        client.containers.run(
+            JDK_IMAGE,
+            [
+                "java",
+                "-cp",
+                classpath,
+                "EqualityDeletes",
+                "http://localhost:8181",
+                "taxi.trips",
+                "id",
+                "2",
+                "4",
+            ],
+            network_mode=f"container:{container.get_wrapped_container().id}",
+            volumes={
+                str(root): {"bind": "/w", "mode": "ro"},
+                str(warehouse): {"bind": str(warehouse), "mode": "rw"},
+            },
+            user="0",
+            remove=True,
+        )
     config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"rest": properties})
     assert _rows(config, "rest:taxi.trips") == [1, 3]
 

@@ -5,20 +5,12 @@ Needs Docker.
 
 from __future__ import annotations
 
-import docker
 import httpx
 import pytest
 
+from tests.docker_helpers import docker_daemon_reachable
 
-def _docker_daemon_reachable() -> bool:
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 

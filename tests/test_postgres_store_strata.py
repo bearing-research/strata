@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 
-import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 from vestigo.provenance import TransformSpec
@@ -17,18 +16,9 @@ from vestigo.store import ArtifactStore
 
 from strata.artifact.cli import _server_store as _configured_server_store
 from strata.notebook.worker_store import NotebookWorkerStore
+from tests.docker_helpers import docker_daemon_reachable
 
-
-def _docker_daemon_reachable() -> bool:
-    """Skip when the Docker daemon is unreachable (only possible locally; CI always has Docker)."""
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]

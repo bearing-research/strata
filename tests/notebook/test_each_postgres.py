@@ -9,23 +9,14 @@ from __future__ import annotations
 
 import sys
 
-import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 from vestigo.sql_backend import PostgresDialect
 
+from tests.docker_helpers import docker_daemon_reachable
 from tests.notebook import test_each
 
-
-def _docker_daemon_reachable() -> bool:
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 pytestmark = [

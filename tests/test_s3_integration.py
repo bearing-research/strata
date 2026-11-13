@@ -7,7 +7,6 @@ container startup makes each test slow.
 import random
 import time
 
-import docker
 import pyarrow as pa
 import pytest
 from pyiceberg.catalog.sql import SqlCatalog
@@ -22,18 +21,9 @@ from strata.iceberg.catalog import object_store_unreachable
 from strata.planner import ReadPlanner
 from strata.types import Filter, FilterOp
 from tests.conftest import MINIO_IMAGE
+from tests.docker_helpers import docker_daemon_reachable
 
-
-def _docker_daemon_reachable() -> bool:
-    """Skip when the Docker daemon is not running (CI always has one)."""
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]

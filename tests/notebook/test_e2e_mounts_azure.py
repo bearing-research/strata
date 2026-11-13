@@ -12,7 +12,6 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import docker
 import pytest
 from azure.storage.blob import BlobServiceClient
 from testcontainers.community.azurite import AzuriteContainer
@@ -29,17 +28,9 @@ from strata.notebook.writer import (
     write_cell,
 )
 from tests.conftest import make_azurite, start_container_or_skip
+from tests.docker_helpers import docker_daemon_reachable
 
-
-def _docker_daemon_reachable() -> bool:
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 

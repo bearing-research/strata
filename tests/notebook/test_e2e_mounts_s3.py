@@ -12,7 +12,6 @@ import io
 import textwrap
 from pathlib import Path
 
-import docker
 import pytest
 from testcontainers.community.minio import MinioContainer
 
@@ -29,18 +28,9 @@ from strata.notebook.writer import (
     write_cell,
 )
 from tests.conftest import MINIO_IMAGE, start_container_or_skip
+from tests.docker_helpers import docker_daemon_reachable
 
-
-def _docker_daemon_reachable() -> bool:
-    """Whether the Docker daemon answers; the package is installed but the daemon may not run."""
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 

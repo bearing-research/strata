@@ -6,7 +6,6 @@ break a migration, and SQLite has none of them.
 
 from __future__ import annotations
 
-import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 from vestigo.provenance import TransformSpec
@@ -16,6 +15,7 @@ from vestigo.tables import TRANSIENT_TABLES
 
 from strata.migrate import MIGRATED_TABLES, migrate, plan_migration
 from strata.notebook.worker_store import NotebookWorkerStore
+from tests.docker_helpers import docker_daemon_reachable
 
 
 def _workers(store):
@@ -45,15 +45,7 @@ def _insert_dangling_build(db_path, build_id: str) -> None:
         conn.close()
 
 
-def _docker_daemon_reachable() -> bool:
-    try:
-        docker.from_env().ping()
-        return True
-    except Exception:
-        return False
-
-
-if not _docker_daemon_reachable():
+if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
