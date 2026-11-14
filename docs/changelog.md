@@ -69,6 +69,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   in DuckDB SQL is still not seen. (#1516)
 
 ### Changed
+- **A SQL cell on a SQLite or DuckDB file reopens ready when the database is unchanged.**
+  Under the default `fingerprint` policy a reopened cell read idle, and the cells reading
+  its result stale, until it ran. The staleness pass now makes the probe a run makes, on
+  a local file with no lake, and the cell reads ready when the database is as its run
+  left it and stale (external) when it changed, after which it is not probed again until
+  it runs. Other drivers still open idle: their probe is a query over the network.
+  (#1548)
 - **A relative local mount path is under the notebook's directory.** `# @mount shared
   ../shared ro` resolved against the server's working directory, so it named a different
   folder depending on where the server started, and a SQL cell's DuckDB view read it from

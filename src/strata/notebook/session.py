@@ -205,6 +205,8 @@ class _OutsideWorld:
 
     inputs: InputFingerprints
     has_rw_mount: bool
+    # A SQL cell's identity with its local database probed (``_probed_reopen_identity``).
+    reopen_identity: str | None = None
 
 
 @dataclass
@@ -319,6 +321,11 @@ class NotebookSession:
         # Local mounts a staleness check found too much of unhashed, as
         # ``(digests_path, root)``, and the task hashing each (``_hash_mounts``).
         self._mounts_to_hash: set[tuple[Path, Path]] = set()
+        # A SQL cell's probe that did not give the identity its run recorded, by
+        # ``(cell id, recorded identity)``: what it gave, ``None`` for a failed probe. Not
+        # probed again until a run records another, so a database being written is not
+        # opened on every pass.
+        self._probe_misses: dict[tuple[str, str], str | None] = {}
         self._mount_hashing: dict[tuple[Path, Path], asyncio.Task[None]] = {}
         self._mount_hash_lock = threading.Lock()
 
@@ -1070,8 +1077,9 @@ class NotebookSession:
             env_hash=env_hash,
         )
 
-    def _outside_world_for(self, cell: Any) -> _OutsideWorld:
-        """One cell's outside-world fingerprints."""
+    def _outside_world_for(self, cell: Any, *, probe: bool = True) -> _OutsideWorld:
+        """One cell's outside-world fingerprints; a SQL cell's database is probed only with
+        *probe*, which a caller holding the staleness lock leaves off."""
         mount_fingerprints, has_rw_mount = self._collect_mount_fingerprints(cell)
         return _OutsideWorld(
             inputs=InputFingerprints(
@@ -1081,7 +1089,39 @@ class NotebookSession:
                 datasets=self._collect_dataset_fingerprints(cell),
             ),
             has_rw_mount=has_rw_mount,
+            reopen_identity=self._probed_reopen_identity(cell) if probe else None,
         )
+
+    def _probed_reopen_identity(self, cell: Any) -> str | None:
+        """A SQL cell's reopen identity with its database probed, as a run would, for a
+        policy that needs the probe (``sql_reopen_identity`` with ``probe``).
+
+        Only for a cell a probe could make ready: not ready, and whose run recorded an
+        identity to compare. A ready one ran in this session as it stands.
+        """
+        recorded = cell.last_reopen_identity
+        if (
+            cell.language != CellLanguage.SQL
+            or cell.status not in (CellStatus.IDLE, CellStatus.STALE)
+            or recorded is None
+            or (cell.id, recorded) in self._probe_misses
+        ):
+            return None
+        from strata.notebook.sql.cell_executor import sql_reopen_identity
+
+        try:
+            identity = sql_reopen_identity(cell, self, probe=True)
+        except Exception:
+            logger.debug("reopen identity unavailable for cell %s", cell.id, exc_info=True)
+            identity = None
+        if identity != recorded:
+            self._probe_misses[(cell.id, recorded)] = identity
+        return identity
+
+    def probed_identity_changed(self, cell: Any) -> bool:
+        """Whether a probe of *cell*'s database gave another identity than its run recorded."""
+        recorded = cell.last_reopen_identity
+        return recorded is not None and self._probe_misses.get((cell.id, recorded)) is not None
 
     def _compute_staleness_locked(
         self,
@@ -1154,13 +1194,13 @@ class NotebookSession:
             # next flush recomputes), so read our own rather than skip the cell's mounts.
             outside = prefetched.get(cell_id)
             if outside is None:
-                outside = self._outside_world_for(cell)
+                outside = self._outside_world_for(cell, probe=False)
             # Same per-variable artifact selection as execution.
             try:
                 key = self._cell_key(analysis, cell_id, outside, env_hash)
             except InputNotFingerprinted:
                 # Prefetched before an edit added the input.
-                outside = self._outside_world_for(cell)
+                outside = self._outside_world_for(cell, probe=False)
                 key = self._cell_key(analysis, cell_id, outside, env_hash)
 
             inputs = cell_provenance_inputs(key.upstream, outside.inputs)
@@ -1210,10 +1250,13 @@ class NotebookSession:
                 )
                 # The generic hash isn't all these cells cache on (a SQL cell's connection and
                 # cache policy, a prompt's model), so the cell's own identity must match what it
-                # recorded; None means it can't be settled without a probe. Only needed when
-                # the cell is not READY; a READY cell ran in this session as it stands.
+                # recorded; None means it can't be settled without a probe, which was made
+                # before the lock for a local database. Only needed when the cell is not
+                # READY; a READY cell ran in this session as it stands.
                 identity_required = keyed_elsewhere and cell.status != CellStatus.READY
                 identity = self.reopen_identity(cell) if identity_required else None
+                if identity_required and identity is None:
+                    identity = outside.reopen_identity
                 identity_holds = not identity_required or (
                     identity is not None and identity == (cell.last_reopen_identity or "")
                 )
@@ -1580,6 +1623,7 @@ class NotebookSession:
         reads: dict[str, Any] | None,
         key_parts: dict[str, Any] | None,
         writes: dict[str, Any] | None = None,
+        reopen_identity: str | None = None,
     ) -> None:
         """Persist the last successful execution provenance for uncached cells.
 
@@ -1588,6 +1632,8 @@ class NotebookSession:
         *reads*, what the run moved, in the reads index, and *writes*, what it wrote
         through its read-write mounts, in the writes index. A run that wrote nothing
         (a cache hit, a batched cell) passes no *writes* and drops the cell's entry.
+        *reopen_identity* is one the run settled itself (a SQL cell's probed database);
+        without it the identity is computed here.
         """
         from strata.notebook import reads_index, table_index, writes_index
         from strata.notebook.runtime_state import persist_cell_provenance
@@ -1601,7 +1647,7 @@ class NotebookSession:
         cell.last_key_parts = key_parts
         # So a reopen compares like with like, not on a hash that never covered the
         # connection read or the model asked.
-        cell.last_reopen_identity = self.reopen_identity(cell)
+        cell.last_reopen_identity = reopen_identity or self.reopen_identity(cell)
         persist_cell_provenance(
             self.path,
             cell_id,

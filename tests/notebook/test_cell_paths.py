@@ -486,6 +486,7 @@ class TestSql:
             "execution_method": "cached",
             "artifact_uri": "strata://t",
             "mutation_warnings": [{"variable": "x"}],
+            "reopen_identity": "probed",
         }
         run, _, calls = path(answer)
         calls.stored_displays = [self.STORED]
@@ -494,7 +495,15 @@ class TestSql:
 
         args, kwargs = RECORDED
         assert calls.recorded == [
-            (args, {**kwargs, "table_reads": [{"table": "t"}, {"table": "lake"}]})
+            (
+                args,
+                {
+                    **kwargs,
+                    "table_reads": [{"table": "t"}, {"table": "lake"}],
+                    # What the run's own probes settled, for a reopen to compare.
+                    "reopen_identity": "probed",
+                },
+            )
         ]
         assert calls.cell.cache_hit is True
         assert calls.store_inline == [
