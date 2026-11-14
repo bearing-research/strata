@@ -114,6 +114,7 @@ class ExecutorHost(Protocol):
         reads: dict[str, Any] | None,
         key_parts: dict[str, Any] | None,
         writes: dict[str, Any] | None = None,
+        reopen_identity: str | None = None,
     ) -> None: ...
 
     def remember_dataset_fingerprint(self, spec: DatasetSpec, fingerprint: str) -> None: ...

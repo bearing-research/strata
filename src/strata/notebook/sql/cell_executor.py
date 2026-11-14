@@ -320,6 +320,9 @@ async def execute_sql_cell(
                     session=session,
                     cell_id=cell_id,
                 )
+                hit["reopen_identity"] = _run_identity(
+                    spec, connection_id, policy, probes, reuse=not runs_every_time
+                )
                 return _with_reads(_report_snapshots(_report_pin(hit, pin), pinned_lake), lake)
 
     # ---- execute query ---------------------------------------------
@@ -418,6 +421,14 @@ async def execute_sql_cell(
             "execution_method": "sql",
             "artifact_uri": uri,
             "mutation_warnings": [],
+            # A result keyed on its rows is never looked up, so no probe vouches for it.
+            "reopen_identity": _run_identity(
+                spec,
+                connection_id,
+                policy,
+                probes,
+                reuse=not (runs_every_time or annotations.nocache or moved is not None),
+            ),
         },
         pin,
     )
@@ -837,13 +848,54 @@ def _credentials(session: ExecutorHost) -> CredentialResolver:
     )
 
 
-def sql_reopen_identity(cell: Any, session: Any) -> str | None:
+# Drivers whose probe reads a local file, cheap enough for a staleness pass to repeat.
+_PROBED_BY_STALENESS = frozenset({"duckdb", "sqlite"})
+
+
+def _probed_by_staleness(spec: ConnectionSpec) -> bool:
+    """Whether a staleness pass may probe *spec*'s database: a local file and no lake,
+    whose catalogs and mounts are reached over the network or hashed."""
+    return spec.driver in _PROBED_BY_STALENESS and not any(lake_options(spec))
+
+
+def _reopen_identity(connection_id: str, policy: Any, probes: tuple[Any, Any] | None = None) -> str:
+    """The connection and cache policy, and what the probes gave, when *probes* is set."""
+    digest = hashlib.sha256(connection_id.encode() + b"|" + policy.salt)
+    for token in probes or ():
+        value = b"" if token is None else token.value
+        digest.update(len(value).to_bytes(8, "big") + value)
+    return digest.hexdigest()
+
+
+def _run_identity(
+    spec: ConnectionSpec,
+    connection_id: str,
+    policy: Any,
+    probes: tuple[Any, Any] | None,
+    *,
+    reuse: bool,
+) -> str | None:
+    """The identity a run records when its probes settle it, so a staleness pass that
+    probes again can compare. ``None`` when they do not: no probe ran, the database is
+    not one a pass probes, the rows are not reused (*reuse*), or the token is good for
+    this session only."""
+    if probes is None or not reuse or not _probed_by_staleness(spec):
+        return None
+    freshness = probes[0]
+    if freshness is not None and freshness.is_session_only:
+        return None
+    return _reopen_identity(connection_id, policy, probes)
+
+
+def sql_reopen_identity(cell: Any, session: Any, *, probe: bool = False) -> str | None:
     """What a reopened SQL cell's cached rows depend on beyond its query.
 
     The connection and cache policy, which the generic triplet does not see.
-    ``None`` for ``fingerprint`` and ``snapshot`` policies, which need a query
-    to the source. ``forever``, ``session`` and ``ttl`` settle here (this
-    session's salt, this moment's ttl bucket).
+    ``forever``, ``session`` and ``ttl`` settle here (this session's salt, this
+    moment's ttl bucket). ``fingerprint`` and ``snapshot`` need a query to the
+    source: ``None``. With *probe*, the reverse: the identity those policies give
+    once a local database (``_probed_by_staleness``) is probed, as a run records it
+    (``_run_identity``), and ``None`` for a policy that needs no probe.
     """
     annotations = parse_annotations(cell.source, CellLanguage.SQL)
     if annotations.sql is None or not annotations.sql.connection:
@@ -867,7 +919,15 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
         )
     except CachePolicyError:
         return None
-    if policy.freshness_required:
+    probed = policy.freshness_required
+    if probe != probed:
+        return None
+    if probed and not (
+        _probed_by_staleness(spec)
+        and not annotations.sql.write
+        and not annotations.nocache
+        and not analysis.unresolved_tables
+    ):
         return None
     try:
         # No credentials: resolving may hit a secret manager, and the identity
@@ -878,7 +938,20 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
         )
     except (CredentialError, ValueError, OSError):
         return None
-    return hashlib.sha256(connection_id.encode() + b"|" + policy.salt).hexdigest()
+    if not probed:
+        return _reopen_identity(connection_id, policy)
+    try:
+        probes = _run_probes(
+            adapter,
+            _confined(session, runtime_spec, None),
+            analysis.tables,
+            policy,
+            session.path / ".strata" / DIGESTS_FILE,
+        )
+    except Exception:  # noqa: BLE001 - an unreadable database is not settled
+        logger.debug("could not probe the database of cell %s", cell.id, exc_info=True)
+        return None
+    return _run_identity(spec, connection_id, policy, probes, reuse=True)
 
 
 # The files the server opens for a connection, by driver.

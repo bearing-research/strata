@@ -1378,7 +1378,9 @@ class TestWhatASqlCellRemembersAcrossAReopen:
     """SQL cells across a reopen.
 
     Their artifacts are keyed under the SQL hash, so the recorded generic triplet
-    is what keeps them ready. Status is not persisted, so a cold open starts idle.
+    is what keeps them ready. Status is not persisted, so a cold open starts idle; a
+    policy that probes the database is probed again by the staleness pass, for a
+    local file.
     """
 
     @pytest.mark.asyncio
@@ -1458,10 +1460,52 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         assert status != CellStatus.READY
 
     @pytest.mark.asyncio
-    async def test_the_default_policy_waits_to_be_asked(self, tmp_path):
-        """``fingerprint`` promises to check the source, and opening a notebook does not check."""
+    async def test_the_default_policy_probes_a_local_database_and_reads_ready(self, tmp_path):
+        """``fingerprint`` checks the source; the staleness pass does, for a local file."""
         from strata.notebook.models import CellStatus
 
+        status = await self._run_then_reopen(
+            tmp_path, "-- @sql connection=db\nSELECT id FROM events\n"
+        )
+
+        assert status == CellStatus.READY, "a reopen of an unchanged database went idle"
+
+    @pytest.mark.asyncio
+    async def test_the_default_policy_after_the_database_changed_is_not_ready(self, tmp_path):
+        """The probe that keeps it ready sees a row written since the run."""
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.models import CellStatus
+
+        db_path = tmp_path / "events.sqlite"
+        _seed_sqlite(db_path)
+        nb_dir = _build_notebook_with_sql_cell(
+            tmp_path, db_path=db_path, cell_source="-- @sql connection=db\nSELECT id FROM events\n"
+        )
+        session = _make_session(nb_dir)
+        result = await CellExecutor(session).execute_cell("c1", _read_cell(nb_dir, "c1"))
+        assert result.success, result.error
+        session.compute_staleness()
+        session.mark_executed_ready("c1")
+        assert _make_session(nb_dir).compute_staleness()["c1"].status == CellStatus.READY
+
+        with closing(sqlite3.connect(db_path)) as conn, conn:
+            conn.execute("INSERT INTO events (id, name, value) VALUES (4, 'delta', 40)")
+
+        reopened = _make_session(nb_dir)
+        assert reopened.compute_staleness()["c1"].status != CellStatus.READY, (
+            "a reopen served rows the database no longer holds as ready"
+        )
+        rerun = await CellExecutor(reopened).execute_cell("c1", _read_cell(nb_dir, "c1"))
+        assert rerun.success and not rerun.cache_hit, "the probe and the run disagree"
+
+    @pytest.mark.asyncio
+    async def test_a_query_whose_tables_are_named_at_run_time_is_not_probed(
+        self, tmp_path, monkeypatch
+    ):
+        """It runs every time, so a reopen has no cached rows to vouch for."""
+        from strata.notebook.models import CellStatus
+
+        _with_unresolved_table(monkeypatch)
         status = await self._run_then_reopen(
             tmp_path, "-- @sql connection=db\nSELECT id FROM events\n"
         )
