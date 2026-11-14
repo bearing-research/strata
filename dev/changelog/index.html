@@ -4218,6 +4218,9 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A reopen shows the worker a cell last ran on.</strong> A cell's header names the remote worker
+  and transport its last run used; a reopen dropped them until the cell ran again. They
+  are now kept in <code>.strata/runtime.json</code>, and a local run clears them. (#1547)</li>
 <li><strong><code>run_snippet</code> needs <code>notebook:write</code> as well as <code>notebook:execute</code>.</strong> It adds a
   cell before running it, so a caller allowed to run cells but not edit them could add
   one. (#1534)</li>
