@@ -60,10 +60,6 @@ KNOWN_RELOAD_GAPS = {
         "a cell whose mount names a credential loses its artifact_uri and artifact_uris "
         "after a reopen"
     ),
-    "fanout": (
-        "a per_variant cell's artifact_uri and artifact_uris are not restored, so its "
-        "consumer reads stale (upstream, unavailable) after a reopen"
-    ),
     "mounts": "a cell with a read-write mount loses its artifact_uri and artifact_uris",
     "sql": (
         "a SQL cell that ran reads idle after a reopen and loses its artifact_uris, so "

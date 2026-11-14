@@ -741,15 +741,25 @@ class NotebookSession:
         For cell kinds keyed under their own scheme (SQL, prompt, widget) nothing else
         repopulates ``artifact_uris`` on open, and a downstream cell would otherwise
         compute a provenance hash that no longer matches its record.
+
+        A ``# @per_variant`` cell stores one artifact per variant, which its run runs in
+        the order of the group's tabs, so it ends pointing at the last one stored.
         """
-        store = self.get_artifact_manager().artifact_store
-        notebook_id = self.notebook_state.id
+        manager = self.get_artifact_manager()
+        variants: tuple[str | None, ...] = (None,)
+        fanout = self.dag.fanout_cells.get(cell.id) if self.dag is not None else None
+        if fanout is not None:
+            group = next(g for g in self.dag.variant_groups if g.group == fanout.group)
+            variants = tuple(name for _, name in group.members)
         for name in cell.defines:
-            artifact = store.get_latest_version(f"nb_{notebook_id}_cell_{cell.id}_var_{name}")
-            if artifact is not None:
-                uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
-                cell.artifact_uris[name] = uri
-                cell.artifact_uri = uri
+            for variant in variants:
+                artifact = manager.artifact_store.get_latest_version(
+                    manager.cell_artifact_id(cell.id, name, variant=variant)
+                )
+                if artifact is not None:
+                    uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
+                    cell.artifact_uris[name] = uri
+                    cell.artifact_uri = uri
 
     def _restore_loop_carry(self, cell: Any, provenance_hash: str) -> None:
         """Point a loop cell at its final state, as the run that stored it does.
