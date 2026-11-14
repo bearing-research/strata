@@ -1178,14 +1178,18 @@ class TestBuildPolling:
     async def test_shutdown_cancels_builds(self, build_runner, artifact_store, build_store):
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
+        claimed = asyncio.Event()
+
         # Slow execution, claimed the way _execute_build claims it.
         async def slow_execute(build, already_claimed=False):
             build_store.claim_build(build.build_id, build_runner._runner_id)
+            claimed.set()
             await asyncio.sleep(10.0)  # Long sleep
 
         with patch.object(build_runner, "_execute_build", slow_execute):
             await build_runner.start()
-            await asyncio.sleep(0.1)  # Let it start
+            # Until the build is running, not a fixed window a loaded runner can miss.
+            await asyncio.wait_for(claimed.wait(), timeout=10.0)
             await build_runner.stop()
 
         # Build should be marked as failed due to shutdown
