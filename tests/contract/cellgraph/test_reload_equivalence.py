@@ -65,9 +65,6 @@ KNOWN_RELOAD_GAPS = {
         "a SQL cell that ran reads idle after a reopen and loses its artifact_uris, so "
         "the cell reading its result reads stale (upstream)"
     ),
-    "worker": (
-        "a cell run on a worker loses remote_worker and remote_transport, which its header shows"
-    ),
 }
 
 
