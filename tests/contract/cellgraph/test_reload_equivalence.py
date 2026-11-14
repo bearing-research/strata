@@ -56,10 +56,6 @@ def _differences(live: Any, reopened: Any) -> dict[str, dict[str, Any]]:
 # a bug to fix in its own PR; a fixed one passes here, and the strict xfail then fails
 # until its entry is removed.
 KNOWN_RELOAD_GAPS = {
-    "cell_level_ref": (
-        "a loop cell's artifact_uri is not restored, so the cell after it (@after lp) "
-        "reads stale (upstream) after a reopen while the live session reads it ready"
-    ),
     "credentials": (
         "a cell whose mount names a credential loses its artifact_uri and artifact_uris "
         "after a reopen"
