@@ -4234,6 +4234,9 @@ exhaustive commit history.</p>
 <li><strong>A cell after a loop reads ready after a reopen.</strong> A cell ordered after a <code># @loop</code>
   cell (<code># @after lp</code>) keys on the loop's final state, which a reopen did not point the
   loop at, so the cell read stale (upstream) until it ran again. (#1545)</li>
+<li><strong>A <code># @per_variant</code> cell and what reads it read ready after a reopen.</strong> A reopen looked
+  for the cell's result under its plain id, not its <code>@variant=</code> ones, so the next
+  <code># @per_variant</code> cell read idle and the cell that reads them stale (upstream). (#1546)</li>
 <li><strong>Downloads close the stored blob however the client leaves, and dropped catalogs close.</strong>
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the
