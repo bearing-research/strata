@@ -751,6 +751,24 @@ class NotebookSession:
                 cell.artifact_uris[name] = uri
                 cell.artifact_uri = uri
 
+    def _restore_loop_carry(self, cell: Any, provenance_hash: str) -> None:
+        """Point a loop cell at its final state, as the run that stored it does.
+
+        A loop's ``artifact_uri`` is its canonical carry even when no cell reads it, and a
+        cell ordered after the loop (``# @after``) keys on that.
+        """
+        loop = parse_annotations(cell.source, cell.language).loop
+        if loop is None:
+            return
+        manager = self.artifact_manager
+        carry = manager.artifact_store.get_latest_version(
+            manager.cell_artifact_id(cell.id, loop.carry)
+        )
+        if carry is not None and carry.provenance_hash == derive_subkey(
+            provenance_hash, loop.carry
+        ):
+            cell.artifact_uri = f"strata://artifact/{carry.id}@v={carry.version}"
+
     def _restore_ready_runtime_state(
         self,
         previous_cells: dict[str, Any],
@@ -1225,6 +1243,7 @@ class NotebookSession:
                     uri = f"strata://artifact/{artifact_id}@v={version}"
                     cell.artifact_uris[var_name] = uri
                     cell.artifact_uri = uri  # backward compat
+                self._restore_loop_carry(cell, provenance_hash)
                 cell.display_outputs = cached_display_outputs or []
                 cell.display_output = cached_display_outputs[-1] if cached_display_outputs else None
 
