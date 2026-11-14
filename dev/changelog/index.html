@@ -3926,6 +3926,13 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A SQL cell on a SQLite or DuckDB file reopens ready when the database is unchanged.</strong>
+  Under the default <code>fingerprint</code> policy a reopened cell read idle, and the cells reading
+  its result stale, until it ran. The staleness pass now makes the probe a run makes, on
+  a local file with no lake, and the cell reads ready when the database is as its run
+  left it and stale (external) when it changed, after which it is not probed again until
+  it runs. Other drivers still open idle: their probe is a query over the network.
+  (#1548)</li>
 <li><strong>A relative local mount path is under the notebook's directory.</strong> <code># @mount shared
   ../shared ro</code> resolved against the server's working directory, so it named a different
   folder depending on where the server started, and a SQL cell's DuckDB view read it from

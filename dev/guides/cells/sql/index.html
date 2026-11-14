@@ -3397,10 +3397,16 @@
 </tr>
 </tbody>
 </table>
-<p><strong>On reopen.</strong> <code>fingerprint</code> and <code>snapshot</code> open idle. Both say, in the cell's
-own annotation, that the cached rows are good only while the source still
-agrees, and asking the source is a query, not something to do while opening a
-notebook. <code>forever</code>, <code>session</code> and <code>ttl</code> can come back ready, because each has
+<p><strong>On reopen.</strong> <code>fingerprint</code> and <code>snapshot</code> say, in the cell's own annotation,
+that the cached rows are good only while the source still agrees. On a SQLite or
+DuckDB file with no lake, the staleness pass asks it, with the same probe a run
+makes, so the cell comes back ready if the database is as the run left it and
+stale if it changed. A cell left stale is not probed again in that session
+until it runs. A cell whose run did not reuse its rows (a table named only
+at run time, <code>@nocache</code>, a database that changed during the query) opens idle.
+On any other connection asking the source is a query over the network, not
+something to do while opening a notebook, so the cell opens idle until it runs.
+<code>forever</code>, <code>session</code> and <code>ttl</code> can come back ready, because each has
 already said what it depends on and that is settled locally: a <code>session</code> cell
 matches only within the session that ran it, and a <code>ttl</code> cell only inside the
 same time bucket, so one whose window has passed comes back idle anyway.</p>

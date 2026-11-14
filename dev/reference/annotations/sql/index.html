@@ -3215,7 +3215,7 @@ has no anchor when the cell mutates state.</p>
 <tbody>
 <tr>
 <td><code>fingerprint</code></td>
-<td>Default. Probe-derived freshness token + schema fingerprint folded into the hash. The cell opens idle, because trusting the cache means asking the source.</td>
+<td>Default. Probe-derived freshness token + schema fingerprint folded into the hash. A reopen probes a SQLite or DuckDB file again and opens the cell ready if it is unchanged, stale if it changed; on other drivers the cell opens idle, because trusting the cache means asking the source.</td>
 </tr>
 <tr>
 <td><code>forever</code></td>

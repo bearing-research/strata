@@ -117,10 +117,16 @@ A SQL cell's **provenance hash** folds together:
 | `ttl=<seconds>` | `floor(now / ttl)` in the salt; bucketed time-based invalidation.                                                         | Stale-tolerant aggregations.       |
 | `snapshot`      | Pins the query to one point in time through the warehouse's time travel (Snowflake, BigQuery), or to the Iceberg snapshots of a DuckDB connection's catalog tables. Refused on other drivers before a connection opens. See [`@cache`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache). | Reproducibility-critical reads.    |
 
-**On reopen.** `fingerprint` and `snapshot` open idle. Both say, in the cell's
-own annotation, that the cached rows are good only while the source still
-agrees, and asking the source is a query, not something to do while opening a
-notebook. `forever`, `session` and `ttl` can come back ready, because each has
+**On reopen.** `fingerprint` and `snapshot` say, in the cell's own annotation,
+that the cached rows are good only while the source still agrees. On a SQLite or
+DuckDB file with no lake, the staleness pass asks it, with the same probe a run
+makes, so the cell comes back ready if the database is as the run left it and
+stale if it changed. A cell left stale is not probed again in that session
+until it runs. A cell whose run did not reuse its rows (a table named only
+at run time, `@nocache`, a database that changed during the query) opens idle.
+On any other connection asking the source is a query over the network, not
+something to do while opening a notebook, so the cell opens idle until it runs.
+`forever`, `session` and `ttl` can come back ready, because each has
 already said what it depends on and that is settled locally: a `session` cell
 matches only within the session that ran it, and a `ttl` cell only inside the
 same time bucket, so one whose window has passed comes back idle anyway.
