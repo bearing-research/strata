@@ -360,7 +360,7 @@ exhaustive commit history.
 ### Fixed
 - **A reopen shows the worker a cell last ran on.** A cell's header names the remote worker
   and transport its last run used; a reopen dropped them until the cell ran again. They
-  are now kept in `.strata/runtime.json`, and a local run clears them. (#PRNUM)
+  are now kept in `.strata/runtime.json`, and a local run clears them. (#1547)
 - **`run_snippet` needs `notebook:write` as well as `notebook:execute`.** It adds a
   cell before running it, so a caller allowed to run cells but not edit them could add
   one. (#1534)
