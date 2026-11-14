@@ -1525,6 +1525,7 @@ class NotebookSession:
             cell.display_outputs = []
             cell.display_output = None
 
+        shown = (cell.remote_worker, cell.remote_transport)
         if (
             result.remote_worker
             or result.remote_transport
@@ -1545,14 +1546,17 @@ class NotebookSession:
                 cell.remote_build_id = result.remote_build_id
                 cell.remote_build_state = result.remote_build_state
                 cell.remote_error_code = result.remote_error_code
-            return
-
-        if result.execution_method != "cached":
+        elif result.execution_method != "cached":
             cell.remote_worker = None
             cell.remote_transport = None
             cell.remote_build_id = None
             cell.remote_build_state = None
             cell.remote_error_code = None
+        if (cell.remote_worker, cell.remote_transport) != shown:
+            # The cell's header names them, so a reopen shows them too.
+            from strata.notebook.runtime_state import persist_cell_remote
+
+            persist_cell_remote(self.path, cell_id, cell.remote_worker, cell.remote_transport)
 
     def record_successful_execution_provenance(
         self,
