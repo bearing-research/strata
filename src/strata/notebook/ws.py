@@ -3202,7 +3202,7 @@ async def _handle_dependency_add(
         return
 
     try:
-        await session.submit_environment_job(action="add", package=package)
+        await session.environment_jobs.submit(action="add", package=package)
     except RuntimeError as exc:
         await websocket.send_text(
             _json_encode(
@@ -3251,7 +3251,7 @@ async def _handle_dependency_remove(
         return
 
     try:
-        await session.submit_environment_job(action="remove", package=package)
+        await session.environment_jobs.submit(action="remove", package=package)
     except RuntimeError as exc:
         await websocket.send_text(
             _json_encode(

@@ -1017,10 +1017,10 @@ async def test_an_environment_panel_add_attests_the_installed_lockfile(tmp_path,
 
     monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", fake_uv)
     before_ms = int(time.time() * 1000)
-    await session.submit_environment_job(action="add", package="six")
-    await session.wait_for_environment_job()
+    await session.environment_jobs.submit(action="add", package="six")
+    await session.environment_jobs.wait()
 
-    assert session.serialize_environment_job_state()["status"] == "completed"
+    assert session.environment_jobs.serialize_state()["status"] == "completed"
     _assert_install_recorded(session, before_ms)
 
 
