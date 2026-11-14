@@ -1161,15 +1161,18 @@ class TestBuildPolling:
         artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
 
         executed_builds = []
+        executed = asyncio.Event()
 
         async def mock_execute(build, already_claimed=False):
             executed_builds.append(build.build_id)
             build_store.start_build(build.build_id)
             build_store.complete_build(build.build_id)
+            executed.set()
 
         with patch.object(build_runner, "_execute_build", mock_execute):
             await build_runner.start()
-            await asyncio.sleep(0.2)  # Wait for polling
+            # Until a poll picks it up, not a fixed window a loaded runner can miss.
+            await asyncio.wait_for(executed.wait(), timeout=10.0)
             await build_runner.stop()
 
         assert build_id in executed_builds
