@@ -47,6 +47,7 @@ from strata.notebook.process_tree import (
 )
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.read_audit import ReadFinding
+from strata.notebook.run_scope import RunScope
 from strata.notebook.table_writes import TableWriteError, write_back_failed
 from strata.notebook.team_store import TeamPull
 
@@ -187,166 +188,163 @@ async def run_batch(
 
     completed = False
     failed_cell_id: str | None = None
-    proc: asyncio.subprocess.Process | None = None
 
     with ExitStack() as token_scope:
         try:
-            upstream_inputs = batch_resolve_upstream_inputs(host, context, cell_specs, batch_tmpdir)
-            # One token for the batch: Run All acts as whoever started it, and each
-            # cell's scans count under it by cell id. Minted after the inputs are
-            # staged, since the batch's timeout runs from the spawn.
-            run_token = token_scope.enter_context(context.run_token(batch_timeout_seconds))
-            manifest = {
-                "cells": cell_specs,
-                "upstream_inputs": upstream_inputs,
-                **context.harness_fields(),
-            }
-            manifest["run_token_on_stdin"] = True
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            # Leaving the scope by any exception, cancellation included, stops the
+            # harness's process tree and its drains before the files below go: none may
+            # leave the user's code running, unreaped.
+            async with RunScope("Batch execution") as scope:
+                upstream_inputs = batch_resolve_upstream_inputs(
+                    host, context, cell_specs, batch_tmpdir
+                )
+                # One token for the batch: Run All acts as whoever started it, and each
+                # cell's scans count under it by cell id. Minted after the inputs are
+                # staged, since the batch's timeout runs from the spawn.
+                run_token = token_scope.enter_context(context.run_token(batch_timeout_seconds))
+                manifest = {
+                    "cells": cell_specs,
+                    "upstream_inputs": upstream_inputs,
+                    **context.harness_fields(),
+                }
+                manifest["run_token_on_stdin"] = True
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-            lifeline_fds, lifeline_vars = lifeline_handoff()
-            env = identity_env(
-                context.harness_env(
-                    {
-                        "STRATA_BATCH_FRAME_FD": str(frame_w),
-                        "STRATA_BATCH_RESP_FD": str(resp_r),
-                        "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
-                        **lifeline_vars,
-                    }
-                ),
-                harness_user,
-            )
-            hand_over(batch_tmpdir, harness_user)
-
-            # New process group so a timeout SIGKILL reaches every descendant. Mirrors
-            # _run_harness.
-            proc = await asyncio.create_subprocess_exec(
-                str(venv_python),
-                str(context.harness_path),
-                "--batch",
-                str(manifest_path),
-                env=env,
-                pass_fds=(frame_w, resp_r, *lifeline_fds),
-                stdin=asyncio.subprocess.PIPE if run_token is not None else None,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(host.path),
-                **spawn_kwargs(harness_user),
-                **subprocess_kwargs_for_new_group(),
-            )
-
-            if run_token is not None:
-                assert proc.stdin is not None
-                proc.stdin.write(f"{run_token}\n".encode())
-                proc.stdin.close()
-
-            # Close the parent's copies of harness-side fds so EOF detection works on exit.
-            os.close(frame_w)
-            os.close(resp_r)
-            frame_w = -1  # mark already-closed for finally
-            resp_r = -1
-
-            # Drain stdout/stderr concurrently to prevent pipe-buffer deadlock (no per-cell
-            # attribution).
-            assert proc.stdout is not None
-            assert proc.stderr is not None
-            stdout_task = asyncio.create_task(_drain_stream(proc.stdout))
-            stderr_task = asyncio.create_task(_drain_stream(proc.stderr))
-
-            # The default 64 KiB limit would make readline() raise on any frame embedding a big
-            # stdout capture or display payload, aborting the batch.
-            loop = asyncio.get_running_loop()
-            frame_reader = asyncio.StreamReader(limit=SUBPROCESS_LINE_LIMIT, loop=loop)
-            frame_protocol = asyncio.StreamReaderProtocol(frame_reader, loop=loop)
-            frame_file = os.fdopen(frame_r, "rb")
-            frame_r = -1  # ownership transferred to file
-            await loop.connect_read_pipe(lambda: frame_protocol, frame_file)
-
-            # Sync os.write: the kernel pipe buffer absorbs our small JSON responses.
-            resp_w_fd = resp_w
-            resp_w = -1  # ownership transferred
-
-            def send_response(payload: dict) -> None:
-                line = (json.dumps(payload) + "\n").encode("utf-8")
-                os.write(resp_w_fd, line)
-
-            # Per-cell watchdog, integrated into the service loop's readline via wait_for (no
-            # separate task). On timeout the loop records the cell and SIGKILLs the harness;
-            # readline then returns "" and the loop exits. Cells with explicit timeouts aren't
-            # batchable, so the default applies to every cell.
-            watchdog_state: dict[str, Any] = {
-                "active_cell_id": None,
-                "active_started_at": None,
-                "active_timeout": cell_timeout_seconds,
-                "timed_out": False,
-                "timeout_cell_id": None,
-                "proc": proc,
-            }
-
-            try:
-                end_reason, failed_cell_id = await asyncio.wait_for(
-                    batch_service_loop(
-                        host,
-                        context,
-                        frame_reader,
-                        send_response,
-                        cell_results,
-                        batch_tmpdir,
-                        # Sources frozen at partition time: ``cell.source`` can change under a
-                        # running batch, and hashing it would file outputs under the edit's key.
-                        executed_sources={
-                            str(spec.get("cell_id", "")): str(spec.get("source", ""))
-                            for spec in cell_specs
-                        },
-                        provenance=dict(provenance or {}),
-                        use_cache=use_cache,
-                        on_cell_event=on_cell_event,
-                        on_cell_start=on_cell_start,
-                        watchdog_state=watchdog_state,
+                lifeline_fds, lifeline_vars = lifeline_handoff()
+                env = identity_env(
+                    context.harness_env(
+                        {
+                            "STRATA_BATCH_FRAME_FD": str(frame_w),
+                            "STRATA_BATCH_RESP_FD": str(resp_r),
+                            "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
+                            **lifeline_vars,
+                        }
                     ),
-                    timeout=batch_timeout_seconds,
+                    harness_user,
                 )
-                completed = end_reason == "complete"
-            except TimeoutError:
-                # SIGTERM the whole tree; proc.kill() alone would leak user-spawned children.
-                await terminate_subprocess_tree(proc)
-                end_reason = "subprocess_died"
-                completed = False
-            finally:
-                # Close the response fd so a still-live harness sees EOF.
+                hand_over(batch_tmpdir, harness_user)
+
+                # New process group so a timeout SIGKILL reaches every descendant. Mirrors
+                # _run_harness.
+                proc = scope.own(
+                    await asyncio.create_subprocess_exec(
+                        str(venv_python),
+                        str(context.harness_path),
+                        "--batch",
+                        str(manifest_path),
+                        env=env,
+                        pass_fds=(frame_w, resp_r, *lifeline_fds),
+                        stdin=asyncio.subprocess.PIPE if run_token is not None else None,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=str(host.path),
+                        **spawn_kwargs(harness_user),
+                        **subprocess_kwargs_for_new_group(),
+                    )
+                )
+
+                if run_token is not None:
+                    assert proc.stdin is not None
+                    proc.stdin.write(f"{run_token}\n".encode())
+                    proc.stdin.close()
+
+                # Close the parent's copies of harness-side fds so EOF detection works on exit.
+                os.close(frame_w)
+                os.close(resp_r)
+                frame_w = -1  # mark already-closed for finally
+                resp_r = -1
+
+                # Drain stdout/stderr concurrently to prevent pipe-buffer deadlock (no per-cell
+                # attribution).
+                assert proc.stdout is not None
+                assert proc.stderr is not None
+                stdout_task = scope.start(_drain_stream(proc.stdout))
+                stderr_task = scope.start(_drain_stream(proc.stderr))
+
+                # The default 64 KiB limit would make readline() raise on any frame embedding a big
+                # stdout capture or display payload, aborting the batch.
+                loop = asyncio.get_running_loop()
+                frame_reader = asyncio.StreamReader(limit=SUBPROCESS_LINE_LIMIT, loop=loop)
+                frame_protocol = asyncio.StreamReaderProtocol(frame_reader, loop=loop)
+                frame_file = os.fdopen(frame_r, "rb")
+                frame_r = -1  # ownership transferred to file
+                await loop.connect_read_pipe(lambda: frame_protocol, frame_file)
+
+                # Sync os.write: the kernel pipe buffer absorbs our small JSON responses.
+                resp_w_fd = resp_w
+                resp_w = -1  # ownership transferred
+
+                def send_response(payload: dict) -> None:
+                    line = (json.dumps(payload) + "\n").encode("utf-8")
+                    os.write(resp_w_fd, line)
+
+                # Per-cell watchdog, integrated into the service loop's readline via wait_for (no
+                # separate task). On timeout the loop records the cell and SIGKILLs the harness;
+                # readline then returns "" and the loop exits. Cells with explicit timeouts aren't
+                # batchable, so the default applies to every cell.
+                watchdog_state: dict[str, Any] = {
+                    "active_cell_id": None,
+                    "active_started_at": None,
+                    "active_timeout": cell_timeout_seconds,
+                    "timed_out": False,
+                    "timeout_cell_id": None,
+                    "proc": proc,
+                }
+
                 try:
-                    os.close(resp_w_fd)
-                except OSError:
-                    pass
+                    end_reason, failed_cell_id = await asyncio.wait_for(
+                        batch_service_loop(
+                            host,
+                            context,
+                            frame_reader,
+                            send_response,
+                            cell_results,
+                            batch_tmpdir,
+                            # Sources frozen at partition time: ``cell.source`` can change under a
+                            # running batch, and hashing it would file outputs under the edit's key.
+                            executed_sources={
+                                str(spec.get("cell_id", "")): str(spec.get("source", ""))
+                                for spec in cell_specs
+                            },
+                            provenance=dict(provenance or {}),
+                            use_cache=use_cache,
+                            on_cell_event=on_cell_event,
+                            on_cell_start=on_cell_start,
+                            watchdog_state=watchdog_state,
+                        ),
+                        timeout=batch_timeout_seconds,
+                    )
+                    completed = end_reason == "complete"
+                except TimeoutError:
+                    # SIGTERM the whole tree; proc.kill() alone would leak user-spawned children.
+                    await terminate_subprocess_tree(proc)
+                    end_reason = "subprocess_died"
+                    completed = False
+                finally:
+                    # Close the response fd so a still-live harness sees EOF.
+                    try:
+                        os.close(resp_w_fd)
+                    except OSError:
+                        pass
 
-            # A watchdog kill ends the loop as "subprocess_died"; override with the timeout
-            # details so the dispatcher sees which cell hung.
-            if watchdog_state["timed_out"] and watchdog_state["timeout_cell_id"]:
-                timed_out_id = watchdog_state["timeout_cell_id"]
-                timed_out_result = BatchCellResult(
-                    cell_id=timed_out_id,
-                    status="cell_error",
-                    error=cell_timeout_message(watchdog_state["active_timeout"]),
-                )
-                cell_results[timed_out_id] = timed_out_result
-                if on_cell_event is not None:
-                    await on_cell_event(timed_out_result)
-                end_reason = "cell_timeout"
-                failed_cell_id = timed_out_id
-                completed = False
+                # A watchdog kill ends the loop as "subprocess_died"; override with the timeout
+                # details so the dispatcher sees which cell hung.
+                if watchdog_state["timed_out"] and watchdog_state["timeout_cell_id"]:
+                    timed_out_id = watchdog_state["timeout_cell_id"]
+                    timed_out_result = BatchCellResult(
+                        cell_id=timed_out_id,
+                        status="cell_error",
+                        error=cell_timeout_message(watchdog_state["active_timeout"]),
+                    )
+                    cell_results[timed_out_id] = timed_out_result
+                    if on_cell_event is not None:
+                        await on_cell_event(timed_out_result)
+                    end_reason = "cell_timeout"
+                    failed_cell_id = timed_out_id
+                    completed = False
 
-            await proc.wait()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-        except asyncio.CancelledError:
-            # As _run_harness: a cancelled run (a closed socket) must not leave the
-            # harness running the user's code, unreaped.
-            if proc is not None:
-                logger.info(
-                    "Batch execution cancelled; terminating harness subprocess tree pid=%s",
-                    proc.pid,
-                )
-                await asyncio.shield(terminate_subprocess_tree(proc))
-            raise
+                await proc.wait()
+                await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
         finally:
             for fd in (frame_w, resp_r, frame_r, resp_w):
                 if fd >= 0:
