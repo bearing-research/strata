@@ -747,9 +747,10 @@ class NotebookSession:
         """
         manager = self.get_artifact_manager()
         variants: tuple[str | None, ...] = (None,)
-        fanout = self.dag.fanout_cells.get(cell.id) if self.dag is not None else None
-        if fanout is not None:
-            group = next(g for g in self.dag.variant_groups if g.group == fanout.group)
+        dag = self.dag
+        fanout = dag.fanout_cells.get(cell.id) if dag is not None else None
+        if dag is not None and fanout is not None:
+            group = next(g for g in dag.variant_groups if g.group == fanout.group)
             variants = tuple(name for _, name in group.members)
         for name in cell.defines:
             for variant in variants:

@@ -376,7 +376,7 @@ exhaustive commit history.
   loop at, so the cell read stale (upstream) until it ran again. (#1545)
 - **A `# @per_variant` cell and what reads it read ready after a reopen.** A reopen looked
   for the cell's result under its plain id, not its `@variant=` ones, so the next
-  `# @per_variant` cell read idle and the cell that reads them stale (upstream). (#PRNUM)
+  `# @per_variant` cell read idle and the cell that reads them stale (upstream). (#1546)
 - **Downloads close the stored blob however the client leaves, and dropped catalogs close.**
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the
