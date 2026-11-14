@@ -121,7 +121,8 @@ A SQL cell's **provenance hash** folds together:
 that the cached rows are good only while the source still agrees. On a SQLite or
 DuckDB file with no lake, the staleness pass asks it, with the same probe a run
 makes, so the cell comes back ready if the database is as the run left it and
-idle if it changed. A cell whose run did not reuse its rows (a table named only
+stale if it changed. A cell left stale is not probed again in that session
+until it runs. A cell whose run did not reuse its rows (a table named only
 at run time, `@nocache`, a database that changed during the query) opens idle.
 On any other connection asking the source is a query over the network, not
 something to do while opening a notebook, so the cell opens idle until it runs.

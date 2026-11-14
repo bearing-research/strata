@@ -1471,10 +1471,13 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         assert status == CellStatus.READY, "a reopen of an unchanged database went idle"
 
     @pytest.mark.asyncio
-    async def test_the_default_policy_after_the_database_changed_is_not_ready(self, tmp_path):
-        """The probe that keeps it ready sees a row written since the run."""
+    async def test_the_default_policy_after_the_database_changed_is_stale(
+        self, tmp_path, monkeypatch
+    ):
+        """The probe that keeps it ready sees a row written since the run, once."""
         from strata.notebook.executor import CellExecutor
-        from strata.notebook.models import CellStatus
+        from strata.notebook.models import CellStatus, StalenessReason
+        from strata.notebook.sql import cell_executor
 
         db_path = tmp_path / "events.sqlite"
         _seed_sqlite(db_path)
@@ -1491,12 +1494,36 @@ class TestWhatASqlCellRemembersAcrossAReopen:
         with closing(sqlite3.connect(db_path)) as conn, conn:
             conn.execute("INSERT INTO events (id, name, value) VALUES (4, 'delta', 40)")
 
+        probes = []
+        real = cell_executor._run_probes
+        monkeypatch.setattr(
+            cell_executor, "_run_probes", lambda *a, **k: probes.append(1) or real(*a, **k)
+        )
         reopened = _make_session(nb_dir)
-        assert reopened.compute_staleness()["c1"].status != CellStatus.READY, (
+        for _ in range(3):
+            staleness = reopened.compute_staleness()["c1"]
+        assert staleness.status == CellStatus.STALE, (
             "a reopen served rows the database no longer holds as ready"
         )
+        assert staleness.reasons == [StalenessReason.EXTERNAL]
+        assert len(probes) == 1, "a database that moved was opened again on every pass"
         rerun = await CellExecutor(reopened).execute_cell("c1", _read_cell(nb_dir, "c1"))
         assert rerun.success and not rerun.cache_hit, "the probe and the run disagree"
+
+    def test_a_nocache_cell_is_not_probed(self, tmp_path):
+        """``@nocache`` reuses no rows, so no probe can vouch for them."""
+        from strata.notebook.sql.cell_executor import sql_reopen_identity
+
+        db_path = tmp_path / "events.sqlite"
+        _seed_sqlite(db_path)
+        probed = "-- @sql connection=db\nSELECT id FROM events\n"
+        nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=probed)
+        session = _make_session(nb_dir)
+        cell = session.notebook_state.get_cell("c1")
+        assert sql_reopen_identity(cell, session, probe=True) is not None
+
+        cell.source = "-- @sql connection=db\n-- @nocache\nSELECT id FROM events\n"
+        assert sql_reopen_identity(cell, session, probe=True) is None
 
     @pytest.mark.asyncio
     async def test_a_query_whose_tables_are_named_at_run_time_is_not_probed(

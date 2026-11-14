@@ -71,7 +71,8 @@ exhaustive commit history.
   Under the default `fingerprint` policy a reopened cell read idle, and the cells reading
   its result stale, until it ran. The staleness pass now makes the probe a run makes, on
   a local file with no lake, and the cell reads ready when the database is as its run
-  left it. Other drivers still open idle: their probe is a query over the network.
+  left it and stale (external) when it changed, after which it is not probed again until
+  it runs. Other drivers still open idle: their probe is a query over the network.
   (#1548)
 - **A relative local mount path is under the notebook's directory.** `# @mount shared
   ../shared ro` resolved against the server's working directory, so it named a different

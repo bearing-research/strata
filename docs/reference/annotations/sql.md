@@ -85,7 +85,7 @@ Override the default `fingerprint` cache policy on a SQL cell.
 
 | Policy            | Behavior                                                     |
 | ----------------- | ------------------------------------------------------------ |
-| `fingerprint`     | Default. Probe-derived freshness token + schema fingerprint folded into the hash. A reopen probes a SQLite or DuckDB file again and opens the cell ready if it is unchanged; on other drivers the cell opens idle, because trusting the cache means asking the source. |
+| `fingerprint`     | Default. Probe-derived freshness token + schema fingerprint folded into the hash. A reopen probes a SQLite or DuckDB file again and opens the cell ready if it is unchanged, stale if it changed; on other drivers the cell opens idle, because trusting the cache means asking the source. |
 | `forever`         | Static salt; never invalidates from DB-side state.           |
 | `session`         | Session-unique salt; invalidates across sessions.            |
 | `ttl=<seconds>`   | `floor(now / ttl)` bucketed time-based salt.                 |
