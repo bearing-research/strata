@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -161,23 +162,59 @@ def test_a_run_still_going_is_listed_as_running_under_its_variant(tmp_path: Path
     assert (checkpoint["parts"], checkpoint["heads"]) == (["model"], ["best"])
 
 
-def test_a_checkpoint_not_yet_accepted_is_not_listed(tmp_path: Path):
+def test_an_output_made_ready_outside_its_release_is_not_a_checkpoint(tmp_path: Path):
     session, _ = _notebook(tmp_path)
     runs, run = _open_run(session)
     _checkpoint(runs, run, tmp_path, 1, model={"w": 0})
     manager = session.get_artifact_manager()
-    # As a checkpoint is mid-publish: its release prepared, an output staged under it.
+    store = manager.artifact_store
+    # A release prepared and never accepted, though its output was finalized: ``init``
+    # takes an accepted release only.
     pending = manager.release_store.prepare(run.build_id, run.attempt, "checkpoint", sequence=2)
-    manager.artifact_store.create_artifact(
-        manager.cell_artifact_id("train", "model") + "@ckpt=2",
+    artifact_id = manager.cell_artifact_id("train", "model") + "@ckpt=2"
+    version = store.create_artifact(
+        artifact_id,
         "a-staged-output",
         TransformSpec(executor="notebook/cell@v1", params={"variable_name": "model"}, inputs=[]),
         release_id=pending.release_id,
     )
+    store.blob_store.write_blob(artifact_id, version, b"{}")
+    assert store.finalize_artifact(artifact_id, version, "", None, 2).state == "ready"
 
     (listed,) = _listed(session)
 
     assert [c["sequence"] for c in listed["checkpoints"]] == [1]
+
+
+def test_a_checkpoint_accepted_while_the_listing_reads_waits_for_the_next_one(
+    tmp_path: Path, monkeypatch
+):
+    session, _ = _notebook(tmp_path)
+    runs, run = _open_run(session)
+    _checkpoint(runs, run, tmp_path, 1, model={"w": 0})
+    _checkpoint(runs, run, tmp_path, 2, model={"w": 1}, optimizer=[1])
+    store = session.get_artifact_manager().artifact_store
+    scan = store.list_versions_by_id_prefix
+
+    def mid_acceptance(prefix: str):
+        # The versions as a read before checkpoint 2's acceptance saw them: one part
+        # staged, the other not yet there. The release reads that follow see it accepted.
+        return [
+            replace(v, state="building") if "@ckpt=2" in v.id else v
+            for v in scan(prefix)
+            if "optimizer" not in v.id
+        ]
+
+    monkeypatch.setattr(store, "list_versions_by_id_prefix", mid_acceptance)
+    (listed,) = _listed(session)
+    assert [c["sequence"] for c in listed["checkpoints"]] == [1]
+
+    monkeypatch.undo()
+    (listed,) = _listed(session)
+    assert [(c["sequence"], c["parts"]) for c in listed["checkpoints"]] == [
+        (2, ["model", "optimizer"]),
+        (1, ["model"]),
+    ]
 
 
 def test_a_checkpoint_prune_collected_is_no_longer_listed(tmp_path: Path):
@@ -292,15 +329,21 @@ async def test_a_cell_execute_frame_whose_init_is_not_a_release_id_runs_nothing(
 
     fake, execution_state = _make_fake_ws(served)
 
-    await _handle_cell_execute(
-        cast(WebSocket, fake), served, {"cell_id": "train", "init": 2}, execution_state, served.id
-    )
-    await _drain_execution(execution_state)
+    for not_an_id in (2, ""):
+        await _handle_cell_execute(
+            cast(WebSocket, fake),
+            served,
+            {"cell_id": "train", "init": not_an_id},
+            execution_state,
+            served.id,
+        )
+        await _drain_execution(execution_state)
 
-    (error,) = fake.frames_of("error")
-    assert "init" in error["payload"]["error"]
+    first, second = fake.frames_of("error")
+    assert "init" in first["payload"]["error"] and "init" in second["payload"]["error"]
     assert execution_state.execution_task is None and execution_state.requested_cell is None
-    assert len(_listed(served)) == 1
+    # Neither started a run: the one build is the fixture's.
+    assert len(_only_build(served, "train")) == 1
 
 
 @pytest.mark.asyncio

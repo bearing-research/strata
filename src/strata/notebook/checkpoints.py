@@ -55,7 +55,10 @@ def cell_checkpoints(manager: NotebookArtifactManager, cell_id: str) -> list[Che
     variants: dict[str, str | None] = {}
     for version in manager.artifact_store.list_versions_by_id_prefix(prefix):
         match = _OUTPUT.fullmatch(version.id[len(prefix) :])
-        if match is None or version.release_id is None:
+        # Ready as this one read saw it: an acceptance makes a release's outputs ready
+        # together, so a checkpoint accepted after it is left to the next listing whole,
+        # not listed now with the parts staged so far.
+        if match is None or version.state != "ready" or version.release_id is None:
             continue
         outputs.setdefault(version.release_id, []).append(version)
         variants[version.release_id] = match["variant"]

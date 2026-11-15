@@ -30,15 +30,22 @@ const canBranch = computed(
 
 const cellLabel = computed(() => cell.value?.annotations?.name || props.cellId.slice(0, 8))
 
+// A run's start and its end each refresh, and the earlier answer can land last.
+let latestRefresh = 0
+
 async function refresh() {
+  const mine = ++latestRefresh
   loading.value = true
   try {
-    runs.value = await listCellCheckpoints(props.cellId)
+    const listed = await listCellCheckpoints(props.cellId)
+    if (mine !== latestRefresh) return
+    runs.value = listed
     error.value = null
   } catch (err) {
+    if (mine !== latestRefresh) return
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
-    loading.value = false
+    if (mine === latestRefresh) loading.value = false
   }
 }
 

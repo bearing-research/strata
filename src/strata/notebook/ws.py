@@ -1137,13 +1137,16 @@ async def _handle_cell_execute(
     """
     cell_id = payload.get("cell_id")
     init = payload.get("init")
-    if not cell_id or not (init is None or isinstance(init, str)):
+    # An empty id would key a branch that restores nothing.
+    if not cell_id or not (init is None or (isinstance(init, str) and init)):
         await websocket.send_text(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.next_sequence(),
-                    error_payload("Missing cell_id" if not cell_id else "init is a release id"),
+                    error_payload(
+                        "Missing cell_id" if not cell_id else "init must be a release id"
+                    ),
                 )
             )
         )
