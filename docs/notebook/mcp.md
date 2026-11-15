@@ -119,6 +119,20 @@ cannot be read, a busy notebook, which leaves the cells as they were)
 returns `status: error` with a `fix` line naming the next step. The other tools
 stay registered and callable by name; `STRATA_MCP_TOOLS=all` lists them too.
 
+### A project's own daemon
+
+`strata scratch start` in a project (or `--root DIR`) creates
+`.strata-scratch/` there, a notebook with its own `.gitignore` of `*`, so the
+project's git never sees it and its `.gitignore` is left alone. It then starts
+a server for it on a free loopback port, with the scratchpad profile and
+`STRATA_IDLE_EXIT_MINUTES=30` (or the value already set), opens the notebook and
+waits for its environment. The daemon's address, pid and session are written to
+`.strata-scratch/.strata/server.json`, so the next client finds it instead of
+starting another, and a file lock makes two clients asking at once share one.
+Cells read the project read-only as `project` (`project / "data.csv"`).
+`strata scratch status` prints the running daemon and `strata scratch stop`
+stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
+
 ## Tools
 
 | Tool | Description |

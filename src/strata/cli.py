@@ -713,6 +713,29 @@ def _build_parser() -> argparse.ArgumentParser:
     add_tutorial_arguments(tutorial_parser)
     tutorial_parser.set_defaults(func=tutorial_main)
 
+    scratch_parser = subparsers.add_parser(
+        "scratch",
+        help="Start, stop or show a project's scratchpad daemon",
+        description=(
+            "A project's scratchpad lives in <dir>/.strata-scratch/ and is served by one "
+            "daemon, which an agent's first call starts and which stops itself after "
+            "30 idle minutes. These commands start, stop or show it by hand."
+        ),
+    )
+    scratch_sub = scratch_parser.add_subparsers(dest="scratch_command", required=True)
+    for name, help_text in (
+        ("start", "Start the daemon (creating the scratchpad) unless one runs; print it"),
+        ("stop", "Stop the daemon if one runs"),
+        ("status", "Print the running daemon, or say there is none"),
+    ):
+        sub = scratch_sub.add_parser(name, help=help_text)
+        sub.add_argument(
+            "--root",
+            default=".",
+            help="The project directory holding .strata-scratch/ (default: the current one)",
+        )
+        sub.set_defaults(func=_dispatch_scratch)
+
     watch_parser = subparsers.add_parser(
         "watch",
         help="Attach the read-only TUI to a live notebook session (watch only)",
@@ -815,6 +838,34 @@ def _dispatch_import(args: argparse.Namespace) -> int:
 
 def _dispatch_agent(args: argparse.Namespace) -> int:
     return agent_main(args)
+
+
+def _dispatch_scratch(args: argparse.Namespace) -> int:
+    import json
+    from dataclasses import asdict
+
+    from strata import scratch
+
+    root = Path(args.root).expanduser()
+    if args.scratch_command == "stop":
+        stopped = scratch.stop_daemon(root)
+        print("stopped" if stopped else "no scratchpad daemon runs here")
+        return 0
+    if args.scratch_command == "status":
+        running = scratch.find_daemon(root.resolve())
+        if running is None:
+            print("no scratchpad daemon runs here")
+            return 1
+    else:
+        try:
+            running = scratch.ensure_daemon(
+                root, progress=lambda step: print(f"{step}…", file=sys.stderr, flush=True)
+            )
+        except scratch.ScratchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    print(json.dumps(asdict(running), indent=2))
+    return 0
 
 
 def _dispatch_watch(args: argparse.Namespace) -> int:

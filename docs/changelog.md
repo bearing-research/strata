@@ -23,6 +23,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)
+- **A project's scratchpad has a daemon of its own.** `strata scratch start` creates
+  `<project>/.strata-scratch/` (ignored by the project's git through its own
+  `.gitignore`) and starts a server for it with the scratchpad MCP profile, which stops
+  itself after 30 idle minutes. `server.json` and a file lock let every later client in
+  the project find that one daemon instead of starting another; `strata scratch status`
+  and `stop` show and stop it. `create_notebook` takes the directory's name apart from
+  the notebook's. (#XXXX)
 - **A scratchpad profile for the MCP server.** `STRATA_MCP_PROFILE=scratchpad` lists
   two tools, `run` (add or replace a cell and run it) and `scratchpad` (what the
   session already holds), over the server's one open session, with no `session_id`,
