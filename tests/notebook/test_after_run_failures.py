@@ -1,7 +1,7 @@
 """What each cell path does after a run, in what order, and when a step fails.
 
-The orders differ and stay different: Python stages its displays and console before the store,
-which releases them with the outputs, and pushes after; R pushes before displays and rejects a
+The orders differ and stay different: Python's store stages its displays and console after the
+outputs and releases them together, and it pushes after; R pushes before displays and rejects a
 false store before either; batch stores displays first, rejects a false store after them, and pushes
 last; a loop has no ``_store_outputs`` and no push; ``@each`` does its instances by the Python
 path and then writes its manifests. Each failure is pinned here.
@@ -221,8 +221,8 @@ class TestPythonAndR:
         if language == "python":
             # Its run closes after the store. The one at the end is the dispatcher's, for all.
             expected = [
-                "_stage_run_records",
                 "_store_outputs",
+                "_stage_run_records",
                 "_close_open_run",
                 "_push_to_team_store",
             ]
@@ -240,7 +240,7 @@ class TestPythonAndR:
 
         await CellExecutor(session).execute_cell("v", PYTHON[1])
 
-        assert _after_run(steps) == ["_stage_run_records", "_store_outputs", "_push_to_team_store"]
+        assert _after_run(steps) == ["_store_outputs", "_stage_run_records", "_push_to_team_store"]
         assert _latest(session, "v", "__display__0") == 1
         assert _latest(session, "v", "__console__") == 1
 
@@ -306,7 +306,6 @@ class TestPythonAndR:
 
         assert not result.success
         assert result.error == "Execution failed: no display"
-        assert "_store_outputs" not in steps
         assert "_push_to_team_store" not in steps
         assert _latest(session, "v", "value") is None
 
@@ -689,7 +688,7 @@ class TestEach:
         result = await CellExecutor(session).execute_cell("e", self.SOURCE)
 
         assert result.success, result.error
-        instance = ["_stage_run_records", "_store_outputs", "_push_to_team_store"]
+        instance = ["_store_outputs", "_stage_run_records", "_push_to_team_store"]
         assert _after_run(steps) == [
             *instance,
             *instance,

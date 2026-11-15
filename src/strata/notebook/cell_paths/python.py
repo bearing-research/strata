@@ -140,7 +140,6 @@ class PythonContext:
     push_to_team_store: Callable[..., Awaitable[None]]
     stage_run_records: Callable[..., list[StagedVersion]]
     show_run_records: Callable[[CellExecutionResult, list[StagedVersion]], None]
-    discard_outputs: Callable[[list[StagedVersion]], None]
     store_mount_writes: Callable[..., None]
     record_good_run: Callable[..., None]
     timeout_message: Callable[[str, float], str]
@@ -823,10 +822,11 @@ async def run_python_cell(
             if exec_result.success:
                 store_error: str | None = None
                 records: list[StagedVersion] = []
-                try:
+
+                def stage_records() -> list[StagedVersion]:
                     # Released with the variables, so the displays and console a hit
                     # replays or a reopen shows are never another run's.
-                    records = context.stage_run_records(
+                    records[:] = context.stage_run_records(
                         exec_result,
                         result_output_dir,
                         provenance_hash if moved is None else moved_key(provenance_hash),
@@ -838,6 +838,9 @@ async def run_python_cell(
                         variant=fanout_variant,
                         computation_key=provenance_hash,
                     )
+                    return records
+
+                try:
                     stored_ok = context.store_outputs(
                         cell_id,
                         result_output_dir,
@@ -858,7 +861,7 @@ async def run_python_cell(
                         local_run=local_run,
                         stochastic=prov.annotations.stochastic or moved is not None,
                         run_outputs=exec_result.outputs,
-                        records=records,
+                        stage_records=stage_records,
                     )
                 except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
                     stored_ok, store_error = False, str(exc)
@@ -866,7 +869,6 @@ async def run_python_cell(
                 if stored_ok:
                     context.show_run_records(exec_result, records)
                 else:
-                    context.discard_outputs(records)
                     logger.error(
                         "Cell %s executed OK but artifact storage failed.",
                         cell_id,

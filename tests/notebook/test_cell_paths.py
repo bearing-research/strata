@@ -3491,7 +3491,6 @@ class TestPython:
             pushed=[],
             staged=[],
             shown=[],
-            discarded=[],
             writes=[],
             good=[],
             dispatched=[],
@@ -3600,6 +3599,7 @@ class TestPython:
 
         def store_outputs(*args, **kwargs):
             calls.stored.append((args, kwargs))
+            kwargs["stage_records"]()
             return True
 
         async def close_open_run(cell_id):
@@ -3644,7 +3644,6 @@ class TestPython:
             "push_to_team_store": push_to_team_store,
             "stage_run_records": stage_run_records,
             "show_run_records": lambda *args: calls.shown.append(args),
-            "discard_outputs": calls.discarded.append,
             "store_mount_writes": lambda *args, **kwargs: calls.writes.append((args, kwargs)),
             "record_good_run": lambda *args: calls.good.append(args),
             "timeout_message": lambda _cell_id, seconds: f"timed out after {seconds}",
@@ -4020,8 +4019,8 @@ class TestPython:
 
         assert result.success is False
         assert calls.pushed == []
+        assert calls.staged == []
         assert calls.shown == []
-        assert calls.discarded == [["records"]]
 
     async def test_only_a_cacheable_runs_console_is_kept(self, monkeypatch):
         prov = self._prov(annotations={"nocache": True})
@@ -4042,9 +4041,7 @@ class TestPython:
         (_result, _dir, display_key, console_key), kwargs = calls.staged[0]
         assert display_key == console_key == "prov"
         assert kwargs["variant"] == "v"
-        assert calls.stored[0][1]["records"] == ["records"]
         assert [records for _result, records in calls.shown] == [["records"]]
-        assert calls.discarded == []
         assert calls.persisted == [("c", [{"kind": "x"}])]
 
     @staticmethod

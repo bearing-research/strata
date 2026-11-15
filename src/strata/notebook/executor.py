@@ -1174,9 +1174,6 @@ class CellExecutor:
             push_to_team_store=self._push_to_team_store,
             stage_run_records=self._stage_run_records,
             show_run_records=self._show_run_records,
-            discard_outputs=lambda staged: self.session.get_artifact_manager().discard_cell_outputs(
-                staged
-            ),
             store_mount_writes=self._store_mount_writes,
             record_good_run=self._record_good_run,
             timeout_message=self._timeout_message,
@@ -3106,18 +3103,24 @@ class CellExecutor:
     # ------------------------------------------------------------------
 
     def _release_nothing(
-        self, cell_id: str, local_run: LocalRun | None, records: list[StagedVersion]
+        self,
+        cell_id: str,
+        local_run: LocalRun | None,
+        stage_records: Callable[[], list[StagedVersion]] | None,
     ) -> bool:
-        """Complete a run that stores no variable: its *records* alone end its build."""
+        """Complete a run that stores no variable: its records alone end its build."""
+        records = stage_records() if stage_records is not None else []
         if local_run is None and not records:
             return True
+        artifact_mgr = self.session.get_artifact_manager()
         try:
             if local_run is not None:
                 self._local_runs().finalize(local_run, records)
             else:
-                self.session.get_artifact_manager().finalize_cell_outputs(records)
+                artifact_mgr.finalize_cell_outputs(records)
         except Exception:
             logger.exception("Failed to complete the run of cell %s", cell_id)
+            artifact_mgr.discard_cell_outputs(records)
             # The displays and console are what the run made: not kept, it stored nothing.
             return not records
         return True
@@ -3140,7 +3143,7 @@ class CellExecutor:
         local_run: LocalRun | None = None,
         stochastic: bool = False,
         run_outputs: dict[str, Any] | None = None,
-        records: list[StagedVersion] | None = None,
+        stage_records: Callable[[], list[StagedVersion]] | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
@@ -3157,14 +3160,13 @@ class CellExecutor:
         mount moved) so every run's persist beside the cached key, which none of them
         matches. Without a *local_run*, the run is this call.
 
-        *records* are the run's displays and console, staged by
-        :meth:`_stage_run_records`, made current with its variables. On False or a raise
-        they stay ``building`` for the caller to discard.
+        *stage_records* stages the run's displays and console (:meth:`_stage_run_records`)
+        once its outputs are staged, since a folder's listing is one of the displays; they
+        are made current with the variables, and discarded with them.
         """
-        records = records or []
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or self.session.dag is None:
-            return self._release_nothing(cell_id, local_run, records)
+            return self._release_nothing(cell_id, local_run, stage_records)
 
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id, variant)
@@ -3186,7 +3188,7 @@ class CellExecutor:
         # serialize is skipped rather than failing the cell.
         leaf_vars = set(cell.defines) if not consumed_vars and self.store_leaf_outputs else set()
         if not consumed_vars and not leaf_vars:
-            return self._release_nothing(cell_id, local_run, records)
+            return self._release_nothing(cell_id, local_run, stage_records)
 
         all_stored = True
         staged: list[StagedVersion] = []
@@ -3346,6 +3348,14 @@ class CellExecutor:
                 artifact_mgr.discard_cell_outputs(staged)
                 raise
 
+        records: list[StagedVersion] = []
+        if all_stored and stage_records is not None:
+            try:
+                records = stage_records()
+            except Exception:
+                artifact_mgr.discard_cell_outputs(staged)
+                raise
+
         try:
             if not all_stored:
                 artifact_mgr.discard_cell_outputs(staged)
@@ -3358,7 +3368,7 @@ class CellExecutor:
             )
         except Exception:
             logger.exception("Failed to store the outputs of cell %s", cell_id)
-            artifact_mgr.discard_cell_outputs(staged)
+            artifact_mgr.discard_cell_outputs(staged + records)
             # A leaf's variables are best-effort and never fail the cell; its displays and
             # console are what the run made.
             return not consumed_vars and not records

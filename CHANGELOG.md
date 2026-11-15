@@ -371,6 +371,12 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A Python run's displays and console are current only with its outputs.** A run made
+  its variables current, then each display and its console alone, so a display that failed
+  to store, or a crash between the two, left the new values beside the previous run's
+  displays, and a leaf run whose release the ledger refused still showed what it printed.
+  They are now made current in the same release as the variables; a refused release keeps
+  none of them and fails the run. (#1552)
 - **A reopen shows the worker a cell last ran on.** A cell's header names the remote worker
   and transport its last run used; a reopen dropped them until the cell ran again. They
   are now kept in `.strata/runtime.json`, and a local run clears them. (#1547)
