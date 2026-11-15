@@ -80,7 +80,7 @@ exhaustive commit history.
   faster.** A staleness pass parses `uv.lock` once rather than once per cell,
   `runtime.json` is written about 4 times faster, and `strata` no longer imports the
   notebook server on start. `strata.notebook` re-exports nothing: import from its
-  submodules (`strata.notebook.routes`, `strata.notebook.display`). (#PERF)
+  submodules (`strata.notebook.routes`, `strata.notebook.display`). (#1557)
 - **A SQL cell on a SQLite or DuckDB file reopens ready when the database is unchanged.**
   Under the default `fingerprint` policy a reopened cell read idle, and the cells reading
   its result stale, until it ran. The staleness pass now makes the probe a run makes, on
