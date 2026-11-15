@@ -373,6 +373,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A reverted edit's outputs come back together.** Reverting an edit (a cell's source
+  changed and changed back) reuses the earlier run's results by copying each value,
+  display and console back, one commit each, so a blob gone partway left some from the
+  earlier run and some from the later one. The copies are now one release, current
+  together or not at all; when one is missing the cell runs. (#1553)
 - **A Python run's displays and console are current only with its outputs.** A single
   Python cell run made its variables current, then each display and its console alone, so
   a display that failed to store, or a crash between the two, left the new values beside
