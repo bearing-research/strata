@@ -29,7 +29,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   itself after 30 idle minutes. `server.json` and a file lock let every later client in
   the project find that one daemon instead of starting another; `strata scratch status`
   and `stop` show and stop it. `create_notebook` takes the directory's name apart from
-  the notebook's. (#XXXX)
+  the notebook's. (#1558)
 - **A scratchpad profile for the MCP server.** `STRATA_MCP_PROFILE=scratchpad` lists
   two tools, `run` (add or replace a cell and run it) and `scratchpad` (what the
   session already holds), over the server's one open session, with no `session_id`,
