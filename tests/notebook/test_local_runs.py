@@ -16,7 +16,12 @@ from pathlib import Path
 
 import pytest
 from vestigo import checkpoint_files
-from vestigo.provenance import checkpoint_output_key, derive_subkey, run_output_key
+from vestigo.provenance import (
+    TransformSpec,
+    checkpoint_output_key,
+    derive_subkey,
+    run_output_key,
+)
 from vestigo.releases import ReleaseRejected
 
 from strata.notebook.executor import CellExecutor
@@ -368,6 +373,38 @@ class TestGate1:
                 resume=True,
             )
         assert runs.builds.get_build(first.build_id).state == "building"
+
+    def test_a_run_overtaken_by_a_newer_value_stores_nothing(self, tmp_path: Path, monkeypatch):
+        """Another writer makes a newer ``x`` current first: the run's release is refused."""
+        notebook_dir = create_notebook(tmp_path, "Overtaken", initialize_environment=False)
+        add_cell_to_notebook(notebook_dir, "a")
+        write_cell(notebook_dir, "a", "x = 1\n")
+        add_cell_to_notebook(notebook_dir, "b", "a")
+        write_cell(notebook_dir, "b", "y = x\n")
+        session = NotebookSession(
+            parse_notebook(notebook_dir), notebook_dir, ledger_dialect=_dialect()
+        )
+        session.refresh_environment_runtime()
+        store, _, _ = _ledger(session)
+        artifact_id = session.get_artifact_manager().cell_artifact_id("a", "x")
+        real = LocalRuns.finalize
+
+        def overtaken(self, run, staged):
+            spec = TransformSpec(executor="elsewhere@v1", params={}, inputs=[])
+            newer = store.create_artifact(artifact_id, "elsewhere", spec)
+            store.write_blob(artifact_id, newer, b"newer")
+            store.finalize_artifact(artifact_id, newer, "{}", row_count=None, byte_size=5)
+            return real(self, run, staged)
+
+        monkeypatch.setattr(LocalRuns, "finalize", overtaken)
+        result = _run(CellExecutor(session), "a", "x = 1\n")
+
+        latest = store.get_latest_version(artifact_id)
+        assert latest is not None and latest.provenance_hash == "elsewhere", result
+        assert [v.state for v in store.list_versions_by_id_prefix(artifact_id)] == [
+            "failed",
+            "ready",
+        ]
 
 
 class TestAbandonedRuns:
