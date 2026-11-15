@@ -218,8 +218,9 @@ export function useWebSocket(
     send('notebook_sync', {})
   }
 
-  function executeCell(cellId: string): void {
-    send('cell_execute', { cell_id: cellId })
+  /** Run a cell; with `init`, as a branch from that checkpoint's release. */
+  function executeCell(cellId: string, init?: string): void {
+    send('cell_execute', init ? { cell_id: cellId, init } : { cell_id: cellId })
   }
 
   /** Execute all runnable notebook cells in notebook order. */

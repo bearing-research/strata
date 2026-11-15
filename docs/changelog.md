@@ -10,6 +10,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ## Unreleased
 
 ### Added
+- **A cell's checkpoints are listed in the notebook, and a branch starts from one there.**
+  A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
+  store still holds, by run (running, interrupted, finished or failed, and which
+  checkpoint a branch started from), with each one's parts or files, size, time and the
+  heads pointing at it, and **Branch from here** runs the cell from that checkpoint.
+  `GET /v1/notebooks/{id}/cells/{cell_id}/checkpoints` returns the same listing, release
+  ids included, for `--init` and `?init=`. The WebSocket `cell_execute` frame takes an
+  optional `init`; such a run sends no cascade prompt and asks before a large read even
+  when the cell is ready. (#PRNUM)
 - **A scratchpad profile for the MCP server.** `STRATA_MCP_PROFILE=scratchpad` lists
   two tools, `run` (add or replace a cell and run it) and `scratchpad` (what the
   session already holds), over the server's one open session, with no `session_id`,

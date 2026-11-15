@@ -39,7 +39,7 @@ All messages are JSON with this shape:
 
 | Type                   | Payload                                  | Description                                                 |
 | ---------------------- | ---------------------------------------- | ----------------------------------------------------------- |
-| `cell_execute`         | `{ "cell_id": "..." }`                   | Run cell (triggers cascade check)                           |
+| `cell_execute`         | `{ "cell_id": "...", "init": "..." }`    | Run cell (triggers cascade check). The optional `init` is a checkpoint's release id (from [`GET …/cells/{cell_id}/checkpoints`](rest-api.md#list-a-cells-checkpoints)): the run is then a branch from it, with no cascade prompt, and stale upstreams run first as they do for the REST route |
 | `cell_execute_cascade` | `{ "cell_id": "...", "plan_id": "..." }` | Confirm cascade execution                                   |
 | `cell_execute_force`   | `{ "cell_id": "..." }`                   | Run cell ignoring staleness (no upstream materialization)   |
 | `cell_execute_rerun`   | `{ "cell_id": "..." }`                   | Force re-execute target cell while cascading upstream rebuilds |

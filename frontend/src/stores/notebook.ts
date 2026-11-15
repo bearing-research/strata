@@ -65,6 +65,7 @@ import type {
   SessionClosedPayload,
 } from '../types/ws-payloads.generated'
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
+import type { CheckpointRunInfo } from '../utils/checkpoints'
 import type { DatasetReader } from '../utils/datasetReaders'
 import { DirtySources, keepUnsentSources, shouldAdoptRemoteSource } from '../utils/cellSourceSync'
 import { OptimisticRuns } from '../utils/optimisticRun'
@@ -2664,7 +2665,8 @@ function updateWidgetValues(cellId: CellId, values: Record<string, unknown>): vo
   wsInstance.sendWidgetUpdate(cellId, values)
 }
 
-async function executeCellWebSocket(cellId: CellId) {
+/** Run a cell; with `init`, as a branch from that checkpoint's release. */
+async function executeCellWebSocket(cellId: CellId, init?: string) {
   if (environmentMutationActive.value) {
     environmentError.value =
       environmentOperation.value?.error ||
@@ -2683,7 +2685,10 @@ async function executeCellWebSocket(cellId: CellId) {
       return
     }
   }
-  flushCellSource(cellId)
+  // A branch brings its upstreams up to date without a cascade prompt, so their
+  // unsent edits go first too.
+  if (init) flushDirtyCells()
+  else flushCellSource(cellId)
 
   const cell = cellMap.value.get(cellId)
   if (cell?.loopProgress) {
@@ -2695,7 +2700,7 @@ async function executeCellWebSocket(cellId: CellId) {
   }
 
   showRunStarted(cellId)
-  wsInstance.executeCell(cellId)
+  wsInstance.executeCell(cellId, init)
 }
 
 async function executeNotebookRunAllWebSocket() {
@@ -2808,6 +2813,12 @@ async function executeNotebookRerunAllWebSocket() {
   // Otherwise rerun-all sends the stale debounced copy of a just-edited cell.
   flushDirtyCells()
   wsInstance.executeNotebookRerunAll()
+}
+
+/** A cell's stored checkpoints by run, newest first; none before a session is open. */
+async function listCellCheckpoints(cellId: CellId): Promise<CheckpointRunInfo[]> {
+  const sid = sessionId()
+  return sid ? useStrata().listCellCheckpoints(sid, cellId) : []
 }
 
 function cancelCellWebSocket(cellId: CellId) {
@@ -3681,6 +3692,7 @@ export function useNotebook() {
     // WebSocket
     cleanupWebSocket,
     executeCellWebSocket,
+    listCellCheckpoints,
     executeNotebookRunAllWebSocket,
     executeCascadeWebSocket,
     executeForceWebSocket,

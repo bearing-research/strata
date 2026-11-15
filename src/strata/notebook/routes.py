@@ -3293,6 +3293,21 @@ async def get_cell_iterations(
     }
 
 
+@router.get("/{notebook_id}/cells/{cell_id}/checkpoints")
+async def get_cell_checkpoints(notebook_id: str, session: SessionDep, cell_id: str) -> dict:
+    """List the checkpoints a cell's runs left, by run, newest first.
+
+    Each checkpoint's ``release_id`` is what ``init`` on a run takes to branch from it.
+    A cell that never checkpointed, or whose checkpoints prune has collected, lists none.
+    """
+    from strata.notebook.checkpoints import cell_checkpoints
+
+    if session.notebook_state.get_cell(cell_id) is None:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    runs = await asyncio.to_thread(cell_checkpoints, session.get_artifact_manager(), cell_id)
+    return {"cell_id": cell_id, "runs": runs}
+
+
 def _load_cell_data_blob(session, cell_id: str, artifact_uri: str) -> bytes:
     """Resolve ``strata://artifact/{id}@v={version}`` to its blob for a cell.
 
