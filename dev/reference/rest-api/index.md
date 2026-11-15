@@ -554,6 +554,35 @@ Returns `{ "cell_id", "variable", "iterations": [{ "iteration", "artifact_uri",
 "artifact_id", "version", "content_type", "byte_size", "row_count",
 "created_at" }] }`.
 
+### List a cell's checkpoints
+
+```
+GET /v1/notebooks/{session_id}/cells/{cell_id}/checkpoints
+```
+
+Lists the [checkpoints](https://bearingresearch.com/strata/dev/guides/cells/python/#checkpoints-stratacheckpoint-stratarestore-stratahead)
+the cell's runs saved and the store still holds, grouped by run. Runs come
+newest first, by their latest checkpoint, and so do each run's checkpoints. A
+cell that never checkpointed, or whose checkpoints prune has collected, returns
+an empty list.
+
+Returns `{ "cell_id", "runs": [{ "build_id", "status", "variant", "init",
+"started_at", "checkpoints": [{ "release_id", "sequence", "created_at",
+"parts", "files", "step", "byte_size", "heads" }] }] }`.
+
+- `release_id` is what a branch takes: `init=<release_id>` on
+  [Execute cell](#execute-cell-rest), or `init` on the WebSocket
+  `cell_execute` frame.
+- `status` is `running` (the run holds a live lease), `interrupted` (it stopped
+  before finishing and the next ordinary run of the same computation resumes
+  it), `finished` or `failed`.
+- `init` is the release a run branched from, `null` for a run that started
+  from nothing.
+- `parts` are the names passed to `strata.checkpoint(...)`. A checkpoint of
+  files has `files` (how many) and `step` instead.
+- `heads` are the names `strata.head(...)` points at this checkpoint. Prune
+  keeps a checkpoint a head points at.
+
 ### Browse a cell's table output
 
 ```

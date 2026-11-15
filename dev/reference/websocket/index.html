@@ -3686,8 +3686,8 @@
 <tbody>
 <tr>
 <td><code>cell_execute</code></td>
-<td><code>{ "cell_id": "..." }</code></td>
-<td>Run cell (triggers cascade check)</td>
+<td><code>{ "cell_id": "...", "init": "..." }</code></td>
+<td>Run cell (triggers cascade check). The optional <code>init</code> is a checkpoint's release id (from <a href="../rest-api/#list-a-cells-checkpoints"><code>GET …/cells/{cell_id}/checkpoints</code></a>): the run is then a branch from it, with no cascade prompt, and stale upstreams run first as they do for the REST route</td>
 </tr>
 <tr>
 <td><code>cell_execute_cascade</code></td>

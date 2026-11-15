@@ -3866,6 +3866,15 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell's checkpoints are listed in the notebook, and a branch starts from one there.</strong>
+  A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
+  store still holds, by run (running, interrupted, finished or failed, and which
+  checkpoint a branch started from), with each one's parts or files, size, time and the
+  heads pointing at it, and <strong>Branch from here</strong> runs the cell from that checkpoint.
+  <code>GET /v1/notebooks/{id}/cells/{cell_id}/checkpoints</code> returns the same listing, release
+  ids included, for <code>--init</code> and <code>?init=</code>. The WebSocket <code>cell_execute</code> frame takes an
+  optional <code>init</code>; such a run sends no cascade prompt and asks before a large read even
+  when the cell is ready. (#1555)</li>
 <li><strong>A scratchpad profile for the MCP server.</strong> <code>STRATA_MCP_PROFILE=scratchpad</code> lists
   two tools, <code>run</code> (add or replace a cell and run it) and <code>scratchpad</code> (what the
   session already holds), over the server's one open session, with no <code>session_id</code>,

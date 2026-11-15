@@ -3443,11 +3443,16 @@ to it from inside the cell:</p>
 <p>The cell's variables are stored as before once it returns; they are the run's
 final result, and a cell downstream sees only those. To start a new run from a
 checkpoint's parts instead of from nothing (a branch: try another learning rate
-from epoch 12), pass the release to run with: <code>strata cell run &lt;dir&gt; &lt;cell&gt;
---init &lt;release_id&gt;</code> or <code>?init=</code> on the execute route. The branch is its own
-run under its own provenance key, so it never serves or overwrites the plain
-run's cache. The calls exist only on a local Python run; on a remote worker, an
-R cell or a prompt cell they raise a <code>RuntimeError</code> saying so.</p>
+from epoch 12), open the cell's <strong>Checkpoints</strong> panel (the branch button in the
+cell's header) and press <strong>Branch from here</strong> on the checkpoint. The panel
+lists the checkpoints the store still holds, by run, with each one's parts,
+size and heads. Outside the notebook, pass the release to run with: <code>strata
+cell run &lt;dir&gt; &lt;cell&gt; --init &lt;release_id&gt;</code> or <code>?init=</code> on the execute route;
+<a href="../../../reference/rest-api/#list-a-cells-checkpoints"><code>GET …/cells/{cell_id}/checkpoints</code></a>
+lists the release ids. The branch is its own run under its own provenance key,
+so it never serves or overwrites the plain run's cache. The calls exist only on
+a local Python run; on a remote worker, an R cell or a prompt cell they raise a
+<code>RuntimeError</code> saying so.</p>
 <p>A PyTorch cell can save through
 <a href="https://github.com/bearing-research/vestigo/blob/main/docs/torch.md">vestigo.torch</a>
 instead (<code>vestigo[torch]</code> in the notebook's dependencies). Hand it the ambient
