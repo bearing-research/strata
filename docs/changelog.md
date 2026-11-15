@@ -87,7 +87,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   it only when its content changed; on Python 3.13 and later `runtime.json` is written
   about 4 times faster; `strata` no longer imports the notebook server on start.
   `strata.notebook` re-exports nothing: import from its submodules (`display`, `models`,
-  `parser`, `routes`, `session`, `writer`). (#1557)
+  `parser`, `routes`, `session`, `writer`). (#1557, #1559)
 - **A SQL cell on a SQLite or DuckDB file reopens ready when the database is unchanged.**
   Under the default `fingerprint` policy a reopened cell read idle, and the cells reading
   its result stale, until it ran. The staleness pass now makes the probe a run makes, on
