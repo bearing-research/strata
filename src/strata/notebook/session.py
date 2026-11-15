@@ -2554,7 +2554,6 @@ class NotebookSession:
         """The environment hash staleness folds into ``cell``'s provenance, over *packages*
         (:func:`~strata.notebook.env.local_packages`)."""
         return compute_execution_env_hash(
-            self.path,
             self._collect_runtime_env(cell),
             runtime_identity=self._effective_worker_runtime_identity(cell),
             local_packages=packages,

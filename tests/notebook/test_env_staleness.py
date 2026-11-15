@@ -77,7 +77,6 @@ class TestComponentHashStorage:
         assert "env_hash" in params
         assert params["source_hash"] == compute_source_hash("x = 42")
         assert params["env_hash"] == compute_execution_env_hash(
-            session.path,
             runtime_identity=worker_runtime_identity(
                 session.notebook_state,
                 None,
@@ -175,7 +174,6 @@ class TestStoredHashLookup:
         stored_src = artifact.params["source_hash"]
 
         assert stored_env == compute_execution_env_hash(
-            nb_dir,
             local_packages=local_packages(nb_dir),
             runtime_identity=worker_runtime_identity(
                 session.notebook_state,
