@@ -156,6 +156,12 @@ class NotebookExecutionState:
 
 _notebook_execution_state: dict[str, NotebookExecutionState] = {}
 
+
+def runs_in_flight() -> bool:
+    """Whether any notebook has a run in flight, reserved or started."""
+    return any(notebook_has_active_execution(nid) for nid in list(_notebook_execution_state))
+
+
 _notebook_inspect_managers: dict[str, InspectManager] = {}
 
 # Deferred teardowns after the last WS disconnects, so a refresh or VPN blip
