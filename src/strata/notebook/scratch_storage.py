@@ -1,0 +1,274 @@
+"""A scratchpad's storage: a sweep under a soft limit, and the overage it cannot free.
+
+A scratchpad keeps superseded results on purpose (reverting an edit hits again), so it
+is swept by idle time and size, not by a count per value: what has not been used for
+*max_idle_days* goes, then the least recently used while the store is over its soft
+limit. Every live cell's current value is kept whatever the limit, so the limit can be
+exceeded; the sweep records by how much, and which cells hold the most, in
+``.strata/storage.json``, for ``scratchpad`` and ``strata scratch ls`` to show.
+
+``run`` adds a cell per call, so cells have a way out too: a leaf cell with no
+``# @name``, unused for *retire_days*, is retired. Its source moves to ``retired.jsonl``,
+it leaves the notebook, and the next sweep releases every value it stored.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import tomllib
+from collections import Counter
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from strata.notebook.annotations import parse_annotations
+from strata.notebook.artifact_integration import NotebookArtifactManager
+from strata.notebook.runtime_state import load_runtime_state
+from strata.scratch import register, scratch_dir
+
+if TYPE_CHECKING:
+    from strata.notebook.ops import CellView, NotebookOps
+    from strata.notebook.session import SessionManager
+
+_LARGEST = 3
+_DAY = 86400.0
+# Deleting the scratchpad is the one step that always frees everything.
+SAFE_TO_DELETE = "Deleting .strata-scratch/ is always safe: it costs reruns, never a wrong answer."
+
+
+@dataclass(frozen=True)
+class Storage:
+    """What a sweep left: the store's size against its soft limit."""
+
+    store_bytes: int
+    soft_limit_bytes: int
+    over_by_bytes: int
+    swept_at: float
+    # The live cells holding the most, when over: ``{"cell", "bytes"}``, largest first.
+    largest: list[dict[str, int | str]] = field(default_factory=list)
+
+
+def storage_path(notebook_dir: Path) -> Path:
+    return notebook_dir / ".strata" / "storage.json"
+
+
+def read_storage(notebook_dir: Path) -> Storage | None:
+    """The last sweep's record, or None before the first."""
+    try:
+        return Storage(**json.loads(storage_path(notebook_dir).read_text()))
+    except FileNotFoundError:
+        return None
+
+
+def _largest_cells(manager: NotebookArtifactManager) -> list[dict[str, int | str]]:
+    held: Counter[str] = Counter()
+    for latest in manager.artifact_store.list_latest_by_id_prefix(
+        f"nb_{manager.notebook_id}_cell_"
+    ):
+        output = manager.cell_output_of(latest.id)
+        if output is not None:
+            held[output[0]] += latest.byte_size or 0
+    return [{"cell": cell, "bytes": size} for cell, size in held.most_common(_LARGEST)]
+
+
+def retired_path(notebook_dir: Path) -> Path:
+    return notebook_dir / "retired.jsonl"
+
+
+def retired_cells(notebook_dir: Path) -> list[dict[str, Any]]:
+    """Every cell retired from the scratchpad at *notebook_dir*, oldest first."""
+    try:
+        lines = retired_path(notebook_dir).read_text().splitlines()
+    except FileNotFoundError:
+        return []
+    return [json.loads(line) for line in lines if line]
+
+
+def _shown_path(notebook_dir: Path) -> Path:
+    return notebook_dir / ".strata" / "shown.json"
+
+
+def touch_shown(notebook_dir: Path, cell_id: str) -> None:
+    """Record that ``scratchpad`` showed *cell_id*'s value: a use, as a run is."""
+    path = _shown_path(notebook_dir)
+    try:
+        shown = json.loads(path.read_text())
+    except FileNotFoundError:
+        shown = {}
+    shown[cell_id] = time.time()
+    partial = path.with_suffix(".json.partial")
+    partial.write_text(json.dumps(shown))
+    os.replace(partial, path)
+
+
+def last_uses(notebook_dir: Path, cells: list[CellView]) -> dict[str, float]:
+    """When each cell was last run, shown or edited.
+
+    A reader's loads need not count: an upstream is a leaf, so may retire, only once
+    every reader retired, each unused past the same cutoff.
+    """
+    runtime = load_runtime_state(notebook_dir)
+    try:
+        shown = json.loads(_shown_path(notebook_dir).read_text())
+    except FileNotFoundError:
+        shown = {}
+    uses: dict[str, float] = {}
+    for cell in cells:
+        times = [shown.get(cell.id, 0.0)]
+        entry = runtime.cells.get(cell.id)
+        if entry is not None:
+            times += [sample.get("at", 0.0) for sample in entry.execution_samples]
+        for source in (notebook_dir / "cells").glob(f"{cell.id}.*"):
+            times.append(source.stat().st_mtime)
+        uses[cell.id] = max(times)
+    return uses
+
+
+def retire_cell(
+    ops: NotebookOps, notebook_dir: Path, manager: NotebookArtifactManager, cell: CellView
+) -> dict[str, Any]:
+    """Move *cell* to ``retired.jsonl`` with every value it stored, and remove it."""
+    prefix = f"nb_{manager.notebook_id}_cell_{cell.id}_var_"
+    record = {
+        "cell": cell.id,
+        "language": cell.language,
+        "source": cell.source,
+        "defines": cell.defines,
+        "retired_at": time.time(),
+        "outputs": {
+            latest.id: latest.content_sha256
+            for latest in manager.artifact_store.list_latest_by_id_prefix(prefix)
+        },
+        # For the sweep to release, current values included.
+        "release": [list(value) for value in manager.cell_values(cell.id)],
+    }
+    with open(retired_path(notebook_dir), "a") as retired:
+        retired.write(json.dumps(record) + "\n")
+    ops.remove_cell(cell.id)
+    return record
+
+
+def _named(cell: CellView) -> bool:
+    return parse_annotations(cell.source, cell.language).name is not None
+
+
+def retire_idle(
+    ops: NotebookOps,
+    notebook_dir: Path,
+    *,
+    retire_days: float,
+    now: float | None = None,
+) -> list[str]:
+    """Retire each leaf cell with no ``# @name`` unused for *retire_days*; return their ids.
+
+    Retiring a leaf can leave its upstream a leaf, which retires only if it is idle too.
+    """
+    cutoff = (time.time() if now is None else now) - retire_days * _DAY
+    manager = scratch_manager(notebook_dir)
+    uses = last_uses(notebook_dir, ops.list_cells())
+    retired: list[str] = []
+    while True:
+        idle = [
+            cell
+            for cell in ops.list_cells()
+            if not cell.downstream_ids and not _named(cell) and uses.get(cell.id, cutoff) < cutoff
+        ]
+        if not idle:
+            return retired
+        for cell in idle:
+            retire_cell(ops, notebook_dir, manager, cell)
+            retired.append(cell.id)
+
+
+async def retire_in_session(
+    session_manager: SessionManager, notebook_dir: Path, *, retire_days: float
+) -> list[str]:
+    """:func:`retire_idle` through the session holding *notebook_dir*, which viewers see.
+
+    Nothing while it has a run reserved or running, or when no session holds it: the
+    session is the notebook's writer, so the files are not edited behind it.
+    """
+    from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.ws import broadcast_notebook_sync, notebook_has_active_execution
+
+    for session_id in session_manager.list_sessions():
+        session = session_manager.get_session(session_id)
+        if session is not None and session.path.resolve() == notebook_dir.resolve():
+            break
+    else:
+        return []
+    if notebook_has_active_execution(session_id):
+        return []
+    retired = retire_idle(
+        LocalNotebookOps.from_session(session), notebook_dir, retire_days=retire_days
+    )
+    if retired:
+        await broadcast_notebook_sync(session_id, session)
+    return retired
+
+
+def scratch_manager(notebook_dir: Path) -> NotebookArtifactManager:
+    toml = tomllib.loads((notebook_dir / "notebook.toml").read_text())
+    return NotebookArtifactManager(
+        toml["notebook_id"], artifact_dir=notebook_dir / ".strata" / "artifacts"
+    )
+
+
+def sweep(
+    notebook_dir: Path,
+    *,
+    soft_limit_bytes: int,
+    max_idle_days: float,
+    min_idle_seconds: float,
+) -> Storage:
+    """Sweep the scratchpad at *notebook_dir* and record what is left."""
+    toml = tomllib.loads((notebook_dir / "notebook.toml").read_text())
+    manager = scratch_manager(notebook_dir)
+    manager.prune(
+        None,
+        min_idle_seconds,
+        live_cells=[str(cell["id"]) for cell in toml.get("cells", [])],
+        max_idle_days=max_idle_days,
+        max_bytes=soft_limit_bytes,
+        # What a version still held (named, pinned, an input of a live value) keeps it,
+        # and a later sweep offers it again.
+        released=[
+            (artifact_id, version)
+            for record in retired_cells(notebook_dir)
+            for artifact_id, version in record["release"]
+        ],
+    )
+    store_bytes = manager.artifact_store.stats()["total_bytes"]
+    over_by = max(0, store_bytes - soft_limit_bytes)
+    storage = Storage(
+        store_bytes=store_bytes,
+        soft_limit_bytes=soft_limit_bytes,
+        over_by_bytes=over_by,
+        swept_at=time.time(),
+        largest=_largest_cells(manager) if over_by else [],
+    )
+    storage_path(notebook_dir).write_text(json.dumps(asdict(storage), indent=2) + "\n")
+    return storage
+
+
+def upkeep(
+    anchor: Path,
+    *,
+    soft_limit_bytes: int,
+    max_idle_days: float,
+    min_idle_seconds: float,
+    used: bool = True,
+) -> Storage:
+    """Sweep *anchor*'s scratchpad and update its registry entry (*used*: it was in use)."""
+    storage = sweep(
+        scratch_dir(anchor),
+        soft_limit_bytes=soft_limit_bytes,
+        max_idle_days=max_idle_days,
+        min_idle_seconds=min_idle_seconds,
+    )
+    register(
+        anchor, store_bytes=storage.store_bytes, over_by_bytes=storage.over_by_bytes, used=used
+    )
+    return storage

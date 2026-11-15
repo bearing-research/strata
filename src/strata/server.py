@@ -708,6 +708,38 @@ async def _shared_env_gc_loop(root: Path, ttl_days: float) -> None:
             logger.info("shared_env_gc_collected", removed=", ".join(result.removed))
 
 
+_SCRATCH_UPKEEP_SECONDS = 3600.0
+
+
+async def _scratch_upkeep_loop(anchor: Path, config: StrataConfig) -> None:
+    """Retire its idle cells and sweep the scratchpad this server serves, at start and
+    hourly, until cancelled.
+    """
+    from strata.notebook.routes import get_session_manager
+    from strata.notebook.scratch_storage import retire_in_session, upkeep
+    from strata.scratch import scratch_dir
+
+    while True:
+        try:
+            await retire_in_session(
+                get_session_manager(),
+                scratch_dir(anchor),
+                retire_days=config.notebook_scratch_retire_days,
+            )
+            await anyio.to_thread.run_sync(
+                functools.partial(
+                    upkeep,
+                    anchor,
+                    soft_limit_bytes=config.notebook_scratch_gc_soft_limit_bytes,
+                    max_idle_days=config.notebook_scratch_gc_max_idle_days,
+                    min_idle_seconds=config.artifact_gc_min_idle_seconds,
+                )
+            )
+        except Exception:
+            logger.exception("scratch_upkeep_failed")
+        await asyncio.sleep(_SCRATCH_UPKEEP_SECONDS)
+
+
 _NOTEBOOK_SESSION_SWEEP_SECONDS = 60.0
 _IDLE_CHECK_SECONDS = 5.0
 
@@ -1023,6 +1055,11 @@ async def lifespan(app: FastAPI):
         )
 
     session_sweep_task = asyncio.create_task(_notebook_session_sweep_loop())
+    scratch_task: asyncio.Task | None = None
+    if config.scratch_anchor:
+        scratch_task = asyncio.create_task(
+            _scratch_upkeep_loop(Path(config.scratch_anchor), config)
+        )
 
     build_qos = None
     if config.server_transforms_enabled:
@@ -1125,7 +1162,7 @@ async def lifespan(app: FastAPI):
     else:
         yield
 
-    for task in (gc_task, env_gc_task, session_sweep_task, idle_exit_task):
+    for task in (gc_task, env_gc_task, session_sweep_task, scratch_task, idle_exit_task):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

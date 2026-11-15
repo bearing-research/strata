@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib.metadata import version
 from pathlib import Path
+from typing import Any
 
 import filelock
 import httpx
@@ -196,6 +197,10 @@ def _spawn(anchor: Path, port: int) -> int:
         # The server opens notebooks only inside its storage dir.
         "STRATA_NOTEBOOK_STORAGE_DIR": str(anchor),
         "STRATA_IDLE_EXIT_MINUTES": os.environ.get("STRATA_IDLE_EXIT_MINUTES", str(IDLE_MINUTES)),
+        # Its own sweep, by idle days and size, replaces the count kept per value: a
+        # scratchpad keeps superseded results so that reverting an edit hits again.
+        "STRATA_SCRATCH_ANCHOR": str(anchor),
+        "STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS": "0",
     }
     try:
         log = private_file(_log_path(anchor))
@@ -369,6 +374,50 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
         partial.write_text(json.dumps(record, indent=2) + "\n")
         os.replace(partial, path)
         return Daemon(url=url, session_id=session_id, pid=pid, version=current, setup_ms=setup_ms)
+
+
+def _registry_path() -> Path:
+    return Path.home() / ".strata" / "scratchpads.json"
+
+
+@contextmanager
+def _registry() -> Generator[dict[str, dict[str, Any]]]:
+    """The registry's entries, by anchor, written back on exit."""
+    path = _registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with filelock.FileLock(f"{path}.lock"):
+        try:
+            entries = json.loads(path.read_text())
+        except FileNotFoundError:
+            entries = {}
+        before = json.dumps(entries, sort_keys=True)
+        yield entries
+        if json.dumps(entries, sort_keys=True) != before:
+            partial = path.with_suffix(".json.partial")
+            partial.write_text(json.dumps(entries, indent=2, sort_keys=True) + "\n")
+            os.replace(partial, path)
+
+
+def register(anchor: Path, *, store_bytes: int, over_by_bytes: int, used: bool) -> None:
+    """Record *anchor*'s scratchpad where ``strata scratch ls`` lists every one."""
+    with _registry() as entries:
+        entry = entries.setdefault(str(anchor), {})
+        entry.update(store_bytes=store_bytes, over_by_bytes=over_by_bytes)
+        if used or "last_used" not in entry:
+            entry["last_used"] = time.time()
+
+
+def registered() -> dict[str, dict[str, Any]]:
+    """Every registered scratchpad, by anchor; one whose directory is gone is dropped."""
+    with _registry() as entries:
+        for anchor in [a for a in entries if not scratch_dir(Path(a)).is_dir()]:
+            del entries[anchor]
+        return dict(entries)
+
+
+def unregister(anchor: Path) -> None:
+    with _registry() as entries:
+        entries.pop(str(anchor), None)
 
 
 def stop_daemon(anchor: Path, timeout: float = 30.0) -> bool:

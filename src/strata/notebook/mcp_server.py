@@ -1020,14 +1020,37 @@ async def _scratch_run(
             out["fix"] = f"the run was cancelled; call `run` again with cell={cell!r}"
         else:
             out["fix"] = f"fix what `error` names, then call `run` again with cell={cell!r}"
+        came_back = _retired_source(session, view["references"])
+        if came_back is not None:
+            out["fix"] = came_back
     out["defines"] = view["defines"]
     out["url"] = _notebook_url(session_id)
     return out
 
 
+def _retired_source(session: Any, references: list[str]) -> str | None:
+    """The fix for a cell that used a name only a retired cell defined, or None."""
+    import time
+
+    from strata.notebook.scratch_storage import retired_cells
+
+    live = {name for cell in session.notebook_state.cells for name in cell.defines}
+    missing = set(references) - live
+    for record in reversed(retired_cells(session.path)):
+        names = sorted(missing & set(record["defines"]))
+        if names:
+            retired = time.strftime("%Y-%m-%d", time.localtime(record["retired_at"]))
+            return (
+                f"{', '.join(names)} came from cell {record['cell']}, retired on {retired} "
+                f"after going unused; `run` its source again first:\n{record['source']}"
+            )
+    return None
+
+
 def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dict[str, Any]:
     """The inventory, or with *name* the cell that defines it."""
     from strata.notebook.layout import WORK_DIR
+    from strata.notebook.scratch_storage import SAFE_TO_DELETE, read_storage, touch_shown
 
     try:
         session_id, session = _one_session(session_manager)
@@ -1043,6 +1066,8 @@ def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dic
             # A sweep or fan-out: no single defining cell.
             return {**found, "url": url}
         cell = found["cell"]
+        # A look at its value is a use: it keeps the cell from retiring.
+        touch_shown(session.path, cell["id"])
         defined: dict[str, Any] = {
             "variable": name,
             "defined": True,
@@ -1066,7 +1091,7 @@ def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dic
         if cold_ms:
             entry["cold_ms"] = cold_ms
         cells.append(entry)
-    return {
+    inventory: dict[str, Any] = {
         "notebook": str(session.path),
         "cwd": str(session.path / WORK_DIR),
         "python": str(session.venv_python) if session.venv_python else None,
@@ -1074,6 +1099,19 @@ def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dic
         "cells": cells,
         "url": url,
     }
+    storage = read_storage(session.path)
+    if storage is not None and storage.over_by_bytes:
+        # Shown, never hidden: what live cells hold is the person's to free.
+        inventory["storage"] = {
+            "over_by_bytes": storage.over_by_bytes,
+            "soft_limit_bytes": storage.soft_limit_bytes,
+            "largest": storage.largest,
+            "fix": (
+                "tell the person; `strata scratch ls` shows every scratchpad's size. "
+                + SAFE_TO_DELETE
+            ),
+        }
+    return inventory
 
 
 def _server_config():

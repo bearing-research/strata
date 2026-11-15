@@ -21,6 +21,17 @@ exhaustive commit history.
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)
+- **A scratchpad's storage has a soft limit, and every scratchpad is listed.** Its daemon
+  sweeps it at start and hourly: results unused for 14 days go, then the least recently
+  used while it is over 5 GiB (`STRATA_NOTEBOOK_SCRATCH_GC_SOFT_LIMIT_BYTES`,
+  `STRATA_NOTEBOOK_SCRATCH_GC_MAX_IDLE_DAYS`). Live cells' values stay, and an overage
+  is shown by `scratchpad` with the cells holding the most. `~/.strata/scratchpads.json`
+  lists every scratchpad for `strata scratch ls`; `strata scratch gc` sweeps now and
+  `strata scratch rm` deletes one. A leaf cell with no `# @name` unused for 14 days
+  (`STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS`) is retired: its source goes to
+  `retired.jsonl`, the sweep frees its values, and a run needing its variable gets the
+  source back in its `fix`; `strata scratch retire` retires one by hand. Each run sample
+  in `runtime.json` now records when it ran. (#STORAGE)
 - **The notebook CLI drives a directory through the daemon serving it.** A project's
   `.strata-scratch/` is served by its daemon, whose `.strata/server.json` names it. On
   such a directory, `strata cell`, `status`, `dag` and `dep` go through the daemon's

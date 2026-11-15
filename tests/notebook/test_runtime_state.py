@@ -368,10 +368,12 @@ def test_persist_cell_execution_sample_appends_in_order(tmp_path: Path):
     persist_cell_execution_sample(tmp_path, "c1", duration_ms=8.0, cache_hit=True)
 
     samples = load_runtime_state(tmp_path).cells["c1"].execution_samples
-    assert samples == [
+    assert [{k: v for k, v in sample.items() if k != "at"} for sample in samples] == [
         {"duration_ms": 1200.0, "cache_hit": False},
         {"duration_ms": 8.0, "cache_hit": True},
     ]
+    # When each ran, so a scratchpad can tell an idle cell.
+    assert samples[0]["at"] <= samples[1]["at"]
 
 
 def test_persist_cell_execution_sample_keeps_only_the_newest(tmp_path: Path):
@@ -554,7 +556,7 @@ def test_a_solo_notebook_records_no_team_keys(tmp_path: Path):
 
     written = json_module.loads((tmp_path / ".strata" / "runtime.json").read_text())
     sample = written["cells"]["c1"]["execution_samples"][0]
-    assert set(sample) == {"duration_ms", "cache_hit"}
+    assert set(sample) == {"duration_ms", "cache_hit", "at"}
 
 
 def test_a_team_hit_from_an_anonymous_publisher_still_counts(tmp_path: Path):
