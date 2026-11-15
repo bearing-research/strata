@@ -4231,6 +4231,13 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A Python run's displays and console are current only with its outputs.</strong> A single
+  Python cell run made its variables current, then each display and its console alone, so
+  a display that failed to store, or a crash between the two, left the new values beside
+  the previous run's displays, and a leaf run whose release the ledger refused still showed
+  what it printed. They are now made current in the same release as the variables; a
+  refused release keeps none of them and fails the run. Run All's batch is unchanged.
+  (#1552)</li>
 <li><strong>A reopen shows the worker a cell last ran on.</strong> A cell's header names the remote worker
   and transport its last run used; a reopen dropped them until the cell ran again. They
   are now kept in <code>.strata/runtime.json</code>, and a local run clears them. (#1547)</li>
