@@ -308,7 +308,7 @@ exhaustive commit history.
   cell's outputs never come from two runs. It adds `ArtifactStore.stage_promotion`,
   which Strata does not call yet. Its migrations 18 and 19 add indexes: the first
   0.6.0 process to open a store builds them, and every process on that store
-  upgrades together. (#PRNUM)
+  upgrades together. (#1551)
 - **The ledger is vestigo 0.5.0.** A sweep no longer deletes a cell value that a kept
   checkpoint was built from: before, a checkpoint the idle floor kept could lose its
   inputs in the same pass. Two processes opening one new SQLite store at once no
