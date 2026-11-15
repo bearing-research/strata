@@ -3875,6 +3875,10 @@ exhaustive commit history.</p>
   ids included, for <code>--init</code> and <code>?init=</code>. The WebSocket <code>cell_execute</code> frame takes an
   optional <code>init</code>; such a run sends no cascade prompt and asks before a large read even
   when the cell is ready. (#1555)</li>
+<li><strong>A server can stop itself when nothing uses it.</strong> With <code>STRATA_IDLE_EXIT_MINUTES</code> set,
+  the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
+  response in progress (MCP included), no open notebook tab, and no run, build or cache
+  warm job in flight. Off by default. (#1556)</li>
 <li><strong>A scratchpad profile for the MCP server.</strong> <code>STRATA_MCP_PROFILE=scratchpad</code> lists
   two tools, <code>run</code> (add or replace a cell and run it) and <code>scratchpad</code> (what the
   session already holds), over the server's one open session, with no <code>session_id</code>,

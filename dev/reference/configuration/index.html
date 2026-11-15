@@ -4897,6 +4897,11 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>An open notebook nobody has edited, run or focused for this long is closed, with a tab connected or not, and its warm processes stop. Syncs, previews and keep-alives do not count; a running cell does. Its results stay on disk and reopening restores them; a connected tab gets <code>session_closed</code> and offers to reopen. Checked every minute. See <a href="../notebook-protocol/#session-lifetime-and-session_closed">Session lifetime</a>.</td>
 </tr>
 <tr>
+<td><code>STRATA_IDLE_EXIT_MINUTES</code></td>
+<td><code>0</code> (never)</td>
+<td>The server stops itself after this many minutes with no HTTP request or response in progress (MCP included), no open WebSocket (a notebook tab), and no cell run, build or cache warm job in flight, as Ctrl-C would stop it. For one <code>python -m strata</code> process: a process manager that restarts its workers restarts the one that stopped.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_MAX_SESSIONS</code></td>
 <td><code>50</code></td>
 <td>Most notebooks open at once. Beyond it the least recently used is closed, with a tab connected or not.</td>
