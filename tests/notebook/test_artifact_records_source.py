@@ -1,8 +1,8 @@
 """Every artifact write records the source that produced it.
 
 ``store_cell_output`` and ``stage_cell_output`` take ``source`` as optional, so any call site
-can omit it, and a lineage view with code for some cells and blanks for others misleads. Static rather than
-behavioural, so it also fails on call sites that do not exist yet.
+can omit it, and a lineage view with code for some cells and blanks for others misleads.
+Static rather than behavioural, so it also fails on call sites that do not exist yet.
 """
 
 from __future__ import annotations
