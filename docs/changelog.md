@@ -12,7 +12,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ### Added
 - **A server can stop itself when nothing uses it.** With `STRATA_IDLE_EXIT_MINUTES` set,
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request (MCP
-  included), no open notebook tab and no run in flight. Off by default. (#1536)
+  included), no open notebook tab and no run in flight. Off by default. (#1556)
 - **A scratchpad profile for the MCP server.** `STRATA_MCP_PROFILE=scratchpad` lists
   two tools, `run` (add or replace a cell and run it) and `scratchpad` (what the
   session already holds), over the server's one open session, with no `session_id`,
