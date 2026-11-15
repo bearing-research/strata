@@ -227,8 +227,9 @@ def _start(
                 deadline,
             )
     except BaseException:
-        # Not left running for nobody: no server.json names it.
-        with contextlib.suppress(ProcessLookupError):
+        # Not left running for nobody: no server.json names it. Gone already raises
+        # ProcessLookupError, or on Windows a plain OSError.
+        with contextlib.suppress(OSError):
             os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
         raise
     return pid, url, session_id
