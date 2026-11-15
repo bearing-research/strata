@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from itertools import islice
 
 from vestigo.sql_backend import SqlDialect, StoreConnection
 from vestigo.tables import LEDGER_TABLES
@@ -244,7 +245,7 @@ def _copy_table(
     statement = ""
 
     while True:
-        rows = cursor.fetchmany(_BATCH_ROWS)
+        rows = list(islice(cursor, _BATCH_ROWS))
         if not rows:
             break
         if columns is None:

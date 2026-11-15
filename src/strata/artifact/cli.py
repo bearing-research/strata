@@ -1061,8 +1061,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
         detail = ""
         if e["action"] in ("name_set", "alias_set"):
             to_ref = f"{(e['artifact_id'] or '?')[:8]}@v{e['to_version']}"
-            if e.get("from_artifact_id"):
-                from_ref = f"{e['from_artifact_id'][:8]}@v{e['from_version']}"
+            if from_id := e.get("from_artifact_id"):
+                from_ref = f"{from_id[:8]}@v{e['from_version']}"
                 detail = f"{from_ref} -> {to_ref}"
             elif e["from_version"] is not None:
                 detail = f"v{e['from_version']} -> {to_ref}"

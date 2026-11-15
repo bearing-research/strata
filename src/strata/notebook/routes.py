@@ -3038,7 +3038,7 @@ async def get_notebook_dag(notebook_id: str, session: SessionDep) -> dict:
 
 
 @router.get("/{notebook_id}/store/stats")
-def get_notebook_store_stats(notebook_id: str, session: SessionDep) -> dict:
+def get_notebook_store_stats(notebook_id: str, session: SessionDep):
     """``GET /v1/artifacts/stats`` over this notebook's own store, run placeholders left out."""
     manager = session.get_artifact_manager()
     return manager.artifact_store.stats(exclude_id_prefix=manager.run_placeholder_prefix)
