@@ -1131,15 +1131,22 @@ async def _handle_cell_execute(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle cell_execute: send a cascade_prompt if upstreams need running, else run."""
+    """Handle cell_execute: send a cascade_prompt if upstreams need running, else run.
+
+    With ``init``, an accepted release of this notebook, the run is a branch from it.
+    """
     cell_id = payload.get("cell_id")
-    if not cell_id:
+    init = payload.get("init")
+    # An empty id would key a branch that restores nothing.
+    if not cell_id or not (init is None or (isinstance(init, str) and init)):
         await websocket.send_text(
             _json_encode(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.next_sequence(),
-                    error_payload("Missing cell_id"),
+                    error_payload(
+                        "Missing cell_id" if not cell_id else "init must be a release id"
+                    ),
                 )
             )
         )
@@ -1155,7 +1162,7 @@ async def _handle_cell_execute(
     # open every later run would be refused as busy.
     try:
         await _handle_cell_execute_reserved(
-            websocket, session, execution_state, notebook_id, cell_id
+            websocket, session, execution_state, notebook_id, cell_id, init
         )
     except BaseException:
         await _release_execution_request(execution_state, cell_id)
@@ -1168,6 +1175,7 @@ async def _handle_cell_execute_reserved(
     execution_state: NotebookExecutionState,
     notebook_id: str,
     cell_id: str,
+    init: str | None = None,
 ) -> None:
     """The post-reservation body of ``_handle_cell_execute``."""
     environment_block_reason = session.environment_execution_block_message()
@@ -1198,8 +1206,9 @@ async def _handle_cell_execute_reserved(
         )
         return
 
-    planner = CascadePlanner(session)
-    plan = planner.plan(cell_id)
+    # A branch asks no cascade: the executor brings its upstreams up to date, as it
+    # does for the REST route's ``init``, and their results go out after the cell's.
+    plan = CascadePlanner(session).plan(cell_id) if init is None else None
 
     if plan:
         # Downstream staleness goes out via cell_status, not impact_preview.
@@ -1235,10 +1244,16 @@ async def _handle_cell_execute_reserved(
             session,
             execution_state,
             notebook_id,
-            [cell_id],
+            [cell_id] if init is None else run_cells(session, cell_id, "normal"),
             lambda: _handle_cell_execute(
-                websocket, session, {"cell_id": cell_id}, execution_state, notebook_id
+                websocket,
+                session,
+                {"cell_id": cell_id, "init": init},
+                execution_state,
+                notebook_id,
             ),
+            # A branch of a ready cell is no cache hit: it reads what the cell reads.
+            force=init is not None,
         ):
             await _release_execution_request(execution_state, cell_id)
             return
@@ -1247,7 +1262,9 @@ async def _handle_cell_execute_reserved(
             execution_state,
             notebook_id,
             cell_id,
-            lambda: execute_cell_and_broadcast(session, cell_id, execution_state, notebook_id),
+            lambda: execute_cell_and_broadcast(
+                session, cell_id, execution_state, notebook_id, init=init
+            ),
         )
         if not scheduled:
             await _release_execution_request(execution_state, cell_id)

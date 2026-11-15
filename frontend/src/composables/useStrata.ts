@@ -7,6 +7,7 @@ import type {
   MaterializeResponse,
   MountSpec,
 } from '../types/notebook'
+import { type CheckpointRunInfo, parseCheckpointRuns } from '../utils/checkpoints'
 import type { DatasetReader } from '../utils/datasetReaders'
 import { BASE_PATH, strataHttpBase } from '../utils/strataBase'
 
@@ -872,6 +873,21 @@ async function listCellIterations(
   }
 }
 
+/** A cell's stored checkpoints by run, newest first. */
+async function listCellCheckpoints(
+  notebookId: string,
+  cellId: string,
+): Promise<CheckpointRunInfo[]> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/cells/${cellId}/checkpoints`,
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to list checkpoints')
+  }
+  const raw = await readJson<{ runs: Array<Record<string, unknown>> }>(resp)
+  return parseCheckpointRuns(raw.runs)
+}
+
 async function updateCellSource(
   notebookId: string,
   cellId: string,
@@ -1654,6 +1670,7 @@ export function useStrata() {
     getCellDataSummary,
     cellDataExportUrl,
     listCellIterations,
+    listCellCheckpoints,
     updateNotebookMounts,
     listNotebookConnections,
     updateNotebookConnections,

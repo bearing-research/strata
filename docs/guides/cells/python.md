@@ -128,11 +128,16 @@ while epoch < 20:
 The cell's variables are stored as before once it returns; they are the run's
 final result, and a cell downstream sees only those. To start a new run from a
 checkpoint's parts instead of from nothing (a branch: try another learning rate
-from epoch 12), pass the release to run with: `strata cell run <dir> <cell>
---init <release_id>` or `?init=` on the execute route. The branch is its own
-run under its own provenance key, so it never serves or overwrites the plain
-run's cache. The calls exist only on a local Python run; on a remote worker, an
-R cell or a prompt cell they raise a `RuntimeError` saying so.
+from epoch 12), open the cell's **Checkpoints** panel (the branch button in the
+cell's header) and press **Branch from here** on the checkpoint. The panel
+lists the checkpoints the store still holds, by run, with each one's parts,
+size and heads. Outside the notebook, pass the release to run with: `strata
+cell run <dir> <cell> --init <release_id>` or `?init=` on the execute route;
+[`GET …/cells/{cell_id}/checkpoints`](../../reference/rest-api.md#list-a-cells-checkpoints)
+lists the release ids. The branch is its own run under its own provenance key,
+so it never serves or overwrites the plain run's cache. The calls exist only on
+a local Python run; on a remote worker, an R cell or a prompt cell they raise a
+`RuntimeError` saying so.
 
 A PyTorch cell can save through
 [vestigo.torch](https://github.com/bearing-research/vestigo/blob/main/docs/torch.md)
