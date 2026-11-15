@@ -238,9 +238,14 @@ class LocalRuns:
         A build of the computation accepts a ``final`` release holding a copy of each
         ``(artifact_id, version)`` (``ArtifactStore.stage_promotion``), so every copy is
         current or none is. Returns the copies in *sources*' order, or None when nothing
-        was made current: a source or its blob is gone, or a newer value of an output was
-        made current first. The build is then failed.
+        was made current: the computation is running (its own release decides), a source
+        or its blob is gone, or a newer value of an output was made current first.
         """
+        occurrence = f"variant={variant}" if variant else None
+        running = self.builds.find_open_build(computation_key, occurrence=occurrence)
+        if running is not None and (running.lease_expires_at or 0.0) > time.time():
+            logger.info("Cell %s's revert waits for its run, build %s", cell_id, running.build_id)
+            return None
         attempt = uuid.uuid4().hex
         build_id = self._new_build(
             cell_id,
@@ -251,29 +256,51 @@ class LocalRuns:
         )
         release = self.releases.prepare(build_id, attempt, "final")
         staged: list[StagedVersion] = []
-        for artifact_id, version in sources:
-            row = self.store.stage_promotion(artifact_id, version, release_id=release.release_id)
-            if row is None:
-                reason = f"{artifact_id}@v={version} is gone"
-                break
-            staged.append(row)
-        else:
-            try:
-                bundle = self.releases.accept(release.release_id, staged)
-            except ReleaseRejected as exc:
-                reason = str(exc)
+        try:
+            for artifact_id, version in sources:
+                row = self.store.stage_promotion(
+                    artifact_id, version, release_id=release.release_id
+                )
+                if row is None:
+                    reason = f"{artifact_id}@v={version} is gone"
+                    break
+                staged.append(row)
             else:
-                by_key = {(v.id, v.version): v for v in bundle.outputs}
-                return [by_key[(row.artifact_id, row.version)] for row in staged]
+                try:
+                    bundle = self.releases.accept(release.release_id, staged)
+                except ReleaseRejected as exc:
+                    reason = str(exc)
+                else:
+                    by_key = {(v.id, v.version): v for v in bundle.outputs}
+                    return [by_key[(row.artifact_id, row.version)] for row in staged]
+        except Exception:
+            # Left open, its lease would refuse a run of the computation for a minute.
+            self._end_revert(build_id, release.release_id, attempt, staged, "it raised")
+            raise
         logger.info("Cell %s's revert was not made current: %s", cell_id, reason)
+        self._end_revert(build_id, release.release_id, attempt, staged, reason)
+        return None
+
+    def _end_revert(
+        self,
+        build_id: str,
+        release_id: str,
+        attempt: str,
+        staged: list[StagedVersion],
+        reason: str,
+    ) -> None:
+        """Fail a revert that made nothing current: its release, copies, placeholder, build."""
         # Settled already when acceptance refused it.
-        self.releases.abandon(release.release_id, attempt)
-        for row in staged:
-            self.store.fail_artifact(row.artifact_id, row.version)
+        self.releases.abandon(release_id, attempt)
+        build = self.builds.get_build(build_id)
+        rows = [(row.artifact_id, row.version) for row in staged]
+        if build is not None:
+            rows.append((build.artifact_id, build.version))
+        for artifact_id, version in rows:
+            self.store.fail_artifact(artifact_id, version)
         self.builds.fail_build(
             build_id, f"revert not made current: {reason}", lease_owner=LEASE_OWNER
         )
-        return None
 
     def start_renewing(self, run: LocalRun) -> asyncio.Task[None]:
         """Renew the attempt's lease until cancelled; the caller stops it with :meth:`close`."""

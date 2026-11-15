@@ -534,6 +534,37 @@ class TestGate1:
         assert store.get_artifact(value, 3).state == "failed"
         *_, revert = _only_build(session, "a")
         assert revert.state == "failed"
+        assert store.get_artifact(revert.artifact_id, revert.version).state == "failed"
+
+    def test_a_revert_waits_for_a_run_of_its_computation(self, tmp_path: Path):
+        """A run of the key holds its build's lease: its own release decides what is current."""
+        session = self._cells(tmp_path, a=self.ONE, b="y = x\n")
+        executor = CellExecutor(session)
+        for source in (self.ONE, self.TWO):
+            self._edit(session, executor, source)
+        manager = session.get_artifact_manager()
+        runs = LocalRuns(manager)
+        first, second = _only_build(session, "a")
+        runs.open(
+            cell_id="a",
+            computation_key=first.computation_key,
+            variant=None,
+            input_versions={},
+            timeout_seconds=30,
+            resume=False,
+        )
+
+        promoted = runs.promote(
+            cell_id="a",
+            computation_key=first.computation_key,
+            variant=None,
+            sources=[(manager.cell_artifact_id("a", "x"), 1)],
+        )
+
+        assert promoted is None
+        assert len(_only_build(session, "a")) == 3  # the run's; no revert's
+        latest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("a", "x"))
+        assert latest is not None and latest.version == 2
 
 
 class TestAbandonedRuns:
