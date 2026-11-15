@@ -34,6 +34,11 @@ IDLE_MINUTES = 30
 # Starting the server, then the scratchpad's first environment sync, can take minutes
 # on a cold uv cache.
 _SETUP_TIMEOUT = 600.0
+# Windows: OpenProcess access, the error a live process of another user gives, and
+# GetExitCodeProcess's "not exited".
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_ERROR_ACCESS_DENIED = 5
+_STILL_ACTIVE = 259
 
 
 class ScratchError(RuntimeError):
@@ -152,9 +157,21 @@ def _spawn(anchor: Path, port: int) -> int:
 
 
 def _alive(pid: int) -> bool:
-    if os.name == "nt":
-        # Signal 0 would terminate it there; the deadline is the check.
-        return True
+    if sys.platform == "win32":
+        # os.kill(pid, 0) would terminate it there: ask for its exit code instead.
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == _ERROR_ACCESS_DENIED
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == _STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

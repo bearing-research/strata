@@ -44,7 +44,8 @@ def project(tmp_path, monkeypatch):
     yield root
     # Every one this test started, not only the one server.json names.
     for pid in started:
-        with contextlib.suppress(ProcessLookupError):
+        # Gone already: ProcessLookupError, or on Windows a plain OSError.
+        with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGTERM)
 
 
