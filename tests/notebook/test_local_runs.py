@@ -470,6 +470,71 @@ class TestGate1:
             assert store.get_latest_version(artifact_id) is None
             assert [v.state for v in store.list_versions_by_id_prefix(artifact_id)] == ["failed"]
 
+    ONE = "x = 1\nprint('one')\nx\n"
+    TWO = "x = 2\nprint('two')\nx\n"
+
+    def _edit(self, session: NotebookSession, executor: CellExecutor, source: str):
+        session.notebook_state.get_cell("a").source = source
+        write_cell(session.path, "a", source)
+        session.re_analyze_cell("a")
+        result = _run(executor, "a", source)
+        assert result.success is True, result.error
+        return result
+
+    def test_a_revert_is_one_release_of_its_copies(self, tmp_path: Path):
+        """K1, K2, then K1 again: the first run's value, display and console come back together."""
+        session = self._cells(tmp_path, a=self.ONE, b="y = x\n")
+        executor = CellExecutor(session)
+        for source in (self.ONE, self.TWO):
+            self._edit(session, executor, source)
+        assert self._edit(session, executor, self.ONE).cache_hit is True
+
+        store, _, releases = _ledger(session)
+        first, _, revert = _only_build(session, "a")
+        assert revert.computation_key == first.computation_key
+        assert revert.state == "ready"
+        (final,) = releases.releases_of(revert.build_id, "final")
+        outputs = releases.bundle(final.release_id).outputs
+        assert sorted(v.id.split("_var_")[1] for v in outputs) == [
+            "__console__",
+            "__display__0",
+            "x",
+        ]
+        for copy in outputs:
+            name = copy.id.split("_var_")[1]
+            assert copy.version == 3
+            assert copy.provenance_hash == derive_subkey(first.computation_key, name)
+            latest = store.get_latest_version(copy.id)
+            assert latest is not None and (latest.version, latest.release_id) == (
+                3,
+                final.release_id,
+            )
+
+    def test_a_revert_whose_source_is_gone_makes_nothing_current(self, tmp_path: Path):
+        session = self._cells(tmp_path, a=self.ONE, b="y = x\n")
+        executor = CellExecutor(session)
+        for source in (self.ONE, self.TWO):
+            self._edit(session, executor, source)
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        value, console = (manager.cell_artifact_id("a", name) for name in ("x", "__console__"))
+        store.blob_store.delete_blob(console, 1)
+        (first, _) = _only_build(session, "a")
+
+        promoted = LocalRuns(manager).promote(
+            cell_id="a",
+            computation_key=first.computation_key,
+            variant=None,
+            sources=[(value, 1), (console, 1)],
+        )
+
+        assert promoted is None
+        latest = store.get_latest_version(value)
+        assert latest is not None and latest.version == 2
+        assert store.get_artifact(value, 3).state == "failed"
+        *_, revert = _only_build(session, "a")
+        assert revert.state == "failed"
+
 
 class TestAbandonedRuns:
     """An interrupted run stays resumable for a week; then prune ends it and its checkpoints go."""

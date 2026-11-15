@@ -1401,7 +1401,8 @@ class CellExecutor:
 
         A mismatched latest may still have the right result under an older version (reverting
         an edit P1 -> P2 -> P1); promoting re-points "latest" at it without running the cell.
-        All are checked before any write. Returns how many were promoted, or None for a miss.
+        All are checked before any write, and promoted in one release. Returns how many were
+        promoted, or None for a miss.
         """
         artifact_mgr = self.session.get_artifact_manager()
         store = artifact_mgr.artifact_store
@@ -1476,32 +1477,47 @@ class CellExecutor:
                 expected[:12],
             )
             return None
-        for artifact_id, source_version in to_promote:
-            promoted = store.promote_version(artifact_id, source_version)
-            if promoted is None:
-                # The blob vanished since the check (likely a GC pass). Run the cell.
-                logger.info(
-                    "Cell %s could not promote %s@v=%d; re-executing.",
-                    cell_id,
-                    artifact_id,
-                    source_version,
-                )
-                return None
+        if not to_promote:
+            return 0
+        if not self._promote_together(cell_id, provenance_hash, variant, to_promote):
+            return None
+        return len(to_promote)
+
+    def _promote_together(
+        self,
+        cell_id: str,
+        provenance_hash: str,
+        variant: str | None,
+        to_promote: list[tuple[str, int]],
+    ) -> bool:
+        """Make *to_promote*'s versions current again in one release; False if they were not.
+
+        All or none: a revert left half done would show one run's values beside another's.
+        """
+        promoted = self._local_runs().promote(
+            cell_id=cell_id, computation_key=provenance_hash, variant=variant, sources=to_promote
+        )
+        if promoted is None:
+            # A blob vanished since the check (likely a GC pass), or a newer value landed.
+            logger.info("Cell %s could not revert; re-executing.", cell_id)
+            return False
+        for (artifact_id, source_version), copy in zip(to_promote, promoted, strict=True):
             logger.info(
                 "Cell %s reverted to a known provenance: promoted "
                 "%s@v=%d to @v=%d instead of re-executing.",
                 cell_id,
                 artifact_id,
                 source_version,
-                promoted.version,
+                copy.version,
             )
-        return len(to_promote)
+        return True
 
     def _promote_reverted_leaf(
         self, cell_id: str, provenance_hash: str, current_display_count: int
     ) -> bool:
         """Make a leaf's console and displays from an earlier run under ``provenance_hash``
-        latest again. All or none is checked before writing; True when promoted.
+        latest again, in one release. All or none is checked before writing; True when
+        promoted.
         """
         artifact_mgr = self.session.get_artifact_manager()
         store = artifact_mgr.artifact_store
@@ -1527,17 +1543,9 @@ class CellExecutor:
             if older is None or not store.blob_exists(artifact_id, older.version):
                 return False
             to_promote.append((artifact_id, older.version))
-        for artifact_id, version in to_promote:
-            if store.promote_version(artifact_id, version) is None:
-                # The blob vanished since the check (likely a GC pass); run the cell.
-                return False
-            logger.info(
-                "Cell %s reverted to a known provenance: promoted %s@v=%d.",
-                cell_id,
-                artifact_id,
-                version,
-            )
-        return bool(to_promote)
+        return bool(to_promote) and self._promote_together(
+            cell_id, provenance_hash, None, to_promote
+        )
 
     def _fanout_variants(self, cell_id: str) -> tuple[str, ...] | None:
         """The variant names if ``cell_id`` is a ``@per_variant`` fan-out cell, else None.

@@ -163,6 +163,31 @@ class LocalRuns:
                 else "interrupted before a checkpoint",
             )
 
+        build_id = self._new_build(
+            cell_id, computation_key, variant, attempt, writable_until, init=init
+        )
+        return LocalRun(
+            build_id=build_id,
+            attempt=attempt,
+            cell_id=cell_id,
+            computation_key=computation_key,
+            variant=variant,
+            input_versions=input_versions,
+            init=init,
+        )
+
+    def _new_build(
+        self,
+        cell_id: str,
+        computation_key: str,
+        variant: str | None,
+        attempt: str,
+        writable_until: float,
+        *,
+        init: str | None = None,
+    ) -> str:
+        """Create a build of the computation with *attempt* open on it; its id."""
+        occurrence = f"variant={variant}" if variant else None
         build_id = uuid.uuid4().hex
         # A build references a version, so a run whose outputs do not exist yet targets a
         # placeholder the final release repoints it from (and fails).
@@ -198,15 +223,57 @@ class LocalRuns:
             lease_duration_seconds=LEASE_SECONDS,
             principal=caller_principal_id(),
         )
-        return LocalRun(
-            build_id=build_id,
-            attempt=attempt,
-            cell_id=cell_id,
-            computation_key=computation_key,
-            variant=variant,
-            input_versions=input_versions,
-            init=init,
+        return build_id
+
+    def promote(
+        self,
+        *,
+        cell_id: str,
+        computation_key: str,
+        variant: str | None,
+        sources: list[tuple[str, int]],
+    ) -> list[ArtifactVersion] | None:
+        """Make earlier versions of a cell's outputs current again, together: a revert hit.
+
+        A build of the computation accepts a ``final`` release holding a copy of each
+        ``(artifact_id, version)`` (``ArtifactStore.stage_promotion``), so every copy is
+        current or none is. Returns the copies in *sources*' order, or None when nothing
+        was made current: a source or its blob is gone, or a newer value of an output was
+        made current first. The build is then failed.
+        """
+        attempt = uuid.uuid4().hex
+        build_id = self._new_build(
+            cell_id,
+            computation_key,
+            variant,
+            attempt,
+            time.time() + WRITE_WINDOW_MARGIN_SECONDS,
         )
+        release = self.releases.prepare(build_id, attempt, "final")
+        staged: list[StagedVersion] = []
+        for artifact_id, version in sources:
+            row = self.store.stage_promotion(artifact_id, version, release_id=release.release_id)
+            if row is None:
+                reason = f"{artifact_id}@v={version} is gone"
+                break
+            staged.append(row)
+        else:
+            try:
+                bundle = self.releases.accept(release.release_id, staged)
+            except ReleaseRejected as exc:
+                reason = str(exc)
+            else:
+                by_key = {(v.id, v.version): v for v in bundle.outputs}
+                return [by_key[(row.artifact_id, row.version)] for row in staged]
+        logger.info("Cell %s's revert was not made current: %s", cell_id, reason)
+        # Settled already when acceptance refused it.
+        self.releases.abandon(release.release_id, attempt)
+        for row in staged:
+            self.store.fail_artifact(row.artifact_id, row.version)
+        self.builds.fail_build(
+            build_id, f"revert not made current: {reason}", lease_owner=LEASE_OWNER
+        )
+        return None
 
     def start_renewing(self, run: LocalRun) -> asyncio.Task[None]:
         """Renew the attempt's lease until cancelled; the caller stops it with :meth:`close`."""
