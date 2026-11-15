@@ -3892,6 +3892,8 @@ class CellExecutor:
             }
             for name in sorted(listings)
         ] + list(display_outputs or [])
+        if not display_outputs:
+            return [], []
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id, variant)
         entries: list[dict[str, Any]] = []

@@ -319,8 +319,11 @@ class TestPythonAndR:
 
         assert offered == ["v"]
         assert result.success, result.error
-        # Python's displays went out with its outputs, before the push.
-        assert "_store_display_outputs" in steps or language == "python"
+        if language == "python":
+            # Its displays went out with its outputs, before the push.
+            assert _latest(session, "v", "__display__0") == 1
+        else:
+            assert "_store_display_outputs" in steps
         assert _latest(session, "v", "value") == 1
 
     async def test_a_cancel_during_the_push_is_still_a_cancel(self, tmp_path, monkeypatch, steps):
