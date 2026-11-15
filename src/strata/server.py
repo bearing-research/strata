@@ -713,8 +713,9 @@ _IDLE_CHECK_SECONDS = 30.0
 
 
 def _stop_self() -> None:
-    # uvicorn's own handler: the lifespan's shutdown runs as on Ctrl-C.
-    os.kill(os.getpid(), signal.SIGTERM)
+    # uvicorn's own handler: the lifespan's shutdown runs as on Ctrl-C. Not os.kill,
+    # which on Windows terminates the process without running any handler.
+    signal.raise_signal(signal.SIGTERM)
 
 
 def _idle_for(now: float, last_busy: float, busy: bool, request_idle: float) -> float:

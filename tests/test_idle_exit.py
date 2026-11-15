@@ -95,8 +95,9 @@ def test_an_idle_server_process_shuts_down_cleanly(tmp_path):
         timeout=60,
     )
     log = proc.stdout + proc.stderr
-    # uvicorn ends on the signal it caught, as after Ctrl-C.
-    assert proc.returncode == -signal.SIGTERM, log
+    if sys.platform != "win32":
+        # uvicorn ends on the signal it caught, as after Ctrl-C.
+        assert proc.returncode == -signal.SIGTERM, log
     assert "idle_exit" in log, log
     # The lifespan's shutdown ran, as on Ctrl-C.
     assert "Application shutdown complete" in log, log
