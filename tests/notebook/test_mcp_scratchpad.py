@@ -349,3 +349,19 @@ async def test_a_run_needing_a_retired_cell_gets_its_source_in_the_fix(scratch):
     failed = await _scratch_run(sm, "x + 1")
     assert failed["status"] == "error"
     assert gone in failed["fix"] and "x = 41" in failed["fix"]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_on_something_else_keeps_its_own_fix(scratch):
+    from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.scratch_storage import retire_cell, scratch_manager
+
+    sm, session_id = scratch
+    session = sm.get_session(session_id)
+    gone = (await _scratch_run(sm, "x = 41"))["cell"]
+    ops = LocalNotebookOps.from_session(session)
+    retire_cell(ops, session.path, scratch_manager(session.path), ops.get_cell(gone))
+
+    failed = await _scratch_run(sm, "1 / 0\nx")
+    assert failed["status"] == "error"
+    assert "x = 41" not in failed.get("fix", "")

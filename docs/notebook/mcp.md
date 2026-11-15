@@ -150,7 +150,7 @@ daemon is up; `strata scratch gc` sweeps one now (`--all` for every one) and
 `run` adds a cell per call, so cells have a way out too. A cell nothing reads,
 with no `# @name`, that has not been run, edited or shown by `scratchpad` for 14
 days (`STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS`) is retired before the sweep: its
-source goes to `.strata-scratch/retired.jsonl`, it leaves the notebook, and the
+source and tests go to `.strata-scratch/retired.jsonl`, it leaves the notebook, and the
 sweep frees every value it stored unless something else holds one (a name, a
 pin, a live cell reading it). A cell it read may then retire the same way. A
 later `run` that needs a retired cell's variable fails with a `fix` naming the

@@ -23,6 +23,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import filelock
+
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.runtime_state import load_runtime_state
@@ -77,13 +79,29 @@ def retired_path(notebook_dir: Path) -> Path:
     return notebook_dir / "retired.jsonl"
 
 
+def _retired_lock(notebook_dir: Path) -> filelock.FileLock:
+    return filelock.FileLock(notebook_dir / ".strata" / "retired.lock")
+
+
 def retired_cells(notebook_dir: Path) -> list[dict[str, Any]]:
     """Every cell retired from the scratchpad at *notebook_dir*, oldest first."""
     try:
-        lines = retired_path(notebook_dir).read_text().splitlines()
+        text = retired_path(notebook_dir).read_text()
     except FileNotFoundError:
         return []
-    return [json.loads(line) for line in lines if line]
+    # The last piece has no newline yet while an append is under way.
+    return [json.loads(line) for line in text.split("\n")[:-1] if line]
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(text)
+    os.replace(partial, path)
+
+
+def _append_retired(notebook_dir: Path, records: list[dict[str, Any]]) -> None:
+    with _retired_lock(notebook_dir), open(retired_path(notebook_dir), "a") as retired:
+        retired.write("".join(json.dumps(record) + "\n" for record in records))
 
 
 def _shown_path(notebook_dir: Path) -> Path:
@@ -98,9 +116,7 @@ def touch_shown(notebook_dir: Path, cell_id: str) -> None:
     except FileNotFoundError:
         shown = {}
     shown[cell_id] = time.time()
-    partial = path.with_suffix(".json.partial")
-    partial.write_text(json.dumps(shown))
-    os.replace(partial, path)
+    _write_atomic(path, json.dumps(shown))
 
 
 def last_uses(notebook_dir: Path, cells: list[CellView]) -> dict[str, float]:
@@ -126,15 +142,48 @@ def last_uses(notebook_dir: Path, cells: list[CellView]) -> dict[str, float]:
     return uses
 
 
-def retire_cell(
-    ops: NotebookOps, notebook_dir: Path, manager: NotebookArtifactManager, cell: CellView
+def _named(cell: CellView) -> bool:
+    return parse_annotations(cell.source, cell.language).name is not None
+
+
+def plan_retirement(
+    notebook_dir: Path, cells: list[CellView], *, retire_days: float, now: float | None = None
+) -> list[CellView]:
+    """The leaf cells with no ``# @name`` unused for *retire_days*, in the order they go.
+
+    Retiring a leaf can leave its upstream a leaf, which goes too if it is idle as well.
+    """
+    cutoff = (time.time() if now is None else now) - retire_days * _DAY
+    uses = last_uses(notebook_dir, cells)
+    going: list[CellView] = []
+    gone: set[str] = set()
+    while True:
+        idle = [
+            cell
+            for cell in cells
+            if cell.id not in gone
+            and not set(cell.downstream_ids) - gone
+            and not _named(cell)
+            and uses[cell.id] < cutoff
+        ]
+        if not idle:
+            return going
+        going += idle
+        gone |= {cell.id for cell in idle}
+
+
+def retirement_record(
+    notebook_dir: Path, manager: NotebookArtifactManager, cell: CellView
 ) -> dict[str, Any]:
-    """Move *cell* to ``retired.jsonl`` with every value it stored, and remove it."""
+    """What ``retired.jsonl`` keeps of *cell*: enough to run it again, and what to release."""
     prefix = f"nb_{manager.notebook_id}_cell_{cell.id}_var_"
-    record = {
+    tests = notebook_dir / "cells" / f"{cell.id}.test.py"
+    return {
         "cell": cell.id,
         "language": cell.language,
         "source": cell.source,
+        # Removing the cell deletes its tests file.
+        "test_source": tests.read_text() if tests.is_file() else None,
         "defines": cell.defines,
         "retired_at": time.time(),
         "outputs": {
@@ -144,53 +193,49 @@ def retire_cell(
         # For the sweep to release, current values included.
         "release": [list(value) for value in manager.cell_values(cell.id)],
     }
-    with open(retired_path(notebook_dir), "a") as retired:
-        retired.write(json.dumps(record) + "\n")
+
+
+def retire_cell(
+    ops: NotebookOps, notebook_dir: Path, manager: NotebookArtifactManager, cell: CellView
+) -> dict[str, Any]:
+    """Remove *cell*, then keep it in ``retired.jsonl`` with every value it stored."""
+    record = retirement_record(notebook_dir, manager, cell)
+    # Recorded only once it is gone: a live cell's values are never released.
     ops.remove_cell(cell.id)
+    _append_retired(notebook_dir, [record])
     return record
 
 
-def _named(cell: CellView) -> bool:
-    return parse_annotations(cell.source, cell.language).name is not None
-
-
 def retire_idle(
-    ops: NotebookOps,
-    notebook_dir: Path,
-    *,
-    retire_days: float,
-    now: float | None = None,
+    ops: NotebookOps, notebook_dir: Path, *, retire_days: float, now: float | None = None
 ) -> list[str]:
-    """Retire each leaf cell with no ``# @name`` unused for *retire_days*; return their ids.
-
-    Retiring a leaf can leave its upstream a leaf, which retires only if it is idle too.
-    """
-    cutoff = (time.time() if now is None else now) - retire_days * _DAY
+    """Retire what :func:`plan_retirement` names, through *ops*; return their ids."""
+    going = plan_retirement(notebook_dir, ops.list_cells(), retire_days=retire_days, now=now)
     manager = scratch_manager(notebook_dir)
-    uses = last_uses(notebook_dir, ops.list_cells())
-    retired: list[str] = []
-    while True:
-        idle = [
-            cell
-            for cell in ops.list_cells()
-            if not cell.downstream_ids and not _named(cell) and uses.get(cell.id, cutoff) < cutoff
-        ]
-        if not idle:
-            return retired
-        for cell in idle:
-            retire_cell(ops, notebook_dir, manager, cell)
-            retired.append(cell.id)
+    for cell in going:
+        retire_cell(ops, notebook_dir, manager, cell)
+    return [cell.id for cell in going]
+
+
+def _planned(notebook_dir: Path, cells: list[CellView], retire_days: float):
+    going = plan_retirement(notebook_dir, cells, retire_days=retire_days)
+    manager = scratch_manager(notebook_dir)
+    return going, [retirement_record(notebook_dir, manager, cell) for cell in going]
 
 
 async def retire_in_session(
     session_manager: SessionManager, notebook_dir: Path, *, retire_days: float
 ) -> list[str]:
-    """:func:`retire_idle` through the session holding *notebook_dir*, which viewers see.
+    """Retire idle cells through the session holding *notebook_dir*, which viewers see.
 
-    Nothing while it has a run reserved or running, or when no session holds it: the
-    session is the notebook's writer, so the files are not edited behind it.
+    Planned off the loop; removed on it, in one reload, only if nothing ran or changed
+    meanwhile. Nothing while it has a run reserved or running, or when no session holds
+    it: the session is the notebook's writer, so the files are not edited behind it.
     """
+    import anyio.to_thread
+
     from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.writer import remove_cell_from_notebook
     from strata.notebook.ws import broadcast_notebook_sync, notebook_has_active_execution
 
     for session_id in session_manager.list_sessions():
@@ -201,12 +246,21 @@ async def retire_in_session(
         return []
     if notebook_has_active_execution(session_id):
         return []
-    retired = retire_idle(
-        LocalNotebookOps.from_session(session), notebook_dir, retire_days=retire_days
-    )
-    if retired:
-        await broadcast_notebook_sync(session_id, session)
-    return retired
+    cells = LocalNotebookOps.from_session(session).list_cells()
+    going, records = await anyio.to_thread.run_sync(_planned, notebook_dir, cells, retire_days)
+    if not going:
+        return []
+    unchanged = {cell.id: cell.source for cell in cells}
+    now = {cell.id: cell.source for cell in session.notebook_state.cells}
+    if notebook_has_active_execution(session_id) or now != unchanged:
+        # The next pass plans again.
+        return []
+    for cell in going:
+        remove_cell_from_notebook(notebook_dir, cell.id)
+    session.reload()
+    await anyio.to_thread.run_sync(_append_retired, notebook_dir, records)
+    await broadcast_notebook_sync(session_id, session)
+    return [cell.id for cell in going]
 
 
 def scratch_manager(notebook_dir: Path) -> NotebookArtifactManager:
@@ -240,6 +294,7 @@ def sweep(
             for artifact_id, version in record["release"]
         ],
     )
+    _forget_released(notebook_dir, manager)
     store_bytes = manager.artifact_store.stats()["total_bytes"]
     over_by = max(0, store_bytes - soft_limit_bytes)
     storage = Storage(
@@ -249,8 +304,27 @@ def sweep(
         swept_at=time.time(),
         largest=_largest_cells(manager) if over_by else [],
     )
-    storage_path(notebook_dir).write_text(json.dumps(asdict(storage), indent=2) + "\n")
+    _write_atomic(storage_path(notebook_dir), json.dumps(asdict(storage), indent=2) + "\n")
     return storage
+
+
+def _forget_released(notebook_dir: Path, manager: NotebookArtifactManager) -> None:
+    """Keep in each record only the versions the store still has, for the next sweep."""
+    with _retired_lock(notebook_dir):
+        records = retired_cells(notebook_dir)
+        changed = False
+        for record in records:
+            if not record["release"]:
+                continue
+            there = {tuple(value) for value in manager.cell_values(record["cell"])}
+            left = [value for value in record["release"] if tuple(value) in there]
+            if left != record["release"]:
+                record["release"] = left
+                changed = True
+        if changed:
+            _write_atomic(
+                retired_path(notebook_dir), "".join(json.dumps(r) + "\n" for r in records)
+            )
 
 
 def upkeep(

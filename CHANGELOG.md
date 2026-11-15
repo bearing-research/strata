@@ -28,7 +28,7 @@ exhaustive commit history.
   is shown by `scratchpad` with the cells holding the most. `~/.strata/scratchpads.json`
   lists every scratchpad for `strata scratch ls`; `strata scratch gc` sweeps now and
   `strata scratch rm` deletes one. A leaf cell with no `# @name` unused for 14 days
-  (`STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS`) is retired: its source goes to
+  (`STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS`) is retired: its source and tests go to
   `retired.jsonl`, the sweep frees its values, and a run needing its variable gets the
   source back in its `fix`; `strata scratch retire` retires one by hand. Each run sample
   in `runtime.json` now records when it ran. (#STORAGE)

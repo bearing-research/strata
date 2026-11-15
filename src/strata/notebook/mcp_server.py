@@ -1020,7 +1020,7 @@ async def _scratch_run(
             out["fix"] = f"the run was cancelled; call `run` again with cell={cell!r}"
         else:
             out["fix"] = f"fix what `error` names, then call `run` again with cell={cell!r}"
-        came_back = _retired_source(session, view["references"])
+        came_back = _retired_source(session, view["references"], run.traceback or run.error)
         if came_back is not None:
             out["fix"] = came_back
     out["defines"] = view["defines"]
@@ -1028,14 +1028,17 @@ async def _scratch_run(
     return out
 
 
-def _retired_source(session: Any, references: list[str]) -> str | None:
-    """The fix for a cell that used a name only a retired cell defined, or None."""
+def _retired_source(session: Any, references: list[str], error: str | None) -> str | None:
+    """The fix for a run that failed on a name only a retired cell defined, or None."""
     import time
 
     from strata.notebook.scratch_storage import retired_cells
 
     live = {name for cell in session.notebook_state.cells for name in cell.defines}
-    missing = set(references) - live
+    # Only a failure on the missing name itself: another one keeps its own fix.
+    missing = {
+        name for name in set(references) - live if f"name '{name}' is not defined" in (error or "")
+    }
     for record in reversed(retired_cells(session.path)):
         names = sorted(missing & set(record["defines"]))
         if names:

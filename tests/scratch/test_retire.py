@@ -134,3 +134,74 @@ def test_the_cli_retires_a_cell_by_hand_but_not_one_something_reads(project, cap
     # gc retires what is idle, then sweeps.
     assert main(["scratch", "gc", "--root", str(project)]) == 0
     assert json.loads(capsys.readouterr().out)[str(project.resolve())]["retired"] == [a]
+
+
+def test_a_cell_that_fails_to_go_keeps_its_values(notebook):
+    from strata.notebook.ops import NotebookOpsError
+    from strata.notebook.scratch_storage import retire_cell
+
+    (a,) = _cells(notebook, "x = 1")
+    ops = LocalNotebookOps(notebook)
+    cell = ops.get_cell(a)
+
+    def refuse(cell_id):
+        raise NotebookOpsError("no")
+
+    ops.remove_cell = refuse
+    with pytest.raises(NotebookOpsError):
+        retire_cell(ops, notebook, scratch_manager(notebook), cell)
+    # Not recorded, so the sweep never releases a live cell's values.
+    assert retired_cells(notebook) == []
+
+
+def test_the_record_keeps_the_tests_removal_deletes(notebook):
+    (a,) = _cells(notebook, "x = 1")
+    (notebook / "cells" / f"{a}.test.py").write_text("def test_x(): assert x == 1\n")
+    os.utime(notebook / "cells" / f"{a}.test.py", (0, 0))
+
+    retire_idle(LocalNotebookOps(notebook), notebook, retire_days=14)
+
+    (record,) = retired_cells(notebook)
+    assert record["test_source"] == "def test_x(): assert x == 1\n"
+
+
+def test_a_line_still_being_appended_is_not_read(notebook):
+    from strata.notebook.scratch_storage import retired_path
+
+    retired_path(notebook).write_text('{"cell": "a"}\n{"cell": "b", "sou')
+
+    assert retired_cells(notebook) == [{"cell": "a"}]
+
+
+def test_what_a_sweep_freed_is_not_offered_again(notebook):
+    (a,) = _cells(notebook, "x = 1")
+    x = _stored(notebook, a, "x")
+    retire_idle(LocalNotebookOps(notebook), notebook, retire_days=14)
+    assert len(retired_cells(notebook)[0]["release"]) == 2
+
+    _sweep(notebook)
+
+    assert _versions(notebook, x) == []
+    assert retired_cells(notebook)[0]["release"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_cell_changed_while_the_daemon_planned_is_left_for_the_next_pass(
+    notebook, monkeypatch
+):
+    from strata.notebook import scratch_storage
+
+    (a,) = _cells(notebook, "x = 1")
+    sm = SessionManager()
+    session = sm.open_notebook(notebook)
+    planned = scratch_storage._planned
+
+    def then_edited(*args):
+        going = planned(*args)
+        session.notebook_state.get_cell(a).source = "x = 2"
+        return going
+
+    monkeypatch.setattr(scratch_storage, "_planned", then_edited)
+    assert await retire_in_session(sm, notebook, retire_days=14) == []
+    assert session.notebook_state.get_cell(a) is not None
+    assert retired_cells(notebook) == []

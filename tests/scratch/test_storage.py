@@ -163,3 +163,26 @@ def test_the_cli_sweeps_lists_and_removes_a_scratchpad(project, capsys):
     assert not scratch.scratch_dir(project).exists()
     assert main(["scratch", "ls"]) == 0
     assert capsys.readouterr().out.strip() == "no scratchpads"
+
+
+@pytest.mark.asyncio
+async def test_a_retirement_that_fails_does_not_stop_the_sweep(tmp_path, monkeypatch):
+    import asyncio
+
+    from strata import server
+    from strata.config import StrataConfig
+    from strata.notebook import scratch_storage
+
+    swept = asyncio.Event()
+
+    async def failing(*args, **kwargs):
+        raise OSError("notebook.toml went away")
+
+    monkeypatch.setattr(scratch_storage, "retire_in_session", failing)
+    monkeypatch.setattr(scratch_storage, "upkeep", lambda *a, **k: swept.set())
+    config = StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
+    task = asyncio.create_task(server._scratch_upkeep_loop(tmp_path, config))
+    try:
+        await asyncio.wait_for(swept.wait(), timeout=30)
+    finally:
+        task.cancel()

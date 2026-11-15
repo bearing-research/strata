@@ -720,12 +720,16 @@ async def _scratch_upkeep_loop(anchor: Path, config: StrataConfig) -> None:
     from strata.scratch import scratch_dir
 
     while True:
+        # Apart: a retirement that keeps failing must not stop the sweep.
         try:
             await retire_in_session(
                 get_session_manager(),
                 scratch_dir(anchor),
                 retire_days=config.notebook_scratch_retire_days,
             )
+        except Exception:
+            logger.exception("scratch_retire_failed")
+        try:
             await anyio.to_thread.run_sync(
                 functools.partial(
                     upkeep,
@@ -736,7 +740,7 @@ async def _scratch_upkeep_loop(anchor: Path, config: StrataConfig) -> None:
                 )
             )
         except Exception:
-            logger.exception("scratch_upkeep_failed")
+            logger.exception("scratch_sweep_failed")
         await asyncio.sleep(_SCRATCH_UPKEEP_SECONDS)
 
 
