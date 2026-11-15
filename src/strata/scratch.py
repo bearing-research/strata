@@ -7,7 +7,7 @@ lock makes find-or-start one step, so two agents in one project share one daemon
 and never write one directory from two sessions.
 
 Imports stay light (no ``strata.notebook`` on the path that finds a running
-daemon): a stdio bridge calls this on every start.
+daemon): the stdio bridge calls this on every tool call.
 """
 
 from __future__ import annotations
