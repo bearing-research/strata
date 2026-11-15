@@ -278,6 +278,10 @@ class BuildRunner:
 
             await asyncio.sleep(heartbeat_interval)
 
+    def busy(self) -> bool:
+        """Whether a build is running."""
+        return bool(self._running_builds)
+
     def _submit_build(self, build: BuildState, already_claimed: bool = False) -> None:
         """Submit a build for async execution.
 

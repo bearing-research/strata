@@ -79,6 +79,13 @@ class StreamRegistry:
         """Snapshot of the live streams (for graceful-shutdown cancellation)."""
         return list(self._streams.values())
 
+    def busy(self) -> bool:
+        """Whether a stream's background build is still running."""
+        return any(
+            s.background_task is not None and not s.background_task.done()
+            for s in self._streams.values()
+        )
+
     def register(self, stream_state: StreamState) -> None:
         """Add a stream to the table; :meth:`claim` then advertises it to other nodes."""
         self._streams[stream_state.stream_id] = stream_state

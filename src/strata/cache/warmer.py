@@ -171,6 +171,10 @@ class CacheWarmer:
 
         return job_id
 
+    def busy(self) -> bool:
+        """Whether a warming job is still running."""
+        return any(job._task is not None and not job._task.done() for job in self._jobs.values())
+
     def _visible_job(self, job_id: str, tenant: str | None) -> WarmingJob | None:
         """The job if ``tenant`` may see it (``None`` sees every tenant's), else ``None``."""
         job = self._jobs.get(job_id)

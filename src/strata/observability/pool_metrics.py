@@ -180,7 +180,6 @@ class ConnectionMetrics:
 
     _start_time: float = field(default_factory=time.time)
     _last_request_time: float = 0.0
-    _last_completed_time: float = 0.0
 
     _requests_with_keepalive: int = 0
     _requests_without_keepalive: int = 0
@@ -204,15 +203,6 @@ class ConnectionMetrics:
         """Record that a request has completed."""
         with self._lock:
             self._active_requests = max(0, self._active_requests - 1)
-            self._last_completed_time = time.time()
-
-    def idle_seconds(self) -> float:
-        """Seconds since a request last started or ended, 0 while one is in flight."""
-        with self._lock:
-            if self._active_requests:
-                return 0.0
-            last = max(self._start_time, self._last_request_time, self._last_completed_time)
-            return time.time() - last
 
     def get_stats(self) -> ConnectionStatsDict:
         """Get connection statistics."""
@@ -246,7 +236,6 @@ class ConnectionMetrics:
             self._max_concurrent_requests = 0
             self._start_time = time.time()
             self._last_request_time = 0.0
-            self._last_completed_time = 0.0
             self._requests_with_keepalive = 0
             self._requests_without_keepalive = 0
 
