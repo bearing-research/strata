@@ -158,6 +158,14 @@ class NotebookExecutionState:
 
 _notebook_execution_state: dict[str, NotebookExecutionState] = {}
 
+
+def clients_or_runs() -> bool:
+    """Whether any notebook has a socket open or a run in flight."""
+    return any(_notebook_connections.values()) or any(
+        state.active_task() is not None for state in _notebook_execution_state.values()
+    )
+
+
 _notebook_inspect_managers: dict[str, InspectManager] = {}
 
 # Deferred teardowns after the last WS disconnects, so a refresh or VPN blip

@@ -507,6 +507,9 @@ class StrataConfig(BaseSettings):
     notebook_session_ttl_seconds: Annotated[float, Field(gt=0)] = 4 * 3600.0
     notebook_max_sessions: Annotated[int, Field(gt=0)] = 50
     notebook_session_min_available_mb: Annotated[int, Field(gt=0)] | None = None
+    # Stop the server after this many minutes with no request, no open notebook socket and
+    # no run in flight; 0 never stops it. A scratchpad's own daemon is started with it set.
+    idle_exit_minutes: Annotated[float, Field(ge=0)] = 0.0
 
     # LLM settings for prompt cells (OpenAI-compatible API)
     ai_base_url: str | None = None

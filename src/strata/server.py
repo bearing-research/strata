@@ -9,6 +9,7 @@ import ipaddress
 import math
 import os
 import re
+import signal
 import socket
 import sys
 import time
@@ -21,6 +22,8 @@ import anyio.to_thread
 import uvicorn
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from starlette.applications import Starlette
 
     from strata.adaptive_concurrency import AdaptiveConcurrencyController
@@ -706,6 +709,39 @@ async def _shared_env_gc_loop(root: Path, ttl_days: float) -> None:
 
 
 _NOTEBOOK_SESSION_SWEEP_SECONDS = 60.0
+_IDLE_CHECK_SECONDS = 30.0
+
+
+def _stop_self() -> None:
+    # uvicorn's own handler: the lifespan's shutdown runs as on Ctrl-C.
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _idle_for(now: float, last_busy: float, busy: bool, request_idle: float) -> float:
+    """How long the server has gone unused, given when a socket or run was last seen."""
+    if busy:
+        return 0.0
+    return min(request_idle, now - last_busy)
+
+
+async def _idle_exit_loop(idle_seconds: float, stop: Callable[[], None] = _stop_self) -> None:
+    """Stop the server once nothing has used it for *idle_seconds*: no request, no open
+    notebook socket, no run in flight."""
+    from strata.notebook.ws import clients_or_runs
+
+    requests = get_connection_metrics()
+    last_busy = time.monotonic()
+    while True:
+        await asyncio.sleep(min(_IDLE_CHECK_SECONDS, idle_seconds))
+        now, busy = time.monotonic(), clients_or_runs()
+        if busy:
+            # A socket that closes after an hour starts the clock then, not an hour ago.
+            last_busy = now
+        idle = _idle_for(now, last_busy, busy, requests.idle_seconds())
+        if idle >= idle_seconds:
+            logger.info("idle_exit", idle_seconds=round(idle))
+            stop()
+            return
 
 
 async def _notebook_session_sweep_loop() -> None:
@@ -942,6 +978,9 @@ async def lifespan(app: FastAPI):
         )
 
     session_sweep_task = asyncio.create_task(_notebook_session_sweep_loop())
+    idle_exit_task: asyncio.Task | None = None
+    if config.idle_exit_minutes:
+        idle_exit_task = asyncio.create_task(_idle_exit_loop(config.idle_exit_minutes * 60))
 
     build_qos = None
     if config.server_transforms_enabled:
@@ -1039,7 +1078,7 @@ async def lifespan(app: FastAPI):
     else:
         yield
 
-    for task in (gc_task, env_gc_task, session_sweep_task):
+    for task in (gc_task, env_gc_task, session_sweep_task, idle_exit_task):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
