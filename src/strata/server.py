@@ -1530,9 +1530,9 @@ from strata.api.routers.names import router as names_router  # noqa: E402
 from strata.api.routers.publications import router as publications_router  # noqa: E402
 from strata.api.routers.registry import router as registry_router  # noqa: E402
 from strata.api.routers.streams import router as streams_router  # noqa: E402
-from strata.notebook import router as notebook_router  # noqa: E402
 from strata.notebook.quiesce import NotebookQuiesced  # noqa: E402
 from strata.notebook.routes import projects_router as notebook_projects_router  # noqa: E402
+from strata.notebook.routes import router as notebook_router  # noqa: E402
 from strata.notebook.ws import router as notebook_ws_router  # noqa: E402
 
 app.include_router(notebook_router)

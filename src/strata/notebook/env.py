@@ -9,6 +9,7 @@ project's own name. A cell's env hash also holds what its local path packages ho
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import json
 import logging
@@ -199,6 +200,8 @@ def renv_lock_key(lock: str) -> str:
     return hashlib.sha256(lock.encode()).hexdigest()
 
 
+# Staleness asks once per cell for the same lock, and parsing it dominated a pass.
+@functools.lru_cache(maxsize=16)
 def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
     """Fingerprint a ``uv.lock``'s runtime dependency closure, or ``None``.
 

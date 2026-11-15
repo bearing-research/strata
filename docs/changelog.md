@@ -78,6 +78,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   in DuckDB SQL is still not seen. (#1516)
 
 ### Changed
+- **A notebook with many cells does less work per edit and run, and the CLI starts
+  faster.** A staleness pass parses `uv.lock` once rather than once per cell,
+  `runtime.json` is written about 4 times faster, and `strata` no longer imports the
+  notebook server on start. `strata.notebook` re-exports nothing: import from its
+  submodules (`strata.notebook.routes`, `strata.notebook.display`). (#1557)
 - **A SQL cell on a SQLite or DuckDB file reopens ready when the database is unchanged.**
   Under the default `fingerprint` policy a reopened cell read idle, and the cells reading
   its result stale, until it ran. The staleness pass now makes the probe a run makes, on
