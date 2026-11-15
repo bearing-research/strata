@@ -93,14 +93,15 @@ def _environment(url: str, session_id: str) -> str | None:
         return None
 
 
-def find_daemon(anchor: Path) -> Daemon | None:
-    """The daemon ``server.json`` names, if it answers and still holds the session.
+def daemon_serving(notebook_dir: Path) -> Daemon | None:
+    """The daemon ``<notebook_dir>/.strata/server.json`` names, if it answers and still
+    holds the session.
 
     Asked, not judged by its pid: a session id is never reused, so no other server
     can answer for it.
     """
     try:
-        record = json.loads(_record_path(anchor).read_text())
+        record = json.loads((notebook_dir / ".strata" / "server.json").read_text())
     except FileNotFoundError:
         return None
     try:
@@ -123,6 +124,11 @@ def find_daemon(anchor: Path) -> Daemon | None:
         pid=record["pid"],
         version=record["version"],
     )
+
+
+def find_daemon(anchor: Path) -> Daemon | None:
+    """The live daemon serving *anchor*'s scratchpad, if any."""
+    return daemon_serving(scratch_dir(anchor))
 
 
 def _free_port() -> int:

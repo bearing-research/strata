@@ -1045,7 +1045,12 @@ def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
 def _add_target_args(parser: argparse.ArgumentParser) -> None:
     """Register a read command's target: a local dir or ``--server URL --session ID``."""
     parser.add_argument(
-        "notebook_dir", nargs="?", help="Path to the notebook directory (local backend)"
+        "notebook_dir",
+        nargs="?",
+        help=(
+            "Path to the notebook directory: driven through the daemon its "
+            ".strata/server.json names if one runs, else locally"
+        ),
     )
     parser.add_argument(
         "--server", help="Server root for a live session, e.g. http://localhost:8765"
@@ -1078,7 +1083,31 @@ def _open_read_ops(args: argparse.Namespace):
     if not args.notebook_dir:
         print("error: provide a notebook directory or --server/--session", file=sys.stderr)
         return None
+    serving = _daemon_serving(args.notebook_dir)
+    if serving is not None:
+        from strata.notebook.ops import RemoteNotebookOps
+
+        return RemoteNotebookOps(
+            serving.url, serving.session_id, author=getattr(args, "author", None)
+        )
     return _open_local_ops(args.notebook_dir, author=getattr(args, "author", None))
+
+
+def _daemon_serving(notebook_dir: str):
+    """The live daemon holding *notebook_dir* open, if its ``server.json`` names one.
+
+    Its session is the notebook's writer; editing the files here as well would race it.
+    """
+    from strata.scratch import daemon_serving
+
+    return daemon_serving(Path(notebook_dir).expanduser().resolve())
+
+
+def _is_remote(ops: object) -> bool:
+    """Whether *ops* drives a server (given ``--server`` or found serving the directory)."""
+    from strata.notebook.ops import RemoteNotebookOps
+
+    return isinstance(ops, RemoteNotebookOps)
 
 
 def _close_ops(ops: object) -> None:
@@ -1172,8 +1201,9 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     run_p.set_defaults(func=cell_run_main)
 
     cancel_p = sub.add_parser("cancel", help="Cancel a cell's run on a server (--server/--session)")
-    # The local positional is accepted only to explain why it cannot work.
-    cancel_p.add_argument("notebook_dir", nargs="?", help=argparse.SUPPRESS)
+    cancel_p.add_argument(
+        "notebook_dir", nargs="?", help="A notebook directory a running daemon serves"
+    )
     cancel_p.add_argument("--server", help="Server root, e.g. http://localhost:8765")
     cancel_p.add_argument("--session", help="Session id the run is on")
     cancel_p.add_argument("cell_id", help="Cell id whose run to cancel")
@@ -1487,10 +1517,10 @@ async def _cell_add_run_async(args: argparse.Namespace, source: str) -> int:
     """
     from strata.notebook.ops import NotebookOpsError
 
-    is_remote = bool(args.server)
     ops = _open_read_ops(args)
     if ops is None:
         return 2
+    is_remote = _is_remote(ops)
     try:
         try:
             cell = ops.add_cell(source, after=args.after, language=args.language)
@@ -1929,10 +1959,10 @@ def dep_rm_main(args: argparse.Namespace) -> int:
 
 
 async def _dep_async(args: argparse.Namespace, action: str) -> int:
-    is_remote = bool(args.server)
     ops = _open_read_ops(args)
     if ops is None:
         return 2
+    is_remote = _is_remote(ops)
     from strata.notebook.ops import NotebookOpsError
 
     try:
@@ -1987,10 +2017,10 @@ def cell_run_main(args: argparse.Namespace) -> int:
 
 
 async def _cell_run_async(args: argparse.Namespace) -> int:
-    is_remote = bool(args.server)
     ops = _open_read_ops(args)
     if ops is None:
         return 2
+    is_remote = _is_remote(ops)
     from strata.notebook.ops import NotebookOpsError
 
     try:
@@ -2027,10 +2057,14 @@ async def _cell_run_async(args: argparse.Namespace) -> int:
 
 def cell_cancel_main(args: argparse.Namespace) -> int:
     """Cancel a run on a server; exit 0 if one was cancelled, 1 if none was running."""
+    serving = _daemon_serving(args.notebook_dir) if args.notebook_dir and not args.server else None
+    if serving is not None:
+        args.server, args.session = serving.url, serving.session_id
     if not args.server:
         print(
-            "error: cell cancel needs --server/--session. A run without --server lives "
-            "in the process that started it; stop that process (Ctrl-C) instead.",
+            "error: cell cancel needs --server/--session, or a notebook directory a "
+            "daemon serves. A run without one lives in the process that started it; "
+            "stop that process (Ctrl-C) instead.",
             file=sys.stderr,
         )
         return 2
@@ -2062,10 +2096,10 @@ def cell_test_main(args: argparse.Namespace) -> int:
 
 
 async def _cell_test_async(args: argparse.Namespace) -> int:
-    is_remote = bool(args.server)
     ops = _open_read_ops(args)
     if ops is None:
         return 2
+    is_remote = _is_remote(ops)
     from strata.notebook.ops import NotebookOpsError
 
     try:

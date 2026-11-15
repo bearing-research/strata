@@ -23,6 +23,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)
+- **The notebook CLI drives a directory through the daemon serving it.** `strata cell`,
+  `status`, `dag` and `dep` on a directory whose `.strata/server.json` names a running
+  daemon, as a project's `.strata-scratch/` does, go through that daemon's session
+  without `--server/--session`, so they never write the files behind its back; with no
+  daemon they run offline as before. `strata cell cancel` takes such a directory
+  too. (#ATTACH)
 - **`strata mcp` serves a project's scratchpad to an agent over stdio.** It lists the
   scratchpad's two tools without starting anything; the first tool call finds or starts
   the project's daemon, reporting each setup step as MCP progress, and its result
