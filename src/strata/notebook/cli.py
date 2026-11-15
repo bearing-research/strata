@@ -1033,6 +1033,16 @@ def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
             file=sys.stderr,
         )
         return None
+    serving = _daemon_serving(notebook_dir_arg)
+    if serving is not None:
+        # Its session is the writer: editing the files here too would race it.
+        print(
+            f"error: the server at {serving.url} holds {notebook_dir} open, and this "
+            "command edits its files directly; stop that server first (for a "
+            "scratchpad, `strata scratch stop` in its project)",
+            file=sys.stderr,
+        )
+        return None
     from strata.notebook.ops import LocalNotebookOps
 
     try:
@@ -2152,17 +2162,17 @@ def add_dag_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def dag_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
-    dag = ops.dag()
-    if args.format == "json":
-        _emit_json(dag.model_dump(mode="json"))
-    else:
-        for edge in dag.edges:
-            print(f"{edge.from_cell_id} → {edge.to_cell_id}  ({edge.variable})")
-        print(f"topo: {' → '.join(dag.topological_order)}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        dag = ops.dag()
+        if args.format == "json":
+            _emit_json(dag.model_dump(mode="json"))
+        else:
+            for edge in dag.edges:
+                print(f"{edge.from_cell_id} → {edge.to_cell_id}  ({edge.variable})")
+            print(f"topo: {' → '.join(dag.topological_order)}")
+        return 0
 
 
 def add_status_arguments(parser: argparse.ArgumentParser) -> None:
@@ -2171,17 +2181,17 @@ def add_status_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def status_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
-    status = ops.status()
-    if args.format == "json":
-        _emit_json(status.model_dump(mode="json"))
-    else:
-        print(f"notebook: {status.name}  ({status.notebook_id})")
-        for cell in status.cells:
-            stale = " ·stale" if cell.staleness_reasons else ""
-            if cell.changed_reads:
-                stale = " ·may be out of date"
-            print(f"  {cell.status:8} {cell.id:18} {cell.name}{stale}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        status = ops.status()
+        if args.format == "json":
+            _emit_json(status.model_dump(mode="json"))
+        else:
+            print(f"notebook: {status.name}  ({status.notebook_id})")
+            for cell in status.cells:
+                stale = " ·stale" if cell.staleness_reasons else ""
+                if cell.changed_reads:
+                    stale = " ·may be out of date"
+                print(f"  {cell.status:8} {cell.id:18} {cell.name}{stale}")
+        return 0

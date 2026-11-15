@@ -22,6 +22,15 @@ def test_a_served_directory_is_driven_through_its_daemon(project, capsys):
     assert cell["status"] == "ready"
     assert added["id"] == cell["id"]
 
+    # Read through the daemon too, closing what they opened.
+    assert main(["status", notebook]) == 0
+    assert cell["id"] in capsys.readouterr().out
+    assert main(["dag", notebook]) == 0
+    capsys.readouterr()
+    # A command that only edits the files directly refuses instead of racing the session.
+    assert main(["worker", "add", notebook, "gpu", "--url", "http://127.0.0.1:1"]) == 2
+    assert "holds" in capsys.readouterr().err
+
     # Nothing runs, and that is the daemon's answer, not "needs --server".
     assert main(["cell", "cancel", notebook, cell["id"]]) == 1
     capsys.readouterr()
