@@ -18,7 +18,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `GET /v1/notebooks/{id}/cells/{cell_id}/checkpoints` returns the same listing, release
   ids included, for `--init` and `?init=`. The WebSocket `cell_execute` frame takes an
   optional `init`; such a run sends no cascade prompt and asks before a large read even
-  when the cell is ready. (#PRNUM)
+  when the cell is ready. (#1555)
 - **A scratchpad profile for the MCP server.** `STRATA_MCP_PROFILE=scratchpad` lists
   two tools, `run` (add or replace a cell and run it) and `scratchpad` (what the
   session already holds), over the server's one open session, with no `session_id`,
