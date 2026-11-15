@@ -167,8 +167,10 @@ def build_server(root: Path) -> Server:
             except scratch.ScratchError as exc:
                 log = scratch.scratch_dir(root.resolve()) / ".strata" / "server.log"
                 return _failure(str(exc), f"read {log} for why; the next call tries again")
-            await upstream.open(daemon.url)
         try:
+            async with setting_up:
+                # The daemon can stop between being found and this handshake.
+                await upstream.open(daemon.url)
             result = await upstream.call_tool(params.name, dict(params.arguments or {}))
         except (httpx.HTTPError, UpstreamError) as exc:
             return _failure(

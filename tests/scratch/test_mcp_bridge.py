@@ -88,7 +88,9 @@ async def test_the_first_call_sets_the_scratchpad_up_and_says_so(project):
 async def test_a_daemon_that_stopped_is_started_again_on_the_next_call(project):
     async with _bridge(project) as client:
         _value(await client.call_tool("run", {"source": "1"}))
-        os.kill(scratch.find_daemon(project.resolve()).pid, signal.SIGKILL)
+        os.kill(
+            scratch.find_daemon(project.resolve()).pid, getattr(signal, "SIGKILL", signal.SIGTERM)
+        )
 
         again = _value(await client.call_tool("run", {"source": "2"}))
         assert again["status"] == "ok"
@@ -123,3 +125,15 @@ async def test_a_scratchpad_that_cannot_start_says_where_to_look(project, monkey
     failed = json.loads(result.content[0].text)
     assert "exited while starting" in failed["error"]
     assert "server.log" in failed["fix"]
+
+
+@pytest.mark.asyncio
+async def test_a_daemon_gone_before_the_handshake_is_a_failure_with_its_fix(project, monkeypatch):
+    async def refused(self, url):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(mcp_bridge.Upstream, "open", refused)
+    async with _bridge(project) as client:
+        result = await client.call_tool("scratchpad", {})
+    assert result.is_error
+    assert "call again" in json.loads(result.content[0].text)["fix"]
