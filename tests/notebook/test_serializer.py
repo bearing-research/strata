@@ -17,8 +17,8 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
-from strata.notebook import Markdown
 from strata.notebook import serializer as serializer_module
+from strata.notebook.display import Markdown
 from strata.notebook.serializer import (
     EXT_TO_CONTENT_TYPE,
     ContentType,
