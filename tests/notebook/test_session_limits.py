@@ -256,7 +256,7 @@ class TestWarmPoolAndTimeout:
                 assert opened.status_code == 200, opened.text
                 session = manager.get_session(opened.json()["session_id"])
                 assert session is not None
-                await session.wait_for_environment_job()
+                await session.environment_jobs.wait()
                 assert session.warm_pool is not None
                 assert session.r_warm_pool is None
 
@@ -296,7 +296,7 @@ class TestWarmPoolAndTimeout:
                 assert opened.status_code == 200, opened.text
                 session = manager.get_session(opened.json()["session_id"])
                 assert session is not None
-                await session.wait_for_environment_job()
+                await session.environment_jobs.wait()
                 added = await client.post(
                     f"/v1/notebooks/{session.id}/cells",
                     json={"after_cell_id": "root", "language": "r"},
@@ -367,7 +367,7 @@ class TestWarmPoolAndTimeout:
                 assert opened.status_code == 200, opened.text
                 session = manager.get_session(opened.json()["session_id"])
                 assert session is not None
-                await session.wait_for_environment_job()
+                await session.environment_jobs.wait()
                 assert session.warm_pool is None
 
                 base = f"/v1/notebooks/{session.id}"

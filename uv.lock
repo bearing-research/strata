@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -4191,7 +4191,7 @@ requires-dist = [
     { name = "textual-image", marker = "extra == 'tui'", specifier = ">=0.14.0" },
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
-    { name = "vestigo", specifier = "==0.5.0" },
+    { name = "vestigo", specifier = "==0.6.0" },
     { name = "websockets", specifier = ">=17.1" },
 ]
 provides-extras = ["otel", "azure", "s3", "gcs", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp"]
@@ -4451,11 +4451,11 @@ wheels = [
 
 [[package]]
 name = "vestigo"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b3/4d/f96a10c6e5db40852ea59f9973eb727c3f0c19a4fbab921223012309319d/vestigo-0.5.0.tar.gz", hash = "sha256:d551f2fe797d24e84fe1f7bcd84bc45419dd9be9dca23356a20e8e4051d769d6", size = 167850, upload-time = "2026-11-09T00:51:30.253Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/c6/866ee3f66d5b8fd1c616496b5e3b0a2af6d07e73c25d12f020a7ff56c4c0/vestigo-0.6.0.tar.gz", hash = "sha256:88665eb5699340823350c165c98459814dd85152293eec967fb4066e2a91253a", size = 173799, upload-time = "2026-11-15T00:00:27.036Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/af/6399a46649e178d7f2f99c47731b06a90a7b99059dbf831ea21303d952c8/vestigo-0.5.0-py3-none-any.whl", hash = "sha256:123d74a7cf4558e5e755bfdc74144a48f452a26684d72a73b87a202e708c6d8a", size = 173713, upload-time = "2026-11-09T00:51:28.699Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/45/449cad7f2fb464edc2c83c79e64be435484069029d1e9b6cee2402740bcb/vestigo-0.6.0-py3-none-any.whl", hash = "sha256:0f73767f47d1172116fc84ffa5175a86fc4fea2e890911829082eb85d73505f7", size = 179564, upload-time = "2026-11-15T00:00:25.658Z" },
 ]
 
 [[package]]

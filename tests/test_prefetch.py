@@ -16,6 +16,20 @@ from strata.config import StrataConfig
 from tests.conftest import find_free_port, run_server
 
 
+def settled_prefetch(client: httpx.Client, base_url: str, until, timeout: float = 10.0) -> dict:
+    """The prefetch metrics once *until* holds of them, polled; the last ones at *timeout*.
+
+    Cleanup runs on the server's own schedule, which a loaded runner stretches past any
+    fixed sleep.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        prefetch = client.get(f"{base_url}/metrics").json()["prefetch"]
+        if until(prefetch) or time.monotonic() > deadline:
+            return prefetch
+        time.sleep(0.05)
+
+
 def build_materialize_request(table_uri: str, columns: list[str] | None = None) -> dict:
     params = {}
     if columns is not None:
@@ -164,12 +178,10 @@ class TestPrefetchBasics:
                 )
                 assert resp.status_code == 200
 
-                # Wait for prefetch and TTL cleanup to run.
-                time.sleep(0.4)
-
-                resp = client.get(f"{base_url}/metrics")
-                metrics = resp.json()
-                prefetch = metrics["prefetch"]
+                # Until prefetch and TTL cleanup have run.
+                prefetch = settled_prefetch(
+                    client, base_url, lambda p: p["wasted"] >= 1 and p["in_flight"] == 0
+                )
 
                 assert prefetch["started"] >= 1
                 assert prefetch["wasted"] >= 1
@@ -238,12 +250,8 @@ class TestPrefetchCancellation:
                 )
                 assert resp.status_code == 200
 
-                # Wait for cleanup.
-                time.sleep(0.2)
-
-                resp = client.get(f"{base_url}/metrics")
-                metrics = resp.json()
-                prefetch = metrics["prefetch"]
+                # Until cleanup has run.
+                prefetch = settled_prefetch(client, base_url, lambda p: p["in_flight"] == 0)
 
                 assert prefetch["in_flight"] == 0
 
@@ -288,17 +296,13 @@ class TestPrefetchNoLeak:
             with httpx.Client(timeout=10.0) as client:
                 # Create and abandon many materialize requests.
                 for _ in range(20):
-                    resp = client.post(
+                    client.post(
                         f"{base_url}/v1/materialize",
                         json=build_materialize_request(table_uri),
                     )
 
-                # Wait for cleanup.
-                time.sleep(0.5)
-
-                resp = client.get(f"{base_url}/metrics")
-                metrics = resp.json()
-                prefetch = metrics["prefetch"]
+                # Until cleanup has run.
+                prefetch = settled_prefetch(client, base_url, lambda p: p["in_flight"] == 0)
 
                 assert prefetch["in_flight"] == 0
 

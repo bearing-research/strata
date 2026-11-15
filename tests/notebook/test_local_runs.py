@@ -16,7 +16,12 @@ from pathlib import Path
 
 import pytest
 from vestigo import checkpoint_files
-from vestigo.provenance import checkpoint_output_key, derive_subkey, run_output_key
+from vestigo.provenance import (
+    TransformSpec,
+    checkpoint_output_key,
+    derive_subkey,
+    run_output_key,
+)
 from vestigo.releases import ReleaseRejected
 
 from strata.notebook.executor import CellExecutor
@@ -153,16 +158,21 @@ class TestGate1:
             assert release.created_at <= build.completed_at
         assert build.state == "ready"
 
-        # The final release holds the cell's outputs, under the cached keys, with the
-        # build's computation key on every row of the run.
+        # The final release holds the cell's outputs and console, under the cached keys,
+        # with the build's computation key on every row of the run.
         (final,) = releases.releases_of(build.build_id, "final")
         outputs = releases.bundle(final.release_id).outputs
-        assert sorted(v.id.split("_var_")[1] for v in outputs) == ["metrics", "model"]
+        assert sorted(v.id.split("_var_")[1] for v in outputs) == [
+            "__console__",
+            "metrics",
+            "model",
+        ]
         parent = build.computation_key
         assert parent and all(v.computation_key == parent for v in outputs)
         assert {v.provenance_hash for v in outputs} == {
             derive_subkey(parent, "model"),
             derive_subkey(parent, "metrics"),
+            derive_subkey(parent, "__console__"),
         }
         first = bundles[0].outputs
         assert all(v.computation_key == parent for v in first)
@@ -172,7 +182,10 @@ class TestGate1:
         # The placeholder the build targeted first is a failed row, not a current value.
         placeholder = store.get_artifact(f"nb_{session.notebook_state.id}_run_train", 1)
         assert placeholder is not None and placeholder.state == "failed"
-        assert (build.artifact_id, build.version) == (outputs[0].id, outputs[0].version)
+        # It targets one of the run's values now, not its console.
+        assert (build.artifact_id, build.version) in {
+            (v.id, v.version) for v in outputs if not v.id.endswith("__console__")
+        }
 
     def test_a_run_killed_after_a_checkpoint_resumes_in_a_new_attempt(self, tmp_path: Path):
         session, executor = _notebook(tmp_path)
@@ -368,6 +381,190 @@ class TestGate1:
                 resume=True,
             )
         assert runs.builds.get_build(first.build_id).state == "building"
+
+    def test_a_run_overtaken_by_a_newer_value_stores_nothing(self, tmp_path: Path, monkeypatch):
+        """Another writer makes a newer ``x`` current first: the run's release is refused."""
+        notebook_dir = create_notebook(tmp_path, "Overtaken", initialize_environment=False)
+        add_cell_to_notebook(notebook_dir, "a")
+        write_cell(notebook_dir, "a", "x = 1\n")
+        add_cell_to_notebook(notebook_dir, "b", "a")
+        write_cell(notebook_dir, "b", "y = x\n")
+        session = NotebookSession(
+            parse_notebook(notebook_dir), notebook_dir, ledger_dialect=_dialect()
+        )
+        session.refresh_environment_runtime()
+        store, _, _ = _ledger(session)
+        artifact_id = session.get_artifact_manager().cell_artifact_id("a", "x")
+        real = LocalRuns.finalize
+
+        def overtaken(self, run, staged):
+            spec = TransformSpec(executor="elsewhere@v1", params={}, inputs=[])
+            newer = store.create_artifact(artifact_id, "elsewhere", spec)
+            store.write_blob(artifact_id, newer, b"newer")
+            store.finalize_artifact(artifact_id, newer, "{}", row_count=None, byte_size=5)
+            return real(self, run, staged)
+
+        monkeypatch.setattr(LocalRuns, "finalize", overtaken)
+        result = _run(CellExecutor(session), "a", "x = 1\n")
+
+        latest = store.get_latest_version(artifact_id)
+        assert latest is not None and latest.provenance_hash == "elsewhere", result
+        assert [v.state for v in store.list_versions_by_id_prefix(artifact_id)] == [
+            "failed",
+            "ready",
+        ]
+
+    @staticmethod
+    def _cells(tmp_path: Path, **cells: str) -> NotebookSession:
+        notebook_dir = create_notebook(tmp_path, "Records", initialize_environment=False)
+        after = None
+        for cell_id, source in cells.items():
+            add_cell_to_notebook(notebook_dir, cell_id, after)
+            write_cell(notebook_dir, cell_id, source)
+            after = cell_id
+        session = NotebookSession(
+            parse_notebook(notebook_dir), notebook_dir, ledger_dialect=_dialect()
+        )
+        session.refresh_environment_runtime()
+        return session
+
+    def test_a_runs_displays_and_console_are_in_its_final_release(self, tmp_path: Path):
+        """What a reopen or a hit shows of the run is released with its variables."""
+        session = self._cells(tmp_path, a="x = 1\nprint('hi')\nx\n", b="y = x\n")
+        result = _run(CellExecutor(session), "a", "x = 1\nprint('hi')\nx\n")
+        assert result.success is True, result.error
+
+        _, _, releases = _ledger(session)
+        (build,) = _only_build(session, "a")
+        (final,) = releases.releases_of(build.build_id, "final")
+        outputs = releases.bundle(final.release_id).outputs
+        assert sorted(v.id.split("_var_")[1] for v in outputs) == [
+            "__console__",
+            "__display__0",
+            "x",
+        ]
+        assert all(v.computation_key == build.computation_key for v in outputs)
+        (display,) = [v for v in outputs if v.id.endswith("__display__0")]
+        assert result.display_outputs[0]["artifact_uri"] == (
+            f"strata://artifact/{display.id}@v={display.version}"
+        )
+        assert result.display_outputs[0]["computed_at"] == display.created_at
+
+    def test_a_leaf_whose_release_fails_keeps_no_display_or_console(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Nothing of a run is current unless its release is: the run fails instead."""
+        session = self._cells(tmp_path, a="print('hi')\n1 + 1\n")
+
+        def refused(self, run, staged):
+            raise ReleaseRejected("refused")
+
+        monkeypatch.setattr(LocalRuns, "finalize", refused)
+        result = _run(CellExecutor(session), "a", "print('hi')\n1 + 1\n")
+
+        assert result.success is False
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        for name in ("__console__", "__display__0"):
+            artifact_id = manager.cell_artifact_id("a", name)
+            assert store.get_latest_version(artifact_id) is None
+            assert [v.state for v in store.list_versions_by_id_prefix(artifact_id)] == ["failed"]
+
+    ONE = "x = 1\nprint('one')\nx\n"
+    TWO = "x = 2\nprint('two')\nx\n"
+
+    def _edit(self, session: NotebookSession, executor: CellExecutor, source: str):
+        session.notebook_state.get_cell("a").source = source
+        write_cell(session.path, "a", source)
+        session.re_analyze_cell("a")
+        result = _run(executor, "a", source)
+        assert result.success is True, result.error
+        return result
+
+    def test_a_revert_is_one_release_of_its_copies(self, tmp_path: Path):
+        """K1, K2, then K1 again: the first run's value, display and console come back together."""
+        session = self._cells(tmp_path, a=self.ONE, b="y = x\n")
+        executor = CellExecutor(session)
+        for source in (self.ONE, self.TWO):
+            self._edit(session, executor, source)
+        assert self._edit(session, executor, self.ONE).cache_hit is True
+
+        store, _, releases = _ledger(session)
+        first, _, revert = _only_build(session, "a")
+        assert revert.computation_key == first.computation_key
+        assert revert.state == "ready"
+        (final,) = releases.releases_of(revert.build_id, "final")
+        outputs = releases.bundle(final.release_id).outputs
+        assert sorted(v.id.split("_var_")[1] for v in outputs) == [
+            "__console__",
+            "__display__0",
+            "x",
+        ]
+        for copy in outputs:
+            name = copy.id.split("_var_")[1]
+            assert copy.version == 3
+            assert copy.provenance_hash == derive_subkey(first.computation_key, name)
+            latest = store.get_latest_version(copy.id)
+            assert latest is not None and (latest.version, latest.release_id) == (
+                3,
+                final.release_id,
+            )
+
+    def test_a_revert_whose_source_is_gone_makes_nothing_current(self, tmp_path: Path):
+        session = self._cells(tmp_path, a=self.ONE, b="y = x\n")
+        executor = CellExecutor(session)
+        for source in (self.ONE, self.TWO):
+            self._edit(session, executor, source)
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        value, console = (manager.cell_artifact_id("a", name) for name in ("x", "__console__"))
+        store.blob_store.delete_blob(console, 1)
+        (first, _) = _only_build(session, "a")
+
+        promoted = LocalRuns(manager).promote(
+            cell_id="a",
+            computation_key=first.computation_key,
+            variant=None,
+            sources=[(value, 1), (console, 1)],
+        )
+
+        assert promoted is None
+        latest = store.get_latest_version(value)
+        assert latest is not None and latest.version == 2
+        assert store.get_artifact(value, 3).state == "failed"
+        *_, revert = _only_build(session, "a")
+        assert revert.state == "failed"
+        assert store.get_artifact(revert.artifact_id, revert.version).state == "failed"
+
+    def test_a_revert_waits_for_a_run_of_its_computation(self, tmp_path: Path):
+        """A run of the key holds its build's lease: its own release decides what is current."""
+        session = self._cells(tmp_path, a=self.ONE, b="y = x\n")
+        executor = CellExecutor(session)
+        for source in (self.ONE, self.TWO):
+            self._edit(session, executor, source)
+        manager = session.get_artifact_manager()
+        runs = LocalRuns(manager)
+        first, second = _only_build(session, "a")
+        runs.open(
+            cell_id="a",
+            computation_key=first.computation_key,
+            variant=None,
+            input_versions={},
+            timeout_seconds=30,
+            resume=False,
+        )
+
+        promoted = runs.promote(
+            cell_id="a",
+            computation_key=first.computation_key,
+            variant=None,
+            sources=[(manager.cell_artifact_id("a", "x"), 1)],
+        )
+
+        assert promoted is None
+        assert len(_only_build(session, "a")) == 3  # the run's; no revert's
+        latest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("a", "x"))
+        assert latest is not None and latest.version == 2
 
 
 class TestAbandonedRuns:

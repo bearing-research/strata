@@ -271,6 +271,24 @@ def test_parse_notebook_hydrates_provenance_hashes(tmp_path: Path):
     assert cell.last_env_hash == "env-abc"
 
 
+def test_parse_notebook_hydrates_the_remote_worker_and_a_clear_removes_it(tmp_path: Path):
+    """The header names the worker a run went to; a reopen shows it until a local run."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.runtime_state import persist_cell_remote
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path, "RemotePersist", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+
+    persist_cell_remote(notebook_dir, "c1", "gpu", "direct")
+    cell = next(c for c in parse_notebook(notebook_dir).cells if c.id == "c1")
+    assert (cell.remote_worker, cell.remote_transport) == ("gpu", "direct")
+
+    persist_cell_remote(notebook_dir, "c1", None, None)
+    assert "c1" not in load_runtime_state(notebook_dir).cells
+
+
 def test_update_cell_display_outputs_clears_entry(tmp_path: Path):
     from strata.notebook.writer import (
         add_cell_to_notebook,

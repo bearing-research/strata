@@ -235,7 +235,8 @@ class _SqlExecutor:
     def reopen_identity(self, cell: CellState, session: Any) -> str | None:
         """The connection read and the cache policy, when they settle the identity.
 
-        ``None`` for a policy that needs a freshness probe, which an open cannot make.
+        ``None`` for a policy that needs a freshness probe; the staleness pass probes a
+        local database itself (``NotebookSession._probed_reopen_identity``).
         """
         from strata.notebook.sql.cell_executor import sql_reopen_identity
 

@@ -31,7 +31,7 @@ from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import CellLanguage, MountSpec, TableWriteSpec
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
 from strata.notebook.read_audit import ReadFinding, merge
-from strata.notebook.table_writes import StagedOutput, TableWriteError, write_back_failed
+from strata.notebook.table_writes import StagedOutput, TableWriteError
 
 if TYPE_CHECKING:
     from strata.notebook.executor import _CellProvenance
@@ -56,7 +56,7 @@ class LoopContext:
     promote_reverted_outputs: Callable[..., int | None]
     canonical_output: Callable[[str, str, str], Any]
     table_write_refusal: Callable[[str], str | None]
-    restore_gone_tables: Callable[[str, str], Awaitable[None]]
+    restore_gone_tables: Callable[[str, str], Awaitable[str | None]]
     prepare_mounts: Callable[..., Awaitable[dict[str, Any]]]
     load_input_blobs: Callable[..., dict[str, Any]]
     keep_failed_output_dirs: Callable[..., None]
@@ -343,16 +343,15 @@ async def _run_loop(
             host, context, cell_id, loop, cell_provenance, start_time, annotations.table_writes
         )
         if cached is not None:
-            try:
-                await context.restore_gone_tables(cell_id, source)
-            except TableWriteError as exc:
+            refusal = await context.restore_gone_tables(cell_id, source)
+            if refusal is not None:
                 cell = host.notebook_state.get_cell(cell_id)
                 if cell is not None:
                     cell.cache_hit = False
                 return CellExecutionResult(
                     cell_id=cell_id,
                     success=False,
-                    error=write_back_failed(exc),
+                    error=refusal,
                     execution_method="loop",
                 )
             from strata.notebook.runtime_state import persist_cell_loop_run

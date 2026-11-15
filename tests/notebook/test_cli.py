@@ -526,13 +526,14 @@ class _FakeSyncSession:
         self._final_status = final_status
         self._error = error
         self.environment_job = None
+        self.environment_jobs = self
 
-    async def submit_environment_job(self, *, action: str):
+    async def submit(self, *, action: str):
         assert action == "sync"
         self.environment_job = self._job  # the "currently running" slot
         return self._job
 
-    async def wait_for_environment_job(self) -> None:
+    async def wait(self) -> None:
         self._job.status = self._final_status
         self._job.error = self._error
         self.environment_job = None  # cleared on completion

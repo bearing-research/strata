@@ -70,8 +70,9 @@ from strata.notebook.mounts import (
 )
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
+from strata.notebook.run_scope import RunScope
 from strata.notebook.serializer import ContentType
-from strata.notebook.table_writes import TableWriteError, write_back_failed
+from strata.notebook.table_writes import TableWriteError
 from strata.notebook.team_store import TeamPull
 from strata.notebook.workers import (
     is_embedded_executor_worker,
@@ -81,6 +82,8 @@ from strata.notebook.workers import (
 )
 
 if TYPE_CHECKING:
+    from vestigo.store import StagedVersion
+
     from strata.notebook.executor import _CellProvenance
     from strata.notebook.executor_host import ExecutorHost
 
@@ -119,7 +122,7 @@ class PythonContext:
     promote_reverted_leaf: Callable[..., Any]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     table_write_refusal: Callable[[str], str | None]
-    restore_gone_tables: Callable[[str, str], Awaitable[None]]
+    restore_gone_tables: Callable[[str, str], Awaitable[str | None]]
     load_input_blobs: Callable[..., Any]
     add_dataset_inputs: Callable[..., None]
     prepare_mounts: Callable[..., Awaitable[dict[str, ResolvedMount]]]
@@ -135,8 +138,8 @@ class PythonContext:
     store_outputs: Callable[..., bool]
     close_open_run: Callable[[str], Awaitable[None]]
     push_to_team_store: Callable[..., Awaitable[None]]
-    store_result_displays: Callable[..., None]
-    store_console_outputs: Callable[..., Any]
+    stage_run_records: Callable[..., list[StagedVersion]]
+    show_run_records: Callable[[CellExecutionResult, list[StagedVersion]], None]
     store_mount_writes: Callable[..., None]
     record_good_run: Callable[..., None]
     timeout_message: Callable[[str, float], str]
@@ -527,15 +530,14 @@ async def run_python_cell(
         ):
             # A fan-out writes back for its instances, once they all have run.
             if cached_artifact is not None and fanout_variant is None:
-                try:
-                    await context.restore_gone_tables(cell_id, source)
-                except TableWriteError as exc:
+                refusal = await context.restore_gone_tables(cell_id, source)
+                if refusal is not None:
                     return refused_run(
                         host,
                         CellExecutionResult(
                             cell_id=cell_id,
                             success=False,
-                            error=write_back_failed(exc),
+                            error=refusal,
                             execution_method="error",
                         ),
                     )
@@ -819,6 +821,25 @@ async def run_python_cell(
 
             if exec_result.success:
                 store_error: str | None = None
+                records: list[StagedVersion] = []
+
+                def stage_records() -> list[StagedVersion]:
+                    # Released with the variables, so the displays and console a hit
+                    # replays or a reopen shows are never another run's.
+                    records[:] = context.stage_run_records(
+                        exec_result,
+                        result_output_dir,
+                        provenance_hash if moved is None else moved_key(provenance_hash),
+                        # Kept by provenance so a hit replays this run's console.
+                        provenance_hash if cacheable and moved is None else None,
+                        source_hash=source_hash,
+                        source=source,
+                        env_hash=env_hash,
+                        variant=fanout_variant,
+                        computation_key=provenance_hash,
+                    )
+                    return records
+
                 try:
                     stored_ok = context.store_outputs(
                         cell_id,
@@ -840,11 +861,14 @@ async def run_python_cell(
                         local_run=local_run,
                         stochastic=prov.annotations.stochastic or moved is not None,
                         run_outputs=exec_result.outputs,
+                        stage_records=stage_records,
                     )
                 except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
                     stored_ok, store_error = False, str(exc)
                 await context.close_open_run(cell_id)
-                if not stored_ok:
+                if stored_ok:
+                    context.show_run_records(exec_result, records)
+                else:
                     logger.error(
                         "Cell %s executed OK but artifact storage failed.",
                         cell_id,
@@ -857,35 +881,6 @@ async def run_python_cell(
                     # Only once artifacts are on disk: the publish reads them back, so a pull
                     # reproduces exactly what a local run stored.
                     await context.push_to_team_store(cell_id=cell_id, variant=fanout_variant)
-
-                if exec_result.success:
-                    context.store_result_displays(
-                        exec_result,
-                        result_output_dir,
-                        provenance_hash if moved is None else moved_key(provenance_hash),
-                        input_hashes,
-                        source_hash=source_hash,
-                        source=source,
-                        env_hash=env_hash,
-                        variant=fanout_variant,
-                    )
-                    # Cache the cell's console by provenance so a hit replays this run's.
-                    if cacheable and moved is None:
-                        context.store_console_outputs(
-                            cell_id,
-                            provenance_hash,
-                            exec_result.stdout,
-                            exec_result.stderr,
-                            input_hashes,
-                            source_hash=source_hash,
-                            source=source,
-                            env_hash=env_hash,
-                            display_count=len(exec_result.display_outputs),
-                            duration_ms=exec_result.duration_ms,
-                            variant=fanout_variant,
-                            read_audit=exec_result.read_audit,
-                            mutation_warnings=exec_result.mutation_warnings,
-                        )
 
                 # ⑥ Sync back read-write mounts. A worker syncs its own and reports what
                 # was written in its result.
@@ -1123,10 +1118,7 @@ async def run_harness(
     # New process group so cancel can signal the whole descendant tree (DataLoader
     # workers, multiprocessing pools); ``proc.kill()`` alone leaks children.
 
-    from strata.notebook.process_tree import (
-        subprocess_kwargs_for_new_group,
-        terminate_subprocess_tree,
-    )
+    from strata.notebook.process_tree import subprocess_kwargs_for_new_group
 
     hand_over(manifest_path.parent, harness_user)
     lifeline_fds, lifeline_vars = lifeline_handoff()
@@ -1140,69 +1132,58 @@ async def run_harness(
         read_fd, write_fd = os.pipe()
         events_fds = (write_fd,)
         events_vars = {EVENTS_FD_ENV: str(write_fd)}
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(host.path),
-            stdin=asyncio.subprocess.PIPE if run_token is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # ``uv run`` must find the notebook's .venv, not the server's environment.
-            env=uv_env(identity_env(harness_env({**lifeline_vars, **events_vars}), harness_user)),
-            pass_fds=(*lifeline_fds, *events_fds),
-            **spawn_kwargs(harness_user),
-            **subprocess_kwargs_for_new_group(),
+    async with RunScope("Cell execution") as scope:
+        try:
+            proc = scope.own(
+                await asyncio.create_subprocess_exec(
+                    *cmd,
+                    cwd=str(host.path),
+                    stdin=asyncio.subprocess.PIPE if run_token is not None else None,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    # ``uv run`` must find the notebook's .venv, not the server's environment.
+                    env=uv_env(
+                        identity_env(harness_env({**lifeline_vars, **events_vars}), harness_user)
+                    ),
+                    pass_fds=(*lifeline_fds, *events_fds),
+                    **spawn_kwargs(harness_user),
+                    **subprocess_kwargs_for_new_group(),
+                )
+            )
+        except BaseException:
+            if read_fd >= 0:
+                os.close(read_fd)
+            raise
+        finally:
+            for fd in events_fds:
+                os.close(fd)
+        # Leaving the scope by any exception (cancellation, the timeout below, anything
+        # else) stops the harness's process tree and the relay.
+        relay = (
+            scope.start(relay_events(read_fd, on_event, proc))
+            if events_fds and on_event is not None
+            else None
         )
-    except BaseException:
-        if read_fd >= 0:
-            os.close(read_fd)
-        raise
-    finally:
-        for fd in events_fds:
-            os.close(fd)
-    relay = (
-        asyncio.create_task(relay_events(read_fd, on_event, proc))
-        if events_fds and on_event is not None
-        else None
-    )
 
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(None if run_token is None else f"{run_token}\n".encode()),
-            timeout=timeout_seconds,
-        )
-    except asyncio.CancelledError:
-        logger.info(
-            "Cell execution cancelled; terminating harness subprocess tree pid=%s",
-            proc.pid,
-        )
-        if relay is not None:
-            relay.cancel()
         try:
-            await asyncio.shield(terminate_subprocess_tree(proc))
-        except Exception:
-            logger.exception(
-                "Failed to terminate cancelled harness subprocess tree pid=%s",
-                proc.pid,
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(None if run_token is None else f"{run_token}\n".encode()),
+                timeout=timeout_seconds,
             )
-        raise
-    except TimeoutError:
-        if relay is not None:
-            relay.cancel()
-        await terminate_subprocess_tree(proc)
-        raise TimeoutError()
-    # The harness has exited, so every line it wrote is in the pipe; EOF follows
-    # unless a child of the cell still holds the write end, which the harness kept
-    # from them, so a short wait is the guard, not the mechanism.
-    fenced = None
-    if relay is not None:
-        try:
-            fenced = await asyncio.wait_for(relay, timeout=EVENTS_DRAIN_SECONDS)
         except TimeoutError:
-            logger.warning(
-                "Event pipe of cell run pid=%s still open after exit; stopped reading",
-                proc.pid,
-            )
+            raise TimeoutError() from None
+        # The harness has exited, so every line it wrote is in the pipe; EOF follows
+        # unless a child of the cell still holds the write end, which the harness kept
+        # from them, so a short wait is the guard, not the mechanism.
+        fenced = None
+        if relay is not None:
+            try:
+                fenced = await asyncio.wait_for(relay, timeout=EVENTS_DRAIN_SECONDS)
+            except TimeoutError:
+                logger.warning(
+                    "Event pipe of cell run pid=%s still open after exit; stopped reading",
+                    proc.pid,
+                )
     if fenced is not None:
         return _fenced_result(fenced)
 

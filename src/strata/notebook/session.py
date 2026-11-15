@@ -17,13 +17,13 @@ import time as _time
 import tomllib
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio.to_thread
 import cellgraph as cg
-from vestigo.file_modes import PASS_THROUGH_DIR, private_dir, private_file
+from vestigo.file_modes import PASS_THROUGH_DIR, private_dir
 from vestigo.provenance import derive_subkey
 
 from strata.notebook import console_relay, nonce, output_file_relay
@@ -34,11 +34,8 @@ from strata.notebook.dependencies import (
     DependencyChangeResult,
     EnvironmentOperationLog,
     RequirementsImportResult,
-    _get_notebook_lock,
     import_environment_yaml_text,
-    import_environment_yaml_text_streaming,
     import_requirements_text,
-    import_requirements_text_streaming,
     list_dependencies,
     list_r_packages,
 )
@@ -49,8 +46,10 @@ from strata.notebook.env import (
     local_packages,
     narrow_env_for_provenance,
 )
+from strata.notebook.environment_jobs import EnvironmentJobs, EnvironmentJobSnapshot
 from strata.notebook.execution_result import CachedConsole
 from strata.notebook.graph import analysis_with, analyze_notebook, mounts_of
+from strata.notebook.inputs import InputFingerprints
 from strata.notebook.keys import CellKey, InputNotFingerprinted, cell_key, input_parts
 from strata.notebook.models import (
     AnnotationDiagnostic,
@@ -71,7 +70,6 @@ from strata.notebook.models import (
 from strata.notebook.mounts import local_mount_path, resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
 from strata.notebook.presence import SessionPresence
-from strata.notebook.protocol import MessageType
 from strata.notebook.provenance import (
     cell_provenance_inputs,
     compute_provenance_hash,
@@ -124,11 +122,6 @@ from strata.notebook.writer import (
     update_cell_display_outputs,
     update_environment_metadata,
 )
-from strata.notebook.ws_payloads import (
-    cell_status_payload,
-    environment_job_event_payload,
-    environment_job_finished_payload,
-)
 
 if TYPE_CHECKING:
     from vestigo.sql_backend import SqlDialect
@@ -140,7 +133,6 @@ if TYPE_CHECKING:
     from strata.notebook.ws_payloads import SessionClosedReason
 
 logger = logging.getLogger(__name__)
-_ENVIRONMENT_JOB_HISTORY_LIMIT = 8
 # Per cell, the undeclared paths whose fingerprints are kept and checked again.
 CHECKED_READS = 100
 # Which a cell's fingerprints keep first: its data before its imports.
@@ -211,11 +203,10 @@ class _OutsideWorld:
     and ``@fetch`` URLs, and the broadcast path takes the lock on the event loop.
     """
 
-    mount_fingerprints: list[str]
+    inputs: InputFingerprints
     has_rw_mount: bool
-    table_fingerprints: list[str]
-    fetch_fingerprints: list[str]
-    dataset_fingerprints: list[str]
+    # A SQL cell's identity with its local database probed (``_probed_reopen_identity``).
+    reopen_identity: str | None = None
 
 
 @dataclass
@@ -265,29 +256,6 @@ class CellStateSnapshot:
     reasons: tuple[str, ...]
     causality: dict[str, Any] | None
     changed_reads: tuple[str, ...] = ()
-
-
-@dataclass
-class EnvironmentJobSnapshot:
-    """One notebook-scoped background environment operation."""
-
-    id: str
-    action: str
-    command: str
-    status: str
-    started_at: int
-    package: str | None = None
-    phase: str | None = None
-    duration_ms: int | None = None
-    stdout: str = ""
-    stderr: str = ""
-    stdout_truncated: bool = False
-    stderr_truncated: bool = False
-    finished_at: int | None = None
-    lockfile_changed: bool = False
-    stale_cell_count: int = 0
-    stale_cell_ids: list[str] = field(default_factory=list)
-    error: str | None = None
 
 
 def _directory_identity(path: Path) -> tuple[int, int] | None:
@@ -353,6 +321,11 @@ class NotebookSession:
         # Local mounts a staleness check found too much of unhashed, as
         # ``(digests_path, root)``, and the task hashing each (``_hash_mounts``).
         self._mounts_to_hash: set[tuple[Path, Path]] = set()
+        # A SQL cell's probe that did not give the identity its run recorded, by
+        # ``(cell id, recorded identity)``: what it gave, ``None`` for a failed probe. Not
+        # probed again until a run records another, so a database being written is not
+        # opened on every pass.
+        self._probe_misses: dict[tuple[str, str], str | None] = {}
         self._mount_hashing: dict[tuple[Path, Path], asyncio.Task[None]] = {}
         self._mount_hash_lock = threading.Lock()
 
@@ -397,7 +370,8 @@ class NotebookSession:
         self.environment_job_task: asyncio.Task[None] | None = None
         self._environment_state_lock = threading.RLock()
         self._synchronous_environment_mutation: str | None = None
-        self._load_environment_job_history()
+        self.environment_jobs = EnvironmentJobs(self)
+        self.environment_jobs.load_history()
 
         # The last secret fetch and the ``[secret_manager]`` config it was made for.
         self._secret_fetch: tuple[dict[str, Any], SecretFetchResult | None] | None = None
@@ -774,15 +748,44 @@ class NotebookSession:
         For cell kinds keyed under their own scheme (SQL, prompt, widget) nothing else
         repopulates ``artifact_uris`` on open, and a downstream cell would otherwise
         compute a provenance hash that no longer matches its record.
+
+        A ``# @per_variant`` cell stores one artifact per variant, which its run runs in
+        the order of the group's tabs, so it ends pointing at the last one stored.
         """
-        store = self.get_artifact_manager().artifact_store
-        notebook_id = self.notebook_state.id
+        manager = self.get_artifact_manager()
+        variants: tuple[str | None, ...] = (None,)
+        dag = self.dag
+        fanout = dag.fanout_cells.get(cell.id) if dag is not None else None
+        if dag is not None and fanout is not None:
+            group = next(g for g in dag.variant_groups if g.group == fanout.group)
+            variants = tuple(name for _, name in group.members)
         for name in cell.defines:
-            artifact = store.get_latest_version(f"nb_{notebook_id}_cell_{cell.id}_var_{name}")
-            if artifact is not None:
-                uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
-                cell.artifact_uris[name] = uri
-                cell.artifact_uri = uri
+            for variant in variants:
+                artifact = manager.artifact_store.get_latest_version(
+                    manager.cell_artifact_id(cell.id, name, variant=variant)
+                )
+                if artifact is not None:
+                    uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
+                    cell.artifact_uris[name] = uri
+                    cell.artifact_uri = uri
+
+    def _restore_loop_carry(self, cell: Any, provenance_hash: str) -> None:
+        """Point a loop cell at its final state, as the run that stored it does.
+
+        A loop's ``artifact_uri`` is its canonical carry even when no cell reads it, and a
+        cell ordered after the loop (``# @after``) keys on that.
+        """
+        loop = parse_annotations(cell.source, cell.language).loop
+        if loop is None:
+            return
+        manager = self.artifact_manager
+        carry = manager.artifact_store.get_latest_version(
+            manager.cell_artifact_id(cell.id, loop.carry)
+        )
+        if carry is not None and carry.provenance_hash == derive_subkey(
+            provenance_hash, loop.carry
+        ):
+            cell.artifact_uri = f"strata://artifact/{carry.id}@v={carry.version}"
 
     def _restore_ready_runtime_state(
         self,
@@ -1070,23 +1073,55 @@ class NotebookSession:
             self,
             analysis,
             cell_id,
-            mounts=outside.mount_fingerprints,
-            tables=outside.table_fingerprints,
-            fetches=outside.fetch_fingerprints,
-            datasets=outside.dataset_fingerprints,
+            inputs=outside.inputs,
             env_hash=env_hash,
         )
 
-    def _outside_world_for(self, cell: Any) -> _OutsideWorld:
-        """One cell's outside-world fingerprints."""
+    def _outside_world_for(self, cell: Any, *, probe: bool = True) -> _OutsideWorld:
+        """One cell's outside-world fingerprints; a SQL cell's database is probed only with
+        *probe*, which a caller holding the staleness lock leaves off."""
         mount_fingerprints, has_rw_mount = self._collect_mount_fingerprints(cell)
         return _OutsideWorld(
-            mount_fingerprints=mount_fingerprints,
+            inputs=InputFingerprints(
+                mounts=mount_fingerprints,
+                tables=self._collect_table_fingerprints(cell),
+                fetches=self._collect_fetch_fingerprints(cell),
+                datasets=self._collect_dataset_fingerprints(cell),
+            ),
             has_rw_mount=has_rw_mount,
-            table_fingerprints=self._collect_table_fingerprints(cell),
-            fetch_fingerprints=self._collect_fetch_fingerprints(cell),
-            dataset_fingerprints=self._collect_dataset_fingerprints(cell),
+            reopen_identity=self._probed_reopen_identity(cell) if probe else None,
         )
+
+    def _probed_reopen_identity(self, cell: Any) -> str | None:
+        """A SQL cell's reopen identity with its database probed, as a run would, for a
+        policy that needs the probe (``sql_reopen_identity`` with ``probe``).
+
+        Only for a cell a probe could make ready: not ready, and whose run recorded an
+        identity to compare. A ready one ran in this session as it stands.
+        """
+        recorded = cell.last_reopen_identity
+        if (
+            cell.language != CellLanguage.SQL
+            or cell.status not in (CellStatus.IDLE, CellStatus.STALE)
+            or recorded is None
+            or (cell.id, recorded) in self._probe_misses
+        ):
+            return None
+        from strata.notebook.sql.cell_executor import sql_reopen_identity
+
+        try:
+            identity = sql_reopen_identity(cell, self, probe=True)
+        except Exception:
+            logger.debug("reopen identity unavailable for cell %s", cell.id, exc_info=True)
+            identity = None
+        if identity != recorded:
+            self._probe_misses[(cell.id, recorded)] = identity
+        return identity
+
+    def probed_identity_changed(self, cell: Any) -> bool:
+        """Whether a probe of *cell*'s database gave another identity than its run recorded."""
+        recorded = cell.last_reopen_identity
+        return recorded is not None and self._probe_misses.get((cell.id, recorded)) is not None
 
     def _compute_staleness_locked(
         self,
@@ -1159,22 +1194,16 @@ class NotebookSession:
             # next flush recomputes), so read our own rather than skip the cell's mounts.
             outside = prefetched.get(cell_id)
             if outside is None:
-                outside = self._outside_world_for(cell)
+                outside = self._outside_world_for(cell, probe=False)
             # Same per-variable artifact selection as execution.
             try:
                 key = self._cell_key(analysis, cell_id, outside, env_hash)
             except InputNotFingerprinted:
                 # Prefetched before an edit added the input.
-                outside = self._outside_world_for(cell)
+                outside = self._outside_world_for(cell, probe=False)
                 key = self._cell_key(analysis, cell_id, outside, env_hash)
 
-            inputs = cell_provenance_inputs(
-                key.upstream,
-                outside.mount_fingerprints,
-                outside.table_fingerprints,
-                outside.fetch_fingerprints,
-                outside.dataset_fingerprints,
-            )
+            inputs = cell_provenance_inputs(key.upstream, outside.inputs)
             test_inputs[cell_id] = cell_test_input_fingerprint(inputs, env_hash)
 
             if outside.has_rw_mount:
@@ -1221,10 +1250,13 @@ class NotebookSession:
                 )
                 # The generic hash isn't all these cells cache on (a SQL cell's connection and
                 # cache policy, a prompt's model), so the cell's own identity must match what it
-                # recorded; None means it can't be settled without a probe. Only needed when
-                # the cell is not READY; a READY cell ran in this session as it stands.
+                # recorded; None means it can't be settled without a probe, which was made
+                # before the lock for a local database. Only needed when the cell is not
+                # READY; a READY cell ran in this session as it stands.
                 identity_required = keyed_elsewhere and cell.status != CellStatus.READY
                 identity = self.reopen_identity(cell) if identity_required else None
+                if identity_required and identity is None:
+                    identity = outside.reopen_identity
                 identity_holds = not identity_required or (
                     identity is not None and identity == (cell.last_reopen_identity or "")
                 )
@@ -1265,6 +1297,7 @@ class NotebookSession:
                     uri = f"strata://artifact/{artifact_id}@v={version}"
                     cell.artifact_uris[var_name] = uri
                     cell.artifact_uri = uri  # backward compat
+                self._restore_loop_carry(cell, provenance_hash)
                 cell.display_outputs = cached_display_outputs or []
                 cell.display_output = cached_display_outputs[-1] if cached_display_outputs else None
 
@@ -1295,14 +1328,7 @@ class NotebookSession:
         }
         # Missing only if the DAG moved meanwhile, and the next flush recomputes.
         if outside is not None:
-            parts["inputs"] = input_parts(
-                {
-                    "mount": outside.mount_fingerprints,
-                    "table": outside.table_fingerprints,
-                    "fetch": outside.fetch_fingerprints,
-                    "dataset": outside.dataset_fingerprints,
-                }
-            )
+            parts["inputs"] = input_parts(outside.inputs.by_kind())
         return parts
 
     def _upstream_moved_under(self, cell: CellState, source_hash: str, env_hash: str) -> bool:
@@ -1553,6 +1579,7 @@ class NotebookSession:
             cell.display_outputs = []
             cell.display_output = None
 
+        shown = (cell.remote_worker, cell.remote_transport)
         if (
             result.remote_worker
             or result.remote_transport
@@ -1573,14 +1600,17 @@ class NotebookSession:
                 cell.remote_build_id = result.remote_build_id
                 cell.remote_build_state = result.remote_build_state
                 cell.remote_error_code = result.remote_error_code
-            return
-
-        if result.execution_method != "cached":
+        elif result.execution_method != "cached":
             cell.remote_worker = None
             cell.remote_transport = None
             cell.remote_build_id = None
             cell.remote_build_state = None
             cell.remote_error_code = None
+        if (cell.remote_worker, cell.remote_transport) != shown:
+            # The cell's header names them, so a reopen shows them too.
+            from strata.notebook.runtime_state import persist_cell_remote
+
+            persist_cell_remote(self.path, cell_id, cell.remote_worker, cell.remote_transport)
 
     def record_successful_execution_provenance(
         self,
@@ -1593,6 +1623,7 @@ class NotebookSession:
         reads: dict[str, Any] | None,
         key_parts: dict[str, Any] | None,
         writes: dict[str, Any] | None = None,
+        reopen_identity: str | None = None,
     ) -> None:
         """Persist the last successful execution provenance for uncached cells.
 
@@ -1601,6 +1632,8 @@ class NotebookSession:
         *reads*, what the run moved, in the reads index, and *writes*, what it wrote
         through its read-write mounts, in the writes index. A run that wrote nothing
         (a cache hit, a batched cell) passes no *writes* and drops the cell's entry.
+        *reopen_identity* is one the run settled itself (a SQL cell's probed database);
+        without it the identity is computed here.
         """
         from strata.notebook import reads_index, table_index, writes_index
         from strata.notebook.runtime_state import persist_cell_provenance
@@ -1614,7 +1647,7 @@ class NotebookSession:
         cell.last_key_parts = key_parts
         # So a reopen compares like with like, not on a hash that never covered the
         # connection read or the model asked.
-        cell.last_reopen_identity = self.reopen_identity(cell)
+        cell.last_reopen_identity = reopen_identity or self.reopen_identity(cell)
         persist_cell_provenance(
             self.path,
             cell_id,
@@ -1962,8 +1995,8 @@ class NotebookSession:
         data["env"] = mask_env(self.notebook_state.env, self.notebook_state.env_sources)
         data["cells"] = self.serialize_cells()
         data["environment"] = self.serialize_environment_state()
-        data["environment_job"] = self.serialize_environment_job_state()
-        data["environment_job_history"] = self.serialize_environment_job_history()
+        data["environment_job"] = self.environment_jobs.serialize_state()
+        data["environment_job_history"] = self.environment_jobs.serialize_history()
         data["r_environment"] = self.serialize_r_environment_state()
         return data
 
@@ -2127,71 +2160,6 @@ class NotebookSession:
             "packages_status": packages_status,
             "packages_error": packages_error,
         }
-
-    def serialize_environment_job_state(self) -> dict[str, Any] | None:
-        """Serialize the current or most recent environment job when present."""
-        with self._environment_state_lock:
-            if self.environment_job is not None and self.environment_job.status == "running":
-                return asdict(self.environment_job)
-            if self.environment_job_history:
-                return asdict(self.environment_job_history[0])
-            return None
-
-    def serialize_environment_job_history(self) -> list[dict[str, Any]]:
-        """Serialize recent finished environment jobs, newest first."""
-        with self._environment_state_lock:
-            return [asdict(job) for job in self.environment_job_history]
-
-    def _environment_job_history_path(self) -> Path:
-        """Return the persisted recent-job history path for this notebook."""
-        return self.path / ".strata" / "environment_jobs.json"
-
-    def _load_environment_job_history(self) -> None:
-        """Load recent finished environment jobs from notebook runtime state."""
-        history_path = self._environment_job_history_path()
-        if not history_path.exists():
-            return
-        try:
-            raw = json.loads(history_path.read_text())
-        except Exception:
-            logger.warning(
-                "Failed to read environment job history for %s", self.path, exc_info=True
-            )
-            return
-        history = [EnvironmentJobSnapshot(**item) for item in raw]
-        self.environment_job_history = [
-            job for job in history if job.status in {"completed", "failed"}
-        ][:_ENVIRONMENT_JOB_HISTORY_LIMIT]
-
-    def _persist_environment_job_history(self) -> None:
-        """Persist recent finished environment jobs to notebook runtime state."""
-        history_path = self._environment_job_history_path()
-        history_path.parent.mkdir(parents=True, exist_ok=True)
-        private_file(history_path)
-        history_path.write_text(
-            json.dumps(
-                [
-                    asdict(job)
-                    for job in self.environment_job_history[:_ENVIRONMENT_JOB_HISTORY_LIMIT]
-                ],
-                indent=2,
-                sort_keys=True,
-            )
-        )
-
-    def _record_finished_environment_job(self, job: EnvironmentJobSnapshot) -> None:
-        """Add a finished job to recent history and persist it."""
-        with self._environment_state_lock:
-            remaining = [
-                existing for existing in self.environment_job_history if existing.id != job.id
-            ]
-            self.environment_job_history = [job, *remaining][:_ENVIRONMENT_JOB_HISTORY_LIMIT]
-            try:
-                self._persist_environment_job_history()
-            except Exception:
-                logger.warning(
-                    "Failed to persist environment job history for %s", self.path, exc_info=True
-                )
 
     def has_active_environment_mutation(
         self, *, besides: EnvironmentJobSnapshot | str | None = None
@@ -3331,607 +3299,6 @@ class NotebookSession:
             result=result,
             staleness_map=staleness_map,
         )
-
-    def wait_for_environment_job_task(self) -> asyncio.Task[None] | None:
-        """Return the current environment job task, if any."""
-        with self._environment_state_lock:
-            return self.environment_job_task
-
-    async def wait_for_environment_job(self) -> None:
-        """Wait for the currently active environment job to finish."""
-        task = self.wait_for_environment_job_task()
-        if task is not None:
-            await task
-
-    async def submit_environment_job(
-        self,
-        *,
-        action: str,
-        package: str | None = None,
-        requirements_text: str | None = None,
-        environment_yaml_text: str | None = None,
-        python_version: str | None = None,
-    ) -> EnvironmentJobSnapshot:
-        """Start an asynchronous notebook environment job."""
-        # R actions reuse the env-job machinery; ``_run_environment_job`` dispatches on ``action``.
-        valid_actions = {
-            "add",
-            "remove",
-            "sync",
-            "import",
-            "change_python",
-            "r_init",
-            "r_add",
-        }
-        if action not in valid_actions:
-            raise ValueError(f"Unsupported environment job action: {action}")
-
-        if action == "import":
-            if (requirements_text is None) == (environment_yaml_text is None):
-                raise ValueError(
-                    "Import environment jobs require exactly one of requirements_text "
-                    "or environment_yaml_text"
-                )
-        if action == "change_python" and not python_version:
-            raise ValueError("change_python jobs require python_version")
-
-        # Catch obvious user errors at submission rather than mid-job.
-        if action in {"r_init", "r_add"} and not shutil.which("Rscript"):
-            raise ValueError(
-                "Rscript not found on PATH. Install R "
-                "(https://cran.r-project.org/) before initialising renv."
-            )
-        if action == "r_add":
-            from strata.notebook.dependencies import is_valid_r_package_name
-
-            if not package or not is_valid_r_package_name(package):
-                raise ValueError(
-                    "r_add requires a valid R package name (match ``[A-Za-z][A-Za-z0-9.]*``)."
-                )
-            if not (self.path / "renv.lock").exists():
-                raise ValueError(
-                    "renv not initialised in this notebook. Click "
-                    "'Initialize renv' before adding R packages."
-                )
-
-        if action == "import":
-            action_label = (
-                "requirements import"
-                if requirements_text is not None
-                else "environment.yaml import"
-            )
-        elif action == "change_python":
-            action_label = f"change Python to {python_version}"
-        elif action == "r_init":
-            action_label = "renv::init"
-        elif action == "r_add":
-            action_label = f"renv::install {package}"
-        else:
-            action_label = f"{action} {package}".strip()
-        with self._environment_state_lock:
-            self._assert_environment_job_can_start(action_label)
-            requested_python = read_requested_python_minor(self.path)
-            command = "uv sync"
-            if action == "add" and package:
-                command = f"uv add {package}"
-            elif action == "remove" and package:
-                command = f"uv remove {package}"
-            elif action == "sync" and requested_python:
-                command = f"uv sync --python {requested_python}"
-            elif action == "change_python":
-                command = f"uv sync (python {python_version})"
-            elif action == "r_init":
-                command = "Rscript -e 'renv::init(bare = TRUE)'"
-            elif action == "r_add":
-                command = (
-                    f'Rscript -e \'renv::install("{package}"); '
-                    'renv::snapshot(type = "all", prompt = FALSE)\''
-                )
-
-            job = EnvironmentJobSnapshot(
-                id=str(uuid.uuid4()),
-                action=action,
-                package=package,
-                command=command,
-                status="running",
-                phase="uv_running",
-                started_at=int(_time.time() * 1000),
-            )
-            self.environment_job = job
-
-        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_STARTED, job)
-        task = asyncio.create_task(
-            self._run_environment_job(
-                job,
-                requirements_text=requirements_text,
-                environment_yaml_text=environment_yaml_text,
-                python_version=python_version,
-            )
-        )
-        with self._environment_state_lock:
-            self.environment_job_task = task
-        return job
-
-    async def _run_environment_job(
-        self,
-        job: EnvironmentJobSnapshot,
-        *,
-        requirements_text: str | None = None,
-        environment_yaml_text: str | None = None,
-        python_version: str | None = None,
-    ) -> None:
-        """Execute a background environment job and publish updates."""
-        stale_cell_ids: list[str] = []
-        import_result: RequirementsImportResult | None = None
-        try:
-            if job.action == "sync":
-                stale_cell_ids = await self._run_sync_environment_job(job)
-            elif job.action == "import":
-                stale_cell_ids, import_result = await self._run_import_environment_job(
-                    job,
-                    requirements_text=requirements_text,
-                    environment_yaml_text=environment_yaml_text,
-                )
-            elif job.action == "change_python":
-                assert python_version is not None
-                stale_cell_ids = await self._run_change_python_environment_job(
-                    job, new_minor=python_version
-                )
-            elif job.action in {"r_init", "r_add"}:
-                stale_cell_ids = await self._run_r_environment_job(job)
-            else:
-                assert job.package is not None
-                stale_cell_ids = await self._run_dependency_environment_job(
-                    job,
-                    action=job.action,
-                    package=job.package,
-                )
-            job.status = "completed"
-            job.phase = "completed"
-        except Exception as exc:
-            logger.exception("Environment job %s failed for %s", job.action, self.path)
-            job.status = "failed"
-            job.phase = "failed"
-            job.error = str(exc)
-        finally:
-            job.finished_at = int(_time.time() * 1000)
-            job.duration_ms = job.finished_at - job.started_at
-            self._record_finished_environment_job(job)
-            payload: dict[str, Any] = {
-                "environment_job": asdict(job),
-                "environment_job_history": self.serialize_environment_job_history(),
-                "cells": self.serialize_cells(),
-                **{
-                    "lockfile_changed": job.lockfile_changed,
-                    "stale_cell_count": job.stale_cell_count,
-                    "stale_cell_ids": stale_cell_ids,
-                },
-            }
-            if import_result is not None:
-                payload["warnings"] = list(import_result.warnings)
-                payload["imported_count"] = import_result.imported_count
-            if job.status == "completed":
-                payload.update(
-                    {
-                        "environment": self.serialize_environment_state(),
-                        # So successful r_init / r_add jobs flip the R panel to synced
-                        # without a reopen.
-                        "r_environment": self.serialize_r_environment_state(),
-                        "dependencies": [
-                            {
-                                "name": dep.name,
-                                "version": str(dep.version) if dep.version else None,
-                                "specifier": str(dep.specifier) if dep.specifier else None,
-                            }
-                            for dep in list_dependencies(self.path)
-                        ],
-                    }
-                )
-                from strata.notebook.dependencies import list_resolved_dependencies
-
-                payload["resolved_dependencies"] = [
-                    {
-                        "name": dep.name,
-                        "version": str(dep.version) if dep.version else None,
-                        "specifier": str(dep.specifier) if dep.specifier else None,
-                    }
-                    for dep in list_resolved_dependencies(self.path)
-                ]
-            await self._broadcast_environment_job_message(
-                MessageType.ENVIRONMENT_JOB_FINISHED,
-                environment_job_finished_payload(payload),
-            )
-            if job.action in {"add", "remove"}:
-                await self._broadcast_environment_staleness_updates(job.stale_cell_ids)
-            with self._environment_state_lock:
-                if self.environment_job is job:
-                    self.environment_job = None
-                current_task = asyncio.current_task()
-                if self.environment_job_task is current_task:
-                    self.environment_job_task = None
-
-    async def _run_r_environment_job(self, job: EnvironmentJobSnapshot) -> list[str]:
-        """Run ``r_init`` / ``r_add`` as a background job.
-
-        ``renv_init`` / ``renv_add`` stream, so ``environment_job_progress`` frames go
-        out live during a long compile. A changed ``renv.lock`` changes the shared
-        lockfile hash, so Python cells go stale along with R cells (over-stale).
-        """
-        from strata.notebook.dependencies import renv_add, renv_init
-
-        old_lockfile_hash = compute_lockfile_hash(self.path)
-        on_update = lambda stream, text, truncated: self._update_environment_job_stream(  # noqa: E731
-            job,
-            stream=stream,
-            text=text,
-            truncated=truncated,
-        )
-
-        if job.action == "r_init":
-            result = await renv_init(self.path, on_update=on_update)
-        elif job.action == "r_add":
-            assert job.package is not None
-            result = await renv_add(self.path, job.package, on_update=on_update)
-        else:  # pragma: no cover (submit_environment_job guards this)
-            raise RuntimeError(f"Unsupported R job action: {job.action!r}")
-
-        if result.operation_log is not None:
-            self._apply_environment_operation_log(job, result.operation_log)
-        if not result.success:
-            raise RuntimeError(result.error or f"{job.action} failed")
-
-        # The library now matches the new ``renv.lock``: record it as the last good
-        # sync so ``sync_state`` reads ``ok`` and the next open doesn't re-restore.
-        # The R version is the cached system probe, which just populated the library.
-        renv_lock = self.path / "renv.lock"
-        if renv_lock.exists():
-            new_lockfile_hash = hashlib.sha256(renv_lock.read_bytes()).hexdigest()
-            self._persist_r_runtime_success(
-                lock_hash=new_lockfile_hash,
-                last_synced_at=int(_time.time() * 1000),
-                r_version=self._cached_system_r_version,
-            )
-
-        job.lockfile_changed = compute_lockfile_hash(self.path) != old_lockfile_hash
-        return await self._finalize_environment_job(job, lockfile_changed=job.lockfile_changed)
-
-    async def _run_dependency_environment_job(
-        self,
-        job: EnvironmentJobSnapshot,
-        *,
-        action: str,
-        package: str,
-    ) -> list[str]:
-        """Run ``uv add`` / ``uv remove`` as a background job."""
-        timeout = 120
-        display_name = f"uv {action}"
-        old_lockfile_hash = compute_lockfile_hash(self.path)
-        lock = _get_notebook_lock(self.path)
-        await asyncio.to_thread(lock.acquire)
-        try:
-            on_update = lambda stream, text, truncated: self._update_environment_job_stream(  # noqa: E731
-                job,
-                stream=stream,
-                text=text,
-                truncated=truncated,
-            )
-            if action == "add":
-                result = await self.backend.add_streaming(
-                    package, timeout=timeout, on_update=on_update
-                )
-            elif action == "remove":
-                result = await self.backend.remove_streaming(
-                    package, timeout=timeout, on_update=on_update
-                )
-            else:
-                raise RuntimeError(f"Unsupported dependency action: {action!r}")
-        finally:
-            lock.release()
-
-        self._apply_environment_operation_log(job, result.operation_log)
-        if not result.success:
-            raise RuntimeError(result.error or f"{display_name} failed")
-
-        job.lockfile_changed = compute_lockfile_hash(self.path) != old_lockfile_hash
-        return await self._finalize_environment_job(
-            job, lockfile_changed=job.lockfile_changed, installed=True
-        )
-
-    async def _run_import_environment_job(
-        self,
-        job: EnvironmentJobSnapshot,
-        *,
-        requirements_text: str | None,
-        environment_yaml_text: str | None,
-    ) -> tuple[list[str], RequirementsImportResult]:
-        """Run a requirements/environment.yaml import as a background job."""
-        job.phase = "preparing_import"
-        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
-
-        if requirements_text is not None:
-            result = await import_requirements_text_streaming(
-                self.path,
-                requirements_text,
-                on_update=lambda stream, text, truncated: self._update_environment_job_stream(
-                    job,
-                    stream=stream,
-                    text=text,
-                    truncated=truncated,
-                ),
-            )
-        else:
-            assert environment_yaml_text is not None
-            result = await import_environment_yaml_text_streaming(
-                self.path,
-                environment_yaml_text,
-                on_update=lambda stream, text, truncated: self._update_environment_job_stream(
-                    job,
-                    stream=stream,
-                    text=text,
-                    truncated=truncated,
-                ),
-            )
-
-        self._apply_environment_operation_log(job, result.operation_log)
-        if not result.success:
-            raise RuntimeError(result.error or "Environment import failed")
-
-        stale_cell_ids = await self._finalize_environment_job(
-            job,
-            lockfile_changed=result.lockfile_changed,
-            installed=True,
-        )
-        return stale_cell_ids, result
-
-    async def _run_change_python_environment_job(
-        self,
-        job: EnvironmentJobSnapshot,
-        *,
-        new_minor: str,
-    ) -> list[str]:
-        """Change ``requires-python`` and rebuild the venv on the new minor.
-
-        If ``uv sync`` fails, restores the previous ``requires-python`` and re-syncs.
-        If that also fails the notebook is left with the old pyproject and no venv,
-        and the error goes to the job's operation log.
-        """
-        from strata.notebook.writer import update_requires_python
-
-        old_minor = read_requested_python_minor(self.path)
-        await asyncio.to_thread(update_requires_python, self.path, new_minor)
-
-        # Otherwise uv sync reports an "interpreter mismatch" and refuses.
-        venv_dir = self.path / ".venv"
-        if venv_dir.exists():
-            await asyncio.to_thread(shutil.rmtree, venv_dir, ignore_errors=True)
-
-        old_lockfile_hash = compute_lockfile_hash(self.path)
-        lock = _get_notebook_lock(self.path)
-        await asyncio.to_thread(lock.acquire)
-        try:
-            on_update = lambda stream, text, truncated: self._update_environment_job_stream(  # noqa: E731
-                job,
-                stream=stream,
-                text=text,
-                truncated=truncated,
-            )
-            result = await self.backend.sync_streaming(
-                python_version=None,
-                timeout=180,
-                on_update=on_update,
-            )
-        finally:
-            lock.release()
-
-        self._apply_environment_operation_log(job, result.operation_log)
-        if not result.success:
-            # Rollback: restore previous requires-python and re-sync.
-            if old_minor:
-                try:
-                    await asyncio.to_thread(update_requires_python, self.path, old_minor)
-                    rollback = await self.backend.sync_streaming(
-                        python_version=None,
-                        timeout=180,
-                        on_update=on_update,
-                    )
-                    self._apply_environment_operation_log(job, rollback.operation_log)
-                except Exception:
-                    logger.exception("Failed to rollback python-version change for %s", self.path)
-            raise RuntimeError(result.error or f"uv sync failed for Python {new_minor}")
-
-        job.lockfile_changed = compute_lockfile_hash(self.path) != old_lockfile_hash
-        return await self._finalize_environment_job(
-            job,
-            lockfile_changed=True,
-            installed=True,
-        )
-
-    async def _run_sync_environment_job(
-        self,
-        job: EnvironmentJobSnapshot,
-    ) -> list[str]:
-        """Run ``uv sync`` as a background job."""
-        old_lockfile_hash = compute_lockfile_hash(self.path)
-        requested_python = read_requested_python_minor(self.path)
-        result = await self.backend.sync_streaming(
-            python_version=requested_python,
-            timeout=60,
-            on_update=lambda stream, text, truncated: self._update_environment_job_stream(
-                job,
-                stream=stream,
-                text=text,
-                truncated=truncated,
-            ),
-        )
-        self._apply_environment_operation_log(job, result.operation_log)
-        self._apply_uv_sync_result(
-            result.success,
-            duration_ms=result.operation_log.duration_ms or 0,
-        )
-        # No-op without ``renv.lock``; R restores whatever uv did, as an open did inline.
-        try:
-            await asyncio.to_thread(self.ensure_renv_synced)
-        except Exception as exc:
-            logger.warning("Failed to sync renv: %s", exc)
-        if not result.success:
-            raise RuntimeError(result.error or "uv sync failed")
-
-        return await self._finalize_environment_job(
-            job,
-            lockfile_changed=compute_lockfile_hash(self.path) != old_lockfile_hash,
-            refresh_runtime=False,
-        )
-
-    async def _finalize_environment_job(
-        self,
-        job: EnvironmentJobSnapshot,
-        *,
-        lockfile_changed: bool,
-        refresh_runtime: bool = True,
-        installed: bool = False,
-    ) -> list[str]:
-        """Refresh runtime metadata and staleness after a successful env mutation.
-
-        ``installed`` means the job installed the current lockfile into the venv.
-        """
-        if refresh_runtime:
-            job.phase = "refreshing_runtime"
-            await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
-            await asyncio.to_thread(self.refresh_environment_runtime)
-        if installed:
-            await asyncio.to_thread(self._record_dependency_install, job.duration_ms)
-
-        job.phase = "invalidating_warm_pool"
-        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
-        await self._invalidate_warm_pool_for_environment_change()
-
-        job.phase = "recomputing_staleness"
-        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
-        try:
-            await asyncio.to_thread(update_environment_metadata, self.path)
-        except Exception:
-            logger.exception("Failed to update environment metadata")
-
-        staleness_map = await self.compute_staleness_async()
-        stale_cell_ids = [
-            cell_id
-            for cell_id, staleness in staleness_map.items()
-            if staleness.status != CellStatus.READY
-        ]
-        job.phase = "starting_warm_pool"
-        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
-        await self.start_missing_warm_pools(job)
-        job.lockfile_changed = lockfile_changed
-        job.stale_cell_count = len(stale_cell_ids)
-        job.stale_cell_ids = stale_cell_ids
-        return stale_cell_ids
-
-    def _apply_environment_operation_log(
-        self,
-        job: EnvironmentJobSnapshot,
-        operation_log: EnvironmentOperationLog | None,
-    ) -> None:
-        """Copy final command log details onto a job snapshot."""
-        if operation_log is None:
-            return
-        job.command = operation_log.command or job.command
-        job.duration_ms = operation_log.duration_ms
-        job.stdout = operation_log.stdout
-        job.stderr = operation_log.stderr
-        job.stdout_truncated = operation_log.stdout_truncated
-        job.stderr_truncated = operation_log.stderr_truncated
-
-    async def _update_environment_job_stream(
-        self,
-        job: EnvironmentJobSnapshot,
-        *,
-        stream: str,
-        text: str,
-        truncated: bool,
-    ) -> None:
-        """Update a running job's live stdout/stderr snapshot and broadcast it."""
-        if stream == "stdout":
-            job.stdout = text
-            job.stdout_truncated = truncated
-        else:
-            job.stderr = text
-            job.stderr_truncated = truncated
-        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
-
-    async def _broadcast_environment_job_event(
-        self,
-        event_type: MessageType,
-        job: EnvironmentJobSnapshot,
-    ) -> None:
-        """Broadcast one environment-job state snapshot (started / progress) over the notebook WS.
-
-        The payload is validated through ``EnvironmentJobModel``, the documented wire shape.
-        """
-        await self._broadcast_environment_job_message(
-            event_type,
-            environment_job_event_payload(asdict(job)),
-        )
-
-    async def _broadcast_environment_job_message(
-        self,
-        event_type: MessageType,
-        payload: dict[str, Any],
-    ) -> None:
-        """Send a structured notebook environment-job message to WS clients."""
-        try:
-            from strata.notebook.ws import broadcast_notebook_message, next_notebook_sequence
-        except Exception:
-            return
-
-        await broadcast_notebook_message(
-            self.id,
-            {
-                "type": event_type,
-                "seq": next_notebook_sequence(self.id),
-                "ts": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
-                "payload": payload,
-            },
-        )
-
-    async def _broadcast_environment_staleness_updates(self, cell_ids: list[str]) -> None:
-        """Broadcast current stale/idle statuses after an environment mutation."""
-        if not cell_ids:
-            return
-        try:
-            from strata.notebook.ws import broadcast_notebook_message, next_notebook_sequence
-        except Exception:
-            return
-
-        for cell_id in cell_ids:
-            cell = next(
-                (candidate for candidate in self.notebook_state.cells if candidate.id == cell_id),
-                None,
-            )
-            if cell is None:
-                continue
-            status = cell.status.value if isinstance(cell.status, CellStatus) else str(cell.status)
-            causality = self.causality_map.get(cell.id)
-            payload = cell_status_payload(
-                cell.id,
-                status,
-                staleness_reasons=[
-                    reason.value for reason in (cell.staleness.reasons if cell.staleness else [])
-                ],
-                causality=asdict(causality, dict_factory=skip_none)
-                if causality is not None
-                else None,
-                changed_reads=(cell.staleness.changed_reads if cell.staleness else None) or None,
-            )
-
-            await broadcast_notebook_message(
-                self.id,
-                {
-                    "type": MessageType.CELL_STATUS,
-                    "seq": next_notebook_sequence(self.id),
-                    "ts": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
-                    "payload": payload,
-                },
-            )
 
 
 def _keyed_by_local_hash(mount: MountSpec, scheme: str) -> bool:

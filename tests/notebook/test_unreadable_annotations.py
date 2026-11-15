@@ -133,13 +133,13 @@ BLOCKED = "# @timeout soon\nx = 1\n"
 def _run_all(session: NotebookSession, monkeypatch) -> list[str]:
     """Run All over every cell; the ids it marked blocked by a failure."""
     blocked: list[str] = []
-    original = ws._mark_blocked_by_failure
+    original = ws._broadcast_blocked_by_failure
 
-    async def record(session, notebook_id, cell_id):
+    async def record(notebook_id, cell_id):
         blocked.append(cell_id)
-        await original(session, notebook_id, cell_id)
+        await original(notebook_id, cell_id)
 
-    monkeypatch.setattr(ws, "_mark_blocked_by_failure", record)
+    monkeypatch.setattr(ws, "_broadcast_blocked_by_failure", record)
     asyncio.run(
         ws._execute_run_all(
             None,

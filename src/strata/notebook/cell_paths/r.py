@@ -39,7 +39,7 @@ from strata.notebook.harness_user import (
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.models import MountMode, MountSpec, WorkerBackendType
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
-from strata.notebook.table_writes import TableWriteError, write_back_failed
+from strata.notebook.table_writes import TableWriteError
 from strata.notebook.team_store import TeamPull
 from strata.notebook.workers import is_http_executor_worker, resolve_worker_spec, worker_transport
 from strata.observability.tracing import trace_span
@@ -64,7 +64,7 @@ class RContext:
     promote_reverted_outputs: Callable[..., int | None]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     table_write_refusal: Callable[[str], str | None]
-    restore_gone_tables: Callable[[str, str], Awaitable[None]]
+    restore_gone_tables: Callable[[str, str], Awaitable[str | None]]
     load_input_blobs: Callable[[str, Path], Any]
     dispatch_http_executor: Callable[..., Awaitable[tuple[Any, Path, str, Any]]]
     prepare_mounts: Callable[..., Awaitable[dict[str, ResolvedMount]]]
@@ -272,15 +272,14 @@ async def run_r_cell(
 
         if cached_artifact is not None or (not consumed_vars and cached_display_outputs):
             if cached_artifact is not None:
-                try:
-                    await context.restore_gone_tables(cell_id, source)
-                except TableWriteError as exc:
+                refusal = await context.restore_gone_tables(cell_id, source)
+                if refusal is not None:
                     return refused_run(
                         host,
                         CellExecutionResult(
                             cell_id=cell_id,
                             success=False,
-                            error=write_back_failed(exc),
+                            error=refusal,
                             execution_method="error",
                         ),
                     )

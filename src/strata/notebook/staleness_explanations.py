@@ -152,8 +152,11 @@ def _explain(session: NotebookSession, cell: CellState, found: StaleCell) -> Cau
 
     identity = session.reopen_identity(cell)
     identity_settled = identity is not None and cell.last_reopen_identity is not None
-    if identity_settled and identity != cell.last_reopen_identity:
+    # A SQL cell's database, probed before the walk, gave another identity.
+    probed_changed = session.probed_identity_changed(cell)
+    if (identity_settled and identity != cell.last_reopen_identity) or probed_changed:
         details.append(CausalityDetail(type=CausalityType.IDENTITY_CHANGED))
+    identity_settled = identity_settled or probed_changed
 
     complete = stored is not None and found.current is not None and identity_settled and details
     return CausalityChain(

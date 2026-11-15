@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Copy,
   FlaskConical,
+  GitBranch,
   Hourglass,
   Info,
   Pencil,
@@ -50,6 +51,7 @@ import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
 
 const InspectPanel = defineAsyncComponent(() => import('./InspectPanel.vue'))
 const TestsPanel = defineAsyncComponent(() => import('./TestsPanel.vue'))
+const CheckpointsPanel = defineAsyncComponent(() => import('./CheckpointsPanel.vue'))
 
 const props = defineProps<{ cell: Cell }>()
 const emit = defineEmits<{
@@ -154,6 +156,7 @@ const isPythonCell = computed(() => props.cell.language === 'python')
 // Widget cells show controls instead of the editor; this reveals the source.
 const widgetShowSource = ref(false)
 const isTesting = computed(() => storeIsTesting(props.cell.id))
+const showCheckpoints = ref(false)
 
 interface TestBadge {
   text: string
@@ -874,6 +877,16 @@ function outputKey(output: CellOutput, index: number): string {
         >
           <FlaskConical />
         </button>
+        <button
+          v-if="isPythonCell"
+          title="Checkpoints: branch a run from one"
+          aria-label="Checkpoints"
+          data-testid="cell-checkpoints-button"
+          :class="{ active: showCheckpoints }"
+          @click="showCheckpoints = !showCheckpoints"
+        >
+          <GitBranch />
+        </button>
       </div>
     </div>
 
@@ -1506,6 +1519,13 @@ function outputKey(output: CellOutput, index: number): string {
 
       <!-- Unit-tests panel -->
       <TestsPanel v-if="isTesting" :cell-id="cell.id" />
+
+      <!-- Checkpoints panel -->
+      <CheckpointsPanel
+        v-if="showCheckpoints"
+        :cell-id="cell.id"
+        @close="showCheckpoints = false"
+      />
     </div>
   </div>
 </template>

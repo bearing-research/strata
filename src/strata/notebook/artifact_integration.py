@@ -25,7 +25,7 @@ from vestigo.build_store import BuildStore
 from vestigo.provenance import TransformSpec
 from vestigo.releases import ReleaseStore
 from vestigo.sql_backend import SqlDialect
-from vestigo.store import ArtifactStore, StagedVersion
+from vestigo.store import ArtifactStore, GcResult, StagedVersion
 
 from strata.artifact.graph import cell_definition, link_reconstructed
 from strata.artifact.retention import requirements
@@ -66,6 +66,12 @@ def caller_principal_id() -> str | None:
     """
     principal = get_principal()
     return principal.id if principal is not None else None
+
+
+class PruneResult(GcResult):
+    """What :meth:`NotebookArtifactManager.prune` did: the sweeps and the runs it failed."""
+
+    abandoned_runs: int
 
 
 class NotebookArtifactManager:
@@ -109,7 +115,7 @@ class NotebookArtifactManager:
         keep_superseded: int,
         min_idle_seconds: float,
         live_cells: Collection[str] | None = None,
-    ) -> dict:
+    ) -> PruneResult:
         """Drop each cell output's values older than its newest *keep_superseded*.
 
         Keeps every output's current value, anything named, pinned or published, and
@@ -160,8 +166,7 @@ class NotebookArtifactManager:
             )
             result["deleted_count"] += swept["deleted_count"]
             result["deleted_bytes"] += swept["deleted_bytes"]
-        result["abandoned_runs"] = abandoned
-        return result
+        return PruneResult(**result, abandoned_runs=abandoned)
 
     def _idle_removed_cell_values(
         self, live_cells: Collection[str] | None, min_idle_seconds: float

@@ -486,6 +486,7 @@ class TestSql:
             "execution_method": "cached",
             "artifact_uri": "strata://t",
             "mutation_warnings": [{"variable": "x"}],
+            "reopen_identity": "probed",
         }
         run, _, calls = path(answer)
         calls.stored_displays = [self.STORED]
@@ -494,7 +495,15 @@ class TestSql:
 
         args, kwargs = RECORDED
         assert calls.recorded == [
-            (args, {**kwargs, "table_reads": [{"table": "t"}, {"table": "lake"}]})
+            (
+                args,
+                {
+                    **kwargs,
+                    "table_reads": [{"table": "t"}, {"table": "lake"}],
+                    # What the run's own probes settled, for a reopen to compare.
+                    "reopen_identity": "probed",
+                },
+            )
         ]
         assert calls.cell.cache_hit is True
         assert calls.store_inline == [
@@ -3116,6 +3125,8 @@ class TestRunBatch:
 
         monkeypatch.setattr(batch.asyncio, "create_subprocess_exec", create_subprocess_exec)
         monkeypatch.setattr(batch, "terminate_subprocess_tree", terminate)
+        # What RunScope calls when the run ends by an exception.
+        monkeypatch.setattr("strata.notebook.process_tree.terminate_subprocess_tree", terminate)
         monkeypatch.setattr(batch, "resolve_harness_user", lambda: self.USER)
         monkeypatch.setattr(batch, "hand_over", lambda path, user: seen.handed.append((path, user)))
         monkeypatch.setattr(batch, "identity_env", lambda env, user: {"env": env, "user": user})
@@ -3197,6 +3208,47 @@ class TestRunBatch:
 
         assert harness.terminated == [harness.proc]
         assert (ran.completed, ran.end_reason) == (False, "subprocess_died")
+
+    async def test_a_failing_callback_ends_the_process_tree_before_the_files_go(
+        self, tmp_path, harness, monkeypatch
+    ):
+        """Not only a cancel or a timeout: any exception stops the harness first."""
+        harness.frames = [_frame("cell_start", cell_id="c")]
+        harness.hangs = True
+        tmpdir_at_stop = []
+
+        async def on_cell_start(cell_id):
+            raise RuntimeError("broadcast failed")
+
+        terminate = batch.terminate_subprocess_tree  # the fixture's
+
+        async def recording(proc):
+            tmpdir_at_stop.append(harness.tmpdir.exists())
+            await terminate(proc)
+
+        monkeypatch.setattr("strata.notebook.process_tree.terminate_subprocess_tree", recording)
+        with pytest.raises(RuntimeError, match="broadcast failed"):
+            await self._run(tmp_path, on_cell_start=on_cell_start)
+
+        assert harness.terminated == [harness.proc]
+        assert tmpdir_at_stop == [True]
+        assert not harness.tmpdir.exists()
+
+    async def test_a_cancel_ends_the_process_tree(self, tmp_path, harness):
+        harness.frames = [_frame("cell_start", cell_id="c")]
+        harness.hangs = True
+        started = asyncio.Event()
+
+        async def on_cell_start(cell_id):
+            started.set()
+
+        run = asyncio.create_task(self._run(tmp_path, on_cell_start=on_cell_start))
+        await asyncio.wait_for(started.wait(), timeout=10)
+        run.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await run
+        assert harness.terminated == [harness.proc]
 
     async def test_a_cell_timeout_names_the_cell_and_reports_it(self, tmp_path, harness):
         harness.frames = [_frame("cell_start", cell_id="c")]
@@ -3437,7 +3489,8 @@ class TestPython:
             kept=[],
             stored=[],
             pushed=[],
-            consoles=[],
+            staged=[],
+            shown=[],
             writes=[],
             good=[],
             dispatched=[],
@@ -3546,6 +3599,7 @@ class TestPython:
 
         def store_outputs(*args, **kwargs):
             calls.stored.append((args, kwargs))
+            kwargs["stage_records"]()
             return True
 
         async def close_open_run(cell_id):
@@ -3556,6 +3610,10 @@ class TestPython:
 
         async def sync_back_mounts(_mounts):
             return []
+
+        def stage_run_records(*args, **kwargs):
+            calls.staged.append((args, kwargs))
+            return ["records"]
 
         fields = {
             "execute_each_cell": execute_each_cell,
@@ -3584,8 +3642,8 @@ class TestPython:
             "store_outputs": store_outputs,
             "close_open_run": close_open_run,
             "push_to_team_store": push_to_team_store,
-            "store_result_displays": lambda *_args, **_kwargs: None,
-            "store_console_outputs": lambda *args, **kwargs: calls.consoles.append((args, kwargs)),
+            "stage_run_records": stage_run_records,
+            "show_run_records": lambda *args: calls.shown.append(args),
             "store_mount_writes": lambda *args, **kwargs: calls.writes.append((args, kwargs)),
             "record_good_run": lambda *args: calls.good.append(args),
             "timeout_message": lambda _cell_id, seconds: f"timed out after {seconds}",
@@ -3961,26 +4019,29 @@ class TestPython:
 
         assert result.success is False
         assert calls.pushed == []
-        assert calls.consoles == []
+        assert calls.staged == []
+        assert calls.shown == []
 
-    async def test_only_a_cacheable_runs_console_is_stored(self, monkeypatch):
+    async def test_only_a_cacheable_runs_console_is_kept(self, monkeypatch):
         prov = self._prov(annotations={"nocache": True})
         host, context, calls = self._fakes(monkeypatch, prov)
 
         await self._run(host, context)
 
-        assert calls.consoles == []
+        (_result, _dir, _display_key, console_key), _kwargs = calls.staged[0]
+        assert console_key is None
 
-    async def test_a_console_is_stored_with_its_display_count_and_variant(self, monkeypatch):
+    async def test_the_run_records_are_released_with_the_outputs(self, monkeypatch):
         host, context, calls = self._fakes(
             monkeypatch, result={"success": True, "display_outputs": [{"kind": "x"}]}
         )
 
         await self._run(host, context, variant="v")
 
-        _args, kwargs = calls.consoles[0]
-        assert kwargs["display_count"] == 1
+        (_result, _dir, display_key, console_key), kwargs = calls.staged[0]
+        assert display_key == console_key == "prov"
         assert kwargs["variant"] == "v"
+        assert [records for _result, records in calls.shown] == [["records"]]
         assert calls.persisted == [("c", [{"kind": "x"}])]
 
     @staticmethod
@@ -4188,7 +4249,7 @@ class TestPython:
         host, context, _calls = self._fakes(
             monkeypatch,
             result={"success": True, "stdout": "printed", "mutation_warnings": [{"variable": "x"}]},
-            store_result_displays=_raises(RuntimeError("no display")),
+            show_run_records=_raises(RuntimeError("no display")),
         )
 
         result = await self._run(host, context)
@@ -4563,7 +4624,12 @@ class TestPythonHarness:
 
     @pytest.mark.parametrize(
         ("outcome", "raised"),
-        [(TimeoutError(), TimeoutError), (asyncio.CancelledError(), asyncio.CancelledError)],
+        [
+            (TimeoutError(), TimeoutError),
+            (asyncio.CancelledError(), asyncio.CancelledError),
+            # Any other exception too, not only the two the path named.
+            (OSError("the pipe broke"), OSError),
+        ],
     )
     async def test_an_interrupted_run_ends_the_tree_and_the_relay(
         self, spawned, tmp_path, outcome, raised

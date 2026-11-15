@@ -8,6 +8,15 @@ exhaustive commit history.
 ## Unreleased
 
 ### Added
+- **A cell's checkpoints are listed in the notebook, and a branch starts from one there.**
+  A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
+  store still holds, by run (running, interrupted, finished or failed, and which
+  checkpoint a branch started from), with each one's parts or files, size, time and the
+  heads pointing at it, and **Branch from here** runs the cell from that checkpoint.
+  `GET /v1/notebooks/{id}/cells/{cell_id}/checkpoints` returns the same listing, release
+  ids included, for `--init` and `?init=`. The WebSocket `cell_execute` frame takes an
+  optional `init`; such a run sends no cascade prompt and asks before a large read even
+  when the cell is ready. (#1555)
 - **A server can stop itself when nothing uses it.** With `STRATA_IDLE_EXIT_MINUTES` set,
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request (MCP
   included), no open notebook tab and no run in flight. Off by default. (#1556)
@@ -70,6 +79,13 @@ exhaustive commit history.
   in DuckDB SQL is still not seen. (#1516)
 
 ### Changed
+- **A SQL cell on a SQLite or DuckDB file reopens ready when the database is unchanged.**
+  Under the default `fingerprint` policy a reopened cell read idle, and the cells reading
+  its result stale, until it ran. The staleness pass now makes the probe a run makes, on
+  a local file with no lake, and the cell reads ready when the database is as its run
+  left it and stale (external) when it changed, after which it is not probed again until
+  it runs. Other drivers still open idle: their probe is a query over the network.
+  (#1548)
 - **A relative local mount path is under the notebook's directory.** `# @mount shared
   ../shared ro` resolved against the server's working directory, so it named a different
   folder depending on where the server started, and a SQL cell's DuckDB view read it from
@@ -299,6 +315,12 @@ exhaustive commit history.
   skipping it. Run All also skips a failed cell's dependents that would have
   run together in one batch, which before ran on the failed cell's last
   artifacts. No cache keys change. (#1343)
+- **The ledger is vestigo 0.6.0.** A run's final release is refused, and stores nothing,
+  when another writer made a newer value of one of its outputs current first, so a
+  cell's outputs never come from two runs. It adds `ArtifactStore.stage_promotion`,
+  which Strata does not call yet. Its migrations 18 and 19 add indexes: the first
+  0.6.0 process to open a store builds them, and every process on that store
+  upgrades together. (#1551)
 - **The ledger is vestigo 0.5.0.** A sweep no longer deletes a cell value that a kept
   checkpoint was built from: before, a checkpoint the idle floor kept could lose its
   inputs in the same pass. Two processes opening one new SQLite store at once no
@@ -361,9 +383,40 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A reverted edit's outputs come back together.** Reverting an edit (a cell's source
+  changed and changed back) reuses the earlier run's results by copying each value,
+  display and console back, one commit each, so a blob gone partway left some from the
+  earlier run and some from the later one. The copies are now one release, current
+  together or not at all; when one is missing the cell runs. (#1553)
+- **A Python run's displays and console are current only with its outputs.** A single
+  Python cell run made its variables current, then each display and its console alone, so
+  a display that failed to store, or a crash between the two, left the new values beside
+  the previous run's displays, and a leaf run whose release the ledger refused still showed
+  what it printed. They are now made current in the same release as the variables; a
+  refused release keeps none of them and fails the run. Run All's batch is unchanged.
+  (#1552)
+- **A reopen shows the worker a cell last ran on.** A cell's header names the remote worker
+  and transport its last run used; a reopen dropped them until the cell ran again. They
+  are now kept in `.strata/runtime.json`, and a local run clears them. (#1547)
 - **`run_snippet` needs `notebook:write` as well as `notebook:execute`.** It adds a
   cell before running it, so a caller allowed to run cells but not edit them could add
   one. (#1534)
+- **Run All warns about a mutation as a single run does.** A cell that changes an input in
+  place and passes it on (`xs[0] = 9`, with a later cell reading `xs`) ran warning-free
+  alone or in a warm worker, but Run All's batch warned that downstream would see the
+  pre-mutation value, which it does not. The batch now knows which inputs the cell passes
+  on, and a test pins cold and batch to the same warnings. (#1535)
+- **A run that fails on the server's side stops its harness.** A cell run or a Run All batch
+  that ended by an exception other than a cancel or a timeout, such as a callback that
+  raised, left the harness running the cell's code, unreaped, and its pipe readers
+  pending. Every exit now stops the harness's process tree first, and a batch does so
+  before its folder is removed. (#1540)
+- **A cell after a loop reads ready after a reopen.** A cell ordered after a `# @loop`
+  cell (`# @after lp`) keys on the loop's final state, which a reopen did not point the
+  loop at, so the cell read stale (upstream) until it ran again. (#1545)
+- **A `# @per_variant` cell and what reads it read ready after a reopen.** A reopen looked
+  for the cell's result under its plain id, not its `@variant=` ones, so the next
+  `# @per_variant` cell read idle and the cell that reads them stale (upstream). (#1546)
 - **Downloads close the stored blob however the client leaves, and dropped catalogs close.**
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the

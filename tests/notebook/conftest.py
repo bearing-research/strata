@@ -462,16 +462,8 @@ def r_notebook_renv(r_notebook):
 
 def key_upstream(session, cell_id: str) -> list[str]:
     """The upstream components *cell_id*'s key covers."""
+    from strata.notebook.inputs import InputFingerprints
     from strata.notebook.keys import cell_key
 
-    key = cell_key(
-        session,
-        session.analysis,
-        cell_id,
-        mounts=[],
-        tables=[],
-        fetches=[],
-        datasets=[],
-        env_hash="",
-    )
+    key = cell_key(session, session.analysis, cell_id, inputs=InputFingerprints(), env_hash="")
     return key.upstream

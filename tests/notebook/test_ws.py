@@ -601,6 +601,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         local_run=None,
         stochastic=False,
         run_outputs=None,
+        stage_records=None,
     ):
         return True
 
@@ -844,7 +845,7 @@ def test_environment_job_submission_rejects_execution_already_accepted(monkeypat
     async def _noop_environment_job(*_args, **_kwargs) -> None:
         return None
 
-    monkeypatch.setattr(session, "_run_environment_job", _noop_environment_job)
+    monkeypatch.setattr(session.environment_jobs, "_run", _noop_environment_job)
 
     async def _exercise() -> None:
         fake = FakeNotebookWebSocket()
@@ -860,7 +861,7 @@ def test_environment_job_submission_rejects_execution_already_accepted(monkeypat
         await asyncio.wait_for(entered_schedule.wait(), timeout=1)
         try:
             with pytest.raises(RuntimeError):
-                await session.submit_environment_job(action="sync")
+                await session.environment_jobs.submit(action="sync")
         finally:
             release_schedule.set()
             await execute_task

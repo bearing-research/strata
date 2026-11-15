@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import cellgraph as cg
 
+from strata.notebook.inputs import PREFIX, InputFingerprints
 from strata.notebook.provenance import cell_provenance_inputs, compute_provenance_hash
 
 if TYPE_CHECKING:
@@ -108,16 +109,13 @@ def published(session: ExecutorHost, analysis: cg.Analysis) -> Callable[[str], c
     return of
 
 
-# Each kind's fingerprint begins ``<name>:`` and then this.
-_PREFIX = {"mount": "", "table": "table:", "fetch": "fetch:", "dataset": "dataset:"}
-
-
-def _resolvers(fingerprints: Mapping[str, list[str]]) -> dict[str, cg.Resolver]:
+def _resolvers(inputs: InputFingerprints) -> dict[str, cg.Resolver]:
     """Each input's fingerprint, found by its name among those already made."""
+    fingerprints = inputs.by_kind()
 
     def resolver(kind: str) -> cg.Resolver:
         def resolve(spec: cg.Input) -> cg.Resolved | cg.Unavailable:
-            prefix = f"{spec.name}:{_PREFIX[kind]}"
+            prefix = f"{spec.name}:{PREFIX[kind]}"
             found = next((c for c in fingerprints[kind] if c.startswith(prefix)), None)
             if found is None:
                 return cg.Unavailable(f"no fingerprint for {kind} {spec.name}")
@@ -125,7 +123,7 @@ def _resolvers(fingerprints: Mapping[str, list[str]]) -> dict[str, cg.Resolver]:
 
         return resolve
 
-    return {kind: resolver(kind) for kind in _PREFIX}
+    return {kind: resolver(kind) for kind in PREFIX}
 
 
 def input_parts(fingerprints: Mapping[str, list[str]]) -> list[list[str]]:
@@ -169,21 +167,18 @@ def cell_key(
     analysis: cg.Analysis,
     cell_id: str,
     *,
-    mounts: list[str],
-    tables: list[str],
-    fetches: list[str],
-    datasets: list[str],
+    inputs: InputFingerprints,
     env_hash: str,
     instance: str | cg.Item | None = None,
 ) -> CellKey:
     """*cell_id*'s provenance hash (one fan-out *instance*'s, when given) over these
-    input fingerprints."""
+    outside-input fingerprints."""
     if analysis.structural_errors:
         # Without a DAG nothing is wired upstream, as before cellgraph.
         definition_key = analysis.cells[cell_id].definition_key
         assert definition_key is not None  # every cell has one
         digest = compute_provenance_hash(
-            cell_provenance_inputs([], mounts, tables, fetches, datasets),
+            cell_provenance_inputs([], inputs),
             definition_key,
             env_hash,
         )
@@ -198,9 +193,7 @@ def cell_key(
         cell_id,
         instance=instance,
         published=published(session, analysis),
-        resolve=_resolvers(
-            {"mount": mounts, "table": tables, "fetch": fetches, "dataset": datasets}
-        ),
+        resolve=_resolvers(inputs),
         env_hash=env_hash,
     )
     if isinstance(result, cg.Unavailable):
@@ -214,6 +207,5 @@ def cell_key(
         raise InputNotFingerprinted(f"cell {cell_id} has no key: {', '.join(result.unresolved)}")
     # A prompt or SQL cell's generic hash, which it records beside its own key. Its parts
     # have no inputs (they are the host's to key), so supply the ones this hash reads.
-    inputs = input_parts({"mount": mounts, "table": tables, "fetch": fetches, "dataset": datasets})
-    parts = {**result.parts, "inputs": inputs}
+    parts = {**result.parts, "inputs": input_parts(inputs.by_kind())}
     return CellKey(cg.parts_digest(parts), upstream, parts)

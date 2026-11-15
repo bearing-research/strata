@@ -330,6 +330,27 @@ class TestAWritingCell:
         )
         assert not warehouse.exists()
 
+    async def test_a_hit_write_back_answers_with_its_refusal(self, tmp_path, monkeypatch):
+        """Every path asks the same step and fails the cell on its answer; none catches."""
+        warehouse, uri = _warehouse(tmp_path)
+        source = _source(uri, '{"id": [1], "v": [10]}')
+        session = _session(tmp_path, source)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("w", source)).success
+        assert await executor._restore_gone_tables("w", source) is None
+
+        shutil.rmtree(warehouse)
+
+        def refused(*_args, **_kwargs):
+            raise OSError("catalog is read-only")
+
+        monkeypatch.setattr(IcebergWriter, "write", refused)
+        refusal = await executor._restore_gone_tables("w", source)
+
+        assert refusal is not None
+        assert refusal.startswith("A table this cell writes is gone")
+        assert "catalog is read-only" in refusal
+
     async def test_run_all_writes_a_deleted_warehouse_from_its_hit(self, tmp_path):
         warehouse, uri = _warehouse(tmp_path)
         log = tmp_path / "ran.log"

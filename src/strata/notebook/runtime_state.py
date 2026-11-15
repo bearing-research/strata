@@ -65,6 +65,9 @@ class CellRuntime:
     # A yes to a large read, ``{machine: input fingerprint}``: the same inputs on that
     # machine do not ask again (``read_confirm``).
     read_approvals: dict[str, str] = field(default_factory=dict)
+    # The worker the last run went to and how, which the cell's header shows.
+    remote_worker: str | None = None
+    remote_transport: str | None = None
 
     def __post_init__(self) -> None:
         # Older builds persisted NaN/inf control values, which the open payload
@@ -94,6 +97,8 @@ class CellRuntime:
             or self.loop_run
             or self.inputs
             or self.read_approvals
+            or self.remote_worker
+            or self.remote_transport
         )
 
 
@@ -372,6 +377,17 @@ def persist_cell_inputs(notebook_dir: Path, cell_id: str, inputs: dict[str, Any]
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
     entry.inputs = inputs
+    save_runtime_state(notebook_dir, state)
+
+
+def persist_cell_remote(
+    notebook_dir: Path, cell_id: str, worker: str | None, transport: str | None
+) -> None:
+    """Record the worker *cell_id*'s last run went to and its transport; ``None`` clears."""
+    state = load_runtime_state(notebook_dir)
+    entry = state.get_or_create_cell(cell_id)
+    entry.remote_worker = worker
+    entry.remote_transport = transport
     save_runtime_state(notebook_dir, state)
 
 

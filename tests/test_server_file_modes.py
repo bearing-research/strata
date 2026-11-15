@@ -85,7 +85,7 @@ class TestANotebooksRuntimeState:
         from strata.notebook.writer import update_cell_console_output
 
         update_cell_console_output(session.path, "c1", "printed", "")
-        session._persist_environment_job_history()
+        session.environment_jobs.persist_history()
         state = session.path / ".strata"
 
         assert _mode(state / "artifacts") == 0o700

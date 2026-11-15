@@ -1,7 +1,8 @@
 """What each cell path does after a run, in what order, and when a step fails.
 
-The orders differ and stay different: Python and R push before displays and reject a false
-store before either; batch stores displays first, rejects a false store after them, and pushes
+The orders differ and stay different: Python's store stages its displays and console after the
+outputs and releases them together, and it pushes after; R pushes before displays and rejects a
+false store before either; batch stores displays first, rejects a false store after them, and pushes
 last; a loop has no ``_store_outputs`` and no push; ``@each`` does its instances by the Python
 path and then writes its manifests. Each failure is pinned here.
 """
@@ -42,6 +43,7 @@ LANGUAGES = [
     pytest.param(*R, id="r", marks=skip_if_no_r),
 ]
 STEPS = (
+    "_stage_run_records",
     "_store_outputs",
     "_close_open_run",
     "_push_to_team_store",
@@ -205,7 +207,7 @@ class TestAFinishedRunThatFails:
 
 
 class TestPythonAndR:
-    """Store, push, displays; a false store is rejected before the push."""
+    """A false store is rejected before the push; Python keeps displays with the outputs."""
 
     async def _run(self, tmp_path, language, source, reader):
         session = _session(tmp_path, ("v", language, source), ("w", language, reader))
@@ -216,23 +218,31 @@ class TestPythonAndR:
         _, result = await self._run(tmp_path, language, source, reader)
 
         assert result.success, result.error
-        expected = [
-            "_store_outputs",
-            "_push_to_team_store",
-            "_store_display_outputs",
-            "_store_console_outputs",
-        ]
         if language == "python":
             # Its run closes after the store. The one at the end is the dispatcher's, for all.
-            expected.insert(1, "_close_open_run")
+            expected = [
+                "_store_outputs",
+                "_stage_run_records",
+                "_close_open_run",
+                "_push_to_team_store",
+            ]
+        else:
+            expected = [
+                "_store_outputs",
+                "_push_to_team_store",
+                "_store_display_outputs",
+                "_store_console_outputs",
+            ]
         assert steps == [*expected, "_close_open_run"]
 
-    async def test_a_leaf_stores_its_console_after_displays_in_python(self, tmp_path, steps):
+    async def test_a_python_leaf_releases_its_displays_and_console(self, tmp_path, steps):
         session = _session(tmp_path, ("v", "python", PYTHON[1]))
 
         await CellExecutor(session).execute_cell("v", PYTHON[1])
 
-        assert _after_run(steps)[-2:] == ["_store_display_outputs", "_store_console_outputs"]
+        assert _after_run(steps) == ["_store_outputs", "_stage_run_records", "_push_to_team_store"]
+        assert _latest(session, "v", "__display__0") == 1
+        assert _latest(session, "v", "__console__") == 1
 
     @pytest.mark.parametrize(("language", "source", "reader", "prefix"), LANGUAGES)
     async def test_a_false_store_fails_before_the_push_and_displays(
@@ -247,6 +257,7 @@ class TestPythonAndR:
         assert "_push_to_team_store" not in steps
         assert "_store_display_outputs" not in steps
         assert _latest(session, "v", "__display__0") is None
+        assert _latest(session, "v", "__console__") is None
 
     @pytest.mark.parametrize(("language", "source", "reader", "prefix"), LANGUAGES)
     async def test_a_table_write_error_is_the_cells_error(
@@ -272,19 +283,31 @@ class TestPythonAndR:
         assert result.error == "a link"
         assert "_push_to_team_store" not in steps
 
-    @pytest.mark.parametrize(("language", "source", "reader", "prefix"), LANGUAGES)
-    async def test_a_display_failure_fails_a_cell_whose_outputs_stay(
-        self, tmp_path, monkeypatch, steps, language, source, reader, prefix
+    @skip_if_no_r
+    async def test_an_r_display_failure_fails_a_cell_whose_outputs_stay(
+        self, tmp_path, monkeypatch, steps
     ):
         _fail(monkeypatch, "_store_display_outputs", RuntimeError("no display"), steps)
 
-        session, result = await self._run(tmp_path, language, source, reader)
+        session, result = await self._run(tmp_path, *R[:3])
 
         assert not result.success
-        assert result.error == f"{prefix}{'E' if prefix == '' else 'e'}xecution failed: no display"
+        assert result.error == "R execution failed: no display"
         # Already stored and offered to the team by then.
         assert steps.index("_push_to_team_store") < steps.index("_store_display_outputs")
         assert _latest(session, "v", "value") == 1
+
+    async def test_a_python_display_failure_keeps_nothing_of_the_run(
+        self, tmp_path, monkeypatch, steps
+    ):
+        _fail(monkeypatch, "_stage_display_outputs", RuntimeError("no display"), steps)
+
+        session, result = await self._run(tmp_path, *PYTHON[:3])
+
+        assert not result.success
+        assert result.error == "Execution failed: no display"
+        assert "_push_to_team_store" not in steps
+        assert _latest(session, "v", "value") is None
 
     @pytest.mark.parametrize(("language", "source", "reader", "prefix"), LANGUAGES)
     async def test_a_push_that_raises_leaves_the_cell_finished(
@@ -296,7 +319,11 @@ class TestPythonAndR:
 
         assert offered == ["v"]
         assert result.success, result.error
-        assert "_store_display_outputs" in steps
+        if language == "python":
+            # Its displays went out with its outputs, before the push.
+            assert _latest(session, "v", "__display__0") == 1
+        else:
+            assert "_store_display_outputs" in steps
         assert _latest(session, "v", "value") == 1
 
     async def test_a_cancel_during_the_push_is_still_a_cancel(self, tmp_path, monkeypatch, steps):
@@ -664,12 +691,7 @@ class TestEach:
         result = await CellExecutor(session).execute_cell("e", self.SOURCE)
 
         assert result.success, result.error
-        instance = [
-            "_store_outputs",
-            "_push_to_team_store",
-            "_store_display_outputs",
-            "_store_console_outputs",
-        ]
+        instance = ["_store_outputs", "_stage_run_records", "_push_to_team_store"]
         assert _after_run(steps) == [
             *instance,
             *instance,
@@ -683,7 +705,7 @@ class TestEach:
             ("_store_outputs", False, STORE_FAILED),
             ("_store_outputs", TableWriteError("no table"), "no table"),
             ("_store_outputs", UnsafeRunFile("a link"), "a link"),
-            ("_store_display_outputs", RuntimeError("no display"), "Execution failed: no display"),
+            ("_stage_display_outputs", RuntimeError("no display"), "Execution failed: no display"),
         ],
         ids=["false", "table", "unsafe", "display"],
     )

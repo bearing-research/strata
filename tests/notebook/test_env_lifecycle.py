@@ -431,21 +431,21 @@ class TestDependencyChangeRefresh:
             _noop_invalidate,
         )
         monkeypatch.setattr(
-            "strata.notebook.session.update_environment_metadata",
+            "strata.notebook.environment_jobs.update_environment_metadata",
             lambda path: None,
         )
 
-        job = await session.submit_environment_job(action="add", package="six")
+        job = await session.environment_jobs.submit(action="add", package="six")
         assert job.status == "running"
-        await session.wait_for_environment_job()
+        await session.environment_jobs.wait()
         assert session.environment_job is None
-        assert session.wait_for_environment_job_task() is None
+        assert session.environment_jobs.current_task() is None
         history_path = nb_dir / ".strata" / "environment_jobs.json"
         assert history_path.exists()
         history_payload = json.loads(history_path.read_text())
         assert history_payload[0]["action"] == "add"
         assert history_payload[0]["status"] == "completed"
-        current_job = session.serialize_environment_job_state()
+        current_job = session.environment_jobs.serialize_state()
         assert current_job is not None
         assert current_job["status"] == "completed"
 
@@ -515,20 +515,20 @@ class TestDependencyChangeRefresh:
         from strata.notebook.dependencies import list_dependencies
         from strata.notebook.session import EnvironmentJobSnapshot
 
-        monkeypatch.setattr(session, "_broadcast_environment_job_event", _noop_event)
-        monkeypatch.setattr(session, "_broadcast_environment_job_message", _capture_message)
+        monkeypatch.setattr(session.environment_jobs, "_broadcast_event", _noop_event)
+        monkeypatch.setattr(session.environment_jobs, "_broadcast_message", _capture_message)
         monkeypatch.setattr(
-            "strata.notebook.session.import_environment_yaml_text_streaming",
+            "strata.notebook.environment_jobs.import_environment_yaml_text_streaming",
             _fake_import_environment_yaml_text_streaming,
         )
-        monkeypatch.setattr(session, "_finalize_environment_job", _fake_finalize_environment_job)
+        monkeypatch.setattr(session.environment_jobs, "_finalize", _fake_finalize_environment_job)
 
-        job = await session.submit_environment_job(
+        job = await session.environment_jobs.submit(
             action="import",
             environment_yaml_text="dependencies:\n  - six=1.17.0\n",
         )
         assert job.status == "running"
-        await session.wait_for_environment_job()
+        await session.environment_jobs.wait()
 
         finished = next(
             payload
@@ -576,11 +576,11 @@ class TestDependencyChangeRefresh:
         state = parse_notebook(nb_dir)
         session = NotebookSession(state, nb_dir)
 
-        assert len(session.serialize_environment_job_history()) == 1
-        current_job = session.serialize_environment_job_state()
+        assert len(session.environment_jobs.serialize_history()) == 1
+        current_job = session.environment_jobs.serialize_state()
         assert current_job is not None
         assert current_job["command"] == "uv sync"
-        assert session.serialize_environment_job_history()[0]["stale_cell_count"] == 2
+        assert session.environment_jobs.serialize_history()[0]["stale_cell_count"] == 2
 
 
 class TestEnvironmentMetadata:

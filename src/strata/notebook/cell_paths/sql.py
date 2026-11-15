@@ -54,6 +54,7 @@ async def run_sql_cell(
             table_reads=prov.table_reads + result_dict.get("table_reads", []),
             reads=prov.reads(*context.moved(cell_id)),
             key_parts=prov.key_parts,
+            reopen_identity=result_dict.get("reopen_identity"),
         )
         # Back the result-table preview with an artifact. Otherwise `save_cell_output` refuses
         # it, export drops it (``markdown_text`` is stripped at persist time and re-fetched

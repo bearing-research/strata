@@ -281,6 +281,8 @@ def parse_notebook(directory: Path) -> NotebookState:
                 widget_values=dict(runtime_cell.widget_values) if runtime_cell else {},
                 inputs=inputs.get("inputs", []),
                 inputs_machine=inputs.get("machine"),
+                remote_worker=runtime_cell.remote_worker if runtime_cell else None,
+                remote_transport=runtime_cell.remote_transport if runtime_cell else None,
             )
         )
 

@@ -51,8 +51,10 @@ PLACEHOLDER = "@NB@"
 _TEXT_SUFFIXES = {".py", ".r", ".R", ".sql", ".prompt", ".toml"}
 # The fetch scenario's URLs are in its keys, so its server listens on a fixed port.
 FETCH_PORT = 47613
-# The worker scenario's URL is in its notebook.toml, so its worker also has a fixed port.
-WORKER_PORT = 47614
+# The worker scenario's URL is in its notebook.toml, so its worker also has a fixed port,
+# below Linux's ephemeral range (32768-60999): inside it, any test's outgoing connection
+# can hold the port as its local end, and the bind fails (EADDRINUSE).
+WORKER_PORT = 29614
 
 # What a scenario needs from the machine beyond the dev environment.
 REQUIRES = {"r_directives": "Rscript"}
@@ -620,30 +622,29 @@ def _keys(
     env_hash = session.cell_env_hash(cell, local_packages(session.path))
     if outside is None:
         outside = session._outside_world_for(cell)
-    fingerprints = {
-        "mounts": outside.mount_fingerprints,
-        "tables": outside.table_fingerprints,
-        "fetches": outside.fetch_fingerprints,
-        "datasets": outside.dataset_fingerprints,
-    }
     resolved = {
-        "mounts": outside.mount_fingerprints,
+        "mounts": outside.inputs.mounts,
         "has_rw_mount": outside.has_rw_mount,
-        "tables": outside.table_fingerprints,
-        "fetches": outside.fetch_fingerprints,
-        "datasets": outside.dataset_fingerprints,
+        "tables": outside.inputs.tables,
+        "fetches": outside.inputs.fetches,
+        "datasets": outside.inputs.datasets,
     }
 
     def key(instance: str | None = None) -> dict[str, Any]:
         found = cell_key(
-            session, session.analysis, cell.id, **fingerprints, env_hash=env_hash, instance=instance
+            session,
+            session.analysis,
+            cell.id,
+            inputs=outside.inputs,
+            env_hash=env_hash,
+            instance=instance,
         )
         upstream, digest = found.upstream, found.provenance_hash
         return {
             # As assembled, but sorted: their order follows set iteration, which varies
             # by process, and the key sorts them anyway.
             "upstream_hashes": sorted(upstream),
-            "input_hashes": sorted(cell_provenance_inputs(upstream, *fingerprints.values())),
+            "input_hashes": sorted(cell_provenance_inputs(upstream, outside.inputs)),
             "execution_key": digest,
         }
 
@@ -778,6 +779,22 @@ def record(name: str) -> dict[str, Any]:
 
 
 def _record(name: str) -> dict[str, Any]:
+    recorded = [
+        {"step": step, **_snapshot(notebook_dir, spy, run, session)}
+        for step, notebook_dir, spy, run, session in _steps(name)
+    ]
+    trace = {"trace_format": TRACE_FORMAT, "scenario": name, "steps": recorded}
+    _check_no_machine_paths(trace)
+    return trace
+
+
+def _steps(name: str) -> Iterator[tuple[dict[str, Any], Path, _Spy, Any, Any]]:
+    """Apply scenario *name*'s steps in a fresh copy under :data:`ROOT`.
+
+    Yields, after each step, the step, the notebook directory, the recording spy, and
+    for a run step its results and the session it ran in (else ``None``, ``None``).
+    The caller holds the scenario's lock.
+    """
     source = SCENARIOS / name
     notebook_dir = ROOT / name
     registry = ROOT / f"{name}-registry"
@@ -793,18 +810,14 @@ def _record(name: str) -> dict[str, Any]:
     registry.mkdir(parents=True)
     _home(name).mkdir()
 
-    recorded = []
     with _recording(name, notebook_dir, registry) as spy:
         for step in steps:
             spy.calls = {}
             ran = _apply(step, notebook_dir, registry)
             run, session = ran if ran is not None else (None, None)
-            recorded.append({"step": step, **_snapshot(notebook_dir, spy, run, session)})
-    trace = {"trace_format": TRACE_FORMAT, "scenario": name, "steps": recorded}
-    _check_no_machine_paths(trace)
+            yield step, notebook_dir, spy, run, session
     for path in scratch:
         shutil.rmtree(path, ignore_errors=True)
-    return trace
 
 
 def _check_no_machine_paths(trace: dict[str, Any]) -> None:
