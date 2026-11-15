@@ -3489,7 +3489,9 @@ class TestPython:
             kept=[],
             stored=[],
             pushed=[],
-            consoles=[],
+            staged=[],
+            shown=[],
+            discarded=[],
             writes=[],
             good=[],
             dispatched=[],
@@ -3609,6 +3611,10 @@ class TestPython:
         async def sync_back_mounts(_mounts):
             return []
 
+        def stage_run_records(*args, **kwargs):
+            calls.staged.append((args, kwargs))
+            return ["records"]
+
         fields = {
             "execute_each_cell": execute_each_cell,
             "execute_fanout_cell": execute_fanout_cell,
@@ -3636,8 +3642,9 @@ class TestPython:
             "store_outputs": store_outputs,
             "close_open_run": close_open_run,
             "push_to_team_store": push_to_team_store,
-            "store_result_displays": lambda *_args, **_kwargs: None,
-            "store_console_outputs": lambda *args, **kwargs: calls.consoles.append((args, kwargs)),
+            "stage_run_records": stage_run_records,
+            "show_run_records": lambda *args: calls.shown.append(args),
+            "discard_outputs": calls.discarded.append,
             "store_mount_writes": lambda *args, **kwargs: calls.writes.append((args, kwargs)),
             "record_good_run": lambda *args: calls.good.append(args),
             "timeout_message": lambda _cell_id, seconds: f"timed out after {seconds}",
@@ -4013,26 +4020,31 @@ class TestPython:
 
         assert result.success is False
         assert calls.pushed == []
-        assert calls.consoles == []
+        assert calls.shown == []
+        assert calls.discarded == [["records"]]
 
-    async def test_only_a_cacheable_runs_console_is_stored(self, monkeypatch):
+    async def test_only_a_cacheable_runs_console_is_kept(self, monkeypatch):
         prov = self._prov(annotations={"nocache": True})
         host, context, calls = self._fakes(monkeypatch, prov)
 
         await self._run(host, context)
 
-        assert calls.consoles == []
+        (_result, _dir, _display_key, console_key), _kwargs = calls.staged[0]
+        assert console_key is None
 
-    async def test_a_console_is_stored_with_its_display_count_and_variant(self, monkeypatch):
+    async def test_the_run_records_are_released_with_the_outputs(self, monkeypatch):
         host, context, calls = self._fakes(
             monkeypatch, result={"success": True, "display_outputs": [{"kind": "x"}]}
         )
 
         await self._run(host, context, variant="v")
 
-        _args, kwargs = calls.consoles[0]
-        assert kwargs["display_count"] == 1
+        (_result, _dir, display_key, console_key), kwargs = calls.staged[0]
+        assert display_key == console_key == "prov"
         assert kwargs["variant"] == "v"
+        assert calls.stored[0][1]["records"] == ["records"]
+        assert [records for _result, records in calls.shown] == [["records"]]
+        assert calls.discarded == []
         assert calls.persisted == [("c", [{"kind": "x"}])]
 
     @staticmethod
@@ -4240,7 +4252,7 @@ class TestPython:
         host, context, _calls = self._fakes(
             monkeypatch,
             result={"success": True, "stdout": "printed", "mutation_warnings": [{"variable": "x"}]},
-            store_result_displays=_raises(RuntimeError("no display")),
+            show_run_records=_raises(RuntimeError("no display")),
         )
 
         result = await self._run(host, context)

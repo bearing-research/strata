@@ -158,16 +158,21 @@ class TestGate1:
             assert release.created_at <= build.completed_at
         assert build.state == "ready"
 
-        # The final release holds the cell's outputs, under the cached keys, with the
-        # build's computation key on every row of the run.
+        # The final release holds the cell's outputs and console, under the cached keys,
+        # with the build's computation key on every row of the run.
         (final,) = releases.releases_of(build.build_id, "final")
         outputs = releases.bundle(final.release_id).outputs
-        assert sorted(v.id.split("_var_")[1] for v in outputs) == ["metrics", "model"]
+        assert sorted(v.id.split("_var_")[1] for v in outputs) == [
+            "__console__",
+            "metrics",
+            "model",
+        ]
         parent = build.computation_key
         assert parent and all(v.computation_key == parent for v in outputs)
         assert {v.provenance_hash for v in outputs} == {
             derive_subkey(parent, "model"),
             derive_subkey(parent, "metrics"),
+            derive_subkey(parent, "__console__"),
         }
         first = bundles[0].outputs
         assert all(v.computation_key == parent for v in first)
@@ -177,7 +182,10 @@ class TestGate1:
         # The placeholder the build targeted first is a failed row, not a current value.
         placeholder = store.get_artifact(f"nb_{session.notebook_state.id}_run_train", 1)
         assert placeholder is not None and placeholder.state == "failed"
-        assert (build.artifact_id, build.version) == (outputs[0].id, outputs[0].version)
+        # It targets one of the run's values now, not its console.
+        assert (build.artifact_id, build.version) in {
+            (v.id, v.version) for v in outputs if not v.id.endswith("__console__")
+        }
 
     def test_a_run_killed_after_a_checkpoint_resumes_in_a_new_attempt(self, tmp_path: Path):
         session, executor = _notebook(tmp_path)
@@ -405,6 +413,62 @@ class TestGate1:
             "failed",
             "ready",
         ]
+
+    @staticmethod
+    def _cells(tmp_path: Path, **cells: str) -> NotebookSession:
+        notebook_dir = create_notebook(tmp_path, "Records", initialize_environment=False)
+        after = None
+        for cell_id, source in cells.items():
+            add_cell_to_notebook(notebook_dir, cell_id, after)
+            write_cell(notebook_dir, cell_id, source)
+            after = cell_id
+        session = NotebookSession(
+            parse_notebook(notebook_dir), notebook_dir, ledger_dialect=_dialect()
+        )
+        session.refresh_environment_runtime()
+        return session
+
+    def test_a_runs_displays_and_console_are_in_its_final_release(self, tmp_path: Path):
+        """What a reopen or a hit shows of the run is released with its variables."""
+        session = self._cells(tmp_path, a="x = 1\nprint('hi')\nx\n", b="y = x\n")
+        result = _run(CellExecutor(session), "a", "x = 1\nprint('hi')\nx\n")
+        assert result.success is True, result.error
+
+        _, _, releases = _ledger(session)
+        (build,) = _only_build(session, "a")
+        (final,) = releases.releases_of(build.build_id, "final")
+        outputs = releases.bundle(final.release_id).outputs
+        assert sorted(v.id.split("_var_")[1] for v in outputs) == [
+            "__console__",
+            "__display__0",
+            "x",
+        ]
+        assert all(v.computation_key == build.computation_key for v in outputs)
+        (display,) = [v for v in outputs if v.id.endswith("__display__0")]
+        assert result.display_outputs[0]["artifact_uri"] == (
+            f"strata://artifact/{display.id}@v={display.version}"
+        )
+        assert result.display_outputs[0]["computed_at"] == display.created_at
+
+    def test_a_leaf_whose_release_fails_keeps_no_display_or_console(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Nothing of a run is current unless its release is: the run fails instead."""
+        session = self._cells(tmp_path, a="print('hi')\n1 + 1\n")
+
+        def refused(self, run, staged):
+            raise ReleaseRejected("refused")
+
+        monkeypatch.setattr(LocalRuns, "finalize", refused)
+        result = _run(CellExecutor(session), "a", "print('hi')\n1 + 1\n")
+
+        assert result.success is False
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        for name in ("__console__", "__display__0"):
+            artifact_id = manager.cell_artifact_id("a", name)
+            assert store.get_latest_version(artifact_id) is None
+            assert [v.state for v in store.list_versions_by_id_prefix(artifact_id)] == ["failed"]
 
 
 class TestAbandonedRuns:
