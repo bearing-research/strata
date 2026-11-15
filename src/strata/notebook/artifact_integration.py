@@ -399,6 +399,7 @@ class NotebookArtifactManager:
         hardware: dict[str, Any] | None = None,
         extra_params: dict[str, str] | None = None,
         computation_key: str | None = None,
+        release_id: str | None = None,
     ) -> StagedVersion:
         """Write a cell output's bytes as a ``building`` version nobody reads yet.
 
@@ -424,6 +425,8 @@ class NotebookArtifactManager:
                 passes its publisher, even when that is ``None``.
             computation_key: The cell run's parent hash, which every output and
                 checkpoint of one bound computation shares (ADR 002 §7.1).
+            release_id: The unsettled release the row is staged under, which accepting
+                makes it current with.
         """
         # Artifacts live under the notebook dir: a write during a copy would
         # leave the copy's runtime.json and artifacts out of step.
@@ -476,6 +479,7 @@ class NotebookArtifactManager:
                 locations=self._table_locations.get(cell_id),
             ),
             computation_key=computation_key,
+            release_id=release_id,
         )
         link_reconstructed(self.artifact_store, artifact_id, version)
 

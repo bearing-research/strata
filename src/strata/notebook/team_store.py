@@ -25,9 +25,11 @@ from typing import BinaryIO
 import anyio
 import httpx
 from vestigo.provenance import derive_subkey
+from vestigo.store import StagedVersion
 
 from strata.notebook import output_dirs
 from strata.notebook.artifact_integration import NotebookArtifactManager
+from strata.notebook.local_runs import LocalRuns
 from strata.observability.logging import get_logger
 from strata.types import PROVENANCE_MISS_HEADER
 
@@ -322,9 +324,9 @@ async def pull_cell_outputs(
     """Materialise a teammate's result for this cell in the local store.
 
     All or nothing: the cache-hit check needs every consumed variable, so all are
-    fetched before any is written, and the pull stops at the first absent one. A
-    download failing after a write leaves correctly keyed rows behind; the hit
-    check keeps rejecting the incomplete set. Returns ``None`` on any miss or failure.
+    fetched before any is written, and the pull stops at the first absent one. The
+    values are then one build's ``final`` release (``LocalRuns.release``), current
+    together or not at all. Returns ``None`` on any miss or failure.
 
     An output folder comes with every file its manifest names, each checked against
     its entry, and lands under this notebook's own ids before its manifest does.
@@ -395,31 +397,49 @@ async def pull_cell_outputs(
             _land_folder_files, artifact_mgr, cell_id, fetched_files
         )
         total_bytes = sum(size for files in fetched_files.values() for _, _, size in files.values())
-        for var, artifact in pulled:
-            artifact_mgr.store_cell_output(
-                cell_id=cell_id,
-                variable_name=var,
-                blob_data=manifests.get(var, artifact.blob),
-                content_type=artifact.content_type,
-                provenance_hash=artifact.provenance_hash,
-                # Same upstream refs a local run records, so lineage doesn't depend on which cells
-                # happened to hit the shared cache.
-                input_versions=input_versions or {},
-                source_hash=source_hash,
-                # The local source, not the publisher's: a provenance match only proves AST
-                # identity, and annotations (``# @worker``, ``# @env``) are comments that can
-                # differ. Record what this machine would have run.
-                source=source,
-                env_hash=published_env_hash or env_hash,
-                variant=variant,
-                # Preserved, not restamped: the bytes came from the publisher's machine.
-                build_env=artifact.build_env,
-                build_duration_ms=artifact.build_duration_ms,
-                # Persisted, not just logged: lineage reads the local store, so otherwise the author
-                # column is blank on exactly the steps someone else produced.
-                principal=artifact.principal,
-            )
-            total_bytes += len(artifact.blob)
+
+        def stage(release_id: str, staged: list[StagedVersion]) -> str | None:
+            for var, artifact in pulled:
+                staged.append(
+                    artifact_mgr.stage_cell_output(
+                        cell_id=cell_id,
+                        variable_name=var,
+                        blob_data=manifests.get(var, artifact.blob),
+                        content_type=artifact.content_type,
+                        provenance_hash=artifact.provenance_hash,
+                        # Same upstream refs a local run records, so lineage doesn't depend on
+                        # which cells happened to hit the shared cache.
+                        input_versions=input_versions or {},
+                        source_hash=source_hash,
+                        # The local source, not the publisher's: a provenance match only proves
+                        # AST identity, and annotations (``# @worker``, ``# @env``) are comments
+                        # that can differ. Record what this machine would have run.
+                        source=source,
+                        env_hash=published_env_hash or env_hash,
+                        variant=variant,
+                        # Preserved, not restamped: the bytes came from the publisher's machine.
+                        build_env=artifact.build_env,
+                        build_duration_ms=artifact.build_duration_ms,
+                        # Persisted, not just logged: lineage reads the local store, so otherwise
+                        # the author column is blank on exactly the steps someone else produced.
+                        principal=artifact.principal,
+                        computation_key=provenance_hash,
+                        release_id=release_id,
+                    )
+                )
+            return None
+
+        # One release: a pull that stops partway makes none of its values current.
+        released = LocalRuns(artifact_mgr).release(
+            cell_id=cell_id,
+            computation_key=provenance_hash,
+            variant=variant,
+            what="team-cache pull",
+            stage=stage,
+        )
+        if released is None:
+            return None
+        total_bytes += sum(len(artifact.blob) for _, artifact in pulled)
 
     # One cell run computed every variable, so they share an author.
     principal = pulled[0][1].principal
