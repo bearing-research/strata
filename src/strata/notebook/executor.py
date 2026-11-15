@@ -1172,8 +1172,8 @@ class CellExecutor:
             store_outputs=self._store_outputs,
             close_open_run=self._close_open_run,
             push_to_team_store=self._push_to_team_store,
-            store_result_displays=self._store_result_displays,
-            store_console_outputs=self._store_console_outputs,
+            stage_run_records=self._stage_run_records,
+            show_run_records=self._show_run_records,
             store_mount_writes=self._store_mount_writes,
             record_good_run=self._record_good_run,
             timeout_message=self._timeout_message,
@@ -3102,14 +3102,27 @@ class CellExecutor:
     # ⑤ Store output artifacts
     # ------------------------------------------------------------------
 
-    def _release_nothing(self, cell_id: str, local_run: LocalRun | None) -> bool:
-        """Complete a run that stores no variable: an empty ``final`` release ends its build."""
-        if local_run is None:
+    def _release_nothing(
+        self,
+        cell_id: str,
+        local_run: LocalRun | None,
+        stage_records: Callable[[], list[StagedVersion]] | None,
+    ) -> bool:
+        """Complete a run that stores no variable: its records alone end its build."""
+        records = stage_records() if stage_records is not None else []
+        if local_run is None and not records:
             return True
+        artifact_mgr = self.session.get_artifact_manager()
         try:
-            self._local_runs().finalize(local_run, [])
+            if local_run is not None:
+                self._local_runs().finalize(local_run, records)
+            else:
+                artifact_mgr.finalize_cell_outputs(records)
         except Exception:
             logger.exception("Failed to complete the run of cell %s", cell_id)
+            artifact_mgr.discard_cell_outputs(records)
+            # The displays and console are what the run made: not kept, it stored nothing.
+            return not records
         return True
 
     def _store_outputs(
@@ -3130,6 +3143,7 @@ class CellExecutor:
         local_run: LocalRun | None = None,
         stochastic: bool = False,
         run_outputs: dict[str, Any] | None = None,
+        stage_records: Callable[[], list[StagedVersion]] | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
@@ -3145,10 +3159,14 @@ class CellExecutor:
         release; *stochastic* keys them by the run (``# @stochastic``, or a run whose local
         mount moved) so every run's persist beside the cached key, which none of them
         matches. Without a *local_run*, the run is this call.
+
+        *stage_records* stages the run's displays and console (:meth:`_stage_run_records`)
+        once its outputs are staged, since a folder's listing is one of the displays; they
+        are made current with the variables, and discarded with them.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or self.session.dag is None:
-            return self._release_nothing(cell_id, local_run)
+            return self._release_nothing(cell_id, local_run, stage_records)
 
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id, variant)
@@ -3170,7 +3188,7 @@ class CellExecutor:
         # serialize is skipped rather than failing the cell.
         leaf_vars = set(cell.defines) if not consumed_vars and self.store_leaf_outputs else set()
         if not consumed_vars and not leaf_vars:
-            return self._release_nothing(cell_id, local_run)
+            return self._release_nothing(cell_id, local_run, stage_records)
 
         all_stored = True
         staged: list[StagedVersion] = []
@@ -3330,23 +3348,34 @@ class CellExecutor:
                 artifact_mgr.discard_cell_outputs(staged)
                 raise
 
+        records: list[StagedVersion] = []
+        if all_stored and stage_records is not None:
+            try:
+                records = stage_records()
+            except Exception:
+                artifact_mgr.discard_cell_outputs(staged)
+                raise
+
         try:
             if not all_stored:
                 artifact_mgr.discard_cell_outputs(staged)
                 return False
             # A local run's outputs are its final release, which completes its build.
             stored = (
-                self._local_runs().finalize(local_run, staged)
+                self._local_runs().finalize(local_run, staged + records)
                 if local_run is not None
-                else artifact_mgr.finalize_cell_outputs(staged)
+                else artifact_mgr.finalize_cell_outputs(staged + records)
             )
         except Exception:
             logger.exception("Failed to store the outputs of cell %s", cell_id)
-            artifact_mgr.discard_cell_outputs(staged)
-            # A leaf's record is best-effort and never fails the cell.
-            return not consumed_vars
+            artifact_mgr.discard_cell_outputs(staged + records)
+            # A leaf's variables are best-effort and never fail the cell; its displays and
+            # console are what the run made.
+            return not consumed_vars and not records
 
-        for (var_name, content_type), artifact_version in zip(staged_names, stored, strict=True):
+        for (var_name, content_type), artifact_version in zip(
+            staged_names, stored[: len(staged)], strict=True
+        ):
             if var_name not in leaf_vars:
                 uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
                 cell.artifact_uris[var_name] = uri
@@ -3575,7 +3604,41 @@ class CellExecutor:
         read_audit: list[ReadFinding] | None = None,
         mutation_warnings: list[MutationWarning] | None = None,
     ) -> None:
-        """Persist a cell's console output as a provenance-keyed artifact.
+        """Persist a cell's console output; see :meth:`_stage_console`."""
+        staged = self._stage_console(
+            cell_id,
+            provenance_hash,
+            stdout,
+            stderr,
+            source_hash=source_hash,
+            source=source,
+            env_hash=env_hash,
+            display_count=display_count,
+            duration_ms=duration_ms,
+            variant=variant,
+            read_audit=read_audit,
+            mutation_warnings=mutation_warnings,
+        )
+        self.session.get_artifact_manager().finalize_cell_outputs([staged])
+
+    def _stage_console(
+        self,
+        cell_id: str,
+        provenance_hash: str,
+        stdout: str,
+        stderr: str,
+        *,
+        source_hash: str,
+        source: str,
+        env_hash: str,
+        display_count: int | None,
+        duration_ms: float,
+        variant: str | None,
+        read_audit: list[ReadFinding] | None,
+        mutation_warnings: list[MutationWarning] | None,
+        computation_key: str | None = None,
+    ) -> StagedVersion:
+        """Stage a cell's console output as a provenance-keyed artifact.
 
         So a hit replays what its own run printed, and a cell that only prints can
         cache-hit at all. Stored even when both streams are empty: that is what the run
@@ -3586,7 +3649,6 @@ class CellExecutor:
         hence what a hit on this record saves. *read_audit* and *mutation_warnings* are
         what a hit's result depends on beyond its key, which the hit says again.
         """
-        artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id, variant)
         record: dict[str, Any] = {"stdout": stdout, "stderr": stderr}
         if read_audit:
@@ -3597,7 +3659,7 @@ class CellExecutor:
         params = self._fetch_params(cell_id)
         if display_count is not None:
             params["display_count"] = str(display_count)
-        artifact_mgr.store_cell_output(
+        return self.session.get_artifact_manager().stage_cell_output(
             cell_id=cell_id,
             variable_name="__console__",
             blob_data=blob,
@@ -3610,6 +3672,7 @@ class CellExecutor:
             build_duration_ms=duration_ms,
             extra_params=params,
             variant=variant,
+            computation_key=computation_key,
         )
 
     def _store_mount_writes(
@@ -3784,10 +3847,40 @@ class CellExecutor:
         env_hash: str = "",
         variant: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Persist ordered cell display outputs as canonical artifacts.
+        """Persist ordered cell display outputs as canonical artifacts, current together."""
+        entries, staged = self._stage_display_outputs(
+            cell_id,
+            output_dir,
+            provenance_hash,
+            display_outputs,
+            source_hash=source_hash,
+            source=source,
+            env_hash=env_hash,
+            variant=variant,
+        )
+        if not staged:
+            return []
+        stored = self.session.get_artifact_manager().finalize_cell_outputs(staged)
+        return _stored_displays(entries, stored)
+
+    def _stage_display_outputs(
+        self,
+        cell_id: str,
+        output_dir: Path,
+        provenance_hash: str,
+        display_outputs: list[dict[str, Any]] | None,
+        *,
+        source_hash: str,
+        source: str,
+        env_hash: str,
+        variant: str | None,
+        computation_key: str | None = None,
+    ) -> tuple[list[dict[str, Any]], list[StagedVersion]]:
+        """Write a run's displays as ``building`` versions; each entry describes its row.
 
         The run's ``# @output_dir`` listings come first, so the cell's last display stays last.
-        A fan-out instance's are stored under its *variant*.
+        A fan-out instance's are stored under its *variant*. A display whose file is missing
+        is dropped. A raise leaves nothing staged.
         """
         listings = self._folder_listings.pop(cell_id, {})
         display_outputs = [
@@ -3800,51 +3893,151 @@ class CellExecutor:
             for name in sorted(listings)
         ] + list(display_outputs or [])
         if not display_outputs:
-            return []
-
+            return [], []
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id, variant)
-        stored_displays: list[dict[str, Any]] = []
+        entries: list[dict[str, Any]] = []
+        staged: list[StagedVersion] = []
+        try:
+            for index, display_output in enumerate(display_outputs):
+                row = self._stage_display(
+                    cell_id,
+                    output_dir,
+                    provenance_hash,
+                    index,
+                    display_output,
+                    len(display_outputs),
+                    input_versions,
+                    source_hash=source_hash,
+                    source=source,
+                    env_hash=env_hash,
+                    variant=variant,
+                    computation_key=computation_key,
+                )
+                if row is not None:
+                    entries.append(dict(display_output))
+                    staged.append(row)
+        except Exception:
+            artifact_mgr.discard_cell_outputs(staged)
+            raise
+        return entries, staged
 
-        for index, display_output in enumerate(display_outputs):
-            file_name = str(display_output.get("file", "")).strip()
-            content_type = str(display_output.get("content_type", "")).strip()
-            markdown_text = display_output.get("markdown_text")
-            if not file_name and content_type == "text/markdown" and isinstance(markdown_text, str):
-                # Made by the server (a folder's listing), not written by the cell.
-                blob_data = markdown_text.encode("utf-8")
-            else:
-                if not file_name or not content_type:
-                    continue
-                if not (output_dir / file_name).exists():
-                    continue
-                blob_data = read_run_file(output_dir, file_name)
-            row_count = display_output.get("rows")
-            display_provenance = derive_subkey(provenance_hash, f"__display__{index}")
-            artifact_version = artifact_mgr.store_cell_output(
-                cell_id=cell_id,
-                variable_name=f"__display__{index}",
-                blob_data=blob_data,
-                content_type=content_type,
-                row_count=row_count if isinstance(row_count, int) else None,
-                variant=variant,
-                provenance_hash=display_provenance,
-                input_versions=input_versions,
+    def _stage_display(
+        self,
+        cell_id: str,
+        output_dir: Path,
+        provenance_hash: str,
+        index: int,
+        display_output: dict[str, Any],
+        display_count: int,
+        input_versions: dict[str, str],
+        *,
+        source_hash: str,
+        source: str,
+        env_hash: str,
+        variant: str | None,
+        computation_key: str | None,
+    ) -> StagedVersion | None:
+        """Stage the run's display at *index*; None for one whose file is missing."""
+        file_name = str(display_output.get("file", "")).strip()
+        content_type = str(display_output.get("content_type", "")).strip()
+        markdown_text = display_output.get("markdown_text")
+        if not file_name and content_type == "text/markdown" and isinstance(markdown_text, str):
+            # Made by the server (a folder's listing), not written by the cell.
+            blob_data = markdown_text.encode("utf-8")
+        else:
+            if not file_name or not content_type:
+                return None
+            if not (output_dir / file_name).exists():
+                return None
+            blob_data = read_run_file(output_dir, file_name)
+        row_count = display_output.get("rows")
+        return self.session.get_artifact_manager().stage_cell_output(
+            cell_id=cell_id,
+            variable_name=f"__display__{index}",
+            blob_data=blob_data,
+            content_type=content_type,
+            row_count=row_count if isinstance(row_count, int) else None,
+            variant=variant,
+            provenance_hash=derive_subkey(provenance_hash, f"__display__{index}"),
+            input_versions=input_versions,
+            source_hash=source_hash,
+            source=source,
+            env_hash=env_hash,
+            extra_params={
+                **display_metadata_params(display_output, display_count),
+                **self._fetch_params(cell_id),
+            },
+            computation_key=computation_key,
+        )
+
+    def _stage_run_records(
+        self,
+        result: CellExecutionResult,
+        output_dir: Path,
+        display_key: str,
+        console_key: str | None,
+        *,
+        source_hash: str,
+        source: str,
+        env_hash: str,
+        variant: str | None,
+        computation_key: str,
+    ) -> list[StagedVersion]:
+        """Stage a single run's displays and console, for :meth:`_store_outputs` to release.
+
+        The displays are keyed on *display_key*, the console on *console_key* (none without
+        one), and both carry the run's *computation_key*. *result*'s displays become the
+        staged ones; :meth:`_show_run_records` says where they were stored once they are. A
+        raise leaves nothing staged.
+        """
+        entries, staged = self._stage_display_outputs(
+            result.cell_id,
+            output_dir,
+            display_key,
+            result.display_outputs,
+            source_hash=source_hash,
+            source=source,
+            env_hash=env_hash,
+            variant=variant,
+            computation_key=computation_key,
+        )
+        result.display_outputs = entries
+        result.display_output = entries[-1] if entries else None
+        if console_key is None:
+            return staged
+        try:
+            console = self._stage_console(
+                result.cell_id,
+                console_key,
+                result.stdout,
+                result.stderr,
                 source_hash=source_hash,
                 source=source,
                 env_hash=env_hash,
-                extra_params={
-                    **display_metadata_params(display_output, len(display_outputs)),
-                    **self._fetch_params(cell_id),
-                },
+                display_count=len(entries),
+                duration_ms=result.duration_ms,
+                variant=variant,
+                read_audit=result.read_audit,
+                mutation_warnings=result.mutation_warnings,
+                computation_key=computation_key,
             )
-            display_uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
-            stored_display = dict(display_output)
-            stored_display["artifact_uri"] = display_uri
-            stored_display["computed_at"] = artifact_version.created_at
-            stored_displays.append(stored_display)
+        except Exception:
+            self.session.get_artifact_manager().discard_cell_outputs(staged)
+            raise
+        return [*staged, console]
 
-        return stored_displays
+    def _show_run_records(self, result: CellExecutionResult, records: list[StagedVersion]) -> None:
+        """Point *result*'s displays at the versions its run released."""
+        store = self.session.get_artifact_manager().artifact_store
+        stored = [
+            store.get_artifact(row.artifact_id, row.version)
+            for row in records[: len(result.display_outputs)]
+        ]
+        result.display_outputs = _stored_displays(
+            result.display_outputs, [version for version in stored if version is not None]
+        )
+        result.display_output = result.display_outputs[-1] if result.display_outputs else None
 
     # ------------------------------------------------------------------
     # Harness helpers
@@ -4069,6 +4262,20 @@ class CellExecutor:
 # Display-output keys valid only for the run in hand: the harness's temp file name,
 # the inline data URL and markdown text hydration rebuilds, and the store's URI.
 _DISPLAY_TRANSIENT_KEYS = frozenset({"file", "inline_data_url", "markdown_text", "artifact_uri"})
+
+
+def _stored_displays(
+    entries: list[dict[str, Any]], stored: list[ArtifactVersion]
+) -> list[dict[str, Any]]:
+    """Display entries with the artifact each was stored as and when."""
+    return [
+        {
+            **entry,
+            "artifact_uri": f"strata://artifact/{version.id}@v={version.version}",
+            "computed_at": version.created_at,
+        }
+        for entry, version in zip(entries, stored, strict=True)
+    ]
 
 
 def display_metadata_params(display_output: dict[str, Any], count: int) -> dict[str, str]:

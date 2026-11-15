@@ -82,6 +82,8 @@ from strata.notebook.workers import (
 )
 
 if TYPE_CHECKING:
+    from vestigo.store import StagedVersion
+
     from strata.notebook.executor import _CellProvenance
     from strata.notebook.executor_host import ExecutorHost
 
@@ -136,8 +138,8 @@ class PythonContext:
     store_outputs: Callable[..., bool]
     close_open_run: Callable[[str], Awaitable[None]]
     push_to_team_store: Callable[..., Awaitable[None]]
-    store_result_displays: Callable[..., None]
-    store_console_outputs: Callable[..., Any]
+    stage_run_records: Callable[..., list[StagedVersion]]
+    show_run_records: Callable[[CellExecutionResult, list[StagedVersion]], None]
     store_mount_writes: Callable[..., None]
     record_good_run: Callable[..., None]
     timeout_message: Callable[[str, float], str]
@@ -819,6 +821,25 @@ async def run_python_cell(
 
             if exec_result.success:
                 store_error: str | None = None
+                records: list[StagedVersion] = []
+
+                def stage_records() -> list[StagedVersion]:
+                    # Released with the variables, so the displays and console a hit
+                    # replays or a reopen shows are never another run's.
+                    records[:] = context.stage_run_records(
+                        exec_result,
+                        result_output_dir,
+                        provenance_hash if moved is None else moved_key(provenance_hash),
+                        # Kept by provenance so a hit replays this run's console.
+                        provenance_hash if cacheable and moved is None else None,
+                        source_hash=source_hash,
+                        source=source,
+                        env_hash=env_hash,
+                        variant=fanout_variant,
+                        computation_key=provenance_hash,
+                    )
+                    return records
+
                 try:
                     stored_ok = context.store_outputs(
                         cell_id,
@@ -840,11 +861,14 @@ async def run_python_cell(
                         local_run=local_run,
                         stochastic=prov.annotations.stochastic or moved is not None,
                         run_outputs=exec_result.outputs,
+                        stage_records=stage_records,
                     )
                 except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:
                     stored_ok, store_error = False, str(exc)
                 await context.close_open_run(cell_id)
-                if not stored_ok:
+                if stored_ok:
+                    context.show_run_records(exec_result, records)
+                else:
                     logger.error(
                         "Cell %s executed OK but artifact storage failed.",
                         cell_id,
@@ -857,35 +881,6 @@ async def run_python_cell(
                     # Only once artifacts are on disk: the publish reads them back, so a pull
                     # reproduces exactly what a local run stored.
                     await context.push_to_team_store(cell_id=cell_id, variant=fanout_variant)
-
-                if exec_result.success:
-                    context.store_result_displays(
-                        exec_result,
-                        result_output_dir,
-                        provenance_hash if moved is None else moved_key(provenance_hash),
-                        input_hashes,
-                        source_hash=source_hash,
-                        source=source,
-                        env_hash=env_hash,
-                        variant=fanout_variant,
-                    )
-                    # Cache the cell's console by provenance so a hit replays this run's.
-                    if cacheable and moved is None:
-                        context.store_console_outputs(
-                            cell_id,
-                            provenance_hash,
-                            exec_result.stdout,
-                            exec_result.stderr,
-                            input_hashes,
-                            source_hash=source_hash,
-                            source=source,
-                            env_hash=env_hash,
-                            display_count=len(exec_result.display_outputs),
-                            duration_ms=exec_result.duration_ms,
-                            variant=fanout_variant,
-                            read_audit=exec_result.read_audit,
-                            mutation_warnings=exec_result.mutation_warnings,
-                        )
 
                 # ⑥ Sync back read-write mounts. A worker syncs its own and reports what
                 # was written in its result.

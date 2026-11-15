@@ -601,6 +601,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         local_run=None,
         stochastic=False,
         run_outputs=None,
+        stage_records=None,
     ):
         return True
 
