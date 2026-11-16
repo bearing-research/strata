@@ -19,6 +19,8 @@ def project(tmp_path, monkeypatch):
         monkeypatch.delenv(key)
     # The test's own home (conftest patches Path.home), so its daemons share it.
     monkeypatch.setenv("HOME", str(Path.home()))
+    # Where Windows looks instead: its Path.home() ignores HOME.
+    monkeypatch.setenv("USERPROFILE", str(Path.home()))
     monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
     monkeypatch.setenv("STRATA_NOTEBOOK_WARM_POOL_SIZE", "0")
