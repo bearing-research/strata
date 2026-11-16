@@ -215,3 +215,39 @@ def test_the_cli_starts_shows_and_stops_it(project, capsys):
     assert main(["scratch", "stop", "--root", str(project)]) == 0
     assert capsys.readouterr().out.strip() == "stopped"
     assert scratch.find_daemon(project.resolve()) is None
+
+
+def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
+    state = project / ".strata-scratch" / ".strata"
+    state.mkdir(parents=True)
+    record = {"url": "http://127.0.0.1:9", "pid": os.getpid(), "session_id": "s", "version": "0"}
+    (state / "server.json").write_text(json.dumps(record))
+
+    def slow(url, **kwargs):
+        raise httpx.ReadTimeout("busy")
+
+    monkeypatch.setattr(scratch.httpx, "get", slow)
+    started = []
+    monkeypatch.setattr(scratch, "_spawn", lambda anchor, port: started.append(port) or 1)
+    # Alive and slow: a second daemon would write the directory beside it.
+    with pytest.raises(scratch.ScratchError, match=rf"pid {os.getpid()}\) is not answering"):
+        scratch.ensure_daemon(project)
+    assert started == []
+
+
+def test_a_launch_that_fails_is_a_scratch_error(project, monkeypatch):
+    def run(command, **kwargs):
+        raise OSError("no such interpreter")
+
+    monkeypatch.setattr(scratch.subprocess, "run", run)
+    with pytest.raises(scratch.ScratchError, match="could not be launched: no such interpreter"):
+        scratch.ensure_daemon(project)
+
+
+def test_status_of_a_daemon_not_answering_is_an_error(project, monkeypatch, capsys):
+    def busy(anchor):
+        raise scratch.ScratchError("the scratchpad's server (pid 1) is not answering")
+
+    monkeypatch.setattr(scratch, "find_daemon", busy)
+    assert main(["scratch", "status", "--root", str(project)]) == 2
+    assert "not answering" in capsys.readouterr().err

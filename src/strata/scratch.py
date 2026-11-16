@@ -70,15 +70,25 @@ def _log_path(anchor: Path) -> Path:
     return scratch_dir(anchor) / ".strata" / "server.log"
 
 
-def _environment(url: str, session_id: str) -> str | None:
-    """The session's environment sync state, or None if the session is not open there."""
+def _sync_state(url: str, session_id: str) -> str | None:
+    """The session's environment sync state, or None if nothing listens at *url* or the
+    session is not open there. Raises ``httpx.HTTPError`` for a server that does not
+    answer in time."""
     try:
         response = httpx.get(f"{url}/v1/notebooks/{session_id}/environment", timeout=5.0)
-    except httpx.HTTPError:
+    except httpx.ConnectError:
         return None
     if not response.is_success:
         return None
     return response.json()["environment"]["sync_state"]
+
+
+def _environment(url: str, session_id: str) -> str | None:
+    """:func:`_sync_state`, with no answer in time as None: for polling a start."""
+    try:
+        return _sync_state(url, session_id)
+    except httpx.HTTPError:
+        return None
 
 
 def find_daemon(anchor: Path) -> Daemon | None:
@@ -91,7 +101,18 @@ def find_daemon(anchor: Path) -> Daemon | None:
         record = json.loads(_record_path(anchor).read_text())
     except FileNotFoundError:
         return None
-    if _environment(record["url"], record["session_id"]) is None:
+    try:
+        state = _sync_state(record["url"], record["session_id"])
+    except httpx.HTTPError as exc:
+        if not _alive(record["pid"]):
+            return None
+        # Alive but slow, not gone: another daemon beside it would write the directory
+        # from a second session.
+        raise ScratchError(
+            f"the scratchpad's server (pid {record['pid']}) is not answering ({exc!r}); "
+            "try again shortly"
+        ) from exc
+    if state is None:
         return None
     return Daemon(
         url=record["url"],
@@ -163,18 +184,23 @@ def _spawn(anchor: Path, port: int) -> int:
         "STRATA_NOTEBOOK_STORAGE_DIR": str(anchor),
         "STRATA_IDLE_EXIT_MINUTES": os.environ.get("STRATA_IDLE_EXIT_MINUTES", str(IDLE_MINUTES)),
     }
-    log = private_file(_log_path(anchor))
-    launched = subprocess.run(
-        [sys.executable, "-I", "-c", _LAUNCH, str(log), *_server_command()],
-        env=env,
-        # Its [tool.strata] is then the scratchpad's (none), not whichever pyproject.toml
-        # sits above where the first client ran.
-        cwd=scratch_dir(anchor),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return int(launched.stdout)
+    try:
+        log = private_file(_log_path(anchor))
+        launched = subprocess.run(
+            [sys.executable, "-I", "-c", _LAUNCH, str(log), *_server_command()],
+            env=env,
+            # Its [tool.strata] is then the scratchpad's (none), not whichever
+            # pyproject.toml sits above where the first client ran.
+            cwd=scratch_dir(anchor),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return int(launched.stdout)
+    except subprocess.CalledProcessError as exc:
+        raise ScratchError(f"the scratchpad's server could not be launched: {exc.stderr}") from exc
+    except (OSError, ValueError) as exc:
+        raise ScratchError(f"the scratchpad's server could not be launched: {exc}") from exc
 
 
 def _alive(pid: int) -> bool:
@@ -284,7 +310,10 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
     *progress* hears each setup step as it starts.
     """
     anchor = anchor.resolve()
-    (scratch_dir(anchor) / ".strata").mkdir(parents=True, exist_ok=True)
+    try:
+        (scratch_dir(anchor) / ".strata").mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ScratchError(f"the scratchpad cannot be created in {anchor}: {exc}") from exc
     with filelock.FileLock(scratch_dir(anchor) / ".strata" / "daemon.lock"):
         running = find_daemon(anchor)
         current = version("strata-notebook")

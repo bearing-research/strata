@@ -26,8 +26,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **`strata mcp` serves a project's scratchpad to an agent over stdio.** It lists the
   scratchpad's two tools without starting anything; the first tool call finds or starts
   the project's daemon, reporting each setup step as MCP progress, and its result
-  carries `setup_ms`. Every call is forwarded to the daemon, which is started again if
-  it stopped while idle. (#1560)
+  carries `setup_ms`. Every call is forwarded to the daemon; a call that cannot reach
+  it (stopped while idle) finds or starts it again and is sent once more, and a call
+  the agent cancels is cancelled on the daemon too. (#1560)
 - **A project's scratchpad has a daemon of its own.** `strata scratch start` creates
   `<project>/.strata-scratch/` (ignored by the project's git through its own
   `.gitignore`) and starts a server for it with the scratchpad MCP profile, which stops

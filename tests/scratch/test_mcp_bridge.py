@@ -88,9 +88,11 @@ async def test_the_first_call_sets_the_scratchpad_up_and_says_so(project):
 async def test_a_daemon_that_stopped_is_started_again_on_the_next_call(project):
     async with _bridge(project) as client:
         _value(await client.call_tool("run", {"source": "1"}))
-        os.kill(
-            scratch.find_daemon(project.resolve()).pid, getattr(signal, "SIGKILL", signal.SIGTERM)
-        )
+        daemon = scratch.find_daemon(project.resolve())
+        os.kill(daemon.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        # Gone before the next call, as after an idle exit.
+        while scratch._alive(daemon.pid):
+            await asyncio.sleep(0.05)
 
         again = _value(await client.call_tool("run", {"source": "2"}))
         assert again["status"] == "ok"
@@ -124,7 +126,7 @@ async def test_a_scratchpad_that_cannot_start_says_where_to_look(project, monkey
     assert result.is_error
     failed = json.loads(result.content[0].text)
     assert "exited while starting" in failed["error"]
-    assert "server.log" in failed["fix"]
+    assert "server.log" in failed["error"]
 
 
 @pytest.mark.asyncio
@@ -137,3 +139,100 @@ async def test_a_daemon_gone_before_the_handshake_is_a_failure_with_its_fix(proj
         result = await client.call_tool("scratchpad", {})
     assert result.is_error
     assert "call again" in json.loads(result.content[0].text)["fix"]
+
+
+@pytest.mark.asyncio
+async def test_later_calls_do_not_probe_the_daemon_again(project, monkeypatch):
+    found = []
+    ensure = scratch.ensure_daemon
+    monkeypatch.setattr(
+        scratch, "ensure_daemon", lambda *args, **kwargs: found.append(1) or ensure(*args, **kwargs)
+    )
+    async with _bridge(project) as client:
+        for source in ("1", "2", "3"):
+            _value(await client.call_tool("run", {"source": source}))
+    # A busy daemon is never probed (and taken for gone) per call.
+    assert found == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_call_that_could_not_connect_is_sent_again_once(project, monkeypatch):
+    call = mcp_bridge.Upstream.call_tool
+    refused = []
+
+    async def once_refused(self, name, arguments):
+        if not refused:
+            refused.append(name)
+            raise httpx.ConnectError("refused")
+        return await call(self, name, arguments)
+
+    monkeypatch.setattr(mcp_bridge.Upstream, "call_tool", once_refused)
+    async with _bridge(project) as client:
+        out = _value(await client.call_tool("run", {"source": "1 + 1"}))
+    assert (refused, out["value"]) == (["run"], 2)
+
+
+@pytest.mark.asyncio
+async def test_parallel_calls_on_a_forgotten_session_open_one_again(project):
+    daemon = scratch.ensure_daemon(project)
+    upstream = mcp_bridge.Upstream()
+    try:
+        await upstream.open(daemon.url)
+        httpx.delete(f"{daemon.url}/mcp/", headers=upstream._headers()).raise_for_status()
+        opened = []
+        initialize = upstream._initialize
+
+        async def counted(url):
+            opened.append(url)
+            await initialize(url)
+
+        upstream._initialize = counted
+        results = await asyncio.gather(*(upstream.call_tool("scratchpad", {}) for _ in range(3)))
+        assert opened == [daemon.url]
+        assert all("cells" in result["structuredContent"] for result in results)
+    finally:
+        await upstream.aclose()
+
+
+def test_a_request_of_the_servers_with_the_answers_id_is_not_the_answer():
+    body = (
+        'data: {"jsonrpc": "2.0", "id": 1, "method": "elicitation/create", "params": {}}\n\n'
+        'data: {"jsonrpc": "2.0", "id": 1, "result": {"ok": true}}\n\n'
+    )
+    response = httpx.Response(200, headers={"content-type": "text/event-stream"}, text=body)
+    assert mcp_bridge._message(response, 1) == {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_call_is_cancelled_on_the_daemon_too():
+    seen = []
+    calling = asyncio.Event()
+
+    async def daemon(request):
+        body = json.loads(request.content)
+        seen.append(body)
+        if body.get("method") == "tools/call":
+            calling.set()
+            await asyncio.sleep(3600)
+        return httpx.Response(202)
+
+    upstream = mcp_bridge.Upstream()
+    await upstream.aclose()
+    upstream._client = httpx.AsyncClient(transport=httpx.MockTransport(daemon))
+    upstream._url, upstream._session = "http://daemon", "s"
+    try:
+        task = asyncio.create_task(upstream.call_tool("run", {"source": "1"}))
+        await calling.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        await upstream.aclose()
+    (call,) = [body for body in seen if body.get("method") == "tools/call"]
+    assert [body for body in seen if body.get("method") == "notifications/cancelled"] == [
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/cancelled",
+            "params": {"requestId": call["id"], "reason": "cancelled by the client"},
+        }
+    ]

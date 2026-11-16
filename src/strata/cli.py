@@ -885,19 +885,19 @@ def _dispatch_scratch(args: argparse.Namespace) -> int:
             return 2
         print("stopped" if stopped else "no scratchpad daemon runs here")
         return 0
-    if args.scratch_command == "status":
-        running = scratch.find_daemon(root.resolve())
-        if running is None:
-            print("no scratchpad daemon runs here")
-            return 1
-    else:
-        try:
+    try:
+        if args.scratch_command == "status":
+            running = scratch.find_daemon(root.resolve())
+            if running is None:
+                print("no scratchpad daemon runs here")
+                return 1
+        else:
             running = scratch.ensure_daemon(
                 root, progress=lambda step: print(f"{step}…", file=sys.stderr, flush=True)
             )
-        except scratch.ScratchError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
+    except scratch.ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(asdict(running), indent=2))
     return 0
 

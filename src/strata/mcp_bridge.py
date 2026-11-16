@@ -9,6 +9,7 @@ reporting each setup step as MCP progress, and every call is forwarded to the da
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import json
 from collections.abc import AsyncGenerator
@@ -51,7 +52,8 @@ def _message(response: httpx.Response, request_id: int) -> dict[str, Any]:
     for line in response.text.splitlines():
         if line.startswith("data:"):
             message = json.loads(line[5:])
-            if message.get("id") == request_id:
+            # Not a request of the server's own that happens to reuse the id.
+            if message.get("id") == request_id and ("result" in message or "error" in message):
                 return message
     raise UpstreamError(f"the scratchpad's server sent no answer: {response.text[:300]}")
 
@@ -65,59 +67,95 @@ class Upstream:
         self._url: str | None = None
         self._session: str | None = None
         self._ids = itertools.count(1)
+        # One handshake at a time; a call waits out one in progress.
+        self._opening = anyio.Lock()
 
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, session: str | None = None) -> dict[str, str]:
         headers = {
             "accept": "application/json, text/event-stream",
             "mcp-protocol-version": _PROTOCOL_VERSION,
         }
-        if self._session is not None:
-            headers[_SESSION_HEADER] = self._session
+        session = session or self._session
+        if session is not None:
+            headers[_SESSION_HEADER] = session
         return headers
 
-    async def _send(self, method: str, params: dict[str, Any]) -> tuple[int, httpx.Response]:
-        assert self._url is not None
-        request_id = next(self._ids)
-        response = await self._client.post(
-            f"{self._url}/mcp/",
-            headers=self._headers(),
-            json={"jsonrpc": "2.0", "id": request_id, "method": method, "params": params},
-        )
-        return request_id, response
-
-    async def open(self, url: str) -> None:
-        if url == self._url and self._session is not None:
-            return
+    async def _initialize(self, url: str) -> None:
         self._url, self._session = url, None
-        _, response = await self._send(
-            "initialize",
-            {
-                "protocolVersion": _PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "strata-mcp", "version": "1"},
+        response = await self._client.post(
+            f"{url}/mcp/",
+            headers=self._headers(),
+            json={
+                "jsonrpc": "2.0",
+                "id": next(self._ids),
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": _PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "strata-mcp", "version": "1"},
+                },
             },
         )
         response.raise_for_status()
-        self._session = response.headers.get(_SESSION_HEADER)
+        session = response.headers.get(_SESSION_HEADER)
         await self._client.post(
             f"{url}/mcp/",
-            headers=self._headers(),
+            headers=self._headers(session),
             json={"jsonrpc": "2.0", "method": "notifications/initialized"},
         )
+        # Only now: a call sent under it before the handshake ends would be refused.
+        self._session = session
+
+    async def open(self, url: str) -> None:
+        async with self._opening:
+            if url != self._url or self._session is None:
+                await self._initialize(url)
+
+    async def _reopen(self, forgotten: str | None) -> None:
+        async with self._opening:
+            # A parallel call that met the same 404 may have opened one already.
+            if self._session == forgotten:
+                assert self._url is not None
+                await self._initialize(self._url)
+
+    async def _call(self, params: dict[str, Any]) -> tuple[str | None, int, httpx.Response]:
+        async with self._opening:
+            url, session = self._url, self._session
+        assert url is not None
+        request_id = next(self._ids)
+        try:
+            response = await self._client.post(
+                f"{url}/mcp/",
+                headers=self._headers(session),
+                json={"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": params},
+            )
+        except anyio.get_cancelled_exc_class():
+            # The agent cancelled it: so does the daemon, or the cell runs on for nobody.
+            with anyio.CancelScope(shield=True), contextlib.suppress(httpx.HTTPError):
+                await self._client.post(
+                    f"{url}/mcp/",
+                    headers=self._headers(session),
+                    json={
+                        "jsonrpc": "2.0",
+                        "method": "notifications/cancelled",
+                        "params": {"requestId": request_id, "reason": "cancelled by the client"},
+                    },
+                    timeout=5.0,
+                )
+            raise
+        return session, request_id, response
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """The daemon's ``tools/call`` result, as JSON."""
-        assert self._url is not None
         params = {"name": name, "arguments": arguments}
-        request_id, response = await self._send("tools/call", params)
+        session, request_id, response = await self._call(params)
         if response.status_code == 404:
             # The daemon forgot an idle session; the call never ran.
-            url, self._url = self._url, None
-            await self.open(url)
-            request_id, response = await self._send("tools/call", params)
+            await self._reopen(session)
+            _, request_id, response = await self._call(params)
         response.raise_for_status()
         message = _message(response, request_id)
         if "error" in message:
@@ -155,30 +193,51 @@ def build_server(root: Path) -> Server:
     ) -> types.ListToolsResult:
         return types.ListToolsResult.model_validate({"tools": listed_tools()})
 
-    async def call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+    # The daemon forwarded to: found or started on the first call, and again only once
+    # a call cannot reach it, so a busy one is not probed (and replaced) per call.
+    found: list[scratch.Daemon] = []
+
+    async def connect(ctx: Any, unreachable: scratch.Daemon | None) -> dict[str, int]:
+        """Connect to the daemon; return the setup steps this took, if it set one up."""
         steps = itertools.count(1)
 
         def progress(step: str) -> None:
             anyio.from_thread.run(ctx.session.report_progress, next(steps), None, step)
 
+        setup_ms: dict[str, int] = {}
         async with setting_up:
-            try:
+            if not found or found[0] is unreachable:
                 daemon = await anyio.to_thread.run_sync(scratch.ensure_daemon, root, progress)
-            except scratch.ScratchError as exc:
-                log = scratch.scratch_dir(root.resolve()) / ".strata" / "server.log"
-                return _failure(str(exc), f"read {log} for why; the next call tries again")
+                found[:] = [daemon]
+                setup_ms = daemon.setup_ms
+        await upstream.open(found[0].url)
+        return setup_ms
+
+    async def call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+        arguments = dict(params.arguments or {})
+        setup_ms: dict[str, int] = {}
+        unreachable: scratch.Daemon | None = None
         try:
-            async with setting_up:
-                # The daemon can stop between being found and this handshake.
-                await upstream.open(daemon.url)
-            result = await upstream.call_tool(params.name, dict(params.arguments or {}))
+            for attempt in range(2):
+                try:
+                    setup_ms = await connect(ctx, unreachable) or setup_ms
+                    result = await upstream.call_tool(params.name, arguments)
+                    break
+                except httpx.ConnectError:
+                    # Nothing listens there now (it stopped idle, or was replaced): the
+                    # call never ran, so find the daemon again and send it once more.
+                    if attempt:
+                        raise
+                    unreachable = found[0] if found else None
+        except scratch.ScratchError as exc:
+            return _failure(str(exc), "the error says what to look at; the next call tries again")
         except (httpx.HTTPError, UpstreamError) as exc:
             return _failure(
                 f"the scratchpad's server failed the call: {exc}",
                 "call again; a server that stopped is started again on the next call",
             )
-        if daemon.setup_ms:
-            result = _with_setup(result, daemon.setup_ms)
+        if setup_ms:
+            result = _with_setup(result, setup_ms)
         return types.CallToolResult.model_validate(result)
 
     @asynccontextmanager

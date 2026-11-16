@@ -151,8 +151,9 @@ it (creating `.strata-scratch/` if needed), and every call runs there. The
 project is the directory `strata mcp` starts in, or `--root DIR`. While the
 scratchpad is set up, each step is sent as MCP progress when the call asks for
 it, and the result of a call that had to set it up carries `setup_ms`, the
-milliseconds each step took. A daemon that stopped while idle is started again on
-the next call. Needs the `[mcp]` extra.
+milliseconds each step took. A call that cannot reach the daemon (it stopped while
+idle) starts it again and is sent once more; a call the agent cancels is cancelled
+on the daemon too. Needs the `[mcp]` extra.
 
 ## Tools
 
