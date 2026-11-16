@@ -1488,7 +1488,11 @@ async def delete_notebook(notebook_id: str, session: SessionDep) -> dict:
     notebook_path = session.path.resolve()
     notebook_name = session.notebook_state.name
 
-    _session_manager.close_session(session.id, reason="deleted")
+    # Every session on the directory, or one still holds its database open.
+    for other_id in _session_manager.list_sessions():
+        other = _session_manager.get_session(other_id)
+        if other is not None and other.path.resolve() == notebook_path:
+            _session_manager.close_session(other_id, reason="deleted")
 
     try:
         delete_notebook_directory(notebook_path)

@@ -616,6 +616,18 @@ def test_create_notebook_endpoint_rejects_parent_path_outside_configured_storage
     )
 
 
+def test_deleting_a_notebook_closes_every_session_on_it(client, tmp_path):
+    notebook_dir = create_notebook(tmp_path, "Twice Open")
+    manager = get_session_manager()
+    first = manager.open_notebook(notebook_dir)
+    second = manager.open_notebook(notebook_dir)
+    assert first.id != second.id
+
+    assert client.delete(f"/v1/notebooks/{first.id}").status_code == 200
+    # Or the second keeps the notebook's database open (Windows refuses the delete).
+    assert manager.get_session(second.id) is None
+
+
 def test_delete_notebook_endpoint_removes_directory_and_closes_session(client, tmp_path):
     notebook_dir = create_notebook(tmp_path, "Delete Me")
     artifact_file = notebook_dir / ".strata" / "artifacts" / "result.bin"

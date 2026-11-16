@@ -136,9 +136,13 @@ def import_snapshot(
         try:
             # 1. Bytes and rows, into the notebook's own store.
             store = ArtifactStore(staging / ".strata" / "artifacts")
-            landed = _import_records(
-                archive, store, manifest.get("records", {}), rename, scratch=staging
-            )
+            try:
+                landed = _import_records(
+                    archive, store, manifest.get("records", {}), rename, scratch=staging
+                )
+            finally:
+                # Closed before the rename: Windows refuses to move an open database.
+                store.close()
 
             # The bytes each @fetch read, so a pinned fetch runs without its URL.
             _write_fetched_bytes(archive, staging)

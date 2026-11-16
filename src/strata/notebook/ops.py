@@ -599,10 +599,13 @@ class LocalNotebookOps:
         return _cell_view(cell)
 
     async def aclose(self) -> None:
-        """Release the warm process pool, if one was started (cleanup on exit)."""
+        """Release the warm process pool, if one was started, and the stores (cleanup on exit)."""
         from strata.notebook.cli import _drain_warm_pool
 
-        await _drain_warm_pool(self._session)
+        try:
+            await _drain_warm_pool(self._session)
+        finally:
+            self.close()
 
     def _ensure_executor(self):
         if self._executor is None:

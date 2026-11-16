@@ -3601,11 +3601,16 @@ class SessionManager:
         except Exception as e:
             logger.warning("Failed to initialize R warm pool: %s", e)
 
-        if timing is None:
-            session.compute_staleness()
-        else:
-            with timing.phase("session_staleness"):
+        try:
+            if timing is None:
                 session.compute_staleness()
+            else:
+                with timing.phase("session_staleness"):
+                    session.compute_staleness()
+        except BaseException:
+            # Never registered, so no close_session would close its stores.
+            session.artifact_manager.close()
+            raise
 
         session.opened_by = opened_by
         session.activity_clock = self._clock
@@ -3722,22 +3727,25 @@ class SessionManager:
         # The outbound sequence counter outlives a disconnect, and this is every way a
         # session ends (delete and close routes, the sweep).
         forget_notebook_execution_state(session_id)
-        for pool in (session.warm_pool, session.r_warm_pool):
-            if pool is None:
-                continue
-            drain = getattr(pool, "drain", None)
-            shutdown_nowait = getattr(pool, "shutdown_nowait", None)
-            try:
-                if callable(drain):
-                    tasks.append(asyncio.get_running_loop().create_task(drain()))
-            except RuntimeError:
-                if callable(shutdown_nowait):
-                    shutdown_nowait()
-            else:
-                if not callable(drain) and callable(shutdown_nowait):
-                    shutdown_nowait()
-        # Or SQLite keeps the notebook's database open, and Windows refuses to delete it.
-        session.artifact_manager.close()
+        try:
+            for pool in (session.warm_pool, session.r_warm_pool):
+                if pool is None:
+                    continue
+                drain = getattr(pool, "drain", None)
+                shutdown_nowait = getattr(pool, "shutdown_nowait", None)
+                try:
+                    if callable(drain):
+                        tasks.append(asyncio.get_running_loop().create_task(drain()))
+                except RuntimeError:
+                    if callable(shutdown_nowait):
+                        shutdown_nowait()
+                else:
+                    if not callable(drain) and callable(shutdown_nowait):
+                        shutdown_nowait()
+        finally:
+            # Or SQLite keeps the notebook's database open, and Windows refuses to
+            # delete it.
+            session.artifact_manager.close()
         return tasks
 
     def list_sessions(self) -> list[str]:

@@ -7,6 +7,7 @@ import json
 import tomllib
 import zipfile
 from contextlib import closing
+from pathlib import Path
 
 import cellgraph as cg
 import pytest
@@ -1098,3 +1099,25 @@ class TestFetchedBytesAreUntrusted:
 
         with pytest.raises(NotASnapshotError, match="fetch index"):
             import_snapshot(evil, tmp_path / "dst" / "nb")
+
+
+def test_the_imported_store_is_closed_before_it_is_moved_in(ran, tmp_path, monkeypatch):
+    from vestigo.store import ArtifactStore
+
+    bundle = _export(ran, tmp_path / "snap.zip")
+    events = []
+    close, rename = ArtifactStore.close, Path.rename
+
+    def closed(self):
+        events.append("close")
+        close(self)
+
+    def renaming(self, target):
+        events.append("rename")
+        return rename(self, target)
+
+    monkeypatch.setattr(ArtifactStore, "close", closed)
+    monkeypatch.setattr(Path, "rename", renaming)
+    import_snapshot(bundle, tmp_path / "dst")
+    # Windows refuses to move a directory holding an open database.
+    assert "close" in events[: events.index("rename")]

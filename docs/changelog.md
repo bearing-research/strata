@@ -401,11 +401,20 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
-- **A closed notebook session closes its database.** Closing a session (the close and
-  delete routes, the idle and memory sweeps), a CLI command's offline session, and an
-  export's read of a stored output now close the notebook's artifact store, and a reset
-  of the API key, stream ownership or worker registry store closes the database it
-  opened. A store given another owner's database leaves it open. (#CLOSE)
+- **What opens a notebook's database closes it.** These now close the stores they
+  opened:
+  - closing a session, through the close and delete routes or the idle and memory
+    sweeps; the delete route now closes every session on the directory;
+  - a session that fails to open;
+  - `LocalNotebookOps`, through `close`, `aclose` or a `with` block;
+  - an export, which now opens the store once rather than per output;
+  - a snapshot import, before it moves the notebook in.
+
+  A reset of the API key or stream ownership store closes the database it opened, and
+  `strata apikey --dsn` closes its connection pool. A store given another owner's
+  database leaves it open. On vestigo 0.6.0 closing a SQLite store releases nothing. It
+  matters once vestigo keeps connections between calls: then an open database stops
+  Windows from deleting or moving the notebook. (#CLOSE)
 - **A reverted edit's outputs come back together.** Reverting an edit (a cell's source
   changed and changed back) reuses the earlier run's results by copying each value,
   display and console back, one commit each, so a blob gone partway left some from the

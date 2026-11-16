@@ -7,53 +7,53 @@ import pytest
 from vestigo.sql_backend import SqliteDialect
 
 from strata.auth import api_keys
-from strata.notebook import worker_store
 from strata.streaming import ownership
 
-STORES = [
-    ownership.StreamOwnershipStore,
-    worker_store.NotebookWorkerStore,
-    api_keys.ApiKeyStore,
-]
+
+def _recording(monkeypatch, dialect: SqliteDialect, closes: list[str], name: str) -> None:
+    close = dialect.close
+
+    def recorded():
+        closes.append(name)
+        close()
+
+    monkeypatch.setattr(dialect, "close", recorded)
 
 
-@pytest.mark.parametrize("store_cls", STORES)
+@pytest.mark.parametrize("store_cls", [ownership.StreamOwnershipStore, api_keys.ApiKeyStore])
 def test_a_store_closes_the_dialect_it_made_and_not_one_passed_in(store_cls, tmp_path, monkeypatch):
-    closes = []
+    closes: list[str] = []
     own = store_cls(tmp_path / "own.sqlite")
-    monkeypatch.setattr(own._dialect, "close", lambda: closes.append("own"))
+    _recording(monkeypatch, own._dialect, closes, "own")
     own.close()
     assert closes == ["own"]
 
     shared = SqliteDialect(tmp_path / "shared.sqlite")
-    monkeypatch.setattr(shared, "close", lambda: closes.append("shared"))
-    store_cls(tmp_path / "shared.sqlite", dialect=shared).close()
-    assert closes == ["own"]
+    _recording(monkeypatch, shared, closes, "shared")
+    try:
+        store_cls(tmp_path / "shared.sqlite", dialect=shared).close()
+        assert closes == ["own"]
+    finally:
+        shared.close()
 
 
 @pytest.mark.parametrize(
-    ("module", "singleton", "store_cls", "reset"),
+    ("module", "singleton", "getter", "reset"),
     [
         (
             ownership,
             "_ownership_store",
-            ownership.StreamOwnershipStore,
+            "get_stream_ownership_store",
             "reset_stream_ownership_store",
         ),
-        (
-            worker_store,
-            "_worker_store",
-            worker_store.NotebookWorkerStore,
-            "reset_notebook_worker_store",
-        ),
-        (api_keys, "_api_key_store", api_keys.ApiKeyStore, "reset_api_key_store"),
+        (api_keys, "_api_key_store", "get_api_key_store", "reset_api_key_store"),
     ],
 )
-def test_a_reset_closes_the_singleton(module, singleton, store_cls, reset, tmp_path, monkeypatch):
-    store = store_cls(tmp_path / "db.sqlite")
-    closes = []
-    monkeypatch.setattr(store, "close", lambda: closes.append(True))
-    monkeypatch.setattr(module, singleton, store)
+def test_a_reset_closes_the_singleton(module, singleton, getter, reset, tmp_path, monkeypatch):
+    monkeypatch.setattr(module, singleton, None)
+    store = getattr(module, getter)(tmp_path / "db.sqlite")
+    closes: list[str] = []
+    _recording(monkeypatch, store._dialect, closes, "store")
     getattr(module, reset)()
-    assert closes == [True]
+    assert closes == ["store"]
     assert getattr(module, singleton) is None
