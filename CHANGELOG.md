@@ -34,7 +34,7 @@ exhaustive commit history.
   `fix`; `strata scratch retire` retires one by hand. With a daemon running,
   `strata scratch gc` sweeps but leaves retirement to the daemon, which retires only
   when nothing runs. `0` turns the size limit, the idle sweep or retirement off. Each run
-  sample in `runtime.json` now records when it ran. (#STORAGE)
+  sample in `runtime.json` now records when it ran. (#1574)
 - **The notebook CLI drives a directory through the daemon serving it.** A project's
   `.strata-scratch/` is served by its daemon, whose `.strata/server.json` names it. On
   such a directory, `strata cell`, `status`, `dag` and `dep` go through the daemon's
