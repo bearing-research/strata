@@ -404,6 +404,10 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **MCP tool descriptions read the same on Python 3.12.** Python 3.13 and later strip a
+  docstring's indentation when compiling, and 3.12 does not, so on 3.12 every notebook
+  MCP tool's description had its lines indented. Each one is now its cleaned docstring.
+  (#1560)
 - **A reverted edit's outputs come back together.** Reverting an edit (a cell's source
   changed and changed back) reuses the earlier run's results by copying each value,
   display and console back, one commit each, so a blob gone partway left some from the
