@@ -238,6 +238,7 @@ and call `strata-notebook` / `strata` / `strata-worker` directly.
 | `uv run strata worker <action>` | Manage a notebook's workers: `ls`, `add`/`rm`/`default` (local, edits `notebook.toml`), and `add-ssh`/`rm-ssh` (provision + tunnel a worker over SSH, against a running server). See [Workers](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to). |
 | `uv run strata agent <notebook-dir>` | One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the `.mcp.json` + `CLAUDE.md` the agent needs, and attach the TUI (skip it with `--no-tui` and watch in the web UI instead). Then run `claude` in the notebook directory to drive it live. Needs the `[mcp]` extra, plus `[tui]` unless you pass `--no-tui`. See [Use a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/). |
 | `uv run strata scratch start\|stop\|status [--root DIR]` | Start, stop or show a project's scratchpad daemon: a server with the [scratchpad MCP profile](https://bearingresearch.com/strata/dev/notebook/mcp/#a-projects-own-daemon) serving `<DIR>/.strata-scratch/`, which it creates on first start. One per project, shared by every client there; it stops itself after 30 idle minutes. |
+| `uv run strata mcp [--root DIR]` | Serve a project's scratchpad to a coding agent as a stdio MCP server, for the agent's MCP config: it lists the tools at once and starts the project's scratchpad daemon on the first tool call. Needs the `[mcp]` extra. See [MCP server](https://bearingresearch.com/strata/dev/notebook/mcp/#from-an-agents-config-strata-mcp). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot), or write a portable snapshot zip with `--to snapshot`. See [Export and import](https://bearingresearch.com/strata/dev/notebook/export/). |
 | `uv run strata import <file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory, or unpack a snapshot zip back into one. See [Coming from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/). |
 | `uv run strata artifact <cmd> [--artifact-dir DIR]` | Inspect the server's configured artifact store (its metadata DSN and blob backend included) without a running server, or one local SQLite store with `--artifact-dir`: `list`, `show <ref>`, `lineage <ref>` (renders model ← features ← scan ← table @ snapshot), `pull <ref> --to FILE`, `audit [name]` (registry history), `pending` (approval queue), `verify`, `gc` (collect what nothing holds, least recently used first; `--dry-run` to preview, `--max-bytes`, `--max-idle-days`, `--min-idle-seconds`). Also publishes and moves results: `publish` / `unpublish` (a link anyone can open), `promote` (copy an artifact and its chain to the team store and name it there), `export` (write a tabular artifact into an Iceberg table), `archive` (a self-contained bundle: page, bytes, manifest, README). `<ref>` is a name, `id@v=N`, or bare id. |
@@ -6990,6 +6991,25 @@ and shared environments under `~/.strata`, as a personal server does.
 Cells read the project read-only as `project` (`project / "data.csv"`).
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
+
+### From an agent's config: `strata mcp`
+
+`strata mcp` serves the project's scratchpad over stdio, the form an agent's MCP
+config starts as a command:
+
+```json
+{"mcpServers": {"strata": {"command": "strata", "args": ["mcp"]}}}
+```
+
+It answers the handshake and the tool list itself, so a session that never calls
+a tool starts nothing. The first tool call finds the project's daemon or starts
+it (creating `.strata-scratch/` if needed), and every call runs there. The
+project is the directory `strata mcp` starts in, or `--root DIR`. While the
+scratchpad is set up, each step is sent as MCP progress when the call asks for
+it, and the result of a call that had to set it up carries `setup_ms`, the
+milliseconds each step took. A call that cannot reach the daemon (it stopped while
+idle) starts it again and is sent once more; a call the agent cancels is cancelled
+on the daemon too. Needs the `[mcp]` extra.
 
 ## Tools
 

@@ -23,6 +23,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)
+- **`strata mcp` serves a project's scratchpad to an agent over stdio.** It lists the
+  scratchpad's two tools without starting anything; the first tool call finds or starts
+  the project's daemon, reporting each setup step as MCP progress, and its result
+  carries `setup_ms`. Every call is forwarded to the daemon; a call that cannot reach
+  it (stopped while idle) finds or starts it again and is sent once more, and a call
+  the agent cancels is cancelled on the daemon too. (#1560)
 - **A project's scratchpad has a daemon of its own.** `strata scratch start` creates
   `<project>/.strata-scratch/` (ignored by the project's git through its own
   `.gitignore`) and starts a server for it with the scratchpad MCP profile, which stops
@@ -401,6 +407,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **MCP tool descriptions read the same on Python 3.12.** Python 3.13 and later strip a
+  docstring's indentation when compiling, and 3.12 does not, so on 3.12 every notebook
+  MCP tool's description had its lines indented. Each one is now its cleaned docstring.
+  (#1560)
 - **A reverted edit's outputs come back together.** Reverting an edit (a cell's source
   changed and changed back) reuses the earlier run's results by copying each value,
   display and console back, one commit each, so a blob gone partway left some from the

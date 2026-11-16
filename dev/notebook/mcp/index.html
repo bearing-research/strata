@@ -1742,6 +1742,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#from-an-agents-config-strata-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From an agent's config: strata mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3127,6 +3138,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#from-an-agents-config-strata-mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From an agent's config: strata mcp
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3339,6 +3361,20 @@ and shared environments under <code>~/.strata</code>, as a personal server does.
 Cells read the project read-only as <code>project</code> (<code>project / "data.csv"</code>).
 <code>strata scratch status</code> prints the running daemon and <code>strata scratch stop</code>
 stops it. Once it is stopped, deleting <code>.strata-scratch/</code> costs reruns, nothing else.</p>
+<h3 id="from-an-agents-config-strata-mcp">From an agent's config: <code>strata mcp</code><a class="headerlink" href="#from-an-agents-config-strata-mcp" title="Permanent link">&para;</a></h3>
+<p><code>strata mcp</code> serves the project's scratchpad over stdio, the form an agent's MCP
+config starts as a command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"strata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"strata"</span><span class="p">,</span><span class="w"> </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"mcp"</span><span class="p">]}}}</span>
+</code></pre></div>
+<p>It answers the handshake and the tool list itself, so a session that never calls
+a tool starts nothing. The first tool call finds the project's daemon or starts
+it (creating <code>.strata-scratch/</code> if needed), and every call runs there. The
+project is the directory <code>strata mcp</code> starts in, or <code>--root DIR</code>. While the
+scratchpad is set up, each step is sent as MCP progress when the call asks for
+it, and the result of a call that had to set it up carries <code>setup_ms</code>, the
+milliseconds each step took. A call that cannot reach the daemon (it stopped while
+idle) starts it again and is sent once more; a call the agent cancels is cancelled
+on the daemon too. Needs the <code>[mcp]</code> extra.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3503,10 +3539,10 @@ already exist.</p>
 <p>On a server that <a href="../lake-aware-cells/#asking-before-a-large-read">asks before a large read</a>,
 pass <code>confirm_reads=true</code> so a run that would move more than the threshold
 returns, rather than starting:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"error"</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"large_read"</span><span class="p">,</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w"> </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;the server's message&gt;"</span><span class="p">,</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w"> </span><span class="nt">"reads"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"machine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">            </span><span class="nt">"bytes_to_move"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">}]}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"error"</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"large_read"</span><span class="p">,</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w"> </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;the server's message&gt;"</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w"> </span><span class="nt">"reads"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"machine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">            </span><span class="nt">"bytes_to_move"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">}]}</span>
 </code></pre></div>
 <p><code>reads</code> has one entry per cell of the run (its stale upstreams included) that
 reads past the threshold with no approval kept. Ask the user, then call again
