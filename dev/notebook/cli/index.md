@@ -405,6 +405,12 @@ MCP server wrapping the same operations is also available; see
 [MCP server](https://bearingresearch.com/strata/dev/notebook/mcp/), or [`strata agent`](https://bearingresearch.com/strata/dev/notebook/agent/) for the one-command on-ramp
 that stands it up and points a coding agent at a live session.
 
+A directory whose `.strata/server.json` names a running daemon, as a project's
+scratchpad `.strata-scratch/` does while [its daemon](https://bearingresearch.com/strata/dev/notebook/mcp/#a-projects-own-daemon)
+runs, is driven through that daemon without `--server/--session`: its session is
+the notebook's writer, so editing the files offline as well would race it. With
+no daemon running, the same command works offline.
+
 ## Workers (`strata worker`)
 
 `strata worker ls|add|rm|default <notebook_dir> ...` edits the notebook's

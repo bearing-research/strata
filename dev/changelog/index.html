@@ -3879,13 +3879,26 @@ exhaustive commit history.</p>
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)</li>
-<li><strong><code>strata mcp</code> serves a project's scratchpad to an agent over stdio.</strong> It lists the
+<li><strong>The notebook CLI drives a directory through the daemon serving it.</strong> A project's
+  <code>.strata-scratch/</code> is served by its daemon, whose <code>.strata/server.json</code> names it. On
+  such a directory, <code>strata cell</code>, <code>status</code>, <code>dag</code> and <code>dep</code> go through the daemon's
+  session without <code>--server/--session</code>. With no daemon they run offline as before.
+  <code>strata cell cancel</code> takes such a directory too.</li>
+<li>Commands that would edit the files themselves (<code>worker add|rm|default</code>,
+    <code>cell pin-fetch</code>) or run the notebook in a session of their own (<code>strata run</code>)
+    refuse, and say to stop the daemon first. <code>worker ls</code> only reads, and goes ahead.</li>
+<li>A daemon that is alive but not answering is an error, not a reason to edit behind
+    it.</li>
+<li>A copy of the directory, which brings the record along, is not taken as served.</li>
+</ul>
+<p>(#1564)
+- <strong><code>strata mcp</code> serves a project's scratchpad to an agent over stdio.</strong> It lists the
   scratchpad's two tools without starting anything; the first tool call finds or starts
   the project's daemon, reporting each setup step as MCP progress, and its result
   carries <code>setup_ms</code>. Every call is forwarded to the daemon; a call that cannot reach
   it (stopped while idle) finds or starts it again and is sent once more, and a call
-  the agent cancels is cancelled on the daemon too. (#1560)</li>
-<li><strong>A project's scratchpad has a daemon of its own.</strong> <code>strata scratch start</code> creates
+  the agent cancels is cancelled on the daemon too. (#1560)
+- <strong>A project's scratchpad has a daemon of its own.</strong> <code>strata scratch start</code> creates
   <code>&lt;project&gt;/.strata-scratch/</code> (ignored by the project's git through its own
   <code>.gitignore</code>) and starts a server for it with the scratchpad MCP profile, which stops
   itself after 30 idle minutes. <code>server.json</code> and a file lock let every later client in
@@ -3893,43 +3906,43 @@ exhaustive commit history.</p>
   version started is replaced; <code>strata scratch status</code> and <code>stop</code> show and stop it. Its
   log is <code>.strata-scratch/.strata/server.log</code>; its remote-mount copies and shared
   environments stay under <code>~/.strata</code>. <code>create_notebook</code> takes the directory's name
-  apart from the notebook's. (#1558)</li>
-<li><strong>A scratchpad profile for the MCP server.</strong> <code>STRATA_MCP_PROFILE=scratchpad</code> lists
+  apart from the notebook's. (#1558)
+- <strong>A scratchpad profile for the MCP server.</strong> <code>STRATA_MCP_PROFILE=scratchpad</code> lists
   two tools, <code>run</code> (add or replace a cell and run it) and <code>scratchpad</code> (what the
   session already holds), over the server's one open session, with no <code>session_id</code>,
   server instructions, and each tool marked to stay loaded. A failure an agent can act
   on returns a <code>fix</code> line; <code>STRATA_MCP_TOOLS=all</code> lists the full set again. The advice
   agents get now comes from one file in the package, <code>strata/agent_guidance/scratchpad.md</code>.
-  (#1529, #1532, #1534)</li>
-<li><strong>A cell knows which cell it is.</strong> While a Python cell runs, <code>STRATA_CELL_ID</code> holds its
+  (#1529, #1532, #1534)
+- <strong>A cell knows which cell it is.</strong> While a Python cell runs, <code>STRATA_CELL_ID</code> holds its
   id, in the cell's process and any process it starts, on the cold, warm and run-all
   paths alike. A run with no cell id unsets one the process inherited.
-  (#1527, #1532, #1534)</li>
-<li><strong>A first-run path: <code>strata tutorial</code>, bundled samples and a tutorial on caching.</strong>
+  (#1527, #1532, #1534)
+- <strong>A first-run path: <code>strata tutorial</code>, bundled samples and a tutorial on caching.</strong>
   The wheel now ships two sample notebooks, so there is nothing to clone. <code>strata
   tutorial</code> lists them and <code>strata tutorial caching</code> opens a copy under a fresh name and
   prints its URL, starting a server if none is running. The home page gains <strong>Open a
   sample</strong> and lists the notebooks in the storage directory as well as browser recents.
-  (#1402, #1407)</li>
-<li><strong><code>@write_table ... sync</code> keeps a table equal to what a cell produces.</strong>
+  (#1402, #1407)
+- <strong><code>@write_table ... sync</code> keeps a table equal to what a cell produces.</strong>
   <code># @write_table &lt;var&gt; &lt;table&gt; sync on=&lt;col&gt;,...</code> upserts on the key columns
   and deletes the rows whose key the variable no longer holds. The table ends up
   as an <code>overwrite</code> would leave it, but data files with no changed row stay, so
   readers' cached row groups stay valid. Nothing is committed when nothing
-  differs. (#1371)</li>
-<li><strong><code>@each</code> runs a cell once per file or row, and caches each item on its own.</strong>
+  differs. (#1371)
+- <strong><code>@each</code> runs a cell once per file or row, and caches each item on its own.</strong>
   <code># @each &lt;name&gt; in &lt;source&gt; [key=&lt;col&gt;] [glob=&lt;pattern&gt;]</code> takes a mount, or a
   dict, list or table from another cell. A changed item runs alone, a removed
   one leaves, and a later cell reads <code>{item: value}</code>. With <code>@write_table ... sync</code>
   the table is written once per run over every item's rows, so a removed file's
   rows are deleted. A remote mount downloads only what <code>glob=</code> names, and is
   weighed by that before a large read is asked about. The <code>each_pipeline</code> example
-  runs this over 287 real files into a REST catalog. (#1372, #1374, #1378, #1379)</li>
-<li><strong>A notebook can keep a warehouse in its own folder.</strong> <code>@table</code> and <code>@write_table</code>
+  runs this over 287 real files into a REST catalog. (#1372, #1374, #1378, #1379)
+- <strong>A notebook can keep a warehouse in its own folder.</strong> <code>@table</code> and <code>@write_table</code>
   take <code>./warehouse#&lt;namespace&gt;.&lt;table&gt;</code>, resolved from the notebook's directory
   wherever the server was started, so a committed notebook names no absolute path.
-  (#1381)</li>
-<li><strong>A cell says when its result depends on a file it does not declare.</strong> Each run
+  (#1381)
+- <strong>A cell says when its result depends on a file it does not declare.</strong> Each run
   records what it opens, lists, imports and starts. A file outside every mount, a module
   from outside the environment, a package <code>uv.lock</code> does not hold, or a file another run
   left in <code>work/</code> shows in the cell's header pill and in the run report (<code>strata run</code>,
@@ -3937,21 +3950,20 @@ exhaustive commit history.</p>
   relative to the notebook when the folder is beside it, or the <code>uv add</code>. A cache hit says
   it again. It never changes a key, a status or what is cached. Mutation warnings show in
   the same pill, for the first time in the UI, and <code>strata run --format json</code> reports
-  both as <code>run_diagnostics</code>, in place of its <code>mutation_warnings</code>. (#1504, #1509)</li>
-<li><strong>A ready cell says when a file its result read undeclared has changed.</strong>
+  both as <code>run_diagnostics</code>, in place of its <code>mutation_warnings</code>. (#1504, #1509)
+- <strong>A ready cell says when a file its result read undeclared has changed.</strong>
   A local run notes each file it read without declaring it. When one changes, the
   cell stays ready (a plain run still hits the cache) and says its result may be out
   of date: a badge in the UI, <code>changed_reads</code> in <code>strata status</code>, <code>strata cell show</code>
-  and MCP, each naming the rerun or the mount that fixes it. (#1512, #1514)</li>
-<li><strong>A cell says what pyarrow, polars and DuckDB read for it.</strong> They open files in
+  and MCP, each naming the rerun or the mount that fixes it. (#1512, #1514)
+- <strong>A cell says what pyarrow, polars and DuckDB read for it.</strong> They open files in
   native code, where the read audit saw nothing, so a parquet file read with
   <code>pq.read_table</code>, <code>pd.read_parquet</code>, <code>pl.scan_parquet</code> or <code>duckdb.read_csv</code> went
   unreported. Their readers that take a path are now wrapped in the cell's process and
   report it like any other read, with its mount and the stale hint. A file their
   writers make is the run's own, so reading it back is not reported. A folder's listing
   leaves out its <code>.</code> names, so a <code>.DS_Store</code> a tool drops is no stale hint. A file named
-  in DuckDB SQL is still not seen. (#1516)</li>
-</ul>
+  in DuckDB SQL is still not seen. (#1516)</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>A notebook with many cells does less work per edit and run, and the CLI starts
@@ -4265,6 +4277,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell run, test run or dependency change through <code>--server</code> no longer fails at 30
+  seconds.</strong> The CLI waited 30 seconds for the server's answer and then reported
+  <code>cannot reach</code>, while the run went on. It now waits for the run or resolve to finish.
+  (#1564)</li>
 <li><strong>MCP tool descriptions read the same on Python 3.12.</strong> Python 3.13 and later strip a
   docstring's indentation when compiling, and 3.12 does not, so on 3.12 every notebook
   MCP tool's description had its lines indented. Each one is now its cleaned docstring.

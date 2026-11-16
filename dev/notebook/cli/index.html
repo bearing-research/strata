@@ -3754,6 +3754,11 @@ offline against a directory or <code>--server/--session</code> against a running
 MCP server wrapping the same operations is also available; see
 <a href="../mcp/">MCP server</a>, or <a href="../agent/"><code>strata agent</code></a> for the one-command on-ramp
 that stands it up and points a coding agent at a live session.</p>
+<p>A directory whose <code>.strata/server.json</code> names a running daemon, as a project's
+scratchpad <code>.strata-scratch/</code> does while <a href="../mcp/#a-projects-own-daemon">its daemon</a>
+runs, is driven through that daemon without <code>--server/--session</code>: its session is
+the notebook's writer, so editing the files offline as well would race it. With
+no daemon running, the same command works offline.</p>
 <h2 id="workers-strata-worker">Workers (<code>strata worker</code>)<a class="headerlink" href="#workers-strata-worker" title="Permanent link">&para;</a></h2>
 <p><code>strata worker ls|add|rm|default &lt;notebook_dir&gt; ...</code> edits the notebook's
 <code>[[workers]]</code> block, and <code>strata worker add-ssh|rm-ssh</code> connects a box you reach
