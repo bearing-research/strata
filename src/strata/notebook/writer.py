@@ -499,6 +499,7 @@ def create_notebook(
     initialize_environment: bool = True,
     write_gitignore_file: bool = True,
     project_mount: str | None = None,
+    directory: str | None = None,
 ) -> Path:
     """Create a new notebook directory with notebook.toml and pyproject.toml.
 
@@ -511,6 +512,8 @@ def create_notebook(
         project_mount: Variable name for a pinned read-only mount of
             *parent_dir*, so cells read project files without absolute paths.
             Pinned, so it never makes cells stale.
+        directory: The directory's name, when it is not one *name* gives
+            (``.strata-scratch`` is no project name).
 
     Returns:
         Path to the created notebook directory.
@@ -523,10 +526,11 @@ def create_notebook(
         else current_python_minor()
     )
 
-    if "/" in name or "\\" in name or ".." in name or "\0" in name:
-        raise ValueError("Notebook name contains invalid characters")
+    for part in (name, directory or ""):
+        if "/" in part or "\\" in part or ".." in part or "\0" in part:
+            raise ValueError("Notebook name contains invalid characters")
 
-    notebook_dir = parent_dir / name.lower().replace(" ", "_")
+    notebook_dir = parent_dir / (directory or name.lower().replace(" ", "_"))
     notebook_dir.mkdir(exist_ok=True)
 
     cells_dir = notebook_dir / "cells"
