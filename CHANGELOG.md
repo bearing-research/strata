@@ -25,7 +25,7 @@ exhaustive commit history.
   scratchpad's two tools without starting anything; the first tool call finds or starts
   the project's daemon, reporting each setup step as MCP progress, and its result
   carries `setup_ms`. Every call is forwarded to the daemon, which is started again if
-  it stopped while idle. (#BRIDGE)
+  it stopped while idle. (#1560)
 - **A project's scratchpad has a daemon of its own.** `strata scratch start` creates
   `<project>/.strata-scratch/` (ignored by the project's git through its own
   `.gitignore`) and starts a server for it with the scratchpad MCP profile, which stops
