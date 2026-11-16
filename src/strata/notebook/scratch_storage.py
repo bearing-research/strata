@@ -33,7 +33,7 @@ from strata.scratch import register, scratch_dir
 
 if TYPE_CHECKING:
     from strata.notebook.ops import CellView, NotebookOps
-    from strata.notebook.session import NotebookSession, SessionManager
+    from strata.notebook.session import SessionManager
 
 _LARGEST = 3
 _DAY = 86400.0
@@ -244,7 +244,7 @@ def retire_idle(
         for cell in going:
             retire_cell(ops, notebook_dir, manager, cell)
     finally:
-        manager.artifact_store.close()
+        manager.close()
     return [cell.id for cell in going]
 
 
@@ -258,19 +258,8 @@ def _planned(notebook_dir: Path, cells: list[CellView], retire_days: float):
     try:
         records = [retirement_record(notebook_dir, manager, cell) for cell in going]
     finally:
-        manager.artifact_store.close()
+        manager.close()
     return going, records, {cell.id: uses[cell.id] for cell in going}
-
-
-def session_holding(
-    session_manager: SessionManager, notebook_dir: Path
-) -> tuple[str, NotebookSession] | None:
-    """The session open on *notebook_dir*, if any, and its id."""
-    for session_id in session_manager.list_sessions():
-        session = session_manager.get_session(session_id)
-        if session is not None and session.path.resolve() == notebook_dir.resolve():
-            return session_id, session
-    return None
 
 
 async def retire_in_session(
@@ -287,10 +276,11 @@ async def retire_in_session(
     from strata.notebook.ops import LocalNotebookOps
     from strata.notebook.ws import broadcast_notebook_sync, notebook_has_active_execution
 
-    holding = session_holding(session_manager, notebook_dir)
-    if holding is None:
+    holding = session_manager.sessions_on(notebook_dir)
+    if not holding:
         return []
-    session_id, session = holding
+    session = holding[0]
+    session_id = session.id
     if notebook_has_active_execution(session_id):
         return []
     cells = LocalNotebookOps.from_session(session).list_cells()
@@ -346,7 +336,7 @@ def sweep(
             min_idle_seconds=min_idle_seconds,
         )
     finally:
-        manager.artifact_store.close()
+        manager.close()
 
 
 def _swept(

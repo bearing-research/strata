@@ -725,13 +725,13 @@ async def _scratch_upkeep_loop(anchor: Path, config: StrataConfig) -> None:
     hourly, until cancelled.
     """
     from strata.notebook.routes import get_session_manager
-    from strata.notebook.scratch_storage import retire_in_session, session_holding, upkeep
+    from strata.notebook.scratch_storage import retire_in_session, upkeep
     from strata.scratch import scratch_dir
 
     # Retirement goes through the session its client opens just after the start; an
     # idle daemon stops before its next hour, so the first pass waits for it.
     waited = 0.0
-    while session_holding(get_session_manager(), scratch_dir(anchor)) is None:
+    while not get_session_manager().sessions_on(scratch_dir(anchor)):
         if waited >= _SCRATCH_SESSION_WAIT_SECONDS:
             break
         await asyncio.sleep(1.0)

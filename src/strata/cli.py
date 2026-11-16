@@ -1011,11 +1011,10 @@ def _dispatch_scratch_gc(args: argparse.Namespace) -> int:
             with scratch.daemon_lock(anchor):
                 running = scratch.find_daemon(anchor)
                 if running is None:
-                    retired = retire_idle(
-                        LocalNotebookOps(directory),
-                        directory,
-                        retire_days=config.notebook_scratch_retire_days,
-                    )
+                    with LocalNotebookOps(directory) as ops:
+                        retired = retire_idle(
+                            ops, directory, retire_days=config.notebook_scratch_retire_days
+                        )
         except scratch.ScratchError as exc:
             print(f"error: {exc}", file=sys.stderr)
             failed = True
@@ -1045,7 +1044,8 @@ def _scratch_ops(anchor: Path, running: Any) -> Generator[Any]:
     from strata.notebook.ops import LocalNotebookOps, RemoteNotebookOps
 
     if running is None:
-        yield LocalNotebookOps(scratch.scratch_dir(anchor))
+        with LocalNotebookOps(scratch.scratch_dir(anchor)) as local:
+            yield local
         return
     ops = RemoteNotebookOps(running.url, running.session_id)
     try:
@@ -1093,7 +1093,7 @@ def _dispatch_scratch_retire(args: argparse.Namespace) -> int:
             try:
                 record = retire_cell(ops, directory, manager, cell)
             finally:
-                manager.artifact_store.close()
+                manager.close()
     print(json.dumps({"retired": record["cell"], "defines": record["defines"]}, indent=2))
     return 0
 

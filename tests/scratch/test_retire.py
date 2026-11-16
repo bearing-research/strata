@@ -463,3 +463,17 @@ def test_gc_all_sweeps_the_rest_past_a_broken_scratchpad(project, tmp_path, caps
     captured = capsys.readouterr()
     assert "has no scratchpad" in captured.err
     assert str(project.resolve()) in json.loads(captured.out)
+
+
+@pytest.mark.parametrize("command", ["gc", "retire"])
+def test_the_cli_closes_the_scratchpad_it_opens_offline(project, monkeypatch, capsys, command):
+    from strata import scratch
+
+    scratch._scaffold(project)
+    (a,) = _cells(scratch.scratch_dir(project), "x = 1")
+    closed = []
+    close = LocalNotebookOps.close
+    monkeypatch.setattr(LocalNotebookOps, "close", lambda self: closed.append(self) or close(self))
+    args = ["scratch", "gc"] if command == "gc" else ["scratch", "retire", a]
+    assert main([*args, "--root", str(project)]) == 0
+    assert len(closed) == 1

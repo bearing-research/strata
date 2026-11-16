@@ -14,6 +14,7 @@ from strata import scratch
 from strata.cli import main
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.scratch_storage import SAFE_TO_DELETE, read_storage, sweep
+from strata.notebook.session import SessionManager
 from strata.notebook.writer import create_notebook
 
 DAY = 86400.0
@@ -180,7 +181,7 @@ async def test_a_retirement_that_fails_does_not_stop_the_sweep(tmp_path, monkeyp
 
     monkeypatch.setattr(scratch_storage, "retire_in_session", failing)
     monkeypatch.setattr(scratch_storage, "upkeep", lambda *a, **k: swept.set())
-    monkeypatch.setattr(scratch_storage, "session_holding", lambda *a: ("s", object()))
+    monkeypatch.setattr(SessionManager, "sessions_on", lambda self, directory: [object()])
     config = StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
     task = asyncio.create_task(server._scratch_upkeep_loop(tmp_path, config))
     try:
@@ -201,9 +202,9 @@ async def test_the_first_pass_waits_for_the_scratchpads_session(tmp_path, monkey
     opened = asyncio.Event()
     asked = []
 
-    def holding(*args):
+    def holding(self, directory):
         asked.append(opened.is_set())
-        return ("s", object()) if opened.is_set() else None
+        return [object()] if opened.is_set() else []
 
     retired = asyncio.Event()
 
@@ -212,7 +213,7 @@ async def test_the_first_pass_waits_for_the_scratchpads_session(tmp_path, monkey
         retired.set()
         return []
 
-    monkeypatch.setattr(scratch_storage, "session_holding", holding)
+    monkeypatch.setattr(SessionManager, "sessions_on", holding)
     monkeypatch.setattr(scratch_storage, "retire_in_session", retire)
     monkeypatch.setattr(scratch_storage, "upkeep", lambda *a, **k: None)
     config = StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
