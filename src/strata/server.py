@@ -709,6 +709,9 @@ async def _shared_env_gc_loop(root: Path, ttl_days: float) -> None:
 
 
 _SCRATCH_UPKEEP_SECONDS = 3600.0
+# How long the first pass waits for the client to open the scratchpad: its open awaits the
+# environment's first sync.
+_SCRATCH_SESSION_WAIT_SECONDS = 900.0
 
 
 async def _scratch_upkeep_loop(anchor: Path, config: StrataConfig) -> None:
@@ -716,9 +719,17 @@ async def _scratch_upkeep_loop(anchor: Path, config: StrataConfig) -> None:
     hourly, until cancelled.
     """
     from strata.notebook.routes import get_session_manager
-    from strata.notebook.scratch_storage import retire_in_session, upkeep
+    from strata.notebook.scratch_storage import retire_in_session, session_holding, upkeep
     from strata.scratch import scratch_dir
 
+    # Retirement goes through the session its client opens just after the start; an
+    # idle daemon stops before its next hour, so the first pass waits for it.
+    waited = 0.0
+    while session_holding(get_session_manager(), scratch_dir(anchor)) is None:
+        if waited >= _SCRATCH_SESSION_WAIT_SECONDS:
+            break
+        await asyncio.sleep(1.0)
+        waited += 1.0
     while True:
         # Apart: a retirement that keeps failing must not stop the sweep.
         try:

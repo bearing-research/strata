@@ -950,8 +950,15 @@ def _dispatch_scratch_ls(args: argparse.Namespace) -> int:
     from strata import scratch
     from strata.notebook.scratch_storage import SAFE_TO_DELETE
 
+    def running(anchor: str) -> bool:
+        try:
+            return scratch.find_daemon(Path(anchor)) is not None
+        except scratch.ScratchError:
+            # Alive, but not answering.
+            return True
+
     rows: list[dict[str, Any]] = [
-        {**entry, "anchor": anchor, "running": scratch.find_daemon(Path(anchor)) is not None}
+        {**entry, "anchor": anchor, "running": running(anchor)}
         for anchor, entry in sorted(scratch.registered().items())
     ]
     if args.format == "json":
@@ -987,26 +994,33 @@ def _dispatch_scratch_gc(args: argparse.Namespace) -> int:
         else [Path(args.root).expanduser().resolve()]
     )
     swept = {}
+    failed = False
     for anchor in anchors:
         directory = scratch.scratch_dir(anchor)
         if not (directory / "notebook.toml").is_file():
+            # The rest are still swept.
             print(f"error: {anchor} has no scratchpad", file=sys.stderr)
-            return 2
+            failed = True
+            continue
         # As its daemon reads it, from inside the scratchpad: the same limits.
         with contextlib.chdir(directory):
             config = StrataConfig.load()
+        retired: list[str] | str
         try:
-            running = scratch.find_daemon(anchor)
+            # Held, so no daemon starts while the files are edited here.
+            with scratch.daemon_lock(anchor):
+                running = scratch.find_daemon(anchor)
+                if running is None:
+                    retired = retire_idle(
+                        LocalNotebookOps(directory),
+                        directory,
+                        retire_days=config.notebook_scratch_retire_days,
+                    )
         except scratch.ScratchError as exc:
             print(f"error: {exc}", file=sys.stderr)
-            return 2
-        if running is None:
-            retired: list[str] | str = retire_idle(
-                LocalNotebookOps(directory),
-                directory,
-                retire_days=config.notebook_scratch_retire_days,
-            )
-        else:
+            failed = True
+            continue
+        if running is not None:
             # Its session is the writer, and it retires idle cells itself, hourly, only
             # when nothing runs: removing them from here could catch one mid-run.
             retired = f"left to its daemon (pid {running.pid}), which retires them hourly"
@@ -1020,16 +1034,16 @@ def _dispatch_scratch_gc(args: argparse.Namespace) -> int:
         )
         swept[str(anchor)] = {**asdict(storage), "retired": retired}
     print(json.dumps(swept, indent=2))
-    return 0
+    return 2 if failed else 0
 
 
 @contextmanager
-def _scratch_ops(anchor: Path) -> Generator[Any]:
-    """The scratchpad's ops: through its daemon when one runs, its session being the writer."""
+def _scratch_ops(anchor: Path, running: Any) -> Generator[Any]:
+    """The scratchpad's ops: through its *running* daemon if any, its session being the
+    writer."""
     from strata import scratch
     from strata.notebook.ops import LocalNotebookOps, RemoteNotebookOps
 
-    running = scratch.find_daemon(anchor)
     if running is None:
         yield LocalNotebookOps(scratch.scratch_dir(anchor))
         return
@@ -1052,20 +1066,34 @@ def _dispatch_scratch_retire(args: argparse.Namespace) -> int:
     if not (directory / "notebook.toml").is_file():
         print(f"error: {anchor} has no scratchpad", file=sys.stderr)
         return 2
-    with _scratch_ops(anchor) as ops:
+    # Held, so no daemon starts while the files are edited here.
+    with scratch.daemon_lock(anchor):
         try:
-            cell = ops.get_cell(args.cell)
-        except NotebookOpsError as exc:
+            running = scratch.find_daemon(anchor)
+        except scratch.ScratchError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
-        if cell.downstream_ids:
-            readers = ", ".join(cell.downstream_ids)
-            print(f"error: cells {readers} read {args.cell}; retire them first", file=sys.stderr)
-            return 2
-        if cell.status == "running":
-            print(f"error: {args.cell} is running; retire it once it ends", file=sys.stderr)
-            return 2
-        record = retire_cell(ops, directory, scratch_manager(directory), cell)
+        with _scratch_ops(anchor, running) as ops:
+            try:
+                cell = ops.get_cell(args.cell)
+            except NotebookOpsError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            if cell.downstream_ids:
+                readers = ", ".join(cell.downstream_ids)
+                print(
+                    f"error: cells {readers} read {args.cell}; retire them first",
+                    file=sys.stderr,
+                )
+                return 2
+            if cell.status == "running":
+                print(f"error: {args.cell} is running; retire it once it ends", file=sys.stderr)
+                return 2
+            manager = scratch_manager(directory)
+            try:
+                record = retire_cell(ops, directory, manager, cell)
+            finally:
+                manager.artifact_store.close()
     print(json.dumps({"retired": record["cell"], "defines": record["defines"]}, indent=2))
     return 0
 
@@ -1080,7 +1108,11 @@ def _dispatch_scratch_rm(args: argparse.Namespace) -> int:
     if not (directory / "notebook.toml").is_file():
         print(f"error: {anchor} has no scratchpad", file=sys.stderr)
         return 2
-    scratch.stop_daemon(anchor)
+    try:
+        scratch.stop_daemon(anchor)
+    except scratch.ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     shutil.rmtree(directory)
     scratch.unregister(anchor)
     print(f"removed {directory}")

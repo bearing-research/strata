@@ -331,6 +331,11 @@ def _start(
     return pid, url, session_id
 
 
+def daemon_lock(anchor: Path) -> filelock.FileLock:
+    """Held while a daemon is started: held too, none starts behind a writer of the files."""
+    return filelock.FileLock(scratch_dir(anchor) / ".strata" / "daemon.lock")
+
+
 def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -> Daemon:
     """The daemon for *anchor*'s scratchpad, started (and the scratchpad created) if none runs.
 
@@ -341,7 +346,7 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
         (scratch_dir(anchor) / ".strata").mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise ScratchError(f"the scratchpad cannot be created in {anchor}: {exc}") from exc
-    with filelock.FileLock(scratch_dir(anchor) / ".strata" / "daemon.lock"):
+    with daemon_lock(anchor):
         running = find_daemon(anchor)
         current = version("strata-notebook")
         if running is not None and running.version == current:

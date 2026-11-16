@@ -432,6 +432,10 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **`strata cell rm` without a server removes a cell as a session does.** Removing a
+  group's active variant promotes the next one, removing its last member drops the
+  group, and the table, read and write indexes forget the cell. Before, the variant
+  pointer dangled until the next open warned of it. (#1574)
 - **A cell run, test run or dependency change through `--server` no longer fails at 30
   seconds.** The CLI waited 30 seconds for the server's answer and then reported
   `cannot reach`, while the run went on. It now waits for the run or resolve to finish.

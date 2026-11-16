@@ -180,10 +180,50 @@ async def test_a_retirement_that_fails_does_not_stop_the_sweep(tmp_path, monkeyp
 
     monkeypatch.setattr(scratch_storage, "retire_in_session", failing)
     monkeypatch.setattr(scratch_storage, "upkeep", lambda *a, **k: swept.set())
+    monkeypatch.setattr(scratch_storage, "session_holding", lambda *a: ("s", object()))
     config = StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
     task = asyncio.create_task(server._scratch_upkeep_loop(tmp_path, config))
     try:
         await asyncio.wait_for(swept.wait(), timeout=30)
+    finally:
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_the_first_pass_waits_for_the_scratchpads_session(tmp_path, monkeypatch):
+    """The client opens it just after the start, and an idle daemon stops within the hour."""
+    import asyncio
+
+    from strata import server
+    from strata.config import StrataConfig
+    from strata.notebook import scratch_storage
+
+    opened = asyncio.Event()
+    asked = []
+
+    def holding(*args):
+        asked.append(opened.is_set())
+        return ("s", object()) if opened.is_set() else None
+
+    retired = asyncio.Event()
+
+    async def retire(*args, **kwargs):
+        assert opened.is_set()
+        retired.set()
+        return []
+
+    monkeypatch.setattr(scratch_storage, "session_holding", holding)
+    monkeypatch.setattr(scratch_storage, "retire_in_session", retire)
+    monkeypatch.setattr(scratch_storage, "upkeep", lambda *a, **k: None)
+    config = StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
+    task = asyncio.create_task(server._scratch_upkeep_loop(tmp_path, config))
+    try:
+        async with asyncio.timeout(30):
+            while len(asked) < 2:
+                await asyncio.sleep(0.05)
+        assert not retired.is_set()
+        opened.set()
+        await asyncio.wait_for(retired.wait(), timeout=30)
     finally:
         task.cancel()
 

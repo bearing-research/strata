@@ -313,3 +313,153 @@ def test_the_cli_will_not_retire_a_running_cell(project, monkeypatch, capsys):
     assert main(["scratch", "retire", a, "--root", str(project)]) == 2
     assert "running" in capsys.readouterr().err
     assert retired_cells(scratch.scratch_dir(project)) == []
+
+
+@pytest.mark.asyncio
+async def test_a_cell_used_as_the_daemon_planned_is_left_for_the_next_pass(
+    notebook, monkeypatch, sm
+):
+    """Used after the plan read its uses, before the records were made."""
+    from strata.notebook import scratch_storage
+
+    (a,) = _cells(notebook, "x = 1")
+    sm.open_notebook(notebook)
+    plan = scratch_storage.plan_retirement
+
+    def then_shown(*args, **kwargs):
+        going = plan(*args, **kwargs)
+        touch_shown(notebook, a)
+        return going
+
+    monkeypatch.setattr(scratch_storage, "plan_retirement", then_shown)
+    assert await retire_in_session(sm, notebook, retire_days=14) == []
+    assert retired_cells(notebook) == []
+
+
+@pytest.mark.asyncio
+async def test_a_cell_that_fails_to_go_costs_only_its_own_record(notebook, monkeypatch, sm):
+    from strata.notebook.session import NotebookSession
+
+    a, b = _cells(notebook, "x = 1", "y = 2")
+    sm.open_notebook(notebook)
+    remove = NotebookSession.remove_cell
+
+    def second_fails(self, cell_id):
+        if cell_id == b:
+            raise ValueError("held")
+        remove(self, cell_id)
+
+    monkeypatch.setattr(NotebookSession, "remove_cell", second_fails)
+    with pytest.raises(ValueError, match="held"):
+        await retire_in_session(sm, notebook, retire_days=14)
+    assert [record["cell"] for record in retired_cells(notebook)] == [a]
+
+
+def test_an_offline_retirement_removes_a_cell_as_a_session_does(notebook, monkeypatch):
+    from strata.notebook.session import NotebookSession
+
+    (a,) = _cells(notebook, "x = 1")
+    removed = []
+    remove = NotebookSession.remove_cell
+    monkeypatch.setattr(
+        NotebookSession,
+        "remove_cell",
+        lambda self, cell_id: removed.append(cell_id) or remove(self, cell_id),
+    )
+    assert retire_idle(LocalNotebookOps(notebook), notebook, retire_days=14) == [a]
+    assert removed == [a]
+
+
+def _daemon_lock_held(project) -> bool:
+    import filelock
+
+    from strata import scratch
+
+    lock = filelock.FileLock(scratch.scratch_dir(project) / ".strata" / "daemon.lock")
+    try:
+        lock.acquire(timeout=0)
+    except filelock.Timeout:
+        return True
+    lock.release()
+    return False
+
+
+def test_gc_retires_offline_holding_the_daemon_lock(project, monkeypatch, capsys):
+    """So no daemon starts and opens a session while the files are edited here."""
+    from strata import scratch
+    from strata.notebook import scratch_storage
+
+    scratch._scaffold(project)
+    _cells(scratch.scratch_dir(project), "x = 1")
+    held = []
+
+    def retire(*args, **kwargs):
+        held.append(_daemon_lock_held(project))
+        return []
+
+    monkeypatch.setattr(scratch_storage, "retire_idle", retire)
+    assert main(["scratch", "gc", "--root", str(project)]) == 0
+    assert held == [True]
+
+
+def test_the_cli_retires_holding_the_daemon_lock_and_closes_its_store(project, monkeypatch, capsys):
+    from strata import scratch
+    from strata.notebook import scratch_storage
+
+    scratch._scaffold(project)
+    (a,) = _cells(scratch.scratch_dir(project), "x = 1")
+    held, closed = [], []
+    retire = scratch_storage.retire_cell
+    make = scratch_storage.scratch_manager
+
+    def recorded(*args):
+        held.append(_daemon_lock_held(project))
+        return retire(*args)
+
+    def manager(directory):
+        made = make(directory)
+        close = made.artifact_store.close
+        monkeypatch.setattr(made.artifact_store, "close", lambda: closed.append(made) or close())
+        return made
+
+    monkeypatch.setattr(scratch_storage, "retire_cell", recorded)
+    monkeypatch.setattr(scratch_storage, "scratch_manager", manager)
+    assert main(["scratch", "retire", a, "--root", str(project)]) == 0
+    assert held == [True]
+    assert len(closed) == 1
+
+
+def test_scratch_commands_report_a_daemon_not_answering(project, monkeypatch, capsys):
+    from strata import scratch
+
+    scratch._scaffold(project)
+    (a,) = _cells(scratch.scratch_dir(project), "x = 1")
+    scratch.register(project.resolve(), store_bytes=0, over_by_bytes=0, used=True)
+
+    def not_answering(anchor):
+        raise scratch.ScratchError("the scratchpad's server is not answering")
+
+    monkeypatch.setattr(scratch, "find_daemon", not_answering)
+    assert main(["scratch", "ls", "--format", "json"]) == 0
+    (listed,) = json.loads(capsys.readouterr().out)
+    assert listed["running"] is True
+    for command in (["retire", a], ["rm"]):
+        assert main(["scratch", *command, "--root", str(project)]) == 2
+        assert "not answering" in capsys.readouterr().err
+    assert scratch.scratch_dir(project).is_dir()
+
+
+def test_gc_all_sweeps_the_rest_past_a_broken_scratchpad(project, tmp_path, capsys):
+    from strata import scratch
+
+    scratch._scaffold(project)
+    # Listed first, and half made: no notebook.toml.
+    broken = tmp_path / "another"
+    (scratch.scratch_dir(broken) / ".strata").mkdir(parents=True)
+    for anchor in (broken, project):
+        scratch.register(anchor.resolve(), store_bytes=0, over_by_bytes=0, used=True)
+
+    assert main(["scratch", "gc", "--all"]) == 2
+    captured = capsys.readouterr()
+    assert "has no scratchpad" in captured.err
+    assert str(project.resolve()) in json.loads(captured.out)

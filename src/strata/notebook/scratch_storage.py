@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import tomllib
 from collections import Counter
@@ -32,7 +33,7 @@ from strata.scratch import register, scratch_dir
 
 if TYPE_CHECKING:
     from strata.notebook.ops import CellView, NotebookOps
-    from strata.notebook.session import SessionManager
+    from strata.notebook.session import NotebookSession, SessionManager
 
 _LARGEST = 3
 _DAY = 86400.0
@@ -105,7 +106,8 @@ def retired_cells(notebook_dir: Path) -> list[dict[str, Any]]:
 
 
 def _write_atomic(path: Path, text: str) -> None:
-    partial = path.with_name(path.name + ".partial")
+    # Its own name: the daemon's sweep and `strata scratch gc` may write at once.
+    partial = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.partial")
     partial.write_text(text)
     os.replace(partial, path)
 
@@ -164,17 +166,23 @@ def last_uses(notebook_dir: Path, cells: list[CellView]) -> dict[str, float]:
 
 
 def plan_retirement(
-    notebook_dir: Path, cells: list[CellView], *, retire_days: float, now: float | None = None
+    notebook_dir: Path,
+    cells: list[CellView],
+    *,
+    retire_days: float,
+    now: float | None = None,
+    uses: dict[str, float] | None = None,
 ) -> list[CellView]:
     """The leaf cells with no ``# @name`` unused for *retire_days*, in the order they go.
 
     Retiring a leaf can leave its upstream a leaf, which goes too if it is idle as well.
-    A *retire_days* of 0 retires nothing.
+    A *retire_days* of 0 retires nothing. *uses* is :func:`last_uses`, read if not given.
     """
     if not retire_days:
         return []
     cutoff = (time.time() if now is None else now) - retire_days * _DAY
-    uses = last_uses(notebook_dir, cells)
+    if uses is None:
+        uses = last_uses(notebook_dir, cells)
     # Named cells stay, and only idle ones can go.
     candidates = [
         cell
@@ -241,7 +249,9 @@ def retire_idle(
 
 
 def _planned(notebook_dir: Path, cells: list[CellView], retire_days: float):
-    going = plan_retirement(notebook_dir, cells, retire_days=retire_days)
+    # The uses the plan judged by: one used since, even while planning, stays.
+    uses = last_uses(notebook_dir, cells)
+    going = plan_retirement(notebook_dir, cells, retire_days=retire_days, uses=uses)
     if not going:
         return going, [], {}
     manager = scratch_manager(notebook_dir)
@@ -249,8 +259,18 @@ def _planned(notebook_dir: Path, cells: list[CellView], retire_days: float):
         records = [retirement_record(notebook_dir, manager, cell) for cell in going]
     finally:
         manager.artifact_store.close()
-    # When each was last used as planned: one used since stays.
-    return going, records, last_uses(notebook_dir, going)
+    return going, records, {cell.id: uses[cell.id] for cell in going}
+
+
+def session_holding(
+    session_manager: SessionManager, notebook_dir: Path
+) -> tuple[str, NotebookSession] | None:
+    """The session open on *notebook_dir*, if any, and its id."""
+    for session_id in session_manager.list_sessions():
+        session = session_manager.get_session(session_id)
+        if session is not None and session.path.resolve() == notebook_dir.resolve():
+            return session_id, session
+    return None
 
 
 async def retire_in_session(
@@ -258,21 +278,19 @@ async def retire_in_session(
 ) -> list[str]:
     """Retire idle cells through the session holding *notebook_dir*, which viewers see.
 
-    Planned off the loop; removed on it, in one reload, only if nothing ran or changed
-    meanwhile. Nothing while it has a run reserved or running, or when no session holds
-    it: the session is the notebook's writer, so the files are not edited behind it.
+    Planned off the loop; removed on it, only if nothing ran or changed meanwhile.
+    Nothing while it has a run reserved or running, or when no session holds it: the
+    session is the notebook's writer, so the files are not edited behind it.
     """
     import anyio.to_thread
 
     from strata.notebook.ops import LocalNotebookOps
     from strata.notebook.ws import broadcast_notebook_sync, notebook_has_active_execution
 
-    for session_id in session_manager.list_sessions():
-        session = session_manager.get_session(session_id)
-        if session is not None and session.path.resolve() == notebook_dir.resolve():
-            break
-    else:
+    holding = session_holding(session_manager, notebook_dir)
+    if holding is None:
         return []
+    session_id, session = holding
     if notebook_has_active_execution(session_id):
         return []
     cells = LocalNotebookOps.from_session(session).list_cells()
@@ -287,14 +305,15 @@ async def retire_in_session(
         notebook_has_active_execution(session_id)
         or now != unchanged
         # Run or shown while it was planned: used, and its record misses what it stored.
-        or last_uses(notebook_dir, going) != planned_uses
+        or await anyio.to_thread.run_sync(last_uses, notebook_dir, going) != planned_uses
     ):
         # The next pass plans again.
         return []
-    for cell in going:
+    for cell, record in zip(going, records, strict=True):
         # The session's removal: a variant group's pointer and the read indexes follow.
         session.remove_cell(cell.id)
-    await anyio.to_thread.run_sync(_append_retired, notebook_dir, records)
+        # Each as it goes: one that fails to go must not cost the others' records.
+        await anyio.to_thread.run_sync(_append_retired, notebook_dir, [record])
     await broadcast_notebook_sync(session_id, session)
     return [cell.id for cell in going]
 

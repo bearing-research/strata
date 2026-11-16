@@ -654,12 +654,13 @@ class LocalNotebookOps:
 
     def remove_cell(self, cell_id: str) -> None:
         """Delete a cell (see :meth:`NotebookOps.remove_cell`)."""
-        from strata.notebook.writer import remove_cell_from_notebook
-
         if self._session.notebook_state.get_cell(cell_id) is None:
             raise NotebookOpsError(f"no cell with id {cell_id!r}")
-        remove_cell_from_notebook(self.notebook_dir, cell_id)
-        self._reload()
+        # The session's removal, which reloads: a variant group's pointer and the read
+        # indexes follow.
+        self._session.remove_cell(cell_id)
+        self._staleness_computed = True
+        self._executor = None
 
     def move_cell(self, cell_id: str, index: int) -> list[CellView]:
         """Reorder a cell (see :meth:`NotebookOps.move_cell`)."""
