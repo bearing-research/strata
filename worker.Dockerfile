@@ -17,7 +17,7 @@
 # Pinned by digest for supply-chain safety (Scorecard Pinned-Dependencies).
 # Bump tag and digest together; get the digest with
 # `docker buildx imagetools inspect <image:tag>`.
-FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # Plain pip, not a uv venv: the uv-runtime guard (src/strata/_uv_runtime.py)
 # gates ``strata-notebook`` but not the worker entry point, so this runs on a
