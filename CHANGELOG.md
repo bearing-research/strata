@@ -21,6 +21,19 @@ exhaustive commit history.
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)
+- **The notebook CLI drives a directory through the daemon serving it.** A project's
+  `.strata-scratch/` is served by its daemon, whose `.strata/server.json` names it. On
+  such a directory, `strata cell`, `status`, `dag` and `dep` go through the daemon's
+  session without `--server/--session`. With no daemon they run offline as before.
+  `strata cell cancel` takes such a directory too.
+  - Commands that would edit the files themselves (`worker add|rm|default`,
+    `cell pin-fetch`) or run the notebook in a session of their own (`strata run`)
+    refuse, and say to stop the daemon first. `worker ls` only reads, and goes ahead.
+  - A daemon that is alive but not answering is an error, not a reason to edit behind
+    it.
+  - A copy of the directory, which brings the record along, is not taken as served.
+
+  (#1564)
 - **`strata mcp` serves a project's scratchpad to an agent over stdio.** It lists the
   scratchpad's two tools without starting anything; the first tool call finds or starts
   the project's daemon, reporting each setup step as MCP progress, and its result
@@ -405,6 +418,10 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A cell run, test run or dependency change through `--server` no longer fails at 30
+  seconds.** The CLI waited 30 seconds for the server's answer and then reported
+  `cannot reach`, while the run went on. It now waits for the run or resolve to finish.
+  (#1564)
 - **MCP tool descriptions read the same on Python 3.12.** Python 3.13 and later strip a
   docstring's indentation when compiling, and 3.12 does not, so on 3.12 every notebook
   MCP tool's description had its lines indented. Each one is now its cleaned docstring.

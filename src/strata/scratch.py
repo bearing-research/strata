@@ -75,13 +75,14 @@ def _log_path(anchor: Path) -> Path:
 def _sync_state(url: str, session_id: str) -> str | None:
     """The session's environment sync state, or None if nothing listens at *url* or the
     session is not open there. Raises ``httpx.HTTPError`` for a server that does not
-    answer in time."""
+    answer in time, or answers with an error: it may still hold the session."""
     try:
         response = httpx.get(f"{url}/v1/notebooks/{session_id}/environment", timeout=5.0)
     except httpx.ConnectError:
         return None
-    if not response.is_success:
+    if response.status_code == 404:
         return None
+    response.raise_for_status()
     return response.json()["environment"]["sync_state"]
 
 
@@ -93,15 +94,19 @@ def _environment(url: str, session_id: str) -> str | None:
         return None
 
 
-def find_daemon(anchor: Path) -> Daemon | None:
-    """The daemon ``server.json`` names, if it answers and still holds the session.
+def daemon_serving(notebook_dir: Path) -> Daemon | None:
+    """The daemon ``<notebook_dir>/.strata/server.json`` names, if it answers and still
+    holds the session.
 
     Asked, not judged by its pid: a session id is never reused, so no other server
     can answer for it.
     """
     try:
-        record = json.loads(_record_path(anchor).read_text())
-    except FileNotFoundError:
+        record = json.loads((notebook_dir / ".strata" / "server.json").read_text())
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if scratch_dir(Path(record["anchor"])).resolve() != notebook_dir.resolve():
+        # A copy of the directory, record and all: that daemon serves the original.
         return None
     try:
         state = _sync_state(record["url"], record["session_id"])
@@ -123,6 +128,11 @@ def find_daemon(anchor: Path) -> Daemon | None:
         pid=record["pid"],
         version=record["version"],
     )
+
+
+def find_daemon(anchor: Path) -> Daemon | None:
+    """The live daemon serving *anchor*'s scratchpad, if any."""
+    return daemon_serving(scratch_dir(anchor))
 
 
 def _free_port() -> int:
