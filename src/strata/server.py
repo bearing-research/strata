@@ -1405,7 +1405,6 @@ async def tenant_context_middleware(request: Request, call_next):
         path
         in (
             "/health",
-            "/health/busy",
             "/health/ready",
             "/health/dependencies",
             "/metrics",
@@ -1487,7 +1486,6 @@ async def auth_middleware(request: Request, call_next):
         path
         in (
             "/health",
-            "/health/busy",
             "/health/ready",
             "/health/dependencies",
             "/metrics",
