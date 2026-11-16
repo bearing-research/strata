@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -28,6 +29,15 @@ DAY = 86400.0
 @pytest.fixture
 def notebook(tmp_path):
     return create_notebook(tmp_path, "scratch", initialize_environment=False)
+
+
+@pytest.fixture
+async def sm():
+    """A session manager whose sessions, and the warm processes they start, close after."""
+    manager = SessionManager()
+    yield manager
+    for session_id in list(manager._sessions):
+        await asyncio.gather(*manager.close_session(session_id))
 
 
 def _cells(notebook, *sources: str) -> list[str]:
@@ -104,11 +114,10 @@ def test_a_released_value_still_held_stays_until_the_hold_ends(notebook):
 
 
 @pytest.mark.asyncio
-async def test_the_daemon_retires_through_its_session_and_not_mid_run(notebook, monkeypatch):
+async def test_the_daemon_retires_through_its_session_and_not_mid_run(notebook, monkeypatch, sm):
     from strata.notebook import ws
 
     (a,) = _cells(notebook, "x = 1")
-    sm = SessionManager()
     session = sm.open_notebook(notebook)
 
     monkeypatch.setattr(ws, "notebook_has_active_execution", lambda notebook_id: True)
@@ -187,12 +196,11 @@ def test_what_a_sweep_freed_is_not_offered_again(notebook):
 
 @pytest.mark.asyncio
 async def test_a_cell_changed_while_the_daemon_planned_is_left_for_the_next_pass(
-    notebook, monkeypatch
+    notebook, monkeypatch, sm
 ):
     from strata.notebook import scratch_storage
 
     (a,) = _cells(notebook, "x = 1")
-    sm = SessionManager()
     session = sm.open_notebook(notebook)
     planned = scratch_storage._planned
 
@@ -218,11 +226,10 @@ def test_a_record_torn_by_a_crash_costs_only_itself(notebook):
 
 
 @pytest.mark.asyncio
-async def test_the_daemon_removes_a_cell_as_its_session_does(notebook, monkeypatch):
+async def test_the_daemon_removes_a_cell_as_its_session_does(notebook, monkeypatch, sm):
     from strata.notebook.session import NotebookSession
 
     (a,) = _cells(notebook, "x = 1")
-    sm = SessionManager()
     sm.open_notebook(notebook)
     removed = []
     remove = NotebookSession.remove_cell
@@ -239,12 +246,11 @@ async def test_the_daemon_removes_a_cell_as_its_session_does(notebook, monkeypat
 
 @pytest.mark.asyncio
 async def test_a_cell_used_while_the_daemon_planned_is_left_for_the_next_pass(
-    notebook, monkeypatch
+    notebook, monkeypatch, sm
 ):
     from strata.notebook import scratch_storage
 
     (a,) = _cells(notebook, "x = 1")
-    sm = SessionManager()
     sm.open_notebook(notebook)
     planned = scratch_storage._planned
 
