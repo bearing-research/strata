@@ -154,7 +154,7 @@ def test_a_lock_without_local_packages_keys_as_before(tmp_path):
 
     assert local_packages(nb_dir).key is None
     assert compute_execution_env_hash(
-        nb_dir, local_packages=local_packages(nb_dir)
+        local_packages=local_packages(nb_dir)
     ) == compute_lockfile_hash(nb_dir)
 
 
@@ -163,13 +163,13 @@ def test_the_lockfile_hash_leaves_local_packages_out(tmp_path):
     nb_dir, lib = _editable(tmp_path)
     lock_hash, env_hash = (
         compute_lockfile_hash(nb_dir),
-        compute_execution_env_hash(nb_dir, local_packages=local_packages(nb_dir)),
+        compute_execution_env_hash(local_packages=local_packages(nb_dir)),
     )
 
     (lib / "src" / "mylib" / "__init__.py").write_text(LIB_SOURCE.format("two"))
 
     assert compute_lockfile_hash(nb_dir) == lock_hash
-    assert compute_execution_env_hash(nb_dir, local_packages=local_packages(nb_dir)) != env_hash
+    assert compute_execution_env_hash(local_packages=local_packages(nb_dir)) != env_hash
 
 
 def test_a_package_folder_that_cannot_be_read_does_not_fail_the_key(tmp_path):
@@ -261,3 +261,24 @@ def test_a_staleness_walk_reads_the_packages_once(tmp_path, monkeypatch):
     session.compute_staleness()
 
     assert reads == [session.path]
+
+
+def test_a_staleness_pass_reads_the_lock_once_however_many_cells(tmp_path, monkeypatch):
+    from strata.notebook import env
+
+    reads = []
+    real = env.compute_lockfile_hash
+    monkeypatch.setattr(env, "compute_lockfile_hash", lambda d: (reads.append(d), real(d))[1])
+
+    def per_pass(cells: int) -> int:
+        nb_dir = create_notebook(tmp_path / str(cells), "nb", initialize_environment=False)
+        _lock(nb_dir)
+        for i in range(cells):
+            add_cell_to_notebook(nb_dir, f"c{i}")
+            write_cell(nb_dir, f"c{i}", f"x{i} = {i}")
+        session = SessionManager().open_notebook(nb_dir)
+        reads.clear()
+        session.compute_staleness()
+        return len(reads)
+
+    assert per_pass(1) == per_pass(6) > 0

@@ -9,7 +9,6 @@ project's own name. A cell's env hash also holds what its local path packages ho
 from __future__ import annotations
 
 import ast
-import functools
 import hashlib
 import json
 import logging
@@ -200,8 +199,6 @@ def renv_lock_key(lock: str) -> str:
     return hashlib.sha256(lock.encode()).hexdigest()
 
 
-# Staleness asks once per cell for the same lock, and parsing it dominated a pass.
-@functools.lru_cache(maxsize=16)
 def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
     """Fingerprint a ``uv.lock``'s runtime dependency closure, or ``None``.
 
@@ -307,6 +304,38 @@ def _runtime_packages(data: Any) -> list[dict] | None:
     ]
 
 
+# By the lock's digest, not its bytes, which can be megabytes held for the process.
+_UV_LOCK_FOLDS: dict[str, bytes | None] = {}
+_UV_LOCK_FOLDS_MAX = 16
+
+
+def _uv_lock_fold(content: bytes) -> bytes | None:
+    """What a ``uv.lock`` folds into the lockfile hash, or ``None`` to fold its bytes.
+
+    Parsed once per content: each run and each staleness pass hash the same lock.
+    """
+    digest = hashlib.sha256(content).hexdigest()
+    if digest in _UV_LOCK_FOLDS:
+        return _UV_LOCK_FOLDS[digest]
+    # Fold only the runtime closure, dev group or not: a basis that switched when
+    # the first dev tool arrived would invalidate every cell once.
+    folded: bytes | None = None
+    fingerprint = _runtime_uv_closure_fingerprint(content)
+    if fingerprint is not None:
+        folded = b"\0uv-runtime=" + fingerprint
+    else:
+        try:
+            key = uv_lock_key(content.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+            key = None
+        if key is not None:
+            folded = b"\0uv-lock=" + key.encode("utf-8")
+    if len(_UV_LOCK_FOLDS) >= _UV_LOCK_FOLDS_MAX:
+        _UV_LOCK_FOLDS.clear()
+    _UV_LOCK_FOLDS[digest] = folded
+    return folded
+
+
 def _fold_lockfile_into_hash(
     hasher: hashlib._Hash, notebook_dir: Path, filename: str, *, tag: bytes | None
 ) -> None:
@@ -325,21 +354,10 @@ def _fold_lockfile_into_hash(
     except OSError as exc:
         logger.warning("Could not read %s: %s", filename, exc)
         return
-    # Fold only the runtime closure, dev group or not: a basis that switched when
-    # the first dev tool arrived would invalidate every cell once.
     if filename == "uv.lock":
-        fingerprint = _runtime_uv_closure_fingerprint(content)
-        if fingerprint is not None:
-            hasher.update(b"\0uv-runtime=")
-            hasher.update(fingerprint)
-            return
-        try:
-            key = uv_lock_key(content.decode("utf-8"))
-        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
-            key = None
-        if key is not None:
-            hasher.update(b"\0uv-lock=")
-            hasher.update(key.encode("utf-8"))
+        folded = _uv_lock_fold(content)
+        if folded is not None:
+            hasher.update(folded)
             return
     if tag is not None:
         hasher.update(tag)
@@ -359,9 +377,13 @@ class LocalPackages:
     from its source, so its import roots (the paths its ``.pth`` adds, else its folder)
     enter by content, through the notebook's digest cache. One built from a directory
     runs from what the last sync installed, so its installed ``RECORD``.
+
+    ``lockfile_hash`` is :func:`compute_lockfile_hash` as read with them, so keying many
+    cells reads the lock once.
     """
 
     notebook_dir: Path
+    lockfile_hash: str
     keys: Mapping[str, str] = field(default_factory=dict)
 
     @property
@@ -388,17 +410,19 @@ def local_packages(notebook_dir: Path) -> LocalPackages:
     Reads every file of an editable one the digest cache holds no digest for, so callers
     on the event loop run it in a thread.
     """
+    lockfile_hash = compute_lockfile_hash(notebook_dir)
     try:
         with open(notebook_dir / "uv.lock", "rb") as f:
             raw = f.read()
     except OSError:
-        return LocalPackages(notebook_dir)  # an unreadable lock is logged by compute_lockfile_hash
+        # An unreadable lock is logged by compute_lockfile_hash.
+        return LocalPackages(notebook_dir, lockfile_hash)
     if not _LOCAL_SOURCE.search(raw):
-        return LocalPackages(notebook_dir)
+        return LocalPackages(notebook_dir, lockfile_hash)
     try:
         closure = _runtime_packages(tomllib.loads(raw.decode("utf-8")))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError):
-        return LocalPackages(notebook_dir)
+        return LocalPackages(notebook_dir, lockfile_hash)
     digests_path = notebook_dir / ".strata" / DIGESTS_FILE
     skip_dir = _not_package_source(notebook_dir)
     keys: dict[str, str] = {}
@@ -425,7 +449,7 @@ def local_packages(notebook_dir: Path) -> LocalPackages:
             hasher.update(b"\0record=")
             hasher.update(record[1] if record is not None else b"")
         keys[pkg["name"]] = hasher.hexdigest()
-    return LocalPackages(notebook_dir, keys)
+    return LocalPackages(notebook_dir, lockfile_hash, keys)
 
 
 def moved_input(
@@ -610,7 +634,6 @@ def narrow_env_for_provenance(
 
 
 def compute_execution_env_hash(
-    notebook_dir: Path,
     runtime_env: Mapping[str, str] | None = None,
     runtime_identity: str | None = None,
     *,
@@ -624,7 +647,7 @@ def compute_execution_env_hash(
     ``runtime_env`` and ``runtime_identity`` are empty. The local packages stay out of
     ``compute_lockfile_hash``, which says whether the venv was synced from the lock.
     """
-    lockfile_hash = compute_lockfile_hash(notebook_dir)
+    lockfile_hash = local_packages.lockfile_hash
     local = local_packages.key
     if local is not None:
         lockfile_hash = hashlib.sha256(f"{lockfile_hash}\0local={local}".encode()).hexdigest()

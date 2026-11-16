@@ -996,7 +996,6 @@ class CellExecutor:
         )
         packages = await asyncio.to_thread(local_packages, self.session.path)
         env_hash = compute_execution_env_hash(
-            self.session.path,
             provenance_env,
             runtime_identity=runtime_identity,
             local_packages=packages,

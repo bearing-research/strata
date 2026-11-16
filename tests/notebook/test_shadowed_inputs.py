@@ -225,7 +225,6 @@ async def test_a_plain_chain_keeps_its_provenance(tmp_path: Path):
     assert key_upstream(session, "c1") == [x_hash]
     cell = session.notebook_state.get_cell("c1")
     env_hash = compute_execution_env_hash(
-        session.path,
         session._collect_runtime_env(cell),
         runtime_identity=session._effective_worker_runtime_identity(cell),
         local_packages=local_packages(session.path),

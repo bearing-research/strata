@@ -310,6 +310,31 @@ async def test_the_first_dev_dependency_keeps_a_cached_cell_cached(tmp_path):
     assert second.cache_hit is True, "the first dev dependency invalidated the cell"
 
 
+def test_a_lock_is_parsed_once_per_content(tmp_path, monkeypatch):
+    """Each run and staleness pass hashes the lock; only new content parses it again."""
+    from strata.notebook import env
+
+    parsed = []
+    for name in ("_runtime_uv_closure_fingerprint", "uv_lock_key"):
+        real = getattr(env, name)
+        monkeypatch.setattr(
+            env, name, lambda lock, real=real, name=name: (parsed.append(name), real(lock))[1]
+        )
+    monkeypatch.setattr(env, "_UV_LOCK_FOLDS", {})
+
+    rooted = _uv_lock(runtime={"cloudpickle": "3.1.2"})
+    # No project root: no runtime closure, so the whole lock's key.
+    rootless = "version = 1\n\n[[package]]\nname = 'pandas'\n"
+    hashes = [_hash_with(tmp_path, lock) for lock in (rooted, rooted, rootless, rootless, rooted)]
+
+    assert parsed == [
+        "_runtime_uv_closure_fingerprint",
+        "_runtime_uv_closure_fingerprint",
+        "uv_lock_key",
+    ]
+    assert hashes[0] == hashes[1] == hashes[4] != hashes[2] == hashes[3]
+
+
 def test_unparseable_lock_falls_back_to_raw_bytes(tmp_path):
     """A malformed uv.lock does not crash; the hash folds its raw bytes."""
     lockfile = tmp_path / "uv.lock"
