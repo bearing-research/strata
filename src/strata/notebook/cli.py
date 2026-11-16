@@ -1152,7 +1152,7 @@ def _is_remote(ops: object) -> bool:
 
 
 def _close_ops(ops: object) -> None:
-    """Close a remote ops client if it owns one (local ops hold no client)."""
+    """Close what the ops backend opened: a remote client, or a local session's stores."""
     close = getattr(ops, "close", None)
     if callable(close):
         close()

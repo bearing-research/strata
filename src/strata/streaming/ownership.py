@@ -31,11 +31,17 @@ class StreamOwnershipStore:
 
     def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
         self.db_path = db_path
+        self._owns_dialect = dialect is None
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
         create_tables(self._dialect, "stream_owners", _OWNERSHIP_SCHEMA_SQL)
 
     def _get_connection(self) -> StoreConnection:
         return self._dialect.connect()
+
+    def close(self) -> None:
+        """Close the dialect if this store made it; one passed in is its owner's. Idempotent."""
+        if self._owns_dialect:
+            self._dialect.close()
 
     def claim(self, stream_id: str, node_url: str, ttl_seconds: float) -> None:
         """Record this node as the one serving ``stream_id``; the newest claim wins.
@@ -116,6 +122,8 @@ def get_stream_ownership_store(
 
 
 def reset_stream_ownership_store() -> None:
-    """Reset the singleton (for testing)."""
+    """Close and drop the singleton (for testing)."""
     global _ownership_store
+    if _ownership_store is not None:
+        _ownership_store.close()
     _ownership_store = None

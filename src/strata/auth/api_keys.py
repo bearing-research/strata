@@ -107,11 +107,17 @@ class ApiKeyStore:
 
     def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
         self.db_path = db_path
+        self._owns_dialect = dialect is None
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
         create_tables(self._dialect, "api_keys", _API_KEY_SCHEMA_SQL)
 
     def _get_connection(self) -> StoreConnection:
         return self._dialect.connect()
+
+    def close(self) -> None:
+        """Close the dialect if this store made it; one passed in is its owner's. Idempotent."""
+        if self._owns_dialect:
+            self._dialect.close()
 
     def create_key(
         self,
@@ -288,6 +294,8 @@ def get_api_key_store(
 
 
 def reset_api_key_store() -> None:
-    """Reset the singleton (for testing)."""
+    """Close and drop the singleton (for testing)."""
     global _api_key_store
+    if _api_key_store is not None:
+        _api_key_store.close()
     _api_key_store = None

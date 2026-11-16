@@ -575,9 +575,15 @@ async def _graceful_shutdown(state: ServerState) -> None:
     state.planner.close()
 
     # No `ssh -L` children may outlive the server; remote workers stay up for reuse.
-    from strata.notebook.routes import shutdown_worker_supervisor
+    from strata.notebook.routes import get_session_manager, shutdown_worker_supervisor
 
     shutdown_worker_supervisor()
+    # Their warm processes, and their notebooks' databases, which Windows keeps locked.
+    sessions = get_session_manager()
+    for session_id in sessions.list_sessions():
+        await asyncio.gather(
+            *sessions.close_session(session_id, reason="shutdown"), return_exceptions=True
+        )
 
 
 # None when the endpoint is disabled or the [mcp] extra is absent.
