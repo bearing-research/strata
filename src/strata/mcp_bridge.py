@@ -62,8 +62,13 @@ class Upstream:
     """One MCP session on a daemon's ``/mcp/``, opened again when the daemon changes."""
 
     def __init__(self) -> None:
-        # A cell may run for hours; its own timeout ends it, not this client.
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=5.0))
+        # A cell may run for hours; its own timeout ends it, not this client. No kept-alive
+        # connections: one to a daemon that died fails as if the call were sent, where a
+        # new one finds nothing listening (ConnectError) and the call is sent again.
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(None, connect=5.0),
+            limits=httpx.Limits(max_keepalive_connections=0),
+        )
         self._url: str | None = None
         self._session: str | None = None
         self._ids = itertools.count(1)

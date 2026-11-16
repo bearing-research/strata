@@ -236,3 +236,38 @@ async def test_a_cancelled_call_is_cancelled_on_the_daemon_too():
             "params": {"requestId": call["id"], "reason": "cancelled by the client"},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_each_call_opens_its_own_connection():
+    """None is kept alive: reused after the daemon died, one fails as if the call were sent."""
+    connections = 0
+
+    async def serve(reader, writer):
+        nonlocal connections
+        connections += 1
+        while head := await reader.readuntil(b"\r\n\r\n"):
+            length = next(
+                int(line.split(b":")[1])
+                for line in head.split(b"\r\n")
+                if line.lower().startswith(b"content-length:")
+            )
+            request = json.loads(await reader.readexactly(length))
+            body = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {}}).encode()
+            writer.write(
+                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n"
+                b"content-length: %d\r\n\r\n%s" % (len(body), body)
+            )
+            await writer.drain()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    upstream = mcp_bridge.Upstream()
+    upstream._url, upstream._session = f"http://127.0.0.1:{port}", "s"
+    try:
+        await upstream.call_tool("scratchpad", {})
+        await upstream.call_tool("scratchpad", {})
+    finally:
+        await upstream.aclose()
+        server.close()
+    assert connections == 2

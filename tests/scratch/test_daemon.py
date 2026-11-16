@@ -235,6 +235,22 @@ def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
     assert started == []
 
 
+def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
+    """Killed a moment ago: its connections reset while its process still exists."""
+    state = project / ".strata-scratch" / ".strata"
+    state.mkdir(parents=True)
+    record = {"url": "http://127.0.0.1:9", "pid": 12345, "session_id": "s", "version": "0"}
+    (state / "server.json").write_text(json.dumps(record))
+
+    def reset(url, **kwargs):
+        raise httpx.ReadError("connection reset by peer")
+
+    checks = iter([True, True, False])
+    monkeypatch.setattr(scratch.httpx, "get", reset)
+    monkeypatch.setattr(scratch, "_alive", lambda pid: next(checks))
+    assert scratch.find_daemon(project) is None
+
+
 def test_a_launch_that_fails_is_a_scratch_error(project, monkeypatch):
     def run(command, **kwargs):
         raise OSError("no such interpreter")

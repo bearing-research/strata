@@ -31,6 +31,8 @@ import httpx
 
 SCRATCH_DIR = ".strata-scratch"
 IDLE_MINUTES = 30
+# How long a daemon that stopped answering may take to finish dying.
+_DYING_GRACE = 2.0
 # Starting the server, then the scratchpad's first environment sync, can take minutes
 # on a cold uv cache.
 _SETUP_TIMEOUT = 600.0
@@ -104,7 +106,8 @@ def find_daemon(anchor: Path) -> Daemon | None:
     try:
         state = _sync_state(record["url"], record["session_id"])
     except httpx.HTTPError as exc:
-        if not _alive(record["pid"]):
+        # A process killed a moment ago still exists while its connections reset.
+        if _exits_within(record["pid"], _DYING_GRACE):
             return None
         # Alive but slow, not gone: another daemon beside it would write the directory
         # from a second session.
@@ -236,6 +239,15 @@ def _until(ready: Callable[[], bool], pid: int, what: str, deadline: float, log:
         if time.monotonic() > deadline:
             raise ScratchError(f"the scratchpad's server timed out {what}; see {log}")
         time.sleep(0.1)
+
+
+def _exits_within(pid: int, seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while _alive(pid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
 
 
 def _kill(pid: int) -> None:
