@@ -399,6 +399,11 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A closed notebook session closes its database.** Closing a session (the close and
+  delete routes, the idle and memory sweeps), a CLI command's offline session, and an
+  export's read of a stored output now close the notebook's artifact store, and a reset
+  of the API key, stream ownership or worker registry store closes the database it
+  opened. A store given another owner's database leaves it open. (#CLOSE)
 - **A reverted edit's outputs come back together.** Reverting an edit (a cell's source
   changed and changed back) reuses the earlier run's results by copying each value,
   display and console back, one commit each, so a blob gone partway left some from the

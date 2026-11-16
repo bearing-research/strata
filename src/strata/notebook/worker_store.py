@@ -37,11 +37,17 @@ class NotebookWorkerStore:
 
     def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
         self.db_path = db_path
+        self._owns_dialect = dialect is None
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
         create_tables(self._dialect, "notebook_workers", _SCHEMA_SQL)
 
     def _get_connection(self) -> StoreConnection:
         return self._dialect.connect()
+
+    def close(self) -> None:
+        """Close the dialect if this store made it; one passed in is its owner's. Idempotent."""
+        if self._owns_dialect:
+            self._dialect.close()
 
     def entries(self) -> list[dict[str, Any]] | None:
         """The registry in order, or ``None`` if never set.
@@ -137,6 +143,8 @@ def get_notebook_worker_store() -> NotebookWorkerStore | None:
 
 
 def reset_notebook_worker_store() -> None:
-    """Forget the singleton (for tests)."""
+    """Close and drop the singleton (for tests)."""
     global _worker_store
+    if _worker_store is not None:
+        _worker_store.close()
     _worker_store = None

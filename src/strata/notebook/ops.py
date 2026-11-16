@@ -409,8 +409,20 @@ class LocalNotebookOps:
         self.author = resolve_author(author)
         state = parse_notebook(notebook_dir)
         self._session = NotebookSession(state, notebook_dir)
+        self._owns_session = True
         self._executor: object | None = None
         self._staleness_computed = False
+
+    def close(self) -> None:
+        """Close the stores of a session this handle opened; a wrapped one stays open."""
+        if self._owns_session:
+            self._session.artifact_manager.close()
+
+    def __enter__(self) -> LocalNotebookOps:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     @classmethod
     def from_session(cls, session: NotebookSession, author: str | None = None) -> LocalNotebookOps:
@@ -426,6 +438,7 @@ class LocalNotebookOps:
         ops.notebook_dir = session.path
         ops.author = resolve_author(author)
         ops._session = session
+        ops._owns_session = False
         ops._executor = None
         # The server keeps staleness current; this handle only views it.
         ops._staleness_computed = True
