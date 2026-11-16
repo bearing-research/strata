@@ -3441,6 +3441,10 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 <td>One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the <code>.mcp.json</code> + <code>CLAUDE.md</code> the agent needs, and attach the TUI (skip it with <code>--no-tui</code> and watch in the web UI instead). Then run <code>claude</code> in the notebook directory to drive it live. Needs the <code>[mcp]</code> extra, plus <code>[tui]</code> unless you pass <code>--no-tui</code>. See <a href="../../notebook/agent/">Use a coding agent</a>.</td>
 </tr>
 <tr>
+<td><code>uv run strata scratch start\|stop\|status [--root DIR]</code></td>
+<td>Start, stop or show a project's scratchpad daemon: a server with the <a href="../../notebook/mcp/#a-projects-own-daemon">scratchpad MCP profile</a> serving <code>&lt;DIR&gt;/.strata-scratch/</code>, which it creates on first start. One per project, shared by every client there; it stops itself after 30 idle minutes.</td>
+</tr>
+<tr>
 <td><code>uv run strata export &lt;notebook-dir&gt;</code></td>
 <td>Render a notebook to markdown or HTML (add <code>--app-view</code> for a frozen dashboard snapshot), or write a portable snapshot zip with <code>--to snapshot</code>. See <a href="../../notebook/export/">Export and import</a>.</td>
 </tr>

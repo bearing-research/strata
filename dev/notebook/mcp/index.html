@@ -1728,6 +1728,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Scratchpad profile">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-projects-own-daemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A project's own daemon
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3096,6 +3113,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Scratchpad profile">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-projects-own-daemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A project's own daemon
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3290,6 +3324,21 @@ unknown or non-Python cell, an environment that is not ready, an annotation that
 cannot be read, a busy notebook, which leaves the cells as they were)
 returns <code>status: error</code> with a <code>fix</code> line naming the next step. The other tools
 stay registered and callable by name; <code>STRATA_MCP_TOOLS=all</code> lists them too.</p>
+<h3 id="a-projects-own-daemon">A project's own daemon<a class="headerlink" href="#a-projects-own-daemon" title="Permanent link">&para;</a></h3>
+<p><code>strata scratch start</code> in a project (or <code>--root DIR</code>) creates
+<code>.strata-scratch/</code> there, a notebook with its own <code>.gitignore</code> of <code>*</code>, so the
+project's git never sees it and its <code>.gitignore</code> is left alone. It then starts
+a server for it on a free loopback port, with the scratchpad profile and
+<code>STRATA_IDLE_EXIT_MINUTES=30</code> (or the value already set), opens the notebook and
+waits for its environment. The daemon's address, pid and session are written to
+<code>.strata-scratch/.strata/server.json</code>, so the next client finds it instead of
+starting another, and a file lock makes two clients asking at once share one.
+A daemon another Strata version started is stopped and replaced. The server's
+output goes to <code>.strata-scratch/.strata/server.log</code>; it keeps remote-mount copies
+and shared environments under <code>~/.strata</code>, as a personal server does.
+Cells read the project read-only as <code>project</code> (<code>project / "data.csv"</code>).
+<code>strata scratch status</code> prints the running daemon and <code>strata scratch stop</code>
+stops it. Once it is stopped, deleting <code>.strata-scratch/</code> costs reruns, nothing else.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
