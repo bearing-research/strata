@@ -209,12 +209,21 @@ async def test_another_versions_daemon_too_busy_to_answer_still_serves_the_call(
         _value(await client.call_tool("run", {"source": "1"}))
 
         def not_answering(*args, **kwargs):
-            raise scratch.ScratchError("is not answering; try again shortly")
+            raise scratch.NotAnswering("is not answering; try again shortly")
 
         monkeypatch.setattr(scratch, "ensure_daemon", not_answering)
         served = _value(await client.call_tool("run", {"source": "2"}))
         assert served["status"] == "ok"
         assert "Strata 0.0.0" in served["note"]
+
+        # Any other failure, such as a replacement that would not start, is the call's.
+        def failed(*args, **kwargs):
+            raise scratch.ScratchError("the scratchpad's server did not open it")
+
+        monkeypatch.setattr(scratch, "ensure_daemon", failed)
+        result = await client.call_tool("run", {"source": "3"})
+        assert result.is_error
+        assert "did not open it" in result.content[0].text
 
 
 @pytest.mark.asyncio

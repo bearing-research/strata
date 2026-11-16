@@ -1358,6 +1358,7 @@ async def rate_limit_middleware(request: Request, call_next):
     # and amplify the overload across the fleet.
     if path in (
         "/health",
+        "/health/busy",
         "/health/ready",
         "/health/dependencies",
         "/ready",
@@ -1404,6 +1405,7 @@ async def tenant_context_middleware(request: Request, call_next):
         path
         in (
             "/health",
+            "/health/busy",
             "/health/ready",
             "/health/dependencies",
             "/metrics",
@@ -1485,6 +1487,7 @@ async def auth_middleware(request: Request, call_next):
         path
         in (
             "/health",
+            "/health/busy",
             "/health/ready",
             "/health/dependencies",
             "/metrics",

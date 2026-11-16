@@ -218,7 +218,7 @@ def build_server(root: Path) -> Server:
             if not found or found[0] is unreachable or other:
                 try:
                     daemon = await anyio.to_thread.run_sync(scratch.ensure_daemon, root, progress)
-                except scratch.ScratchError:
+                except scratch.NotAnswering:
                     # Another version's, too busy to answer whether it is: it serves the call.
                     if not other:
                         raise

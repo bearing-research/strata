@@ -409,6 +409,9 @@ class TestRateLimiterIntegration:
                 # The bucket is empty, and no time has passed.
                 response = await client.get("/v1/debug/rate-limits")
                 assert response.status_code == 429
+                # A probe still answers: a daemon refused it would look busy for good.
+                probe = await client.get("/health/busy")
+                assert probe.status_code == 200
                 assert "Retry-After" in response.headers
                 assert "Rate limit exceeded" in response.text
 

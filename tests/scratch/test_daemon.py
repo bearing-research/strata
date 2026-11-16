@@ -180,13 +180,17 @@ def test_a_busy_daemon_another_version_started_is_kept_until_idle(project):
             b"POST /v1/notebooks/open HTTP/1.1\r\nHost: 127.0.0.1\r\n"
             b"Content-Type: application/json\r\nContent-Length: 100\r\n\r\n"
         )
+        deadline = time.monotonic() + 30
         while not scratch._busy(first.url):
+            assert time.monotonic() < deadline, "a request still open is not busy"
             time.sleep(0.05)
         kept = scratch.ensure_daemon(project)
         assert (kept.pid, kept.version) == (first.pid, "0.0.0")
         assert scratch._healthy(first.url)
 
+    deadline = time.monotonic() + 30
     while scratch._busy(first.url):
+        assert time.monotonic() < deadline, "a request that ended is still busy"
         time.sleep(0.05)
     replaced = scratch.ensure_daemon(project)
     assert replaced.pid != first.pid
@@ -290,7 +294,7 @@ def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
     started = []
     monkeypatch.setattr(scratch, "_spawn", lambda anchor, port: started.append(port) or 1)
     # Alive and slow: a second daemon would write the directory beside it.
-    with pytest.raises(scratch.ScratchError, match=rf"pid {os.getpid()}\) is not answering"):
+    with pytest.raises(scratch.NotAnswering, match=rf"pid {os.getpid()}\) is not answering"):
         scratch.ensure_daemon(project)
     assert started == []
 

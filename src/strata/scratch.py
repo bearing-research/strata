@@ -48,6 +48,10 @@ class ScratchError(RuntimeError):
     """The scratchpad's daemon could not be found or started; the message says why."""
 
 
+class NotAnswering(ScratchError):
+    """The daemon's process is alive but did not answer in time: busy, not gone."""
+
+
 @dataclass(frozen=True)
 class Daemon:
     """A running daemon and the scratchpad session it holds open."""
@@ -118,7 +122,7 @@ def daemon_serving(notebook_dir: Path) -> Daemon | None:
             return None
         # Alive but slow, not gone: another daemon beside it would write the directory
         # from a second session.
-        raise ScratchError(
+        raise NotAnswering(
             f"the scratchpad's server (pid {record['pid']}) is not answering ({exc!r}); "
             "try again shortly"
         ) from exc
