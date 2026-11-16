@@ -673,7 +673,10 @@ def _hydrate_output(output: CellOutput, *, notebook_dir: Path, notebook_id: str)
             notebook_id=notebook_id,
             artifact_dir=notebook_dir / ".strata" / "artifacts",
         )
-        blob = manager.load_artifact_data(artifact_id, version)
+        try:
+            blob = manager.load_artifact_data(artifact_id, version)
+        finally:
+            manager.close()
     except Exception:
         return output
 

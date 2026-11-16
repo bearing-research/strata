@@ -3736,6 +3736,8 @@ class SessionManager:
             else:
                 if not callable(drain) and callable(shutdown_nowait):
                     shutdown_nowait()
+        # Or SQLite keeps the notebook's database open, and Windows refuses to delete it.
+        session.artifact_manager.close()
         return tasks
 
     def list_sessions(self) -> list[str]:

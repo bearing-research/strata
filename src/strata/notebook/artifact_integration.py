@@ -98,6 +98,8 @@ class NotebookArtifactManager:
         artifact_dir.mkdir(parents=True, exist_ok=True)
         self.artifact_dir = artifact_dir
 
+        # A dialect passed in is its owner's to close.
+        self._owns_dialect = dialect is None
         self.artifact_store = ArtifactStore(artifact_dir, dialect=dialect)
         complete_upgrade(self.artifact_store)
         # The tables each cell's current run read (``uri@v=<snapshot>`` by name), recorded
@@ -109,6 +111,14 @@ class NotebookArtifactManager:
             self.artifact_store.db_path, dialect=self.artifact_store.dialect
         )
         self.release_store = ReleaseStore(self.artifact_store, self.build_store)
+
+    def close(self) -> None:
+        """Close the store's connections if this manager opened them. Idempotent.
+
+        The store still answers afterwards, one connection per call.
+        """
+        if self._owns_dialect:
+            self.artifact_store.close()
 
     def prune(
         self,
