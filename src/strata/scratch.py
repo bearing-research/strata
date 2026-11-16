@@ -52,6 +52,8 @@ class Daemon:
     url: str
     session_id: str
     pid: int
+    # The strata-notebook version that started it; another version's daemon is replaced.
+    version: str = ""
     # Milliseconds per setup step, in order; empty when the daemon was already up.
     setup_ms: dict[str, int] = field(default_factory=dict)
 
@@ -62,6 +64,10 @@ def scratch_dir(anchor: Path) -> Path:
 
 def _record_path(anchor: Path) -> Path:
     return scratch_dir(anchor) / ".strata" / "server.json"
+
+
+def _log_path(anchor: Path) -> Path:
+    return scratch_dir(anchor) / ".strata" / "server.log"
 
 
 def _environment(url: str, session_id: str) -> str | None:
@@ -87,7 +93,12 @@ def find_daemon(anchor: Path) -> Daemon | None:
         return None
     if _environment(record["url"], record["session_id"]) is None:
         return None
-    return Daemon(url=record["url"], session_id=record["session_id"], pid=record["pid"])
+    return Daemon(
+        url=record["url"],
+        session_id=record["session_id"],
+        pid=record["pid"],
+        version=record["version"],
+    )
 
 
 def _free_port() -> int:
@@ -134,7 +145,14 @@ def _server_command() -> list[str]:
 
 def _spawn(anchor: Path, port: int) -> int:
     """Start the daemon detached; return its pid."""
+    from vestigo.file_modes import private_file
+
+    strata_home = Path.home() / ".strata"
     env = {
+        # The caches a personal server keeps, not ones beside the storage dir, which is
+        # the project itself here. The environment may still say otherwise.
+        "STRATA_NOTEBOOK_MOUNT_CACHE_DIR": str(strata_home / "mount_cache"),
+        "STRATA_NOTEBOOK_SHARED_ENV_DIR": str(strata_home / "envs"),
         **os.environ,
         "STRATA_HOST": "127.0.0.1",
         "STRATA_PORT": str(port),
@@ -145,10 +163,13 @@ def _spawn(anchor: Path, port: int) -> int:
         "STRATA_NOTEBOOK_STORAGE_DIR": str(anchor),
         "STRATA_IDLE_EXIT_MINUTES": os.environ.get("STRATA_IDLE_EXIT_MINUTES", str(IDLE_MINUTES)),
     }
-    log = scratch_dir(anchor) / ".strata" / "server.log"
+    log = private_file(_log_path(anchor))
     launched = subprocess.run(
         [sys.executable, "-I", "-c", _LAUNCH, str(log), *_server_command()],
         env=env,
+        # Its [tool.strata] is then the scratchpad's (none), not whichever pyproject.toml
+        # sits above where the first client ran.
+        cwd=scratch_dir(anchor),
         capture_output=True,
         text=True,
         check=True,
@@ -176,16 +197,29 @@ def _alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # Another user's process: it exists.
+        return True
     return True
 
 
-def _until(ready: Callable[[], bool], pid: int, what: str, deadline: float) -> None:
+def _until(ready: Callable[[], bool], pid: int, what: str, deadline: float, log: Path) -> None:
     while not ready():
         if not _alive(pid):
-            raise ScratchError(f"the scratchpad's server exited while {what}")
+            raise ScratchError(f"the scratchpad's server exited while {what}; see {log}")
         if time.monotonic() > deadline:
-            raise ScratchError(f"the scratchpad's server timed out {what}")
+            raise ScratchError(f"the scratchpad's server timed out {what}; see {log}")
         time.sleep(0.1)
+
+
+def _kill(pid: int) -> None:
+    """Kill the daemon and what it started: it leads its own session, so its group."""
+    # Gone already raises ProcessLookupError, or on Windows a plain OSError.
+    with contextlib.suppress(OSError):
+        if sys.platform == "win32":
+            os.kill(pid, signal.SIGTERM)
+        else:
+            os.killpg(pid, signal.SIGKILL)
 
 
 def _healthy(url: str) -> bool:
@@ -206,13 +240,23 @@ def _start(
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
     pid = _spawn(anchor, port)
+    log = _log_path(anchor)
     try:
         with step("starting the scratchpad"):
-            _until(lambda: _healthy(url), pid, "starting", deadline)
+            _until(lambda: _healthy(url), pid, "starting", deadline, log)
         with step("opening the scratchpad"):
-            opened = httpx.post(
-                f"{url}/v1/notebooks/open", json={"path": str(scratch_dir(anchor))}, timeout=60.0
-            )
+            try:
+                # Open awaits the first environment sync, which on a cold uv cache
+                # takes minutes: the rest of the setup budget, not a request's.
+                opened = httpx.post(
+                    f"{url}/v1/notebooks/open",
+                    json={"path": str(scratch_dir(anchor))},
+                    timeout=max(deadline - time.monotonic(), 1.0),
+                )
+            except httpx.HTTPError as exc:
+                raise ScratchError(
+                    f"the scratchpad's server did not open it ({exc}); see {log}"
+                ) from exc
             if not opened.is_success:
                 raise ScratchError(
                     f"the scratchpad's server refused to open it: {opened.text[:300]}"
@@ -225,12 +269,11 @@ def _start(
                 pid,
                 "syncing its environment",
                 deadline,
+                log,
             )
     except BaseException:
-        # Not left running for nobody: no server.json names it. Gone already raises
-        # ProcessLookupError, or on Windows a plain OSError.
-        with contextlib.suppress(OSError):
-            os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        # Not left running for nobody: no server.json names it.
+        _kill(pid)
         raise
     return pid, url, session_id
 
@@ -244,8 +287,12 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
     (scratch_dir(anchor) / ".strata").mkdir(parents=True, exist_ok=True)
     with filelock.FileLock(scratch_dir(anchor) / ".strata" / "daemon.lock"):
         running = find_daemon(anchor)
-        if running is not None:
+        current = version("strata-notebook")
+        if running is not None and running.version == current:
             return running
+        if running is not None:
+            # Started by another install: its code is not this client's.
+            _stop(running)
 
         setup_ms: dict[str, int] = {}
 
@@ -262,11 +309,15 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
             "url": url,
             "pid": pid,
             "session_id": session_id,
-            "version": version("strata-notebook"),
+            "version": current,
             "anchor": str(anchor),
         }
-        _record_path(anchor).write_text(json.dumps(record, indent=2) + "\n")
-        return Daemon(url=url, session_id=session_id, pid=pid, setup_ms=setup_ms)
+        # Whole or not at all: a torn record would stop every later client.
+        path = _record_path(anchor)
+        partial = path.with_suffix(".json.tmp")
+        partial.write_text(json.dumps(record, indent=2) + "\n")
+        os.replace(partial, path)
+        return Daemon(url=url, session_id=session_id, pid=pid, version=current, setup_ms=setup_ms)
 
 
 def stop_daemon(anchor: Path, timeout: float = 30.0) -> bool:
@@ -274,10 +325,16 @@ def stop_daemon(anchor: Path, timeout: float = 30.0) -> bool:
     running = find_daemon(anchor.resolve())
     if running is None:
         return False
-    os.kill(running.pid, signal.SIGTERM)
+    _stop(running, timeout)
+    return True
+
+
+def _stop(running: Daemon, timeout: float = 30.0) -> None:
+    # It may stop itself, idle, in between.
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(running.pid, signal.SIGTERM)
     deadline = time.monotonic() + timeout
     while _healthy(running.url):
         if time.monotonic() > deadline:
             raise ScratchError(f"the scratchpad's server (pid {running.pid}) did not stop")
         time.sleep(0.1)
-    return True

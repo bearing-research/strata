@@ -129,6 +129,9 @@ a server for it on a free loopback port, with the scratchpad profile and
 waits for its environment. The daemon's address, pid and session are written to
 `.strata-scratch/.strata/server.json`, so the next client finds it instead of
 starting another, and a file lock makes two clients asking at once share one.
+A daemon another Strata version started is stopped and replaced. The server's
+output goes to `.strata-scratch/.strata/server.log`; it keeps remote-mount copies
+and shared environments under `~/.strata`, as a personal server does.
 Cells read the project read-only as `project` (`project / "data.csv"`).
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.

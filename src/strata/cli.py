@@ -848,7 +848,11 @@ def _dispatch_scratch(args: argparse.Namespace) -> int:
 
     root = Path(args.root).expanduser()
     if args.scratch_command == "stop":
-        stopped = scratch.stop_daemon(root)
+        try:
+            stopped = scratch.stop_daemon(root)
+        except scratch.ScratchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         print("stopped" if stopped else "no scratchpad daemon runs here")
         return 0
     if args.scratch_command == "status":

@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 import httpx
 import pytest
@@ -134,10 +135,101 @@ def test_a_server_that_will_not_start_leaves_no_record(project, monkeypatch):
     monkeypatch.setattr(
         scratch, "_server_command", lambda: [sys.executable, "-c", "raise SystemExit(3)"]
     )
-    with pytest.raises(scratch.ScratchError, match="exited while starting"):
+    # The error names the log that says why.
+    with pytest.raises(scratch.ScratchError, match=r"exited while starting; see .*server\.log"):
         scratch.ensure_daemon(project)
     assert scratch.find_daemon(project) is None
     assert not (project / ".strata-scratch" / ".strata" / "server.json").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a process group is POSIX")
+def test_a_failed_start_kills_what_the_server_started(project, monkeypatch):
+    child_pid = project / "child.pid"
+    server = (
+        "import pathlib, subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        f"pathlib.Path({str(child_pid)!r}).write_text(str(child.pid))\n"
+        "raise SystemExit(3)\n"
+    )
+    monkeypatch.setattr(scratch, "_server_command", lambda: [sys.executable, "-c", server])
+    with pytest.raises(scratch.ScratchError, match="exited while starting"):
+        scratch.ensure_daemon(project)
+    pid = int(child_pid.read_text())
+    try:
+        # Orphaned, then reaped by init once killed: gone within a moment.
+        deadline = time.monotonic() + 10
+        while scratch._alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not scratch._alive(pid)
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGKILL)
+
+
+def test_open_has_the_setup_budget_and_its_failure_is_a_scratch_error(project, monkeypatch):
+    # Open awaits the first sync, which on a cold uv cache outlasts any one request.
+    timeouts = []
+
+    def post(url, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        raise httpx.ReadTimeout("slow sync")
+
+    monkeypatch.setattr(scratch.httpx, "post", post)
+    with pytest.raises(scratch.ScratchError, match="did not open it .*slow sync"):
+        scratch.ensure_daemon(project)
+    assert timeouts and timeouts[0] > 500
+    assert scratch.find_daemon(project) is None
+
+
+def test_a_daemon_another_version_started_is_replaced(project):
+    first = scratch.ensure_daemon(project)
+    record_path = project / ".strata-scratch" / ".strata" / "server.json"
+    record = json.loads(record_path.read_text())
+    record["version"] = "0.0.0"
+    record_path.write_text(json.dumps(record))
+
+    second = scratch.ensure_daemon(project)
+    assert second.pid != first.pid
+    # Stopped, not left beside the new one: one session writes the directory.
+    assert not scratch._healthy(first.url)
+    assert json.loads(record_path.read_text())["version"] == second.version != "0.0.0"
+
+
+def test_the_daemon_keeps_the_personal_caches_and_none_of_the_callers_config(tmp_path, monkeypatch):
+    for key in [k for k in os.environ if k.startswith("STRATA_")]:
+        monkeypatch.delenv(key)
+    anchor = tmp_path / "project"
+    (anchor / ".strata-scratch" / ".strata").mkdir(parents=True)
+    seen = {}
+
+    def run(command, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, stdout="1\n")
+
+    monkeypatch.setattr(scratch.subprocess, "run", run)
+    scratch._spawn(anchor, 1)
+    home = scratch.Path.home() / ".strata"
+    # Not beside the storage dir, which is the project here.
+    assert seen["env"]["STRATA_NOTEBOOK_MOUNT_CACHE_DIR"] == str(home / "mount_cache")
+    assert seen["env"]["STRATA_NOTEBOOK_SHARED_ENV_DIR"] == str(home / "envs")
+    # Its pyproject.toml is the scratchpad's, wherever the client runs.
+    assert seen["cwd"] == anchor / ".strata-scratch"
+    if sys.platform != "win32":
+        log = anchor / ".strata-scratch" / ".strata" / "server.log"
+        assert log.stat().st_mode & 0o077 == 0
+
+    monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_DIR", str(tmp_path / "mine"))
+    scratch._spawn(anchor, 1)
+    assert seen["env"]["STRATA_NOTEBOOK_MOUNT_CACHE_DIR"] == str(tmp_path / "mine")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="os.kill(pid, 0) is POSIX's probe")
+def test_another_users_process_is_alive(monkeypatch):
+    def kill(pid, sig):
+        raise PermissionError
+
+    monkeypatch.setattr(scratch.os, "kill", kill)
+    assert scratch._alive(1)
 
 
 def test_the_cli_starts_shows_and_stops_it(project, capsys):
