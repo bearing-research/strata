@@ -156,14 +156,16 @@ async def test_later_calls_do_not_probe_the_daemon_again(project, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_call_that_could_not_connect_is_sent_again_once(project, monkeypatch):
+# Windows may time a connection to a port nobody holds out instead of refusing it.
+@pytest.mark.parametrize("unconnected", [httpx.ConnectError, httpx.ConnectTimeout])
+async def test_a_call_that_could_not_connect_is_sent_again_once(project, monkeypatch, unconnected):
     call = mcp_bridge.Upstream.call_tool
     refused = []
 
     async def once_refused(self, name, arguments):
         if not refused:
             refused.append(name)
-            raise httpx.ConnectError("refused")
+            raise unconnected("refused")
         return await call(self, name, arguments)
 
     monkeypatch.setattr(mcp_bridge.Upstream, "call_tool", once_refused)

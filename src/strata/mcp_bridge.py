@@ -64,7 +64,7 @@ class Upstream:
     def __init__(self) -> None:
         # A cell may run for hours; its own timeout ends it, not this client. No kept-alive
         # connections: one to a daemon that died fails as if the call were sent, where a
-        # new one finds nothing listening (ConnectError) and the call is sent again.
+        # new one finds nothing listening and the call is sent again.
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(None, connect=5.0),
             limits=httpx.Limits(max_keepalive_connections=0),
@@ -228,9 +228,10 @@ def build_server(root: Path) -> Server:
                     setup_ms = await connect(ctx, unreachable) or setup_ms
                     result = await upstream.call_tool(params.name, arguments)
                     break
-                except httpx.ConnectError:
+                except (httpx.ConnectError, httpx.ConnectTimeout):
                     # Nothing listens there now (it stopped idle, or was replaced): the
                     # call never ran, so find the daemon again and send it once more.
+                    # Windows may time such a connection out rather than refuse it.
                     if attempt:
                         raise
                     unreachable = found[0] if found else None
@@ -238,7 +239,7 @@ def build_server(root: Path) -> Server:
             return _failure(str(exc), "the error says what to look at; the next call tries again")
         except (httpx.HTTPError, UpstreamError) as exc:
             return _failure(
-                f"the scratchpad's server failed the call: {exc}",
+                f"the scratchpad's server failed the call: {type(exc).__name__}: {exc}",
                 "call again; a server that stopped is started again on the next call",
             )
         if setup_ms:
