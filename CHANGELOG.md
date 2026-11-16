@@ -412,7 +412,7 @@ exhaustive commit history.
   `strata apikey --dsn` closes its connection pool. A store given another owner's
   database leaves it open. On vestigo 0.6.0 closing a SQLite store releases nothing. It
   matters once vestigo keeps connections between calls: then an open database stops
-  Windows from deleting or moving the notebook. (#CLOSE)
+  Windows from deleting or moving the notebook. (#1563)
 - **A reverted edit's outputs come back together.** Reverting an edit (a cell's source
   changed and changed back) reuses the earlier run's results by copying each value,
   display and console back, one commit each, so a blob gone partway left some from the
