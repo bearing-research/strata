@@ -291,3 +291,35 @@ class TestConfiguration:
     def test_personal_mode_rejects_api_key_auth(self):
         with pytest.raises(ValueError, match="api_key"):
             StrataConfig(deployment_mode="personal", auth_mode="api_key")
+
+
+def test_a_dsn_given_to_the_cli_has_its_pool_closed(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    import vestigo.sql_backend
+    from vestigo.sql_backend import SqliteDialect
+
+    from strata.auth.api_key_cli import cmd_create
+
+    closes = []
+
+    class Recorded(SqliteDialect):
+        def close(self):
+            closes.append(True)
+            super().close()
+
+    # A SQLite stand-in for the Postgres pool the DSN would open.
+    monkeypatch.setattr(
+        vestigo.sql_backend, "PostgresDialect", lambda dsn: Recorded(tmp_path / "pg.sqlite")
+    )
+    args = argparse.Namespace(
+        principal="svc",
+        tenant=None,
+        scopes=None,
+        description=None,
+        expires_in_days=None,
+        artifact_dir=str(tmp_path),
+        dsn="postgresql://keys",
+    )
+    assert cmd_create(args) == 0
+    assert closes == [True]

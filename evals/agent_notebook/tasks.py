@@ -43,9 +43,9 @@ def _seed_cells(notebook_dir: Path, sources: list[str]) -> None:
     """Add each source as a Python cell via the offline ops backend."""
     from strata.notebook.ops import LocalNotebookOps
 
-    ops = LocalNotebookOps(notebook_dir)
-    for source in sources:
-        ops.add_cell(source, language="python")
+    with LocalNotebookOps(notebook_dir) as ops:
+        for source in sources:
+            ops.add_cell(source, language="python")
 
 
 def _seed_buggy(notebook_dir: Path) -> None:

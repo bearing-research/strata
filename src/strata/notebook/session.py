@@ -371,18 +371,21 @@ class NotebookSession:
         self._environment_state_lock = threading.RLock()
         self._synchronous_environment_mutation: str | None = None
         self.environment_jobs = EnvironmentJobs(self)
-        self.environment_jobs.load_history()
-
         # The last secret fetch and the ``[secret_manager]`` config it was made for.
         self._secret_fetch: tuple[dict[str, Any], SecretFetchResult | None] | None = None
-
-        self._analyze_and_build_dag()
-        self._run_annotation_validation()
-        # Merge manager secrets into env before cells see it.
-        if fetch_secrets:
-            self.refresh_secrets()
-        else:
-            self._merge_secrets()
+        try:
+            self.environment_jobs.load_history()
+            self._analyze_and_build_dag()
+            self._run_annotation_validation()
+            # Merge manager secrets into env before cells see it.
+            if fetch_secrets:
+                self.refresh_secrets()
+            else:
+                self._merge_secrets()
+        except BaseException:
+            # No session comes back to close the store it opened.
+            self.artifact_manager.close()
+            raise
 
     def _merge_secrets(self) -> None:
         """Merge the last secret fetch into env, unless ``[secret_manager]`` changed since.
@@ -3433,6 +3436,18 @@ class SessionManager:
                 continue
         return None
 
+    def sessions_on(self, directory: Path) -> list[NotebookSession]:
+        """Every live session on *directory*, whoever opened it."""
+        target = Path(directory).resolve()
+        found = []
+        for session in self._sessions.values():
+            try:
+                if session.path.resolve() == target:
+                    found.append(session)
+            except FileNotFoundError:
+                continue
+        return found
+
     def open_notebook(
         self,
         directory: Path,
@@ -3601,11 +3616,19 @@ class SessionManager:
         except Exception as e:
             logger.warning("Failed to initialize R warm pool: %s", e)
 
-        if timing is None:
-            session.compute_staleness()
-        else:
-            with timing.phase("session_staleness"):
+        try:
+            if timing is None:
                 session.compute_staleness()
+            else:
+                with timing.phase("session_staleness"):
+                    session.compute_staleness()
+        except BaseException:
+            # Never registered, so no close_session would release its pools and stores.
+            for pool in (session.warm_pool, session.r_warm_pool):
+                if pool is not None:
+                    pool.shutdown_nowait()
+            session.artifact_manager.close()
+            raise
 
         session.opened_by = opened_by
         session.activity_clock = self._clock
@@ -3722,20 +3745,25 @@ class SessionManager:
         # The outbound sequence counter outlives a disconnect, and this is every way a
         # session ends (delete and close routes, the sweep).
         forget_notebook_execution_state(session_id)
-        for pool in (session.warm_pool, session.r_warm_pool):
-            if pool is None:
-                continue
-            drain = getattr(pool, "drain", None)
-            shutdown_nowait = getattr(pool, "shutdown_nowait", None)
-            try:
-                if callable(drain):
-                    tasks.append(asyncio.get_running_loop().create_task(drain()))
-            except RuntimeError:
-                if callable(shutdown_nowait):
-                    shutdown_nowait()
-            else:
-                if not callable(drain) and callable(shutdown_nowait):
-                    shutdown_nowait()
+        try:
+            for pool in (session.warm_pool, session.r_warm_pool):
+                if pool is None:
+                    continue
+                drain = getattr(pool, "drain", None)
+                shutdown_nowait = getattr(pool, "shutdown_nowait", None)
+                try:
+                    if callable(drain):
+                        tasks.append(asyncio.get_running_loop().create_task(drain()))
+                except RuntimeError:
+                    if callable(shutdown_nowait):
+                        shutdown_nowait()
+                else:
+                    if not callable(drain) and callable(shutdown_nowait):
+                        shutdown_nowait()
+        finally:
+            # Or SQLite keeps the notebook's database open, and Windows refuses to
+            # delete it.
+            session.artifact_manager.close()
         return tasks
 
     def list_sessions(self) -> list[str]:

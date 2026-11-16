@@ -21,6 +21,8 @@ from strata.notebook.parser import parse_notebook
 if TYPE_CHECKING:
     import re
 
+    from strata.notebook.artifact_integration import NotebookArtifactManager
+
 _DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # per rendered output
 
 
@@ -60,36 +62,41 @@ def export_notebook(
     state = parse_notebook(notebook_dir)
     _resolve_variant_flags(state)
 
-    blocks: list[Block] = []
+    # Opened on the first stored output an export reads, and closed once at the end.
+    stored = _StoredOutputs(notebook_dir, state.id)
+    try:
+        blocks: list[Block] = []
 
-    if options.app_view:
-        # No README banner: the app view has none.
-        blocks.append(HeadingBlock(state.name, level=1))
+        if options.app_view:
+            # No README banner: the app view has none.
+            blocks.append(HeadingBlock(state.name, level=1))
+            for cell in state.cells:
+                if not options.include_inactive_variants and cell.variant_active is False:
+                    continue
+                if not _is_app_cell(cell):
+                    continue
+                blocks.extend(_render_app_cell(cell, notebook_dir, options, stored))
+            if options.output_format == ExportFormat.HTML:
+                return _emit_html(blocks, title=state.name)
+            return _emit_markdown(blocks)
+
+        readme = _load_readme(notebook_dir)
+        if readme is not None:
+            # README opens with its own h1; a second header would compete in mkdocs.
+            blocks.append(MarkdownBlock(readme))
+        else:
+            blocks.append(HeadingBlock(f"Notebook: {state.name}", level=1))
+
         for cell in state.cells:
             if not options.include_inactive_variants and cell.variant_active is False:
                 continue
-            if not _is_app_cell(cell):
-                continue
-            blocks.extend(_render_app_cell(cell, state, notebook_dir, options))
+            blocks.extend(_render_cell(cell, state, notebook_dir, options, stored))
+
         if options.output_format == ExportFormat.HTML:
             return _emit_html(blocks, title=state.name)
         return _emit_markdown(blocks)
-
-    readme = _load_readme(notebook_dir)
-    if readme is not None:
-        # README opens with its own h1; a second header would compete in mkdocs.
-        blocks.append(MarkdownBlock(readme))
-    else:
-        blocks.append(HeadingBlock(f"Notebook: {state.name}", level=1))
-
-    for cell in state.cells:
-        if not options.include_inactive_variants and cell.variant_active is False:
-            continue
-        blocks.extend(_render_cell(cell, state, notebook_dir, options))
-
-    if options.output_format == ExportFormat.HTML:
-        return _emit_html(blocks, title=state.name)
-    return _emit_markdown(blocks)
+    finally:
+        stored.close()
 
 
 # --- Block tree ---
@@ -190,9 +197,9 @@ def _render_widget_controls(cell: CellState) -> list[Block]:
 
 def _render_app_cell(
     cell: CellState,
-    state: NotebookState,
     notebook_dir: Path,
     options: ExportOptions,
+    stored: _StoredOutputs,
 ) -> list[Block]:
     """Render one cell for an app-view snapshot: outputs only, no source, chips or console.
 
@@ -218,8 +225,7 @@ def _render_app_cell(
         blocks.extend(
             _render_display_output(
                 output,
-                notebook_dir=notebook_dir,
-                notebook_id=state.id,
+                stored=stored,
                 max_bytes=options.max_output_bytes,
             )
         )
@@ -260,6 +266,7 @@ def _render_cell(
     state: NotebookState,
     notebook_dir: Path,
     options: ExportOptions,
+    stored: _StoredOutputs,
 ) -> list[Block]:
     blocks: list[Block] = []
 
@@ -293,8 +300,7 @@ def _render_cell(
         blocks.extend(
             _render_display_output(
                 output,
-                notebook_dir=notebook_dir,
-                notebook_id=state.id,
+                stored=stored,
                 max_bytes=options.max_output_bytes,
             )
         )
@@ -537,8 +543,7 @@ _PREVIEW_ROW_LIMIT = 20
 def _render_display_output(
     output: CellOutput,
     *,
-    notebook_dir: Path,
-    notebook_id: str,
+    stored: _StoredOutputs,
     max_bytes: int,
 ) -> list[Block]:
     """Per-content-type renderer for one persisted cell output.
@@ -551,7 +556,7 @@ def _render_display_output(
             CodeBlock(language="text", body=output.error.rstrip(), title="Error"),
         ]
 
-    output = _hydrate_output(output, notebook_dir=notebook_dir, notebook_id=notebook_id)
+    output = _hydrate_output(output, stored=stored)
     ctype = output.content_type
 
     if ctype == "image/png" and output.inline_data_url:
@@ -651,7 +656,30 @@ def _format_scalar_preview(value: object) -> str:
     return repr(value)
 
 
-def _hydrate_output(output: CellOutput, *, notebook_dir: Path, notebook_id: str) -> CellOutput:
+class _StoredOutputs:
+    """The notebook's artifact store for one export: opened on first use, closed once."""
+
+    def __init__(self, notebook_dir: Path, notebook_id: str) -> None:
+        self._notebook_dir = notebook_dir
+        self._notebook_id = notebook_id
+        self._manager: NotebookArtifactManager | None = None
+
+    def load(self, artifact_id: str, version: int) -> bytes:
+        if self._manager is None:
+            from strata.notebook.artifact_integration import NotebookArtifactManager
+
+            self._manager = NotebookArtifactManager(
+                notebook_id=self._notebook_id,
+                artifact_dir=self._notebook_dir / ".strata" / "artifacts",
+            )
+        return self._manager.load_artifact_data(artifact_id, version)
+
+    def close(self) -> None:
+        if self._manager is not None:
+            self._manager.close()
+
+
+def _hydrate_output(output: CellOutput, *, stored: _StoredOutputs) -> CellOutput:
     """Re-attach the inline image/markdown payload, which is not persisted, from the store.
 
     Best effort: if the store or blob is unavailable, the output is returned as-is.
@@ -666,14 +694,8 @@ def _hydrate_output(output: CellOutput, *, notebook_dir: Path, notebook_id: str)
         return output
 
     try:
-        from strata.notebook.artifact_integration import NotebookArtifactManager
-
         artifact_id, version = _parse_artifact_uri(output.artifact_uri)
-        manager = NotebookArtifactManager(
-            notebook_id=notebook_id,
-            artifact_dir=notebook_dir / ".strata" / "artifacts",
-        )
-        blob = manager.load_artifact_data(artifact_id, version)
+        blob = stored.load(artifact_id, version)
     except Exception:
         return output
 

@@ -140,7 +140,7 @@ def test_export_code_fence_grows_when_body_contains_triple_backticks(
 
 def test_image_output_renders_when_inline_data_url_present() -> None:
     """Renderer-only: assumes hydration re-attached ``inline_data_url``, which the writer strips."""
-    from strata.notebook.export import _render_display_output
+    from strata.notebook.export import _render_display_output, _StoredOutputs
     from strata.notebook.models import CellOutput
 
     data_url = "data:image/png;base64,iVBORw0KGgoAAAANS"
@@ -151,8 +151,7 @@ def test_image_output_renders_when_inline_data_url_present() -> None:
 
     blocks = _render_display_output(
         output,
-        notebook_dir=Path("."),
-        notebook_id="dummy",
+        stored=_StoredOutputs(Path("."), "dummy"),
         max_bytes=0,
     )
     from strata.notebook.export import ImageBlock
@@ -531,7 +530,7 @@ def test_export_swaps_oversized_image_for_size_note(tmp_path: Path) -> None:
 
     Renderer-level because the writer strips a 1 MB data URL as transient.
     """
-    from strata.notebook.export import _render_display_output
+    from strata.notebook.export import _render_display_output, _StoredOutputs
     from strata.notebook.models import CellOutput
 
     # 200 KB data URL
@@ -540,8 +539,7 @@ def test_export_swaps_oversized_image_for_size_note(tmp_path: Path) -> None:
 
     blocks = _render_display_output(
         output,
-        notebook_dir=Path("."),
-        notebook_id="dummy",
+        stored=_StoredOutputs(Path("."), "dummy"),
         max_bytes=100_000,  # below the 200 KB image
     )
 

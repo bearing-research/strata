@@ -446,6 +446,23 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   docstring's indentation when compiling, and 3.12 does not, so on 3.12 every notebook
   MCP tool's description had its lines indented. Each one is now its cleaned docstring.
   (#1560)
+- **What opens a notebook's database closes it.** These now close the stores they
+  opened:
+  - closing a session, through the close and delete routes or the idle and memory
+    sweeps; both delete routes now close every session on the directory, and refuse
+    while any of them runs a cell or changes its environment;
+  - the server's shutdown, for every session still open;
+  - a session that fails to open, with its warm pools;
+  - `LocalNotebookOps`, through `close`, `aclose` or a `with` block, with the warm
+    pools of a session it opened; one wrapping a server's session leaves it alone;
+  - an export, which now opens the store once rather than per output;
+  - a snapshot import, before it moves the notebook in.
+
+  A reset of the API key or stream ownership store closes the database it opened, and
+  `strata apikey --dsn` closes its connection pool. A store given another owner's
+  database leaves it open. On vestigo 0.6.0 closing a SQLite store releases nothing. It
+  matters once vestigo keeps connections between calls: then an open database stops
+  Windows from deleting or moving the notebook. (#1563)
 - **A reverted edit's outputs come back together.** Reverting an edit (a cell's source
   changed and changed back) reuses the earlier run's results by copying each value,
   display and console back, one commit each, so a blob gone partway left some from the
