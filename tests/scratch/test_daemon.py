@@ -20,36 +20,6 @@ from strata import scratch
 from strata.cli import main
 
 
-@pytest.fixture
-def project(tmp_path, monkeypatch):
-    """An empty project; the daemons it starts keep their stores under *tmp_path*."""
-    for key in [k for k in os.environ if k.startswith("STRATA_")]:
-        monkeypatch.delenv(key)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
-    monkeypatch.setenv("STRATA_NOTEBOOK_WARM_POOL_SIZE", "0")
-    # A backstop: a daemon a failed test leaves behind stops itself.
-    monkeypatch.setenv("STRATA_IDLE_EXIT_MINUTES", "1")
-    started: list[int] = []
-    spawn = scratch._spawn
-
-    def recorded(anchor, port):
-        pid = spawn(anchor, port)
-        started.append(pid)
-        return pid
-
-    monkeypatch.setattr(scratch, "_spawn", recorded)
-    root = tmp_path / "project"
-    root.mkdir()
-    yield root
-    # Every one this test started, not only the one server.json names.
-    for pid in started:
-        # Gone already: ProcessLookupError, or on Windows a plain OSError.
-        with contextlib.suppress(OSError):
-            os.kill(pid, signal.SIGTERM)
-
-
 def test_the_first_call_starts_it_and_the_next_finds_it(project):
     first = scratch.ensure_daemon(project)
     assert list(first.setup_ms) == [
@@ -245,3 +215,55 @@ def test_the_cli_starts_shows_and_stops_it(project, capsys):
     assert main(["scratch", "stop", "--root", str(project)]) == 0
     assert capsys.readouterr().out.strip() == "stopped"
     assert scratch.find_daemon(project.resolve()) is None
+
+
+def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
+    state = project / ".strata-scratch" / ".strata"
+    state.mkdir(parents=True)
+    record = {"url": "http://127.0.0.1:9", "pid": os.getpid(), "session_id": "s", "version": "0"}
+    (state / "server.json").write_text(json.dumps(record))
+
+    def slow(url, **kwargs):
+        raise httpx.ReadTimeout("busy")
+
+    monkeypatch.setattr(scratch.httpx, "get", slow)
+    started = []
+    monkeypatch.setattr(scratch, "_spawn", lambda anchor, port: started.append(port) or 1)
+    # Alive and slow: a second daemon would write the directory beside it.
+    with pytest.raises(scratch.ScratchError, match=rf"pid {os.getpid()}\) is not answering"):
+        scratch.ensure_daemon(project)
+    assert started == []
+
+
+def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
+    """Killed a moment ago: its connections reset while its process still exists."""
+    state = project / ".strata-scratch" / ".strata"
+    state.mkdir(parents=True)
+    record = {"url": "http://127.0.0.1:9", "pid": 12345, "session_id": "s", "version": "0"}
+    (state / "server.json").write_text(json.dumps(record))
+
+    def reset(url, **kwargs):
+        raise httpx.ReadError("connection reset by peer")
+
+    checks = iter([True, True, False])
+    monkeypatch.setattr(scratch.httpx, "get", reset)
+    monkeypatch.setattr(scratch, "_alive", lambda pid: next(checks))
+    assert scratch.find_daemon(project) is None
+
+
+def test_a_launch_that_fails_is_a_scratch_error(project, monkeypatch):
+    def run(command, **kwargs):
+        raise OSError("no such interpreter")
+
+    monkeypatch.setattr(scratch.subprocess, "run", run)
+    with pytest.raises(scratch.ScratchError, match="could not be launched: no such interpreter"):
+        scratch.ensure_daemon(project)
+
+
+def test_status_of_a_daemon_not_answering_is_an_error(project, monkeypatch, capsys):
+    def busy(anchor):
+        raise scratch.ScratchError("the scratchpad's server (pid 1) is not answering")
+
+    monkeypatch.setattr(scratch, "find_daemon", busy)
+    assert main(["scratch", "status", "--root", str(project)]) == 2
+    assert "not answering" in capsys.readouterr().err

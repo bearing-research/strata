@@ -736,6 +736,22 @@ def _build_parser() -> argparse.ArgumentParser:
         )
         sub.set_defaults(func=_dispatch_scratch)
 
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="Serve a project's scratchpad to a coding agent as a stdio MCP server",
+        description=(
+            "For an agent's MCP config. Lists the scratchpad's tools at once; the first "
+            "tool call starts the project's scratchpad daemon (see `strata scratch`) and "
+            "every call runs there. Needs the [mcp] extra."
+        ),
+    )
+    mcp_parser.add_argument(
+        "--root",
+        default=".",
+        help="The project whose scratchpad to serve (default: the current directory)",
+    )
+    mcp_parser.set_defaults(func=_dispatch_mcp)
+
     watch_parser = subparsers.add_parser(
         "watch",
         help="Attach the read-only TUI to a live notebook session (watch only)",
@@ -840,6 +856,20 @@ def _dispatch_agent(args: argparse.Namespace) -> int:
     return agent_main(args)
 
 
+def _dispatch_mcp(args: argparse.Namespace) -> int:
+    try:
+        from strata.mcp_bridge import mcp_main
+    except ModuleNotFoundError as exc:
+        if exc.name is None or not exc.name.startswith("mcp"):
+            raise
+        print(
+            "strata mcp needs the [mcp] extra: uv tool install 'strata-notebook[mcp]'",
+            file=sys.stderr,
+        )
+        return 2
+    return mcp_main(Path(args.root))
+
+
 def _dispatch_scratch(args: argparse.Namespace) -> int:
     import json
     from dataclasses import asdict
@@ -855,19 +885,19 @@ def _dispatch_scratch(args: argparse.Namespace) -> int:
             return 2
         print("stopped" if stopped else "no scratchpad daemon runs here")
         return 0
-    if args.scratch_command == "status":
-        running = scratch.find_daemon(root.resolve())
-        if running is None:
-            print("no scratchpad daemon runs here")
-            return 1
-    else:
-        try:
+    try:
+        if args.scratch_command == "status":
+            running = scratch.find_daemon(root.resolve())
+            if running is None:
+                print("no scratchpad daemon runs here")
+                return 1
+        else:
             running = scratch.ensure_daemon(
                 root, progress=lambda step: print(f"{step}…", file=sys.stderr, flush=True)
             )
-        except scratch.ScratchError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
+    except scratch.ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(asdict(running), indent=2))
     return 0
 
