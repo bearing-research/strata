@@ -623,7 +623,8 @@ def test_deleting_a_notebook_closes_every_session_on_it(client, tmp_path):
     second = manager.open_notebook(notebook_dir)
     assert first.id != second.id
 
-    assert client.delete(f"/v1/notebooks/{first.id}").status_code == 200
+    deleted = client.delete(f"/v1/notebooks/{first.id}")
+    assert deleted.status_code == 200
     # Or the second keeps the notebook's database open (Windows refuses the delete).
     assert manager.get_session(second.id) is None
 
