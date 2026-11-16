@@ -246,6 +246,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if _refuses_served(str(notebook_dir), "runs it in a session of its own"):
+        return 2
 
     # Late imports so --help / path errors don't pay heavy import cost.
     from strata.notebook.executor import DEFAULT_CELL_TIMEOUT_SECONDS, CellExecutor
@@ -1021,10 +1023,13 @@ def export_main(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
+def _open_local_ops(
+    notebook_dir_arg: str, author: str | None = None, *, refuse_served: bool = True
+):
     """Open a :class:`LocalNotebookOps` for *notebook_dir_arg*, or None on error.
 
-    The error is printed to stderr; callers return exit 2 on None.
+    The error is printed to stderr; callers return exit 2 on None. *refuse_served* off is
+    for a caller that only reads, or that asked already.
     """
     notebook_dir = Path(notebook_dir_arg).expanduser().resolve()
     if not (notebook_dir / "notebook.toml").is_file():
@@ -1032,6 +1037,8 @@ def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
             f"error: {notebook_dir} is not a Strata notebook (no notebook.toml)",
             file=sys.stderr,
         )
+        return None
+    if refuse_served and _refuses_served(notebook_dir_arg, "edits its files directly"):
         return None
     from strata.notebook.ops import LocalNotebookOps
 
@@ -1045,7 +1052,12 @@ def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
 def _add_target_args(parser: argparse.ArgumentParser) -> None:
     """Register a read command's target: a local dir or ``--server URL --session ID``."""
     parser.add_argument(
-        "notebook_dir", nargs="?", help="Path to the notebook directory (local backend)"
+        "notebook_dir",
+        nargs="?",
+        help=(
+            "Path to the notebook directory: driven through the daemon its "
+            ".strata/server.json names if one runs, else locally"
+        ),
     )
     parser.add_argument(
         "--server", help="Server root for a live session, e.g. http://localhost:8765"
@@ -1078,7 +1090,65 @@ def _open_read_ops(args: argparse.Namespace):
     if not args.notebook_dir:
         print("error: provide a notebook directory or --server/--session", file=sys.stderr)
         return None
-    return _open_local_ops(args.notebook_dir, author=getattr(args, "author", None))
+    from strata.scratch import ScratchError
+
+    try:
+        serving = _daemon_serving(args.notebook_dir)
+    except ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
+    if serving is not None:
+        from strata.notebook.ops import RemoteNotebookOps
+
+        return RemoteNotebookOps(
+            serving.url, serving.session_id, author=getattr(args, "author", None)
+        )
+    # Asked just now: no daemon serves it.
+    return _open_local_ops(
+        args.notebook_dir, author=getattr(args, "author", None), refuse_served=False
+    )
+
+
+def _refuses_served(notebook_dir: str, doing: str) -> bool:
+    """Print why and return True if a daemon serves *notebook_dir*, or may (not answering).
+
+    Its session is the writer: a command that *doing* there too would race it.
+    """
+    from strata.scratch import ScratchError
+
+    try:
+        serving = _daemon_serving(notebook_dir)
+    except ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return True
+    if serving is None:
+        return False
+    held = Path(notebook_dir).expanduser().resolve()
+    print(
+        f"error: the server at {serving.url} holds {held} open, "
+        f"and this command {doing}; stop that server first (for a scratchpad, "
+        "`strata scratch stop` in its project)",
+        file=sys.stderr,
+    )
+    return True
+
+
+def _daemon_serving(notebook_dir: str):
+    """The live daemon holding *notebook_dir* open, if its ``server.json`` names one.
+
+    Its session is the notebook's writer; editing the files here as well would race it.
+    Raises ``ScratchError`` for one that is alive but not answering.
+    """
+    from strata.scratch import daemon_serving
+
+    return daemon_serving(Path(notebook_dir).expanduser().resolve())
+
+
+def _is_remote(ops: object) -> bool:
+    """Whether *ops* drives a server (given ``--server`` or found serving the directory)."""
+    from strata.notebook.ops import RemoteNotebookOps
+
+    return isinstance(ops, RemoteNotebookOps)
 
 
 def _close_ops(ops: object) -> None:
@@ -1172,8 +1242,9 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     run_p.set_defaults(func=cell_run_main)
 
     cancel_p = sub.add_parser("cancel", help="Cancel a cell's run on a server (--server/--session)")
-    # The local positional is accepted only to explain why it cannot work.
-    cancel_p.add_argument("notebook_dir", nargs="?", help=argparse.SUPPRESS)
+    cancel_p.add_argument(
+        "notebook_dir", nargs="?", help="A notebook directory a running daemon serves"
+    )
     cancel_p.add_argument("--server", help="Server root, e.g. http://localhost:8765")
     cancel_p.add_argument("--session", help="Session id the run is on")
     cancel_p.add_argument("cell_id", help="Cell id whose run to cancel")
@@ -1487,10 +1558,10 @@ async def _cell_add_run_async(args: argparse.Namespace, source: str) -> int:
     """
     from strata.notebook.ops import NotebookOpsError
 
-    is_remote = bool(args.server)
     ops = _open_read_ops(args)
     if ops is None:
         return 2
+    is_remote = _is_remote(ops)
     try:
         try:
             cell = ops.add_cell(source, after=args.after, language=args.language)
@@ -1739,7 +1810,8 @@ def _emit_worker_list(view: WorkerListView, fmt: str) -> None:
 def worker_ls_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
-    ops = _open_local_ops(args.notebook_dir)
+    # Only reads: fine beside a daemon serving it.
+    ops = _open_local_ops(args.notebook_dir, refuse_served=False)
     if ops is None:
         return 2
     try:
@@ -1929,10 +2001,10 @@ def dep_rm_main(args: argparse.Namespace) -> int:
 
 
 async def _dep_async(args: argparse.Namespace, action: str) -> int:
-    is_remote = bool(args.server)
     ops = _open_read_ops(args)
     if ops is None:
         return 2
+    is_remote = _is_remote(ops)
     from strata.notebook.ops import NotebookOpsError
 
     try:
@@ -1987,10 +2059,10 @@ def cell_run_main(args: argparse.Namespace) -> int:
 
 
 async def _cell_run_async(args: argparse.Namespace) -> int:
-    is_remote = bool(args.server)
     ops = _open_read_ops(args)
     if ops is None:
         return 2
+    is_remote = _is_remote(ops)
     from strata.notebook.ops import NotebookOpsError
 
     try:
@@ -2027,10 +2099,24 @@ async def _cell_run_async(args: argparse.Namespace) -> int:
 
 def cell_cancel_main(args: argparse.Namespace) -> int:
     """Cancel a run on a server; exit 0 if one was cancelled, 1 if none was running."""
+    from strata.scratch import ScratchError
+
+    try:
+        serving = (
+            _daemon_serving(args.notebook_dir)
+            if args.notebook_dir and not args.server and not args.session
+            else None
+        )
+    except ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if serving is not None:
+        args.server, args.session = serving.url, serving.session_id
     if not args.server:
         print(
-            "error: cell cancel needs --server/--session. A run without --server lives "
-            "in the process that started it; stop that process (Ctrl-C) instead.",
+            "error: cell cancel needs --server/--session, or a notebook directory a "
+            "daemon serves. A run without one lives in the process that started it; "
+            "stop that process (Ctrl-C) instead.",
             file=sys.stderr,
         )
         return 2
@@ -2062,10 +2148,10 @@ def cell_test_main(args: argparse.Namespace) -> int:
 
 
 async def _cell_test_async(args: argparse.Namespace) -> int:
-    is_remote = bool(args.server)
     ops = _open_read_ops(args)
     if ops is None:
         return 2
+    is_remote = _is_remote(ops)
     from strata.notebook.ops import NotebookOpsError
 
     try:
@@ -2118,17 +2204,17 @@ def add_dag_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def dag_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
-    dag = ops.dag()
-    if args.format == "json":
-        _emit_json(dag.model_dump(mode="json"))
-    else:
-        for edge in dag.edges:
-            print(f"{edge.from_cell_id} → {edge.to_cell_id}  ({edge.variable})")
-        print(f"topo: {' → '.join(dag.topological_order)}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        dag = ops.dag()
+        if args.format == "json":
+            _emit_json(dag.model_dump(mode="json"))
+        else:
+            for edge in dag.edges:
+                print(f"{edge.from_cell_id} → {edge.to_cell_id}  ({edge.variable})")
+            print(f"topo: {' → '.join(dag.topological_order)}")
+        return 0
 
 
 def add_status_arguments(parser: argparse.ArgumentParser) -> None:
@@ -2137,17 +2223,17 @@ def add_status_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def status_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
-    status = ops.status()
-    if args.format == "json":
-        _emit_json(status.model_dump(mode="json"))
-    else:
-        print(f"notebook: {status.name}  ({status.notebook_id})")
-        for cell in status.cells:
-            stale = " ·stale" if cell.staleness_reasons else ""
-            if cell.changed_reads:
-                stale = " ·may be out of date"
-            print(f"  {cell.status:8} {cell.id:18} {cell.name}{stale}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        status = ops.status()
+        if args.format == "json":
+            _emit_json(status.model_dump(mode="json"))
+        else:
+            print(f"notebook: {status.name}  ({status.notebook_id})")
+            for cell in status.cells:
+                stale = " ·stale" if cell.staleness_reasons else ""
+                if cell.changed_reads:
+                    stale = " ·may be out of date"
+                print(f"  {cell.status:8} {cell.id:18} {cell.name}{stale}")
+        return 0

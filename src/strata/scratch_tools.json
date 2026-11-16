@@ -1,0 +1,72 @@
+[
+  {
+    "name": "run",
+    "description": "Run Python in the scratchpad and return the result; it stays for later calls.\n\nWithout ``cell``, adds a cell with ``source`` and runs it. With ``cell``,\nreplaces that cell's source and runs it: edit a cell rather than adding a\ncopy. A cell whose source and inputs are unchanged returns its stored\nresult (``cache_hit``, ``saved_ms``). ``fresh=True`` runs this cell again\nwhatever its cache says; upstream cells still come from the cache when\ncurrent.\n\nReturns ``status`` (ok / error), ``value`` (what a trailing expression\nshowed), ``stdout`` / ``stderr``, ``traceback`` when the cell raised,\n``defines``, ``reran`` (upstream cells brought up to date first, and why),\n``path`` (a file holding an image the cell showed; read it to see the\nplot), ``diagnostics`` (files it read without declaring them, or values\nit mutated, each with its fix) and ``url`` (the notebook, for a person).\nA failure that is not the cell's own exception carries a ``fix`` line\nsaying what to do next.",
+    "inputSchema": {
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "cell": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cell"
+        },
+        "fresh": {
+          "default": false,
+          "title": "Fresh",
+          "type": "boolean"
+        }
+      },
+      "required": ["source"],
+      "title": "runArguments",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "runDictOutput",
+      "type": "object"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  },
+  {
+    "name": "scratchpad",
+    "description": "What the scratchpad already holds; look here before computing again.\n\nWithout ``name``: every cell's id, ``defines``, ``status``, why it is\nstale, what its last uncached run took (``cold_ms``), plus the notebook\ndirectory, the cells' ``cwd``, the ``python`` they run on and the time\nthe cache has saved. With ``name``: the cell defining that variable, its\nsource and shown ``value``, or the names that do exist.",
+    "inputSchema": {
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        }
+      },
+      "title": "scratchpadArguments",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "scratchpadDictOutput",
+      "type": "object"
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  }
+]

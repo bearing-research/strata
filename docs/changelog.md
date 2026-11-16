@@ -23,6 +23,25 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)
+- **The notebook CLI drives a directory through the daemon serving it.** A project's
+  `.strata-scratch/` is served by its daemon, whose `.strata/server.json` names it. On
+  such a directory, `strata cell`, `status`, `dag` and `dep` go through the daemon's
+  session without `--server/--session`. With no daemon they run offline as before.
+  `strata cell cancel` takes such a directory too.
+  - Commands that would edit the files themselves (`worker add|rm|default`,
+    `cell pin-fetch`) or run the notebook in a session of their own (`strata run`)
+    refuse, and say to stop the daemon first. `worker ls` only reads, and goes ahead.
+  - A daemon that is alive but not answering is an error, not a reason to edit behind
+    it.
+  - A copy of the directory, which brings the record along, is not taken as served.
+
+  (#1564)
+- **`strata mcp` serves a project's scratchpad to an agent over stdio.** It lists the
+  scratchpad's two tools without starting anything; the first tool call finds or starts
+  the project's daemon, reporting each setup step as MCP progress, and its result
+  carries `setup_ms`. Every call is forwarded to the daemon; a call that cannot reach
+  it (stopped while idle) finds or starts it again and is sent once more, and a call
+  the agent cancels is cancelled on the daemon too. (#1560)
 - **A project's scratchpad has a daemon of its own.** `strata scratch start` creates
   `<project>/.strata-scratch/` (ignored by the project's git through its own
   `.gitignore`) and starts a server for it with the scratchpad MCP profile, which stops
@@ -401,6 +420,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A cell run, test run or dependency change through `--server` no longer fails at 30
+  seconds.** The CLI waited 30 seconds for the server's answer and then reported
+  `cannot reach`, while the run went on. It now waits for the run or resolve to finish.
+  (#1564)
+- **MCP tool descriptions read the same on Python 3.12.** Python 3.13 and later strip a
+  docstring's indentation when compiling, and 3.12 does not, so on 3.12 every notebook
+  MCP tool's description had its lines indented. Each one is now its cleaned docstring.
+  (#1560)
 - **What opens a notebook's database closes it.** These now close the stores they
   opened:
   - closing a session, through the close and delete routes or the idle and memory

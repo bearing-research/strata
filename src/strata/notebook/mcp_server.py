@@ -13,6 +13,7 @@ registers thin wrappers whose docstrings are the agent-facing tool descriptions.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -1197,6 +1198,12 @@ def build_mcp_app(
         principal is current for the call, so ``get_principal`` sees the caller. Scopes
         come from the same table the REST routes and WebSocket frames use.
         """
+
+        def add_tool(self, fn: Any, *args: Any, description: str | None = None, **kwargs: Any):
+            # 3.13 strips a docstring's indentation and 3.12 does not: one text on both.
+            if description is None and fn.__doc__:
+                description = inspect.cleandoc(fn.__doc__)
+            return super().add_tool(fn, *args, description=description, **kwargs)
 
         async def list_tools(self) -> list[Any]:
             tools = await super().list_tools()
