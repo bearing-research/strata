@@ -431,9 +431,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **What opens a notebook's database closes it.** These now close the stores they
   opened:
   - closing a session, through the close and delete routes or the idle and memory
-    sweeps; the delete route now closes every session on the directory;
-  - a session that fails to open;
-  - `LocalNotebookOps`, through `close`, `aclose` or a `with` block;
+    sweeps; both delete routes now close every session on the directory, and refuse
+    while any of them runs a cell or changes its environment;
+  - the server's shutdown, for every session still open;
+  - a session that fails to open, with its warm pools;
+  - `LocalNotebookOps`, through `close`, `aclose` or a `with` block, with the warm
+    pools of a session it opened; one wrapping a server's session leaves it alone;
   - an export, which now opens the store once rather than per output;
   - a snapshot import, before it moves the notebook in.
 

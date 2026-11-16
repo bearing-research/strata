@@ -727,6 +727,33 @@ def test_delete_by_path_closes_open_session_before_removal(client, tmp_path):
     assert get_session_manager().get_session(session_id) is None
 
 
+def test_delete_by_path_closes_every_session_on_it(client, tmp_path):
+    notebook_dir = create_notebook(tmp_path, "Twice Open By Path")
+    manager = get_session_manager()
+    first = manager.open_notebook(notebook_dir)
+    second = manager.open_notebook(notebook_dir)
+
+    deleted = client.post("/v1/notebooks/delete-by-path", json={"path": str(notebook_dir)})
+    assert deleted.status_code == 200
+    assert manager.get_session(first.id) is None
+    assert manager.get_session(second.id) is None
+
+
+def test_a_busy_session_on_the_notebook_refuses_its_delete(client, tmp_path, monkeypatch):
+    notebook_dir = create_notebook(tmp_path, "Busy Elsewhere")
+    manager = get_session_manager()
+    first = manager.open_notebook(notebook_dir)
+    second = manager.open_notebook(notebook_dir)
+    monkeypatch.setattr(second, "_has_active_execution", lambda: True)
+
+    deleted = client.delete(f"/v1/notebooks/{first.id}")
+    assert deleted.status_code == 409
+    # Nothing closed under the run, nothing deleted.
+    assert manager.get_session(first.id) is not None
+    assert manager.get_session(second.id) is not None
+    assert notebook_dir.exists()
+
+
 def test_delete_by_path_rejects_missing_notebook(client, tmp_path):
     bogus = tmp_path / "not-a-notebook"
     bogus.mkdir()

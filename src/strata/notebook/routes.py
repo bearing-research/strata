@@ -1468,31 +1468,33 @@ async def close_notebook_session(notebook_id: str, session: SessionDep) -> dict:
     return {"closed": True, "session_id": notebook_id, "path": str(session.path)}
 
 
+def _close_sessions_to_delete(notebook_path: Path) -> None:
+    """Close every session on *notebook_path*, or refuse while any of them is busy: one
+    left open keeps the notebook's database open, and Windows refuses the delete."""
+    sessions = _session_manager.sessions_on(notebook_path)
+    for session in sessions:
+        if session.has_active_environment_mutation():
+            _raise_environment_busy(
+                session,
+                "Notebook deletion is blocked while an environment update is in progress.",
+            )
+        if session._has_active_execution():
+            raise HTTPException(
+                status_code=409,
+                detail="Notebook deletion is blocked while notebook execution is running.",
+            )
+    for session in sessions:
+        _session_manager.close_session(session.id, reason="deleted")
+
+
 @router.delete("/{notebook_id}")
 async def delete_notebook(notebook_id: str, session: SessionDep) -> dict:
     """Delete a notebook directory and all notebook-owned runtime state."""
     _require_personal_mode_notebook_delete()
 
-    if session.has_active_environment_mutation():
-        _raise_environment_busy(
-            session,
-            "Notebook deletion is blocked while an environment update is in progress.",
-        )
-
-    if session._has_active_execution():
-        raise HTTPException(
-            status_code=409,
-            detail="Notebook deletion is blocked while notebook execution is running.",
-        )
-
     notebook_path = session.path.resolve()
     notebook_name = session.notebook_state.name
-
-    # Every session on the directory, or one still holds its database open.
-    for other_id in _session_manager.list_sessions():
-        other = _session_manager.get_session(other_id)
-        if other is not None and other.path.resolve() == notebook_path:
-            _session_manager.close_session(other_id, reason="deleted")
+    _close_sessions_to_delete(notebook_path)
 
     try:
         delete_notebook_directory(notebook_path)
@@ -1737,7 +1739,7 @@ class DeleteNotebookByPathRequest(BaseModel):
 async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Request) -> dict:
     """Delete a notebook directory by path, without an open session.
 
-    An open session on the same directory is closed first.
+    Every open session on the directory is closed first; a busy one refuses the delete.
     """
     _require_personal_mode_notebook_delete()
 
@@ -1749,20 +1751,7 @@ async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Req
             detail=f"No notebook found at {notebook_path}",
         )
 
-    # Personal mode only, where no session records an opener.
-    existing = _session_manager._find_session_by_path(notebook_path, None)
-    if existing is not None:
-        if existing.has_active_environment_mutation():
-            _raise_environment_busy(
-                existing,
-                "Notebook deletion is blocked while an environment update is in progress.",
-            )
-        if existing._has_active_execution():
-            raise HTTPException(
-                status_code=409,
-                detail="Notebook deletion is blocked while notebook execution is running.",
-            )
-        _session_manager.close_session(existing.id, reason="deleted")
+    _close_sessions_to_delete(notebook_path)
 
     try:
         delete_notebook_directory(notebook_path.resolve())

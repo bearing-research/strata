@@ -75,7 +75,7 @@ def export_notebook(
                     continue
                 if not _is_app_cell(cell):
                     continue
-                blocks.extend(_render_app_cell(cell, state, notebook_dir, options, stored))
+                blocks.extend(_render_app_cell(cell, notebook_dir, options, stored))
             if options.output_format == ExportFormat.HTML:
                 return _emit_html(blocks, title=state.name)
             return _emit_markdown(blocks)
@@ -197,7 +197,6 @@ def _render_widget_controls(cell: CellState) -> list[Block]:
 
 def _render_app_cell(
     cell: CellState,
-    state: NotebookState,
     notebook_dir: Path,
     options: ExportOptions,
     stored: _StoredOutputs,

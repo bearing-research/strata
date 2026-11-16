@@ -414,9 +414,14 @@ class LocalNotebookOps:
         self._staleness_computed = False
 
     def close(self) -> None:
-        """Close the stores of a session this handle opened; a wrapped one stays open."""
-        if self._owns_session:
-            self._session.artifact_manager.close()
+        """Release a session this handle opened, its warm pools and stores; a wrapped one
+        stays open."""
+        if not self._owns_session:
+            return
+        for pool in (self._session.warm_pool, self._session.r_warm_pool):
+            if pool is not None:
+                pool.shutdown_nowait()
+        self._session.artifact_manager.close()
 
     def __enter__(self) -> LocalNotebookOps:
         return self
@@ -599,9 +604,11 @@ class LocalNotebookOps:
         return _cell_view(cell)
 
     async def aclose(self) -> None:
-        """Release the warm process pool, if one was started, and the stores (cleanup on exit)."""
+        """:meth:`close`, draining the warm pools rather than killing them."""
         from strata.notebook.cli import _drain_warm_pool
 
+        if not self._owns_session:
+            return
         try:
             await _drain_warm_pool(self._session)
         finally:

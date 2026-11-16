@@ -101,15 +101,20 @@ class NotebookArtifactManager:
         # A dialect passed in is its owner's to close.
         self._owns_dialect = dialect is None
         self.artifact_store = ArtifactStore(artifact_dir, dialect=dialect)
-        complete_upgrade(self.artifact_store)
+        try:
+            complete_upgrade(self.artifact_store)
+            # The ledger's builds and releases, on the store's database: a local run's
+            # execution and its checkpoints (``local_runs``).
+            self.build_store = BuildStore(
+                self.artifact_store.db_path, dialect=self.artifact_store.dialect
+            )
+        except BaseException:
+            # No manager comes back to close the store.
+            self.close()
+            raise
         # The tables each cell's current run read (``uri@v=<snapshot>`` by name), recorded
         # when its provenance is computed; every output the run stages carries them.
         self._table_locations: dict[str, dict[str, str]] = {}
-        # The ledger's builds and releases, on the store's database: a local run's
-        # execution and its checkpoints (``local_runs``).
-        self.build_store = BuildStore(
-            self.artifact_store.db_path, dialect=self.artifact_store.dialect
-        )
         self.release_store = ReleaseStore(self.artifact_store, self.build_store)
 
     def close(self) -> None:
