@@ -3949,10 +3949,11 @@ exhaustive commit history.</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>A notebook with many cells does less work per edit and run, and the CLI starts
-  faster.</strong> A staleness pass parses <code>uv.lock</code> once rather than once per cell,
-  <code>runtime.json</code> is written about 4 times faster, and <code>strata</code> no longer imports the
-  notebook server on start. <code>strata.notebook</code> re-exports nothing: import from its
-  submodules (<code>strata.notebook.routes</code>, <code>strata.notebook.display</code>). (#1557)</li>
+  faster.</strong> A staleness pass reads <code>uv.lock</code> once rather than once per cell, and parses
+  it only when its content changed; on Python 3.13 and later <code>runtime.json</code> is written
+  about 4 times faster; <code>strata</code> no longer imports the notebook server on start.
+  <code>strata.notebook</code> re-exports nothing: import from its submodules (<code>display</code>, <code>models</code>,
+  <code>parser</code>, <code>routes</code>, <code>session</code>, <code>writer</code>). (#1557, #1559)</li>
 <li><strong>A SQL cell on a SQLite or DuckDB file reopens ready when the database is unchanged.</strong>
   Under the default <code>fingerprint</code> policy a reopened cell read idle, and the cells reading
   its result stale, until it ran. The staleness pass now makes the probe a run makes, on
