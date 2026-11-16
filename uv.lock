@@ -4191,7 +4191,7 @@ requires-dist = [
     { name = "textual-image", marker = "extra == 'tui'", specifier = ">=0.14.0" },
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
-    { name = "vestigo", git = "https://github.com/bearing-research/vestigo?rev=a43621f0eb45aeda7ff4760be488b80754babd9a" },
+    { name = "vestigo", git = "https://github.com/bearing-research/vestigo?rev=26098c42adab6e58d15090375c85ff3ed8c7b216" },
     { name = "websockets", specifier = ">=17.1" },
 ]
 provides-extras = ["otel", "azure", "s3", "gcs", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp"]
@@ -4452,7 +4452,7 @@ wheels = [
 [[package]]
 name = "vestigo"
 version = "0.6.0"
-source = { git = "https://github.com/bearing-research/vestigo?rev=a43621f0eb45aeda7ff4760be488b80754babd9a#a43621f0eb45aeda7ff4760be488b80754babd9a" }
+source = { git = "https://github.com/bearing-research/vestigo?rev=26098c42adab6e58d15090375c85ff3ed8c7b216#26098c42adab6e58d15090375c85ff3ed8c7b216" }
 
 [[package]]
 name = "virtualenv"

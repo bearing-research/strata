@@ -218,7 +218,7 @@ members = ["packages/strata-client", "packages/strata-pool"]
 [tool.uv.sources]
 strata-client = { workspace = true }
 strata-pool = { workspace = true }
-vestigo = { git = "https://github.com/bearing-research/vestigo", rev = "a43621f0eb45aeda7ff4760be488b80754babd9a" }
+vestigo = { git = "https://github.com/bearing-research/vestigo", rev = "26098c42adab6e58d15090375c85ff3ed8c7b216" }
 
 [tool.uv.build-backend]
 # The distribution is strata-notebook; the import package is strata, under src/.
