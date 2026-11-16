@@ -33,7 +33,7 @@ exhaustive commit history.
     it.
   - A copy of the directory, which brings the record along, is not taken as served.
 
-  (#ATTACH)
+  (#1564)
 - **`strata mcp` serves a project's scratchpad to an agent over stdio.** It lists the
   scratchpad's two tools without starting anything; the first tool call finds or starts
   the project's daemon, reporting each setup step as MCP progress, and its result
@@ -421,7 +421,7 @@ exhaustive commit history.
 - **A cell run, test run or dependency change through `--server` no longer fails at 30
   seconds.** The CLI waited 30 seconds for the server's answer and then reported
   `cannot reach`, while the run went on. It now waits for the run or resolve to finish.
-  (#ATTACH)
+  (#1564)
 - **MCP tool descriptions read the same on Python 3.12.** Python 3.13 and later strip a
   docstring's indentation when compiling, and 3.12 does not, so on 3.12 every notebook
   MCP tool's description had its lines indented. Each one is now its cleaned docstring.
