@@ -4285,224 +4285,238 @@ exhaustive commit history.</p>
   docstring's indentation when compiling, and 3.12 does not, so on 3.12 every notebook
   MCP tool's description had its lines indented. Each one is now its cleaned docstring.
   (#1560)</li>
-<li><strong>A reverted edit's outputs come back together.</strong> Reverting an edit (a cell's source
+<li><strong>What opens a notebook's database closes it.</strong> These now close the stores they
+  opened:</li>
+<li>closing a session, through the close and delete routes or the idle and memory
+    sweeps; both delete routes now close every session on the directory, and refuse
+    while any of them runs a cell or changes its environment;</li>
+<li>the server's shutdown, for every session still open;</li>
+<li>a session that fails to open, with its warm pools;</li>
+<li><code>LocalNotebookOps</code>, through <code>close</code>, <code>aclose</code> or a <code>with</code> block, with the warm
+    pools of a session it opened; one wrapping a server's session leaves it alone;</li>
+<li>an export, which now opens the store once rather than per output;</li>
+<li>a snapshot import, before it moves the notebook in.</li>
+</ul>
+<p>A reset of the API key or stream ownership store closes the database it opened, and
+  <code>strata apikey --dsn</code> closes its connection pool. A store given another owner's
+  database leaves it open. On vestigo 0.6.0 closing a SQLite store releases nothing. It
+  matters once vestigo keeps connections between calls: then an open database stops
+  Windows from deleting or moving the notebook. (#1563)
+- <strong>A reverted edit's outputs come back together.</strong> Reverting an edit (a cell's source
   changed and changed back) reuses the earlier run's results by copying each value,
   display and console back, one commit each, so a blob gone partway left some from the
   earlier run and some from the later one. The copies are now one release, current
-  together or not at all; when one is missing the cell runs. (#1553)</li>
-<li><strong>A Python run's displays and console are current only with its outputs.</strong> A single
+  together or not at all; when one is missing the cell runs. (#1553)
+- <strong>A Python run's displays and console are current only with its outputs.</strong> A single
   Python cell run made its variables current, then each display and its console alone, so
   a display that failed to store, or a crash between the two, left the new values beside
   the previous run's displays, and a leaf run whose release the ledger refused still showed
   what it printed. They are now made current in the same release as the variables; a
   refused release keeps none of them and fails the run. Run All's batch is unchanged.
-  (#1552)</li>
-<li><strong>A reopen shows the worker a cell last ran on.</strong> A cell's header names the remote worker
+  (#1552)
+- <strong>A reopen shows the worker a cell last ran on.</strong> A cell's header names the remote worker
   and transport its last run used; a reopen dropped them until the cell ran again. They
-  are now kept in <code>.strata/runtime.json</code>, and a local run clears them. (#1547)</li>
-<li><strong><code>run_snippet</code> needs <code>notebook:write</code> as well as <code>notebook:execute</code>.</strong> It adds a
+  are now kept in <code>.strata/runtime.json</code>, and a local run clears them. (#1547)
+- <strong><code>run_snippet</code> needs <code>notebook:write</code> as well as <code>notebook:execute</code>.</strong> It adds a
   cell before running it, so a caller allowed to run cells but not edit them could add
-  one. (#1534)</li>
-<li><strong>Run All warns about a mutation as a single run does.</strong> A cell that changes an input in
+  one. (#1534)
+- <strong>Run All warns about a mutation as a single run does.</strong> A cell that changes an input in
   place and passes it on (<code>xs[0] = 9</code>, with a later cell reading <code>xs</code>) ran warning-free
   alone or in a warm worker, but Run All's batch warned that downstream would see the
   pre-mutation value, which it does not. The batch now knows which inputs the cell passes
-  on, and a test pins cold and batch to the same warnings. (#1535)</li>
-<li><strong>A run that fails on the server's side stops its harness.</strong> A cell run or a Run All batch
+  on, and a test pins cold and batch to the same warnings. (#1535)
+- <strong>A run that fails on the server's side stops its harness.</strong> A cell run or a Run All batch
   that ended by an exception other than a cancel or a timeout, such as a callback that
   raised, left the harness running the cell's code, unreaped, and its pipe readers
   pending. Every exit now stops the harness's process tree first, and a batch does so
-  before its folder is removed. (#1540)</li>
-<li><strong>A cell after a loop reads ready after a reopen.</strong> A cell ordered after a <code># @loop</code>
+  before its folder is removed. (#1540)
+- <strong>A cell after a loop reads ready after a reopen.</strong> A cell ordered after a <code># @loop</code>
   cell (<code># @after lp</code>) keys on the loop's final state, which a reopen did not point the
-  loop at, so the cell read stale (upstream) until it ran again. (#1545)</li>
-<li><strong>A <code># @per_variant</code> cell and what reads it read ready after a reopen.</strong> A reopen looked
+  loop at, so the cell read stale (upstream) until it ran again. (#1545)
+- <strong>A <code># @per_variant</code> cell and what reads it read ready after a reopen.</strong> A reopen looked
   for the cell's result under its plain id, not its <code>@variant=</code> ones, so the next
-  <code># @per_variant</code> cell read idle and the cell that reads them stale (upstream). (#1546)</li>
-<li><strong>Downloads close the stored blob however the client leaves, and dropped catalogs close.</strong>
+  <code># @per_variant</code> cell read idle and the cell that reads them stale (upstream). (#1546)
+- <strong>Downloads close the stored blob however the client leaves, and dropped catalogs close.</strong>
   An artifact's data, a signed build blob, a publication, an output folder's file and a
   scan stream kept the stored blob open when the client went away before or during the
   body. A named catalog dropped for new credentials and a catalog rebuilt after its
   connection failed kept their connection pools open, and stopping the cache warmer did
   not wait for the plans its cancelled jobs were still running. <code>strata run</code> and the
-  notebook CLI also leave no R warm worker running when they finish. (#1515)</li>
-<li><strong>Uploads and table reads close what they open.</strong> An artifact upload, an import, a worker's
+  notebook CLI also leave no R warm worker running when they finish. (#1515)
+- <strong>Uploads and table reads close what they open.</strong> An artifact upload, an import, a worker's
   execute request and the reference executor left each form part's spooled temp file open, and
   every <code>@table</code> read, <code>@write_table</code> write, table export and catalog read in SQL left its
   Iceberg catalog's SQLite connection open; each waited for the collector. The server also
-  closes its own catalogs when it stops. (#1513)</li>
-<li><strong>A warm worker warns about mutations as a cold run does.</strong> A cell run on the warm pool
+  closes its own catalogs when it stops. (#1513)
+- <strong>A warm worker warns about mutations as a cold run does.</strong> A cell run on the warm pool
   warned when it changed an input in place and passed it on, which a cold run rightly does
-  not, and never warned when two of its outputs shared one mutable object. (#1507)</li>
-<li><strong>A Jupyter import survives a cell Python cannot read.</strong> A cell nested past the parser,
+  not, and never warned when two of its outputs shared one mutable object. (#1507)
+- <strong>A Jupyter import survives a cell Python cannot read.</strong> A cell nested past the parser,
   such as a chain of tens of thousands of <code>+</code>, made the whole import fail; it now imports
   with a warning, and the notebook refuses to run that cell until the expression is split.
   Half an emoji in a cell's JSON (a lone surrogate) failed the import too; it now imports
-  as U+FFFD, with a warning naming the cell. (#1500, #1503)</li>
-<li><strong>A failed cell keeps its traceback through a reload.</strong> A reload or a reopen showed a red
+  as U+FFFD, with a warning naming the cell. (#1500, #1503)
+- <strong>A failed cell keeps its traceback through a reload.</strong> A reload or a reopen showed a red
   cell with no reason, and a later sync could wipe the traceback from an open page. The full
-  traceback is saved beside the trimmed one, so its section comes back too. (#1455)</li>
-<li><strong>A traceback quotes the line that failed,</strong> with Python's marker under the failing
+  traceback is saved beside the trimmed one, so its section comes back too. (#1455)
+- <strong>A traceback quotes the line that failed,</strong> with Python's marker under the failing
   expression. Each cell now compiles under its own name, so frames read <code>&lt;cell ba3b7451&gt;</code>
   rather than <code>&lt;cell&gt;</code>, and a function defined in another cell quotes its own line, never
-  the running cell's. Remote workers get the cell id over the push route too. (#1456)</li>
-<li><strong>A cell's header keeps its duration through a reload.</strong> <code>ran in</code> and <code>loaded in</code> used to
-  disappear, leaving the cached badge with no time beside it. (#1457)</li>
-<li><strong>The notebook header fits a phone.</strong> Below 600px it takes two rows, and its menus span
-  the page instead of running off its left edge. (#1454)</li>
-<li><strong>The Logs and Artifacts pages' header fits a phone.</strong> "strata" no longer wraps under its
+  the running cell's. Remote workers get the cell id over the push route too. (#1456)
+- <strong>A cell's header keeps its duration through a reload.</strong> <code>ran in</code> and <code>loaded in</code> used to
+  disappear, leaving the cached badge with no time beside it. (#1457)
+- <strong>The notebook header fits a phone.</strong> Below 600px it takes two rows, and its menus span
+  the page instead of running off its left edge. (#1454)
+- <strong>The Logs and Artifacts pages' header fits a phone.</strong> "strata" no longer wraps under its
   diamond, and the theme button stays on the page: the links share Back's row and the
-  breadcrumb takes the row below. (#1463)</li>
-<li><strong>The Artifacts page loads the store its route names.</strong> Moving from the server store to a
-  notebook's, or between two notebooks', kept the last store's name, rows and totals. (#1465)</li>
-<li><strong>A notebook's store page leaves out its runs' placeholders.</strong> Each run's placeholder
+  breadcrumb takes the row below. (#1463)
+- <strong>The Artifacts page loads the store its route names.</strong> Moving from the server store to a
+  notebook's, or between two notebooks', kept the last store's name, rows and totals. (#1465)
+- <strong>A notebook's store page leaves out its runs' placeholders.</strong> Each run's placeholder
   version is failed once the run ends, so the page counted one failed version per run.
-  Placeholders made before this keep their old id and stay listed. (#1476)</li>
-<li><strong>The CLI and MCP hand back both forms of a traceback.</strong> <code>strata run</code> adds
+  Placeholders made before this keep their old id and stay listed. (#1476)
+- <strong>The CLI and MCP hand back both forms of a traceback.</strong> <code>strata run</code> adds
   <code>traceback_full</code>; <code>cell run</code> and <code>run_cell</code> add <code>traceback</code> and <code>traceback_full</code>;
-  <code>cell show</code> and <code>get_cell</code> add <code>error_full</code>. (#1458)</li>
-<li><strong>A failed cell's traceback starts at the cell.</strong> The frames of Strata's own harness
+  <code>cell show</code> and <code>get_cell</code> add <code>error_full</code>. (#1458)
+- <strong>A failed cell's traceback starts at the cell.</strong> The frames of Strata's own harness
   before the cell's first frame are gone, library frames after it stay, and the error line
   prints once. <strong>Full traceback</strong> under the error keeps the whole thing for a bug report.
   Cold, warm and Run All failures now read the same: a warm run printed the error line
   twice, a cold one and Run All showed only that line in the browser, and a syntax error
-  chained two tracebacks. A loop or <code>@each</code> failure says which iteration or item. (#1444)</li>
-<li><strong>A fresh notebook no longer logs warnings about nothing.</strong> A table an upstream cell has
+  chained two tracebacks. A loop or <code>@each</code> failure says which iteration or item. (#1444)
+- <strong>A fresh notebook no longer logs warnings about nothing.</strong> A table an upstream cell has
   yet to write is an ordinary state, so its unresolved fingerprint logs at debug; a catalog
   that cannot answer still warns. A warm worker gets 60 seconds to start, not 10: its first
   start in a fresh environment compiles what it imports, 20 to 24 seconds with <code>pandas</code> and
-  <code>pyarrow</code> measured here, and it was killed for it. (#1439)</li>
-<li><strong><code>[[mounts]]</code> or <code>[[workers]]</code> appended by hand to a new <code>notebook.toml</code> is valid.</strong> The
+  <code>pyarrow</code> measured here, and it was killed for it. (#1439)
+- <strong><code>[[mounts]]</code> or <code>[[workers]]</code> appended by hand to a new <code>notebook.toml</code> is valid.</strong> The
   scaffold wrote <code>mounts = []</code> and <code>workers = []</code>, and TOML refuses to define a key twice. An
-  empty section is now left out. (#1439)</li>
-<li><strong>Run All stores what happened, in the order it happened.</strong> A cell whose outputs failed
+  empty section is now left out. (#1439)
+- <strong>Run All stores what happened, in the order it happened.</strong> A cell whose outputs failed
   to save left a stored display behind with no value. A display that failed to store was
   still reported, with no file behind it. Displays now record the source that ran rather
   than an edit made during the batch, and a fan-out instance's output can be staged as an
-  input from outside the batch. (#1432)</li>
-<li><strong>A loop cell that fails reports it like any other cell.</strong> A display that couldn't be
+  input from outside the batch. (#1432)
+- <strong>A loop cell that fails reports it like any other cell.</strong> A display that couldn't be
   stored, or an iteration whose carry file was missing, ended the request with an exception
   instead of a failed cell. It's now a failed result that keeps the loop's output and
-  mutation warnings, and its <code>@output_dir</code> folders if the outputs hadn't saved yet. (#1431)</li>
-<li><strong>A team store failure no longer fails your cell.</strong> A problem offering finished outputs
+  mutation warnings, and its <code>@output_dir</code> folders if the outputs hadn't saved yet. (#1431)
+- <strong>A team store failure no longer fails your cell.</strong> A problem offering finished outputs
   to the team store could fail a cell whose outputs were already saved, and stop a Run All
   partway. It's now logged and the run goes on, and one output that can't be offered no
-  longer stops the others. (#1427)</li>
-<li><strong>A worker is told to stop whenever Strata stops waiting for it.</strong> A remote request that
+  longer stops the others. (#1427)
+- <strong>A worker is told to stop whenever Strata stops waiting for it.</strong> A remote request that
   times out or drops, and a job status reply Strata cannot read, now cancel the job, so the
   machine isn't left computing for nobody. An unreadable status also reads as a job status
   failure, where before it reported "setup failed" or a raw parse error. Cancelling a
   signed-transport cell before its request went out raised <code>UnboundLocalError</code>; it now
-  cancels cleanly and leaves the worker alone. (#1426)</li>
-<li><strong>A run that fails to start leaves no descriptors open.</strong> A missing input file, or a
-  harness process that can't start, leaked open files in the server. (#1426)</li>
-<li><strong>A snapshot planned once plans again while the object store is down.</strong> Every scan read the
+  cancels cleanly and leaves the worker alone. (#1426)
+- <strong>A run that fails to start leaves no descriptors open.</strong> A missing input file, or a
+  harness process that can't start, leaked open files in the server. (#1426)
+- <strong>A snapshot planned once plans again while the object store is down.</strong> Every scan read the
   table's <code>metadata.json</code>, manifest list and manifests from the store before it could use the
   cache, so with the store down every scan failed, cache hits too. Iceberg never rewrites these
   files, so Strata now keeps each one it reads under <code>iceberg-metadata/</code> in the cache directory,
   up to <code>STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES</code> (1 GiB), and plans from those copies. A table
-  or file never read still needs the store. (#1470)</li>
-<li><strong><code>strata run</code> and MCP run cells in warm processes.</strong> Their cells all started cold, though
+  or file never read still needs the store. (#1470)
+- <strong><code>strata run</code> and MCP run cells in warm processes.</strong> Their cells all started cold, though
   the session had warm processes ready: only the UI used them. An <code>@each</code> cell over 300 items
-  took 60 s through <code>strata run</code> and now takes 26 s. (#1468)</li>
-<li><strong>A DAG label stays off its own edge.</strong> An edge running down and to the left no longer
-  passes through its variable name. (#1413)</li>
-<li><strong>A <code>@per_variant</code> cell shows every variant's displays.</strong> A cell that plotted or displayed a
+  took 60 s through <code>strata run</code> and now takes 26 s. (#1468)
+- <strong>A DAG label stays off its own edge.</strong> An edge running down and to the left no longer
+  passes through its variable name. (#1413)
+- <strong>A <code>@per_variant</code> cell shows every variant's displays.</strong> A cell that plotted or displayed a
   value per variant showed nothing: each instance stored its displays under the cell's own id,
   so one variant replaced another's, and the fan-out never gathered them. Each variant's are now
   stored under that variant, and the cell shows them all, in the order of the variant tabs,
   after a run, a cache hit or a reopen. Each is named in the web UI and the TUI, and carries
   <code>variant</code> in <code>strata cell show --format json</code> and MCP's <code>get_cell</code>. The variants run and
-  print in that order too, where they had run in the order of their names. (#1464, #1466)</li>
-<li><strong>An <code>@each</code> cell shows its items' displays.</strong> A cell that plotted or displayed something per
+  print in that order too, where they had run in the order of their names. (#1464, #1466)
+- <strong>An <code>@each</code> cell shows its items' displays.</strong> A cell that plotted or displayed something per
   item showed nothing. It now shows every item's, in the order the items ran, each under its
   item's key, after a run or a hit that lists no item. The manifest names them, so a prune
-  keeps them; a copy to another store carries the values only. (#1467)</li>
-<li><strong>A cached cell writes its table again if the table is gone.</strong> A cell whose <code>@write_table</code> target
+  keeps them; a copy to another store carries the values only. (#1467)
+- <strong>A cached cell writes its table again if the table is gone.</strong> A cell whose <code>@write_table</code> target
   was deleted, or whose warehouse was, stayed a cache hit and wrote nothing, so the table stayed
   missing while the cell read ready. A hit on a writing cell now checks each table it writes, and
   writes its stored output into any that no longer exists, without running the cell; a table
   still there is left alone, so an <code>append</code> target never gets its rows twice. If that write
   fails, the cell fails with the reason. This applies on every path: Python, R, <code>@each</code>,
   <code>@per_variant</code>, loops and Run All. A catalog that can't be reached leaves the hit standing.
-  (#1437, #1462)</li>
-<li><strong>A cell can keep what <code>strata.put</code> and <code>strata.materialize</code> return.</strong> A later cell
+  (#1437, #1462)
+- <strong>A cell can keep what <code>strata.put</code> and <code>strata.materialize</code> return.</strong> A later cell
   reading the handle failed with "failed to store output artifacts", because the handle
   pickled the run's checkpoint pipe. It now leaves the run's pipe and token behind, and
-  reads through the running cell's client. (#1412)</li>
-<li><strong>The browser tab shows Strata's diamond.</strong> The app never linked a tab icon, and the
-  file it shipped was the Vite template's logo. (#1406)</li>
-<li><strong>The table viewer no longer shows NaN and infinity as <code>null</code>.</strong> JSON cannot carry
+  reads through the running cell's client. (#1412)
+- <strong>The browser tab shows Strata's diamond.</strong> The app never linked a tab icon, and the
+  file it shipped was the Vite template's logo. (#1406)
+- <strong>The table viewer no longer shows NaN and infinity as <code>null</code>.</strong> JSON cannot carry
   them, so a column holding <code>inf</code> read <code>null</code> and a range ending there read <code>1.5 – null</code>.
   Pages, previews and min/max now send <code>"NaN"</code>, <code>"inf"</code> and <code>"-inf"</code>. A pandas NaN is
-  stored as a null, so it still reads <code>null</code>. (#1404)</li>
-<li><strong>A markdown cell no longer reads as a cache hit.</strong> Run All gave markdown cells a
+  stored as a null, so it still reads <code>null</code>. (#1404)
+- <strong>A markdown cell no longer reads as a cache hit.</strong> Run All gave markdown cells a
   <code>cached</code> badge and counted them in the profiler's hits and rows, so a first run said
-  <code>4 cached</code>. Nothing runs for one, so it now has no badge and is not counted. (#1402)</li>
-<li><strong>A result known not to match reads stale, and going back reads cached.</strong> A cell
+  <code>4 cached</code>. Nothing runs for one, so it now has no badge and is not counted. (#1402)
+- <strong>A result known not to match reads stale, and going back reads cached.</strong> A cell
   whose environment or declared outside input changed read idle while it went on
   showing the old result. It now reads <code>stale · environment changed</code> or
   <code>stale · input changed</code>, and undoing the change returns it to cached. Idle now means
-  no result, or no way to tell, as with an input that cannot be read. (#1401)</li>
-<li><strong>A cache hit shows the console of the run it stands for.</strong> Edit a cell, run the
+  no result, or no way to tell, as with an input that cannot be read. (#1401)
+- <strong>A cache hit shows the console of the run it stands for.</strong> Edit a cell, run the
   edit and undo the edit, and the cell read <code>ready</code> with the edit's value and
   console. It now reads <code>stale</code> until it runs, and running it brings back the first
   run's console, displays and variables without executing anything. Hits on cells
   with downstream readers replay their console too, where they used to show nothing
-  new, and a hit's saved time is the cost of the run it replays. (#1400)</li>
-<li><strong>A loop no longer holds its carry in memory between iterations.</strong> The server kept the seed and
+  new, and a hit's saved time is the cost of the run it replays. (#1400)
+- <strong>A loop no longer holds its carry in memory between iterations.</strong> The server kept the seed and
   each iteration's carry in memory for the whole loop, so a large checkpoint cost that much for
   every iteration. Each iteration now copies it from the store in bounded chunks, and restoring a
-  checkpoint of files does the same. (#1438)</li>
-<li><strong>A table's columns line up, and a null reads as a null.</strong> A numeric column's
+  checkpoint of files does the same. (#1438)
+- <strong>A table's columns line up, and a null reads as a null.</strong> A numeric column's
   header, stats and cells now right-align together, a null among them. Nulls reach
   the viewer as nulls, not as empty strings, and the Stats row no longer goes blank
-  for a table holding an all-null column. (#1399)</li>
-<li><strong>Run All records what each cell cost, and a cache hit says what it saved.</strong> Run
+  for a table holding an all-null column. (#1399)
+- <strong>Run All records what each cell cost, and a cache hit says what it saved.</strong> Run
   All recorded 0 for every cell, so the profiler read "0ms" and later hits were
   priced at nothing. A hit's badge now reads <code>cached · saved 2.1s</code>, with the load
   time in its tooltip, or plain <code>cached</code> when no earlier run priced it or the load
   took longer than the run. A team hit in Run All keeps the publisher's cost, as a
-  single-cell hit does. (#1393)</li>
-<li><strong>A stale cell says it is stale.</strong> It keeps no <code>cached</code> pill, and its previous
-  output stays, dimmed, under "Output from the previous run". (#1394)</li>
-<li><strong>A pandas index no longer shows as a column.</strong> <code>__index_level_0__</code> is hidden in the
+  single-cell hit does. (#1393)
+- <strong>A stale cell says it is stale.</strong> It keeps no <code>cached</code> pill, and its previous
+  output stays, dimmed, under "Output from the previous run". (#1394)
+- <strong>A pandas index no longer shows as a column.</strong> <code>__index_level_0__</code> is hidden in the
   notebook, the app view, exports and CSV downloads, and a named index leads as pandas
-  prints it. Parquet downloads keep it so pandas can restore the index. (#1394)</li>
-<li><strong>An R cell restored to an earlier source is served from cache.</strong> Going back to
+  prints it. Parquet downloads keep it so pandas can restore the index. (#1394)
+- <strong>An R cell restored to an earlier source is served from cache.</strong> Going back to
   source that already ran finds its variables and displays again instead of running
-  the cell, as a Python cell does. (#1384)</li>
-<li><strong>A <code>:memory:</code> database stays in memory.</strong> A DuckDB or SQLite connection with
+  the cell, as a Python cell does. (#1384)
+- <strong>A <code>:memory:</code> database stays in memory.</strong> A DuckDB or SQLite connection with
   <code>path = ":memory:"</code> opened a real file of that name in the notebook folder, so
   a cell's tables outlived the run and the file could be committed. If a notebook
-  relied on that, name a file in <code>path</code>. (#1377)</li>
-<li><strong>A notebook-level mount reaches only the cells that read it.</strong> Every
+  relied on that, name a file in <code>path</code>. (#1377)
+- <strong>A notebook-level mount reaches only the cells that read it.</strong> Every
   cell used to list it, download all of it, and run again when it changed: a
   rollup cell spent 35 minutes downloading a bucket it never read. Those cells
   run once more after this upgrade, as their keys no longer hold the mount.
-  (#1376, #1380)</li>
-<li><strong><code>strata run</code> says where a long <code>@each</code> is.</strong> It reports progress at most every
+  (#1376, #1380)
+- <strong><code>strata run</code> says where a long <code>@each</code> is.</strong> It reports progress at most every
   5 seconds and prints a line per failed item, and labels a cell by its <code>@name</code>. A
   failed cell's error now names the exception: <code>KeyError: 'MAX'</code>, not <code>'MAX'</code>.
-  (#1375)</li>
-<li><strong>A <code>@per_variant</code> cell ending in a displayed value no longer reruns every
+  (#1375)
+- <strong>A <code>@per_variant</code> cell ending in a displayed value no longer reruns every
   variant.</strong> The cache check looked for its displays where they are not stored,
-  so every variant missed. (#1372)</li>
-<li>
-<p><strong>A <code>merge</code> on two key columns no longer kills the server.</strong> <code>@write_table
+  so every variant missed. (#1372)
+- <strong>A <code>merge</code> on two key columns no longer kills the server.</strong> <code>@write_table
   ... merge on=a,b</code> with about 2,000 rows or more crashed the process in Arrow.
   A merge now also refuses a null or missing key column before writing. (#1371)</p>
-</li>
-<li>
-<p><strong>A stale cell says what really changed.</strong> Change a file in a mounted folder
+<ul>
+<li><strong>A stale cell says what really changed.</strong> Change a file in a mounted folder
   and the cell no longer says its source changed: it says mount <code>data</code> changed.
   Each good run now saves the parts its key was built from, and the explanation
   compares them with the same parts now, so mounts, tables, fetches, datasets,
   upstream outputs and a SQL cell's connection or a prompt cell's model are each
   named. An input that can't be read is reported as that. When nothing recorded
   explains the change, including a cell last run before this version, the
-  explanation says it is incomplete instead of guessing. (#1369)</p>
-</li>
+  explanation says it is incomplete instead of guessing. (#1369)</li>
 <li><strong>A cell after a prompt cell reads the answer it just gave.</strong> Under
   <code>strata run</code>, the cell was keyed without the prompt's answer, so after the
   notebook's <code>[ai]</code> model changed it was a cache hit and printed the old
