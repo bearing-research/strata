@@ -205,3 +205,105 @@ async def test_a_cell_changed_while_the_daemon_planned_is_left_for_the_next_pass
     assert await retire_in_session(sm, notebook, retire_days=14) == []
     assert session.notebook_state.get_cell(a) is not None
     assert retired_cells(notebook) == []
+
+
+def test_a_record_torn_by_a_crash_costs_only_itself(notebook):
+    from strata.notebook.scratch_storage import _append_retired, retired_path
+
+    retired_path(notebook).write_text('{"cell": "a"}\n{"cell": "b", "sou')
+    _append_retired(notebook, [{"cell": "c"}])
+    _append_retired(notebook, [{"cell": "d"}])
+
+    assert retired_cells(notebook) == [{"cell": "a"}, {"cell": "c"}, {"cell": "d"}]
+
+
+@pytest.mark.asyncio
+async def test_the_daemon_removes_a_cell_as_its_session_does(notebook, monkeypatch):
+    from strata.notebook.session import NotebookSession
+
+    (a,) = _cells(notebook, "x = 1")
+    sm = SessionManager()
+    sm.open_notebook(notebook)
+    removed = []
+    remove = NotebookSession.remove_cell
+
+    def recorded(self, cell_id):
+        removed.append(cell_id)
+        remove(self, cell_id)
+
+    # Its removal fixes a variant group's pointer and drops the read indexes' entries.
+    monkeypatch.setattr(NotebookSession, "remove_cell", recorded)
+    assert await retire_in_session(sm, notebook, retire_days=14) == [a]
+    assert removed == [a]
+
+
+@pytest.mark.asyncio
+async def test_a_cell_used_while_the_daemon_planned_is_left_for_the_next_pass(
+    notebook, monkeypatch
+):
+    from strata.notebook import scratch_storage
+
+    (a,) = _cells(notebook, "x = 1")
+    sm = SessionManager()
+    sm.open_notebook(notebook)
+    planned = scratch_storage._planned
+
+    def then_shown(*args):
+        going = planned(*args)
+        touch_shown(notebook, a)
+        return going
+
+    monkeypatch.setattr(scratch_storage, "_planned", then_shown)
+    assert await retire_in_session(sm, notebook, retire_days=14) == []
+    assert retired_cells(notebook) == []
+
+
+def test_zero_retire_days_retires_nothing(notebook):
+    _cells(notebook, "x = 1")
+    assert retire_idle(LocalNotebookOps(notebook), notebook, retire_days=0) == []
+
+
+def test_gc_leaves_retirement_to_a_running_daemon(project, monkeypatch, capsys):
+    from strata import scratch
+    from strata.notebook import scratch_storage
+
+    scratch._scaffold(project)
+    _cells(scratch.scratch_dir(project), "x = 1")
+    daemon = scratch.Daemon(url="http://127.0.0.1:9", session_id="s", pid=4321, version="0")
+    monkeypatch.setattr(scratch, "find_daemon", lambda anchor: daemon)
+
+    def removed(*args, **kwargs):
+        raise AssertionError("retired behind the daemon")
+
+    monkeypatch.setattr(scratch_storage, "retire_idle", removed)
+    assert main(["scratch", "gc", "--root", str(project)]) == 0
+    retired = json.loads(capsys.readouterr().out)[str(project.resolve())]["retired"]
+    assert "left to its daemon (pid 4321)" in retired
+
+
+def test_gc_reads_its_limits_as_the_daemon_does(project, monkeypatch, capsys):
+    """From inside the scratchpad, not the project: one policy for both sweeps."""
+    from strata import scratch
+
+    scratch._scaffold(project)
+    (a,) = _cells(scratch.scratch_dir(project), "x = 1")
+    (project / "pyproject.toml").write_text("[tool.strata]\nnotebook_scratch_retire_days = 0\n")
+    monkeypatch.chdir(project)
+    assert main(["scratch", "gc", "--root", str(project)]) == 0
+    assert json.loads(capsys.readouterr().out)[str(project.resolve())]["retired"] == [a]
+
+
+def test_the_cli_will_not_retire_a_running_cell(project, monkeypatch, capsys):
+    from strata import scratch
+
+    scratch._scaffold(project)
+    (a,) = _cells(scratch.scratch_dir(project), "x = 1")
+    get_cell = LocalNotebookOps.get_cell
+    monkeypatch.setattr(
+        LocalNotebookOps,
+        "get_cell",
+        lambda self, cell_id: get_cell(self, cell_id).model_copy(update={"status": "running"}),
+    )
+    assert main(["scratch", "retire", a, "--root", str(project)]) == 2
+    assert "running" in capsys.readouterr().err
+    assert retired_cells(scratch.scratch_dir(project)) == []

@@ -360,7 +360,8 @@ class StrataConfig(BaseSettings):
     # A project's scratchpad (set by strata.scratch for the daemon it starts, never by
     # hand): the server sweeps it at start and hourly, by idle days then size, and keeps
     # its entry in ~/.strata/scratchpads.json. Its live cells' values stay whatever the
-    # limit, so the limit is soft and the sweep records the overage.
+    # limit, so the limit is soft and the sweep records the overage. 0 turns the size
+    # limit, the idle sweep or retirement off.
     scratch_anchor: str | None = None
     notebook_scratch_gc_soft_limit_bytes: Annotated[int, Field(ge=0)] = 5 * 1024**3
     notebook_scratch_gc_max_idle_days: Annotated[float, Field(ge=0)] = 14.0

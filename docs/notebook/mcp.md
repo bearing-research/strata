@@ -145,7 +145,8 @@ swept, so the limit can be exceeded; when it is, `scratchpad` returns a
 `storage` entry with the overage and the cells holding the most. `strata scratch
 ls` lists every scratchpad with its size, last use, overage and whether its
 daemon is up; `strata scratch gc` sweeps one now (`--all` for every one) and
-`strata scratch rm` stops its daemon and deletes it.
+`strata scratch rm` stops its daemon and deletes it. With its daemon running, `gc`
+leaves retiring cells to the daemon, which does it only when nothing runs.
 
 `run` adds a cell per call, so cells have a way out too. A cell nothing reads,
 with no `# @name`, that has not been run, edited or shown by `scratchpad` for 14
@@ -153,8 +154,9 @@ days (`STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS`) is retired before the sweep: its
 source and tests go to `.strata-scratch/retired.jsonl`, it leaves the notebook, and the
 sweep frees every value it stored unless something else holds one (a name, a
 pin, a live cell reading it). A cell it read may then retire the same way. A
-later `run` that needs a retired cell's variable fails with a `fix` naming the
-cell, when it retired, and its source to run again. `strata scratch retire
+later `run` that needs a retired cell's variable, a `run` naming its id, or a
+`scratchpad` look for its variable answers with a `fix` naming the cell, when it
+retired, and its source to run again. `strata scratch retire
 <cell>` retires one by hand, unless another cell reads it.
 
 ### From an agent's config: `strata mcp`

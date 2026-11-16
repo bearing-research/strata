@@ -29,9 +29,12 @@ exhaustive commit history.
   lists every scratchpad for `strata scratch ls`; `strata scratch gc` sweeps now and
   `strata scratch rm` deletes one. A leaf cell with no `# @name` unused for 14 days
   (`STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS`) is retired: its source and tests go to
-  `retired.jsonl`, the sweep frees its values, and a run needing its variable gets the
-  source back in its `fix`; `strata scratch retire` retires one by hand. Each run sample
-  in `runtime.json` now records when it ran. (#STORAGE)
+  `retired.jsonl`, the sweep frees its values, and a run needing its variable, a `run`
+  naming its id, or `scratchpad` asking for its variable gets the source back in its
+  `fix`; `strata scratch retire` retires one by hand. With a daemon running,
+  `strata scratch gc` sweeps but leaves retirement to the daemon, which retires only
+  when nothing runs. `0` turns the size limit, the idle sweep or retirement off. Each run
+  sample in `runtime.json` now records when it ran. (#STORAGE)
 - **The notebook CLI drives a directory through the daemon serving it.** A project's
   `.strata-scratch/` is served by its daemon, whose `.strata/server.json` names it. On
   such a directory, `strata cell`, `status`, `dag` and `dep` go through the daemon's

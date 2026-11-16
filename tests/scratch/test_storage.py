@@ -186,3 +186,26 @@ async def test_a_retirement_that_fails_does_not_stop_the_sweep(tmp_path, monkeyp
         await asyncio.wait_for(swept.wait(), timeout=30)
     finally:
         task.cancel()
+
+
+def test_a_zero_limit_is_no_limit(store):
+    notebook, manager = store
+    held = _values(manager, "a", [100, 100], used_days_ago=[1, 0])
+    storage = _sweep(notebook, 0)
+    assert storage.over_by_bytes == 0
+    assert _kept(manager, held, 2) == [1, 2]
+
+
+def test_the_largest_are_live_cells_only():
+    from types import SimpleNamespace
+
+    from strata.notebook.scratch_storage import _largest_cells
+
+    latest = [SimpleNamespace(id="live", byte_size=10), SimpleNamespace(id="gone", byte_size=99)]
+    manager = SimpleNamespace(
+        notebook_id="nb",
+        artifact_store=SimpleNamespace(list_latest_by_id_prefix=lambda prefix: latest),
+        cell_output_of=lambda artifact_id: (artifact_id, "v"),
+    )
+    # A retired cell's value something still holds is not the agent's to report.
+    assert _largest_cells(manager, ["live"]) == [{"cell": "live", "bytes": 10}]

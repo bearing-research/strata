@@ -972,14 +972,15 @@ def _dispatch_scratch_ls(args: argparse.Namespace) -> int:
 
 
 def _dispatch_scratch_gc(args: argparse.Namespace) -> int:
+    import contextlib
     import json
     from dataclasses import asdict
 
     from strata import scratch
     from strata.config import StrataConfig
+    from strata.notebook.ops import LocalNotebookOps
     from strata.notebook.scratch_storage import retire_idle, upkeep
 
-    config = StrataConfig.load()
     anchors = (
         [Path(anchor) for anchor in scratch.registered()]
         if args.all
@@ -987,15 +988,28 @@ def _dispatch_scratch_gc(args: argparse.Namespace) -> int:
     )
     swept = {}
     for anchor in anchors:
-        if not (scratch.scratch_dir(anchor) / "notebook.toml").is_file():
+        directory = scratch.scratch_dir(anchor)
+        if not (directory / "notebook.toml").is_file():
             print(f"error: {anchor} has no scratchpad", file=sys.stderr)
             return 2
-        with _scratch_ops(anchor) as ops:
-            retired = retire_idle(
-                ops,
-                scratch.scratch_dir(anchor),
+        # As its daemon reads it, from inside the scratchpad: the same limits.
+        with contextlib.chdir(directory):
+            config = StrataConfig.load()
+        try:
+            running = scratch.find_daemon(anchor)
+        except scratch.ScratchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if running is None:
+            retired: list[str] | str = retire_idle(
+                LocalNotebookOps(directory),
+                directory,
                 retire_days=config.notebook_scratch_retire_days,
             )
+        else:
+            # Its session is the writer, and it retires idle cells itself, hourly, only
+            # when nothing runs: removing them from here could catch one mid-run.
+            retired = f"left to its daemon (pid {running.pid}), which retires them hourly"
         storage = upkeep(
             anchor,
             soft_limit_bytes=config.notebook_scratch_gc_soft_limit_bytes,
@@ -1047,6 +1061,9 @@ def _dispatch_scratch_retire(args: argparse.Namespace) -> int:
         if cell.downstream_ids:
             readers = ", ".join(cell.downstream_ids)
             print(f"error: cells {readers} read {args.cell}; retire them first", file=sys.stderr)
+            return 2
+        if cell.status == "running":
+            print(f"error: {args.cell} is running; retire it once it ends", file=sys.stderr)
             return 2
         record = retire_cell(ops, directory, scratch_manager(directory), cell)
     print(json.dumps({"retired": record["cell"], "defines": record["defines"]}, indent=2))
