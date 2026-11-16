@@ -1033,7 +1033,13 @@ def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
             file=sys.stderr,
         )
         return None
-    serving = _daemon_serving(notebook_dir_arg)
+    from strata.scratch import ScratchError
+
+    try:
+        serving = _daemon_serving(notebook_dir_arg)
+    except ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
     if serving is not None:
         # Its session is the writer: editing the files here too would race it.
         print(
@@ -1093,7 +1099,13 @@ def _open_read_ops(args: argparse.Namespace):
     if not args.notebook_dir:
         print("error: provide a notebook directory or --server/--session", file=sys.stderr)
         return None
-    serving = _daemon_serving(args.notebook_dir)
+    from strata.scratch import ScratchError
+
+    try:
+        serving = _daemon_serving(args.notebook_dir)
+    except ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
     if serving is not None:
         from strata.notebook.ops import RemoteNotebookOps
 
@@ -1107,6 +1119,7 @@ def _daemon_serving(notebook_dir: str):
     """The live daemon holding *notebook_dir* open, if its ``server.json`` names one.
 
     Its session is the notebook's writer; editing the files here as well would race it.
+    Raises ``ScratchError`` for one that is alive but not answering.
     """
     from strata.scratch import daemon_serving
 
@@ -2067,7 +2080,15 @@ async def _cell_run_async(args: argparse.Namespace) -> int:
 
 def cell_cancel_main(args: argparse.Namespace) -> int:
     """Cancel a run on a server; exit 0 if one was cancelled, 1 if none was running."""
-    serving = _daemon_serving(args.notebook_dir) if args.notebook_dir and not args.server else None
+    from strata.scratch import ScratchError
+
+    try:
+        serving = (
+            _daemon_serving(args.notebook_dir) if args.notebook_dir and not args.server else None
+        )
+    except ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if serving is not None:
         args.server, args.session = serving.url, serving.session_id
     if not args.server:
