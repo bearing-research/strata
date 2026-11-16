@@ -4,7 +4,8 @@ It answers ``initialize`` and ``tools/list`` itself, from the guidance and a cop
 daemon's tool list (``scratch_tools.json``), so a session that never calls a tool starts
 nothing. The first tool call finds or starts the project's daemon (``strata.scratch``),
 reporting each setup step as MCP progress, and every call is forwarded to the daemon's
-``/mcp/`` endpoint. A call that had to set the scratchpad up carries ``setup_ms``.
+``/mcp/`` endpoint. A call that had to set the scratchpad up carries ``setup_ms``, and
+one served by another Strata version's daemon, busy so not replaced, carries ``note``.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import cache
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -168,12 +170,12 @@ class Upstream:
         return message["result"]
 
 
-def _with_setup(result: dict[str, Any], setup_ms: dict[str, int]) -> dict[str, Any]:
-    """*result* with ``setup_ms`` added to its structured value and the text showing it."""
+def _with_fields(result: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
+    """*result* with *fields* added to its structured value and the text showing it."""
     structured = result.get("structuredContent")
     if not isinstance(structured, dict):
         return result
-    structured = {**structured, "setup_ms": setup_ms}
+    structured = {**structured, **fields}
     # As the daemon renders it, so the text and the structured value agree.
     text = pydantic_core.to_json(structured, fallback=str, indent=2).decode()
     return {**result, "structuredContent": structured, "content": [{"type": "text", "text": text}]}
@@ -199,8 +201,9 @@ def build_server(root: Path) -> Server:
         return types.ListToolsResult.model_validate({"tools": listed_tools()})
 
     # The daemon forwarded to: found or started on the first call, and again only once
-    # a call cannot reach it, so a busy one is not probed (and replaced) per call.
+    # a call cannot reach it, or while another version's is used until it is idle.
     found: list[scratch.Daemon] = []
+    current = version("strata-notebook")
 
     async def connect(ctx: Any, unreachable: scratch.Daemon | None) -> dict[str, int]:
         """Connect to the daemon; return the setup steps this took, if it set one up."""
@@ -211,10 +214,17 @@ def build_server(root: Path) -> Server:
 
         setup_ms: dict[str, int] = {}
         async with setting_up:
-            if not found or found[0] is unreachable:
-                daemon = await anyio.to_thread.run_sync(scratch.ensure_daemon, root, progress)
-                found[:] = [daemon]
-                setup_ms = daemon.setup_ms
+            other = bool(found) and found[0] is not unreachable and found[0].version != current
+            if not found or found[0] is unreachable or other:
+                try:
+                    daemon = await anyio.to_thread.run_sync(scratch.ensure_daemon, root, progress)
+                except scratch.ScratchError:
+                    # Another version's, too busy to answer whether it is: it serves the call.
+                    if not other:
+                        raise
+                else:
+                    found[:] = [daemon]
+                    setup_ms = daemon.setup_ms
         await upstream.open(found[0].url)
         return setup_ms
 
@@ -242,8 +252,14 @@ def build_server(root: Path) -> Server:
                 f"the scratchpad's server failed the call: {type(exc).__name__}: {exc}",
                 "call again; a server that stopped is started again on the next call",
             )
-        if setup_ms:
-            result = _with_setup(result, setup_ms)
+        fields: dict[str, Any] = {"setup_ms": setup_ms} if setup_ms else {}
+        if found[0].version != current:
+            fields["note"] = (
+                f"served by the scratchpad's daemon of Strata {found[0].version}, not this "
+                f"client's {current}: it was busy, so it is replaced once idle"
+            )
+        if fields:
+            result = _with_fields(result, fields)
         return types.CallToolResult.model_validate(result)
 
     @asynccontextmanager

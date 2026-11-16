@@ -124,6 +124,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   in DuckDB SQL is still not seen. (#1516)
 
 ### Changed
+- **A scratchpad daemon another Strata version started is replaced only when idle.** One
+  with a request open, a socket open, or a run, build or warm job in flight serves the
+  call as it is, and the call's result has a `note` saying so; `strata scratch start`
+  prints it. The bridge asks again on each call until it is idle, then replaces it.
+  `GET /health/busy` says whether a server has work besides that request. (#BUSY)
 - **A notebook with many cells does less work per edit and run, and the CLI starts
   faster.** A staleness pass reads `uv.lock` once rather than once per cell, and parses
   it only when its content changed; on Python 3.13 and later `runtime.json` is written

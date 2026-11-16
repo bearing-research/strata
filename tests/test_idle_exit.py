@@ -172,3 +172,18 @@ async def test_a_background_build_or_warm_job_is_busy_until_it_ends():
     await task
     runner._running_builds.clear()
     assert not streams.busy() and not warmer.busy() and not runner.busy()
+
+
+@pytest.mark.asyncio
+async def test_busy_is_work_besides_the_question(activity, monkeypatch):
+    from strata.api.routers.metrics_health import health_busy
+
+    monkeypatch.setattr(server, "_work_in_flight", lambda state: False)
+    # The question itself is open.
+    activity.begin()
+    assert await health_busy() == {"busy": False}
+    activity.begin()
+    assert await health_busy() == {"busy": True}
+    activity.end()
+    monkeypatch.setattr(server, "_work_in_flight", lambda state: True)
+    assert await health_busy() == {"busy": True}
