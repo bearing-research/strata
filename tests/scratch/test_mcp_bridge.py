@@ -84,14 +84,30 @@ async def test_the_first_call_sets_the_scratchpad_up_and_says_so(project):
         assert "setup_ms" not in held
 
 
+def _refused(url: str) -> bool:
+    """Whether a connection to *url* is refused: nothing listens there."""
+    import socket
+    from urllib.parse import urlsplit
+
+    address = urlsplit(url)
+    try:
+        socket.create_connection((address.hostname, address.port), timeout=5).close()
+    except ConnectionRefusedError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 @pytest.mark.asyncio
 async def test_a_daemon_that_stopped_is_started_again_on_the_next_call(project):
     async with _bridge(project) as client:
         _value(await client.call_tool("run", {"source": "1"}))
         daemon = scratch.find_daemon(project.resolve())
         os.kill(daemon.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
-        # Gone before the next call, as after an idle exit.
-        while scratch._alive(daemon.pid):
+        # Gone before the next call, as after an idle exit: its port refuses. Not its pid's
+        # exit: on Windows that is the venv's launcher, and the server it started dies after.
+        while not await asyncio.to_thread(_refused, daemon.url):
             await asyncio.sleep(0.05)
 
         again = _value(await client.call_tool("run", {"source": "2"}))
