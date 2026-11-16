@@ -246,6 +246,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if _refuses_served(str(notebook_dir), "runs it in a session of its own"):
+        return 2
 
     # Late imports so --help / path errors don't pay heavy import cost.
     from strata.notebook.executor import DEFAULT_CELL_TIMEOUT_SECONDS, CellExecutor
@@ -1021,10 +1023,13 @@ def export_main(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
+def _open_local_ops(
+    notebook_dir_arg: str, author: str | None = None, *, refuse_served: bool = True
+):
     """Open a :class:`LocalNotebookOps` for *notebook_dir_arg*, or None on error.
 
-    The error is printed to stderr; callers return exit 2 on None.
+    The error is printed to stderr; callers return exit 2 on None. *refuse_served* off is
+    for a caller that only reads, or that asked already.
     """
     notebook_dir = Path(notebook_dir_arg).expanduser().resolve()
     if not (notebook_dir / "notebook.toml").is_file():
@@ -1033,21 +1038,7 @@ def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
             file=sys.stderr,
         )
         return None
-    from strata.scratch import ScratchError
-
-    try:
-        serving = _daemon_serving(notebook_dir_arg)
-    except ScratchError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return None
-    if serving is not None:
-        # Its session is the writer: editing the files here too would race it.
-        print(
-            f"error: the server at {serving.url} holds {notebook_dir} open, and this "
-            "command edits its files directly; stop that server first (for a "
-            "scratchpad, `strata scratch stop` in its project)",
-            file=sys.stderr,
-        )
+    if refuse_served and _refuses_served(notebook_dir_arg, "edits its files directly"):
         return None
     from strata.notebook.ops import LocalNotebookOps
 
@@ -1112,7 +1103,34 @@ def _open_read_ops(args: argparse.Namespace):
         return RemoteNotebookOps(
             serving.url, serving.session_id, author=getattr(args, "author", None)
         )
-    return _open_local_ops(args.notebook_dir, author=getattr(args, "author", None))
+    # Asked just now: no daemon serves it.
+    return _open_local_ops(
+        args.notebook_dir, author=getattr(args, "author", None), refuse_served=False
+    )
+
+
+def _refuses_served(notebook_dir: str, doing: str) -> bool:
+    """Print why and return True if a daemon serves *notebook_dir*, or may (not answering).
+
+    Its session is the writer: a command that *doing* there too would race it.
+    """
+    from strata.scratch import ScratchError
+
+    try:
+        serving = _daemon_serving(notebook_dir)
+    except ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return True
+    if serving is None:
+        return False
+    held = Path(notebook_dir).expanduser().resolve()
+    print(
+        f"error: the server at {serving.url} holds {held} open, "
+        f"and this command {doing}; stop that server first (for a scratchpad, "
+        "`strata scratch stop` in its project)",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _daemon_serving(notebook_dir: str):
@@ -1792,7 +1810,8 @@ def _emit_worker_list(view: WorkerListView, fmt: str) -> None:
 def worker_ls_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
-    ops = _open_local_ops(args.notebook_dir)
+    # Only reads: fine beside a daemon serving it.
+    ops = _open_local_ops(args.notebook_dir, refuse_served=False)
     if ops is None:
         return 2
     try:
@@ -2084,7 +2103,9 @@ def cell_cancel_main(args: argparse.Namespace) -> int:
 
     try:
         serving = (
-            _daemon_serving(args.notebook_dir) if args.notebook_dir and not args.server else None
+            _daemon_serving(args.notebook_dir)
+            if args.notebook_dir and not args.server and not args.session
+            else None
         )
     except ScratchError as exc:
         print(f"error: {exc}", file=sys.stderr)

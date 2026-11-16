@@ -862,6 +862,13 @@ _EMPTY_DAG: dict[str, Any] = {
 }
 
 
+def _until_done() -> httpx.Timeout:
+    """For a run or a resolve: the cell's own timeout ends it, not the client's 30s."""
+    import httpx
+
+    return httpx.Timeout(None, connect=10.0)
+
+
 class RemoteNotebookOps:
     """:class:`NotebookOps` over a running ``strata-notebook`` server.
 
@@ -904,7 +911,7 @@ class RemoteNotebookOps:
         *,
         json: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
-        timeout: float | None = None,
+        timeout: float | httpx.Timeout | None = None,
     ) -> httpx.Response:
         """Issue one request, turning a connection failure into an ops error.
 
@@ -941,6 +948,7 @@ class RemoteNotebookOps:
         cell_id: str | None = None,
         json: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
+        timeout: float | httpx.Timeout | None = None,
     ) -> dict[str, Any]:
         """Issue a cell-scoped request and return the JSON body, mapping errors.
 
@@ -948,7 +956,7 @@ class RemoteNotebookOps:
         detail), ``409`` an environment-busy error, any other error status the
         server's detail message.
         """
-        resp = self._send(method, path, json=json, params=params)
+        resp = self._send(method, path, json=json, params=params, timeout=timeout)
         if resp.status_code == 404:
             raise NotebookOpsError(
                 f"no cell with id {cell_id!r}" if cell_id else _error_detail(resp)
@@ -1026,6 +1034,7 @@ class RemoteNotebookOps:
             f"/v1/notebooks/{self._session_id}/cells/{cell_id}/execute",
             cell_id=cell_id,
             params={"mode": mode, **({"init": init} if init else {})},
+            timeout=_until_done(),
         )
         return _run_result_from_wire(data)
 
@@ -1048,6 +1057,7 @@ class RemoteNotebookOps:
             "POST",
             f"/v1/notebooks/{self._session_id}/cells/{cell_id}/tests",
             cell_id=cell_id,
+            timeout=_until_done(),
         )
         return _test_run_result_from_wire(data, cell_id)
 
@@ -1123,9 +1133,9 @@ class RemoteNotebookOps:
     def _mutate_dependency(self, package: str, action: str) -> DependencyResult:
         base = f"/v1/notebooks/{self._session_id}/dependencies"
         if action == "add":
-            resp = self._send("POST", base, json={"package": package})
+            resp = self._send("POST", base, json={"package": package}, timeout=_until_done())
         else:
-            resp = self._send("DELETE", f"{base}/{package}")
+            resp = self._send("DELETE", f"{base}/{package}", timeout=_until_done())
         if resp.status_code == 404:
             raise NotebookOpsError(f"no session {self._session_id!r} on {self._base_url}")
         if resp.status_code == 409:

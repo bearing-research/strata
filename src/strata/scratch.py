@@ -75,13 +75,14 @@ def _log_path(anchor: Path) -> Path:
 def _sync_state(url: str, session_id: str) -> str | None:
     """The session's environment sync state, or None if nothing listens at *url* or the
     session is not open there. Raises ``httpx.HTTPError`` for a server that does not
-    answer in time."""
+    answer in time, or answers with an error: it may still hold the session."""
     try:
         response = httpx.get(f"{url}/v1/notebooks/{session_id}/environment", timeout=5.0)
     except httpx.ConnectError:
         return None
-    if not response.is_success:
+    if response.status_code == 404:
         return None
+    response.raise_for_status()
     return response.json()["environment"]["sync_state"]
 
 
@@ -102,7 +103,10 @@ def daemon_serving(notebook_dir: Path) -> Daemon | None:
     """
     try:
         record = json.loads((notebook_dir / ".strata" / "server.json").read_text())
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if scratch_dir(Path(record["anchor"])).resolve() != notebook_dir.resolve():
+        # A copy of the directory, record and all: that daemon serves the original.
         return None
     try:
         state = _sync_state(record["url"], record["session_id"])

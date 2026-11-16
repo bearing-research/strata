@@ -217,11 +217,22 @@ def test_the_cli_starts_shows_and_stops_it(project, capsys):
     assert scratch.find_daemon(project.resolve()) is None
 
 
-def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
+def _served(project, **over):
     state = project / ".strata-scratch" / ".strata"
     state.mkdir(parents=True)
-    record = {"url": "http://127.0.0.1:9", "pid": os.getpid(), "session_id": "s", "version": "0"}
+    record = {
+        "url": "http://127.0.0.1:9",
+        "pid": os.getpid(),
+        "session_id": "s",
+        "version": "0",
+        "anchor": str(project),
+        **over,
+    }
     (state / "server.json").write_text(json.dumps(record))
+
+
+def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
+    _served(project, pid=os.getpid())
 
     def slow(url, **kwargs):
         raise httpx.ReadTimeout("busy")
@@ -237,10 +248,7 @@ def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
 
 def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
     """Killed a moment ago: its connections reset while its process still exists."""
-    state = project / ".strata-scratch" / ".strata"
-    state.mkdir(parents=True)
-    record = {"url": "http://127.0.0.1:9", "pid": 12345, "session_id": "s", "version": "0"}
-    (state / "server.json").write_text(json.dumps(record))
+    _served(project, pid=12345)
 
     def reset(url, **kwargs):
         raise httpx.ReadError("connection reset by peer")
@@ -249,6 +257,30 @@ def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
     monkeypatch.setattr(scratch.httpx, "get", reset)
     monkeypatch.setattr(scratch, "_alive", lambda pid: next(checks))
     assert scratch.find_daemon(project) is None
+
+
+def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):
+    """Its record came along, but that daemon holds the original, not the copy."""
+    _served(project, anchor=str(tmp_path / "original"))
+
+    def asked(url, **kwargs):
+        raise AssertionError("asked the original's daemon")
+
+    monkeypatch.setattr(scratch.httpx, "get", asked)
+    assert scratch.find_daemon(project) is None
+
+
+def test_a_daemon_answering_with_an_error_may_still_hold_the_session(project, monkeypatch):
+    _served(project)
+    monkeypatch.setattr(
+        scratch.httpx,
+        "get",
+        lambda url, **kwargs: httpx.Response(500, request=httpx.Request("GET", url)),
+    )
+    monkeypatch.setattr(scratch, "_DYING_GRACE", 0.1)
+    # Not taken for gone: the files would be edited behind its session.
+    with pytest.raises(scratch.ScratchError, match="is not answering"):
+        scratch.find_daemon(project)
 
 
 def test_a_launch_that_fails_is_a_scratch_error(project, monkeypatch):
