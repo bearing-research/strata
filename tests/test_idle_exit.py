@@ -46,8 +46,8 @@ async def test_a_request_or_socket_counts_until_it_ends(activity, kind):
     assert activity.idle_seconds(time.monotonic() + 3600) == 0.0
     release.set()
     await task
-    # From when it ended.
-    assert activity.idle_seconds(activity.last_ended + 5) == 5.0
+    # From when it ended (approx: subtracting the clock reading back rounds).
+    assert activity.idle_seconds(activity.last_ended + 5) == pytest.approx(5.0)
 
 
 def test_a_run_counts_from_its_reservation(monkeypatch):
