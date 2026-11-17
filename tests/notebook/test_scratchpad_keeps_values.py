@@ -3,6 +3,7 @@ loads it instead of rerunning the cell that made it. These run real cells."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -48,3 +49,74 @@ def test_a_scratchpad_says_so_in_its_config_and_keeps_saying_it(tmp_path):
     plain = create_notebook(tmp_path, "plain")
     assert "scratchpad" not in (plain / "notebook.toml").read_text()
     assert not parse_notebook(plain).scratchpad
+
+
+async def test_a_cell_with_one_value_read_keeps_the_rest(tmp_path):
+    # Edited once a cell reads `rows`, the maker runs with `rows` consumed: `size` is kept
+    # too, so a cell reading it later loads it.
+    log = tmp_path / "ran.log"
+    path = create_notebook(tmp_path, "nb", scratchpad=True)
+    with LocalNotebookOps(path) as ops:
+        maker = ops.add_cell(_loads(log))
+        ops._session.refresh_environment_runtime()
+        assert (await ops.run_cell(maker.id)).status == "ok"
+        await _add_and_run(ops, "print(sum(rows))")
+        ops.edit_cell(maker.id, _loads(log) + "size = len(rows)\n")
+        assert (await ops.run_cell(maker.id)).status == "ok"
+        late = await _add_and_run(ops, "print(size * 2)")
+    assert "10" in late.stdout
+    assert log.read_text().splitlines() == ["ran", "ran"]
+
+
+async def test_a_kept_def_is_its_module_export(tmp_path):
+    log = tmp_path / "ran.log"
+    path = create_notebook(tmp_path, "nb", scratchpad=True)
+    with LocalNotebookOps(path) as ops:
+        ops._session.refresh_environment_runtime()
+        maker = await _add_and_run(ops, _loads(log) + "def double(x):\n    return 2 * x\n")
+        used = await _add_and_run(ops, "print(double(len(rows)))")
+        kinds = {
+            json.loads(version.transform_spec)["params"]["content_type"]
+            for version in ops._session.artifact_manager.artifact_store.list_latest_by_id_prefix(
+                f"nb_{ops._session.notebook_state.id}_cell_{maker.cell_id}_var_double"
+            )
+        }
+    assert "10" in used.stdout
+    assert log.read_text().splitlines() == ["ran"]
+    assert kinds == {"module/cell"}
+
+
+async def test_a_kept_def_that_cannot_be_shared_is_left_for_its_reader_to_find_out(tmp_path):
+    # A lambda pickles, but no module export ships it. Kept as a pickle, its reader would
+    # get it from the cache; it reruns the cell and is told, as in a plain notebook.
+    path = create_notebook(tmp_path, "nb", scratchpad=True)
+    with LocalNotebookOps(path) as ops:
+        ops._session.refresh_environment_runtime()
+        await _add_and_run(ops, "square = lambda x: x * x")
+        cell = ops.add_cell("print(square(3))")
+        refused = await ops.run_cell(cell.id)
+    assert refused.status == "error"
+    assert "cannot be shared across cells" in (refused.error or "")
+
+
+async def test_run_all_keeps_what_a_single_run_keeps(tmp_path):
+    from strata.notebook import ws
+    from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+    log = tmp_path / "ran.log"
+    path = create_notebook(tmp_path, "nb", scratchpad=True)
+    for cell_id, source, after in (("a", _loads(log), None), ("b", "other = 1", "a")):
+        add_cell_to_notebook(path, cell_id, after)
+        write_cell(path, cell_id, source)
+    with LocalNotebookOps(path) as ops:
+        session = ops._session
+        session.refresh_environment_runtime()
+        await ws._execute_run_all(
+            None, session, ["a", "b"], ws._ensure_execution_state(session.id), session.id
+        )
+    assert log.read_text().splitlines() == ["ran"]
+    with LocalNotebookOps(path) as ops:
+        ops._session.refresh_environment_runtime()
+        late = await _add_and_run(ops, "print(len(rows))")
+    assert "5" in late.stdout
+    assert log.read_text().splitlines() == ["ran"]
