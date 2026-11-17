@@ -269,11 +269,14 @@ class TestTheLoadCounter:
     def test_unset_it_writes_nothing_and_the_load_still_waits(self, built, tmp_path):
         work = _fresh(built, tmp_path)
         log = tmp_path / "loads.jsonl"
+        # What the load asks to sleep, not how long it took: a measured wait
+        # can come up a hair short of the requested one on some clocks.
         code = (
-            "import time; from harbor.data import load_events; t = time.monotonic();"
-            " load_events(); assert time.monotonic() - t >= 0.5"
+            "import time; slept = []; time.sleep = slept.append;"
+            " from harbor.data import load_events; load_events();"
+            " assert len(slept) == 1 and slept[0] > 0, slept"
         )
 
-        self._load(work, log, "-c", code, HARBOR_LOAD_LOG="", HARBOR_LOAD_SECONDS="0.5")
+        self._load(work, log, "-c", code, HARBOR_LOAD_LOG="", HARBOR_LOAD_SECONDS="3600")
 
         assert not log.exists()
