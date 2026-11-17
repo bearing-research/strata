@@ -14,6 +14,7 @@ import json
 import httpx
 import pytest
 from vestigo.provenance import TransformSpec, derive_subkey
+from vestigo.releases import ReleaseRejected, ReleaseStore
 from vestigo.store import ArtifactStore
 
 from strata.notebook import output_dirs
@@ -141,6 +142,52 @@ async def test_one_missing_variable_is_a_miss_and_writes_nothing(team_store_serv
         await store.aclose()
 
     assert pull is None
+    assert canonical_provenance(local_manager, "model") is None
+    assert canonical_provenance(local_manager, "scaler") is None
+
+
+async def _pull_model_and_scaler(team_store_server, local_manager):
+    seed_team_result(team_store_server["artifact_dir"], variable="model", blob=b'{"trees": 200}')
+    seed_team_result(team_store_server["artifact_dir"], variable="scaler", blob=b'{"mean": 0}')
+    store = TeamStore(team_store_server["base_url"])
+    try:
+        return await pull_cell_outputs(
+            store,
+            local_manager,
+            cell_id=CELL_ID,
+            provenance_hash=CELL_PROVENANCE,
+            consumed_vars={"model", "scaler"},
+        )
+    finally:
+        await store.aclose()
+
+
+async def test_a_pull_is_one_release_of_its_values(team_store_server, local_manager):
+    """Current together: one build of the cell's key, whose final release holds both."""
+    assert await _pull_model_and_scaler(team_store_server, local_manager) is not None
+
+    rows = [
+        local_manager.artifact_store.get_latest_version(local_manager.cell_artifact_id(CELL_ID, v))
+        for v in ("model", "scaler")
+    ]
+    assert all(row is not None for row in rows)
+    (release_id,) = {row.release_id for row in rows if row is not None}
+    release = local_manager.release_store.get(release_id)
+    assert release is not None and (release.kind, release.state) == ("final", "accepted")
+    build = local_manager.build_store.get_build(release.build_id)
+    assert build is not None
+    assert (build.state, build.computation_key) == ("ready", CELL_PROVENANCE)
+
+
+async def test_a_pull_whose_release_is_refused_makes_nothing_current(
+    team_store_server, local_manager, monkeypatch
+):
+    def refused(self, release_id, staged):
+        raise ReleaseRejected("refused")
+
+    monkeypatch.setattr(ReleaseStore, "accept", refused)
+
+    assert await _pull_model_and_scaler(team_store_server, local_manager) is None
     assert canonical_provenance(local_manager, "model") is None
     assert canonical_provenance(local_manager, "scaler") is None
 
