@@ -3156,7 +3156,8 @@ class CellExecutor:
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
-        With ``store_leaf_outputs``, a leaf cell's variables are stored too, best-effort.
+        With ``store_leaf_outputs``, a leaf cell's variables are stored too, best-effort, as
+        are a scratchpad cell's unread ones (``kept_unread``).
         *collected* holds folders already collected by :meth:`_collect_output_dirs`.
         *run_outputs* is what the harness reported, which says why a value left no file.
 
@@ -3196,7 +3197,11 @@ class CellExecutor:
         # Nothing reads them yet, so a value that did not serialize is skipped rather than
         # failing the cell; one stored is what a later reader loads. A def or class goes only
         # as its module export: pickled, a reader would get a copy of the class.
-        leaf_vars = kept_unread(self.session, cell_id)
+        # Only the cell's own key: an ``@each`` instance's, a variant's or a stochastic
+        # run's are found through what is read.
+        leaf_vars = (
+            kept_unread(self.session, cell_id) if variant is None and not stochastic else set()
+        )
         if leaf_vars:
             leaf_vars -= {
                 name

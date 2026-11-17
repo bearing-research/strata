@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from strata.notebook.executor import CellExecutor
 from strata.notebook.ops import LocalNotebookOps
 from strata.notebook.parser import parse_notebook
 from strata.notebook.writer import create_notebook, update_notebook_worker
@@ -105,18 +107,76 @@ async def test_run_all_keeps_what_a_single_run_keeps(tmp_path):
 
     log = tmp_path / "ran.log"
     path = create_notebook(tmp_path, "nb", scratchpad=True)
-    for cell_id, source, after in (("a", _loads(log), None), ("b", "other = 1", "a")):
+    maker = _loads(log) + "def double(x):\n    return 2 * x\n"
+    for cell_id, source, after in (("a", maker, None), ("b", "other = 1", "a")):
         add_cell_to_notebook(path, cell_id, after)
         write_cell(path, cell_id, source)
-    with LocalNotebookOps(path) as ops:
+    specs: list[dict] = []
+    real_batch = CellExecutor.execute_batch
+
+    async def execute_batch(self, cell_specs, **kwargs):
+        specs.extend(cell_specs)
+        return await real_batch(self, cell_specs, **kwargs)
+
+    with (
+        LocalNotebookOps(path) as ops,
+        mock.patch.object(CellExecutor, "execute_batch", execute_batch),
+    ):
         session = ops._session
         session.refresh_environment_runtime()
         await ws._execute_run_all(
             None, session, ["a", "b"], ws._ensure_execution_state(session.id), session.id
         )
+    # Code goes as its module export: the harness does not pickle it.
+    (kept,) = [spec["kept_vars"] for spec in specs if spec["cell_id"] == "a"]
+    assert "rows" in kept
+    assert "double" not in kept
     assert log.read_text().splitlines() == ["ran"]
     with LocalNotebookOps(path) as ops:
         ops._session.refresh_environment_runtime()
         late = await _add_and_run(ops, "print(len(rows))")
     assert "5" in late.stdout
     assert log.read_text().splitlines() == ["ran"]
+
+
+def _kinds(ops: LocalNotebookOps, cell_id: str, name: str) -> set[str]:
+    store = ops._session.artifact_manager.artifact_store
+    prefix = f"nb_{ops._session.notebook_state.id}_cell_{cell_id}_var_{name}"
+    return {
+        json.loads(version.transform_spec)["params"]["content_type"]
+        for version in store.list_latest_by_id_prefix(prefix)
+    }
+
+
+async def test_a_read_constant_beside_kept_code_stays_a_value(tmp_path):
+    # A prompt or R cell can read it only as a value; it rides a module only beside code
+    # something reads.
+    path = create_notebook(tmp_path, "nb", scratchpad=True)
+    with LocalNotebookOps(path) as ops:
+        ops._session.refresh_environment_runtime()
+        maker = ops.add_cell("LIMIT = 10\ndef double(x):\n    return 2 * x\n")
+        ops._session.refresh_environment_runtime()
+        # The maker runs with LIMIT read and `double` not.
+        assert (await ops.run_cell(ops.add_cell("print(LIMIT)").id)).status == "ok"
+        assert _kinds(ops, maker.id, "LIMIT") == {"json/object"}
+        assert _kinds(ops, maker.id, "double") == {"module/cell"}
+
+
+async def test_a_plain_notebook_still_refuses_a_cell_it_cannot_share(tmp_path):
+    path = create_notebook(tmp_path, "nb")
+    with LocalNotebookOps(path) as ops:
+        ops._session.refresh_environment_runtime()
+        await _add_and_run(ops, "LIMIT = 10\nsquare = lambda x: x * x")
+        reader = ops.add_cell("print(LIMIT)")
+        refused = await ops.run_cell(reader.id)
+    assert refused.status == "error"
+    assert "cannot be shared across cells" in (refused.error or "")
+
+
+async def test_a_stochastic_run_keeps_only_what_is_read(tmp_path):
+    # Keyed by the run, which no later reader's key matches.
+    path = create_notebook(tmp_path, "nb", scratchpad=True)
+    with LocalNotebookOps(path) as ops:
+        ops._session.refresh_environment_runtime()
+        maker = await _add_and_run(ops, "# @stochastic\nimport random\nx = random.random()\n")
+        assert _kinds(ops, maker.cell_id, "x") == set()

@@ -55,8 +55,6 @@ def write_module_export_outputs(
         return None
 
     consumed_vars = host.dag.consumed_variables.get(cell_id, set())
-    # A kept def is exported like a read one, but one that cannot be is left unstored, not
-    # an error: nothing reads it yet.
     kept = kept_unread(host, cell_id)
     if not consumed_vars and not kept:
         return None
@@ -76,18 +74,20 @@ def write_module_export_outputs(
     injectable = cross_cell | same_cell_runtime
 
     export_plan = build_module_export_plan(source, injectable=injectable)
-    exportable_vars = sorted(set(export_plan.exported_symbols) & (set(consumed_vars) | kept))
+    exportable_vars = sorted(set(export_plan.exported_symbols) & set(consumed_vars))
     blocked_vars = sorted(export_plan.blocking_symbols & set(consumed_vars))
-    if not exportable_vars and not blocked_vars:
-        return None
-    read_code = blocked_vars or [
+    # Unread code is kept as its export where it can be. Where it cannot, it is left for
+    # its first reader to rerun and be told why: nothing reads it yet.
+    kept_code = sorted(
         name
-        for name in exportable_vars
-        if name in consumed_vars and export_plan.exported_symbols[name].kind in _CODE_KINDS
-    ]
+        for name in kept & set(export_plan.exported_symbols)
+        if export_plan.exported_symbols[name].kind in _CODE_KINDS
+    )
+    if not exportable_vars and not blocked_vars and not kept_code:
+        return None
 
     if not export_plan.is_exportable:
-        if not read_code:
+        if not exportable_vars and not blocked_vars:
             return None
         joined_vars = ", ".join(sorted(set(exportable_vars) | set(blocked_vars)))
         return (
@@ -97,12 +97,14 @@ def write_module_export_outputs(
         )
 
     # Constants alone don't trigger module-export (``x = 1`` stays a plain int). They
-    # ride the module only when the cell also exports a def/class.
+    # ride the module only when the cell also exports a def/class something reads.
     code_exports = [
         name for name in exportable_vars if export_plan.exported_symbols[name].kind in _CODE_KINDS
     ]
     if not code_exports:
-        return None
+        if not kept_code:
+            return None
+        exportable_vars = []
 
     # Pin each injected name to the upstream variable's versioned artifact URI. If one
     # can't be pinned, block rather than ship a module that NameErrors at call time.
@@ -119,7 +121,7 @@ def write_module_export_outputs(
                 host, cell_id, name, output_dir, outputs, provenance_hash, source
             )
         if uri is None:
-            if not read_code:
+            if not code_exports:
                 return None
             return (
                 "This cell defines reusable code used downstream "
@@ -128,6 +130,7 @@ def write_module_export_outputs(
                 "share yet."
             )
         injected_refs[name] = uri
+    exportable_vars = sorted({*exportable_vars, *kept_code})
 
     source_hash = compute_source_hash(source)
     notebook_id = host.notebook_state.id
