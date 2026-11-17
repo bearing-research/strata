@@ -171,6 +171,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         name=toml_data.get("name", "Untitled Notebook"),
         created_at=created_at,
         updated_at=updated_at,
+        scratchpad=toml_data.get("scratchpad", False),
         worker=toml_data.get("worker"),
         timeout=toml_data.get("timeout"),
         env=toml_data.get("env", {}),
@@ -291,6 +292,7 @@ def parse_notebook(directory: Path) -> NotebookState:
     return NotebookState(
         id=notebook_toml.notebook_id,
         name=notebook_toml.name,
+        scratchpad=notebook_toml.scratchpad,
         worker=notebook_toml.worker,
         timeout=notebook_toml.timeout,
         env=dict(notebook_toml.env),

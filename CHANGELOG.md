@@ -122,6 +122,11 @@ exhaustive commit history.
   in DuckDB SQL is still not seen. (#1516)
 
 ### Changed
+- **A scratchpad keeps every variable its cells define.** A notebook stores a variable
+  only once a cell downstream reads it, so an agent that loaded data in one cell and asked
+  about it in the next ran the load twice: the first reader reran the cell that made it.
+  A notebook whose `notebook.toml` says `scratchpad = true`, as `strata scratch`'s does,
+  keeps them all, best-effort. Plain notebooks are unchanged. (#KEEP)
 - **A scratchpad daemon another Strata version started is replaced only when idle.** One
   with a request open, a socket open, or a run, build or warm job in flight serves the
   call as it is, and the call's result has a `note` saying so; `strata scratch start`

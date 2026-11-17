@@ -392,6 +392,7 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         "name": toml.name,
         "created_at": toml.created_at,
         "updated_at": toml.updated_at,
+        **({"scratchpad": True} if toml.scratchpad else {}),
         "cells": [
             {
                 "id": cell.id,
@@ -500,6 +501,7 @@ def create_notebook(
     write_gitignore_file: bool = True,
     project_mount: str | None = None,
     directory: str | None = None,
+    scratchpad: bool = False,
 ) -> Path:
     """Create a new notebook directory with notebook.toml and pyproject.toml.
 
@@ -514,6 +516,8 @@ def create_notebook(
             Pinned, so it never makes cells stale.
         directory: The directory's name, when it is not one *name* gives
             (``.strata-scratch`` is no project name).
+        scratchpad: Keep every variable a cell defines, so the first cell to read one
+            loads it rather than rerunning the cell that made it.
 
     Returns:
         Path to the created notebook directory.
@@ -561,6 +565,7 @@ def create_notebook(
         name=name,
         created_at=now,
         updated_at=now,
+        scratchpad=scratchpad,
         cells=[],
         mounts=mounts,
     )

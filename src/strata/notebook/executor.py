@@ -500,9 +500,10 @@ class CellExecutor:
         # What each variant of a running ``# @per_variant`` cell wrote through its mounts,
         # recorded together once every variant has succeeded.
         self._variant_writes: dict[str, list[MountWrite]] = {}
-        # Also store the variables of a cell nothing downstream reads. Off by default: only
-        # consumed variables are kept, and a leaf's result can be large.
-        self.store_leaf_outputs = False
+        # Also store the variables of a cell nothing downstream reads, so the first cell to
+        # read one loads it. A scratchpad's next cell reads its last; elsewhere only consumed
+        # variables are kept, since a leaf's result can be large.
+        self.store_leaf_outputs = session.notebook_state.scratchpad
         # What a remote dispatch reports as ``metadata.origin``: "notebook" for an open
         # notebook, "run" for a headless ``strata run``, so a dispatcher can queue
         # interactive cells first.
@@ -3191,8 +3192,8 @@ class CellExecutor:
             [f.name for f in output_files],
         )
 
-        # Kept for the record only: no input resolves through them, so a value that did not
-        # serialize is skipped rather than failing the cell.
+        # Nothing reads them yet, so a value that did not serialize is skipped rather than
+        # failing the cell; one stored is what a later reader loads.
         leaf_vars = set(cell.defines) if not consumed_vars and self.store_leaf_outputs else set()
         if not consumed_vars and not leaf_vars:
             return self._release_nothing(cell_id, local_run, stage_records)

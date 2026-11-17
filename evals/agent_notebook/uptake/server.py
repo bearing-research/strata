@@ -182,7 +182,7 @@ def _prepare_notebook(root: Path, project: Path) -> Path:
     # The server opens notebooks only inside its storage dir.
     storage = root / "notebooks"
     storage.mkdir(parents=True)
-    notebook = create_notebook(storage, "scratch")
+    notebook = create_notebook(storage, "scratch", scratchpad=True)
     added = subprocess.run(
         ["uv", "add", "--quiet", "--editable", str(project)],
         cwd=notebook,

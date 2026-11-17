@@ -160,6 +160,7 @@ def _scaffold(anchor: Path) -> None:
         write_gitignore_file=False,
         # Pinned, read-only: project files by `project / "path"`, never a stale cell.
         project_mount="project",
+        scratchpad=True,
     )
     ignore = scratch / ".gitignore"
     if not ignore.exists():
