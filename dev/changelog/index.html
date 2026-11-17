@@ -3980,6 +3980,11 @@ exhaustive commit history.</p>
   in DuckDB SQL is still not seen. (#1516)</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A scratchpad daemon another Strata version started is replaced only when idle.</strong> One
+  with a request open, a socket open, or a run, build or warm job in flight serves the
+  call as it is, and the call's result has a <code>note</code> saying so; <code>strata scratch start</code>
+  prints it. The bridge asks again on each call until it is idle, then replaces it.
+  <code>GET /health/busy</code> says whether a server has work besides that request. (#1575)</li>
 <li><strong>A notebook with many cells does less work per edit and run, and the CLI starts
   faster.</strong> A staleness pass reads <code>uv.lock</code> once rather than once per cell, and parses
   it only when its content changed; on Python 3.13 and later <code>runtime.json</code> is written

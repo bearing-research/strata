@@ -3355,7 +3355,9 @@ a server for it on a free loopback port, with the scratchpad profile and
 waits for its environment. The daemon's address, pid and session are written to
 <code>.strata-scratch/.strata/server.json</code>, so the next client finds it instead of
 starting another, and a file lock makes two clients asking at once share one.
-A daemon another Strata version started is stopped and replaced. The server's
+A daemon another Strata version started is stopped and replaced once it is idle
+(<code>GET /health/busy</code>); while it has a request, a socket or a run in flight it serves the
+call as it is, the result's <code>note</code> says so, and the next call asks again. The server's
 output goes to <code>.strata-scratch/.strata/server.log</code>; it keeps remote-mount copies
 and shared environments under <code>~/.strata</code>, as a personal server does.
 Cells read the project read-only as <code>project</code> (<code>project / "data.csv"</code>).
