@@ -439,6 +439,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A cell whose value Arrow cannot hold, such as `df.dtypes`, no longer breaks its
+  notebook.** Its display named an unnamed Series's column `0`, a number, and reading
+  that display back failed, so `strata status`, `cell add` and every later run raised
+  until the cell was edited. A display's column names are now strings, as Arrow's are,
+  and a display stored before this loads too, so a notebook it broke opens again; the
+  stored value keeps its labels. Such a value also loads back with its MultiIndex
+  columns whole and an unnamed Series unnamed (they came back transposed, and named
+  `""`). (#1578)
 - **`strata cell rm` without a server removes a cell as a session does.** Removing a
   group's active variant promotes the next one, removing its last member drops the
   group, and the table, read and write indexes forget the cell. Before, the variant
