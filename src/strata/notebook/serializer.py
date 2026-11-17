@@ -1181,7 +1181,8 @@ def _serialize_dataframe_json(
         "content_type": ContentType.ARROW_IPC,
         "file": filename,
         "rows": num_rows,
-        "columns": columns,
+        # Names, as Arrow's are; the payload keeps the labels (an unnamed Series's is 0).
+        "columns": [str(column) for column in columns],
         "bytes": filepath.stat().st_size,
         "preview": preview,
     }

@@ -376,6 +376,26 @@ class TestArrowSerialization:
             assert loaded.name == "target"
             assert loaded.tolist() == [10, 20, 30]
 
+    def test_a_fallback_display_names_its_columns_as_strings(self):
+        # Arrow cannot hold a Series of dtypes; unnamed, its frame's one column is 0. The
+        # display's names are strings, as Arrow's are, and the value keeps its labels.
+        from strata.notebook.models import CellOutput
+
+        value = pd.DataFrame({"a": [1.0], "b": ["x"]}).dtypes
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(value, tmpdir, "kinds")
+            assert json.loads((tmpdir / meta["file"]).read_text())["kind"] == "series"
+            assert meta["columns"] == ["0"]
+            CellOutput(content_type=meta["content_type"], columns=meta["columns"])
+
+            frame = pd.DataFrame({7: [1], "b": [object()]})
+            meta = serialize_value(frame, tmpdir, "frame")
+            assert meta["columns"] == ["7", "b"]
+            assert (
+                list(deserialize_value(meta["content_type"], tmpdir / meta["file"]).columns)[0] == 7
+            )
+
     def test_deserialize_arrow_json_fallback_without_pyarrow(self, monkeypatch):
         fallback_path = None
 
