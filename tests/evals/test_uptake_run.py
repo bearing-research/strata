@@ -379,9 +379,9 @@ class TestArmCp:
 
         server._prepare_notebook(root, tmp_path / "project")
 
-        (warm_env,) = [e for command, e in calls if command[1:2] == ["-c"]]
+        (warm_env,) = [e for command, e in calls if command[1:] == ["-c", server._WARM]]
         assert warm_env is not None
-        assert warm_env["HOME"] == server.server_env(root, 8799, tmp_path / "l", 0.0)["HOME"]
+        assert warm_env["HOME"] == str(server._home(root))
         # Nor does a load during the warm-up count as the trial's.
         assert "HARBOR_LOAD_LOG" not in warm_env
 

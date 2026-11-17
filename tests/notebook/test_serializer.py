@@ -2162,9 +2162,8 @@ def test_a_value_is_shown_without_importing_matplotlib_or_pil(tmp_path):
         "assert (shown['width'], shown['height']) == (2, 1), shown\n"
         "print(sorted(m for m in ('matplotlib', 'PIL') if m in sys.modules))\n"
     )
-    shown = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
-    )
+    shown = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert shown.returncode == 0, shown.stderr
     assert shown.stdout.strip() == "[]"
 
 
@@ -2172,10 +2171,8 @@ def test_a_figure_is_still_shown_as_a_png(tmp_path):
     figure_module = pytest.importorskip("matplotlib.figure")
     figure = figure_module.Figure(figsize=(1, 1), dpi=10)
     figure.add_subplot().plot([1, 2])
-    assert (
-        serializer_module.serialize_display_value(figure, tmp_path, 0)["content_type"]
-        == "image/png"
-    )
+    shown = serializer_module.serialize_display_value(figure, tmp_path, 0)
+    assert (shown["content_type"], shown["width"], shown["height"]) == ("image/png", 10, 10)
 
 
 def test_an_image_is_shown_as_a_png_of_its_size(tmp_path):
