@@ -9,6 +9,7 @@ import contextlib
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -165,6 +166,51 @@ def test_a_daemon_another_version_started_is_replaced(project):
     assert json.loads(record_path.read_text())["version"] == second.version != "0.0.0"
 
 
+def test_a_busy_daemon_another_version_started_is_kept_until_idle(project):
+    first = scratch.ensure_daemon(project)
+    record_path = project / ".strata-scratch" / ".strata" / "server.json"
+    record = json.loads(record_path.read_text())
+    record["version"] = "0.0.0"
+    record_path.write_text(json.dumps(record))
+
+    # A request still open on it: its body never comes.
+    port = int(first.url.rsplit(":", 1)[1])
+    with socket.create_connection(("127.0.0.1", port)) as held:
+        held.sendall(
+            b"POST /v1/notebooks/open HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"Content-Type: application/json\r\nContent-Length: 100\r\n\r\n"
+        )
+        deadline = time.monotonic() + 30
+        while not scratch._busy(first.url):
+            assert time.monotonic() < deadline, "a request still open is not busy"
+            time.sleep(0.05)
+        kept = scratch.ensure_daemon(project)
+        assert (kept.pid, kept.version) == (first.pid, "0.0.0")
+        assert scratch._healthy(first.url)
+
+    deadline = time.monotonic() + 30
+    while scratch._busy(first.url):
+        assert time.monotonic() < deadline, "a request that ended is still busy"
+        time.sleep(0.05)
+    replaced = scratch.ensure_daemon(project)
+    assert replaced.pid != first.pid
+    assert not scratch._healthy(first.url)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [httpx.ReadTimeout("slow"), httpx.Response(404, request=httpx.Request("GET", "http://x"))],
+)
+def test_a_daemon_that_does_not_say_whether_it_is_busy_is_busy(monkeypatch, answer):
+    def get(url, **kwargs):
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(scratch.httpx, "get", get)
+    assert scratch._busy("http://127.0.0.1:9")
+
+
 def test_the_daemon_keeps_the_personal_caches_and_none_of_the_callers_config(tmp_path, monkeypatch):
     for key in [k for k in os.environ if k.startswith("STRATA_")]:
         monkeypatch.delenv(key)
@@ -217,6 +263,13 @@ def test_the_cli_starts_shows_and_stops_it(project, capsys):
     assert scratch.find_daemon(project.resolve()) is None
 
 
+def test_the_cli_says_when_another_versions_daemon_was_kept(project, monkeypatch, capsys):
+    kept = scratch.Daemon(url="http://127.0.0.1:9", session_id="s", pid=1, version="0.0.0")
+    monkeypatch.setattr(scratch, "ensure_daemon", lambda root, progress: kept)
+    assert main(["scratch", "start", "--root", str(project)]) == 0
+    assert "runs Strata 0.0.0" in capsys.readouterr().err
+
+
 def _served(project, **over):
     state = project / ".strata-scratch" / ".strata"
     state.mkdir(parents=True)
@@ -241,7 +294,7 @@ def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
     started = []
     monkeypatch.setattr(scratch, "_spawn", lambda anchor, port: started.append(port) or 1)
     # Alive and slow: a second daemon would write the directory beside it.
-    with pytest.raises(scratch.ScratchError, match=rf"pid {os.getpid()}\) is not answering"):
+    with pytest.raises(scratch.NotAnswering, match=rf"pid {os.getpid()}\) is not answering"):
         scratch.ensure_daemon(project)
     assert started == []
 

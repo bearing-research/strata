@@ -18,6 +18,7 @@ _EXCLUDED_PATHS = {"/{full_path:path}"}
 
 EXPECTED_ROUTES = [
     ("/health", "GET", 0),
+    ("/health/busy", "GET", 0),
     ("/health/dependencies", "GET", 0),
     ("/health/ready", "GET", 0),
     ("/metrics", "GET", 0),

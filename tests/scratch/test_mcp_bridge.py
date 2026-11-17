@@ -171,6 +171,61 @@ async def test_later_calls_do_not_probe_the_daemon_again(project, monkeypatch):
     assert found == [1]
 
 
+def _another_version(project) -> None:
+    record_path = project / ".strata-scratch" / ".strata" / "server.json"
+    record = json.loads(record_path.read_text())
+    record["version"] = "0.0.0"
+    record_path.write_text(json.dumps(record))
+
+
+@pytest.mark.asyncio
+async def test_another_versions_busy_daemon_serves_the_call_until_it_is_idle(project, monkeypatch):
+    first = scratch.ensure_daemon(project)
+    _another_version(project)
+    monkeypatch.setattr(scratch, "_busy", lambda url: True)
+    async with _bridge(project) as client:
+        served = _value(await client.call_tool("run", {"source": "1"}))
+        assert served["status"] == "ok"
+        assert "Strata 0.0.0" in served["note"]
+        assert scratch._healthy(first.url)
+
+        # Asked again on the next call: idle now, so replaced.
+        monkeypatch.setattr(scratch, "_busy", lambda url: False)
+        again = _value(await client.call_tool("run", {"source": "2"}))
+        assert again["status"] == "ok"
+        assert "note" not in again
+        assert "starting the scratchpad" in again["setup_ms"]
+        assert not scratch._healthy(first.url)
+
+
+@pytest.mark.asyncio
+async def test_another_versions_daemon_too_busy_to_answer_still_serves_the_call(
+    project, monkeypatch
+):
+    scratch.ensure_daemon(project)
+    _another_version(project)
+    monkeypatch.setattr(scratch, "_busy", lambda url: True)
+    async with _bridge(project) as client:
+        _value(await client.call_tool("run", {"source": "1"}))
+
+        def not_answering(*args, **kwargs):
+            raise scratch.NotAnswering("is not answering; try again shortly")
+
+        monkeypatch.setattr(scratch, "ensure_daemon", not_answering)
+        served = _value(await client.call_tool("run", {"source": "2"}))
+        assert served["status"] == "ok"
+        assert "Strata 0.0.0" in served["note"]
+
+        # Any other failure, such as a replacement that would not start, is the call's.
+        def failed(*args, **kwargs):
+            raise scratch.ScratchError("the scratchpad's server did not open it")
+
+        monkeypatch.setattr(scratch, "ensure_daemon", failed)
+        result = await client.call_tool("run", {"source": "3"})
+        assert result.is_error
+        assert "did not open it" in result.content[0].text
+
+
 @pytest.mark.asyncio
 # Windows may time a connection to a port nobody holds out instead of refusing it.
 @pytest.mark.parametrize("unconnected", [httpx.ConnectError, httpx.ConnectTimeout])

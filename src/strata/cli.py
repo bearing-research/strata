@@ -905,6 +905,7 @@ def _dispatch_mcp(args: argparse.Namespace) -> int:
 def _dispatch_scratch(args: argparse.Namespace) -> int:
     import json
     from dataclasses import asdict
+    from importlib.metadata import version
 
     from strata import scratch
 
@@ -927,6 +928,13 @@ def _dispatch_scratch(args: argparse.Namespace) -> int:
             running = scratch.ensure_daemon(
                 root, progress=lambda step: print(f"{step}…", file=sys.stderr, flush=True)
             )
+            current = version("strata-notebook")
+            if running.version != current:
+                print(
+                    f"note: the daemon runs Strata {running.version}, not {current}; "
+                    "it was busy, so it was not replaced",
+                    file=sys.stderr,
+                )
     except scratch.ScratchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

@@ -48,6 +48,10 @@ class ScratchError(RuntimeError):
     """The scratchpad's daemon could not be found or started; the message says why."""
 
 
+class NotAnswering(ScratchError):
+    """The daemon's process is alive but did not answer in time: busy, not gone."""
+
+
 @dataclass(frozen=True)
 class Daemon:
     """A running daemon and the scratchpad session it holds open."""
@@ -55,7 +59,8 @@ class Daemon:
     url: str
     session_id: str
     pid: int
-    # The strata-notebook version that started it; another version's daemon is replaced.
+    # The strata-notebook version that started it; another version's daemon is replaced
+    # once it is idle.
     version: str = ""
     # Milliseconds per setup step, in order; empty when the daemon was already up.
     setup_ms: dict[str, int] = field(default_factory=dict)
@@ -117,7 +122,7 @@ def daemon_serving(notebook_dir: Path) -> Daemon | None:
             return None
         # Alive but slow, not gone: another daemon beside it would write the directory
         # from a second session.
-        raise ScratchError(
+        raise NotAnswering(
             f"the scratchpad's server (pid {record['pid']}) is not answering ({exc!r}); "
             "try again shortly"
         ) from exc
@@ -282,6 +287,17 @@ def _healthy(url: str) -> bool:
         return False
 
 
+def _busy(url: str) -> bool:
+    """Whether the daemon at *url* has work besides this question. One that does not say is
+    taken as busy, so nothing it runs is stopped."""
+    try:
+        response = httpx.get(f"{url}/health/busy", timeout=5.0)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return True
+    return response.json()["busy"]
+
+
 def _start(
     anchor: Path, step: Callable[[str], contextlib.AbstractContextManager[None]]
 ) -> tuple[int, str, str]:
@@ -352,7 +368,10 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
         if running is not None and running.version == current:
             return running
         if running is not None:
-            # Started by another install: its code is not this client's.
+            # Started by another install, so its code is not this client's; but stopping it
+            # now would end what it runs for someone. It is asked again on the next call.
+            if _busy(running.url):
+                return running
             _stop(running)
 
         setup_ms: dict[str, int] = {}

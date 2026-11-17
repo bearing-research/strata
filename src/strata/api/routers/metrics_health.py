@@ -47,6 +47,15 @@ async def health():
     return {"status": "ok"}
 
 
+@router.get("/health/busy")
+async def health_busy():
+    """Whether the server has work besides this request: another request or socket open,
+    or a notebook run, build or warm job in flight. Asked before replacing the server."""
+    from strata import server
+
+    return {"busy": server._activity.open > 1 or server._work_in_flight(server._state)}
+
+
 @router.get("/health/dependencies")
 async def health_dependencies():
     """Check every dependency: disk cache, metadata store, Arrow memory, thread pools, rate
