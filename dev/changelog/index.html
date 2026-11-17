@@ -4296,6 +4296,14 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell whose value Arrow cannot hold, such as <code>df.dtypes</code>, no longer breaks its
+  notebook.</strong> Its display named an unnamed Series's column <code>0</code>, a number, and reading
+  that display back failed, so <code>strata status</code>, <code>cell add</code> and every later run raised
+  until the cell was edited. A display's column names are now strings, as Arrow's are,
+  and a display stored before this loads too, so a notebook it broke opens again; the
+  stored value keeps its labels. Such a value also loads back with its MultiIndex
+  columns whole and an unnamed Series unnamed (they came back transposed, and named
+  <code>""</code>). (#1578)</li>
 <li><strong><code>strata cell rm</code> without a server removes a cell as a session does.</strong> Removing a
   group's active variant promotes the next one, removing its last member drops the
   group, and the table, read and write indexes forget the cell. Before, the variant
