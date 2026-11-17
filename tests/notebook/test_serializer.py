@@ -2147,7 +2147,19 @@ def test_a_value_is_shown_without_importing_matplotlib_or_pil(tmp_path):
     probe = (
         "import sys\n"
         "from strata.notebook.serializer import serialize_display_value\n"
+        "import struct, zlib\n"
+        "def chunk(kind, data):\n"
+        "    body = kind + data\n"
+        "    return struct.pack('>I', len(data)) + body + struct.pack('>I', zlib.crc32(body))\n"
+        "header = struct.pack('>IIBBBBB', 2, 1, 8, 0, 0, 0, 0)\n"
+        "png = b'\\x89PNG\\r\\n\\x1a\\n' + chunk(b'IHDR', header)\n"
+        "png += chunk(b'IDAT', zlib.compress(b'\\x00\\x00\\x00')) + chunk(b'IEND', b'')\n"
+        "class Shows:\n"
+        "    def _repr_png_(self):\n"
+        "        return png\n"
         f"serialize_display_value(246, {str(tmp_path)!r}, 0)\n"
+        f"shown = serialize_display_value(Shows(), {str(tmp_path)!r}, 1)\n"
+        "assert (shown['width'], shown['height']) == (2, 1), shown\n"
         "print(sorted(m for m in ('matplotlib', 'PIL') if m in sys.modules))\n"
     )
     shown = subprocess.run(
@@ -2164,3 +2176,9 @@ def test_a_figure_is_still_shown_as_a_png(tmp_path):
         serializer_module.serialize_display_value(figure, tmp_path, 0)["content_type"]
         == "image/png"
     )
+
+
+def test_an_image_is_shown_as_a_png_of_its_size(tmp_path):
+    image = pytest.importorskip("PIL.Image").new("RGB", (7, 3))
+    shown = serializer_module.serialize_display_value(image, tmp_path, 0)
+    assert (shown["content_type"], shown["width"], shown["height"]) == ("image/png", 7, 3)

@@ -374,12 +374,16 @@ class TestArmCp:
             return subprocess.CompletedProcess(command, 0, "", "")
 
         monkeypatch.setattr(server.subprocess, "run", ran)
-        env = {"HOME": str(tmp_path / "srv" / "home"), "PATH": os.environ["PATH"]}
+        monkeypatch.setenv("HARBOR_LOAD_LOG", str(tmp_path / "loads.jsonl"))
+        root = tmp_path / "srv"
 
-        server._prepare_notebook(tmp_path / "srv", tmp_path / "project", env)
+        server._prepare_notebook(root, tmp_path / "project")
 
         (warm_env,) = [e for command, e in calls if command[1:2] == ["-c"]]
-        assert warm_env == env
+        assert warm_env is not None
+        assert warm_env["HOME"] == server.server_env(root, 8799, tmp_path / "l", 0.0)["HOME"]
+        # Nor does a load during the warm-up count as the trial's.
+        assert "HARBOR_LOAD_LOG" not in warm_env
 
     @pytest.mark.parametrize(
         "failure",

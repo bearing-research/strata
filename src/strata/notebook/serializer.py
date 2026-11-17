@@ -22,6 +22,7 @@ import logging
 import math
 import os
 import pickle
+import struct
 import sys
 import tarfile
 from collections.abc import Callable, Iterable
@@ -1109,17 +1110,16 @@ def _png_via_pil(value: Any) -> _PngHandlerResult | None:
 _PNG_HANDLERS = (_png_via_repr_png, _png_via_matplotlib, _png_via_pil)
 
 
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
 def _png_size_from_bytes(png_bytes: bytes) -> tuple[int | None, int | None]:
-    """Probe PIL for a PNG's size; ``(None, None)`` if PIL is missing or fails."""
-    try:
-        from PIL import Image as _PILImage
-    except ImportError:
+    """A PNG's size from its IHDR chunk, which the format puts first; ``(None, None)``
+    for bytes that are not a PNG. Not through PIL, whose import every display would pay."""
+    if png_bytes[:8] != _PNG_SIGNATURE or png_bytes[12:16] != b"IHDR" or len(png_bytes) < 24:
         return None, None
-    try:
-        with _PILImage.open(io.BytesIO(png_bytes)) as image:
-            return image.size
-    except Exception:
-        return None, None
+    width, height = struct.unpack(">II", png_bytes[16:24])
+    return width, height
 
 
 def _serialize_dataframe_json(

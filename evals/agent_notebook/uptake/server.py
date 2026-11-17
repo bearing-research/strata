@@ -57,6 +57,12 @@ def _host_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not _HOST_ONLY.match(k)}
 
 
+def _home(root: Path) -> Path:
+    # Some paths fall back to ~/.strata whatever the settings say, and matplotlib keeps
+    # its font list under it.
+    return root / "home"
+
+
 def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> dict[str, str]:
     """The server's environment: everything it stores under *root*, nothing of the host's
     Strata or Anthropic settings, and the load counter its cells inherit."""
@@ -68,8 +74,7 @@ def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> di
 
     env = _host_env()
     env.update(
-        # Some paths fall back to ~/.strata whatever the settings say.
-        HOME=str(root / "home"),
+        HOME=str(_home(root)),
         # uv's real cache and interpreters, so nothing is downloaded again.
         UV_CACHE_DIR=uv_dir("cache", "dir"),
         UV_PYTHON_INSTALL_DIR=uv_dir("python", "dir"),
@@ -133,9 +138,9 @@ def scratchpad_server(
     can import *project*; its MCP entry is written to the agent's config dir. Yields
     the server's URL and stops the server on exit."""
     with _as_setup_error():
+        notebook = _prepare_notebook(root, project)
         port = _free_port()
         env = server_env(root, port, load_log, load_seconds)
-        notebook = _prepare_notebook(root, project, env)
         log = open(root / "server.log", "w")  # noqa: SIM115 - closed in the finally below
     url = f"http://127.0.0.1:{port}"
     proc: subprocess.Popen | None = None
@@ -175,9 +180,8 @@ def _stop_group(proc: subprocess.Popen) -> None:
     proc.wait()
 
 
-def _prepare_notebook(root: Path, project: Path, env: dict[str, str]) -> Path:
-    """A notebook in the server's storage dir whose environment can import *project*,
-    warmed in the server's *env*."""
+def _prepare_notebook(root: Path, project: Path) -> Path:
+    """A notebook in the server's storage dir whose environment can import *project*."""
     from strata.notebook.writer import create_notebook
 
     # The server opens notebooks only inside its storage dir.
@@ -199,7 +203,7 @@ def _prepare_notebook(root: Path, project: Path, env: dict[str, str]) -> Path:
     # under the HOME the server's cells get.
     warmed = subprocess.run(
         [str(notebook / ".venv" / "bin" / "python"), "-c", _WARM],
-        env=env,
+        env={**_host_env(), "HOME": str(_home(root))},
         capture_output=True,
         text=True,
     )
