@@ -50,6 +50,58 @@ async def test_a_request_or_socket_counts_until_it_ends(activity, kind):
     assert activity.idle_seconds(activity.last_ended + 5) == pytest.approx(5.0)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "last",
+    [{"type": "http.response.body", "body": b"ok"}, {"type": "websocket.close", "code": 1000}],
+)
+async def test_a_request_ends_with_its_last_message_not_its_unwinding(activity, last):
+    # An http middleware inside is still unwinding when the client has the response, and
+    # its next request (the busy probe) may come in then: counted, it would read busy.
+    sent, release = asyncio.Event(), asyncio.Event()
+
+    async def app(scope, receive, send):
+        if last["type"] == "http.response.body":
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"o", "more_body": True})
+            assert activity.open == 1
+        await send(last)
+        sent.set()
+        await release.wait()
+
+    async def send(message):
+        pass
+
+    async def receive():
+        return {"type": "http.request"}
+
+    task = asyncio.create_task(server.ActivityMiddleware(app)({"type": "http"}, receive, send))
+    await sent.wait()
+    assert activity.open == 0
+    release.set()
+    await task
+    assert activity.open == 0
+
+
+def test_the_servers_own_middlewares_do_not_outlast_a_response(activity):
+    # The real stack: its http middlewares run inside the count.
+    from fastapi.testclient import TestClient
+
+    counted = []
+
+    async def app(scope, receive, send):
+        async def recorded(message):
+            if message["type"] == "http.response.body" and not message.get("more_body", False):
+                counted.append(activity.open)
+            await send(message)
+
+        await server.app(scope, receive, recorded)
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+    assert counted == [0]
+
+
 def test_a_run_counts_from_its_reservation(monkeypatch):
     state = ws.NotebookExecutionState()
     monkeypatch.setattr(ws, "_notebook_execution_state", {"nb": state})

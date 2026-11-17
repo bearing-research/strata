@@ -40,7 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from starlette.datastructures import Headers
 from starlette.requests import HTTPConnection
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 from vestigo.sql_backend import SERVER_THREAD_LIMIT
 from vestigo.uris import LATEST_VERSION, parse_artifact_uri, parse_name_uri
@@ -798,10 +798,27 @@ class ActivityMiddleware:
             await self.app(scope, receive, send)
             return
         _activity.begin()
+        ended = False
+
+        def end() -> None:
+            nonlocal ended
+            if not ended:
+                ended = True
+                _activity.end()
+
+        async def counted(message: Message) -> None:
+            # Done once its last message goes out: the http middlewares inside still unwind
+            # after that, and a client's next request may already be in.
+            if message["type"] == "websocket.close" or (
+                message["type"] == "http.response.body" and not message.get("more_body", False)
+            ):
+                end()
+            await send(message)
+
         try:
-            await self.app(scope, receive, send)
+            await self.app(scope, receive, counted)
         finally:
-            _activity.end()
+            end()
 
 
 def _work_in_flight(state: Any) -> bool:
