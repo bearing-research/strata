@@ -1163,7 +1163,9 @@ def _serialize_dataframe_json(
                 "kind": "series" if is_series else "dataframe",
                 "columns": columns,
                 "data": rows,
-                "series_name": to_serialization_safe(value.name) if is_series else None,
+                "series_name": (
+                    to_serialization_safe(value.name, keep_none=True) if is_series else None
+                ),
             }
         )
     except Exception:
@@ -1770,7 +1772,13 @@ def _deserialize_arrow_json_fallback(payload: dict[str, Any]) -> Any:
     except ImportError:
         return payload
 
-    frame = pd.DataFrame(rows, columns=columns)
+    # A MultiIndex's tuples were written as lists, which pandas would read as levels.
+    labels = (
+        pd.MultiIndex.from_tuples([tuple(column) for column in columns])
+        if columns and all(isinstance(column, list) for column in columns)
+        else columns
+    )
+    frame = pd.DataFrame(rows, columns=labels)
     if kind == "series":
         if frame.shape[1] == 0:
             series = pd.Series(dtype=object)

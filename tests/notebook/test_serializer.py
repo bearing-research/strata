@@ -396,6 +396,37 @@ class TestArrowSerialization:
                 list(deserialize_value(meta["content_type"], tmpdir / meta["file"]).columns)[0] == 7
             )
 
+    def test_the_fallback_keeps_a_series_unnamed_and_a_multiindex_whole(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(pd.Series([object()]), tmpdir, "s")
+            assert deserialize_value(meta["content_type"], tmpdir / meta["file"]).name is None
+
+            labels = pd.MultiIndex.from_tuples([("a", "x"), ("b", "y")])
+            meta = serialize_value(pd.DataFrame([[1, object()]], columns=labels), tmpdir, "m")
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+            assert list(loaded.columns) == [("a", "x"), ("b", "y")]
+
+    def test_a_display_stored_with_a_frames_labels_still_opens(self, tmp_path):
+        # Written before the display's names were strings: the notebook opens all the same.
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.runtime_state import (
+            CellRuntime,
+            load_runtime_state,
+            save_runtime_state,
+        )
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook
+
+        path = create_notebook(tmp_path, "nb")
+        add_cell_to_notebook(path, "c1")
+        state = load_runtime_state(path)
+        state.cells["c1"] = CellRuntime(
+            display_outputs=[{"content_type": "arrow/ipc", "columns": [0], "rows": 1}]
+        )
+        save_runtime_state(path, state)
+        (output,) = parse_notebook(path).get_cell("c1").display_outputs
+        assert output.columns == ["0"]
+
     def test_deserialize_arrow_json_fallback_without_pyarrow(self, monkeypatch):
         fallback_path = None
 

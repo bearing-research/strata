@@ -7,7 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MountMode(StrEnum):
@@ -566,6 +566,14 @@ class CellOutput(BaseModel):
     rows: int | None = Field(default=None, description="Number of rows (for tables)")
     columns: list[str] | None = Field(default=None, description="Column names (for tables)")
     bytes: int = Field(default=0, description="Size in bytes")
+
+    @field_validator("columns", mode="before")
+    @classmethod
+    def _column_names(cls, columns: Any) -> Any:
+        # Names, as Arrow's are: a display stored with a frame's labels (an unnamed
+        # Series's 0) still loads.
+        return [str(column) for column in columns] if isinstance(columns, list) else columns
+
     artifact_uri: str | None = Field(
         default=None,
         description="Artifact URI backing this display output",
