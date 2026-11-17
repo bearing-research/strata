@@ -3361,6 +3361,9 @@ call as it is, the result's <code>note</code> says so, and the next call asks ag
 output goes to <code>.strata-scratch/.strata/server.log</code>; it keeps remote-mount copies
 and shared environments under <code>~/.strata</code>, as a personal server does.
 Cells read the project read-only as <code>project</code> (<code>project / "data.csv"</code>).
+Its <code>notebook.toml</code> says <code>scratchpad = true</code>, so it keeps every variable a cell defines,
+read or not: the first cell to read one loads it rather than rerunning the cell that
+made it. A plain notebook stores only what a cell downstream reads.
 <code>strata scratch status</code> prints the running daemon and <code>strata scratch stop</code>
 stops it. Once it is stopped, deleting <code>.strata-scratch/</code> costs reruns, nothing else.</p>
 <p>A scratchpad keeps superseded results, so reverting an edit hits again, and its

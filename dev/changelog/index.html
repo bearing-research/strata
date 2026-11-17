@@ -3980,6 +3980,14 @@ exhaustive commit history.</p>
   in DuckDB SQL is still not seen. (#1516)</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A scratchpad keeps every variable its cells define.</strong> A notebook stores a variable
+  only once a cell downstream reads it, so an agent that loaded data in one cell and asked
+  about it in the next ran the load twice: the first reader reran the cell that made it.
+  A notebook whose <code>notebook.toml</code> says <code>scratchpad = true</code>, as <code>strata scratch</code>'s does,
+  keeps them all, best-effort, in single runs and Run All alike: a def or class as its
+  module export, never as a pickle, and one that cannot be exported is left for its first
+  reader to rerun. A stochastic run, an <code>@each</code> instance or a variant keeps only what is
+  read, since no later key finds the rest. Plain notebooks are unchanged. (#1579)</li>
 <li><strong>A scratchpad daemon another Strata version started is replaced only when idle.</strong> One
   with a request open, a socket open, or a run, build or warm job in flight serves the
   call as it is, and the call's result has a <code>note</code> saying so; <code>strata scratch start</code>

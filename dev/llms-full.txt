@@ -6992,6 +6992,9 @@ call as it is, the result's `note` says so, and the next call asks again. The se
 output goes to `.strata-scratch/.strata/server.log`; it keeps remote-mount copies
 and shared environments under `~/.strata`, as a personal server does.
 Cells read the project read-only as `project` (`project / "data.csv"`).
+Its `notebook.toml` says `scratchpad = true`, so it keeps every variable a cell defines,
+read or not: the first cell to read one loads it rather than rerunning the cell that
+made it. A plain notebook stores only what a cell downstream reads.
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
 
@@ -10254,6 +10257,7 @@ notebook_id = "01HZJV4Y9G..."       # required; UUID-like, backend-generated on 
 name = "Iris classifier"            # human-readable display name
 created_at = 2026-04-12T10:31:00Z
 updated_at = 2026-05-18T18:04:22Z
+scratchpad = true                   # keep every variable, read or not (`strata scratch`)
 
 worker = "fly-cpu"                  # notebook-level default; overridden by @worker annotations
 timeout = 300                       # notebook-level default in seconds; overridden by @timeout
@@ -10265,6 +10269,7 @@ timeout = 300                       # notebook-level default in seconds; overrid
 | `name` | string | Display name. Default: `"Untitled Notebook"`. |
 | `created_at` | datetime (UTC) | Set on create; never updated. |
 | `updated_at` | datetime (UTC) | Bumped on structural edits only. Runtime writers don't touch it. |
+| `scratchpad` | bool \| absent | Keep every variable a cell defines, read or not, so the first cell to read one loads it rather than rerunning the cell that made it. `strata scratch` sets it on its notebook. Absent: only variables a downstream cell reads are stored. |
 | `worker` | string \| absent | Notebook-level default worker name. Overridden by cell-level `worker` (below) or `# @worker` annotations. |
 | `timeout` | float \| absent | Notebook-level default cell timeout in seconds. Same precedence as `worker`. |
 
@@ -13192,7 +13197,7 @@ further calls are required before showing a useful UI. The shape is
 | `path` | Absolute notebook directory path. |
 | `dag` | `edges`, `topological_order`, `roots`, `leaves` and `variable_producer` (which cell defines each variable); `error` instead when the DAG cannot be built. |
 | Runtime config | `deployment_mode`, `default_parent_path`, `available_python_versions`, `default_python_version`, `python_selection_fixed`, `registry_enabled`, `team_store_configured`, `workers_panel`. |
-| `id`, `name`, `worker`, `timeout`, `env`, `created_at`, `updated_at` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](https://bearingresearch.com/strata/dev/reference/rest-api/#update-notebook-default-env)) |
+| `id`, `name`, `scratchpad`, `worker`, `timeout`, `env`, `created_at`, `updated_at` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](https://bearingresearch.com/strata/dev/reference/rest-api/#update-notebook-default-env)) |
 | `env_sources`, `env_fetch_error`, `env_fetched_at` | Secret-manager fetch status |
 | `workers`, `mounts`, `connections`, `malformed_connections`, `catalogs`, `r`, `secret_manager_config`, `variant_groups`, `variant_active_selections`, `variant_modes` | `notebook.toml` |
 | `cells` (full) | Source, status, display outputs, console stdout/stderr, provenance hashes, causality chains, DAG shadow warnings, per-cell overrides. |

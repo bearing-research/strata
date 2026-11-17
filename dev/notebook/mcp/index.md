@@ -135,6 +135,9 @@ call as it is, the result's `note` says so, and the next call asks again. The se
 output goes to `.strata-scratch/.strata/server.log`; it keeps remote-mount copies
 and shared environments under `~/.strata`, as a personal server does.
 Cells read the project read-only as `project` (`project / "data.csv"`).
+Its `notebook.toml` says `scratchpad = true`, so it keeps every variable a cell defines,
+read or not: the first cell to read one loads it rather than rerunning the cell that
+made it. A plain notebook stores only what a cell downstream reads.
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
 
