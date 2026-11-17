@@ -592,6 +592,8 @@ export interface NotebookStatePayload {
   id: string
   /** Notebook name */
   name: string
+  /** A scratchpad keeps every variable its cells define, read or not */
+  scratchpad: boolean
   /** Notebook-level default worker name */
   worker?: string | null
   /** Notebook-level default execution timeout in seconds */

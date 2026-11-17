@@ -104,6 +104,7 @@ from strata.notebook.cell_paths.fanout import _merge_variant_writes as _merge_va
 from strata.notebook.cell_paths.loop import LoopContext, run_loop_cell
 from strata.notebook.cell_paths.loop import _loop_folders as _loop_folders
 from strata.notebook.cell_paths.loop import _loop_run_token as _loop_run_token
+from strata.notebook.cell_paths.module_export import kept_unread, unshared_code
 from strata.notebook.cell_paths.prompt import run_prompt_cell
 from strata.notebook.cell_paths.python import _OUTPUT_VARIABLE as _OUTPUT_VARIABLE
 from strata.notebook.cell_paths.python import (
@@ -500,8 +501,9 @@ class CellExecutor:
         # What each variant of a running ``# @per_variant`` cell wrote through its mounts,
         # recorded together once every variant has succeeded.
         self._variant_writes: dict[str, list[MountWrite]] = {}
-        # Also store the variables of a cell nothing downstream reads. Off by default: only
-        # consumed variables are kept, and a leaf's result can be large.
+        # Also store the variables of a cell nothing downstream reads, best-effort (for
+        # ``strata run``'s report). A scratchpad keeps them anyway (``kept_unread``);
+        # elsewhere only consumed variables are kept, since a leaf's result can be large.
         self.store_leaf_outputs = False
         # What a remote dispatch reports as ``metadata.origin``: "notebook" for an open
         # notebook, "run" for a headless ``strata run``, so a dispatcher can queue
@@ -3154,7 +3156,8 @@ class CellExecutor:
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
-        With ``store_leaf_outputs``, a leaf cell's variables are stored too, best-effort.
+        With ``store_leaf_outputs``, a leaf cell's variables are stored too, best-effort, as
+        are a scratchpad cell's unread ones (``kept_unread``).
         *collected* holds folders already collected by :meth:`_collect_output_dirs`.
         *run_outputs* is what the harness reported, which says why a value left no file.
 
@@ -3191,9 +3194,22 @@ class CellExecutor:
             [f.name for f in output_files],
         )
 
-        # Kept for the record only: no input resolves through them, so a value that did not
-        # serialize is skipped rather than failing the cell.
-        leaf_vars = set(cell.defines) if not consumed_vars and self.store_leaf_outputs else set()
+        # Nothing reads them yet, so a value that did not serialize is skipped rather than
+        # failing the cell; one stored is what a later reader loads. A def or class goes only
+        # as its module export: pickled, a reader would get a copy of the class.
+        # Only the cell's own key: an ``@each`` instance's, a variant's or a stochastic
+        # run's are found through what is read.
+        leaf_vars = (
+            kept_unread(self.session, cell_id) if variant is None and not stochastic else set()
+        )
+        if leaf_vars:
+            leaf_vars -= {
+                name
+                for name in unshared_code(source or cell.source)
+                if not (output_dir / f"{safe_filename_stem(name)}.cell_module.json").exists()
+            }
+        elif not consumed_vars and self.store_leaf_outputs:
+            leaf_vars = set(cell.defines)
         if not consumed_vars and not leaf_vars:
             return self._release_nothing(cell_id, local_run, stage_records)
 

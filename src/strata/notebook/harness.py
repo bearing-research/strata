@@ -15,7 +15,7 @@ import platform
 import sys
 import time
 import traceback
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -441,6 +441,7 @@ def _run_one_batched_cell(
     cell_id = cell["cell_id"]
     source = cell["source"]
     consumed_vars: list[str] = list(cell.get("consumed_vars") or [])
+    kept_vars: list[str] = list(cell.get("kept_vars") or [])
     references: list[str] = list(cell.get("references") or [])
     mutation_defines: set[str] = set(cell.get("mutation_defines") or [])
     cell_env: dict = cell.get("env") or {}
@@ -603,6 +604,14 @@ def _run_one_batched_cell(
                             "error": str(exc),
                             "type": type(namespace[var_name]).__name__,
                         }
+                for var_name in kept_vars:
+                    # Best-effort, as a single run keeps them: one that does not serialize
+                    # (an open file) is left out, nothing reads it yet.
+                    if var_name in namespace:
+                        with suppress(Exception):
+                            outputs[var_name] = _ser.serialize_value(
+                                namespace[var_name], cell_output_dir, var_name
+                            )
 
                 display_values = display_capture.resolve(display_value)
                 written = [
@@ -704,7 +713,7 @@ def execute_batch(
 ) -> None:
     """Execute a sequence of cells in one Python process.
 
-    ``cells`` is ``[{cell_id, source, consumed_vars, env, mount_manifest,
+    ``cells`` is ``[{cell_id, source, consumed_vars, kept_vars, env, mount_manifest,
     source_hash, env_hash}, ...]`` in notebook order. ``upstream_inputs`` seeds the
     shared namespace (same shape ``deserialize_inputs`` reads). Streams frames to
     ``frame_out``, reads responses from ``resp_in``, and returns after

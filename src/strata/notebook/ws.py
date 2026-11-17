@@ -27,6 +27,7 @@ from strata.notebook import console_relay, prewarm, run_all
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.authorship import resolve_author
 from strata.notebook.cascade import CascadePlanner
+from strata.notebook.cell_paths.module_export import kept_unread, unshared_code
 from strata.notebook.executor import (
     BatchCellResult,
     CellExecutionResult,
@@ -2750,6 +2751,9 @@ async def _run_partition_batch(
                     if session.dag is not None
                     else set()
                 ),
+                # A scratchpad's unread variables, serialized too, as a single run does.
+                # Code goes as its module export, never pickled.
+                "kept_vars": sorted(kept_unread(session, cell.id) - unshared_code(cell.source)),
                 # Read-set for runtime mutation detection (forms the static
                 # analyzer can't see).
                 "references": sorted(cell.references or []),

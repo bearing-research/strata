@@ -352,3 +352,10 @@ def test_status_of_a_daemon_not_answering_is_an_error(project, monkeypatch, caps
     monkeypatch.setattr(scratch, "find_daemon", busy)
     assert main(["scratch", "status", "--root", str(project)]) == 2
     assert "not answering" in capsys.readouterr().err
+
+
+def test_the_scratchpad_keeps_every_value(project):
+    from strata.notebook.parser import parse_notebook
+
+    scratch._scaffold(project)
+    assert parse_notebook(scratch.scratch_dir(project)).scratchpad

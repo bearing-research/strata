@@ -479,6 +479,10 @@ class NotebookToml(BaseModel):
     name: str = Field(default="Untitled Notebook", description="Human-readable name")
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
+    scratchpad: bool = Field(
+        default=False,
+        description="A scratchpad keeps every variable its cells define, read or not",
+    )
     cells: list[CellMeta] = Field(default_factory=list, description="Cell metadata")
     worker: str | None = Field(
         default=None,
@@ -971,6 +975,10 @@ class NotebookState(BaseModel):
 
     id: str = Field(..., description="Notebook ID")
     name: str = Field(default="Untitled Notebook", description="Notebook name")
+    scratchpad: bool = Field(
+        default=False,
+        description="A scratchpad keeps every variable its cells define, read or not",
+    )
     worker: str | None = Field(
         default=None,
         description="Notebook-level default worker name",

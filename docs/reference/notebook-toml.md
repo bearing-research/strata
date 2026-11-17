@@ -13,6 +13,7 @@ notebook_id = "01HZJV4Y9G..."       # required; UUID-like, backend-generated on 
 name = "Iris classifier"            # human-readable display name
 created_at = 2026-04-12T10:31:00Z
 updated_at = 2026-05-18T18:04:22Z
+scratchpad = true                   # keep every variable, read or not (`strata scratch`)
 
 worker = "fly-cpu"                  # notebook-level default; overridden by @worker annotations
 timeout = 300                       # notebook-level default in seconds; overridden by @timeout
@@ -24,6 +25,7 @@ timeout = 300                       # notebook-level default in seconds; overrid
 | `name` | string | Display name. Default: `"Untitled Notebook"`. |
 | `created_at` | datetime (UTC) | Set on create; never updated. |
 | `updated_at` | datetime (UTC) | Bumped on structural edits only. Runtime writers don't touch it. |
+| `scratchpad` | bool \| absent | Keep every variable a cell defines, read or not, so the first cell to read one loads it rather than rerunning the cell that made it. `strata scratch` sets it on its notebook. Absent: only variables a downstream cell reads are stored. |
 | `worker` | string \| absent | Notebook-level default worker name. Overridden by cell-level `worker` (below) or `# @worker` annotations. |
 | `timeout` | float \| absent | Notebook-level default cell timeout in seconds. Same precedence as `worker`. |
 
