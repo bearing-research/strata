@@ -3879,6 +3879,20 @@ exhaustive commit history.</p>
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)</li>
+<li><strong>A scratchpad's storage has a soft limit, and every scratchpad is listed.</strong> Its daemon
+  sweeps it at start and hourly: results unused for 14 days go, then the least recently
+  used while it is over 5 GiB (<code>STRATA_NOTEBOOK_SCRATCH_GC_SOFT_LIMIT_BYTES</code>,
+  <code>STRATA_NOTEBOOK_SCRATCH_GC_MAX_IDLE_DAYS</code>). Live cells' values stay, and an overage
+  is shown by <code>scratchpad</code> with the cells holding the most. <code>~/.strata/scratchpads.json</code>
+  lists every scratchpad for <code>strata scratch ls</code>; <code>strata scratch gc</code> sweeps now and
+  <code>strata scratch rm</code> deletes one. A leaf cell with no <code># @name</code> unused for 14 days
+  (<code>STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS</code>) is retired: its source and tests go to
+  <code>retired.jsonl</code>, the sweep frees its values, and a run needing its variable, a <code>run</code>
+  naming its id, or <code>scratchpad</code> asking for its variable gets the source back in its
+  <code>fix</code>; <code>strata scratch retire</code> retires one by hand. With a daemon running,
+  <code>strata scratch gc</code> sweeps but leaves retirement to the daemon, which retires only
+  when nothing runs. <code>0</code> turns the size limit, the idle sweep or retirement off. Each run
+  sample in <code>runtime.json</code> now records when it ran. (#1574)</li>
 <li><strong>The notebook CLI drives a directory through the daemon serving it.</strong> A project's
   <code>.strata-scratch/</code> is served by its daemon, whose <code>.strata/server.json</code> names it. On
   such a directory, <code>strata cell</code>, <code>status</code>, <code>dag</code> and <code>dep</code> go through the daemon's
@@ -4277,6 +4291,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>strata cell rm</code> without a server removes a cell as a session does.</strong> Removing a
+  group's active variant promotes the next one, removing its last member drops the
+  group, and the table, read and write indexes forget the cell. Before, the variant
+  pointer dangled until the next open warned of it. (#1574)</li>
 <li><strong>A cell run, test run or dependency change through <code>--server</code> no longer fails at 30
   seconds.</strong> The CLI waited 30 seconds for the server's answer and then reported
   <code>cannot reach</code>, while the run went on. It now waits for the run or resolve to finish.

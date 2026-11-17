@@ -238,6 +238,7 @@ and call `strata-notebook` / `strata` / `strata-worker` directly.
 | `uv run strata worker <action>` | Manage a notebook's workers: `ls`, `add`/`rm`/`default` (local, edits `notebook.toml`), and `add-ssh`/`rm-ssh` (provision + tunnel a worker over SSH, against a running server). See [Workers](https://bearingresearch.com/strata/dev/notebook/workers/#run-cells-on-a-machine-you-can-ssh-to). |
 | `uv run strata agent <notebook-dir>` | One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the `.mcp.json` + `CLAUDE.md` the agent needs, and attach the TUI (skip it with `--no-tui` and watch in the web UI instead). Then run `claude` in the notebook directory to drive it live. Needs the `[mcp]` extra, plus `[tui]` unless you pass `--no-tui`. See [Use a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/). |
 | `uv run strata scratch start\|stop\|status [--root DIR]` | Start, stop or show a project's scratchpad daemon: a server with the [scratchpad MCP profile](https://bearingresearch.com/strata/dev/notebook/mcp/#a-projects-own-daemon) serving `<DIR>/.strata-scratch/`, which it creates on first start. One per project, shared by every client there; it stops itself after 30 idle minutes. |
+| `uv run strata scratch ls\|gc\|rm\|retire` | List every project's scratchpad (size, last use, overage, daemon up), retire its idle cells and sweep it now (`gc [--root DIR \| --all]`), stop its daemon and delete it (`rm [--root DIR]`, which costs reruns only), or retire one cell by hand (`retire <cell> [--root DIR]`). See [A project's own daemon](https://bearingresearch.com/strata/dev/notebook/mcp/#a-projects-own-daemon). |
 | `uv run strata mcp [--root DIR]` | Serve a project's scratchpad to a coding agent as a stdio MCP server, for the agent's MCP config: it lists the tools at once and starts the project's scratchpad daemon on the first tool call. Needs the `[mcp]` extra. See [MCP server](https://bearingresearch.com/strata/dev/notebook/mcp/#from-an-agents-config-strata-mcp). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot), or write a portable snapshot zip with `--to snapshot`. See [Export and import](https://bearingresearch.com/strata/dev/notebook/export/). |
 | `uv run strata import <file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory, or unpack a snapshot zip back into one. See [Coming from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/). |
@@ -6992,6 +6993,29 @@ Cells read the project read-only as `project` (`project / "data.csv"`).
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
 
+A scratchpad keeps superseded results, so reverting an edit hits again, and its
+daemon sweeps it at start and hourly instead of keeping a count per value:
+results unused for 14 days go, then the least recently used while the store is
+over its 5 GiB soft limit (`STRATA_NOTEBOOK_SCRATCH_GC_*` in
+[Configuration](https://bearingresearch.com/strata/dev/reference/configuration/)). Live cells' values are never
+swept, so the limit can be exceeded; when it is, `scratchpad` returns a
+`storage` entry with the overage and the cells holding the most. `strata scratch
+ls` lists every scratchpad with its size, last use, overage and whether its
+daemon is up; `strata scratch gc` sweeps one now (`--all` for every one) and
+`strata scratch rm` stops its daemon and deletes it. With its daemon running, `gc`
+leaves retiring cells to the daemon, which does it only when nothing runs.
+
+`run` adds a cell per call, so cells have a way out too. A cell nothing reads,
+with no `# @name`, that has not been run, edited or shown by `scratchpad` for 14
+days (`STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS`) is retired before the sweep: its
+source and tests go to `.strata-scratch/retired.jsonl`, it leaves the notebook, and the
+sweep frees every value it stored unless something else holds one (a name, a
+pin, a live cell reading it). A cell it read may then retire the same way. A
+later `run` that needs a retired cell's variable, a `run` naming its id, or a
+`scratchpad` look for its variable answers with a `fix` naming the cell, when it
+retired, and its source to run again. `strata scratch retire
+<cell>` retires one by hand, unless another cell reads it.
+
 ### From an agent's config: `strata mcp`
 
 `strata mcp` serves the project's scratchpad over stdio, the form an agent's MCP
@@ -11300,6 +11324,10 @@ carries upload and finalize capabilities; under any other auth mode it returns
 | `STRATA_NOTEBOOK_WORKERS_EDITABLE` | `true` | `false` keeps a personal server's remote cells on its [server-managed workers](https://bearingresearch.com/strata/dev/notebook/workers/#server-managed-workers): a notebook's own `[[workers]]` are ignored (listed as not allowed in the Workers panel, flagged on a cell that names one), a cell on one fails, and the panel offers no editor for the notebook's own workers. For a host that admits, places, meters or audits every remote run through its own registry. Service mode is always this way. |
 | `STRATA_NOTEBOOK_OBJECT_CODEC` | `cloudpickle` | How a cell's value that is neither Arrow nor JSON is pickled when it is handed to another cell: `cloudpickle` (stdlib `pickle` if cloudpickle is not installed) or `pickle`. Any other value fails the cell's serialization. Environment only. |
 | `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` | `3` | How many earlier values of each cell output a notebook's own store keeps beside the current one, so reverting a recent edit is still a cache hit. Older ones are pruned each time the server opens the notebook, an already-open one included, as are the values of a cell no longer in the notebook once unused for 30 days. `0` turns pruning off and keeps every value. |
+| `STRATA_NOTEBOOK_SCRATCH_GC_SOFT_LIMIT_BYTES` | `5368709120` (5 GiB) | A project scratchpad's soft limit. Its daemon sweeps it at start and hourly: values unused for `STRATA_NOTEBOOK_SCRATCH_GC_MAX_IDLE_DAYS` go, then the least recently used while the store is over this size. Live cells' values stay whatever the limit; the overage is shown by `scratchpad` and `strata scratch ls`. `0` sets no limit. |
+| `STRATA_NOTEBOOK_SCRATCH_GC_MAX_IDLE_DAYS` | `14` | How long a scratchpad's superseded value may sit unused before its sweep takes it. `0` keeps it however long it sits. |
+| `STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS` | `14` | How long a scratchpad's leaf cell with no `# @name` may go unused (not run, edited or shown by `scratchpad`) before it is retired: its source and tests are kept in `.strata-scratch/retired.jsonl`, it leaves the notebook, and the next sweep frees every value it stored. `0` retires nothing. |
+| `STRATA_SCRATCH_ANCHOR` | unset | Set by `strata scratch` on the daemon it starts, never by hand: the project whose scratchpad this server sweeps and lists. |
 | `STRATA_NOTEBOOK_REMOTE_STORE_URL`  | `None`                      | Point the ambient `strata` client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup, because the registry routes would forward to themselves. See [Service mode → shared research store](https://bearingresearch.com/strata/dev/deployment/service-mode/#authenticated-write-back-the-shared-research-store). |
 | `STRATA_NOTEBOOK_REMOTE_STORE_HEADERS` | `{}`                     | Auth headers the ambient client attaches when pointed at a remote store (e.g. the trusted-proxy identity/token). JSON object; set via env so secrets stay out of committed config. |
 | `STRATA_NOTEBOOK_REMOTE_STORE_FORWARD_PRINCIPAL` | `true` | With a caller's principal in context (service mode), send its id as `X-Strata-Principal` to the remote store in place of the one in the static headers, so team-cache attribution, promotions and registry approvals from a shared server name the member. `false` keeps the static identity for every request. |

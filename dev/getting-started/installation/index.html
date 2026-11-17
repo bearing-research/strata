@@ -3445,6 +3445,10 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 <td>Start, stop or show a project's scratchpad daemon: a server with the <a href="../../notebook/mcp/#a-projects-own-daemon">scratchpad MCP profile</a> serving <code>&lt;DIR&gt;/.strata-scratch/</code>, which it creates on first start. One per project, shared by every client there; it stops itself after 30 idle minutes.</td>
 </tr>
 <tr>
+<td><code>uv run strata scratch ls\|gc\|rm\|retire</code></td>
+<td>List every project's scratchpad (size, last use, overage, daemon up), retire its idle cells and sweep it now (<code>gc [--root DIR \| --all]</code>), stop its daemon and delete it (<code>rm [--root DIR]</code>, which costs reruns only), or retire one cell by hand (<code>retire &lt;cell&gt; [--root DIR]</code>). See <a href="../../notebook/mcp/#a-projects-own-daemon">A project's own daemon</a>.</td>
+</tr>
+<tr>
 <td><code>uv run strata mcp [--root DIR]</code></td>
 <td>Serve a project's scratchpad to a coding agent as a stdio MCP server, for the agent's MCP config: it lists the tools at once and starts the project's scratchpad daemon on the first tool call. Needs the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/#from-an-agents-config-strata-mcp">MCP server</a>.</td>
 </tr>

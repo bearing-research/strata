@@ -4787,6 +4787,26 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>How many earlier values of each cell output a notebook's own store keeps beside the current one, so reverting a recent edit is still a cache hit. Older ones are pruned each time the server opens the notebook, an already-open one included, as are the values of a cell no longer in the notebook once unused for 30 days. <code>0</code> turns pruning off and keeps every value.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_SCRATCH_GC_SOFT_LIMIT_BYTES</code></td>
+<td><code>5368709120</code> (5 GiB)</td>
+<td>A project scratchpad's soft limit. Its daemon sweeps it at start and hourly: values unused for <code>STRATA_NOTEBOOK_SCRATCH_GC_MAX_IDLE_DAYS</code> go, then the least recently used while the store is over this size. Live cells' values stay whatever the limit; the overage is shown by <code>scratchpad</code> and <code>strata scratch ls</code>. <code>0</code> sets no limit.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_SCRATCH_GC_MAX_IDLE_DAYS</code></td>
+<td><code>14</code></td>
+<td>How long a scratchpad's superseded value may sit unused before its sweep takes it. <code>0</code> keeps it however long it sits.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS</code></td>
+<td><code>14</code></td>
+<td>How long a scratchpad's leaf cell with no <code># @name</code> may go unused (not run, edited or shown by <code>scratchpad</code>) before it is retired: its source and tests are kept in <code>.strata-scratch/retired.jsonl</code>, it leaves the notebook, and the next sweep frees every value it stored. <code>0</code> retires nothing.</td>
+</tr>
+<tr>
+<td><code>STRATA_SCRATCH_ANCHOR</code></td>
+<td>unset</td>
+<td>Set by <code>strata scratch</code> on the daemon it starts, never by hand: the project whose scratchpad this server sweeps and lists.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code></td>
 <td><code>None</code></td>
 <td>Point the ambient <code>strata</code> client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup, because the registry routes would forward to themselves. See <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service mode → shared research store</a>.</td>
