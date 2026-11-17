@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import pickle
+import subprocess
 import sys
 import tempfile
 from datetime import date
@@ -2136,3 +2137,30 @@ class TestPandasIndexDisplay:
             meta = serialize_value(value, Path(tmpdir), "v")
             restored = deserialize_value(meta["content_type"], Path(tmpdir) / meta["file"])
         pd.testing.assert_frame_equal(restored, value)
+
+
+def test_a_value_is_shown_without_importing_matplotlib_or_pil(tmp_path):
+    # A figure or image implies its library is loaded. Importing it to ask costs every
+    # display the import, and matplotlib's first one on a machine builds its font list.
+    pytest.importorskip("matplotlib.figure")
+    pytest.importorskip("PIL.Image")
+    probe = (
+        "import sys\n"
+        "from strata.notebook.serializer import serialize_display_value\n"
+        f"serialize_display_value(246, {str(tmp_path)!r}, 0)\n"
+        "print(sorted(m for m in ('matplotlib', 'PIL') if m in sys.modules))\n"
+    )
+    shown = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert shown.stdout.strip() == "[]"
+
+
+def test_a_figure_is_still_shown_as_a_png(tmp_path):
+    figure_module = pytest.importorskip("matplotlib.figure")
+    figure = figure_module.Figure(figsize=(1, 1), dpi=10)
+    figure.add_subplot().plot([1, 2])
+    assert (
+        serializer_module.serialize_display_value(figure, tmp_path, 0)["content_type"]
+        == "image/png"
+    )

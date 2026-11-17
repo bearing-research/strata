@@ -133,9 +133,9 @@ def scratchpad_server(
     can import *project*; its MCP entry is written to the agent's config dir. Yields
     the server's URL and stops the server on exit."""
     with _as_setup_error():
-        notebook = _prepare_notebook(root, project)
         port = _free_port()
         env = server_env(root, port, load_log, load_seconds)
+        notebook = _prepare_notebook(root, project, env)
         log = open(root / "server.log", "w")  # noqa: SIM115 - closed in the finally below
     url = f"http://127.0.0.1:{port}"
     proc: subprocess.Popen | None = None
@@ -175,8 +175,9 @@ def _stop_group(proc: subprocess.Popen) -> None:
     proc.wait()
 
 
-def _prepare_notebook(root: Path, project: Path) -> Path:
-    """A notebook in the server's storage dir whose environment can import *project*."""
+def _prepare_notebook(root: Path, project: Path, env: dict[str, str]) -> Path:
+    """A notebook in the server's storage dir whose environment can import *project*,
+    warmed in the server's *env*."""
     from strata.notebook.writer import create_notebook
 
     # The server opens notebooks only inside its storage dir.
@@ -192,11 +193,13 @@ def _prepare_notebook(root: Path, project: Path) -> Path:
     )
     if added.returncode:
         raise SetupError(f"uv add of the project failed: {added.stderr.strip()[-300:]}")
-    # macOS checks each binary of a fresh venv on its first load, 10 s and more in all; a
-    # user's own environment is past that, so it is paid here, before the agent's clock.
+    # macOS checks each binary of a fresh venv on its first load, 10 s and more in all, and
+    # matplotlib builds its font list under HOME on its first import, another 10 s; a
+    # user's own machine is past both, so they are paid here, before the agent's clock,
+    # under the HOME the server's cells get.
     warmed = subprocess.run(
         [str(notebook / ".venv" / "bin" / "python"), "-c", _WARM],
-        env=_host_env(),
+        env=env,
         capture_output=True,
         text=True,
     )

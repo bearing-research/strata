@@ -364,6 +364,23 @@ class TestArmCp:
         assert (env["STRATA_HOST"], env["STRATA_PORT"]) == ("127.0.0.1", "8799")
         assert env["HARBOR_LOAD_LOG"] == str(tmp_path / "loads.jsonl")
 
+    def test_the_notebook_is_warmed_under_the_servers_home(self, tmp_path, monkeypatch):
+        # matplotlib's first import builds its font list under HOME: warmed under another,
+        # each trial's first plot would pay it on the agent's clock.
+        calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+        def ran(command, **kwargs):
+            calls.append((command, kwargs.get("env")))
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        monkeypatch.setattr(server.subprocess, "run", ran)
+        env = {"HOME": str(tmp_path / "srv" / "home"), "PATH": os.environ["PATH"]}
+
+        server._prepare_notebook(tmp_path / "srv", tmp_path / "project", env)
+
+        (warm_env,) = [e for command, e in calls if command[1:2] == ["-c"]]
+        assert warm_env == env
+
     @pytest.mark.parametrize(
         "failure",
         [

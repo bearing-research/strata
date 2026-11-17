@@ -982,28 +982,28 @@ def table_cell(value: Any) -> Any:
     return _named_non_finite(to_serialization_safe(value, keep_none=True))
 
 
+def _loaded_class(module: str, name: str) -> type | None:
+    """*module*'s class *name* if the cell imported it, else None.
+
+    A figure or image implies its library is loaded; importing it to ask would cost every
+    value's display the import, and matplotlib's first one on a machine builds its font
+    list (10 s and more on macOS).
+    """
+    cls = getattr(sys.modules.get(module), name, None)
+    return cls if isinstance(cls, type) else None
+
+
 def _is_png_display_value(value: Any) -> bool:
     repr_png = getattr(value, "_repr_png_", None)
     if callable(repr_png):
         return True
-
-    try:
-        from matplotlib.figure import Figure
-
-        if isinstance(value, Figure):
-            return True
-    except ImportError:
-        pass
-
-    try:
-        from PIL import Image as _PILImage
-
-        if isinstance(value, _PILImage.Image):
-            return True
-    except ImportError:
-        pass
-
-    return False
+    return any(
+        cls is not None and isinstance(value, cls)
+        for cls in (
+            _loaded_class("matplotlib.figure", "Figure"),
+            _loaded_class("PIL.Image", "Image"),
+        )
+    )
 
 
 def _is_markdown_display_value(value: Any) -> bool:
@@ -1086,11 +1086,8 @@ def _png_via_repr_png(value: Any) -> _PngHandlerResult | None:
 
 
 def _png_via_matplotlib(value: Any) -> _PngHandlerResult | None:
-    try:
-        from matplotlib.figure import Figure
-    except ImportError:
-        return None
-    if not isinstance(value, Figure):
+    figure = _loaded_class("matplotlib.figure", "Figure")
+    if figure is None or not isinstance(value, figure):
         return None
     buffer = io.BytesIO()
     value.savefig(buffer, format="png")
@@ -1100,11 +1097,8 @@ def _png_via_matplotlib(value: Any) -> _PngHandlerResult | None:
 
 
 def _png_via_pil(value: Any) -> _PngHandlerResult | None:
-    try:
-        from PIL import Image as _PILImage
-    except ImportError:
-        return None
-    if not isinstance(value, _PILImage.Image):
+    image = _loaded_class("PIL.Image", "Image")
+    if image is None or not isinstance(value, image):
         return None
     buffer = io.BytesIO()
     value.save(buffer, format="PNG")
