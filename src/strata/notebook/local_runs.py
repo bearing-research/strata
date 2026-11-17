@@ -235,16 +235,48 @@ class LocalRuns:
     ) -> list[ArtifactVersion] | None:
         """Make earlier versions of a cell's outputs current again, together: a revert hit.
 
-        A build of the computation accepts a ``final`` release holding a copy of each
-        ``(artifact_id, version)`` (``ArtifactStore.stage_promotion``), so every copy is
-        current or none is. Returns the copies in *sources*' order, or None when nothing
-        was made current: the computation is running (its own release decides), a source
-        or its blob is gone, or a newer value of an output was made current first.
+        Each ``(artifact_id, version)`` is copied (``ArtifactStore.stage_promotion``) into
+        one :meth:`release`; returns the copies in *sources*' order, or None as it does.
+        """
+
+        def copies(release_id: str, staged: list[StagedVersion]) -> str | None:
+            for artifact_id, version in sources:
+                row = self.store.stage_promotion(artifact_id, version, release_id=release_id)
+                if row is None:
+                    return f"{artifact_id}@v={version} is gone"
+                staged.append(row)
+            return None
+
+        return self.release(
+            cell_id=cell_id,
+            computation_key=computation_key,
+            variant=variant,
+            what="revert",
+            stage=copies,
+        )
+
+    def release(
+        self,
+        *,
+        cell_id: str,
+        computation_key: str,
+        variant: str | None,
+        what: str,
+        stage: Callable[[str, list[StagedVersion]], str | None],
+    ) -> list[ArtifactVersion] | None:
+        """Make a result this process did not compute current, all of it or none: a build.
+
+        A revert or a team-cache pull. *stage* writes each output as a ``building`` row under
+        the build's ``final`` release id, appending it to the list it is given, and returns
+        why it could not stage them all, or None. Accepting the release makes every row
+        current in one transaction. Returns the rows in the order staged, or None when
+        nothing was made current: the computation is running (its own release decides),
+        *stage* gave a reason, or a newer value of an output was made current first.
         """
         occurrence = f"variant={variant}" if variant else None
         running = self.builds.find_open_build(computation_key, occurrence=occurrence)
         if running is not None and (running.lease_expires_at or 0.0) > time.time():
-            logger.info("Cell %s's revert waits for its run, build %s", cell_id, running.build_id)
+            logger.info("Cell %s's %s waits for its run, build %s", cell_id, what, running.build_id)
             return None
         attempt = uuid.uuid4().hex
         build_id = self._new_build(
@@ -257,15 +289,8 @@ class LocalRuns:
         release = self.releases.prepare(build_id, attempt, "final")
         staged: list[StagedVersion] = []
         try:
-            for artifact_id, version in sources:
-                row = self.store.stage_promotion(
-                    artifact_id, version, release_id=release.release_id
-                )
-                if row is None:
-                    reason = f"{artifact_id}@v={version} is gone"
-                    break
-                staged.append(row)
-            else:
+            reason = stage(release.release_id, staged)
+            if reason is None:
                 try:
                     bundle = self.releases.accept(release.release_id, staged)
                 except ReleaseRejected as exc:
@@ -275,13 +300,13 @@ class LocalRuns:
                     return [by_key[(row.artifact_id, row.version)] for row in staged]
         except Exception:
             # Left open, its lease would refuse a run of the computation for a minute.
-            self._end_revert(build_id, release.release_id, attempt, staged, "it raised")
+            self._end_unreleased(build_id, release.release_id, attempt, staged, "it raised")
             raise
-        logger.info("Cell %s's revert was not made current: %s", cell_id, reason)
-        self._end_revert(build_id, release.release_id, attempt, staged, reason)
+        logger.info("Cell %s's %s was not made current: %s", cell_id, what, reason)
+        self._end_unreleased(build_id, release.release_id, attempt, staged, f"{what}: {reason}")
         return None
 
-    def _end_revert(
+    def _end_unreleased(
         self,
         build_id: str,
         release_id: str,
@@ -289,7 +314,7 @@ class LocalRuns:
         staged: list[StagedVersion],
         reason: str,
     ) -> None:
-        """Fail a revert that made nothing current: its release, copies, placeholder, build."""
+        """Fail a build that made nothing current: its release, rows, placeholder, build."""
         # Settled already when acceptance refused it.
         self.releases.abandon(release_id, attempt)
         build = self.builds.get_build(build_id)
@@ -298,9 +323,7 @@ class LocalRuns:
             rows.append((build.artifact_id, build.version))
         for artifact_id, version in rows:
             self.store.fail_artifact(artifact_id, version)
-        self.builds.fail_build(
-            build_id, f"revert not made current: {reason}", lease_owner=LEASE_OWNER
-        )
+        self.builds.fail_build(build_id, f"nothing made current: {reason}", lease_owner=LEASE_OWNER)
 
     def start_renewing(self, run: LocalRun) -> asyncio.Task[None]:
         """Renew the attempt's lease until cancelled; the caller stops it with :meth:`close`."""
