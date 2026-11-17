@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +17,10 @@ def project(tmp_path, monkeypatch):
     """An empty project; the daemons it starts keep their stores under *tmp_path*."""
     for key in [k for k in os.environ if k.startswith("STRATA_")]:
         monkeypatch.delenv(key)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    # The test's own home (conftest patches Path.home), so its daemons share it.
+    monkeypatch.setenv("HOME", str(Path.home()))
+    # Where Windows looks instead: its Path.home() ignores HOME.
+    monkeypatch.setenv("USERPROFILE", str(Path.home()))
     monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
     monkeypatch.setenv("STRATA_NOTEBOOK_WARM_POOL_SIZE", "0")

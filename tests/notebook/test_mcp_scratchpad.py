@@ -7,6 +7,7 @@ what an agent would read back.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from types import SimpleNamespace
 
@@ -311,3 +312,75 @@ async def test_a_failed_upstream_is_named_as_failed(scratch):
 
     out = await _scratch_run(sm, "y = x + 1")
     assert out["reran"] == [{"cell": upstream["cell"], "reason": "it had failed"}]
+
+
+def test_scratchpad_shows_storage_its_sweep_could_not_free(scratch):
+    from dataclasses import asdict
+
+    from strata.notebook.scratch_storage import SAFE_TO_DELETE, Storage, storage_path
+
+    sm, session_id = scratch
+    path = storage_path(sm.get_session(session_id).path)
+    held = [{"cell": "a", "bytes": 300}]
+    under = Storage(store_bytes=100, soft_limit_bytes=200, over_by_bytes=0, swept_at=0.0)
+    path.write_text(json.dumps(asdict(under)))
+    assert "storage" not in _scratchpad(sm)
+
+    over = Storage(
+        store_bytes=300, soft_limit_bytes=200, over_by_bytes=100, swept_at=0.0, largest=held
+    )
+    path.write_text(json.dumps(asdict(over)))
+    storage = _scratchpad(sm)["storage"]
+    assert (storage["over_by_bytes"], storage["largest"]) == (100, held)
+    assert "strata scratch ls" in storage["fix"] and SAFE_TO_DELETE in storage["fix"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_needing_a_retired_cell_gets_its_source_in_the_fix(scratch):
+    from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.scratch_storage import retire_cell, scratch_manager
+
+    sm, session_id = scratch
+    session = sm.get_session(session_id)
+    gone = (await _scratch_run(sm, "x = 41"))["cell"]
+    ops = LocalNotebookOps.from_session(session)
+    retire_cell(ops, session.path, scratch_manager(session.path), ops.get_cell(gone))
+
+    failed = await _scratch_run(sm, "x + 1")
+    assert failed["status"] == "error"
+    assert gone in failed["fix"] and "x = 41" in failed["fix"]
+
+
+@pytest.mark.asyncio
+async def test_a_retired_cell_or_its_variable_asked_for_by_name_gets_its_source(scratch):
+    from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.scratch_storage import retire_cell, scratch_manager
+
+    sm, session_id = scratch
+    session = sm.get_session(session_id)
+    gone = (await _scratch_run(sm, "x = 41"))["cell"]
+    ops = LocalNotebookOps.from_session(session)
+    retire_cell(ops, session.path, scratch_manager(session.path), ops.get_cell(gone))
+
+    refused = await _scratch_run(sm, "x = 42", cell=gone)
+    assert refused["status"] == "error"
+    assert "x = 41" in refused["fix"]
+    looked = mcp_server._scratchpad(sm, name="x")
+    assert looked["defined"] is False
+    assert gone in looked["fix"] and "x = 41" in looked["fix"]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_on_something_else_keeps_its_own_fix(scratch):
+    from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.scratch_storage import retire_cell, scratch_manager
+
+    sm, session_id = scratch
+    session = sm.get_session(session_id)
+    gone = (await _scratch_run(sm, "x = 41"))["cell"]
+    ops = LocalNotebookOps.from_session(session)
+    retire_cell(ops, session.path, scratch_manager(session.path), ops.get_cell(gone))
+
+    failed = await _scratch_run(sm, "1 / 0\nx")
+    assert failed["status"] == "error"
+    assert "x = 41" not in failed.get("fix", "")

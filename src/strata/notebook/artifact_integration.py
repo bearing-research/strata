@@ -127,11 +127,18 @@ class NotebookArtifactManager:
 
     def prune(
         self,
-        keep_superseded: int,
+        keep_superseded: int | None,
         min_idle_seconds: float,
         live_cells: Collection[str] | None = None,
+        *,
+        max_idle_days: float | None = None,
+        max_bytes: int | None = None,
+        released: Collection[tuple[str, int]] = (),
     ) -> PruneResult:
         """Drop each cell output's values older than its newest *keep_superseded*.
+
+        Or, with *max_idle_days* and *max_bytes* (a scratchpad's policy), the values
+        unused that long, then the least recently used while the store is over that size.
 
         Keeps every output's current value, anything named, pinned or published, and
         anything used in the last *min_idle_seconds*, and each ``# @output_dir`` version
@@ -144,6 +151,8 @@ class NotebookArtifactManager:
         With *live_cells*, the notebook's cells, the values of a cell no longer among them go
         once idle a month (:meth:`removed_cell_values`), current ones too, unless something
         else holds them.
+
+        *released* versions go like those, but at once: a retired scratchpad cell's.
 
         Raises:
             NotebookQuiesced: the notebook is held still for a copy, which
@@ -167,10 +176,12 @@ class NotebookArtifactManager:
         # resume would start from it.
         result = self.artifact_store.garbage_collect(
             keep_superseded=keep_superseded,
+            max_idle_days=max_idle_days,
+            max_bytes=max_bytes,
             min_idle_seconds=min_idle_seconds,
             exempt=is_file_id,
             spare=failed_since_ready(self),
-            collectable=[*self.release_store.collectable_checkpoints(), *removed],
+            collectable=[*self.release_store.collectable_checkpoints(), *removed, *released],
         )
         # After the values: a folder file goes once no manifest version left names it.
         # An @each instance likewise, once no manifest left requires it.
@@ -210,8 +221,6 @@ class NotebookArtifactManager:
         Checkpoints and ``# @output_dir`` files are left to their own rules, which already
         take them once nothing needs them.
         """
-        from strata.notebook.output_dirs import is_file_id
-
         prefix = f"nb_{self.notebook_id}_cell_"
         live = set(live_cells)
         # One row per id finds the cells; their versions are listed only for those.
@@ -220,15 +229,21 @@ class NotebookArtifactManager:
             output = self.cell_output_of(latest.id)
             if output is not None and output[0] not in live:
                 cells.add(output[0])
-        removed = []
-        for cell_id in sorted(cells):
+        return [value for cell_id in sorted(cells) for value in self.cell_values(cell_id)]
+
+    def cell_values(self, cell_id: str) -> list[tuple[str, int]]:
+        """Every version of every value *cell_id* stored, its variants, loop steps and
+        ``# @each`` instances included; not its checkpoints or ``# @output_dir`` files.
+        """
+        from strata.notebook.output_dirs import is_file_id
+
+        return [
+            (version.id, version.version)
             for version in self.artifact_store.list_versions_by_id_prefix(
-                f"{prefix}{cell_id}_var_"
-            ):
-                if "@ckpt=" in version.id or is_file_id(version.id):
-                    continue
-                removed.append((version.id, version.version))
-        return removed
+                f"nb_{self.notebook_id}_cell_{cell_id}_var_"
+            )
+            if "@ckpt=" not in version.id and not is_file_id(version.id)
+        ]
 
     def fail_abandoned_runs(self) -> int:
         """Fail each run whose lease lapsed over a week ago; return how many.

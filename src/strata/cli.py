@@ -9,7 +9,10 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from strata.notebook.agent_launch import add_agent_arguments, agent_main
 from strata.notebook.cli import (
@@ -735,6 +738,35 @@ def _build_parser() -> argparse.ArgumentParser:
             help="The project directory holding .strata-scratch/ (default: the current one)",
         )
         sub.set_defaults(func=_dispatch_scratch)
+    ls_parser = scratch_sub.add_parser(
+        "ls", help="List every scratchpad: size, last use, daemon, overage"
+    )
+    ls_parser.add_argument("--format", choices=["human", "json"], default="human")
+    ls_parser.set_defaults(func=_dispatch_scratch_ls)
+    gc_parser = scratch_sub.add_parser(
+        "gc", help="Sweep a scratchpad now, by idle days then its soft limit"
+    )
+    gc_target = gc_parser.add_mutually_exclusive_group()
+    gc_target.add_argument(
+        "--root", default=".", help="The project whose scratchpad to sweep (default: here)"
+    )
+    gc_target.add_argument("--all", action="store_true", help="Sweep every listed scratchpad")
+    gc_parser.set_defaults(func=_dispatch_scratch_gc)
+    rm_parser = scratch_sub.add_parser(
+        "rm", help="Stop a scratchpad's daemon and delete .strata-scratch/; costs reruns only"
+    )
+    rm_parser.add_argument(
+        "--root", default=".", help="The project whose scratchpad to delete (default: here)"
+    )
+    rm_parser.set_defaults(func=_dispatch_scratch_rm)
+    retire_parser = scratch_sub.add_parser(
+        "retire", help="Retire a cell now: its source kept, its values freed by the next sweep"
+    )
+    retire_parser.add_argument("cell", help="The cell id")
+    retire_parser.add_argument(
+        "--root", default=".", help="The project whose scratchpad holds it (default: here)"
+    )
+    retire_parser.set_defaults(func=_dispatch_scratch_retire)
 
     mcp_parser = subparsers.add_parser(
         "mcp",
@@ -899,6 +931,191 @@ def _dispatch_scratch(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(asdict(running), indent=2))
+    return 0
+
+
+def _bytes(size: float) -> str:
+    unit = "B"
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024 or unit == "GiB":
+            break
+        size /= 1024
+    return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+
+
+def _dispatch_scratch_ls(args: argparse.Namespace) -> int:
+    import json
+    import time
+
+    from strata import scratch
+    from strata.notebook.scratch_storage import SAFE_TO_DELETE
+
+    def running(anchor: str) -> bool:
+        try:
+            return scratch.find_daemon(Path(anchor)) is not None
+        except scratch.ScratchError:
+            # Alive, but not answering.
+            return True
+
+    rows: list[dict[str, Any]] = [
+        {**entry, "anchor": anchor, "running": running(anchor)}
+        for anchor, entry in sorted(scratch.registered().items())
+    ]
+    if args.format == "json":
+        print(json.dumps(rows, indent=2))
+        return 0
+    if not rows:
+        print("no scratchpads")
+        return 0
+    print(f"{'SIZE':>10}  {'OVER BY':>10}  {'LAST USED':<16}  DAEMON  ANCHOR")
+    for row in rows:
+        size = _bytes(row["store_bytes"])
+        over = _bytes(row["over_by_bytes"]) if row["over_by_bytes"] else "-"
+        used = time.strftime("%Y-%m-%d %H:%M", time.localtime(row["last_used"]))
+        daemon = "up" if row["running"] else "-"
+        print(f"{size:>10}  {over:>10}  {used:<16}  {daemon:<6}  {row['anchor']}")
+    print(f"\n{SAFE_TO_DELETE} `strata scratch rm` deletes one.")
+    return 0
+
+
+def _dispatch_scratch_gc(args: argparse.Namespace) -> int:
+    import contextlib
+    import json
+    from dataclasses import asdict
+
+    from strata import scratch
+    from strata.config import StrataConfig
+    from strata.notebook.ops import LocalNotebookOps
+    from strata.notebook.scratch_storage import retire_idle, upkeep
+
+    anchors = (
+        [Path(anchor) for anchor in scratch.registered()]
+        if args.all
+        else [Path(args.root).expanduser().resolve()]
+    )
+    swept = {}
+    failed = False
+    for anchor in anchors:
+        directory = scratch.scratch_dir(anchor)
+        if not (directory / "notebook.toml").is_file():
+            # The rest are still swept.
+            print(f"error: {anchor} has no scratchpad", file=sys.stderr)
+            failed = True
+            continue
+        # As its daemon reads it, from inside the scratchpad: the same limits.
+        with contextlib.chdir(directory):
+            config = StrataConfig.load()
+        retired: list[str] | str
+        try:
+            # Held, so no daemon starts while the files are edited here.
+            with scratch.daemon_lock(anchor):
+                running = scratch.find_daemon(anchor)
+                if running is None:
+                    with LocalNotebookOps(directory) as ops:
+                        retired = retire_idle(
+                            ops, directory, retire_days=config.notebook_scratch_retire_days
+                        )
+        except scratch.ScratchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            failed = True
+            continue
+        if running is not None:
+            # Its session is the writer, and it retires idle cells itself, hourly, only
+            # when nothing runs: removing them from here could catch one mid-run.
+            retired = f"left to its daemon (pid {running.pid}), which retires them hourly"
+        storage = upkeep(
+            anchor,
+            soft_limit_bytes=config.notebook_scratch_gc_soft_limit_bytes,
+            max_idle_days=config.notebook_scratch_gc_max_idle_days,
+            min_idle_seconds=config.artifact_gc_min_idle_seconds,
+            # A sweep is not a use: it leaves the scratchpad's last use alone.
+            used=False,
+        )
+        swept[str(anchor)] = {**asdict(storage), "retired": retired}
+    print(json.dumps(swept, indent=2))
+    return 2 if failed else 0
+
+
+@contextmanager
+def _scratch_ops(anchor: Path, running: Any) -> Generator[Any]:
+    """The scratchpad's ops: through its *running* daemon if any, its session being the
+    writer."""
+    from strata import scratch
+    from strata.notebook.ops import LocalNotebookOps, RemoteNotebookOps
+
+    if running is None:
+        with LocalNotebookOps(scratch.scratch_dir(anchor)) as local:
+            yield local
+        return
+    ops = RemoteNotebookOps(running.url, running.session_id)
+    try:
+        yield ops
+    finally:
+        ops.close()
+
+
+def _dispatch_scratch_retire(args: argparse.Namespace) -> int:
+    import json
+
+    from strata import scratch
+    from strata.notebook.ops import NotebookOpsError
+    from strata.notebook.scratch_storage import retire_cell, scratch_manager
+
+    anchor = Path(args.root).expanduser().resolve()
+    directory = scratch.scratch_dir(anchor)
+    if not (directory / "notebook.toml").is_file():
+        print(f"error: {anchor} has no scratchpad", file=sys.stderr)
+        return 2
+    # Held, so no daemon starts while the files are edited here.
+    with scratch.daemon_lock(anchor):
+        try:
+            running = scratch.find_daemon(anchor)
+        except scratch.ScratchError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        with _scratch_ops(anchor, running) as ops:
+            try:
+                cell = ops.get_cell(args.cell)
+            except NotebookOpsError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            if cell.downstream_ids:
+                readers = ", ".join(cell.downstream_ids)
+                print(
+                    f"error: cells {readers} read {args.cell}; retire them first",
+                    file=sys.stderr,
+                )
+                return 2
+            if cell.status == "running":
+                print(f"error: {args.cell} is running; retire it once it ends", file=sys.stderr)
+                return 2
+            manager = scratch_manager(directory)
+            try:
+                record = retire_cell(ops, directory, manager, cell)
+            finally:
+                manager.close()
+    print(json.dumps({"retired": record["cell"], "defines": record["defines"]}, indent=2))
+    return 0
+
+
+def _dispatch_scratch_rm(args: argparse.Namespace) -> int:
+    import shutil
+
+    from strata import scratch
+
+    anchor = Path(args.root).expanduser().resolve()
+    directory = scratch.scratch_dir(anchor)
+    if not (directory / "notebook.toml").is_file():
+        print(f"error: {anchor} has no scratchpad", file=sys.stderr)
+        return 2
+    try:
+        scratch.stop_daemon(anchor)
+    except scratch.ScratchError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    shutil.rmtree(directory)
+    scratch.unregister(anchor)
+    print(f"removed {directory}")
     return 0
 
 

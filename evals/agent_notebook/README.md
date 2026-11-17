@@ -180,3 +180,17 @@ uv run python -m evals.agent_notebook.field --json > field.json
 
 It reads only local files and prints aggregates, plus up to `--examples` sampled
 commands for reading why an agent bypassed the scratchpad.
+
+## Latency
+
+`latency.py` times the scratchpad as an agent meets it, on a fresh project: `strata
+mcp`'s first call (creating the scratchpad and starting its daemon, step by step in
+`setup_ms`), then trivial uncached cells through `run` and through `strata cell add
+--run`, with p50, p95 and max. Phase 2's goals are p95 under 0.3 s through MCP and under
+1 s through the CLI, and a first call within 3 s of Strata overhead. Measure on a quiet
+machine: a test run alongside doubles the numbers.
+
+```bash
+uv run python -m evals.agent_notebook.latency --calls 100
+uv run python -m evals.agent_notebook.latency --calls 100 --cold-uv-cache
+```

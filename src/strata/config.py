@@ -357,6 +357,17 @@ class StrataConfig(BaseSettings):
     # recent edit is still a cache hit; older values are pruned when the
     # server opens the notebook. 0 turns pruning off and keeps every value.
     notebook_keep_superseded_versions: Annotated[int, Field(ge=0)] = 3
+    # A project's scratchpad (set by strata.scratch for the daemon it starts, never by
+    # hand): the server sweeps it at start and hourly, by idle days then size, and keeps
+    # its entry in ~/.strata/scratchpads.json. Its live cells' values stay whatever the
+    # limit, so the limit is soft and the sweep records the overage. 0 turns the size
+    # limit, the idle sweep or retirement off.
+    scratch_anchor: str | None = None
+    notebook_scratch_gc_soft_limit_bytes: Annotated[int, Field(ge=0)] = 5 * 1024**3
+    notebook_scratch_gc_max_idle_days: Annotated[float, Field(ge=0)] = 14.0
+    # A leaf cell with no `# @name`, unused this long, leaves the scratchpad and its
+    # values go in the next sweep; its source is kept in .strata-scratch/retired.jsonl.
+    notebook_scratch_retire_days: Annotated[float, Field(ge=0)] = 14.0
     # Registry aliases that require approval: moves/deletes of these aliases
     # (e.g. "champion") land in a pending queue instead of applying, and an
     # explicit approve applies them. Empty (the default) = no gating.

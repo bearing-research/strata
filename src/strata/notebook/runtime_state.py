@@ -11,6 +11,7 @@ import json
 import math
 import os
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -308,6 +309,8 @@ def persist_cell_execution_sample(
     sample: dict[str, Any] = {
         "duration_ms": None if duration_ms is None else float(duration_ms),
         "cache_hit": bool(cache_hit),
+        # When, so a scratchpad can tell an idle cell from one in use.
+        "at": time.time(),
     }
     # Only for a team hit, so ordinary runs do not grow dead keys.
     if from_team:

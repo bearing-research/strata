@@ -21,6 +21,20 @@ exhaustive commit history.
   the server shuts down, as on Ctrl-C, after that many minutes with no HTTP request or
   response in progress (MCP included), no open notebook tab, and no run, build or cache
   warm job in flight. Off by default. (#1556)
+- **A scratchpad's storage has a soft limit, and every scratchpad is listed.** Its daemon
+  sweeps it at start and hourly: results unused for 14 days go, then the least recently
+  used while it is over 5 GiB (`STRATA_NOTEBOOK_SCRATCH_GC_SOFT_LIMIT_BYTES`,
+  `STRATA_NOTEBOOK_SCRATCH_GC_MAX_IDLE_DAYS`). Live cells' values stay, and an overage
+  is shown by `scratchpad` with the cells holding the most. `~/.strata/scratchpads.json`
+  lists every scratchpad for `strata scratch ls`; `strata scratch gc` sweeps now and
+  `strata scratch rm` deletes one. A leaf cell with no `# @name` unused for 14 days
+  (`STRATA_NOTEBOOK_SCRATCH_RETIRE_DAYS`) is retired: its source and tests go to
+  `retired.jsonl`, the sweep frees its values, and a run needing its variable, a `run`
+  naming its id, or `scratchpad` asking for its variable gets the source back in its
+  `fix`; `strata scratch retire` retires one by hand. With a daemon running,
+  `strata scratch gc` sweeps but leaves retirement to the daemon, which retires only
+  when nothing runs. `0` turns the size limit, the idle sweep or retirement off. Each run
+  sample in `runtime.json` now records when it ran. (#1574)
 - **The notebook CLI drives a directory through the daemon serving it.** A project's
   `.strata-scratch/` is served by its daemon, whose `.strata/server.json` names it. On
   such a directory, `strata cell`, `status`, `dag` and `dep` go through the daemon's
@@ -418,6 +432,10 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **`strata cell rm` without a server removes a cell as a session does.** Removing a
+  group's active variant promotes the next one, removing its last member drops the
+  group, and the table, read and write indexes forget the cell. Before, the variant
+  pointer dangled until the next open warned of it. (#1574)
 - **A cell run, test run or dependency change through `--server` no longer fails at 30
   seconds.** The CLI waited 30 seconds for the server's answer and then reported
   `cannot reach`, while the run went on. It now waits for the run or resolve to finish.
