@@ -451,7 +451,7 @@ exhaustive commit history.
   HOME) built matplotlib's font list: a scratchpad's first `run` of `pow(3, 100, 1009)`
   took 12.5 s. A figure or image implies its library is loaded, so it is now looked up in
   `sys.modules`, and a PNG's size is read from its header, not through PIL. That first
-  run now takes 0.4 s, and later runs 0.18 s where they took 0.4 s. (#MPL)
+  run now takes 0.4 s, and later runs 0.18 s where they took 0.4 s. (#1580)
 - **A cell whose value Arrow cannot hold, such as `df.dtypes`, no longer breaks its
   notebook.** Its display named an unnamed Series's column `0`, a number, and reading
   that display back failed, so `strata status`, `cell add` and every later run raised
