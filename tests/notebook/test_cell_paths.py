@@ -605,7 +605,7 @@ class TestModuleExport:
             dag=SimpleNamespace(
                 consumed_variables={"c1": set(consumed)}, variable_producer=producer or {}
             ),
-            notebook_state=SimpleNamespace(id="nb", cells=[cell, *cells]),
+            notebook_state=SimpleNamespace(id="nb", cells=[cell, *cells], scratchpad=False),
             get_artifact_manager=lambda: SimpleNamespace(store_cell_output=store_cell_output),
         )
 
