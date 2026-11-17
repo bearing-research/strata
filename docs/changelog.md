@@ -443,7 +443,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   notebook.** Its display named an unnamed Series's column `0`, a number, and reading
   that display back failed, so `strata status`, `cell add` and every later run raised
   until the cell was edited. A display's column names are now strings, as Arrow's are;
-  the stored value keeps its labels. (#SERIES)
+  the stored value keeps its labels. (#1578)
 - **`strata cell rm` without a server removes a cell as a session does.** Removing a
   group's active variant promotes the next one, removing its last member drops the
   group, and the table, read and write indexes forget the cell. Before, the variant
