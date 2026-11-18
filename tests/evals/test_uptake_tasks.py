@@ -241,7 +241,7 @@ class TestAnEditTask:
 
 
 class TestTheLoadCounter:
-    def _load(self, work: Path, log: Path, *args: str, **env: str) -> None:
+    def _load(self, work: Path, log: Path, *args: str, **env: str) -> str:
         env = {
             **os.environ,
             "PYTHONPATH": os.pathsep.join(
@@ -251,7 +251,16 @@ class TestTheLoadCounter:
             "HARBOR_LOAD_SECONDS": "0",
             **env,
         }
-        subprocess.run([sys.executable, *args], cwd=work, env=env, check=True, timeout=120)
+        done = subprocess.run(
+            [sys.executable, *args],
+            cwd=work,
+            env=env,
+            check=True,
+            timeout=120,
+            capture_output=True,
+            text=True,
+        )
+        return done.stdout
 
     def test_each_load_is_a_line_tagged_with_its_cell(self, built, tmp_path):
         work = _fresh(built, tmp_path)
@@ -266,17 +275,19 @@ class TestTheLoadCounter:
         assert [line["cell"] for line in lines] == [None, "c1"]
         assert [line["argv"] for line in lines] == [["-c"], [str(script)]]
 
-    def test_unset_it_writes_nothing_and_the_load_still_waits(self, built, tmp_path):
+    def test_unset_it_writes_nothing_and_the_load_still_asks_to_wait(self, built, tmp_path):
         work = _fresh(built, tmp_path)
         log = tmp_path / "loads.jsonl"
         # What the load asks to sleep, not how long it took: a measured wait
         # can come up a hair short of the requested one on some clocks.
         code = (
-            "import time; slept = []; time.sleep = slept.append;"
-            " from harbor.data import load_events; load_events();"
-            " assert len(slept) == 1 and slept[0] > 0, slept"
+            "import json, time; slept = []; time.sleep = slept.append;"
+            " from harbor.data import load_events; load_events(); print(json.dumps(slept))"
         )
 
-        self._load(work, log, "-c", code, HARBOR_LOAD_LOG="", HARBOR_LOAD_SECONDS="3600")
+        out = self._load(work, log, "-c", code, HARBOR_LOAD_LOG="", HARBOR_LOAD_SECONDS="60")
 
+        # 60 less the read: not the default 20, and short if the patch stops applying.
+        (wait,) = [s for s in json.loads(out.splitlines()[-1]) if s >= 1]
+        assert 30 < wait <= 60
         assert not log.exists()

@@ -65,10 +65,12 @@ def summarize(trials: Iterable[dict[str, Any]]) -> dict[str, Any]:
     if "A" in by and by["A"]["all"]["used_strata"]["k"]:
         warnings.append(f"arm A used strata in {by['A']['all']['used_strata']['k']} runs")
     # A tuning round changes strata; any other pin that differs is a second variable.
-    for key in sorted({key for t in trials for key in t["pins"]} - {"strata_commit"}):
+    scored = [t for t in trials if t["discarded"] is None]
+    for key in sorted({key for t in scored for key in t["pins"]} - {"strata_commit"}):
         arms_by_value: dict[str, set[str]] = {}
-        for t in trials:
-            arms_by_value.setdefault(str(t["pins"].get(key)), set()).add(t["arm"])
+        # A record from before a pin existed says nothing about it.
+        for t in (t for t in scored if key in t["pins"]):
+            arms_by_value.setdefault(str(t["pins"][key]), set()).add(t["arm"])
         if len(arms_by_value) > 1:
             seen = ", ".join(
                 f"{v} ({' '.join(sorted(a))})" for v, a in sorted(arms_by_value.items())
