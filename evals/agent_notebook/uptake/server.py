@@ -57,6 +57,12 @@ def _host_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not _HOST_ONLY.match(k)}
 
 
+def _home(root: Path) -> Path:
+    # Some paths fall back to ~/.strata whatever the settings say, and matplotlib keeps
+    # its font list under it.
+    return root / "home"
+
+
 def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> dict[str, str]:
     """The server's environment: everything it stores under *root*, nothing of the host's
     Strata or Anthropic settings, and the load counter its cells inherit."""
@@ -68,8 +74,7 @@ def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> di
 
     env = _host_env()
     env.update(
-        # Some paths fall back to ~/.strata whatever the settings say.
-        HOME=str(root / "home"),
+        HOME=str(_home(root)),
         # uv's real cache and interpreters, so nothing is downloaded again.
         UV_CACHE_DIR=uv_dir("cache", "dir"),
         UV_PYTHON_INSTALL_DIR=uv_dir("python", "dir"),
@@ -192,11 +197,13 @@ def _prepare_notebook(root: Path, project: Path) -> Path:
     )
     if added.returncode:
         raise SetupError(f"uv add of the project failed: {added.stderr.strip()[-300:]}")
-    # macOS checks each binary of a fresh venv on its first load, 10 s and more in all; a
-    # user's own environment is past that, so it is paid here, before the agent's clock.
+    # macOS checks each binary of a fresh venv on its first load, 10 s and more in all, and
+    # matplotlib builds its font list under HOME on its first import, another 10 s; a
+    # user's own machine is past both, so they are paid here, before the agent's clock,
+    # under the HOME the server's cells get.
     warmed = subprocess.run(
         [str(notebook / ".venv" / "bin" / "python"), "-c", _WARM],
-        env=_host_env(),
+        env={**_host_env(), "HOME": str(_home(root))},
         capture_output=True,
         text=True,
     )

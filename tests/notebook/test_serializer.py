@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import pickle
+import subprocess
 import sys
 import tempfile
 from datetime import date
@@ -2136,3 +2137,45 @@ class TestPandasIndexDisplay:
             meta = serialize_value(value, Path(tmpdir), "v")
             restored = deserialize_value(meta["content_type"], Path(tmpdir) / meta["file"])
         pd.testing.assert_frame_equal(restored, value)
+
+
+def test_a_value_is_shown_without_importing_matplotlib_or_pil(tmp_path):
+    # A figure or image implies its library is loaded. Importing it to ask costs every
+    # display the import, and matplotlib's first one on a machine builds its font list.
+    pytest.importorskip("matplotlib.figure")
+    pytest.importorskip("PIL.Image")
+    probe = (
+        "import sys\n"
+        "from strata.notebook.serializer import serialize_display_value\n"
+        "import struct, zlib\n"
+        "def chunk(kind, data):\n"
+        "    body = kind + data\n"
+        "    return struct.pack('>I', len(data)) + body + struct.pack('>I', zlib.crc32(body))\n"
+        "header = struct.pack('>IIBBBBB', 2, 1, 8, 0, 0, 0, 0)\n"
+        "png = b'\\x89PNG\\r\\n\\x1a\\n' + chunk(b'IHDR', header)\n"
+        "png += chunk(b'IDAT', zlib.compress(b'\\x00\\x00\\x00')) + chunk(b'IEND', b'')\n"
+        "class Shows:\n"
+        "    def _repr_png_(self):\n"
+        "        return png\n"
+        f"serialize_display_value(246, {str(tmp_path)!r}, 0)\n"
+        f"shown = serialize_display_value(Shows(), {str(tmp_path)!r}, 1)\n"
+        "assert (shown['width'], shown['height']) == (2, 1), shown\n"
+        "print(sorted(m for m in ('matplotlib', 'PIL') if m in sys.modules))\n"
+    )
+    shown = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert shown.returncode == 0, shown.stderr
+    assert shown.stdout.strip() == "[]"
+
+
+def test_a_figure_is_still_shown_as_a_png(tmp_path):
+    figure_module = pytest.importorskip("matplotlib.figure")
+    figure = figure_module.Figure(figsize=(1, 1), dpi=10)
+    figure.add_subplot().plot([1, 2])
+    shown = serializer_module.serialize_display_value(figure, tmp_path, 0)
+    assert (shown["content_type"], shown["width"], shown["height"]) == ("image/png", 10, 10)
+
+
+def test_an_image_is_shown_as_a_png_of_its_size(tmp_path):
+    image = pytest.importorskip("PIL.Image").new("RGB", (7, 3))
+    shown = serializer_module.serialize_display_value(image, tmp_path, 0)
+    assert (shown["content_type"], shown["width"], shown["height"]) == ("image/png", 7, 3)

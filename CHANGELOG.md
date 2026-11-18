@@ -445,6 +445,13 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Showing a cell's value no longer imports matplotlib or PIL.** To tell whether a value
+  was a figure or an image, the serializer imported both, so every cold run in an
+  environment with matplotlib paid its import, and the first on a machine (or under a new
+  HOME) built matplotlib's font list: a scratchpad's first `run` of `pow(3, 100, 1009)`
+  took 12.6 s. A figure or image implies its library is loaded, so it is now looked up in
+  `sys.modules`, and a PNG's size is read from its header, not through PIL. That first
+  run now takes 0.46 s, and later runs 0.18 s where they took 0.4 s. (#1580)
 - **A cell whose value Arrow cannot hold, such as `df.dtypes`, no longer breaks its
   notebook.** Its display named an unnamed Series's column `0`, a number, and reading
   that display back failed, so `strata status`, `cell add` and every later run raised
