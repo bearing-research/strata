@@ -736,6 +736,8 @@ class CellView(CellState, WsPayload):
     staleness_reasons: list[str]
     # A ready cell's undeclared reads that changed since: it may be out of date.
     changed_reads: list[str]
+    # A scratchpad cell stale for ``code``: the file its last run read that changed.
+    changed_code: str | None = None
     annotations: AnnotationsWirePayload
     widget: WidgetModel | None = None
     is_module_cell: bool | None = None

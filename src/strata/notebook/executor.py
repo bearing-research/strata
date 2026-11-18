@@ -2736,8 +2736,9 @@ class CellExecutor:
         return manifest_path
 
     def _harness_fields(self) -> dict[str, Any]:
-        """Where a local cell runs, its notebook's ``work/``, made and handed over here, and
-        what its read audit counts as the notebook's environment (``audit_scope``).
+        """Where a local cell runs, its notebook's ``work/``, made and handed over here, what
+        its read audit counts as the notebook's environment (``audit_scope``), and for a
+        scratchpad, what its recorder of reads leaves out (``code_reads``).
 
         Relative: every local harness starts in the notebook's directory, and a relative
         change needs no directory above it to be searchable by the cell's user.
@@ -2747,11 +2748,16 @@ class CellExecutor:
         except LocalExecutionRefused:
             harness_user = None  # the run is refused where the cell would start
         prepare_work_dir(self.session.path, harness_user)
-        return {
+        fields: dict[str, Any] = {
             "work_dir": WORK_DIR,
             "notebook_dir": str(self.session.path),
             "audit": audit_scope(self.session.path),
         }
+        if self.session.notebook_state.scratchpad:
+            # A scratchpad cell is keyed on what it read (``code_keys``); its own files are
+            # the store's, not the cell's.
+            fields["code_reads"] = {"exclude": [str(self.session.path)]}
+        return fields
 
     # ------------------------------------------------------------------
     # Prompt cell execution (LLM path)
@@ -4346,6 +4352,10 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     # fetch is checked and injected.
     annotations = parse_annotations(cell.source, cell.language)
     if annotations.fetches or annotations.datasets or annotations.each is not None:
+        return False
+
+    # A scratchpad cell is keyed on what its run read, which only a single-cell run records.
+    if executor.session.notebook_state.scratchpad:
         return False
 
     dag = executor.session.dag

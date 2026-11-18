@@ -290,6 +290,7 @@ class StalenessReason(StrEnum):
     EXTERNAL = "external"  # a mount, table, fetch or dataset, a connection or a model
     FORCED = "forced"  # Re-run despite a cache hit
     CHECKING = "checking"  # a local mount whose files are being hashed
+    CODE = "code"  # a scratchpad cell: a file its last run read (``changed_code``)
 
 
 class CellLanguage(StrEnum):
@@ -338,6 +339,13 @@ class CellStaleness(BaseModel):
     status: CellStatus = Field(..., description="Status: ready, stale, idle, running, error")
     reasons: list[StalenessReason] = Field(
         default_factory=list, description="List of staleness reasons"
+    )
+    changed_code: str | None = Field(
+        default=None,
+        description=(
+            "Of a scratchpad cell stale for `code`: a file its last run read (its code, "
+            "or one it opened or listed) that is not as that run read it"
+        ),
     )
     changed_reads: list[str] = Field(
         default_factory=list,
@@ -932,6 +940,7 @@ class CellState(BaseModel):
             else []
         )
         data["changed_reads"] = list(self.staleness.changed_reads) if self.staleness else []
+        data["changed_code"] = self.staleness.changed_code if self.staleness else None
         data["annotations"] = parse_annotations(self.source, self.language).to_wire_payload()
 
         # A widget's value is runtime state that every reader of the cell needs, and

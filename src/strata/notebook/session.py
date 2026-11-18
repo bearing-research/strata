@@ -29,6 +29,7 @@ from vestigo.provenance import derive_subkey
 from strata.notebook import console_relay, nonce, output_file_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
+from strata.notebook.code_keys import CodeIndex, Resolved
 from strata.notebook.dag import NotebookDag
 from strata.notebook.dependencies import (
     DependencyChangeResult,
@@ -1214,7 +1215,9 @@ class NotebookSession:
                 stale_cells.add(cell_id)
                 continue
 
-            provenance_hash = key.provenance_hash
+            # A scratchpad cell's result is under its key over what its runs read, as now.
+            code = self.resolve_code_key(cell_id, key.provenance_hash)
+            provenance_hash = code.key
 
             # Per-variable hashes: sha256(f"{provenance_hash}:{var_name}").
             cached_outputs = self._resolve_cached_outputs(cell_id, provenance_hash)
@@ -1274,6 +1277,14 @@ class NotebookSession:
                     # Outputs live under a per-language scheme, so artifact uris are still empty
                     # here, and downstream cells read them to build their provenance.
                     self._restore_alternate_scheme_outputs(cell)
+                elif code.changed is not None and cell.last_provenance_hash is not None:
+                    # A file its last run read is not as that run read it.
+                    staleness_map[cell_id] = CellStaleness(
+                        status=CellStatus.STALE,
+                        reasons=[StalenessReason.CODE],
+                        changed_code=code.changed,
+                    )
+                    stale_cells.add(cell_id)
                 elif self._upstream_moved_under(cell, source_hash, env_hash):
                     # Upstream artifacts were replaced by newer versions with this cell's source
                     # and env unchanged: stale, not idle (which would read as "never ran").
@@ -1858,6 +1869,31 @@ class NotebookSession:
             hydrated = self._hydrate_display_output(output)
             resolved.append(CellOutput(**hydrated) if hydrated is not None else output)
         return resolved
+
+    @functools.cached_property
+    def code_index(self) -> CodeIndex:
+        """A scratchpad's runs by what they read (``code_keys``)."""
+        return CodeIndex(self.path)
+
+    def resolve_code_key(self, cell_id: str, lookup: str) -> Resolved:
+        """The key a scratchpad cell's result under *lookup* is stored under, as what its
+        runs read is now; a notebook's is *lookup* itself. Blocking: it may hash files."""
+        if not self.notebook_state.scratchpad:
+            return Resolved(lookup)
+        consumed = sorted(self.dag.consumed_variables.get(cell_id, set())) if self.dag else []
+        manager = self.artifact_manager
+        console_id = manager.cell_artifact_id(cell_id, "__console__")
+
+        def has_result(key: str) -> bool:
+            # Any version: a revert's result is an older one, which the run promotes.
+            if consumed:
+                return manager.find_cached(derive_subkey(key, consumed[0])) is not None
+            found = manager.artifact_store.find_version_by_provenance(
+                console_id, derive_subkey(key, "__console__")
+            )
+            return found is not None
+
+        return self.code_index.resolve(lookup, has_result)
 
     def resolve_cached_console(
         self, cell_id: str, provenance_hash: str, *, variant: str | None = None

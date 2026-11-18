@@ -422,6 +422,8 @@ async def _run_loop(
     combined_stderr = run.stderr
     all_mutation_warnings = run.mutation_warnings
     iteration_audits: list[list[ReadFinding]] = []
+    # A scratchpad's: what each iteration read (``code_reads``).
+    iteration_code: list[dict[str, Any]] = []
     final_display_files: dict[str, bytes] = {}
     context.folder_listings.pop(cell_id, None)
 
@@ -523,6 +525,8 @@ async def _run_loop(
             combined_stderr.append(result.get("stderr", ""))
             all_mutation_warnings.extend(result.get("mutation_warnings", []))
             iteration_audits.append(result.get("read_audit") or [])
+            if result.get("code_reads") is not None:
+                iteration_code.append(result["code_reads"])
             final_result = result
 
             if not result.get("success", False):
@@ -709,6 +713,14 @@ async def _run_loop(
     recorded_provenance, recorded_parts = cell_provenance, prov.key_parts
     if moved is not None:
         combined_stderr.append(moved_line(moved))
+    elif any(code["reads"] or code["unstable"] for code in iteration_code):
+        # A scratchpad loop is not keyed on what its iterations read, so it keeps them for
+        # itself, as a moved input's run does.
+        moved = "its iterations read files a loop is not keyed on"
+        combined_stderr.append(
+            f"cache: skipped, {moved}; its outputs are kept for this run only.\n"
+        )
+    if moved is not None:
         output_provenance = derive_subkey(cell_provenance, f"run={uuid.uuid4().hex}")
         carry_var_provenance = derive_subkey(output_provenance, loop.carry)
         recorded_provenance = moved_key(cell_provenance)

@@ -99,6 +99,8 @@ class CellView(BaseModel):
     staleness_reasons: list[str]
     # Ready, but files it read without declaring them changed since: may be out of date.
     changed_reads: list[str] = Field(default_factory=list)
+    # Stale for `code`: a file its last run read that changed (a scratchpad's cells).
+    changed_code: str | None = None
     # Promised by the MCP `get_notebook` description.
     defines: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
@@ -215,6 +217,8 @@ class CellStatusRow(BaseModel):
     staleness_reasons: list[str]
     # Ready, but files it read without declaring them changed since: may be out of date.
     changed_reads: list[str] = Field(default_factory=list)
+    # Stale for `code`: a file its last run read that changed (a scratchpad's cells).
+    changed_code: str | None = None
     # Answers "do I already have this?" without a call per cell.
     defines: list[str] = Field(default_factory=list)
 
@@ -1324,6 +1328,7 @@ def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
         source=data.get("source") or "",
         staleness_reasons=list(data.get("staleness_reasons") or []),
         changed_reads=list(data.get("changed_reads") or []),
+        changed_code=data.get("changed_code"),
         defines=list(data.get("defines") or []),
         references=list(data.get("references") or []),
         upstream_ids=list(data.get("upstream_ids") or []),
@@ -1367,6 +1372,7 @@ def _status_row_from_wire(data: dict[str, Any]) -> CellStatusRow:
         status=data["status"],
         staleness_reasons=list(data.get("staleness_reasons") or []),
         changed_reads=list(data.get("changed_reads") or []),
+        changed_code=data.get("changed_code"),
         defines=list(data.get("defines") or []),
     )
 

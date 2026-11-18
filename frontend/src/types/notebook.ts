@@ -150,6 +150,7 @@ export type StalenessReason =
   | 'external' // a mount, table, fetch or dataset, a connection or a model changed since last run
   | 'forced' // ran with stale inputs ("Run this only"): result exists but suspect
   | 'checking' // a local mount's files are being hashed: not known to have changed
+  | 'code' // a scratchpad cell: a file its last run read changed
 
 /** State of a single input variable for a cell */
 export type InputState = 'ready' | 'stale' | 'missing' | 'error'

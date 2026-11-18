@@ -284,6 +284,7 @@ const STALENESS_REASON_LABELS: Record<StalenessReason, string> = {
   external: 'input changed',
   forced: 'forced re-run',
   checking: 'checking files',
+  code: 'a file it read changed',
 }
 
 const statusTitle = computed(() => {

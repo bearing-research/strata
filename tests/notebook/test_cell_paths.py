@@ -3514,7 +3514,9 @@ class TestPython:
             python, "write_module_export_outputs", lambda *_args: calls.export_error
         )
         host = SimpleNamespace(
-            notebook_state=SimpleNamespace(id="nb", get_cell=lambda _id: calls.cell),
+            notebook_state=SimpleNamespace(
+                id="nb", get_cell=lambda _id: calls.cell, scratchpad=False
+            ),
             dag=SimpleNamespace(each_cells=set(), consumed_variables={"c": set(consumed)}),
             venv_python=Path("venv/python"),
             get_artifact_manager=lambda: SimpleNamespace(
