@@ -64,6 +64,16 @@ def summarize(trials: Iterable[dict[str, Any]]) -> dict[str, Any]:
             warnings.append(f"arm {arm}: {group['discarded']} of {group['trials']} runs discarded")
     if "A" in by and by["A"]["all"]["used_strata"]["k"]:
         warnings.append(f"arm A used strata in {by['A']['all']['used_strata']['k']} runs")
+    # A tuning round changes strata; any other pin that differs is a second variable.
+    for key in sorted({key for t in trials for key in t["pins"]} - {"strata_commit"}):
+        arms_by_value: dict[str, set[str]] = {}
+        for t in trials:
+            arms_by_value.setdefault(str(t["pins"].get(key)), set()).add(t["arm"])
+        if len(arms_by_value) > 1:
+            seen = ", ".join(
+                f"{v} ({' '.join(sorted(a))})" for v, a in sorted(arms_by_value.items())
+            )
+            warnings.append(f"{key} differs between trials: {seen}")
     must_not = {arm: by[arm][MUST_NOT]["used_strata"] for arm in arms if MUST_NOT in by[arm]}
     return {
         "arms": by,

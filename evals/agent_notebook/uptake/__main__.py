@@ -80,7 +80,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(
                 f"{args.arm} {task.id} #{index}: {state},"
-                f" {trial.wall_s:.0f}s, strata {trial.strata_calls}"
+                f" {trial.wall_s:.0f}s, strata {trial.strata_calls}",
+                # Written to a log for hours; each line is news when its trial ends.
+                flush=True,
             )
     return 0
 
