@@ -132,7 +132,7 @@ exhaustive commit history.
   `.pyc`. A run that wrote a file it had read, whose file changed while it ran, or that
   installed an import hook keeps its outputs for that run only, as does a loop or
   `@each` cell that read files; Run All runs a scratchpad's cells one at a time. Plain
-  notebooks are unchanged. (#PRNUM)
+  notebooks are unchanged. (#1585)
 ### Changed
 - **A scratchpad keeps every variable its cells define.** A notebook stores a variable
   only once a cell downstream reads it, so an agent that loaded data in one cell and asked
