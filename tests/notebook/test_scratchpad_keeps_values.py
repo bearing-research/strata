@@ -101,7 +101,10 @@ async def test_a_kept_def_that_cannot_be_shared_is_left_for_its_reader_to_find_o
     assert "cannot be shared across cells" in (refused.error or "")
 
 
-async def test_run_all_keeps_what_a_single_run_keeps(tmp_path):
+async def test_run_all_runs_a_scratchpads_cells_one_at_a_time(tmp_path):
+    # Each cell's run records what it read (``code_reads``), which a shared batch process
+    # cannot: a module an earlier cell imported is not loaded again. So each keeps what a
+    # single run keeps.
     from strata.notebook import ws
     from strata.notebook.writer import add_cell_to_notebook, write_cell
 
@@ -111,11 +114,11 @@ async def test_run_all_keeps_what_a_single_run_keeps(tmp_path):
     for cell_id, source, after in (("a", maker, None), ("b", "other = 1", "a")):
         add_cell_to_notebook(path, cell_id, after)
         write_cell(path, cell_id, source)
-    specs: list[dict] = []
+    batched: list[dict] = []
     real_batch = CellExecutor.execute_batch
 
     async def execute_batch(self, cell_specs, **kwargs):
-        specs.extend(cell_specs)
+        batched.extend(cell_specs)
         return await real_batch(self, cell_specs, **kwargs)
 
     with (
@@ -127,10 +130,7 @@ async def test_run_all_keeps_what_a_single_run_keeps(tmp_path):
         await ws._execute_run_all(
             None, session, ["a", "b"], ws._ensure_execution_state(session.id), session.id
         )
-    # Code goes as its module export: the harness does not pickle it.
-    (kept,) = [spec["kept_vars"] for spec in specs if spec["cell_id"] == "a"]
-    assert "rows" in kept
-    assert "double" not in kept
+    assert batched == []
     assert log.read_text().splitlines() == ["ran"]
     with LocalNotebookOps(path) as ops:
         ops._session.refresh_environment_runtime()

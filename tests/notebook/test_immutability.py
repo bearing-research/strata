@@ -383,3 +383,20 @@ class TestSharedMutableOutputs:
 
         outputs = {"a": {"mod": np, "fn": helper}, "b": {"mod": np, "fn": helper}}
         assert detect_shared_mutable_outputs(outputs) == []
+
+
+def test_snapshotting_a_plain_value_imports_no_library():
+    # A pandas or numpy value implies its library is imported; importing one to check
+    # would be the harness's import inside a scratchpad run's record of what it read.
+    import subprocess
+    import sys
+
+    script = (
+        "import sys\n"
+        "from strata.notebook.immutability import snapshot_inputs\n"
+        "snapshot_inputs({'x': 1, 'y': [1, 2]}, ['x', 'y'])\n"
+        "print(sorted(m for m in ('pandas', 'numpy') if m in sys.modules))\n"
+    )
+    run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)
+
+    assert run.stdout.strip() == "[]"

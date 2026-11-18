@@ -11,14 +11,24 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import cellgraph as cg
     from vestigo.store import ArtifactVersion
 
     from strata.notebook.artifact_integration import NotebookArtifactManager
+    from strata.notebook.code_keys import Resolved
     from strata.notebook.dag import NotebookDag
     from strata.notebook.env import LocalPackages
     from strata.notebook.execution_result import CachedConsole
-    from strata.notebook.models import CellOutput, DatasetSpec, InputWeight, NotebookState
+    from strata.notebook.models import (
+        CellOutput,
+        CellState,
+        DatasetSpec,
+        InputWeight,
+        NotebookState,
+        WorkerSpec,
+    )
     from strata.notebook.pool import WarmProcessPool
     from strata.notebook.session import NotebookSession
 
@@ -72,6 +82,14 @@ class ExecutorHost(Protocol):
     def wired_variables(self, cell_id: str, upstream_id: str) -> set[str]: ...
 
     def collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]: ...
+
+    def keys_on_reads(self, cell: CellState, worker: WorkerSpec | None) -> bool: ...
+
+    def resolve_code_key(self, cell_id: str, lookup: str, *, observe: bool = True) -> Resolved: ...
+
+    def record_code_reads(
+        self, lookup: str, reads: Mapping[str, str], stat: Mapping[str, list[int]]
+    ) -> None: ...
 
     def resolve_cached_console(
         self, cell_id: str, provenance_hash: str, *, variant: str | None = None

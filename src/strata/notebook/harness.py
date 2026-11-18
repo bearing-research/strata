@@ -15,7 +15,7 @@ import platform
 import sys
 import time
 import traceback
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +45,7 @@ _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 _work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
 _traceback = _load_local_module("cell_traceback.py", "_nb_cell_traceback")
 _audit = _load_local_module("read_audit.py", "_nb_read_audit")
+_code = _load_local_module("code_reads.py", "_nb_code_reads")
 
 # Harness-injected, not user inputs: excluded from mutation fingerprinting.
 _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
@@ -441,7 +442,6 @@ def _run_one_batched_cell(
     cell_id = cell["cell_id"]
     source = cell["source"]
     consumed_vars: list[str] = list(cell.get("consumed_vars") or [])
-    kept_vars: list[str] = list(cell.get("kept_vars") or [])
     references: list[str] = list(cell.get("references") or [])
     mutation_defines: set[str] = set(cell.get("mutation_defines") or [])
     cell_env: dict = cell.get("env") or {}
@@ -604,14 +604,6 @@ def _run_one_batched_cell(
                             "error": str(exc),
                             "type": type(namespace[var_name]).__name__,
                         }
-                for var_name in kept_vars:
-                    # Best-effort, as a single run keeps them: one that does not serialize
-                    # (an open file) is left out, nothing reads it yet.
-                    if var_name in namespace:
-                        with suppress(Exception):
-                            outputs[var_name] = _ser.serialize_value(
-                                namespace[var_name], cell_output_dir, var_name
-                            )
 
                 display_values = display_capture.resolve(display_value)
                 written = [
@@ -713,7 +705,7 @@ def execute_batch(
 ) -> None:
     """Execute a sequence of cells in one Python process.
 
-    ``cells`` is ``[{cell_id, source, consumed_vars, kept_vars, env, mount_manifest,
+    ``cells`` is ``[{cell_id, source, consumed_vars, env, mount_manifest,
     source_hash, env_hash}, ...]`` in notebook order. ``upstream_inputs`` seeds the
     shared namespace (same shape ``deserialize_inputs`` reads). Streams frames to
     ``frame_out``, reads responses from ``resp_in``, and returns after
@@ -913,7 +905,7 @@ def main():
             loop_until_expr = (
                 loop_config.get("until_expr") if isinstance(loop_config, dict) else None
             )
-            with _audit.recording() as observed:
+            with _audit.recording() as observed, _code.for_run(manifest, observed) as code:
                 (
                     outputs,
                     display_values,
@@ -937,6 +929,7 @@ def main():
                 run_dir=str(output_dir),
                 scope=manifest.get("audit"),
             )
+            code_reads = code.finish() if code is not None else None
             # Reported here: inputs deserialize before console capture starts.
             if _ser.x64_was_enabled_here():
                 stderr_text += _ser.X64_NOTE
@@ -976,6 +969,7 @@ def main():
             "stderr": stderr_text,
             "mutation_warnings": mutation_warnings,
             "read_audit": read_audit,
+            "code_reads": code_reads,
             "build_env": build_env_identity(),
         }
         if loop_state is not None:

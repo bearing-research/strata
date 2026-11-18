@@ -16,7 +16,7 @@ import threading
 import time as _time
 import tomllib
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,6 +29,7 @@ from vestigo.provenance import derive_subkey
 from strata.notebook import console_relay, nonce, output_file_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
+from strata.notebook.code_keys import CodeIndex, Resolved
 from strata.notebook.dag import NotebookDag
 from strata.notebook.dependencies import (
     DependencyChangeResult,
@@ -66,6 +67,7 @@ from strata.notebook.models import (
     StalenessReason,
     VariantGroupState,
     VariantMember,
+    WorkerSpec,
 )
 from strata.notebook.mounts import local_mount_path, resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
@@ -108,7 +110,9 @@ from strata.notebook.staleness_explanations import (
 from strata.notebook.tables import without_empty_table_nonce
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
+    WorkerBackendType,
     build_worker_catalog,
+    is_embedded_executor_worker,
     one_policy_read,
     resolve_worker_spec,
     worker_runtime_identity,
@@ -318,6 +322,10 @@ class NotebookSession:
         # lock because a session outlives any single event loop, and an asyncio.Lock
         # awaited from another loop never wakes.
         self._staleness_lock = threading.RLock()
+        # A scratchpad's code keys as last observed, by lookup key, and each cell's lookup
+        # key in the last pass: the pass itself observes nothing (``resolve_code_key``).
+        self._code_seen: dict[str, Resolved] = {}
+        self._code_lookups: dict[str, str] = {}
         # Local mounts a staleness check found too much of unhashed, as
         # ``(digests_path, root)``, and the task hashing each (``_hash_mounts``).
         self._mounts_to_hash: set[tuple[Path, Path]] = set()
@@ -878,6 +886,9 @@ class NotebookSession:
             prefetched = self._outside_world_fingerprints()
             # Once for every cell, and outside the lock: it reads the files of a package.
             packages = local_packages(self.path)
+            if check_reads:
+                # Outside the lock, as the changed reads: the stats may be slow.
+                self._observe_code_keys()
             with self._staleness_lock:
                 told = self._told_changed_reads()
                 staleness = self._compute_staleness_locked(prefetched, packages, executing)
@@ -1136,6 +1147,7 @@ class NotebookSession:
         stale_cells: set[str] = set()  # for propagation
         to_explain: dict[str, StaleCell] = {}
         test_inputs: dict[str, str] = {}
+        code_lookups: dict[str, str] = {}
         if self.dag is None:
             for cell in self.notebook_state.cells:
                 staleness_map[cell.id] = CellStaleness(status=CellStatus.IDLE)
@@ -1214,7 +1226,14 @@ class NotebookSession:
                 stale_cells.add(cell_id)
                 continue
 
-            provenance_hash = key.provenance_hash
+            # A scratchpad cell's result is under its key over what its runs read, as last
+            # observed (before the lock).
+            if self.keys_on_reads(cell, worker_spec):
+                code = self.resolve_code_key(cell_id, key.provenance_hash, observe=False)
+                code_lookups[cell_id] = key.provenance_hash
+            else:
+                code = Resolved(key.provenance_hash)
+            provenance_hash = code.key
 
             # Per-variable hashes: sha256(f"{provenance_hash}:{var_name}").
             cached_outputs = self._resolve_cached_outputs(cell_id, provenance_hash)
@@ -1274,6 +1293,14 @@ class NotebookSession:
                     # Outputs live under a per-language scheme, so artifact uris are still empty
                     # here, and downstream cells read them to build their provenance.
                     self._restore_alternate_scheme_outputs(cell)
+                elif code.changed is not None and cell.last_provenance_hash is not None:
+                    # A file its last run read is not as that run read it.
+                    staleness_map[cell_id] = CellStaleness(
+                        status=CellStatus.STALE,
+                        reasons=[StalenessReason.CODE],
+                        changed_code=code.changed,
+                    )
+                    stale_cells.add(cell_id)
                 elif self._upstream_moved_under(cell, source_hash, env_hash):
                     # Upstream artifacts were replaced by newer versions with this cell's source
                     # and env unchanged: stale, not idle (which would read as "never ran").
@@ -1304,6 +1331,11 @@ class NotebookSession:
                 cell.display_outputs = cached_display_outputs or []
                 cell.display_output = cached_display_outputs[-1] if cached_display_outputs else None
 
+        # Only this pass's cells are observed again, and their keys' observations kept.
+        self._code_lookups = code_lookups
+        self._code_seen = {
+            k: v for k, v in self._code_seen.items() if k in set(code_lookups.values())
+        }
         self.causality_map = explain_staleness(self, to_explain)
         # Stale once its last run's record says what moved. Without that the result is not
         # known to be wrong (a run of ``# @nocache``, an input that cannot be read), so idle.
@@ -1858,6 +1890,69 @@ class NotebookSession:
             hydrated = self._hydrate_display_output(output)
             resolved.append(CellOutput(**hydrated) if hydrated is not None else output)
         return resolved
+
+    @functools.cached_property
+    def code_index(self) -> CodeIndex:
+        """A scratchpad's runs by what they read (``code_keys``)."""
+        return CodeIndex(self.path)
+
+    def keys_on_reads(self, cell: CellState, worker: WorkerSpec | None) -> bool:
+        """Whether *cell*'s result is keyed on the files its runs read (``code_keys``): a
+        scratchpad's plain Python cell run on this machine. Any other keeps the notebook's
+        key: a worker elsewhere reads files this machine cannot observe, and a loop or a
+        fan-out keys its own outputs."""
+        if not self.notebook_state.scratchpad or cell.language != CellLanguage.PYTHON:
+            return False
+        here = worker is not None and (
+            worker.backend == WorkerBackendType.LOCAL or is_embedded_executor_worker(worker)
+        )
+        if not here:
+            return False
+        annotations = parse_annotations(cell.source, cell.language)
+        return annotations.loop is None and annotations.each is None and not annotations.per_variant
+
+    def resolve_code_key(self, cell_id: str, lookup: str, *, observe: bool = True) -> Resolved:
+        """The key a scratchpad cell's result under *lookup* is stored under, as what its
+        runs read is now; a notebook's is *lookup* itself.
+
+        Observing may stat and hash files, so it is kept off the loop and out of the
+        staleness lock. Without *observe*, the last observation of *lookup* stands, else
+        what its runs recorded.
+        """
+        if not self.notebook_state.scratchpad:
+            return Resolved(lookup)
+        if not observe and lookup in self._code_seen:
+            return self._code_seen[lookup]
+        consumed = sorted(self.dag.consumed_variables.get(cell_id, set())) if self.dag else []
+        manager = self.artifact_manager
+        console_id = manager.cell_artifact_id(cell_id, "__console__")
+
+        def has_result(key: str) -> bool:
+            # Any version: a revert's result is an older one, which the run promotes.
+            if consumed:
+                return manager.find_cached(derive_subkey(key, consumed[0])) is not None
+            found = manager.artifact_store.find_version_by_provenance(
+                console_id, derive_subkey(key, "__console__")
+            )
+            return found is not None
+
+        resolved = self.code_index.resolve(lookup, has_result, observe=observe)
+        if observe:
+            self._code_seen[lookup] = resolved
+        return resolved
+
+    def _observe_code_keys(self) -> None:
+        """Observe again the code keys the cells had in the last pass."""
+        if self.notebook_state.scratchpad:
+            for cell_id, lookup in list(self._code_lookups.items()):
+                self.resolve_code_key(cell_id, lookup)
+
+    def record_code_reads(
+        self, lookup: str, reads: Mapping[str, str], stat: Mapping[str, list[int]]
+    ) -> None:
+        """Note a scratchpad run under *lookup* and what it read; it is the newest now."""
+        self.code_index.record(lookup, reads, stat)
+        self._code_seen.pop(lookup, None)
 
     def resolve_cached_console(
         self, cell_id: str, provenance_hash: str, *, variant: str | None = None

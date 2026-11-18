@@ -166,6 +166,8 @@ export interface CellStaleness {
   status: CellStatus
   /** List of staleness reasons */
   reasons: StalenessReason[]
+  /** Of a scratchpad cell stale for `code`: a file its last run read (its code, or one it opened or listed) that is not as that run read it */
+  changed_code?: string | null
   /** Of a ready cell: files its result read without declaring them that have changed since. A hint, not a status: the key did not move, so a plain run would hit the same cache */
   changed_reads: string[]
 }
@@ -360,6 +362,7 @@ export interface CellView {
   widget_values: Record<string, unknown>
   staleness_reasons: string[]
   changed_reads: string[]
+  changed_code?: string | null
   annotations: AnnotationsWirePayload
   widget?: WidgetModel | null
   is_module_cell?: boolean | null
@@ -717,7 +720,8 @@ export interface SessionClosedPayload {
   message: string
 }
 
-export type StalenessReason = 'self' | 'upstream' | 'env' | 'external' | 'forced' | 'checking'
+export type StalenessReason =
+  'self' | 'upstream' | 'env' | 'external' | 'forced' | 'checking' | 'code'
 
 export interface VariantGroupState {
   /** Variant group identifier */

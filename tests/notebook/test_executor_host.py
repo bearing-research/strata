@@ -147,6 +147,9 @@ class _FakeHost:
     def collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]:
         return {}
 
+    def keys_on_reads(self, cell: Any, worker: Any) -> bool:
+        return False  # not a scratchpad
+
     def resolve_cached_console(
         self, cell_id: str, provenance_hash: str, *, variant: str | None = None
     ) -> None:

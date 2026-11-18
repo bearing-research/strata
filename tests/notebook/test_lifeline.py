@@ -67,7 +67,7 @@ executor.session = SimpleNamespace(
     id="s",
     path=work,
     venv_python=Path(sys.executable),
-    notebook_state=SimpleNamespace(get_cell=lambda _cell_id: None),
+    notebook_state=SimpleNamespace(get_cell=lambda _cell_id: None, scratchpad=False),
 )
 executor._tables_moved = {}
 spec = {"cell_id": "c1", "source": source, "env": {}, "mount_manifest": {}}

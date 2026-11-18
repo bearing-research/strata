@@ -382,6 +382,25 @@ class TestGate1:
             )
         assert runs.builds.get_build(first.build_id).state == "building"
 
+    def test_a_running_computation_refuses_whoever_asks(self, tmp_path: Path):
+        """A scratchpad cell asks before its cache check: its outputs are not under the key
+        its run is a build of."""
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        runs.refuse_if_running("train", "parent")
+        runs.open(
+            cell_id="train",
+            computation_key="parent",
+            variant=None,
+            input_versions={},
+            timeout_seconds=30,
+            resume=True,
+        )
+
+        with pytest.raises(RunRefused, match="already running"):
+            runs.refuse_if_running("train", "parent")
+        runs.refuse_if_running("train", "other")
+
     def test_a_run_overtaken_by_a_newer_value_stores_nothing(self, tmp_path: Path, monkeypatch):
         """Another writer makes a newer ``x`` current first: the run's release is refused."""
         notebook_dir = create_notebook(tmp_path, "Overtaken", initialize_environment=False)

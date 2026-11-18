@@ -133,11 +133,22 @@ def _field_line(field: str, optional: str, ts: str) -> str:
     return f"  {field}{optional}:\n{members}"
 
 
+def _alias_line(name: str, ts: str) -> str:
+    """A type alias, wrapped the way prettier wraps it when too long."""
+    line = f"export type {name} = {ts}"
+    if len(line) <= _PRINT_WIDTH:
+        return line
+    if len(f"  {ts}") <= _PRINT_WIDTH:
+        return f"export type {name} =\n  {ts}"
+    members = "\n".join(f"  | {part}" for part in ts.split(" | "))
+    return f"export type {name} =\n{members}"
+
+
 def _interface(name: str, schema: dict[str, Any]) -> str:
     if "enum" in schema:
         # A Python Enum is a bare enum node; as an interface it would be ``{}``,
         # which accepts almost anything.
-        return f"export type {name} = {_ts_type(schema)}"
+        return _alias_line(name, _ts_type(schema))
     if "properties" not in schema:
         raise UnsupportedSchema(f"{name}: not an object or enum: {schema!r}")
     lines = [f"export interface {name} {{"]

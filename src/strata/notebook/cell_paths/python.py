@@ -36,6 +36,7 @@ from strata.notebook.cell_paths.context import (
 )
 from strata.notebook.cell_paths.context import no_interpreter_message as _no_interpreter_message
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
+from strata.notebook.code_keys import code_key
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
 from strata.notebook.env import moved_input
 from strata.notebook.execution_result import CellExecutionResult, hit_console
@@ -437,7 +438,32 @@ async def run_python_cell(
                 ),
             )
 
-        # ③ Cache check for THIS cell.
+        # ③ Cache check for THIS cell. A scratchpad cell's result is under its key over what
+        # its runs read (``code_keys``), as those files are now.
+        lookup_hash = provenance_hash
+        on_reads = cell is not None and host.keys_on_reads(cell, worker_spec)
+        if use_cache and on_reads:
+            if worker_spec is not None and worker_spec.backend == WorkerBackendType.LOCAL:
+                # Its run is a build of the lookup key, which a revert under the key over
+                # its reads would not see running.
+                try:
+                    await anyio.to_thread.run_sync(
+                        context.local_runs().refuse_if_running, cell_id, lookup_hash
+                    )
+                except RunRefused as exc:
+                    return refused_run(
+                        host,
+                        CellExecutionResult(
+                            cell_id=cell_id,
+                            success=False,
+                            error=str(exc),
+                            execution_method="error",
+                        ),
+                    )
+            resolved = await anyio.to_thread.run_sync(
+                host.resolve_code_key, cell_id, provenance_hash
+            )
+            provenance_hash = resolved.key
         artifact_mgr = host.get_artifact_manager()
         consumed_vars = host.dag.consumed_variables.get(cell_id, set()) if host.dag else set()
 
@@ -605,7 +631,8 @@ async def run_python_cell(
             )
             return cached_result
 
-        # ④ Cache miss: execute the cell.
+        # ④ Cache miss: execute the cell, keyed as it stands (its reads complete the key).
+        provenance_hash = lookup_hash
         refusal = context.table_write_refusal(source)
         if refusal is not None:
             return refused_run(
@@ -697,7 +724,9 @@ async def run_python_cell(
                             variant=fanout_variant,
                             input_versions=context.input_refs(cell_id, fanout_variant),
                             timeout_seconds=timeout_seconds,
-                            resume=use_cache,
+                            # A dead run's reads are unknown, so a scratchpad's is not
+                            # resumed: its checkpoint may be of other code.
+                            resume=use_cache and not host.notebook_state.scratchpad,
                             init=init,
                         )
                     )
@@ -792,6 +821,30 @@ async def run_python_cell(
                     exec_result, stderr=exec_result.stderr + moved_line(moved), moved_input=moved
                 )
 
+            # A scratchpad run is stored under its key over what it read, the key a
+            # downstream cell then reads; one that cannot be keyed so is kept for itself.
+            lookup_hash = provenance_hash
+            code = result.get("code_reads") if exec_result.success and moved is None else None
+            code_reads: dict[str, str] = {}
+            code_stat: dict[str, list[int]] = {}
+            recorded_code = False
+            if code is not None:
+                unkept = code["unstable"]
+                if unkept is None and fanout_variant is not None and code["reads"]:
+                    unkept = "an instance is not keyed on the files it read"
+                if unkept is not None:
+                    moved = unkept
+                    exec_result = dataclasses.replace(
+                        exec_result,
+                        stderr=f"{exec_result.stderr}cache: skipped, {unkept}; its outputs "
+                        "are kept for this run only.\n",
+                        moved_input=moved,
+                    )
+                elif on_reads:
+                    code_reads, code_stat = code["reads"], code["stat"]
+                    provenance_hash = code_key(lookup_hash, code_reads)
+                    recorded_code = True
+
             # ⑤ Store artifacts for consumed variables.
             if exec_result.success:
                 module_export_error = write_module_export_outputs(
@@ -868,6 +921,10 @@ async def run_python_cell(
                 await context.close_open_run(cell_id)
                 if stored_ok:
                     context.show_run_records(exec_result, records)
+                    if recorded_code:
+                        await anyio.to_thread.run_sync(
+                            host.record_code_reads, lookup_hash, code_reads, code_stat
+                        )
                 else:
                     logger.error(
                         "Cell %s executed OK but artifact storage failed.",

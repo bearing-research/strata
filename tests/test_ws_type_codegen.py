@@ -114,6 +114,18 @@ def test_a_field_too_long_for_one_line_is_broken_as_prettier_breaks_it() -> None
     )
 
 
+def test_an_alias_too_long_for_one_line_is_broken_as_prettier_breaks_it() -> None:
+    module = _generator()
+
+    assert module._alias_line("Reason", "'a' | 'b'") == "export type Reason = 'a' | 'b'"
+    fits_below = " | ".join(f"'reason_{i}'" for i in range(7))
+    assert module._alias_line("Reason", fits_below) == f"export type Reason =\n  {fits_below}"
+    too_long = " | ".join(f"'reason_number_{i}'" for i in range(8))
+    assert module._alias_line("Reason", too_long) == "export type Reason =\n" + "\n".join(
+        f"  | 'reason_number_{i}'" for i in range(8)
+    )
+
+
 def _frame_union(source: str, name: str) -> set[str]:
     start = source.index(f"export type {name} =")
     block = source[start : source.index("\n\n", start)]

@@ -855,6 +855,7 @@ STALE_IN_AGENT_TERMS = {
     StalenessReason.EXTERNAL: "an input it declares changed",
     StalenessReason.FORCED: "a rerun was asked for",
     StalenessReason.CHECKING: "its mounted files are being hashed",
+    StalenessReason.CODE: "a file it read changed",
 }
 
 
@@ -1112,6 +1113,8 @@ def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dic
             entry["stale"] = _stale_reason(row.staleness_reasons)
         if row.changed_reads:
             entry["changed_reads"] = row.changed_reads
+        if row.changed_code:
+            entry["changed_code"] = row.changed_code
         cold_ms = session.get_estimated_duration(row.id)
         if cold_ms:
             entry["cold_ms"] = cold_ms

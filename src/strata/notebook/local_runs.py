@@ -125,11 +125,7 @@ class LocalRuns:
 
         open_build = self.builds.find_open_build(computation_key, occurrence=occurrence)
         if open_build is not None:
-            if open_build.lease_expires_at is not None and open_build.lease_expires_at > now:
-                raise RunRefused(
-                    f"Cell {cell_id} is already running (build {open_build.build_id}); "
-                    "wait for it or cancel it before running it again."
-                )
+            self._refuse_if_live(cell_id, open_build, now)
             latest = self.releases.latest_accepted(open_build.build_id)
             if resume and latest is not None:
                 self.releases.resume(
@@ -224,6 +220,24 @@ class LocalRuns:
             principal=caller_principal_id(),
         )
         return build_id
+
+    def refuse_if_running(self, cell_id: str, computation_key: str) -> None:
+        """Raise :class:`RunRefused` while a run of *computation_key* holds a live lease.
+
+        For a scratchpad cell, whose run is a build of its lookup key while its outputs,
+        and so a revert of them, are under the key over what it read.
+        """
+        open_build = self.builds.find_open_build(computation_key, occurrence=None)
+        if open_build is not None:
+            self._refuse_if_live(cell_id, open_build, time.time())
+
+    @staticmethod
+    def _refuse_if_live(cell_id: str, open_build: Any, now: float) -> None:
+        if open_build.lease_expires_at is not None and open_build.lease_expires_at > now:
+            raise RunRefused(
+                f"Cell {cell_id} is already running (build {open_build.build_id}); "
+                "wait for it or cancel it before running it again."
+            )
 
     def promote(
         self,

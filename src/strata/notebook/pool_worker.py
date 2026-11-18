@@ -62,6 +62,7 @@ _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 _work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
 _traceback = _load_local_module("cell_traceback.py", "_nb_cell_traceback")
 _audit = _load_local_module("read_audit.py", "_nb_read_audit")
+_code = _load_local_module("code_reads.py", "_nb_code_reads")
 
 # Harness-injected names excluded from mutation fingerprinting (the ``display``
 # buffer grows every run and would read as an in-place mutation).
@@ -321,10 +322,15 @@ def execute_harness(manifest: dict) -> dict:
             sys.stdout = stdout_buf
             sys.stderr = stderr_buf
 
-            with display_capture.capture_side_effects(), _audit.recording() as observed:
+            with (
+                display_capture.capture_side_effects(),
+                _audit.recording() as observed,
+                _code.for_run(manifest, observed) as code,
+            ):
                 _display_value = _exec_with_display(
                     source, namespace, manifest.get("strata_cell_id")
                 )
+            code_reads = code.finish() if code is not None else None
 
         sys.stdout = old_stdout
         sys.stderr = old_stderr
@@ -386,6 +392,7 @@ def execute_harness(manifest: dict) -> dict:
             "error": None,
             "mutation_warnings": mutation_warnings,
             "read_audit": read_audit,
+            "code_reads": code_reads,
             "build_env": build_env_identity(),
         }
 
