@@ -10,7 +10,7 @@ import signal
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import httpx
@@ -55,6 +55,18 @@ def _trial(tmp_path, claude, monkeypatch, task_id, arm, script, timeout=600.0, *
         timeout=timeout,
         pinned={"model": "fake"},
     )
+
+
+def _gone(pid: int) -> bool:
+    """Whether *pid* has exited and been reaped, given a few seconds to."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def _answers(task_id: str, tmp_path: Path) -> list[str]:
@@ -193,6 +205,19 @@ class TestATrial:
         assert trial.discarded == "turn 1: timed out after 2 s"
         saved = json.loads((tmp_path / "trial" / "trial.json").read_text())
         assert saved["discarded"] == trial.discarded
+        # The turn's whole group went with it, not only the agent's own process.
+        child = int((tmp_path / "trial" / "config" / "hang.pid").read_text())
+        assert _gone(child)
+
+    def test_every_arms_trial_stops_the_scratchpad_daemon_on_its_project(
+        self, tmp_path, claude, monkeypatch
+    ):
+        stopped = []
+        monkeypatch.setattr(server, "stop_daemon", stopped.append)
+
+        _trial(tmp_path, claude, monkeypatch, "neutral_modpow", "B", [[None, "246"]])
+
+        assert stopped == [tmp_path / "trial" / "harbor"]
 
     def test_it_refuses_a_folder_whose_parents_reach_the_agent(self, tmp_path, claude):
         (tmp_path / "repo").mkdir()
@@ -430,12 +455,12 @@ class TestArmCp:
         assert entry["env"]["HARBOR_LOAD_LOG"] == str(tmp_path / "l.jsonl")
         assert (entry["type"], entry["alwaysLoad"]) == ("stdio", True)
 
-    def test_the_stdio_entry_is_written_and_its_daemon_stopped_after(self, tmp_path, monkeypatch):
+    def test_the_stdio_entry_is_written_on_a_warmed_home(self, tmp_path, monkeypatch):
         recorder = tmp_path / "claude"
         recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args"\n')
         recorder.chmod(0o755)
-        stopped = []
-        monkeypatch.setattr(server, "_stop_daemon", stopped.append)
+        warmed = []
+        monkeypatch.setattr(server, "_warm_home", warmed.append)
         project = tmp_path / "harbor"
         kw = {"load_log": tmp_path / "l.jsonl", "load_seconds": 0}
 
@@ -443,8 +468,7 @@ class TestArmCp:
             tmp_path / "home", project, dict(os.environ), claude=str(recorder), **kw
         ):
             assert (tmp_path / "args").read_text().splitlines()[:3] == ["mcp", "add-json", "-s"]
-            assert stopped == []
-        assert stopped == [project]
+            assert warmed == [tmp_path / "home"]
 
         with pytest.raises(server.SetupError, match="add-json failed"):
             with server.stdio_scratchpad(
@@ -452,34 +476,73 @@ class TestArmCp:
             ):
                 pass
 
-    def test_a_daemon_that_will_not_stop_is_killed_and_odd_records_reported(
+    def test_a_warmed_home_has_matplotlibs_font_list(self, tmp_path):
+        server._warm_home(tmp_path)
+
+        assert list(tmp_path.rglob("fontlist-*.json"))
+
+    def test_a_daemon_busy_past_the_probe_is_stopped_with_its_group(self, tmp_path, monkeypatch):
+        from strata import scratch
+
+        project = tmp_path / "harbor"
+        (scratch.scratch_dir(project) / ".strata").mkdir(parents=True)
+        # A daemon that ignores SIGTERM, with a cell process that does too.
+        stubborn = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        leader = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                stubborn + "import subprocess, sys; "
+                f"c = subprocess.Popen([sys.executable, '-c', {stubborn + 'time.sleep(600)'!r}]); "
+                "print(c.pid, flush=True); time.sleep(600)",
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            assert leader.stdout is not None
+            cell = int(leader.stdout.readline())
+            record = scratch.scratch_dir(project) / ".strata" / "server.json"
+            record.write_text(json.dumps({"pid": leader.pid}))
+
+            def busy(anchor):
+                raise scratch.NotAnswering("not answering")
+
+            monkeypatch.setattr(scratch, "find_daemon", busy)
+            server.stop_daemon(project, wait=0.5)
+
+            assert leader.wait(timeout=10) == -signal.SIGKILL
+            assert _gone(cell)
+        finally:
+            with suppress(ProcessLookupError, PermissionError):
+                os.killpg(leader.pid, signal.SIGKILL)
+            leader.wait()
+            leader.stdout.close()
+
+    def test_a_daemon_that_does_not_answer_is_left_and_odd_records_reported(
         self, tmp_path, monkeypatch, capsys
     ):
         from strata import scratch
 
         project = tmp_path / "harbor"
         (scratch.scratch_dir(project) / ".strata").mkdir(parents=True)
-        busy = scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=4242, version="v")
-        killed = []
+        signalled = []
+        monkeypatch.setattr(server, "_end_group", lambda pid, wait: signalled.append(pid))
+        record = scratch.scratch_dir(project) / ".strata" / "server.json"
+        record.write_text(json.dumps({"pid": 4242}))
 
-        def stuck(anchor, timeout=30.0):
-            raise scratch.ScratchError("the scratchpad's server (pid 4242) did not stop")
+        # Gone: its pid may be another process's now.
+        monkeypatch.setattr(scratch, "find_daemon", lambda anchor: None)
+        server.stop_daemon(project)
+        assert signalled == []
 
-        monkeypatch.setattr(scratch, "find_daemon", lambda anchor: busy)
-        monkeypatch.setattr(scratch, "stop_daemon", stuck)
-        monkeypatch.setattr(scratch, "_kill", killed.append)
-
-        server._stop_daemon(project)
-        assert killed == [4242]
-
-        def torn(anchor):
-            raise KeyError("pid")
-
-        monkeypatch.setattr(scratch, "find_daemon", torn)
-        server._stop_daemon(project)
+        monkeypatch.setattr(scratch, "find_daemon", lambda anchor: object())
+        record.write_text("{}")
+        server.stop_daemon(project)
         assert "did not stop: KeyError('pid')" in capsys.readouterr().err
         # No scratchpad at all: nothing to stop, no lock file made.
-        server._stop_daemon(tmp_path / "untouched")
+        server.stop_daemon(tmp_path / "untouched")
         assert not (tmp_path / "untouched").exists()
 
     def test_a_server_that_does_not_come_up_discards_the_trial(self, tmp_path, claude, monkeypatch):

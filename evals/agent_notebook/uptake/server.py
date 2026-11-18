@@ -49,12 +49,13 @@ def _as_setup_error() -> Iterator[None]:
 
 
 # The runner's own settings, which would point uv, Python or Strata at its environment.
+# STRATA_ too in the agent's: a stdio server, and the daemon it starts, inherit it.
 _HOST_ONLY = re.compile(
     r"^(STRATA_|ANTHROPIC_|CLAUDE|HARBOR_|VIRTUAL_ENV$|PYTHON(PATH|HOME)$|UV_PROJECT)"
 )
 
 
-def _host_env() -> dict[str, str]:
+def host_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not _HOST_ONLY.match(k)}
 
 
@@ -69,15 +70,25 @@ def _uv_dir(*args: str) -> str:
     return subprocess.run(["uv", *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
+def _cell_env(home: Path, load_log: Path, load_seconds: float) -> dict[str, str]:
+    """What both scratchpad arms give the process whose cells the agent runs: a HOME of the
+    trial's own, uv's real cache and interpreters (nothing is downloaded again), and the
+    load counter."""
+    return {
+        "HOME": str(home),
+        "UV_CACHE_DIR": _uv_dir("cache", "dir"),
+        "UV_PYTHON_INSTALL_DIR": _uv_dir("python", "dir"),
+        "HARBOR_LOAD_LOG": str(load_log),
+        "HARBOR_LOAD_SECONDS": str(load_seconds),
+    }
+
+
 def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> dict[str, str]:
     """The server's environment: everything it stores under *root*, nothing of the host's
     Strata or Anthropic settings, and the load counter its cells inherit."""
-    env = _host_env()
+    env = host_env()
     env.update(
-        HOME=str(_home(root)),
-        # uv's real cache and interpreters, so nothing is downloaded again.
-        UV_CACHE_DIR=_uv_dir("cache", "dir"),
-        UV_PYTHON_INSTALL_DIR=_uv_dir("python", "dir"),
+        _cell_env(_home(root), load_log, load_seconds),
         STRATA_HOST="127.0.0.1",
         STRATA_PORT=str(port),
         STRATA_MCP_ENABLED="true",
@@ -87,8 +98,6 @@ def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> di
         STRATA_METADATA_DB=str(root / "metadata.sqlite"),
         STRATA_NOTEBOOK_STORAGE_DIR=str(root / "notebooks"),
         STRATA_WORKER_ENV_ROOT=str(root / "worker-envs"),
-        HARBOR_LOAD_LOG=str(load_log),
-        HARBOR_LOAD_SECONDS=str(load_seconds),
     )
     return env
 
@@ -108,20 +117,14 @@ def stdio_entry_command(
     as a user's config starts it, so its first call starts the project's daemon.
 
     A HOME of the trial's own keeps the daemon's registry and shared environments apart
-    (each trial is a first use), on uv's real caches; the load counter is named here, not
-    left to what Claude Code passes a stdio server.
+    (each trial is a first use); the load counter is named here, not left to what Claude
+    Code passes a stdio server.
     """
     entry = {
         "type": "stdio",
         "command": str(Path(sys.executable).parent / "strata"),
         "args": ["mcp", "--root", str(project)],
-        "env": {
-            "HOME": str(home),
-            "UV_CACHE_DIR": _uv_dir("cache", "dir"),
-            "UV_PYTHON_INSTALL_DIR": _uv_dir("python", "dir"),
-            "HARBOR_LOAD_LOG": str(load_log),
-            "HARBOR_LOAD_SECONDS": str(load_seconds),
-        },
+        "env": _cell_env(home, load_log, load_seconds),
         "alwaysLoad": True,
     }
     return [claude, "mcp", "add-json", "-s", "user", SERVER_NAME, json.dumps(entry)]
@@ -137,8 +140,10 @@ def stdio_scratchpad(
     load_log: Path,
     load_seconds: float,
 ) -> Iterator[None]:
-    """Arm Cpp: its entry written, and the daemon its calls started stopped afterwards."""
+    """Arm Cpp: its HOME warmed and its entry written. The daemon its calls start is
+    stopped by the runner, which stops any arm's (:func:`stop_daemon`)."""
     home.mkdir(parents=True)
+    _warm_home(home)
     with _as_setup_error():
         registered = subprocess.run(
             stdio_entry_command(claude, project, home, load_log, load_seconds),
@@ -149,31 +154,61 @@ def stdio_scratchpad(
         )
     if registered.returncode != 0:
         raise SetupError(f"claude mcp add-json failed: {registered.stderr.strip()}")
-    try:
-        yield
-    finally:
-        _stop_daemon(project)
+    yield
 
 
-def _stop_daemon(project: Path) -> None:
-    """Stop the daemon a Cpp trial's calls started; detached, it would idle on for 30
-    minutes, loading the machine under later trials and holding files being removed."""
+def _warm_home(home: Path) -> None:
+    """Build matplotlib's font list under *home*, as Cp's notebook does before the agent's
+    clock: a user's machine is past it, and it is no part of a first use of Strata."""
+    warmed = subprocess.run(
+        [sys.executable, "-c", "import matplotlib.font_manager"],
+        env={**host_env(), "HOME": str(home)},
+        capture_output=True,
+        text=True,
+    )
+    if warmed.returncode:
+        raise SetupError(f"matplotlib's font list was not built: {warmed.stderr[-300:]}")
+
+
+def stop_daemon(project: Path, wait: float = 30.0) -> None:
+    """Stop the scratchpad daemon a trial's calls started on *project* (Cpp's entry, or B's
+    ``strata`` commands), and its group: cells, pools and what outlived its shutdown.
+    Detached, it would idle on for 30 minutes, loading the machine under later trials
+    and holding files being removed."""
     from strata import scratch
 
-    if not scratch.scratch_dir(project).exists():
+    record = scratch.scratch_dir(project) / ".strata" / "server.json"
+    if not record.exists():
         return
-    # Under the start lock: a bridge a timed-out turn left behind may still be starting it.
-    with scratch.daemon_lock(project):
+    try:
+        # Bounded: a bridge a timed-out turn left may hold it while starting one.
+        with scratch.daemon_lock(project).acquire(timeout=60):
+            try:
+                serving = scratch.find_daemon(project.resolve()) is not None
+            except scratch.NotAnswering:
+                # Alive but busy past the probe's wait: still the record's.
+                serving = True
+            if serving:
+                _end_group(json.loads(record.read_text())["pid"], wait)
+    except (scratch.ScratchError, OSError, KeyError, ValueError) as exc:
+        print(f"the scratchpad daemon of {project} did not stop: {exc!r}", file=sys.stderr)
+
+
+def _end_group(pid: int, wait: float) -> None:
+    """Ask the group led by *pid* to stop, then kill what is left of it. *pid* is not this
+    process's child (the daemon is detached), so its exit is polled, not waited for."""
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(pid, signal.SIGTERM)
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
         try:
-            running = scratch.find_daemon(project.resolve())
-            if running is not None:
-                try:
-                    scratch.stop_daemon(project)
-                except scratch.ScratchError:
-                    # Busy past the wait: its group, cells and pools with it.
-                    scratch._kill(running.pid)
-        except (scratch.ScratchError, OSError, KeyError, ValueError) as exc:
-            print(f"the scratchpad daemon of {project} did not stop: {exc!r}", file=sys.stderr)
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    # See _stop_group on EPERM.
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(pid, signal.SIGKILL)
 
 
 def _free_port() -> int:
@@ -266,7 +301,7 @@ def _prepare_notebook(root: Path, project: Path) -> Path:
     added = subprocess.run(
         ["uv", "add", "--quiet", "--editable", str(project)],
         cwd=notebook,
-        env=_host_env(),
+        env=host_env(),
         capture_output=True,
         text=True,
     )
@@ -278,7 +313,7 @@ def _prepare_notebook(root: Path, project: Path) -> Path:
     # under the HOME the server's cells get.
     warmed = subprocess.run(
         [str(notebook / ".venv" / "bin" / "python"), "-c", _WARM],
-        env={**_host_env(), "HOME": str(_home(root))},
+        env={**host_env(), "HOME": str(_home(root))},
         capture_output=True,
         text=True,
     )

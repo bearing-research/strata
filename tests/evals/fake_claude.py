@@ -6,7 +6,8 @@ really runs, then the reply.
 does; ``FAKE_SERVERS`` names MCP servers to report connected and ``FAKE_TOOLS`` the
 tools to list; ``FAKE_NEW_SESSION`` is
 a turn that starts a new session instead of resuming; ``FAKE_API_ERROR``, a turn that
-fails before reaching the model; ``FAKE_HANG``, a turn that never ends. Each call's
+fails before reaching the model; ``FAKE_HANG``, a turn that never ends, with a child
+that does not either (its pid in ``hang.pid``). Each call's
 argv, and whether its stdin is the null device, go to ``calls.jsonl``.
 """
 
@@ -37,6 +38,8 @@ def main(args: list[str]) -> int:
     command, reply = json.loads(os.environ["FAKE_SCRIPT"])[turn]
     session = args[args.index("--resume") + 1] if "--resume" in args else str(uuid.uuid4())
     if os.environ.get("FAKE_HANG") == str(turn):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        (config / "hang.pid").write_text(str(child.pid))
         time.sleep(600)
     api_error = os.environ.get("FAKE_API_ERROR") == str(turn)
     if os.environ.get("FAKE_NEW_SESSION") == str(turn):

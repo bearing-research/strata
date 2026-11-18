@@ -47,7 +47,7 @@ about Strata. `run` refuses such an `--out`; use one under `/tmp`.
 | A, control | every `strata*` command on `PATH` answers "command not found"; a `PreToolUse` hook denies any Bash command that runs one or imports `strata` |
 | B, today | the shipped `strata-scratchpad` skill in the config dir; this checkout's `strata` on `PATH` |
 | Cp, the design's C' | a Strata server of the trial's own (`STRATA_MCP_PROFILE=scratchpad`, every store under the trial folder) with one notebook open, whose environment has the project installed editable; a user-scope HTTP MCP entry for it, `alwaysLoad: true`, written with `claude mcp add-json` |
-| Cpp, C' as a user sets it up | a user-scope stdio MCP entry running `strata mcp --root <project>`, `alwaysLoad: true`: the first tool call starts the project's daemon and its `.strata-scratch/`, nothing warmed beforehand; a HOME of the trial's own (on uv's real caches), so each trial is a first use; the daemon is stopped when the trial ends. Until P3, its cells cannot import the project |
+| Cpp, C' as a user sets it up | a user-scope stdio MCP entry running `strata mcp --root <project>`, `alwaysLoad: true`: the first tool call starts the project's daemon and its `.strata-scratch/`, nothing warmed beforehand; a HOME of the trial's own (on uv's real caches), so each trial is a first use of Strata, with matplotlib's font list built in it beforehand, as in Cp. Until P3, its cells cannot import the project |
 
 ```bash
 uv run python -m evals.agent_notebook.uptake run --arm A --out /tmp/uptake-runs/ --split train --runs 3
@@ -59,7 +59,9 @@ uv run python -m evals.agent_notebook.uptake report /tmp/uptake-runs/
 Given several arms, `run` runs all their trials in one order shuffled by `--seed`, so no
 arm always goes first or always follows the same one (the prompt cache and the
 machine's load then favor none). `run` skips trials already in `--out`, so an
-interrupted batch picks up where it stopped. Each trial folder keeps the project as the agent left it, each turn's stream,
+interrupted batch picks up where it stopped. When a trial ends, a scratchpad daemon its
+calls started (Cpp's, or B's `strata` commands') is stopped with its cells and pools, and a
+turn past its timeout is killed with everything it started. Each trial folder keeps the project as the agent left it, each turn's stream,
 the load counter and `trial.json`; once a trial is scored its venvs and artifact stores
 (about 520 MB in Cp) are removed. A trial is **discarded**, never scored, when a turn's
 `system/init` event does not show the arm's setup (in Cp, anything but `strata`

@@ -14,10 +14,11 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -39,12 +40,6 @@ SKILL = REPO / "src" / "strata" / ".agents" / "skills" / "strata-scratchpad"
 # path (`~/.local/bin/strata`); or Python that imports it.
 _STRATA_COMMAND = r"(?:^|[\s;&|(`/])strata(?:-\w[\w-]*)?(?:\s|$)|\b(?:import|from)\s+strata\b"
 _RUNS_STRATA = re.compile(_STRATA_COMMAND)
-# The variables of the process running the eval that must not reach the agent's.
-# STRATA_ too: a stdio server, and the daemon it starts, inherit the agent's environment.
-_DROP = re.compile(
-    r"^(CLAUDE|ANTHROPIC_(?!API_KEY$)|STRATA_|VIRTUAL_ENV$|PYTHON(PATH|HOME)$|UV_PROJECT)"
-)
-
 _DENY_HOOK = f"""\
 import json, re, sys
 
@@ -224,7 +219,9 @@ def preflight(arm: str, init: dict[str, Any] | None) -> str | None:
 def agent_env(
     config: Path, bin_dir: Path, path: str, load_log: Path, load_seconds: float
 ) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not _DROP.match(k)}
+    env = server.host_env()
+    if "ANTHROPIC_API_KEY" in os.environ:
+        env["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
     env.update(
         CLAUDE_CONFIG_DIR=str(config),
         PATH=f"{bin_dir}{os.pathsep}{path}",
@@ -237,7 +234,7 @@ def agent_env(
 def prepare_workspace(dest: Path, *, rows: int, sync: bool) -> Path:
     """The project as a user would have it: built, synced, committed."""
     work = ws.build(dest, rows=rows)
-    env = {k: v for k, v in os.environ.items() if not _DROP.match(k)}
+    env = server.host_env()
     if sync:
         subprocess.run(["uv", "sync", "--quiet"], cwd=work, env=env, check=True, timeout=600)
     git = ["git", "-c", "user.name=eval", "-c", "user.email=eval@localhost"]
@@ -307,6 +304,9 @@ def run_trial(
             )
     except server.SetupError as exc:
         trial.discarded = f"setup: {exc}"
+    finally:
+        # Any arm's: B's `strata` commands start one too.
+        server.stop_daemon(work)
     trial.loads = _loads(load_log)
     if trial.discarded is None:
         for turn, expect in zip(trial.turns, expected, strict=True):
@@ -371,19 +371,9 @@ def _run_turns(
             "--verbose",
         ]
         started = time.time()
-        try:
-            done = subprocess.run(
-                command,
-                cwd=work,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            stream = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout or ""
-            (trial_dir / f"turn{index}.jsonl").write_text(stream)
+        done, timed_out = _agent(command, work, env, timeout)
+        if timed_out:
+            (trial_dir / f"turn{index}.jsonl").write_text(done.stdout)
             trial.turns.append(Turn(question.prompt, wall_s=time.time() - started))
             trial.discarded = f"turn {index}: timed out after {timeout:.0f} s"
             break
@@ -404,6 +394,33 @@ def _run_turns(
         turn.loads = sum(
             started <= line["at"] <= started + turn.wall_s for line in _loads(load_log)
         )
+
+
+def _agent(
+    command: list[str], work: Path, env: dict[str, str], timeout: float
+) -> tuple[subprocess.CompletedProcess[str], bool]:
+    """One turn of the agent, and whether it ran past *timeout*. It runs in a process
+    group of its own, killed whole on a timeout: an MCP server it started, left behind,
+    could start a scratchpad daemon after the trial's was stopped."""
+    with subprocess.Popen(
+        command,
+        cwd=work,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            timed_out = False
+        except subprocess.TimeoutExpired:
+            with suppress(ProcessLookupError, PermissionError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            stdout, stderr = proc.communicate()
+            timed_out = True
+    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr), timed_out
 
 
 def _broken_turn(
