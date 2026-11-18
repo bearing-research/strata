@@ -121,8 +121,17 @@ stay registered and callable by name; `STRATA_MCP_TOOLS=all` lists them too.
 
 ### A project's own daemon
 
-`strata scratch start` in a project (or `--root DIR`) creates
-`.strata-scratch/` there, a notebook with its own `.gitignore` of `*`, so the
+A scratchpad belongs to a project, found from where a command runs: the nearest
+directory at or above it that holds a `pyproject.toml`, searched no higher than
+the git repository's root (outside a repository, no higher than your home
+directory). So in a monorepo, `services/api/` with its own `pyproject.toml` is
+its own project, and a command run in its `src/` serves `services/api/`'s
+scratchpad. With no `pyproject.toml` found, the directory itself is the project.
+`--root DIR` on any `strata scratch` command or on `strata mcp`, or
+`STRATA_SCRATCH_ROOT` for a config that cannot pass arguments, names the project
+instead.
+
+`strata scratch start` in a project creates `.strata-scratch/` at its root, a notebook with its own `.gitignore` of `*`, so the
 project's git never sees it and its `.gitignore` is left alone. It then starts
 a server for it on a free loopback port, with the scratchpad profile and
 `STRATA_IDLE_EXIT_MINUTES=30` (or the value already set), opens the notebook and
@@ -176,7 +185,7 @@ config starts as a command:
 It answers the handshake and the tool list itself, so a session that never calls
 a tool starts nothing. The first tool call finds the project's daemon or starts
 it (creating `.strata-scratch/` if needed), and every call runs there. The
-project is the directory `strata mcp` starts in, or `--root DIR`. While the
+project is the one `strata mcp` starts in (below). While the
 scratchpad is set up, each step is sent as MCP progress when the call asks for
 it, and the result of a call that had to set it up carries `setup_ms`, the
 milliseconds each step took. A call that cannot reach the daemon (it stopped while

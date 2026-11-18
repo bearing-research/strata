@@ -70,6 +70,37 @@ def scratch_dir(anchor: Path) -> Path:
     return anchor / SCRATCH_DIR
 
 
+def find_anchor(start: Path) -> Path:
+    """The project *start* is in: the nearest directory at or above it holding a
+    ``pyproject.toml``, else *start*.
+
+    Searched no higher than the git root, so a monorepo's ``services/api/`` with its own
+    ``pyproject.toml`` is its own project and nothing above the repository is one. Outside
+    a repository, no higher than the home directory when *start* is in it.
+    """
+    start = start.resolve()
+    home = Path.home().resolve()
+    candidates = [start, *start.parents]
+    bound = next((d for d in candidates if (d / ".git").exists()), None)
+    if bound is None and start.is_relative_to(home):
+        bound = home
+    for directory in candidates:
+        if (directory / "pyproject.toml").is_file():
+            return directory
+        if directory == bound:
+            break
+    return start
+
+
+def resolve_anchor(root: str | None) -> Path:
+    """The anchor a command serves: *root* (its ``--root``), else ``STRATA_SCRATCH_ROOT``, as
+    given; else the project the current directory is in (:func:`find_anchor`)."""
+    given = root or os.environ.get("STRATA_SCRATCH_ROOT")
+    if given:
+        return Path(given).expanduser().resolve()
+    return find_anchor(Path.cwd())
+
+
 def _record_path(anchor: Path) -> Path:
     return scratch_dir(anchor) / ".strata" / "server.json"
 
