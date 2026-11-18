@@ -485,8 +485,10 @@ async def metrics_prometheus():
     except Exception:
         pass  # Metadata store not available
 
-    pq_cache_stats = state.planner.parquet_cache.stats()
-    manifest_cache_stats = state.planner.manifest_cache.stats()
+    # Not built for a scrape, which runs on the loop: one never built has empty caches.
+    planner = state.built_planner
+    pq_cache_stats = planner.parquet_cache.stats() if planner is not None else {}
+    manifest_cache_stats = planner.manifest_cache.stats() if planner is not None else {}
 
     lines.extend(
         [

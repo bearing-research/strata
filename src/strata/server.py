@@ -12,6 +12,7 @@ import re
 import signal
 import socket
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from html import escape
@@ -27,6 +28,8 @@ if TYPE_CHECKING:
     from starlette.applications import Starlette
 
     from strata.adaptive_concurrency import AdaptiveConcurrencyController
+    from strata.cache.disk import CachedFetcher
+    from strata.planner import ReadPlanner
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (
@@ -56,7 +59,6 @@ from strata.auth.principal import (
     verify_proxy_token,
 )
 from strata.auth.run_tokens import RUN_TOKEN_HEADER, grant_for
-from strata.cache.disk import CachedFetcher
 from strata.cache.warmer import CacheWarmer
 from strata.config import StrataConfig, describe_config_error
 from strata.json_types import JsonValue
@@ -71,7 +73,6 @@ from strata.observability.logging import (
 from strata.observability.metrics import MetricsCollector
 from strata.observability.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.observability.tracing import init_tracing, instrument_fastapi
-from strata.planner import ReadPlanner
 from strata.rate_limiter import (
     RateLimitConfig,
     get_rate_limiter,
@@ -93,6 +94,8 @@ from strata.tenancy.tenant import (
 )
 from strata.types import (
     BuildStatusResponse,
+    ReadPlan,
+    Task,
 )
 from strata.url_safety import host_is_allowlisted
 
@@ -109,11 +112,16 @@ class ResourceLimitError(Exception):
     pass
 
 
-def _eager_warmup(config: StrataConfig) -> dict:
+def _scan_plane(state: ServerState) -> tuple[ReadPlanner, CachedFetcher]:
+    return state.planner, state.fetcher
+
+
+def _eager_warmup(config: StrataConfig, *, scans: bool) -> dict:
     """Pre-initialize expensive resources at startup and return per-step timings.
 
     GC tracking goes first to catch early GC events, and the Arrow memory pool is configured
-    before any Arrow allocation.
+    before any Arrow allocation. Without *scans*, the scan plane (Parquet, Iceberg, their
+    metadata caches) is left to load on first use.
     """
     warmup_times = {}
     total_start = time.perf_counter()
@@ -129,6 +137,10 @@ def _eager_warmup(config: StrataConfig) -> dict:
             warmup_times["arrow_memory_pool"] = pool_name
     except ValueError as e:
         warmup_times["arrow_memory_pool_error"] = str(e)
+
+    if not scans:
+        warmup_times["total_ms"] = (time.perf_counter() - total_start) * 1000
+        return warmup_times
 
     # Load the heavy submodules that module-level imports leave lazy.
     import_start = time.perf_counter()
@@ -196,8 +208,10 @@ class ServerState:
         )
         metrics_enabled = os.environ.get("STRATA_METRICS_ENABLED", "true").lower() != "false"
         self.metrics = MetricsCollector(enabled=metrics_enabled)
-        self.planner = ReadPlanner(config)
-        self.fetcher = CachedFetcher(config, metrics=self.metrics)
+        # The scan plane: built on first use (planner, fetcher), once, under this lock.
+        self._scan_plane_lock = threading.Lock()
+        self._planner: ReadPlanner | None = None
+        self._fetcher: CachedFetcher | None = None
 
         self.scan_builds = ScanBuildManager()
 
@@ -232,6 +246,58 @@ class ServerState:
             on_release=self._release_stream_ownership,
             on_drop=self._fail_unbuilt_stream,
         )
+
+    # Built on first use: their imports (Iceberg, Parquet, pandas) are most of a server's
+    # start, which a scratchpad daemon, serving no scans, need not pay. Building takes
+    # seconds, so the event loop reaches them only through plan() and
+    # fetch_as_stream_bytes(), in an executor.
+    @property
+    def planner(self) -> ReadPlanner:
+        with self._scan_plane_lock:
+            if self._planner is None:
+                from strata.planner import ReadPlanner
+
+                self._planner = ReadPlanner(self.config)
+            return self._planner
+
+    @planner.setter
+    def planner(self, planner: ReadPlanner) -> None:
+        self._planner = planner
+
+    @property
+    def fetcher(self) -> CachedFetcher:
+        with self._scan_plane_lock:
+            if self._fetcher is None:
+                from strata.cache.disk import CachedFetcher
+
+                self._fetcher = CachedFetcher(self.config, metrics=self.metrics)
+            return self._fetcher
+
+    @fetcher.setter
+    def fetcher(self, fetcher: CachedFetcher) -> None:
+        self._fetcher = fetcher
+
+    @property
+    def built_planner(self) -> ReadPlanner | None:
+        """The planner if one was built: for what reports on it or resets it."""
+        return self._planner
+
+    @property
+    def built_fetcher(self) -> CachedFetcher | None:
+        """The fetcher if one was built: for what reports on it."""
+        return self._fetcher
+
+    def plan(self, **kwargs: Any) -> ReadPlan:
+        return self.planner.plan(**kwargs)
+
+    def fetch_as_stream_bytes(self, task: Task) -> bytes:
+        return self.fetcher.fetch_as_stream_bytes(task)
+
+    def close_scan_plane(self) -> None:
+        """Close the planner, waiting for one being built; a planner never built is not."""
+        with self._scan_plane_lock:
+            if self._planner is not None:
+                self._planner.close()
 
     def _fail_unbuilt_stream(self, stream_state: StreamState) -> None:
         """Fail the artifact of a stream-mode miss that expired unfetched.
@@ -443,9 +509,12 @@ def _get_qos_metrics(state: ServerState) -> dict:
 
 def _get_cache_size_bytes(state: ServerState) -> int:
     """Get current cache size in bytes."""
+    # Not built (nor its module loaded) for a report: a server that never scanned has none.
+    if state.built_fetcher is None:
+        return 0
     from strata.cache.disk import DiskCache
 
-    cache = state.fetcher.cache
+    cache = state.built_fetcher.cache
     if isinstance(cache, DiskCache):
         return cache.get_size_bytes()
     return 0
@@ -453,9 +522,11 @@ def _get_cache_size_bytes(state: ServerState) -> int:
 
 def _get_cache_entry_count(state: ServerState) -> int:
     """Get current number of cache entries."""
+    if state.built_fetcher is None:
+        return 0
     from strata.cache.disk import DiskCache
 
-    cache = state.fetcher.cache
+    cache = state.built_fetcher.cache
     if isinstance(cache, DiskCache):
         return len(cache.list_entries())
     return 0
@@ -572,7 +643,7 @@ async def _graceful_shutdown(state: ServerState) -> None:
 
     state._planning_executor.shutdown(wait=False)
     state._fetch_executor.shutdown(wait=False)
-    state.planner.close()
+    state.close_scan_plane()
 
     # No `ssh -L` children may outlive the server; remote workers stay up for reuse.
     from strata.notebook.routes import get_session_manager, shutdown_worker_supervisor
@@ -961,8 +1032,10 @@ async def lifespan(app: FastAPI):
     # No-op if OpenTelemetry is not installed or configured.
     tracing_enabled = init_tracing()
 
+    # A scratchpad daemon serves cells: an agent waits on its start, and few ever scan.
+    scans = not config.scratch_anchor
     # So the first request is as fast as warm ones.
-    warmup_times = _eager_warmup(config)
+    warmup_times = _eager_warmup(config, scans=scans)
 
     # Tests may inject their own state.
     if _state is None:
@@ -989,12 +1062,13 @@ async def lifespan(app: FastAPI):
     )
     init_rate_limiter(rate_limit_config)
 
-    _state._cache_warmer = CacheWarmer(
-        planner=_state.planner,
-        fetcher=_state.fetcher,
-        metrics=_state.metrics,
-    )
-    await _state._cache_warmer.start()
+    if scans:
+        _state._cache_warmer = CacheWarmer(
+            planner=_state.planner,
+            fetcher=_state.fetcher,
+            metrics=_state.metrics,
+        )
+        await _state._cache_warmer.start()
 
     # Configured slots must reach the per-tenant limiters admission acquires.
     # Create the default tenant's limiters now so the adaptive controller and
@@ -1154,8 +1228,8 @@ async def lifespan(app: FastAPI):
                 transform_registry=get_transform_registry(),
                 artifact_dir=artifact_dir,
                 runtime_config=config,
-                scan_planner=_state.planner,
-                scan_fetcher=_state.fetcher,
+                # The server's own, built on the first scan build if not before.
+                scan_plane=functools.partial(_scan_plane, _state),
             )
             set_build_runner(build_runner)
             await build_runner.start()

@@ -4,6 +4,7 @@ import sys
 import threading
 import time
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pyarrow as pa
 import pytest
@@ -722,7 +723,7 @@ class TestEagerWarmup:
         from strata.server import _eager_warmup
 
         config = StrataConfig(cache_dir=tmp_path / "cache")
-        warmup_times = _eager_warmup(config)
+        warmup_times = _eager_warmup(config, scans=True)
 
         assert "total_ms" in warmup_times
         assert "imports_ms" in warmup_times
@@ -745,9 +746,168 @@ class TestEagerWarmup:
         metadata_cache._metadata_store = None
 
         config = StrataConfig(cache_dir=tmp_path / "cache")
-        _eager_warmup(config)
+        _eager_warmup(config, scans=True)
 
         store = get_metadata_store(config.cache_dir)
         assert store is not None
         stats = store.stats()
         assert isinstance(stats, dict)
+
+    def test_without_scans_it_loads_no_scan_plane(self, tmp_path):
+        from strata.config import StrataConfig
+        from strata.server import _eager_warmup
+
+        warmup_times = _eager_warmup(StrataConfig(cache_dir=tmp_path / "cache"), scans=False)
+
+        assert "imports_ms" not in warmup_times and "caches_ms" not in warmup_times
+        assert not (tmp_path / "cache").exists()
+
+
+# Run in a fresh interpreter, so what the server's start loaded is all that sys.modules holds.
+_STARTUP_PROBE = """
+import json, sys
+from fastapi.testclient import TestClient
+from strata.server import app, get_state
+
+HEAVY = ("pyiceberg", "pandas", "sqlalchemy", "strata.planner", "strata.cache.disk")
+seen = {}
+with TestClient(app, base_url="http://127.0.0.1") as client:
+    assert client.get("/health").status_code == 200
+    # Reports on the scan plane do not build it.
+    assert client.get("/metrics").status_code == 200
+    assert client.get("/metrics/prometheus").status_code == 200
+    seen["started"] = [m for m in HEAVY if m in sys.modules]
+    seen["built"] = get_state().built_planner is not None
+    if sys.argv[1:] == ["scan"]:
+        get_state().planner
+seen["stopped"] = [m for m in HEAVY if m in sys.modules]
+print(json.dumps(seen))
+"""
+
+
+class TestScanPlaneOnFirstUse:
+    """The server's planner and fetcher, built once on first use."""
+
+    @pytest.fixture
+    def state(self, tmp_path):
+        from strata.server import ServerState
+
+        state = ServerState(StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a"))
+        yield state
+        state._planning_executor.shutdown()
+        state._fetch_executor.shutdown()
+
+    def test_threads_asking_at_once_get_one_planner(self, state, monkeypatch):
+        built = []
+        entered = threading.Event()
+        release = threading.Event()
+
+        class Planner:
+            def __init__(self, config):
+                built.append(self)
+                entered.set()
+                release.wait(10)
+
+        monkeypatch.setattr("strata.planner.ReadPlanner", Planner)
+        got = []
+        threads = [threading.Thread(target=lambda: got.append(state.planner)) for _ in range(4)]
+        threads[0].start()
+        entered.wait(10)
+        for thread in threads[1:]:
+            thread.start()
+        release.set()
+        for thread in threads:
+            thread.join(10)
+
+        assert len(built) == 1 and got == built * 4
+
+    def test_closing_waits_for_a_planner_being_built(self, state, monkeypatch):
+        entered = threading.Event()
+        release = threading.Event()
+        closed = []
+
+        class Planner:
+            def __init__(self, config):
+                entered.set()
+                release.wait(10)
+
+            def close(self):
+                closed.append(self)
+
+        monkeypatch.setattr("strata.planner.ReadPlanner", Planner)
+        building = threading.Thread(target=lambda: state.planner)
+        building.start()
+        entered.wait(10)
+        closing = threading.Thread(target=state.close_scan_plane)
+        closing.start()
+        release.set()
+        building.join(10)
+        closing.join(10)
+
+        assert closed == [state.built_planner]
+
+    def test_a_planner_never_built_is_not_closed(self, state, monkeypatch):
+        monkeypatch.setattr("strata.planner.ReadPlanner", None)
+        state.close_scan_plane()
+
+        assert state.built_planner is None
+
+    def test_an_artifact_input_resolves_without_a_planner(self, state, monkeypatch):
+        from strata.api.dependencies import _input_resolution
+
+        class Store:
+            def get_artifact(self, artifact_id, version):
+                return SimpleNamespace(id=artifact_id, version=version)
+
+        def no_planner(config):
+            raise AssertionError("a planner was built")
+
+        monkeypatch.setattr("strata.planner.ReadPlanner", no_planner)
+        monkeypatch.setattr("strata.server._state", state)
+        monkeypatch.setattr("strata.server._get_artifact_store", lambda **kwargs: Store())
+
+        _, resolve, _ = _input_resolution("strata://artifact/abc@v=2", None)
+
+        assert resolve().version == "abc@v=2"
+        assert state.built_planner is None
+
+
+class TestScanPlaneAtStartup:
+    """A scratchpad daemon starts without the scan plane; any other server warms it."""
+
+    def _start(self, tmp_path, anchor: str, *args: str) -> dict:
+        import json
+        import os
+        import subprocess
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("STRATA_")}
+        env.update(
+            HOME=str(tmp_path / "home"),
+            STRATA_SCRATCH_ANCHOR=anchor,
+            STRATA_ARTIFACT_DIR=str(tmp_path / "artifacts"),
+            STRATA_CACHE_DIR=str(tmp_path / "cache"),
+            STRATA_NOTEBOOK_STORAGE_DIR=str(tmp_path),
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", _STARTUP_PROBE, *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr[-2000:]
+        return json.loads(done.stdout.splitlines()[-1])
+
+    def test_a_scratchpad_daemon_loads_it_on_first_use_only(self, tmp_path):
+        idle = self._start(tmp_path, str(tmp_path))
+        # Its shutdown closes no planner it never built.
+        assert idle == {"started": [], "built": False, "stopped": []}
+
+        scanned = self._start(tmp_path, str(tmp_path), "scan")
+        assert "pyiceberg" in scanned["stopped"] and "strata.planner" in scanned["stopped"]
+
+    def test_any_other_server_warms_it_at_start(self, tmp_path):
+        seen = self._start(tmp_path, "")
+
+        assert "pyiceberg" in seen["started"] and "strata.cache.disk" in seen["started"]
+        assert seen["built"]

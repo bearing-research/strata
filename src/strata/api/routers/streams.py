@@ -154,7 +154,7 @@ async def get_stream(stream_id: str, request: Request):
                     with get_pool_tracker().track("fetch"):
                         chunk = await asyncio.get_running_loop().run_in_executor(
                             state._fetch_executor,
-                            state.fetcher.fetch_as_stream_bytes,
+                            state.fetch_as_stream_bytes,
                             task,
                         )
                     rows += validate_ipc_stream(chunk)

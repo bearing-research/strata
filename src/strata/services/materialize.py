@@ -11,11 +11,8 @@ import re
 import uuid
 from typing import TYPE_CHECKING, NamedTuple
 
-from pyiceberg.exceptions import NoSuchTableError
 from vestigo.provenance import TransformSpec, compute_provenance_hash
 
-from strata.iceberg.catalog import WarehouseNotFound, object_store_unreachable
-from strata.iceberg.schema import UnsupportedTableFormatError
 from strata.types import (
     ExplainMaterializeRequest,
     ExplainMaterializeResponse,
@@ -126,6 +123,12 @@ class MaterializeService:
 
         if input_uri.startswith("strata://"):
             raise InputResolutionError(400, f"Unknown input URI type: {input_uri}")
+
+        # The scan plane, loaded only by a table input.
+        from pyiceberg.exceptions import NoSuchTableError
+
+        from strata.iceberg.catalog import WarehouseNotFound, object_store_unreachable
+        from strata.iceberg.schema import UnsupportedTableFormatError
 
         # The planner, not a scheme list, decides what is a table: the scan path reads
         # object-store, named-catalog and bare forms, and a transform over one must agree.

@@ -8,7 +8,6 @@ imported lazily: server imports this module at load time, so the import stays on
 from __future__ import annotations
 
 import asyncio
-import functools
 from typing import Annotated, NamedTuple
 
 import anyio.to_thread
@@ -293,13 +292,14 @@ def _input_resolution(input_uri: str, tenant: str | None):
     if not input_uri.startswith("strata://"):
         authorize_table_access(input_uri, _table_identity_from_uri(input_uri))
     state = get_state()
-    resolve = functools.partial(
-        materialize_service.resolve_input_version,
-        input_uri,
-        store=store,
-        planner=state.planner,
-        tenant=tenant,
-    )
+
+    def resolve():
+        # Only a table is planned, and where resolve runs: the planner may be built here.
+        planner = None if input_uri.startswith("strata://") else state.planner
+        return materialize_service.resolve_input_version(
+            input_uri, store=store, planner=planner, tenant=tenant
+        )
+
     return store, resolve, state.config.plan_timeout_seconds
 
 

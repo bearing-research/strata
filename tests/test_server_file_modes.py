@@ -56,7 +56,9 @@ class TestTheCache:
 
         assert _mode(cache) == 0o755
 
-    def test_server_startup_makes_the_cache_dir_owner_only(self, tmp_path):
+    def test_the_servers_cache_makes_the_cache_dir_owner_only(self, tmp_path):
+        """Built at a server's start (TestScanPlaneAtStartup), or a scratchpad daemon's
+        first scan."""
         from strata.config import StrataConfig
         from strata.server import ServerState
 
@@ -64,6 +66,7 @@ class TestTheCache:
         cache.mkdir(mode=0o755)
         state = ServerState(StrataConfig(cache_dir=cache, artifact_dir=tmp_path / "a"))
         try:
+            state.fetcher
             assert _mode(cache) == 0o700
         finally:
             state._planning_executor.shutdown()

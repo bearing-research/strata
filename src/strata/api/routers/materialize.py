@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pyiceberg.exceptions import NoSuchTableError
 
 from strata.api.dependencies import (
     CurrentPrincipal,
@@ -24,17 +23,9 @@ from strata.api.dependencies import (
     resolve_input_version_async,
     table_identity_or_400,
 )
-from strata.iceberg.catalog import (
-    OBJECT_STORE_RETRY_AFTER_SECONDS,
-    CatalogUriRequired,
-    SnapshotNotFound,
-    WarehouseNotFound,
-    object_store_unreachable,
-)
 from strata.observability.logging import get_logger
 from strata.observability.pool_metrics import get_pool_tracker
 from strata.observability.tracing import trace_span
-from strata.planner import ColumnNotFound, UnsupportedTableFormatError
 from strata.streaming import StreamState
 from strata.types import (
     BuildSpec,
@@ -445,10 +436,20 @@ async def _handle_identity_materialize(
     """
     import uuid
 
+    # The scan plane, here and not at module level: a server that never scans never loads it.
+    from pyiceberg.exceptions import NoSuchTableError
     from vestigo.provenance import TransformSpec as ArtifactTransformSpec
     from vestigo.store import get_artifact_store
 
     from strata.auth.principal import get_principal
+    from strata.iceberg.catalog import (
+        OBJECT_STORE_RETRY_AFTER_SECONDS,
+        CatalogUriRequired,
+        SnapshotNotFound,
+        WarehouseNotFound,
+        object_store_unreachable,
+    )
+    from strata.planner import ColumnNotFound, UnsupportedTableFormatError
     from strata.server import _retry_after_header, get_state
 
     state = get_state()
