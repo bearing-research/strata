@@ -10,7 +10,7 @@ import signal
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import httpx
@@ -55,6 +55,18 @@ def _trial(tmp_path, claude, monkeypatch, task_id, arm, script, timeout=600.0, *
         timeout=timeout,
         pinned={"model": "fake"},
     )
+
+
+def _gone(pid: int) -> bool:
+    """Whether *pid* has exited and been reaped, given a few seconds to."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def _answers(task_id: str, tmp_path: Path) -> list[str]:
@@ -112,6 +124,7 @@ class TestATrial:
     def test_shrinking_removes_venvs_and_artifact_stores_anywhere(self, tmp_path):
         notebook = tmp_path / "scratchpad" / "notebooks" / "scratch"
         rebuilt = [
+            tmp_path / "home" / ".strata" / "envs",
             tmp_path / "harbor" / ".venv" / "bin",
             tmp_path / "scratchpad" / "artifacts" / "blobs",
             notebook / ".venv" / "lib",
@@ -192,6 +205,19 @@ class TestATrial:
         assert trial.discarded == "turn 1: timed out after 2 s"
         saved = json.loads((tmp_path / "trial" / "trial.json").read_text())
         assert saved["discarded"] == trial.discarded
+        # The turn's whole group went with it, not only the agent's own process.
+        child = int((tmp_path / "trial" / "config" / "hang.pid").read_text())
+        assert _gone(child)
+
+    def test_every_arms_trial_stops_the_scratchpad_daemon_on_its_project(
+        self, tmp_path, claude, monkeypatch
+    ):
+        stopped = []
+        monkeypatch.setattr(server, "stop_daemon", stopped.append)
+
+        _trial(tmp_path, claude, monkeypatch, "neutral_modpow", "B", [[None, "246"]])
+
+        assert stopped == [tmp_path / "trial" / "harbor"]
 
     def test_it_refuses_a_folder_whose_parents_reach_the_agent(self, tmp_path, claude):
         (tmp_path / "repo").mkdir()
@@ -325,10 +351,12 @@ class TestArmA:
         monkeypatch.setenv("VIRTUAL_ENV", "/repo/.venv")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://proxy")
+        monkeypatch.setenv("STRATA_NOTEBOOK_SHARED_ENV_DIR", "/home/me/.strata/envs")
 
         env = run.agent_env(tmp_path / "c", tmp_path / "b", "/usr/bin", tmp_path / "l", 20)
 
         assert "CLAUDECODE" not in env and "VIRTUAL_ENV" not in env
+        assert "STRATA_NOTEBOOK_SHARED_ENV_DIR" not in env
         assert "ANTHROPIC_BASE_URL" not in env and env["ANTHROPIC_API_KEY"] == "k"
         assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "c")
         assert env["PATH"].startswith(str(tmp_path / "b"))
@@ -360,6 +388,8 @@ class TestArmCp:
         )
         skilled = {**self.INIT, "skills": ["strata-scratchpad"]}
         assert run.preflight("Cp", skilled) == "the strata-scratchpad skill is loaded"
+        assert run.preflight("Cpp", self.INIT) is None
+        assert run.preflight("Cpp", deferred) == run.preflight("Cp", deferred)
 
     def test_its_turns_run_while_its_server_is_up(self, tmp_path, claude, monkeypatch):
         events = []
@@ -386,6 +416,134 @@ class TestArmCp:
 
         assert trial.discarded is None and trial.turns[0].passed
         assert events == [("up", "harbor", False), ("down", 1)]
+
+    def test_arm_cpp_runs_its_turns_inside_its_stdio_entry(self, tmp_path, claude, monkeypatch):
+        events = []
+
+        @contextmanager
+        def fake_stdio(home, project, agent_env, *, claude, load_log, load_seconds):
+            events.append(("up", home.relative_to(tmp_path).as_posix(), project.name))
+            yield
+            events.append(("down",))
+
+        monkeypatch.setattr(server, "stdio_scratchpad", fake_stdio)
+
+        trial = _trial(
+            tmp_path,
+            claude,
+            monkeypatch,
+            "neutral_modpow",
+            "Cpp",
+            [[None, "246"]],
+            FAKE_SERVERS="strata",
+            FAKE_TOOLS="mcp__strata__run,mcp__strata__scratchpad",
+        )
+
+        assert trial.discarded is None and trial.turns[0].passed
+        assert events == [("up", "trial/home", "harbor"), ("down",)]
+
+    def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):
+        command = server.stdio_entry_command(
+            "claude", tmp_path / "harbor", tmp_path / "home", tmp_path / "l.jsonl", 20.0
+        )
+
+        assert command[:6] == ["claude", "mcp", "add-json", "-s", "user", "strata"]
+        entry = json.loads(command[6])
+        assert Path(entry["command"]).name == "strata" and Path(entry["command"]).exists()
+        assert entry["args"] == ["mcp", "--root", str(tmp_path / "harbor")]
+        assert entry["env"]["HOME"] == str(tmp_path / "home")
+        assert entry["env"]["HARBOR_LOAD_LOG"] == str(tmp_path / "l.jsonl")
+        assert (entry["type"], entry["alwaysLoad"]) == ("stdio", True)
+
+    def test_the_stdio_entry_is_written_on_a_warmed_home(self, tmp_path, monkeypatch):
+        recorder = tmp_path / "claude"
+        recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args"\n')
+        recorder.chmod(0o755)
+        warmed = []
+        monkeypatch.setattr(server, "_warm_home", warmed.append)
+        project = tmp_path / "harbor"
+        kw = {"load_log": tmp_path / "l.jsonl", "load_seconds": 0}
+
+        with server.stdio_scratchpad(
+            tmp_path / "home", project, dict(os.environ), claude=str(recorder), **kw
+        ):
+            assert (tmp_path / "args").read_text().splitlines()[:3] == ["mcp", "add-json", "-s"]
+            assert warmed == [tmp_path / "home"]
+
+        with pytest.raises(server.SetupError, match="add-json failed"):
+            with server.stdio_scratchpad(
+                tmp_path / "h2", project, dict(os.environ), claude="false", **kw
+            ):
+                pass
+
+    def test_a_warmed_home_has_matplotlibs_font_list(self, tmp_path):
+        server._warm_home(tmp_path)
+
+        assert list(tmp_path.rglob("fontlist-*.json"))
+
+    def test_a_daemon_busy_past_the_probe_is_stopped_with_its_group(self, tmp_path, monkeypatch):
+        from strata import scratch
+
+        project = tmp_path / "harbor"
+        (scratch.scratch_dir(project) / ".strata").mkdir(parents=True)
+        # A daemon that ignores SIGTERM, with a cell process that does too.
+        stubborn = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        leader = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                stubborn + "import subprocess, sys; "
+                f"c = subprocess.Popen([sys.executable, '-c', {stubborn + 'time.sleep(600)'!r}]); "
+                "print(c.pid, flush=True); time.sleep(600)",
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            assert leader.stdout is not None
+            cell = int(leader.stdout.readline())
+            record = scratch.scratch_dir(project) / ".strata" / "server.json"
+            record.write_text(json.dumps({"pid": leader.pid}))
+
+            def busy(anchor):
+                raise scratch.NotAnswering("not answering")
+
+            monkeypatch.setattr(scratch, "find_daemon", busy)
+            server.stop_daemon(project, wait=0.5)
+
+            assert leader.wait(timeout=10) == -signal.SIGKILL
+            assert _gone(cell)
+        finally:
+            with suppress(ProcessLookupError, PermissionError):
+                os.killpg(leader.pid, signal.SIGKILL)
+            leader.wait()
+            leader.stdout.close()
+
+    def test_a_daemon_that_does_not_answer_is_left_and_odd_records_reported(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from strata import scratch
+
+        project = tmp_path / "harbor"
+        (scratch.scratch_dir(project) / ".strata").mkdir(parents=True)
+        signalled = []
+        monkeypatch.setattr(server, "_end_group", lambda pid, wait: signalled.append(pid))
+        record = scratch.scratch_dir(project) / ".strata" / "server.json"
+        record.write_text(json.dumps({"pid": 4242}))
+
+        # Gone: its pid may be another process's now.
+        monkeypatch.setattr(scratch, "find_daemon", lambda anchor: None)
+        server.stop_daemon(project)
+        assert signalled == []
+
+        monkeypatch.setattr(scratch, "find_daemon", lambda anchor: object())
+        record.write_text("{}")
+        server.stop_daemon(project)
+        assert "did not stop: KeyError('pid')" in capsys.readouterr().err
+        # No scratchpad at all: nothing to stop, no lock file made.
+        server.stop_daemon(tmp_path / "untouched")
+        assert not (tmp_path / "untouched").exists()
 
     def test_a_server_that_does_not_come_up_discards_the_trial(self, tmp_path, claude, monkeypatch):
         def broken(*args, **kwargs):
@@ -623,6 +781,27 @@ class TestTheReport:
 
         assert main(["report", str(tmp_path / "out"), "--json"]) == 0
         assert json.loads(capsys.readouterr().out)["arms"]["A"]["all"]["completed"]["k"] == 1
+
+    def test_the_cli_runs_several_arms_in_one_seeded_shuffle(
+        self, tmp_path, claude, monkeypatch, capsys
+    ):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        monkeypatch.setenv("FAKE_SCRIPT", json.dumps([[None, "246"]]))
+        monkeypatch.setattr(run, "prepare_workspace", lambda dest, **kw: _small(dest))
+        out = str(tmp_path / "out")
+        argv = ["run", "--arm", "A", "--arm", "B", "--out", out, "--task", "neutral_modpow"]
+
+        assert main([*argv, "--runs", "3", "--seed", "7", "--claude", claude]) == 0
+
+        ran = [line.split(":")[0] for line in capsys.readouterr().out.splitlines()]
+        assert sorted(ran) == sorted(f"{a} neutral_modpow #{i}" for a in "AB" for i in range(3))
+        # Neither arm-major nor the plain round-robin a loop would give.
+        arms = [line.split()[0] for line in ran]
+        assert arms not in (["A"] * 3 + ["B"] * 3, ["B"] * 3 + ["A"] * 3, ["A", "B"] * 3)
+        # The seed alone fixes the order.
+        shutil.rmtree(tmp_path / "out")
+        assert main([*argv, "--runs", "3", "--seed", "7", "--claude", claude]) == 0
+        assert [line.split(":")[0] for line in capsys.readouterr().out.splitlines()] == ran
 
     def test_the_cli_needs_an_api_key(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
