@@ -37,6 +37,8 @@ from vestigo.store import BuildLeaseLost
 from strata.tenancy.tenant import DEFAULT_TENANT_ID, reset_tenant_id, set_tenant_id
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vestigo.build_store import BuildState, BuildStore
     from vestigo.store import ArtifactStore
 
@@ -118,6 +120,9 @@ class BuildRunner:
     runtime_config: StrataConfig | None = None
     scan_planner: ReadPlanner | None = None
     scan_fetcher: CachedFetcher | None = None
+    # The server's planner and fetcher, built on first use; called where a scan build
+    # needs them and has neither of the above.
+    scan_plane: Callable[[], tuple[ReadPlanner, CachedFetcher]] | None = None
 
     _running: bool = field(default=False, init=False)
     _task: asyncio.Task | None = field(default=None, init=False)
@@ -762,6 +767,8 @@ class BuildRunner:
 
         planner = self.scan_planner
         fetcher = self.scan_fetcher
+        if (planner is None or fetcher is None) and self.scan_plane is not None:
+            planner, fetcher = self.scan_plane()
 
         with contextlib.ExitStack() as stack:
             if planner is None or fetcher is None:

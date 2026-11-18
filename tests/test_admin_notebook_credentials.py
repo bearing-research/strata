@@ -59,7 +59,7 @@ def server(tmp_path, monkeypatch):
     )
     state = MagicMock()
     state.config = config
-    state.planner = SimpleNamespace(catalog=PyIcebergCatalog(config))
+    state.planner = state.built_planner = SimpleNamespace(catalog=PyIcebergCatalog(config))
     monkeypatch.setattr(server_module, "_state", state)
 
     fetched: list[dict] = []

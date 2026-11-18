@@ -187,7 +187,7 @@ async def warm_cache_v1(request: WarmRequest):
         async with warming_semaphore:
             try:
                 loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, state.fetcher.fetch_as_stream_bytes, task)
+                await loop.run_in_executor(None, state.fetch_as_stream_bytes, task)
                 if task.cached:
                     return ("skipped", 0, None)  # Already cached
                 return ("cached", task.bytes_read, None)
@@ -202,7 +202,7 @@ async def warm_cache_v1(request: WarmRequest):
     for table_uri in request.tables:
         try:
             plan_table = functools.partial(
-                state.planner.plan,
+                state.plan,
                 table_uri=table_uri,
                 snapshot_id=None,  # Current snapshot
                 columns=request.columns,

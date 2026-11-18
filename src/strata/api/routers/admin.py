@@ -368,7 +368,9 @@ async def replace_admin_notebook_credentials(request: AdminNotebookCredentialsRe
         setattr(state.config, field, value)
     # Built from the old properties and credentials; the next use rebuilds them. Off the loop:
     # closing them shuts their pooled connections.
-    await anyio.to_thread.run_sync(state.planner.catalog.forget_named_catalogs)
+    # A planner never built holds no catalog to forget.
+    if state.built_planner is not None:
+        await anyio.to_thread.run_sync(state.built_planner.catalog.forget_named_catalogs)
     return _serialize_notebook_credentials()
 
 

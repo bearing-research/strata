@@ -1115,8 +1115,12 @@ class TestInputAcquisition:
 
         assert tenants == ["team-a"]
 
-    def test_scan_to_file_sync_uses_fetch_pipeline_on_cold_cache(self, build_runner, artifact_dir):
-        """Table inputs fetch through the planner/fetcher path, not raw cache files."""
+    @pytest.mark.parametrize("given", ["fields", "scan_plane"])
+    def test_scan_to_file_sync_uses_fetch_pipeline_on_cold_cache(
+        self, build_runner, artifact_dir, given
+    ):
+        """Table inputs fetch through the planner/fetcher path, not raw cache files: the
+        runner's own, or the server's, built on the first scan build (scan_plane)."""
         batch = pa.record_batch([pa.array([1, 2, 3])], names=["id"])
         task = Task(
             file_path="file:///warehouse/data.parquet",
@@ -1139,16 +1143,19 @@ class TestInputAcquisition:
             schema=batch.schema,
         )
 
-        build_runner.scan_planner = MagicMock()
-        build_runner.scan_planner.plan.return_value = plan
-        build_runner.scan_fetcher = MagicMock()
-        build_runner.scan_fetcher.fetch.return_value = batch
+        planner, fetcher = MagicMock(), MagicMock()
+        planner.plan.return_value = plan
+        fetcher.fetch.return_value = batch
+        if given == "fields":
+            build_runner.scan_planner, build_runner.scan_fetcher = planner, fetcher
+        else:
+            build_runner.scan_plane = lambda: (planner, fetcher)
 
         output_path = artifact_dir / "scan-output.arrow"
         build_runner._scan_to_file_sync("file:///warehouse#ns.tbl", output_path)
 
-        build_runner.scan_planner.plan.assert_called_once()
-        build_runner.scan_fetcher.fetch.assert_called_once_with(task)
+        planner.plan.assert_called_once()
+        fetcher.fetch.assert_called_once_with(task)
 
         with pa.ipc.open_stream(output_path) as reader:
             table = reader.read_all()

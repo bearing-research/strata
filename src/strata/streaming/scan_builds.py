@@ -175,7 +175,7 @@ class ScanBuildManager:
                 with get_pool_tracker().track("fetch"):
                     plan.prefetched_first = await loop.run_in_executor(
                         state._fetch_executor,
-                        state.fetcher.fetch_as_stream_bytes,
+                        state.fetch_as_stream_bytes,
                         plan.tasks[0],
                     )
             except asyncio.CancelledError:
@@ -341,7 +341,7 @@ class ScanBuildManager:
                         with get_pool_tracker().track("fetch"):
                             chunk = await loop.run_in_executor(
                                 state._fetch_executor,
-                                state.fetcher.fetch_as_stream_bytes,
+                                state.fetch_as_stream_bytes,
                                 task,
                             )
                     out = merger.feed(chunk) if merger is not None else chunk

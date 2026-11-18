@@ -12,6 +12,7 @@ import re
 import signal
 import socket
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from html import escape
@@ -93,6 +94,8 @@ from strata.tenancy.tenant import (
 )
 from strata.types import (
     BuildStatusResponse,
+    ReadPlan,
+    Task,
 )
 from strata.url_safety import host_is_allowlisted
 
@@ -107,6 +110,10 @@ class ResourceLimitError(Exception):
     """Raised when a resource limit is exceeded."""
 
     pass
+
+
+def _scan_plane(state: ServerState) -> tuple[ReadPlanner, CachedFetcher]:
+    return state.planner, state.fetcher
 
 
 def _eager_warmup(config: StrataConfig, *, scans: bool) -> dict:
@@ -201,6 +208,10 @@ class ServerState:
         )
         metrics_enabled = os.environ.get("STRATA_METRICS_ENABLED", "true").lower() != "false"
         self.metrics = MetricsCollector(enabled=metrics_enabled)
+        # The scan plane: built on first use (planner, fetcher), once, under this lock.
+        self._scan_plane_lock = threading.Lock()
+        self._planner: ReadPlanner | None = None
+        self._fetcher: CachedFetcher | None = None
 
         self.scan_builds = ScanBuildManager()
 
@@ -237,18 +248,56 @@ class ServerState:
         )
 
     # Built on first use: their imports (Iceberg, Parquet, pandas) are most of a server's
-    # start, which a scratchpad daemon, serving no scans, need not pay.
-    @functools.cached_property
+    # start, which a scratchpad daemon, serving no scans, need not pay. Building takes
+    # seconds, so the event loop reaches them only through plan() and
+    # fetch_as_stream_bytes(), in an executor.
+    @property
     def planner(self) -> ReadPlanner:
-        from strata.planner import ReadPlanner
+        with self._scan_plane_lock:
+            if self._planner is None:
+                from strata.planner import ReadPlanner
 
-        return ReadPlanner(self.config)
+                self._planner = ReadPlanner(self.config)
+            return self._planner
 
-    @functools.cached_property
+    @planner.setter
+    def planner(self, planner: ReadPlanner) -> None:
+        self._planner = planner
+
+    @property
     def fetcher(self) -> CachedFetcher:
-        from strata.cache.disk import CachedFetcher
+        with self._scan_plane_lock:
+            if self._fetcher is None:
+                from strata.cache.disk import CachedFetcher
 
-        return CachedFetcher(self.config, metrics=self.metrics)
+                self._fetcher = CachedFetcher(self.config, metrics=self.metrics)
+            return self._fetcher
+
+    @fetcher.setter
+    def fetcher(self, fetcher: CachedFetcher) -> None:
+        self._fetcher = fetcher
+
+    @property
+    def built_planner(self) -> ReadPlanner | None:
+        """The planner if one was built: for what reports on it or resets it."""
+        return self._planner
+
+    @property
+    def built_fetcher(self) -> CachedFetcher | None:
+        """The fetcher if one was built: for what reports on it."""
+        return self._fetcher
+
+    def plan(self, **kwargs: Any) -> ReadPlan:
+        return self.planner.plan(**kwargs)
+
+    def fetch_as_stream_bytes(self, task: Task) -> bytes:
+        return self.fetcher.fetch_as_stream_bytes(task)
+
+    def close_scan_plane(self) -> None:
+        """Close the planner, waiting for one being built; a planner never built is not."""
+        with self._scan_plane_lock:
+            if self._planner is not None:
+                self._planner.close()
 
     def _fail_unbuilt_stream(self, stream_state: StreamState) -> None:
         """Fail the artifact of a stream-mode miss that expired unfetched.
@@ -460,9 +509,12 @@ def _get_qos_metrics(state: ServerState) -> dict:
 
 def _get_cache_size_bytes(state: ServerState) -> int:
     """Get current cache size in bytes."""
+    # Not built (nor its module loaded) for a report: a server that never scanned has none.
+    if state.built_fetcher is None:
+        return 0
     from strata.cache.disk import DiskCache
 
-    cache = state.fetcher.cache
+    cache = state.built_fetcher.cache
     if isinstance(cache, DiskCache):
         return cache.get_size_bytes()
     return 0
@@ -470,9 +522,11 @@ def _get_cache_size_bytes(state: ServerState) -> int:
 
 def _get_cache_entry_count(state: ServerState) -> int:
     """Get current number of cache entries."""
+    if state.built_fetcher is None:
+        return 0
     from strata.cache.disk import DiskCache
 
-    cache = state.fetcher.cache
+    cache = state.built_fetcher.cache
     if isinstance(cache, DiskCache):
         return len(cache.list_entries())
     return 0
@@ -589,8 +643,7 @@ async def _graceful_shutdown(state: ServerState) -> None:
 
     state._planning_executor.shutdown(wait=False)
     state._fetch_executor.shutdown(wait=False)
-    if "planner" in vars(state):
-        state.planner.close()
+    state.close_scan_plane()
 
     # No `ssh -L` children may outlive the server; remote workers stay up for reuse.
     from strata.notebook.routes import get_session_manager, shutdown_worker_supervisor
@@ -1175,9 +1228,8 @@ async def lifespan(app: FastAPI):
                 transform_registry=get_transform_registry(),
                 artifact_dir=artifact_dir,
                 runtime_config=config,
-                # Without them it plans each scan build on its own (_write_scan).
-                scan_planner=_state.planner if scans else None,
-                scan_fetcher=_state.fetcher if scans else None,
+                # The server's own, built on the first scan build if not before.
+                scan_plane=functools.partial(_scan_plane, _state),
             )
             set_build_runner(build_runner)
             await build_runner.start()

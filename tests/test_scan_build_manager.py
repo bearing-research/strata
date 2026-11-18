@@ -114,9 +114,7 @@ def _fetching_state(fetched: list):
         fetched.append(task)
         return b"first row group"
 
-    return SimpleNamespace(
-        _draining=False, _fetch_executor=None, fetcher=SimpleNamespace(fetch_as_stream_bytes=fetch)
-    )
+    return SimpleNamespace(_draining=False, _fetch_executor=None, fetch_as_stream_bytes=fetch)
 
 
 async def _prefetch(m: ScanBuildManager, state, plan) -> None:
