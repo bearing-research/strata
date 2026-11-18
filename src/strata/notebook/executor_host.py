@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import cellgraph as cg
     from vestigo.store import ArtifactVersion
 
     from strata.notebook.artifact_integration import NotebookArtifactManager
-    from strata.notebook.code_keys import CodeIndex, Resolved
+    from strata.notebook.code_keys import Resolved
     from strata.notebook.dag import NotebookDag
     from strata.notebook.env import LocalPackages
     from strata.notebook.execution_result import CachedConsole
@@ -74,10 +76,11 @@ class ExecutorHost(Protocol):
 
     def collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]: ...
 
-    @property
-    def code_index(self) -> CodeIndex: ...
+    def resolve_code_key(self, cell_id: str, lookup: str, *, observe: bool = True) -> Resolved: ...
 
-    def resolve_code_key(self, cell_id: str, lookup: str) -> Resolved: ...
+    def record_code_reads(
+        self, lookup: str, reads: Mapping[str, str], stat: Mapping[str, list[int]]
+    ) -> None: ...
 
     def resolve_cached_console(
         self, cell_id: str, provenance_hash: str, *, variant: str | None = None

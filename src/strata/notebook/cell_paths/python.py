@@ -706,7 +706,9 @@ async def run_python_cell(
                             variant=fanout_variant,
                             input_versions=context.input_refs(cell_id, fanout_variant),
                             timeout_seconds=timeout_seconds,
-                            resume=use_cache,
+                            # A dead run's reads are unknown, so a scratchpad's is not
+                            # resumed: its checkpoint may be of other code.
+                            resume=use_cache and not host.notebook_state.scratchpad,
                             init=init,
                         )
                     )
@@ -807,6 +809,7 @@ async def run_python_cell(
             code = result.get("code_reads") if exec_result.success and moved is None else None
             code_reads: dict[str, str] = {}
             code_stat: dict[str, list[int]] = {}
+            recorded_code = False
             if code is not None:
                 unkept = code["unstable"]
                 if unkept is None and fanout_variant is not None and code["reads"]:
@@ -819,9 +822,10 @@ async def run_python_cell(
                         "are kept for this run only.\n",
                         moved_input=moved,
                     )
-                else:
+                elif fanout_variant is None:
                     code_reads, code_stat = code["reads"], code["stat"]
                     provenance_hash = code_key(lookup_hash, code_reads)
+                    recorded_code = True
 
             # ⑤ Store artifacts for consumed variables.
             if exec_result.success:
@@ -899,9 +903,9 @@ async def run_python_cell(
                 await context.close_open_run(cell_id)
                 if stored_ok:
                     context.show_run_records(exec_result, records)
-                    if code_reads:
+                    if recorded_code:
                         await anyio.to_thread.run_sync(
-                            host.code_index.record, lookup_hash, code_reads, code_stat
+                            host.record_code_reads, lookup_hash, code_reads, code_stat
                         )
                 else:
                     logger.error(

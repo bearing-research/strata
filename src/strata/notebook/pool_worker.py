@@ -15,7 +15,7 @@ import os
 import platform
 import sys
 import tomllib
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -322,12 +322,10 @@ def execute_harness(manifest: dict) -> dict:
             sys.stdout = stdout_buf
             sys.stderr = stderr_buf
 
-            # As the cold harness records it (``harness.recording_code``).
-            code_config = manifest.get("code_reads")
             with (
                 display_capture.capture_side_effects(),
                 _audit.recording() as observed,
-                _code.recording(code_config["exclude"]) if code_config else nullcontext() as code,
+                _code.for_run(manifest, observed) as code,
             ):
                 _display_value = _exec_with_display(
                     source, namespace, manifest.get("strata_cell_id")

@@ -1,23 +1,26 @@
 """A scratchpad cell's key over what its run read: the code it loaded and the files it opened.
 
 L, the lookup key, is the cell's provenance hash as cellgraph makes it. R, what a run read
-(``code_reads.Reads``), completes it: F is L when R is empty, else L derived over R. A run's
-outputs are stored under F, so a downstream cell, which keys on what its upstream stored
-under, changes with it.
+(``code_reads.Reads``), completes it: F is L derived over R, never L itself, so no result
+stored under L by a run that recorded nothing is taken for one. A run's outputs are stored
+under F, so a downstream cell, which keys on what its upstream stored under, changes with it.
 
 F cannot be known before the files are looked at, so an index maps each L to the reads of
-the runs keyed under it (``.strata/reads/code.json``, the newest :data:`MAX_SETS`). A lookup
-observes those paths as they are now and tries the F each set makes. The index only
-points: F is checked against the store, so losing it costs a rerun, never a wrong result.
+the runs keyed under it (``.strata/reads/code.json``, the newest :data:`MAX_SETS` of the
+newest :data:`MAX_LOOKUPS` keys). A lookup observes those paths as they are now and tries
+the F each set makes. The index only points: F is checked against the store, so losing it,
+or failing to write it, costs a rerun, never a wrong result.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
+import uuid
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,12 +32,13 @@ from strata.notebook.code_reads import fingerprint, observe, racy
 
 INDEX = Path(".strata") / "reads" / "code.json"
 MAX_SETS = 8
+MAX_LOOKUPS = 256
+
+logger = logging.getLogger(__name__)
 
 
 def code_key(lookup: str, reads: Mapping[str, str]) -> str:
-    """F: *lookup* itself when nothing was read, else *lookup* derived over *reads*."""
-    if not reads:
-        return lookup
+    """F: *lookup* derived over *reads*, an empty record included."""
     digest = hashlib.sha256(json.dumps(sorted(reads.items())).encode()).hexdigest()
     return derive_subkey(lookup, f"code={digest}")
 
@@ -60,7 +64,8 @@ class CodeIndex:
     def _load(self) -> dict[str, list[dict[str, list[Any]]]]:
         try:
             st = self.path.stat()
-        except FileNotFoundError:
+        except OSError:
+            # Missing, or under something that is not a directory: no index.
             self._data, self._loaded_as = {}, None
             return self._data
         if (st.st_mtime_ns, st.st_size) != self._loaded_as:
@@ -74,38 +79,58 @@ class CodeIndex:
         return self._data
 
     def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        partial = self.path.with_suffix(".json.partial")
-        partial.write_text(json.dumps(self._data))
-        os.replace(partial, self.path)
-        st = self.path.stat()
+        """Write the index whole; a failure is logged, as the index only points."""
+        partial = self.path.with_name(f"{self.path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            partial.write_text(json.dumps(self._data))
+            os.replace(partial, self.path)
+            st = self.path.stat()
+        except OSError as exc:
+            logger.warning("Could not write %s: %s", self.path, exc)
+            if partial.is_file():
+                partial.unlink(missing_ok=True)
+            return
         self._loaded_as = (st.st_mtime_ns, st.st_size)
 
     def record(self, lookup: str, reads: Mapping[str, str], stat: Mapping[str, list[int]]) -> None:
-        """Note a run under *lookup* that read *reads*, newest first."""
+        """Note a run under *lookup* that read *reads* (perhaps nothing), newest first."""
         entry = {path: [seen, stat.get(path)] for path, seen in reads.items()}
         with self._lock:
-            sets = [s for s in self._load().get(lookup, []) if s.keys() != entry.keys()]
-            self._data[lookup] = [entry, *sets][:MAX_SETS]
+            data = self._load()
+            sets = [s for s in data.pop(lookup, []) if s.keys() != entry.keys()]
+            data[lookup] = [entry, *sets][:MAX_SETS]
+            # Oldest first, as written: a key not run for a while goes.
+            for stale in list(data)[: max(0, len(data) - MAX_LOOKUPS)]:
+                del data[stale]
             self._save()
 
-    def resolve(self, lookup: str, has_result: Callable[[str], bool]) -> Resolved:
+    def resolve(
+        self, lookup: str, has_result: Callable[[str], bool], *, observe: bool = True
+    ) -> Resolved:
         """The key *lookup*'s result is stored under now, if any is (*has_result* says), else
-        *lookup* itself: a run that read nothing is stored there."""
+        the key of a run that read nothing.
+
+        Without *observe* no path is looked at: each set's paths are taken as its run read
+        them, and nothing is reported changed.
+        """
         changed: str | None = None
-        for index, (key, moved) in enumerate(self._keys(lookup)):
+        for index, (key, moved) in enumerate(self._keys(lookup, observe=observe)):
             if index == 0:
                 changed = moved
             if has_result(key):
                 return Resolved(key, changed)
-        return Resolved(lookup, changed)
+        return Resolved(code_key(lookup, {}), changed)
 
-    def _keys(self, lookup: str) -> Iterator[tuple[str, str | None]]:
+    def _keys(self, lookup: str, *, observe: bool) -> Iterator[tuple[str, str | None]]:
         """The F of each run under *lookup*, as its reads are now, and the first of its paths
         that is not as that run read it."""
         with self._lock:
             sets = list(self._load().get(lookup, []))
         for entry in sets:
+            if not observe:
+                yield code_key(lookup, {path: seen for path, (seen, _) in entry.items()}), None
+                continue
             now, moved, retaken = _now(entry)
             if retaken:
                 self._retake(lookup, entry, retaken)

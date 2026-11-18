@@ -141,6 +141,8 @@ def test_files_opened_and_listed_are_recorded_and_its_own_output_is_not(tmp_path
         """
         import glob, os
         value = open("data/x.csv").read()
+        # Opening a directory reads nothing of it; listing it does.
+        os.close(os.open("data", os.O_RDONLY))
         names = sorted(os.listdir("data"))
         open("out.txt", "w").write(value)
         value += open("out.txt").read()
@@ -230,3 +232,82 @@ def test_a_stat_fingerprint_is_racy_while_young(tmp_path):
     old = [*now[:5], now[5] + 10 * code_reads.RACY_NS]
     assert not code_reads.racy(old)
     assert code_reads.racy([*old[:4], 0, old[5]])
+
+
+def test_a_directory_the_cell_made_and_removed_is_its_own(tmp_path):
+    got = _record(
+        tmp_path,
+        """
+        import os, tempfile
+        with tempfile.TemporaryDirectory(dir=".") as d:
+            open(f"{d}/x", "w").write("1")
+            value = open(f"{d}/x").read() + str(len(os.listdir(d)))
+        """,
+    )
+
+    assert got["value"] == "11"
+    assert got["record"]["unstable"] is None
+    # Only where its imports looked: nothing of the directory or the file in it.
+    assert all(seen == ABSENT for seen in got["record"]["reads"].values())
+
+
+def test_the_runs_own_directory_is_not_recorded(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "input.arrow").write_text("x")
+    (tmp_path / "data.txt").write_text("y")
+    script = f"""
+import importlib.util, json, types
+spec = importlib.util.spec_from_file_location("_code_reads", {code_reads.__file__!r})
+code_reads = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(code_reads)
+observed = types.SimpleNamespace(on_native_read=None)
+manifest = {{"code_reads": {{"exclude": []}}, "output_dir": {str(run)!r}}}
+with code_reads.for_run(manifest, observed) as reads:
+    told = observed.on_native_read == reads.file
+    open({str(run / "input.arrow")!r}).read()
+    open({str(tmp_path / "data.txt")!r}).read()
+after = observed.on_native_read
+print(json.dumps({{"told": told, "after": after, "reads": reads.finish()["reads"]}}))
+"""
+    run_ = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True, check=True
+    )
+    got = json.loads(run_.stdout.splitlines()[-1])
+
+    assert list(got["reads"]) == [str(tmp_path / "data.txt")]
+    # A native reader's files are told to the record while it runs, and only then.
+    assert got["told"] and got["after"] is None
+
+
+def test_a_large_file_has_one_form_however_soon_it_is_observed(tmp_path, monkeypatch):
+    monkeypatch.setattr(code_reads, "LARGE_BYTES", 4)
+    path = tmp_path / "big.bin"
+    path.write_bytes(b"0123456789")
+
+    seen, print_ = code_reads.observe(str(path))
+
+    assert print_ is not None and code_reads.racy(print_)
+    assert seen == "stat:" + ":".join(map(str, print_[:5]))
+
+
+def test_the_end_of_a_run_reads_again_only_what_moved(tmp_path, monkeypatch):
+    path = tmp_path / "data.txt"
+    path.write_text("x")
+    # No stat is too young to trust here.
+    monkeypatch.setattr(code_reads, "RACY_NS", -(10**18))
+    reads = code_reads.Reads([])
+    reads._hooks = (list(sys.meta_path), list(sys.path_hooks))
+    reads.file(str(path))
+    observed: list[str] = []
+    real = code_reads.observe
+    monkeypatch.setattr(
+        code_reads, "observe", lambda p, **kw: (observed.append(p), real(p, **kw))[1]
+    )
+
+    assert reads.finish()["unstable"] is None
+    assert observed == []
+
+    path.write_text("yy")
+    assert reads.finish()["unstable"] == f"{path} changed while the cell ran"
+    assert observed == [str(path)]

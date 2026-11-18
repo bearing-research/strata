@@ -126,15 +126,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A scratchpad cell is keyed on what its run read.** Editing a module a scratchpad cell
   imported, or a file it opened through the pinned `project` mount, left it returning
   what the old file gave. Each run now records the files it opened or listed, the code it
-  imported from outside its environment, and where an import looked and found nothing;
+  imported from outside its environment (native readers' files included), and where an
+  import looked and found nothing;
   the cell's result is stored under its key and that record, so a changed file makes it
   stale with reason `code` (`changed_code` names the file in `status`, the MCP
   `scratchpad` tool and the cell payload), its readers' keys move with it, and putting
   the file back hits again. A module runs from the bytes it was hashed by, never a stale
   `.pyc`. A run that wrote a file it had read, whose file changed while it ran, or that
   installed an import hook keeps its outputs for that run only, as does a loop or
-  `@each` cell that read files; Run All runs a scratchpad's cells one at a time. Plain
-  notebooks are unchanged. (#1585)
+  `@each` cell that read files; Run All runs a scratchpad's cells one at a time, and a
+  run does not resume a dead run's checkpoint. Plain notebooks are unchanged. (#1585)
 ### Changed
 - **A scratchpad keeps every variable its cells define.** A notebook stores a variable
   only once a cell downstream reads it, so an agent that loaded data in one cell and asked

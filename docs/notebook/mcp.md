@@ -140,14 +140,16 @@ read or not: the first cell to read one loads it rather than rerunning the cell 
 made it. A plain notebook stores only what a cell downstream reads.
 
 A scratchpad cell is also keyed on what its run read: each file it opened or
-directory it listed, the code it imported from outside its environment, and each
-place an import looked and found nothing. Edit `project / "config.yaml"` or a module
+directory it listed (pyarrow's, polars' and duckdb's readers included), the code it
+imported from outside its environment, and each place an import looked and found
+nothing. A file it only checked with `exists()`, or one a subprocess read, is not
+recorded. Edit `project / "config.yaml"` or a module
 of the project and the cells that read it go stale with reason `code`
 (`changed_code` names the file), then run again; put the file back and they hit
 again. A cell that changed a file it had read, or whose file changed while it ran,
 keeps its outputs for that run only, as does a loop or `@each` cell that read
 files. Run All runs a scratchpad's cells one at a time, so each run records its
-own reads.
+own reads, and a run never resumes a dead run's checkpoint, whose reads are unknown.
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
 

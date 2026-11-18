@@ -4,6 +4,7 @@ and the value it then makes gives the cells reading it a new key too. These run 
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -163,3 +164,55 @@ async def test_a_notebook_records_nothing_and_keeps_its_keys(tmp_path):
         assert _status(ops, cell.id).status == "ready"
         assert (await _run(ops, cell.id)).cache_hit
     assert not (path / INDEX).exists()
+
+
+async def test_a_file_a_native_reader_read_restales_it(tmp_path, scratch):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    data = tmp_path / "rows.parquet"
+    pq.write_table(pa.table({"x": [1, 2]}), data)
+    cell = scratch.add_cell(
+        f"import pyarrow.parquet as pq\nprint(pq.read_table({str(data)!r}).num_rows)"
+    )
+    assert "2" in (await _run(scratch, cell.id)).stdout
+
+    pq.write_table(pa.table({"x": [1, 2, 3]}), data)
+
+    assert _status(scratch, cell.id).changed_code == str(data)
+    assert "3" in (await _run(scratch, cell.id)).stdout
+
+
+async def test_a_pass_that_checks_no_reads_looks_at_no_file(tmp_path, scratch):
+    # As the one on the event loop between a run and its frames: it keeps what was seen.
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    cell = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    await _run(scratch, cell.id)
+    session = scratch._session
+    assert session.compute_staleness()[cell.id].status == "ready"
+
+    data.write_text("3")
+
+    assert session.compute_staleness(check_reads=False)[cell.id].status == "ready"
+    checked = session.compute_staleness()[cell.id]
+    assert checked.status == "stale" and checked.changed_code == str(data)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no event pipe on Windows")
+async def test_a_scratchpad_run_does_not_resume_a_dead_runs_checkpoint(scratch):
+    # What the dead run read is unknown, so its checkpoint may be of other code.
+    cell = scratch.add_cell(
+        "import pathlib\n"
+        "print('restored', strata.restore() is not None)\n"
+        "strata.checkpoint(n=1)\n"
+        "if not pathlib.Path('crashed').exists():\n"
+        "    pathlib.Path('crashed').write_text('1')\n"
+        "    raise RuntimeError('killed')\n"
+    )
+    died = await scratch.run_cell(cell.id)
+    assert died.status == "error"
+
+    again = await _run(scratch, cell.id)
+
+    assert "restored False" in again.stdout

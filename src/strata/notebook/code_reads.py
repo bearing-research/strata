@@ -102,8 +102,8 @@ def observe(path: str, *, listing: bool = False) -> tuple[str, list[int] | None]
     """What is at *path* now, and its stat fingerprint (None when absent).
 
     A file is ``sha256:<hex>`` of its bytes, or past :data:`LARGE_BYTES` ``stat:...`` of
-    its fingerprint unless that is racy. A directory listed is ``list:<hex>`` of its sorted
-    names but the dot ones, as a glob sees it.
+    its fingerprint, whenever it is observed, so one file has one form. A directory listed
+    is ``list:<hex>`` of its sorted names but the dot ones, as a glob sees it.
     """
     taken = time.time_ns()
     try:
@@ -118,7 +118,7 @@ def observe(path: str, *, listing: bool = False) -> tuple[str, list[int] | None]
             names = sorted(n for n in os.listdir(path) if not n.startswith("."))
             digest = hashlib.sha256("\0".join(names).encode(errors="surrogateescape"))
             return f"list:{digest.hexdigest()}", print_
-        if st.st_size > LARGE_BYTES and not racy(print_):
+        if st.st_size > LARGE_BYTES:
             return "stat:" + ":".join(map(str, print_[:5])), print_
         digest = hashlib.sha256()
         with open(path, "rb") as file:
@@ -146,6 +146,7 @@ class Reads:
         # (class, method) the recording patches.
         self.patched: list[tuple[type, str]] = []
         self._own = threading.local()
+        self._tracked: dict[str, bool] = {}
 
     @property
     def quiet(self) -> bool:
@@ -161,10 +162,15 @@ class Reads:
             self._own.on = was
 
     def tracked(self, path: str) -> bool:
-        real = os.path.realpath(path)
-        if any(real == p or real.startswith(p.rstrip(os.sep) + os.sep) for p in self.excluded):
-            return False
-        return not any(real == p or real.startswith(p + "/") for p in _SYSTEM)
+        known = self._tracked.get(path)
+        if known is None:
+            real = os.path.realpath(path)
+            known = not any(
+                real == p or real.startswith(p.rstrip(os.sep) + os.sep)
+                for p in (*self.excluded, *_SYSTEM)
+            )
+            self._tracked[path] = known
+        return known
 
     def _unstable(self, reason: str) -> None:
         if self.unstable is None:
@@ -185,6 +191,8 @@ class Reads:
             return
         with self.own():
             seen, print_ = observe(path)
+        if seen == "dir":
+            return  # opened to list it or to remove it: its listing, if any, is recorded
         self._put(path, seen, print_)
 
     def module(self, path: str, data: bytes) -> None:
@@ -202,6 +210,11 @@ class Reads:
             seen, print_ = observe(path, listing=True)
         self.listed.add(path)
         self._put(path, seen, print_)
+
+    def made(self, path: Any) -> None:
+        """A directory the cell made: its own, as a file it wrote is."""
+        if not isinstance(path, int):
+            self.written.add(os.path.abspath(os.fsdecode(path)))
 
     def opened(self, path: Any, mode: Any, flags: Any) -> None:
         if isinstance(path, int):
@@ -274,9 +287,21 @@ class Reads:
                 and self.tracked(origin)
             ):
                 self._unstable(f"the cell loaded {name} through {_name(loader)}")
+        taken = time.time_ns()
         with self.own():
             for path, seen in self.seen.items():
                 if path in self.written:
+                    continue
+                # Read again only when its stat moved, or it was read too soon after a write.
+                recorded, current = self.stat.get(path), fingerprint(path, taken)
+                if seen == ABSENT and current is None:
+                    continue
+                if (
+                    recorded is not None
+                    and current is not None
+                    and current[:5] == recorded[:5]
+                    and not racy(recorded)
+                ):
                     continue
                 now, _ = observe(path, listing=path in self.listed)
                 if now != seen:
@@ -306,6 +331,8 @@ def _on_event(event: str, args: tuple[Any, ...]) -> None:
     try:
         if event == "open":
             reads.opened(*args[:3])
+        elif event == "os.mkdir":
+            reads.made(args[0])
         elif event in ("os.listdir", "os.scandir"):
             path = args[0] if args[0] is not None else "."
             if not isinstance(path, int):
@@ -427,6 +454,26 @@ def _patch(reads: Reads) -> list[tuple[type, str, Any]]:
     for cls, attr, fn in patched:
         setattr(cls, attr, fn)
     return restore
+
+
+@contextmanager
+def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
+    """A harness run's recording: a scratchpad cell's (its manifest has ``code_reads``),
+    else None.
+
+    The run's own directory (its inputs and folders) is left out, and the files a native
+    reader reads come from the read audit's *observed*, which no open event shows.
+    """
+    config = manifest.get("code_reads")
+    if config is None:
+        yield None
+        return
+    with recording([*config["exclude"], manifest.get("output_dir") or ""]) as reads:
+        observed.on_native_read = reads.file
+        try:
+            yield reads
+        finally:
+            observed.on_native_read = None
 
 
 @contextmanager

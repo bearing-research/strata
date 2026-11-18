@@ -187,6 +187,9 @@ class Observed:
         self._walked: set[str] = set()
         # Per thread: one thread's fingerprinting must not hide another thread's reads.
         self._hush = threading.local()
+        # Told of each file a native reader reads (a scratchpad's ``code_reads``), which no
+        # open event shows.
+        self.on_native_read: Callable[[str], None] | None = None
 
     @property
     def quiet(self) -> bool:
@@ -250,6 +253,8 @@ class Observed:
                     return
                 if not is_dir:
                     self.open(file, mode, None)
+                    if self.on_native_read is not None:
+                        self.on_native_read(file)
 
     def files_at(self, target: Any) -> dict[str, list[int] | None] | None:
         """What a native writer's *target* holds now, folders as None, unseen by the hook;

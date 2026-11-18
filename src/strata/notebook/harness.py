@@ -15,7 +15,7 @@ import platform
 import sys
 import time
 import traceback
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -49,12 +49,6 @@ _code = _load_local_module("code_reads.py", "_nb_code_reads")
 
 # Harness-injected, not user inputs: excluded from mutation fingerprinting.
 _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
-
-
-def recording_code(manifest: dict) -> AbstractContextManager[Any]:
-    """What a scratchpad cell reads, recorded (``code_reads``); nothing for a notebook's."""
-    config = manifest.get("code_reads")
-    return _code.recording(config["exclude"]) if config is not None else nullcontext()
 
 
 # --- Manifest I/O ---
@@ -911,7 +905,7 @@ def main():
             loop_until_expr = (
                 loop_config.get("until_expr") if isinstance(loop_config, dict) else None
             )
-            with _audit.recording() as observed, recording_code(manifest) as code:
+            with _audit.recording() as observed, _code.for_run(manifest, observed) as code:
                 (
                     outputs,
                     display_values,
