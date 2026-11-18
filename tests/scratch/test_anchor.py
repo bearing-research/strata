@@ -93,6 +93,39 @@ def test_a_start_inside_a_scratchpad_is_in_its_project(repo):
     assert scratch.find_anchor(repo / ".strata-scratch") == repo
 
 
+def test_a_start_inside_a_notebook_is_in_the_project_holding_it(repo):
+    # A notebook has a pyproject.toml of its own, scaffolded, and is no project.
+    _projects(repo, "notebooks/analysis")
+    (repo / "notebooks/analysis/notebook.toml").write_text("")
+    _dirs(repo, "notebooks/analysis/work")
+
+    assert scratch.find_anchor(repo / "notebooks/analysis/work") == repo
+
+
+def test_a_home_that_is_a_repository_is_never_the_project(tmp_path, monkeypatch):
+    # A dotfiles checkout of home: its directories are not one project.
+    tmp_path = tmp_path.resolve()
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    _dirs(home, ".git", "downloads/data")
+
+    assert scratch.find_anchor(home / "downloads/data") == home / "downloads/data"
+
+
+def test_mcp_serves_the_project_it_is_run_in(repo, monkeypatch):
+    import strata.mcp_bridge
+    from strata import cli
+
+    served: list[Path] = []
+    monkeypatch.setattr(strata.mcp_bridge, "mcp_main", lambda anchor: served.append(anchor) or 0)
+    monkeypatch.setattr("strata._uv_runtime.assert_uv_managed_runtime", lambda: None)
+    monkeypatch.delenv("STRATA_SCRATCH_ROOT", raising=False)
+    monkeypatch.chdir(repo / "services/api/src")
+
+    assert cli.main(["mcp"]) == 0
+    assert served == [repo / "services/api"]
+
+
 def test_outside_home_and_any_repository_the_search_goes_up(tmp_path, monkeypatch):
     tmp_path = tmp_path.resolve()
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "elsewhere"))
@@ -129,3 +162,26 @@ def test_the_cli_serves_the_project_it_is_run_in(repo):
     )
 
     assert f"{repo / 'services/api'} has no scratchpad" in removed.stderr
+    assert "of its own" not in removed.stderr
+
+
+def test_a_scratchpad_of_the_directory_itself_is_pointed_out(repo):
+    """One made here by ``--root`` (or an earlier version) is named, with the way to it."""
+    here = repo / "services/api/src"
+    (here / ".strata-scratch").mkdir()
+    (here / ".strata-scratch/notebook.toml").write_text("")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("STRATA_")}
+    env["HOME"] = str(Path.home())
+
+    status = subprocess.run(
+        [sys.executable, "-m", "strata.cli", "scratch", "status"],
+        cwd=here,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert status.stdout.strip() == (
+        f"no scratchpad daemon runs for {repo / 'services/api'}; "
+        f"{here} has a scratchpad of its own: --root ."
+    )

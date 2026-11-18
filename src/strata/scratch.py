@@ -80,25 +80,39 @@ def find_anchor(start: Path) -> Path:
     a scratchpad (its ``work/``, say) is in the scratchpad's project.
     """
     start = start.resolve()
-    inside = [d for d in [start, *start.parents] if d.name == SCRATCH_DIR]
+    # A notebook (a scratchpad too) has a pyproject.toml of its own and is no project.
+    inside = [
+        d
+        for d in [start, *start.parents]
+        if d.name == SCRATCH_DIR or (d / "notebook.toml").is_file()
+    ]
     if inside:
         start = inside[-1].parent
-    candidates = [start, *start.parents]
-    repo = next((d for d in candidates if (d / ".git").exists()), None)
     try:
         home: Path | None = Path.home().resolve()
     except RuntimeError:
         # No HOME and no passwd entry, as in a container run under an arbitrary uid.
         home = None
-    bounds = [repo, home if home is not None and start.is_relative_to(home) else None]
-    bound = max((b for b in bounds if b is not None), key=lambda b: len(b.parts), default=None)
-    for directory in candidates:
+    # Up to the nearer of the git root and home: the first met.
+    for directory in [start, *start.parents]:
         if (directory / "pyproject.toml").is_file():
             return directory
-        if directory == bound:
-            break
-    # A repository with no Python project, served from any of its directories, is one.
-    return repo if repo is not None and repo == bound else start
+        if (directory / ".git").exists():
+            # A repository with no Python project, from any of its directories, is one;
+            # never home, which a dotfiles repository would make every directory's.
+            return directory if directory != home else start
+        if directory == home:
+            return start
+    return start
+
+
+def own_scratchpad_note(anchor: Path) -> str:
+    """A note for a command that found nothing at *anchor* when the current directory has
+    a scratchpad of its own (made by ``--root``, or by a version that anchored there)."""
+    here = Path.cwd().resolve()
+    if here != anchor and (scratch_dir(here) / "notebook.toml").is_file():
+        return f"; {here} has a scratchpad of its own: --root ."
+    return ""
 
 
 def resolve_anchor(root: str | None) -> Path:
