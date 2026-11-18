@@ -63,21 +63,19 @@ def _home(root: Path) -> Path:
     return root / "home"
 
 
+def _uv_dir(*args: str) -> str:
+    return subprocess.run(["uv", *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
 def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> dict[str, str]:
     """The server's environment: everything it stores under *root*, nothing of the host's
     Strata or Anthropic settings, and the load counter its cells inherit."""
-
-    def uv_dir(*args: str) -> str:
-        return subprocess.run(
-            ["uv", *args], capture_output=True, text=True, check=True
-        ).stdout.strip()
-
     env = _host_env()
     env.update(
         HOME=str(_home(root)),
         # uv's real cache and interpreters, so nothing is downloaded again.
-        UV_CACHE_DIR=uv_dir("cache", "dir"),
-        UV_PYTHON_INSTALL_DIR=uv_dir("python", "dir"),
+        UV_CACHE_DIR=_uv_dir("cache", "dir"),
+        UV_PYTHON_INSTALL_DIR=_uv_dir("python", "dir"),
         STRATA_HOST="127.0.0.1",
         STRATA_PORT=str(port),
         STRATA_MCP_ENABLED="true",
@@ -99,6 +97,66 @@ def mcp_entry_command(claude: str, url: str) -> list[str]:
     ``add-json`` keeps ``alwaysLoad`` (checked on Claude Code 2.1.323, §7)."""
     entry = {"type": "http", "url": f"{url}/mcp/", "alwaysLoad": True}
     return [claude, "mcp", "add-json", "-s", "user", SERVER_NAME, json.dumps(entry)]
+
+
+def stdio_entry_command(
+    claude: str, project: Path, home: Path, load_log: Path, load_seconds: float
+) -> list[str]:
+    """The ``claude mcp add-json`` call writing arm Cpp's entry: ``strata mcp`` over stdio,
+    as a user's config starts it, so its first call starts the project's daemon.
+
+    A HOME of the trial's own keeps the daemon's registry and shared environments apart
+    (each trial is a first use), on uv's real caches; the load counter is named here, not
+    left to what Claude Code passes a stdio server.
+    """
+    entry = {
+        "type": "stdio",
+        "command": str(Path(sys.executable).parent / "strata"),
+        "args": ["mcp", "--root", str(project)],
+        "env": {
+            "HOME": str(home),
+            "UV_CACHE_DIR": _uv_dir("cache", "dir"),
+            "UV_PYTHON_INSTALL_DIR": _uv_dir("python", "dir"),
+            "HARBOR_LOAD_LOG": str(load_log),
+            "HARBOR_LOAD_SECONDS": str(load_seconds),
+        },
+        "alwaysLoad": True,
+    }
+    return [claude, "mcp", "add-json", "-s", "user", SERVER_NAME, json.dumps(entry)]
+
+
+@contextmanager
+def stdio_scratchpad(
+    home: Path,
+    project: Path,
+    agent_env: dict[str, str],
+    *,
+    claude: str,
+    load_log: Path,
+    load_seconds: float,
+) -> Iterator[None]:
+    """Arm Cpp: its entry written, and the daemon its calls started stopped afterwards."""
+    from strata import scratch
+
+    home.mkdir(parents=True)
+    with _as_setup_error():
+        registered = subprocess.run(
+            stdio_entry_command(claude, project, home, load_log, load_seconds),
+            env=agent_env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    if registered.returncode != 0:
+        raise SetupError(f"claude mcp add-json failed: {registered.stderr.strip()}")
+    try:
+        yield
+    finally:
+        # Detached, it would idle on for 30 minutes over a trial being cleaned up.
+        try:
+            scratch.stop_daemon(project)
+        except scratch.ScratchError as exc:
+            print(f"the scratchpad daemon of {project} did not stop: {exc}", file=sys.stderr)
 
 
 def _free_port() -> int:

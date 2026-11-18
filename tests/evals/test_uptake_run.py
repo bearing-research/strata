@@ -112,6 +112,7 @@ class TestATrial:
     def test_shrinking_removes_venvs_and_artifact_stores_anywhere(self, tmp_path):
         notebook = tmp_path / "scratchpad" / "notebooks" / "scratch"
         rebuilt = [
+            tmp_path / "home" / ".strata" / "envs",
             tmp_path / "harbor" / ".venv" / "bin",
             tmp_path / "scratchpad" / "artifacts" / "blobs",
             notebook / ".venv" / "lib",
@@ -360,6 +361,8 @@ class TestArmCp:
         )
         skilled = {**self.INIT, "skills": ["strata-scratchpad"]}
         assert run.preflight("Cp", skilled) == "the strata-scratchpad skill is loaded"
+        assert run.preflight("Cpp", self.INIT) is None
+        assert run.preflight("Cpp", deferred) == run.preflight("Cp", deferred)
 
     def test_its_turns_run_while_its_server_is_up(self, tmp_path, claude, monkeypatch):
         events = []
@@ -386,6 +389,90 @@ class TestArmCp:
 
         assert trial.discarded is None and trial.turns[0].passed
         assert events == [("up", "harbor", False), ("down", 1)]
+
+    def test_arm_cpp_runs_its_turns_inside_its_stdio_entry(self, tmp_path, claude, monkeypatch):
+        events = []
+
+        @contextmanager
+        def fake_stdio(home, project, agent_env, *, claude, load_log, load_seconds):
+            events.append(("up", home.relative_to(tmp_path).as_posix(), project.name))
+            yield
+            events.append(("down",))
+
+        monkeypatch.setattr(server, "stdio_scratchpad", fake_stdio)
+
+        trial = _trial(
+            tmp_path,
+            claude,
+            monkeypatch,
+            "neutral_modpow",
+            "Cpp",
+            [[None, "246"]],
+            FAKE_SERVERS="strata",
+            FAKE_TOOLS="mcp__strata__run,mcp__strata__scratchpad",
+        )
+
+        assert trial.discarded is None and trial.turns[0].passed
+        assert events == [("up", "trial/home", "harbor"), ("down",)]
+
+    def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):
+        command = server.stdio_entry_command(
+            "claude", tmp_path / "harbor", tmp_path / "home", tmp_path / "l.jsonl", 20.0
+        )
+
+        assert command[:6] == ["claude", "mcp", "add-json", "-s", "user", "strata"]
+        entry = json.loads(command[6])
+        assert Path(entry["command"]).name == "strata" and Path(entry["command"]).exists()
+        assert entry["args"] == ["mcp", "--root", str(tmp_path / "harbor")]
+        assert entry["env"]["HOME"] == str(tmp_path / "home")
+        assert entry["env"]["HARBOR_LOAD_LOG"] == str(tmp_path / "l.jsonl")
+        assert (entry["type"], entry["alwaysLoad"]) == ("stdio", True)
+
+    def test_the_stdio_entry_is_written_and_its_daemon_stopped_after(self, tmp_path, monkeypatch):
+        from strata import scratch
+
+        recorder = tmp_path / "claude"
+        recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args"\n')
+        recorder.chmod(0o755)
+        stopped = []
+        monkeypatch.setattr(scratch, "stop_daemon", lambda project: stopped.append(project))
+        project = tmp_path / "harbor"
+
+        with server.stdio_scratchpad(
+            tmp_path / "home",
+            project,
+            dict(os.environ),
+            claude=str(recorder),
+            load_log=tmp_path / "l.jsonl",
+            load_seconds=0,
+        ):
+            assert (tmp_path / "args").read_text().splitlines()[:3] == ["mcp", "add-json", "-s"]
+            assert stopped == []
+
+        assert stopped == [project]
+
+    def test_a_stdio_entry_that_fails_or_a_daemon_that_will_not_stop(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from strata import scratch
+
+        def stuck(project):
+            raise scratch.ScratchError("the scratchpad's server (pid 1) did not stop")
+
+        monkeypatch.setattr(scratch, "stop_daemon", stuck)
+        kw = {"load_log": tmp_path / "l.jsonl", "load_seconds": 0}
+
+        with pytest.raises(server.SetupError, match="add-json failed"):
+            with server.stdio_scratchpad(
+                tmp_path / "h1", tmp_path, dict(os.environ), claude="false", **kw
+            ):
+                pass
+        with server.stdio_scratchpad(
+            tmp_path / "h2", tmp_path, dict(os.environ), claude="true", **kw
+        ):
+            pass
+
+        assert "did not stop" in capsys.readouterr().err
 
     def test_a_server_that_does_not_come_up_discards_the_trial(self, tmp_path, claude, monkeypatch):
         def broken(*args, **kwargs):
@@ -623,6 +710,25 @@ class TestTheReport:
 
         assert main(["report", str(tmp_path / "out"), "--json"]) == 0
         assert json.loads(capsys.readouterr().out)["arms"]["A"]["all"]["completed"]["k"] == 1
+
+    def test_the_cli_runs_several_arms_in_one_seeded_shuffle(
+        self, tmp_path, claude, monkeypatch, capsys
+    ):
+        import random
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        monkeypatch.setenv("FAKE_SCRIPT", json.dumps([[None, "246"]]))
+        monkeypatch.setattr(run, "prepare_workspace", lambda dest, **kw: _small(dest))
+        out = str(tmp_path / "out")
+        argv = ["run", "--arm", "A", "--arm", "B", "--out", out, "--task", "neutral_modpow"]
+
+        assert main([*argv, "--runs", "3", "--seed", "7", "--claude", claude]) == 0
+
+        ran = [line.split(":")[0] for line in capsys.readouterr().out.splitlines()]
+        jobs = [f"{arm} neutral_modpow #{i}" for i in range(3) for arm in ("A", "B")]
+        random.Random(7).shuffle(jobs)
+        assert ran == jobs
+        assert ran != sorted(ran)
 
     def test_the_cli_needs_an_api_key(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

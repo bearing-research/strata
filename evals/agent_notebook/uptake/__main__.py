@@ -1,6 +1,7 @@
 """Run uptake trials, or report on them.
 
 python -m evals.agent_notebook.uptake run --arm A --out runs/ --split train --runs 3
+python -m evals.agent_notebook.uptake run --arm A --arm Cp --out runs/ --split holdout --runs 3
 python -m evals.agent_notebook.uptake report runs/
 """
 
@@ -9,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -20,7 +22,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m evals.agent_notebook.uptake")
     commands = parser.add_subparsers(dest="command", required=True)
     go = commands.add_parser("run", help="run trials into --out, skipping any already there")
-    go.add_argument("--arm", choices=run.ARMS, required=True)
+    go.add_argument(
+        "--arm",
+        choices=run.ARMS,
+        action="append",
+        required=True,
+        help="repeatable: several arms' trials run in one shuffled order",
+    )
+    go.add_argument("--seed", type=int, default=0, help="the shuffle's seed")
     go.add_argument("--out", type=Path, required=True)
     go.add_argument("--task", action="append", default=[], help="a task id; repeatable")
     go.add_argument("--split", choices=("train", "holdout", "all"), default="train")
@@ -55,35 +64,39 @@ def main(argv: list[str] | None = None) -> int:
     else:
         tasks = list(split(holdout=args.split == "holdout"))
     pinned = run.pins(args.model, args.claude)
-    for task in tasks:
-        for index in range(args.runs):
-            trial_dir = args.out / args.arm / task.id / str(index)
-            if (trial_dir / "trial.json").exists():
-                continue
-            if trial_dir.exists():
-                print(f"skipping {trial_dir}: an unfinished trial is there", file=sys.stderr)
-                continue
-            trial = run.run_trial(
-                task,
-                args.arm,
-                index,
-                trial_dir,
-                claude=args.claude,
-                model=args.model,
-                load_seconds=args.load_seconds,
-                pinned=pinned,
-            )
-            state = (
-                f"discarded ({trial.discarded})"
-                if trial.discarded
-                else ("completed" if trial.completed else "failed")
-            )
-            print(
-                f"{args.arm} {task.id} #{index}: {state},"
-                f" {trial.wall_s:.0f}s, strata {trial.strata_calls}",
-                # Written to a log for hours; each line is news when its trial ends.
-                flush=True,
-            )
+    arms = list(dict.fromkeys(args.arm))
+    jobs = [(arm, task, index) for task in tasks for index in range(args.runs) for arm in arms]
+    if len(arms) > 1:
+        # No arm always goes first, or always after the same one: the prompt cache and
+        # the machine's load then favor none.
+        random.Random(args.seed).shuffle(jobs)
+    for arm, task, index in jobs:
+        trial_dir = args.out / arm / task.id / str(index)
+        if (trial_dir / "trial.json").exists():
+            continue
+        if trial_dir.exists():
+            print(f"skipping {trial_dir}: an unfinished trial is there", file=sys.stderr)
+            continue
+        trial = run.run_trial(
+            task,
+            arm,
+            index,
+            trial_dir,
+            claude=args.claude,
+            model=args.model,
+            load_seconds=args.load_seconds,
+            pinned=pinned,
+        )
+        state = (
+            f"discarded ({trial.discarded})"
+            if trial.discarded
+            else ("completed" if trial.completed else "failed")
+        )
+        print(
+            f"{arm} {task.id} #{index}: {state}, {trial.wall_s:.0f}s, strata {trial.strata_calls}",
+            # Written to a log for hours; each line is news when its trial ends.
+            flush=True,
+        )
     return 0
 
 

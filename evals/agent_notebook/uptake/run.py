@@ -27,7 +27,9 @@ from . import workspace as ws
 from .tasks import Task
 
 # Cp is the design's C': arm C with a hand-written MCP entry, before the installer (P4).
-ARMS = ("A", "B", "Cp")
+# Cpp is C' as a user sets it up: `strata mcp` over stdio, its daemon started by the
+# first call, nothing warmed beforehand.
+ARMS = ("A", "B", "Cp", "Cpp")
 MODEL = "claude-opus-5-5"
 REPO = Path(__file__).resolve().parents[3]
 SKILL = REPO / "src" / "strata" / ".agents" / "skills" / "strata-scratchpad"
@@ -186,8 +188,9 @@ def prepare_arm(arm: str, config: Path, bin_dir: Path, path: str) -> None:
     elif arm == "B":
         shutil.copytree(SKILL, config / "skills" / "strata-scratchpad")
         (bin_dir / "strata").symlink_to(Path(sys.executable).parent / "strata")
-    elif arm == "Cp":
-        # Its MCP entry is written once its server is up (server.scratchpad_server).
+    elif arm in ("Cp", "Cpp"):
+        # Its MCP entry is written with the workspace's path (server.scratchpad_server,
+        # server.stdio_scratchpad).
         pass
     else:
         raise ValueError(f"unknown arm {arm!r}; expected one of {ARMS}")
@@ -200,7 +203,7 @@ def preflight(arm: str, init: dict[str, Any] | None) -> str | None:
     servers = {str(s.get("name")): s.get("status") for s in init.get("mcp_servers") or []}
     strata = {name: status for name, status in servers.items() if "strata" in name}
     skill = "strata-scratchpad" in (init.get("skills") or [])
-    if arm == "Cp":
+    if arm in ("Cp", "Cpp"):
         if strata != {server.SERVER_NAME: "connected"}:
             return f"want only {server.SERVER_NAME!r} connected of the strata servers: {strata}"
         missing = sorted(set(server.TOOLS) - set(init.get("tools") or []))
@@ -289,16 +292,11 @@ def run_trial(
     # Before the agent can touch the workspace's data; a files check reads it after.
     expected = task.expected(work)
     try:
+        arm_server = {"Cp": server.scratchpad_server, "Cpp": server.stdio_scratchpad}.get(arm)
+        root = trial_dir / ("home" if arm == "Cpp" else "scratchpad")
         with (
-            server.scratchpad_server(
-                trial_dir / "scratchpad",
-                work,
-                env,
-                claude=claude,
-                load_log=load_log,
-                load_seconds=load_seconds,
-            )
-            if arm == "Cp"
+            arm_server(root, work, env, claude=claude, load_log=load_log, load_seconds=load_seconds)
+            if arm_server
             else nullcontext()
         ):
             _run_turns(
@@ -321,7 +319,8 @@ def shrink(trial_dir: Path) -> None:
     A scratchpad trial holds about 520 MB of them. ``trial.json``, the turns, the cells'
     sources and the workspace's git status (what the agent changed) stay.
     """
-    stores = [trial_dir / "scratchpad" / "artifacts"]
+    # Cpp's HOME holds the daemon's shared environments and registry, nothing the agent made.
+    stores = [trial_dir / "scratchpad" / "artifacts", trial_dir / "home"]
     for root, dirs, _ in os.walk(trial_dir):
         for name in [d for d in dirs if d == ".venv"]:
             stores.append(Path(root, name))
