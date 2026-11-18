@@ -4304,6 +4304,13 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Showing a cell's value no longer imports matplotlib or PIL.</strong> To tell whether a value
+  was a figure or an image, the serializer imported both, so every cold run in an
+  environment with matplotlib paid its import, and the first on a machine (or under a new
+  HOME) built matplotlib's font list: a scratchpad's first <code>run</code> of <code>pow(3, 100, 1009)</code>
+  took 12.6 s. A figure or image implies its library is loaded, so it is now looked up in
+  <code>sys.modules</code>, and a PNG's size is read from its header, not through PIL. That first
+  run now takes 0.46 s, and later runs 0.18 s where they took 0.4 s. (#1580)</li>
 <li><strong>A cell whose value Arrow cannot hold, such as <code>df.dtypes</code>, no longer breaks its
   notebook.</strong> Its display named an unnamed Series's column <code>0</code>, a number, and reading
   that display back failed, so <code>strata status</code>, <code>cell add</code> and every later run raised
