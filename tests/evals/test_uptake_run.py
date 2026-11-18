@@ -92,6 +92,61 @@ class TestATrial:
         saved = json.loads((tmp_path / "trial" / "trial.json").read_text())
         assert saved["completed"] is False and saved["strata_calls"] == 0
 
+    def test_once_scored_it_keeps_its_record_but_not_its_venv(self, tmp_path, claude, monkeypatch):
+        venv = tmp_path / "trial" / "harbor" / ".venv"
+        build = run.prepare_workspace
+
+        def synced(dest, **kw):
+            work = build(dest, **kw)
+            (work / ".venv").mkdir()
+            return work
+
+        monkeypatch.setattr(run, "prepare_workspace", synced)
+        trial = _trial(tmp_path, claude, monkeypatch, "neutral_modpow", "A", [[None, "246"]])
+
+        assert trial.discarded is None
+        assert not venv.exists()
+        assert (tmp_path / "trial" / "trial.json").exists()
+        assert (tmp_path / "trial" / "turn0.jsonl").exists()
+
+    def test_shrinking_removes_venvs_and_artifact_stores_anywhere(self, tmp_path):
+        notebook = tmp_path / "scratchpad" / "notebooks" / "scratch"
+        rebuilt = [
+            tmp_path / "harbor" / ".venv" / "bin",
+            tmp_path / "scratchpad" / "artifacts" / "blobs",
+            notebook / ".venv" / "lib",
+            notebook / ".strata" / "artifacts",
+        ]
+        for path in rebuilt:
+            path.mkdir(parents=True)
+        (notebook / "cells").mkdir()
+        (notebook / "cells" / "a1b2c3d4.py").write_text("x = 1\n")
+        agents_own = tmp_path / "harbor" / "artifacts"
+        agents_own.mkdir()
+        shared = tmp_path / "envs" / "abc"
+        shared.mkdir(parents=True)
+        (tmp_path / "harbor" / "packages").mkdir()
+        (tmp_path / "harbor" / "packages" / ".venv").symlink_to(shared)
+
+        run.shrink(tmp_path)
+
+        assert [p for p in rebuilt if p.exists()] == []
+        assert not (tmp_path / "harbor" / "packages" / ".venv").is_symlink()
+        assert shared.exists() and agents_own.exists()
+        assert (notebook / "cells" / "a1b2c3d4.py").read_text() == "x = 1\n"
+
+    def test_a_store_that_will_not_go_is_reported_not_raised(self, tmp_path, capsys):
+        store = tmp_path / "harbor" / ".venv"
+        store.mkdir(parents=True)
+        (store / "lib").mkdir()
+        store.chmod(0o500)
+        try:
+            run.shrink(tmp_path)
+        finally:
+            store.chmod(0o700)
+
+        assert f"could not remove {store}" in capsys.readouterr().err
+
     def test_an_edit_is_checked_in_the_files(self, tmp_path, claude, monkeypatch):
         fix = (
             f"{sys.executable} -c \"import pathlib; p = pathlib.Path('src/harbor/text.py');"
@@ -528,6 +583,27 @@ class TestTheReport:
         row = report.summarize(trials)["versus_control"]["B"]["iteration"]
 
         assert row["median_wall_ratio"][0] == 0.5
+
+    def test_a_pin_other_than_strata_that_differs_is_a_warning(self):
+        trials = [_saved("A", "iter_west"), _saved("Cp", "iter_west")]
+        trials[0]["pins"] = {"claude_code": "2.1.326", "strata_commit": "aaa"}
+        trials[1]["pins"] = {"claude_code": "2.1.327", "strata_commit": "bbb"}
+
+        assert report.summarize(trials)["warnings"] == [
+            "claude_code differs between trials: 2.1.326 (A), 2.1.327 (Cp)"
+        ]
+
+    def test_pins_of_discarded_runs_and_absent_pins_are_no_warning(self):
+        trials = [
+            _saved("A", "iter_west"),
+            _saved("Cp", "iter_west"),
+            _saved("Cp", "iter_west", discarded="turn 0: no init event"),
+        ]
+        trials[0]["pins"] = {"claude_code": "2.1.327", "uv": "0.13.1"}
+        trials[1]["pins"] = {"claude_code": "2.1.327"}
+        trials[2]["pins"] = {"claude_code": "2.1.326"}
+
+        assert report.summarize(trials)["warnings"] == ["arm Cp: 1 of 2 runs discarded"]
 
     def test_the_cli_runs_trials_once_and_reports(self, tmp_path, claude, monkeypatch, capsys):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")

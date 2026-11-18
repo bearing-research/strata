@@ -56,7 +56,8 @@ uv run python -m evals.agent_notebook.uptake report /tmp/uptake-runs/
 
 `run` skips trials already in `--out`, so an interrupted batch picks up where it
 stopped. Each trial folder keeps the project as the agent left it, each turn's stream,
-the load counter and `trial.json`. A trial is **discarded**, never scored, when a turn's
+the load counter and `trial.json`; once a trial is scored its venvs and artifact stores
+(about 520 MB in Cp) are removed. A trial is **discarded**, never scored, when a turn's
 `system/init` event does not show the arm's setup (in Cp, anything but `strata`
 connected with `run` and `scratchpad` loaded; a strata MCP server in A or B; the skill
 missing in B or present in A or Cp), when Cp's server does not come up, when a turn
@@ -69,4 +70,5 @@ wall time, cost, each rate with its 95% Wilson interval; and each arm against A,
 the tasks both ran: completion and payoff differences (Newcombe) and the ratio of
 median wall times (bootstrap). It warns when more than 10% of an arm's runs were
 discarded or arm A used strata, either of which means the numbers are not to be
-trusted. The model, Claude Code, uv and Strata versions are recorded with each trial.
+trusted. The model, Claude Code, Python, uv and Strata versions are recorded with each
+trial, and it warns when any of them but Strata's differs between trials.

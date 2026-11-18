@@ -311,7 +311,32 @@ def run_trial(
         for turn, expect in zip(trial.turns, expected, strict=True):
             turn.passed = not turn.is_error and expect.passes(turn.reply, work)
     (trial_dir / "trial.json").write_text(json.dumps(trial.to_json(), indent=2))
+    shrink(trial_dir)
     return trial
+
+
+def shrink(trial_dir: Path) -> None:
+    """Remove what only the trial itself needed: its venvs and artifact stores.
+
+    A scratchpad trial holds about 520 MB of them. ``trial.json``, the turns, the cells'
+    sources and the workspace's git status (what the agent changed) stay.
+    """
+    stores = [trial_dir / "scratchpad" / "artifacts"]
+    for root, dirs, _ in os.walk(trial_dir):
+        for name in [d for d in dirs if d == ".venv"]:
+            stores.append(Path(root, name))
+            dirs.remove(name)
+        if Path(root).name == ".strata" and "artifacts" in dirs:
+            stores.append(Path(root, "artifacts"))
+    for path in stores:
+        try:
+            if path.is_symlink():
+                path.unlink()
+            elif path.exists():
+                shutil.rmtree(path)
+        except OSError as exc:
+            # The trial is scored and saved; a batch stopping here would lose the rest.
+            print(f"could not remove {path}: {exc}", file=sys.stderr, flush=True)
 
 
 def _run_turns(
