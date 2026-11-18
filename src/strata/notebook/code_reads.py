@@ -321,7 +321,8 @@ def _name(thing: Any) -> str:
 
 
 _current: Reads | None = None
-_installed = False
+# The audit hook, added once a process: one cannot be removed.
+_hook_added = False
 
 
 def _on_event(event: str, args: tuple[Any, ...]) -> None:
@@ -484,10 +485,10 @@ def recording(excluded: Iterable[str]) -> Generator[Reads]:
     The audit hook stays installed after: one cannot be removed. The finder and the
     loader patches are undone.
     """
-    global _current, _installed
-    if not _installed:
+    global _current, _hook_added
+    if not _hook_added:
         sys.addaudithook(_on_event)
-        _installed = True
+        _hook_added = True
     reads = Reads(excluded)
     finder = _Absences(reads)
     sys.meta_path.insert(0, finder)
