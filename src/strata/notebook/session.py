@@ -67,6 +67,7 @@ from strata.notebook.models import (
     StalenessReason,
     VariantGroupState,
     VariantMember,
+    WorkerSpec,
 )
 from strata.notebook.mounts import local_mount_path, resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
@@ -109,7 +110,9 @@ from strata.notebook.staleness_explanations import (
 from strata.notebook.tables import without_empty_table_nonce
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
+    WorkerBackendType,
     build_worker_catalog,
+    is_embedded_executor_worker,
     one_policy_read,
     resolve_worker_spec,
     worker_runtime_identity,
@@ -1144,6 +1147,7 @@ class NotebookSession:
         stale_cells: set[str] = set()  # for propagation
         to_explain: dict[str, StaleCell] = {}
         test_inputs: dict[str, str] = {}
+        code_lookups: dict[str, str] = {}
         if self.dag is None:
             for cell in self.notebook_state.cells:
                 staleness_map[cell.id] = CellStaleness(status=CellStatus.IDLE)
@@ -1224,8 +1228,11 @@ class NotebookSession:
 
             # A scratchpad cell's result is under its key over what its runs read, as last
             # observed (before the lock).
-            code = self.resolve_code_key(cell_id, key.provenance_hash, observe=False)
-            self._code_lookups[cell_id] = key.provenance_hash
+            if self.keys_on_reads(cell, worker_spec):
+                code = self.resolve_code_key(cell_id, key.provenance_hash, observe=False)
+                code_lookups[cell_id] = key.provenance_hash
+            else:
+                code = Resolved(key.provenance_hash)
             provenance_hash = code.key
 
             # Per-variable hashes: sha256(f"{provenance_hash}:{var_name}").
@@ -1324,6 +1331,11 @@ class NotebookSession:
                 cell.display_outputs = cached_display_outputs or []
                 cell.display_output = cached_display_outputs[-1] if cached_display_outputs else None
 
+        # Only this pass's cells are observed again, and their keys' observations kept.
+        self._code_lookups = code_lookups
+        self._code_seen = {
+            k: v for k, v in self._code_seen.items() if k in set(code_lookups.values())
+        }
         self.causality_map = explain_staleness(self, to_explain)
         # Stale once its last run's record says what moved. Without that the result is not
         # known to be wrong (a run of ``# @nocache``, an input that cannot be read), so idle.
@@ -1883,6 +1895,21 @@ class NotebookSession:
     def code_index(self) -> CodeIndex:
         """A scratchpad's runs by what they read (``code_keys``)."""
         return CodeIndex(self.path)
+
+    def keys_on_reads(self, cell: CellState, worker: WorkerSpec | None) -> bool:
+        """Whether *cell*'s result is keyed on the files its runs read (``code_keys``): a
+        scratchpad's plain Python cell run on this machine. Any other keeps the notebook's
+        key: a worker elsewhere reads files this machine cannot observe, and a loop or a
+        fan-out keys its own outputs."""
+        if not self.notebook_state.scratchpad or cell.language != CellLanguage.PYTHON:
+            return False
+        here = worker is not None and (
+            worker.backend == WorkerBackendType.LOCAL or is_embedded_executor_worker(worker)
+        )
+        if not here:
+            return False
+        annotations = parse_annotations(cell.source, cell.language)
+        return annotations.loop is None and annotations.each is None and not annotations.per_variant
 
     def resolve_code_key(self, cell_id: str, lookup: str, *, observe: bool = True) -> Resolved:
         """The key a scratchpad cell's result under *lookup* is stored under, as what its

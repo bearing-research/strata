@@ -190,6 +190,8 @@ class Observed:
         # Told of each file a native reader reads (a scratchpad's ``code_reads``), which no
         # open event shows.
         self.on_native_read: Callable[[str], None] | None = None
+        # Told of each file a native writer wrote and folder it made (``code_reads``).
+        self.on_native_write: Callable[[str, bool], None] | None = None
 
     @property
     def quiet(self) -> bool:
@@ -278,6 +280,10 @@ class Observed:
                 self.made.add(path)
             elif now is not None and (path not in before or before[path] != now):
                 self.open(path, "w", None)
+            else:
+                continue
+            if self.on_native_write is not None:
+                self.on_native_write(path, now is None)
 
     def native_write_later(self, target: Any) -> None:
         """A writer that writes when collected (a polars ``lazy=True`` sink): its target is

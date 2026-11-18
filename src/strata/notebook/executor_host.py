@@ -21,7 +21,14 @@ if TYPE_CHECKING:
     from strata.notebook.dag import NotebookDag
     from strata.notebook.env import LocalPackages
     from strata.notebook.execution_result import CachedConsole
-    from strata.notebook.models import CellOutput, DatasetSpec, InputWeight, NotebookState
+    from strata.notebook.models import (
+        CellOutput,
+        CellState,
+        DatasetSpec,
+        InputWeight,
+        NotebookState,
+        WorkerSpec,
+    )
     from strata.notebook.pool import WarmProcessPool
     from strata.notebook.session import NotebookSession
 
@@ -75,6 +82,8 @@ class ExecutorHost(Protocol):
     def wired_variables(self, cell_id: str, upstream_id: str) -> set[str]: ...
 
     def collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]: ...
+
+    def keys_on_reads(self, cell: CellState, worker: WorkerSpec | None) -> bool: ...
 
     def resolve_code_key(self, cell_id: str, lookup: str, *, observe: bool = True) -> Resolved: ...
 

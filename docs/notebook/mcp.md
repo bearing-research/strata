@@ -139,11 +139,12 @@ Its `notebook.toml` says `scratchpad = true`, so it keeps every variable a cell 
 read or not: the first cell to read one loads it rather than rerunning the cell that
 made it. A plain notebook stores only what a cell downstream reads.
 
-A scratchpad cell is also keyed on what its run read: each file it opened or
-directory it listed (pyarrow's, polars' and duckdb's readers included), the code it
-imported from outside its environment, and each place an import looked and found
-nothing. A file it only checked with `exists()`, or one a subprocess read, is not
-recorded. Edit `project / "config.yaml"` or a module
+A scratchpad's Python cell run on this machine is also keyed on what its run
+read: each file it opened or directory it listed (pyarrow's, polars' and duckdb's
+readers included), the code it imported from outside its environment, and each
+place an import looked and found nothing. A file it only checked with `exists()`,
+or one a subprocess read, is not recorded, and neither is anything a cell on a
+remote worker reads, keyed as in any notebook. Edit `project / "config.yaml"` or a module
 of the project and the cells that read it go stale with reason `code`
 (`changed_code` names the file), then run again; put the file back and they hit
 again. A cell that changed a file it had read, or whose file changed while it ran,

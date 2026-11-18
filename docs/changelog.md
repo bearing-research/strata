@@ -135,7 +135,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `.pyc`. A run that wrote a file it had read, whose file changed while it ran, or that
   installed an import hook keeps its outputs for that run only, as does a loop or
   `@each` cell that read files; Run All runs a scratchpad's cells one at a time, and a
-  run does not resume a dead run's checkpoint. Plain notebooks are unchanged. (#1585)
+  run does not resume a dead run's checkpoint. A cell on a remote worker, an R, SQL or
+  prompt cell, and a loop or fan-out keep the notebook's key. Plain notebooks are
+  unchanged. (#1585)
 ### Changed
 - **A scratchpad keeps every variable its cells define.** A notebook stores a variable
   only once a cell downstream reads it, so an agent that loaded data in one cell and asked

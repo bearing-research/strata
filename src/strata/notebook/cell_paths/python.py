@@ -441,7 +441,25 @@ async def run_python_cell(
         # ③ Cache check for THIS cell. A scratchpad cell's result is under its key over what
         # its runs read (``code_keys``), as those files are now.
         lookup_hash = provenance_hash
-        if use_cache and fanout_variant is None and host.notebook_state.scratchpad:
+        on_reads = cell is not None and host.keys_on_reads(cell, worker_spec)
+        if use_cache and on_reads:
+            if worker_spec is not None and worker_spec.backend == WorkerBackendType.LOCAL:
+                # Its run is a build of the lookup key, which a revert under the key over
+                # its reads would not see running.
+                try:
+                    await anyio.to_thread.run_sync(
+                        context.local_runs().refuse_if_running, cell_id, lookup_hash
+                    )
+                except RunRefused as exc:
+                    return refused_run(
+                        host,
+                        CellExecutionResult(
+                            cell_id=cell_id,
+                            success=False,
+                            error=str(exc),
+                            execution_method="error",
+                        ),
+                    )
             resolved = await anyio.to_thread.run_sync(
                 host.resolve_code_key, cell_id, provenance_hash
             )
@@ -822,7 +840,7 @@ async def run_python_cell(
                         "are kept for this run only.\n",
                         moved_input=moved,
                     )
-                elif fanout_variant is None:
+                elif on_reads:
                     code_reads, code_stat = code["reads"], code["stat"]
                     provenance_hash = code_key(lookup_hash, code_reads)
                     recorded_code = True

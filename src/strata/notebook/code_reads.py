@@ -22,7 +22,7 @@ import sysconfig
 import threading
 import time
 import zipimport
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from typing import Any
 
@@ -147,15 +147,18 @@ class Reads:
         self.patched: list[tuple[type, str]] = []
         self._own = threading.local()
         self._tracked: dict[str, bool] = {}
+        # Whether this thread is the read audit's own work (listing a native writer's
+        # target), which is not the cell's either.
+        self.audit_quiet: Callable[[], bool] = lambda: False
 
     @property
     def quiet(self) -> bool:
-        return getattr(self._own, "on", False)
+        return getattr(self._own, "on", False) or self.audit_quiet()
 
     @contextmanager
     def own(self) -> Generator[None]:
         """This thread's opens are the recorder's own, not the cell's."""
-        was, self._own.on = self.quiet, True
+        was, self._own.on = getattr(self._own, "on", False), True
         try:
             yield
         finally:
@@ -210,6 +213,13 @@ class Reads:
             seen, print_ = observe(path, listing=True)
         self.listed.add(path)
         self._put(path, seen, print_)
+
+    def native_wrote(self, path: str, is_dir: bool) -> None:
+        """A file a native writer wrote, or a folder it made: the run's own."""
+        if is_dir:
+            self.made(path)
+        else:
+            self.opened(path, "w", None)
 
     def made(self, path: Any) -> None:
         """A directory the cell made: its own, as a file it wrote is."""
@@ -273,7 +283,14 @@ class Reads:
         return issubclass(kind, _KNOWN_LOADERS)
 
     def finish(self) -> dict[str, Any]:
-        """Observe each path again; return the record."""
+        """Observe each path again; return the record. A failure makes it unstable, never
+        the run's failure."""
+        try:
+            return self._finish()
+        except Exception as exc:
+            return {"reads": {}, "stat": {}, "unstable": f"the record failed: {exc!r}"}
+
+    def _finish(self) -> dict[str, Any]:
         self.hooks_changed()
         for name in sorted(set(sys.modules) - self.modules_before):
             spec = getattr(sys.modules.get(name), "__spec__", None)
@@ -355,26 +372,42 @@ class _Absences:
         reads = self.reads
         if reads.quiet:
             return None
+        try:
+            self._record(name, path)
+        except Exception as exc:
+            # The cell's import must not fail on the record; the run is not cached instead.
+            reads._unstable(f"the record failed: {exc!r}")
+        return None
+
+    def _record(self, name: str, path: Any) -> None:
+        reads = self.reads
         reads.hooks_changed()
         if path is None and (
             machinery.BuiltinImporter.find_spec(name) or machinery.FrozenImporter.find_spec(name)
         ):
-            return None  # found before any path is searched
+            return  # found before any path is searched
         tail = name.rpartition(".")[2]
         with reads.own():
-            for entry in sys.path if path is None else path:
-                if isinstance(entry, bytes):
-                    entry = os.fsdecode(entry)
-                if not isinstance(entry, str):
-                    continue
-                if self._search(name, tail, entry):
-                    return None
-        return None
+            searched = (
+                os.fsdecode(e) if isinstance(e, bytes) else e
+                for e in (sys.path if path is None else path)
+            )
+            entries = [
+                (entry, os.path.abspath(entry or os.getcwd()))
+                for entry in searched
+                if isinstance(entry, str)
+            ]
+            # Past the last tracked entry nothing is recorded, as an environment package's
+            # submodule (its own __path__) searches nothing tracked at all.
+            tracked = [i for i, (_, base) in enumerate(entries) if reads.tracked(base)]
+            last = tracked[-1] if tracked else -1
+            for entry, base in entries[: last + 1]:
+                if self._search(name, tail, entry, base):
+                    return
 
-    def _search(self, name: str, tail: str, entry: str) -> bool:
+    def _search(self, name: str, tail: str, entry: str, base: str) -> bool:
         """Whether *entry* holds the module, recording what it lacks on the way."""
         reads = self.reads
-        base = os.path.abspath(entry or os.getcwd())
         if os.path.isfile(base):
             # An archive (a zip): observed whole, as a file read.
             reads.file(base)
@@ -384,7 +417,11 @@ class _Absences:
             except Exception:
                 return False
         importer = sys.path_importer_cache.get(entry)
-        if importer is not None and not isinstance(importer, machinery.FileFinder):
+        if (
+            importer is not None
+            and not isinstance(importer, machinery.FileFinder)
+            and not reads._installed(importer)
+        ):
             reads._unstable(f"{entry} is served by {_name(importer)}")
         track = reads.tracked(base)
         package = os.path.join(base, tail)
@@ -469,12 +506,18 @@ def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
     if config is None:
         yield None
         return
-    with recording([*config["exclude"], manifest.get("output_dir") or ""]) as reads:
+    # A run's own folders (``# @output_dir``) are mounts with no URI; a loop's live
+    # outside its run directory.
+    own = [m["local_path"] for m in (manifest.get("mounts") or {}).values() if not m.get("uri")]
+    with recording([*config["exclude"], manifest.get("output_dir") or "", *own]) as reads:
+        reads.audit_quiet = lambda: observed.quiet
         observed.on_native_read = reads.file
+        observed.on_native_write = reads.native_wrote
         try:
             yield reads
         finally:
             observed.on_native_read = None
+            observed.on_native_write = None
 
 
 @contextmanager

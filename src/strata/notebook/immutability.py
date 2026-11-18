@@ -192,11 +192,10 @@ def _content_fingerprint(value: Any) -> str | None:
 
 
 def _is_pandas(value: Any) -> bool:
-    try:
-        import pandas as pd
-    except ImportError:
-        return False
-    return isinstance(value, (pd.DataFrame, pd.Series))
+    # A frame implies pandas is imported, as for torch: importing it here would be the
+    # harness's import inside a scratchpad run's record of what the cell read.
+    pd = sys.modules.get("pandas")
+    return pd is not None and isinstance(value, (pd.DataFrame, pd.Series))
 
 
 def _hash_pandas_sample(value: Any) -> str | None:
@@ -220,11 +219,8 @@ def _hash_pandas_sample(value: Any) -> str | None:
 
 
 def _is_numpy(value: Any) -> bool:
-    try:
-        import numpy as np
-    except ImportError:
-        return False
-    return isinstance(value, np.ndarray)
+    np = sys.modules.get("numpy")
+    return np is not None and isinstance(value, np.ndarray)
 
 
 def _hash_ndarray_sample(value: Any) -> str | None:

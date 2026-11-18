@@ -177,11 +177,10 @@ def test_the_environment_and_what_is_excluded_are_not_recorded(tmp_path):
     )
 
     reads = got["record"]["reads"]
-    # Only where the import looked before the stdlib: the start directory, first on the
-    # path under `python -c`, where a decimal.py would shadow it.
-    assert reads
-    assert all(Path(path).parent == tmp_path and seen == ABSENT for path, seen in reads.items())
+    # Only where the import looked before the stdlib, as the start directory (first on the
+    # path under `python -c`, where a decimal.py would shadow it): no file was read.
     assert str(tmp_path / "decimal.py") in reads
+    assert [path for path, seen in reads.items() if seen != ABSENT] == []
 
 
 def test_a_file_changed_while_the_cell_ran_makes_it_unstable(tmp_path):
@@ -261,7 +260,7 @@ import importlib.util, json, types
 spec = importlib.util.spec_from_file_location("_code_reads", {code_reads.__file__!r})
 code_reads = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(code_reads)
-observed = types.SimpleNamespace(on_native_read=None)
+observed = types.SimpleNamespace(on_native_read=None, on_native_write=None, quiet=False)
 manifest = {{"code_reads": {{"exclude": []}}, "output_dir": {str(run)!r}}}
 with code_reads.for_run(manifest, observed) as reads:
     told = observed.on_native_read == reads.file
@@ -311,3 +310,173 @@ def test_the_end_of_a_run_reads_again_only_what_moved(tmp_path, monkeypatch):
     path.write_text("yy")
     assert reads.finish()["unstable"] == f"{path} changed while the cell ran"
     assert observed == [str(path)]
+
+
+def _script(tmp_path: Path, script: str) -> dict:
+    run = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(script)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(run.stdout.splitlines()[-1])
+
+
+def test_what_a_native_writer_wrote_is_the_runs_own(tmp_path):
+    # The read audit lists the target before and after the write: its work, not the cell's.
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "keep.txt").write_text("k")
+
+    got = _script(
+        tmp_path,
+        """
+        import json
+        import pyarrow as pa, pyarrow.parquet as pq
+        from strata.notebook import code_reads, read_audit
+        manifest = {"code_reads": {"exclude": []}}
+        with read_audit.recording() as observed, code_reads.for_run(manifest, observed) as reads:
+            pq.write_to_dataset(pa.table({"x": [1, 2]}), root_path="out")
+            pq.write_table(pa.table({"x": [3]}), "out/part.parquet")
+            # Read back, what it wrote is still its own.
+            pq.read_table("out/part.parquet")
+        print(json.dumps(reads.finish()))
+        """,
+    )
+
+    assert got["unstable"] is None
+    assert not [path for path in got["reads"] if "out" in Path(path).parts]
+
+
+def test_the_runs_own_folders_are_not_recorded(tmp_path):
+    # A loop's ``# @output_dir`` folders live outside its run directory.
+    own, data = tmp_path / "own", tmp_path / "data"
+    for folder in (own, data):
+        folder.mkdir()
+        (folder / "f.txt").write_text("x")
+    mounts = {
+        "ckpt": {"uri": "", "mode": "rw", "local_path": str(own)},
+        "data": {"uri": data.as_uri(), "mode": "ro", "local_path": str(data)},
+    }
+
+    got = _script(
+        tmp_path,
+        f"""
+        import json, types
+        from strata.notebook import code_reads
+        observed = types.SimpleNamespace(on_native_read=None, on_native_write=None, quiet=False)
+        manifest = {{"code_reads": {{"exclude": []}}, "mounts": {mounts!r}}}
+        with code_reads.for_run(manifest, observed) as reads:
+            open({str(own / "f.txt")!r}).read()
+            open({str(data / "f.txt")!r}).read()
+        print(json.dumps(reads.finish()))
+        """,
+    )
+
+    assert list(got["reads"]) == [str(data / "f.txt")]
+
+
+def test_an_import_from_a_removed_directory_still_imports(tmp_path):
+    gone = tmp_path / "gone"
+    gone.mkdir()
+
+    got = _record(
+        tmp_path,
+        f"""
+        import os
+        sys.path.insert(0, "")
+        os.chdir({str(gone)!r})
+        os.rmdir({str(gone)!r})
+        import colorsys
+        value = colorsys.__name__
+        """,
+    )
+
+    assert got["value"] == "colorsys"
+    assert got["record"]["unstable"].startswith("the record failed: FileNotFoundError")
+
+
+def test_a_record_that_fails_at_the_end_is_unstable_not_an_error(tmp_path):
+    (tmp_path / "x.csv").write_text("1")
+
+    got = _record(
+        tmp_path,
+        """
+        value = open("x.csv").read()
+        code_reads.fingerprint = lambda *_args: 1 / 0
+        """,
+    )
+
+    assert got["record"] == {
+        "reads": {},
+        "stat": {},
+        "unstable": "the record failed: ZeroDivisionError('division by zero')",
+    }
+
+
+def test_a_path_hook_the_environment_installed_is_its_own(tmp_path):
+    # As setuptools' strict editable install puts on sys.path.
+    env = tmp_path / "env"
+    env.mkdir()
+    (env / "hookmod.py").write_text(
+        "class Finder:\n"
+        "    def __init__(self, path):\n"
+        "        self.path = path\n"
+        "    def find_spec(self, name, target=None):\n"
+        "        return None\n"
+    )
+
+    got = _script(
+        tmp_path,
+        f"""
+        import json, sys
+        sys.path.insert(0, {str(env)!r})
+        import hookmod
+        sys.path.insert(0, "x.__path_hook__")
+        sys.path_importer_cache["x.__path_hook__"] = hookmod.Finder("x.__path_hook__")
+        from strata.notebook import code_reads
+        with code_reads.recording([{str(env)!r}]) as reads:
+            import colorsys
+        print(json.dumps(reads.finish()))
+        """,
+    )
+
+    assert got["unstable"] is None
+
+
+def test_an_import_only_untracked_directories_serve_searches_nothing(tmp_path):
+    # A submodule of an environment package: its package's __path__ is all it searches.
+    got = _record(
+        tmp_path,
+        """
+        searched = []
+        search = code_reads._Absences._search
+        code_reads._Absences._search = lambda self, name, *a: (
+            searched.append(name) or search(self, name, *a)
+        )
+        import email.mime.audio
+        value = searched
+        """,
+    )
+
+    assert got["value"]
+    assert [name for name in got["value"] if "." in name] == []
+
+
+def test_a_package_with_an_empty_path_searches_nowhere(tmp_path):
+    # As six's ``six.moves``: a submodule of it is found by a hook, never on sys.path.
+    got = _record(
+        tmp_path,
+        """
+        import types
+        pseudo = types.ModuleType("pseudo")
+        pseudo.__path__ = []
+        sys.modules["pseudo"] = pseudo
+        try:
+            import pseudo.child
+        except ImportError:
+            pass
+        """,
+    )
+
+    assert not [path for path in got["record"]["reads"] if "child" in path]

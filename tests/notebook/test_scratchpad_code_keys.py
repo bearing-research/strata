@@ -216,3 +216,58 @@ async def test_a_scratchpad_run_does_not_resume_a_dead_runs_checkpoint(scratch):
     again = await _run(scratch, cell.id)
 
     assert "restored False" in again.stdout
+
+
+async def test_a_loop_is_ready_after_its_run(scratch):
+    # A loop keys its outputs on the notebook's key, as its status does.
+    start = scratch.add_cell("state = 0\n")
+    cell = scratch.add_cell("# @loop max_iter=2 carry=state\nstate = state + 1\n", after=start.id)
+    reader = scratch.add_cell("print(state)", after=cell.id)
+    await _run(scratch, reader.id)
+
+    assert _status(scratch, cell.id).status == "ready"
+    assert (await _run(scratch, reader.id)).cache_hit
+
+
+def test_only_a_plain_python_cell_run_here_is_keyed_on_its_reads(scratch):
+    from types import SimpleNamespace
+
+    from strata.notebook.models import WorkerBackendType
+
+    session = scratch._session
+    here = SimpleNamespace(backend=WorkerBackendType.LOCAL, config=SimpleNamespace(url=""))
+    elsewhere = SimpleNamespace(
+        backend=WorkerBackendType.EXECUTOR, config=SimpleNamespace(url="https://w.example")
+    )
+    embedded = SimpleNamespace(
+        backend=WorkerBackendType.EXECUTOR, config=SimpleNamespace(url="embedded://local")
+    )
+    plain = scratch.add_cell("x = 1")
+    loop = scratch.add_cell("# @loop max_iter=2 carry=x\nx = x + 1")
+    cell = session.notebook_state.get_cell
+
+    assert session.keys_on_reads(cell(plain.id), here)
+    assert session.keys_on_reads(cell(plain.id), embedded)
+    assert not session.keys_on_reads(cell(plain.id), elsewhere)
+    assert not session.keys_on_reads(cell(loop.id), here)
+
+
+async def test_a_removed_or_edited_cell_is_observed_no_more(tmp_path, scratch):
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    cell = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    await _run(scratch, cell.id)
+    session = scratch._session
+    session.compute_staleness()
+    before = session._code_lookups[cell.id]
+    assert before in session._code_seen
+
+    scratch.edit_cell(cell.id, f"print(open({str(data)!r}).read(), 1)")
+    session.compute_staleness()
+    assert session._code_lookups[cell.id] != before
+    assert before not in session._code_seen
+
+    scratch.remove_cell(cell.id)
+    session.compute_staleness()
+    assert session._code_lookups == {}
+    assert session._code_seen == {}

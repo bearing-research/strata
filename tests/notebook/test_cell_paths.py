@@ -3518,6 +3518,7 @@ class TestPython:
                 id="nb", get_cell=lambda _id: calls.cell, scratchpad=False
             ),
             dag=SimpleNamespace(each_cells=set(), consumed_variables={"c": set(consumed)}),
+            keys_on_reads=lambda _cell, _worker: False,
             venv_python=Path("venv/python"),
             get_artifact_manager=lambda: SimpleNamespace(
                 cell_artifact_id=lambda cell_id, var, variant=None: f"{cell_id}.{var}",
@@ -3874,6 +3875,46 @@ class TestPython:
 
         assert calls.prepared == [[]]
         assert calls.dispatched[0][1]["resolved_mounts"] == {}
+
+    # A scratchpad
+
+    _READ = {"reads": {"/data.txt": "sha256:abc"}, "stat": {}, "unstable": None}
+
+    async def test_a_cell_not_keyed_on_its_reads_keeps_the_notebook_key(self, monkeypatch):
+        # As a cell on a worker elsewhere: its results are stored under, and found by, the
+        # key every notebook uses, never one over reads this machine did not see.
+        host, context, calls = self._fakes(
+            monkeypatch, worker=self.HTTP, result={"success": True, "code_reads": self._READ}
+        )
+        host.notebook_state.scratchpad = True
+
+        def resolve_code_key(*_args, **_kwargs):
+            raise AssertionError("not keyed on its reads")
+
+        host.resolve_code_key = resolve_code_key
+        host.record_code_reads = resolve_code_key
+
+        await self._run(host, context)
+
+        assert calls.stored[0][0][2] == "prov"
+
+    async def test_a_cell_keyed_on_its_reads_is_refused_while_its_run_runs(self, monkeypatch):
+        # Its run is a build of the lookup key; a revert under the key over its reads would
+        # not see it.
+        def refuse_if_running(cell_id, computation_key):
+            raise RunRefused(f"Cell {cell_id} is already running ({computation_key})")
+
+        host, context, calls = self._fakes(
+            monkeypatch,
+            local_runs=lambda: SimpleNamespace(refuse_if_running=refuse_if_running),
+        )
+        host.notebook_state.scratchpad = True
+        host.keys_on_reads = lambda _cell, _worker: True
+
+        refused = await self._run(host, context)
+
+        assert refused.error == "Cell c is already running (prov)"
+        assert calls.dispatched == []
 
     async def test_an_http_worker_prepares_its_own(self, monkeypatch):
         host, context, calls = self._fakes(monkeypatch, worker=self.HTTP)
