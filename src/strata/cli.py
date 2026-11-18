@@ -37,6 +37,14 @@ from strata.notebook.cli import run_main as _run_main_direct
 from strata.notebook.tutorial import add_tutorial_arguments, tutorial_main
 
 
+def _root_help(what: str) -> str:
+    return (
+        f"The project whose scratchpad (.strata-scratch/) {what}; also STRATA_SCRATCH_ROOT "
+        "(default: the project the command runs in, the nearest directory at or above it "
+        "holding a pyproject.toml, searched up to the git root or home)"
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="strata",
@@ -732,11 +740,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ("status", "Print the running daemon, or say there is none"),
     ):
         sub = scratch_sub.add_parser(name, help=help_text)
-        sub.add_argument(
-            "--root",
-            default=".",
-            help="The project directory holding .strata-scratch/ (default: the current one)",
-        )
+        sub.add_argument("--root", help=_root_help(f"to {name}"))
         sub.set_defaults(func=_dispatch_scratch)
     ls_parser = scratch_sub.add_parser(
         "ls", help="List every scratchpad: size, last use, daemon, overage"
@@ -747,25 +751,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "gc", help="Sweep a scratchpad now, by idle days then its soft limit"
     )
     gc_target = gc_parser.add_mutually_exclusive_group()
-    gc_target.add_argument(
-        "--root", default=".", help="The project whose scratchpad to sweep (default: here)"
-    )
+    gc_target.add_argument("--root", help=_root_help("to sweep"))
     gc_target.add_argument("--all", action="store_true", help="Sweep every listed scratchpad")
     gc_parser.set_defaults(func=_dispatch_scratch_gc)
     rm_parser = scratch_sub.add_parser(
         "rm", help="Stop a scratchpad's daemon and delete .strata-scratch/; costs reruns only"
     )
-    rm_parser.add_argument(
-        "--root", default=".", help="The project whose scratchpad to delete (default: here)"
-    )
+    rm_parser.add_argument("--root", help=_root_help("to delete"))
     rm_parser.set_defaults(func=_dispatch_scratch_rm)
     retire_parser = scratch_sub.add_parser(
         "retire", help="Retire a cell now: its source kept, its values freed by the next sweep"
     )
     retire_parser.add_argument("cell", help="The cell id")
-    retire_parser.add_argument(
-        "--root", default=".", help="The project whose scratchpad holds it (default: here)"
-    )
+    retire_parser.add_argument("--root", help=_root_help("holds it"))
     retire_parser.set_defaults(func=_dispatch_scratch_retire)
 
     mcp_parser = subparsers.add_parser(
@@ -777,11 +775,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "every call runs there. Needs the [mcp] extra."
         ),
     )
-    mcp_parser.add_argument(
-        "--root",
-        default=".",
-        help="The project whose scratchpad to serve (default: the current directory)",
-    )
+    mcp_parser.add_argument("--root", help=_root_help("to serve"))
     mcp_parser.set_defaults(func=_dispatch_mcp)
 
     watch_parser = subparsers.add_parser(
@@ -899,7 +893,9 @@ def _dispatch_mcp(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    return mcp_main(Path(args.root))
+    from strata.scratch import resolve_anchor
+
+    return mcp_main(resolve_anchor(args.root))
 
 
 def _dispatch_scratch(args: argparse.Namespace) -> int:
@@ -909,20 +905,24 @@ def _dispatch_scratch(args: argparse.Namespace) -> int:
 
     from strata import scratch
 
-    root = Path(args.root).expanduser()
+    root = scratch.resolve_anchor(args.root)
     if args.scratch_command == "stop":
         try:
             stopped = scratch.stop_daemon(root)
         except scratch.ScratchError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
-        print("stopped" if stopped else "no scratchpad daemon runs here")
+        print(
+            "stopped"
+            if stopped
+            else f"no scratchpad daemon runs for {root}{scratch.own_scratchpad_note(root)}"
+        )
         return 0
     try:
         if args.scratch_command == "status":
-            running = scratch.find_daemon(root.resolve())
+            running = scratch.find_daemon(root)
             if running is None:
-                print("no scratchpad daemon runs here")
+                print(f"no scratchpad daemon runs for {root}{scratch.own_scratchpad_note(root)}")
                 return 1
         else:
             running = scratch.ensure_daemon(
@@ -999,7 +999,7 @@ def _dispatch_scratch_gc(args: argparse.Namespace) -> int:
     anchors = (
         [Path(anchor) for anchor in scratch.registered()]
         if args.all
-        else [Path(args.root).expanduser().resolve()]
+        else [scratch.resolve_anchor(args.root)]
     )
     swept = {}
     failed = False
@@ -1007,7 +1007,8 @@ def _dispatch_scratch_gc(args: argparse.Namespace) -> int:
         directory = scratch.scratch_dir(anchor)
         if not (directory / "notebook.toml").is_file():
             # The rest are still swept.
-            print(f"error: {anchor} has no scratchpad", file=sys.stderr)
+            note = scratch.own_scratchpad_note(anchor)
+            print(f"error: {anchor} has no scratchpad{note}", file=sys.stderr)
             failed = True
             continue
         # As its daemon reads it, from inside the scratchpad: the same limits.
@@ -1069,10 +1070,11 @@ def _dispatch_scratch_retire(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
     from strata.notebook.scratch_storage import retire_cell, scratch_manager
 
-    anchor = Path(args.root).expanduser().resolve()
+    anchor = scratch.resolve_anchor(args.root)
     directory = scratch.scratch_dir(anchor)
     if not (directory / "notebook.toml").is_file():
-        print(f"error: {anchor} has no scratchpad", file=sys.stderr)
+        note = scratch.own_scratchpad_note(anchor)
+        print(f"error: {anchor} has no scratchpad{note}", file=sys.stderr)
         return 2
     # Held, so no daemon starts while the files are edited here.
     with scratch.daemon_lock(anchor):
@@ -1111,10 +1113,11 @@ def _dispatch_scratch_rm(args: argparse.Namespace) -> int:
 
     from strata import scratch
 
-    anchor = Path(args.root).expanduser().resolve()
+    anchor = scratch.resolve_anchor(args.root)
     directory = scratch.scratch_dir(anchor)
     if not (directory / "notebook.toml").is_file():
-        print(f"error: {anchor} has no scratchpad", file=sys.stderr)
+        note = scratch.own_scratchpad_note(anchor)
+        print(f"error: {anchor} has no scratchpad{note}", file=sys.stderr)
         return 2
     try:
         scratch.stop_daemon(anchor)

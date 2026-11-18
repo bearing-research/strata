@@ -70,6 +70,61 @@ def scratch_dir(anchor: Path) -> Path:
     return anchor / SCRATCH_DIR
 
 
+def find_anchor(start: Path) -> Path:
+    """The project *start* is in: the nearest directory at or above it holding a
+    ``pyproject.toml``, else the git root, else *start*.
+
+    Searched no higher than the git root, so a monorepo's ``services/api/`` with its own
+    ``pyproject.toml`` is its own project and nothing above the repository is one, nor
+    higher than the home directory when *start* is in it, whichever is nearer. A start in
+    a scratchpad (its ``work/``, say) is in the scratchpad's project.
+    """
+    start = start.resolve()
+    # A notebook (a scratchpad too) has a pyproject.toml of its own and is no project.
+    inside = [
+        d
+        for d in [start, *start.parents]
+        if d.name == SCRATCH_DIR or (d / "notebook.toml").is_file()
+    ]
+    if inside:
+        start = inside[-1].parent
+    try:
+        home: Path | None = Path.home().resolve()
+    except RuntimeError:
+        # No HOME and no passwd entry, as in a container run under an arbitrary uid.
+        home = None
+    # Up to the nearer of the git root and home: the first met.
+    for directory in [start, *start.parents]:
+        if (directory / "pyproject.toml").is_file():
+            return directory
+        if (directory / ".git").exists():
+            # A repository with no Python project, from any of its directories, is one;
+            # never home, which a dotfiles repository would make every directory's.
+            return directory if directory != home else start
+        if directory == home:
+            return start
+    return start
+
+
+def own_scratchpad_note(anchor: Path) -> str:
+    """A note for a command that found nothing at *anchor* when the current directory has
+    a scratchpad of its own (made by ``--root``, or by a version that anchored there)."""
+    here = Path.cwd().resolve()
+    if here != anchor and (scratch_dir(here) / "notebook.toml").is_file():
+        return f"; {here} has a scratchpad of its own: --root ."
+    return ""
+
+
+def resolve_anchor(root: str | None) -> Path:
+    """The anchor a command serves: *root* (its ``--root``), else ``STRATA_SCRATCH_ROOT``, as
+    given; else the project the current directory is in (:func:`find_anchor`)."""
+    # An empty --root is the current directory, as a path; an empty variable is unset.
+    given = root if root is not None else os.environ.get("STRATA_SCRATCH_ROOT") or None
+    if given is not None:
+        return Path(given).expanduser().resolve()
+    return find_anchor(Path.cwd())
+
+
 def _record_path(anchor: Path) -> Path:
     return scratch_dir(anchor) / ".strata" / "server.json"
 
