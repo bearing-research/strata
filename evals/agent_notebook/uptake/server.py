@@ -9,6 +9,7 @@ in its ``work/``, not the project's).
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -63,6 +64,7 @@ def _home(root: Path) -> Path:
     return root / "home"
 
 
+@functools.cache
 def _uv_dir(*args: str) -> str:
     return subprocess.run(["uv", *args], capture_output=True, text=True, check=True).stdout.strip()
 
@@ -136,8 +138,6 @@ def stdio_scratchpad(
     load_seconds: float,
 ) -> Iterator[None]:
     """Arm Cpp: its entry written, and the daemon its calls started stopped afterwards."""
-    from strata import scratch
-
     home.mkdir(parents=True)
     with _as_setup_error():
         registered = subprocess.run(
@@ -152,11 +152,28 @@ def stdio_scratchpad(
     try:
         yield
     finally:
-        # Detached, it would idle on for 30 minutes over a trial being cleaned up.
+        _stop_daemon(project)
+
+
+def _stop_daemon(project: Path) -> None:
+    """Stop the daemon a Cpp trial's calls started; detached, it would idle on for 30
+    minutes, loading the machine under later trials and holding files being removed."""
+    from strata import scratch
+
+    if not scratch.scratch_dir(project).exists():
+        return
+    # Under the start lock: a bridge a timed-out turn left behind may still be starting it.
+    with scratch.daemon_lock(project):
         try:
-            scratch.stop_daemon(project)
-        except scratch.ScratchError as exc:
-            print(f"the scratchpad daemon of {project} did not stop: {exc}", file=sys.stderr)
+            running = scratch.find_daemon(project.resolve())
+            if running is not None:
+                try:
+                    scratch.stop_daemon(project)
+                except scratch.ScratchError:
+                    # Busy past the wait: its group, cells and pools with it.
+                    scratch._kill(running.pid)
+        except (scratch.ScratchError, OSError, KeyError, ValueError) as exc:
+            print(f"the scratchpad daemon of {project} did not stop: {exc!r}", file=sys.stderr)
 
 
 def _free_port() -> int:

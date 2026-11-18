@@ -40,7 +40,10 @@ SKILL = REPO / "src" / "strata" / ".agents" / "skills" / "strata-scratchpad"
 _STRATA_COMMAND = r"(?:^|[\s;&|(`/])strata(?:-\w[\w-]*)?(?:\s|$)|\b(?:import|from)\s+strata\b"
 _RUNS_STRATA = re.compile(_STRATA_COMMAND)
 # The variables of the process running the eval that must not reach the agent's.
-_DROP = re.compile(r"^(CLAUDE|ANTHROPIC_(?!API_KEY$)|VIRTUAL_ENV$|PYTHON(PATH|HOME)$|UV_PROJECT)")
+# STRATA_ too: a stdio server, and the daemon it starts, inherit the agent's environment.
+_DROP = re.compile(
+    r"^(CLAUDE|ANTHROPIC_(?!API_KEY$)|STRATA_|VIRTUAL_ENV$|PYTHON(PATH|HOME)$|UV_PROJECT)"
+)
 
 _DENY_HOOK = f"""\
 import json, re, sys
@@ -320,14 +323,19 @@ def shrink(trial_dir: Path) -> None:
     sources and the workspace's git status (what the agent changed) stay.
     """
     # Cpp's HOME holds the daemon's shared environments and registry, nothing the agent made.
-    stores = [trial_dir / "scratchpad" / "artifacts", trial_dir / "home"]
+    _remove([trial_dir / "scratchpad" / "artifacts", trial_dir / "home"])
+    found = []
     for root, dirs, _ in os.walk(trial_dir):
         for name in [d for d in dirs if d == ".venv"]:
-            stores.append(Path(root, name))
+            found.append(Path(root, name))
             dirs.remove(name)
         if Path(root).name == ".strata" and "artifacts" in dirs:
-            stores.append(Path(root, "artifacts"))
-    for path in stores:
+            found.append(Path(root, "artifacts"))
+    _remove(found)
+
+
+def _remove(paths: list[Path]) -> None:
+    for path in paths:
         try:
             if path.is_symlink():
                 path.unlink()

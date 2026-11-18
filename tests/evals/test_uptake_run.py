@@ -326,10 +326,12 @@ class TestArmA:
         monkeypatch.setenv("VIRTUAL_ENV", "/repo/.venv")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
         monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://proxy")
+        monkeypatch.setenv("STRATA_NOTEBOOK_SHARED_ENV_DIR", "/home/me/.strata/envs")
 
         env = run.agent_env(tmp_path / "c", tmp_path / "b", "/usr/bin", tmp_path / "l", 20)
 
         assert "CLAUDECODE" not in env and "VIRTUAL_ENV" not in env
+        assert "STRATA_NOTEBOOK_SHARED_ENV_DIR" not in env
         assert "ANTHROPIC_BASE_URL" not in env and env["ANTHROPIC_API_KEY"] == "k"
         assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path / "c")
         assert env["PATH"].startswith(str(tmp_path / "b"))
@@ -429,50 +431,56 @@ class TestArmCp:
         assert (entry["type"], entry["alwaysLoad"]) == ("stdio", True)
 
     def test_the_stdio_entry_is_written_and_its_daemon_stopped_after(self, tmp_path, monkeypatch):
-        from strata import scratch
-
         recorder = tmp_path / "claude"
         recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args"\n')
         recorder.chmod(0o755)
         stopped = []
-        monkeypatch.setattr(scratch, "stop_daemon", lambda project: stopped.append(project))
+        monkeypatch.setattr(server, "_stop_daemon", stopped.append)
         project = tmp_path / "harbor"
+        kw = {"load_log": tmp_path / "l.jsonl", "load_seconds": 0}
 
         with server.stdio_scratchpad(
-            tmp_path / "home",
-            project,
-            dict(os.environ),
-            claude=str(recorder),
-            load_log=tmp_path / "l.jsonl",
-            load_seconds=0,
+            tmp_path / "home", project, dict(os.environ), claude=str(recorder), **kw
         ):
             assert (tmp_path / "args").read_text().splitlines()[:3] == ["mcp", "add-json", "-s"]
             assert stopped == []
-
         assert stopped == [project]
 
-    def test_a_stdio_entry_that_fails_or_a_daemon_that_will_not_stop(
+        with pytest.raises(server.SetupError, match="add-json failed"):
+            with server.stdio_scratchpad(
+                tmp_path / "h2", project, dict(os.environ), claude="false", **kw
+            ):
+                pass
+
+    def test_a_daemon_that_will_not_stop_is_killed_and_odd_records_reported(
         self, tmp_path, monkeypatch, capsys
     ):
         from strata import scratch
 
-        def stuck(project):
-            raise scratch.ScratchError("the scratchpad's server (pid 1) did not stop")
+        project = tmp_path / "harbor"
+        (scratch.scratch_dir(project) / ".strata").mkdir(parents=True)
+        busy = scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=4242, version="v")
+        killed = []
 
+        def stuck(anchor, timeout=30.0):
+            raise scratch.ScratchError("the scratchpad's server (pid 4242) did not stop")
+
+        monkeypatch.setattr(scratch, "find_daemon", lambda anchor: busy)
         monkeypatch.setattr(scratch, "stop_daemon", stuck)
-        kw = {"load_log": tmp_path / "l.jsonl", "load_seconds": 0}
+        monkeypatch.setattr(scratch, "_kill", killed.append)
 
-        with pytest.raises(server.SetupError, match="add-json failed"):
-            with server.stdio_scratchpad(
-                tmp_path / "h1", tmp_path, dict(os.environ), claude="false", **kw
-            ):
-                pass
-        with server.stdio_scratchpad(
-            tmp_path / "h2", tmp_path, dict(os.environ), claude="true", **kw
-        ):
-            pass
+        server._stop_daemon(project)
+        assert killed == [4242]
 
-        assert "did not stop" in capsys.readouterr().err
+        def torn(anchor):
+            raise KeyError("pid")
+
+        monkeypatch.setattr(scratch, "find_daemon", torn)
+        server._stop_daemon(project)
+        assert "did not stop: KeyError('pid')" in capsys.readouterr().err
+        # No scratchpad at all: nothing to stop, no lock file made.
+        server._stop_daemon(tmp_path / "untouched")
+        assert not (tmp_path / "untouched").exists()
 
     def test_a_server_that_does_not_come_up_discards_the_trial(self, tmp_path, claude, monkeypatch):
         def broken(*args, **kwargs):
@@ -714,8 +722,6 @@ class TestTheReport:
     def test_the_cli_runs_several_arms_in_one_seeded_shuffle(
         self, tmp_path, claude, monkeypatch, capsys
     ):
-        import random
-
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
         monkeypatch.setenv("FAKE_SCRIPT", json.dumps([[None, "246"]]))
         monkeypatch.setattr(run, "prepare_workspace", lambda dest, **kw: _small(dest))
@@ -725,10 +731,14 @@ class TestTheReport:
         assert main([*argv, "--runs", "3", "--seed", "7", "--claude", claude]) == 0
 
         ran = [line.split(":")[0] for line in capsys.readouterr().out.splitlines()]
-        jobs = [f"{arm} neutral_modpow #{i}" for i in range(3) for arm in ("A", "B")]
-        random.Random(7).shuffle(jobs)
-        assert ran == jobs
-        assert ran != sorted(ran)
+        assert sorted(ran) == sorted(f"{a} neutral_modpow #{i}" for a in "AB" for i in range(3))
+        # Neither arm-major nor the plain round-robin a loop would give.
+        arms = [line.split()[0] for line in ran]
+        assert arms not in (["A"] * 3 + ["B"] * 3, ["B"] * 3 + ["A"] * 3, ["A", "B"] * 3)
+        # The seed alone fixes the order.
+        shutil.rmtree(tmp_path / "out")
+        assert main([*argv, "--runs", "3", "--seed", "7", "--claude", claude]) == 0
+        assert [line.split(":")[0] for line in capsys.readouterr().out.splitlines()] == ran
 
     def test_the_cli_needs_an_api_key(self, tmp_path, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
