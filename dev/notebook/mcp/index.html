@@ -3374,7 +3374,19 @@ and shared environments under <code>~/.strata</code>, as a personal server does.
 Cells read the project read-only as <code>project</code> (<code>project / "data.csv"</code>).
 Its <code>notebook.toml</code> says <code>scratchpad = true</code>, so it keeps every variable a cell defines,
 read or not: the first cell to read one loads it rather than rerunning the cell that
-made it. A plain notebook stores only what a cell downstream reads.
+made it. A plain notebook stores only what a cell downstream reads.</p>
+<p>A scratchpad's Python cell run on this machine is also keyed on what its run
+read: each file it opened or directory it listed (pyarrow's, polars' and duckdb's
+readers included), the code it imported from outside its environment, and each
+place an import looked and found nothing. A file it only checked with <code>exists()</code>,
+or one a subprocess read, is not recorded, and neither is anything a cell on a
+remote worker reads, keyed as in any notebook. Edit <code>project / "config.yaml"</code> or a module
+of the project and the cells that read it go stale with reason <code>code</code>
+(<code>changed_code</code> names the file), then run again; put the file back and they hit
+again. A cell that changed a file it had read, or whose file changed while it ran,
+keeps its outputs for that run only, as does a loop or <code>@each</code> cell that read
+files. Run All runs a scratchpad's cells one at a time, so each run records its
+own reads, and a run never resumes a dead run's checkpoint, whose reads are unknown.
 <code>strata scratch status</code> prints the running daemon and <code>strata scratch stop</code>
 stops it. Once it is stopped, deleting <code>.strata-scratch/</code> costs reruns, nothing else.</p>
 <p>A scratchpad keeps superseded results, so reverting an edit hits again, and its
@@ -3452,7 +3464,7 @@ on the daemon too. Needs the <code>[mcp]</code> extra.</p>
 </tr>
 <tr>
 <td><code>status(session_id)</code></td>
-<td>Per-cell status + staleness summary. A ready cell's <code>changed_reads</code> lists files it read without declaring them that changed since: its result may be out of date, and only a <code>rerun</code> reads them again.</td>
+<td>Per-cell status + staleness summary. A ready cell's <code>changed_reads</code> lists files it read without declaring them that changed since: its result may be out of date, and only a <code>rerun</code> reads them again. A scratchpad cell stale for <code>code</code> has <code>changed_code</code>, the file its last run read that changed.</td>
 </tr>
 <tr>
 <td><code>run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)</code></td>

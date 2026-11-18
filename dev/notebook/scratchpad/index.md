@@ -106,6 +106,10 @@ optional, since it is your workspace and some people keep it.
     that reads a file you are not changing is fine as it is, and is the case
     the pin exists for.
 
+    The scratchpad that `strata scratch` and `strata mcp` set up has no such trap:
+    it keys each cell on the files its run read
+    ([A project's own daemon](https://bearingresearch.com/strata/dev/notebook/mcp/#a-projects-own-daemon)).
+
 ## Why it beats a temp script
 
 - **Unchanged work never recomputes.** Every cell is cached by provenance

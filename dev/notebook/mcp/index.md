@@ -150,6 +150,19 @@ Cells read the project read-only as `project` (`project / "data.csv"`).
 Its `notebook.toml` says `scratchpad = true`, so it keeps every variable a cell defines,
 read or not: the first cell to read one loads it rather than rerunning the cell that
 made it. A plain notebook stores only what a cell downstream reads.
+
+A scratchpad's Python cell run on this machine is also keyed on what its run
+read: each file it opened or directory it listed (pyarrow's, polars' and duckdb's
+readers included), the code it imported from outside its environment, and each
+place an import looked and found nothing. A file it only checked with `exists()`,
+or one a subprocess read, is not recorded, and neither is anything a cell on a
+remote worker reads, keyed as in any notebook. Edit `project / "config.yaml"` or a module
+of the project and the cells that read it go stale with reason `code`
+(`changed_code` names the file), then run again; put the file back and they hit
+again. A cell that changed a file it had read, or whose file changed while it ran,
+keeps its outputs for that run only, as does a loop or `@each` cell that read
+files. Run All runs a scratchpad's cells one at a time, so each run records its
+own reads, and a run never resumes a dead run's checkpoint, whose reads are unknown.
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
 
@@ -207,7 +220,7 @@ on the daemon too. Needs the `[mcp]` extra.
 | `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. For a swept variable, each variant's cell and the name `lineage` takes for it. |
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
-| `status(session_id)` | Per-cell status + staleness summary. A ready cell's `changed_reads` lists files it read without declaring them that changed since: its result may be out of date, and only a `rerun` reads them again. |
+| `status(session_id)` | Per-cell status + staleness summary. A ready cell's `changed_reads` lists files it read without declaring them that changed since: its result may be out of date, and only a `rerun` reads them again. A scratchpad cell stale for `code` has `changed_code`, the file its last run read that changed. |
 | `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. A cell that raised has its `traceback` and `traceback_full`; `run_diagnostics` names what the run read without declaring it, each with its fix. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
 | `cancel_cell(session_id, cell_id)` | Cancel the cell's run, whoever started it, as the browser's stop button does: the run stops and the cell is left idle. A `run_cell` waiting on it returns `status: error` with `error_code: cancelled`. Returns `{cell_id, cancelled, status}`; `cancelled` is `false` when the cell was not running. |
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |

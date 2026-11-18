@@ -3304,6 +3304,9 @@ cell stale.</p>
 <a href="../../reference/annotations/python/#nocache"><code># @nocache</code></a>, the same as a clock read. A cell
 that reads a file you are not changing is fine as it is, and is the case
 the pin exists for.</p>
+<p>The scratchpad that <code>strata scratch</code> and <code>strata mcp</code> set up has no such trap:
+it keys each cell on the files its run read
+(<a href="../mcp/#a-projects-own-daemon">A project's own daemon</a>).</p>
 </div>
 <h2 id="why-it-beats-a-temp-script">Why it beats a temp script<a class="headerlink" href="#why-it-beats-a-temp-script" title="Permanent link">&para;</a></h2>
 <ul>
