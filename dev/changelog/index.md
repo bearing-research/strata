@@ -132,6 +132,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   setting of your own winning), as uv does off macOS: there uv clones them, and macOS
   checks each new binary on its first load, 2 s of the first cell. On a Mac, a first
   call's median went from 4.3 s to 2.3 s. (#1583)
+- **A scratchpad belongs to the project a command runs in, not to its directory.** `strata
+  mcp` and the `strata scratch` commands serve the scratchpad of the nearest directory at
+  or above where they run that holds a `pyproject.toml`, searched no higher than the git
+  root or the home directory, whichever is nearer, so an agent started in `src/` uses the
+  project's scratchpad. With none found, the repository is the project (never the home
+  directory), or outside one the directory itself; a notebook directory is never one.
+  `--root DIR`, or `STRATA_SCRATCH_ROOT`, names it instead. (#1584)
 - **A scratchpad keeps every variable its cells define.** A notebook stores a variable
   only once a cell downstream reads it, so an agent that loaded data in one cell and asked
   about it in the next ran the load twice: the first reader reran the cell that made it.

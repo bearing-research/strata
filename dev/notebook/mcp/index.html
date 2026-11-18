@@ -3347,10 +3347,21 @@ cannot be read, a busy notebook, which leaves the cells as they were)
 returns <code>status: error</code> with a <code>fix</code> line naming the next step. The other tools
 stay registered and callable by name; <code>STRATA_MCP_TOOLS=all</code> lists them too.</p>
 <h3 id="a-projects-own-daemon">A project's own daemon<a class="headerlink" href="#a-projects-own-daemon" title="Permanent link">&para;</a></h3>
-<p><code>strata scratch start</code> in a project (or <code>--root DIR</code>) creates
-<code>.strata-scratch/</code> there, a notebook with its own <code>.gitignore</code> of <code>*</code>, so the
-project's git never sees it and its <code>.gitignore</code> is left alone. It then starts
-a server for it on a free loopback port, with the scratchpad profile and
+<p>A scratchpad belongs to a project, found from where a command runs: the nearest
+directory at or above it that holds a <code>pyproject.toml</code>, searched no higher than
+the git repository's root or your home directory, whichever is nearer. So in a
+monorepo, <code>services/api/</code> with its own <code>pyproject.toml</code> is its own project, and a
+command run in its <code>src/</code> serves <code>services/api/</code>'s scratchpad. With no
+<code>pyproject.toml</code> found, the repository is the project (never your home directory,
+should it be one), or outside one the directory itself. A command run inside a
+notebook, <code>.strata-scratch/</code> included, serves the project the notebook is in.
+<code>--root DIR</code> on any <code>strata scratch</code> command or on <code>strata mcp</code>, or
+<code>STRATA_SCRATCH_ROOT</code> for a config that cannot pass arguments, names the project
+instead.</p>
+<p><code>strata scratch start</code> in a project creates <code>.strata-scratch/</code> at its root, a
+notebook with its own <code>.gitignore</code> of <code>*</code>, so the project's git never sees it and
+its <code>.gitignore</code> is left alone. It then starts a server for it on a free loopback
+port, with the scratchpad profile and
 <code>STRATA_IDLE_EXIT_MINUTES=30</code> (or the value already set), opens the notebook and
 waits for its environment. The daemon's address, pid and session are written to
 <code>.strata-scratch/.strata/server.json</code>, so the next client finds it instead of
@@ -3395,9 +3406,10 @@ config starts as a command:</p>
 <p>It answers the handshake and the tool list itself, so a session that never calls
 a tool starts nothing. The first tool call finds the project's daemon or starts
 it (creating <code>.strata-scratch/</code> if needed), and every call runs there. The
-project is the directory <code>strata mcp</code> starts in, or <code>--root DIR</code>. While the
-scratchpad is set up, each step is sent as MCP progress when the call asks for
-it, and the result of a call that had to set it up carries <code>setup_ms</code>, the
+project is the one <code>strata mcp</code> starts in
+(<a href="#a-projects-own-daemon">A project's own daemon</a>). While the scratchpad is set
+up, each step is sent as MCP progress when the call asks for it, and the result
+of a call that had to set it up carries <code>setup_ms</code>, the
 milliseconds each step took. A call that cannot reach the daemon (it stopped while
 idle) starts it again and is sent once more; a call the agent cancels is cancelled
 on the daemon too. Needs the <code>[mcp]</code> extra.</p>

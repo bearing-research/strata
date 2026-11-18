@@ -3442,7 +3442,7 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 </tr>
 <tr>
 <td><code>uv run strata scratch start\|stop\|status [--root DIR]</code></td>
-<td>Start, stop or show a project's scratchpad daemon: a server with the <a href="../../notebook/mcp/#a-projects-own-daemon">scratchpad MCP profile</a> serving <code>&lt;DIR&gt;/.strata-scratch/</code>, which it creates on first start. One per project, shared by every client there; it stops itself after 30 idle minutes.</td>
+<td>Start, stop or show a project's scratchpad daemon: a server with the <a href="../../notebook/mcp/#a-projects-own-daemon">scratchpad MCP profile</a> serving <code>&lt;DIR&gt;/.strata-scratch/</code>, which it creates on first start. <code>DIR</code> defaults to the project the command runs in: the nearest directory at or above it holding a <code>pyproject.toml</code>, within its git repository, else the repository (<a href="../../notebook/mcp/#a-projects-own-daemon">which project</a>). One per project, shared by every client there; it stops itself after 30 idle minutes.</td>
 </tr>
 <tr>
 <td><code>uv run strata scratch ls\|gc\|rm\|retire</code></td>

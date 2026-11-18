@@ -4802,6 +4802,11 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>How long a scratchpad's leaf cell with no <code># @name</code> may go unused (not run, edited or shown by <code>scratchpad</code>) before it is retired: its source and tests are kept in <code>.strata-scratch/retired.jsonl</code>, it leaves the notebook, and the next sweep frees every value it stored. <code>0</code> retires nothing.</td>
 </tr>
 <tr>
+<td><code>STRATA_SCRATCH_ROOT</code></td>
+<td>the project the command runs in</td>
+<td>The project whose scratchpad <code>strata scratch</code> and <code>strata mcp</code> use when <code>--root</code> is not given. Unset, it is the nearest directory with a <code>pyproject.toml</code> at or above the working directory, searched no higher than the git root or the home directory, whichever is nearer; else the repository (never the home directory); else the working directory. A notebook directory, <code>.strata-scratch/</code> included, is never the project. Environment only.</td>
+</tr>
+<tr>
 <td><code>STRATA_SCRATCH_ANCHOR</code></td>
 <td>unset</td>
 <td>Set by <code>strata scratch</code> on the daemon it starts, never by hand: the project whose scratchpad this server sweeps and lists.</td>
