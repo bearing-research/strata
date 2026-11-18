@@ -798,8 +798,6 @@ class TestScanPlaneOnFirstUse:
         state._fetch_executor.shutdown()
 
     def test_threads_asking_at_once_get_one_planner(self, state, monkeypatch):
-        import strata.planner
-
         built = []
         entered = threading.Event()
         release = threading.Event()
@@ -810,7 +808,7 @@ class TestScanPlaneOnFirstUse:
                 entered.set()
                 release.wait(10)
 
-        monkeypatch.setattr(strata.planner, "ReadPlanner", Planner)
+        monkeypatch.setattr("strata.planner.ReadPlanner", Planner)
         got = []
         threads = [threading.Thread(target=lambda: got.append(state.planner)) for _ in range(4)]
         threads[0].start()
@@ -824,8 +822,6 @@ class TestScanPlaneOnFirstUse:
         assert len(built) == 1 and got == built * 4
 
     def test_closing_waits_for_a_planner_being_built(self, state, monkeypatch):
-        import strata.planner
-
         entered = threading.Event()
         release = threading.Event()
         closed = []
@@ -838,7 +834,7 @@ class TestScanPlaneOnFirstUse:
             def close(self):
                 closed.append(self)
 
-        monkeypatch.setattr(strata.planner, "ReadPlanner", Planner)
+        monkeypatch.setattr("strata.planner.ReadPlanner", Planner)
         building = threading.Thread(target=lambda: state.planner)
         building.start()
         entered.wait(10)
@@ -851,15 +847,12 @@ class TestScanPlaneOnFirstUse:
         assert closed == [state.built_planner]
 
     def test_a_planner_never_built_is_not_closed(self, state, monkeypatch):
-        import strata.planner
-
-        monkeypatch.setattr(strata.planner, "ReadPlanner", None)
+        monkeypatch.setattr("strata.planner.ReadPlanner", None)
         state.close_scan_plane()
 
         assert state.built_planner is None
 
     def test_an_artifact_input_resolves_without_a_planner(self, state, monkeypatch):
-        import strata.server
         from strata.api.dependencies import _input_resolution
 
         class Store:
@@ -869,11 +862,9 @@ class TestScanPlaneOnFirstUse:
         def no_planner(config):
             raise AssertionError("a planner was built")
 
-        import strata.planner
-
-        monkeypatch.setattr(strata.planner, "ReadPlanner", no_planner)
-        monkeypatch.setattr(strata.server, "_state", state)
-        monkeypatch.setattr(strata.server, "_get_artifact_store", lambda **kwargs: Store())
+        monkeypatch.setattr("strata.planner.ReadPlanner", no_planner)
+        monkeypatch.setattr("strata.server._state", state)
+        monkeypatch.setattr("strata.server._get_artifact_store", lambda **kwargs: Store())
 
         _, resolve, _ = _input_resolution("strata://artifact/abc@v=2", None)
 
