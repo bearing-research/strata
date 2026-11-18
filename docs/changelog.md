@@ -135,9 +135,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A scratchpad belongs to the project a command runs in, not to its directory.** `strata
   mcp` and the `strata scratch` commands serve the scratchpad of the nearest directory at
   or above where they run that holds a `pyproject.toml`, searched no higher than the git
-  root (outside a repository, no higher than the home directory), so an agent started in
-  `src/` uses the project's scratchpad. With none found, the directory itself is the
-  project. `--root DIR`, or `STRATA_SCRATCH_ROOT`, names it instead. (#1584)
+  root or the home directory, whichever is nearer, so an agent started in `src/` uses the
+  project's scratchpad. With none found, the repository is the project, or outside one
+  the directory itself. `--root DIR`, or `STRATA_SCRATCH_ROOT`, names it instead. (#1584)
 - **A scratchpad keeps every variable its cells define.** A notebook stores a variable
   only once a cell downstream reads it, so an agent that loaded data in one cell and asked
   about it in the next ran the load twice: the first reader reran the cell that made it.

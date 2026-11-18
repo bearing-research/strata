@@ -72,31 +72,41 @@ def scratch_dir(anchor: Path) -> Path:
 
 def find_anchor(start: Path) -> Path:
     """The project *start* is in: the nearest directory at or above it holding a
-    ``pyproject.toml``, else *start*.
+    ``pyproject.toml``, else the git root, else *start*.
 
     Searched no higher than the git root, so a monorepo's ``services/api/`` with its own
-    ``pyproject.toml`` is its own project and nothing above the repository is one. Outside
-    a repository, no higher than the home directory when *start* is in it.
+    ``pyproject.toml`` is its own project and nothing above the repository is one, nor
+    higher than the home directory when *start* is in it, whichever is nearer. A start in
+    a scratchpad (its ``work/``, say) is in the scratchpad's project.
     """
     start = start.resolve()
-    home = Path.home().resolve()
+    inside = [d for d in [start, *start.parents] if d.name == SCRATCH_DIR]
+    if inside:
+        start = inside[-1].parent
     candidates = [start, *start.parents]
-    bound = next((d for d in candidates if (d / ".git").exists()), None)
-    if bound is None and start.is_relative_to(home):
-        bound = home
+    repo = next((d for d in candidates if (d / ".git").exists()), None)
+    try:
+        home: Path | None = Path.home().resolve()
+    except RuntimeError:
+        # No HOME and no passwd entry, as in a container run under an arbitrary uid.
+        home = None
+    bounds = [repo, home if home is not None and start.is_relative_to(home) else None]
+    bound = max((b for b in bounds if b is not None), key=lambda b: len(b.parts), default=None)
     for directory in candidates:
         if (directory / "pyproject.toml").is_file():
             return directory
         if directory == bound:
             break
-    return start
+    # A repository with no Python project, served from any of its directories, is one.
+    return repo if repo is not None and repo == bound else start
 
 
 def resolve_anchor(root: str | None) -> Path:
     """The anchor a command serves: *root* (its ``--root``), else ``STRATA_SCRATCH_ROOT``, as
     given; else the project the current directory is in (:func:`find_anchor`)."""
-    given = root or os.environ.get("STRATA_SCRATCH_ROOT")
-    if given:
+    # An empty --root is the current directory, as a path; an empty variable is unset.
+    given = root if root is not None else os.environ.get("STRATA_SCRATCH_ROOT") or None
+    if given is not None:
         return Path(given).expanduser().resolve()
     return find_anchor(Path.cwd())
 

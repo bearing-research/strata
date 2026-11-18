@@ -42,8 +42,8 @@ def test_nothing_above_the_git_root_is_a_project(tmp_path):
     _projects(tmp_path, "outer")
     _dirs(tmp_path, "outer/repo/.git", "outer/repo/sub")
 
-    start = tmp_path / "outer/repo/sub"
-    assert scratch.find_anchor(start) == start
+    # With no project in it, the repository is one, from any of its directories.
+    assert scratch.find_anchor(tmp_path / "outer/repo/sub") == tmp_path / "outer/repo"
 
 
 def test_a_worktrees_git_file_bounds_it_too(tmp_path):
@@ -52,8 +52,7 @@ def test_a_worktrees_git_file_bounds_it_too(tmp_path):
     _dirs(tmp_path, "outer/wt/sub")
     (tmp_path / "outer/wt/.git").write_text("gitdir: elsewhere\n")
 
-    start = tmp_path / "outer/wt/sub"
-    assert scratch.find_anchor(start) == start
+    assert scratch.find_anchor(tmp_path / "outer/wt/sub") == tmp_path / "outer/wt"
 
 
 def test_outside_a_repository_nothing_above_home_is_a_project(tmp_path, monkeypatch):
@@ -65,6 +64,33 @@ def test_outside_a_repository_nothing_above_home_is_a_project(tmp_path, monkeypa
 
     assert scratch.find_anchor(home / "proj/a/b") == home / "proj"
     assert scratch.find_anchor(home / "loose/c") == home / "loose/c"
+
+
+def test_home_bounds_it_below_a_repository_above_home(tmp_path, monkeypatch):
+    # A checkout above home (``/``, in some containers) is not the search's bound.
+    tmp_path = tmp_path.resolve()
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    _projects(tmp_path, ".")
+    _dirs(tmp_path, ".git", "home/loose/c")
+
+    assert scratch.find_anchor(home / "loose/c") == home / "loose/c"
+
+
+def test_with_no_home_directory_the_repository_bounds_it(repo, monkeypatch):
+    def no_home(cls):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", classmethod(no_home))
+    assert scratch.find_anchor(repo / "services/api/src") == repo / "services/api"
+
+
+def test_a_start_inside_a_scratchpad_is_in_its_project(repo):
+    _projects(repo, ".strata-scratch")
+    _dirs(repo, ".strata-scratch/work/out")
+
+    assert scratch.find_anchor(repo / ".strata-scratch/work/out") == repo
+    assert scratch.find_anchor(repo / ".strata-scratch") == repo
 
 
 def test_outside_home_and_any_repository_the_search_goes_up(tmp_path, monkeypatch):
@@ -84,12 +110,16 @@ def test_a_given_root_is_the_anchor_as_given(repo, monkeypatch):
     monkeypatch.setenv("STRATA_SCRATCH_ROOT", str(repo / "docs"))
     assert scratch.resolve_anchor(None) == repo / "docs"
     assert scratch.resolve_anchor(str(repo / "services")) == repo / "services"
+    # An empty --root is the current directory, never a search.
+    assert scratch.resolve_anchor("") == repo / "services/api/src"
+    monkeypatch.setenv("STRATA_SCRATCH_ROOT", "")
+    assert scratch.resolve_anchor(None) == repo / "services/api"
 
 
-def test_the_cli_serves_the_project_it_is_run_in(repo, project):
+def test_the_cli_serves_the_project_it_is_run_in(repo):
     """``strata scratch rm`` from a subdirectory acts on the project's scratchpad."""
-    env = {**os.environ, "HOME": str(Path.home())}
-    env.pop("STRATA_SCRATCH_ROOT", None)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("STRATA_")}
+    env["HOME"] = str(Path.home())
     removed = subprocess.run(
         [sys.executable, "-m", "strata.cli", "scratch", "rm"],
         cwd=repo / "services/api/src",

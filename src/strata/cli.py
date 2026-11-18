@@ -39,7 +39,7 @@ from strata.notebook.tutorial import add_tutorial_arguments, tutorial_main
 _ROOT_HELP = (
     "The project whose scratchpad (.strata-scratch/) this is; also STRATA_SCRATCH_ROOT "
     "(default: the nearest directory at or above the current one holding a pyproject.toml, "
-    "within its git repository, else the current one)"
+    "within its git repository, else the repository, else the current one)"
 )
 
 
@@ -914,7 +914,7 @@ def _dispatch_scratch(args: argparse.Namespace) -> int:
         return 0
     try:
         if args.scratch_command == "status":
-            running = scratch.find_daemon(root.resolve())
+            running = scratch.find_daemon(root)
             if running is None:
                 print("no scratchpad daemon runs here")
                 return 1

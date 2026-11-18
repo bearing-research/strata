@@ -123,10 +123,11 @@ stay registered and callable by name; `STRATA_MCP_TOOLS=all` lists them too.
 
 A scratchpad belongs to a project, found from where a command runs: the nearest
 directory at or above it that holds a `pyproject.toml`, searched no higher than
-the git repository's root (outside a repository, no higher than your home
-directory). So in a monorepo, `services/api/` with its own `pyproject.toml` is
-its own project, and a command run in its `src/` serves `services/api/`'s
-scratchpad. With no `pyproject.toml` found, the directory itself is the project.
+the git repository's root or your home directory, whichever is nearer. So in a
+monorepo, `services/api/` with its own `pyproject.toml` is its own project, and a
+command run in its `src/` serves `services/api/`'s scratchpad. With no
+`pyproject.toml` found, the repository is the project, or outside one the directory
+itself. A command run inside `.strata-scratch/` serves the project it belongs to.
 `--root DIR` on any `strata scratch` command or on `strata mcp`, or
 `STRATA_SCRATCH_ROOT` for a config that cannot pass arguments, names the project
 instead.
@@ -185,7 +186,7 @@ config starts as a command:
 It answers the handshake and the tool list itself, so a session that never calls
 a tool starts nothing. The first tool call finds the project's daemon or starts
 it (creating `.strata-scratch/` if needed), and every call runs there. The
-project is the one `strata mcp` starts in (below). While the
+project is the one `strata mcp` starts in ([A project's own daemon](#a-projects-own-daemon)). While the
 scratchpad is set up, each step is sent as MCP progress when the call asks for
 it, and the result of a call that had to set it up carries `setup_ms`, the
 milliseconds each step took. A call that cannot reach the daemon (it stopped while
