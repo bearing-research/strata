@@ -129,7 +129,7 @@ exhaustive commit history.
   scratchpad's environment links its files from uv's cache (`UV_LINK_MODE=hardlink`, a
   setting of your own winning), as uv does off macOS: there uv clones them, and macOS
   checks each new binary on its first load, 2 s of the first cell. On a Mac, a first
-  call's median went from 4.3 s to 2.3 s. (#PRNUM)
+  call's median went from 4.3 s to 2.3 s. (#1583)
 - **A scratchpad keeps every variable its cells define.** A notebook stores a variable
   only once a cell downstream reads it, so an agent that loaded data in one cell and asked
   about it in the next ran the load twice: the first reader reran the cell that made it.
