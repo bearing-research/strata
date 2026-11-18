@@ -212,7 +212,7 @@ def test_a_daemon_that_does_not_say_whether_it_is_busy_is_busy(monkeypatch, answ
 
 
 def test_the_daemon_keeps_the_personal_caches_and_none_of_the_callers_config(tmp_path, monkeypatch):
-    for key in [k for k in os.environ if k.startswith("STRATA_")]:
+    for key in [k for k in os.environ if k.startswith("STRATA_") or k == "UV_LINK_MODE"]:
         monkeypatch.delenv(key)
     anchor = tmp_path / "project"
     (anchor / ".strata-scratch" / ".strata").mkdir(parents=True)
@@ -228,6 +228,8 @@ def test_the_daemon_keeps_the_personal_caches_and_none_of_the_callers_config(tmp
     # Not beside the storage dir, which is the project here.
     assert seen["env"]["STRATA_NOTEBOOK_MOUNT_CACHE_DIR"] == str(home / "mount_cache")
     assert seen["env"]["STRATA_NOTEBOOK_SHARED_ENV_DIR"] == str(home / "envs")
+    # Its environment's files are the uv cache's own, not clones to be checked again.
+    assert seen["env"]["UV_LINK_MODE"] == "hardlink"
     # Its pyproject.toml is the scratchpad's, wherever the client runs.
     assert seen["cwd"] == anchor / ".strata-scratch"
     if sys.platform != "win32":
@@ -235,8 +237,10 @@ def test_the_daemon_keeps_the_personal_caches_and_none_of_the_callers_config(tmp
         assert log.stat().st_mode & 0o077 == 0
 
     monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_DIR", str(tmp_path / "mine"))
+    monkeypatch.setenv("UV_LINK_MODE", "copy")
     scratch._spawn(anchor, 1)
     assert seen["env"]["STRATA_NOTEBOOK_MOUNT_CACHE_DIR"] == str(tmp_path / "mine")
+    assert seen["env"]["UV_LINK_MODE"] == "copy"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="os.kill(pid, 0) is POSIX's probe")

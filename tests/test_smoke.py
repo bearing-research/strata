@@ -722,7 +722,7 @@ class TestEagerWarmup:
         from strata.server import _eager_warmup
 
         config = StrataConfig(cache_dir=tmp_path / "cache")
-        warmup_times = _eager_warmup(config)
+        warmup_times = _eager_warmup(config, scans=True)
 
         assert "total_ms" in warmup_times
         assert "imports_ms" in warmup_times
@@ -745,9 +745,78 @@ class TestEagerWarmup:
         metadata_cache._metadata_store = None
 
         config = StrataConfig(cache_dir=tmp_path / "cache")
-        _eager_warmup(config)
+        _eager_warmup(config, scans=True)
 
         store = get_metadata_store(config.cache_dir)
         assert store is not None
         stats = store.stats()
         assert isinstance(stats, dict)
+
+    def test_without_scans_it_loads_no_scan_plane(self, tmp_path):
+        from strata.config import StrataConfig
+        from strata.server import _eager_warmup
+
+        warmup_times = _eager_warmup(StrataConfig(cache_dir=tmp_path / "cache"), scans=False)
+
+        assert "imports_ms" not in warmup_times and "caches_ms" not in warmup_times
+        assert not (tmp_path / "cache").exists()
+
+
+# Run in a fresh interpreter, so what the server's start loaded is all that sys.modules holds.
+_STARTUP_PROBE = """
+import json, sys
+from fastapi.testclient import TestClient
+from strata.server import app, get_state
+
+HEAVY = ("pyiceberg", "pandas", "sqlalchemy", "strata.planner", "strata.cache.disk")
+seen = {}
+with TestClient(app, base_url="http://127.0.0.1") as client:
+    assert client.get("/health").status_code == 200
+    seen["started"] = [m for m in HEAVY if m in sys.modules]
+    seen["built"] = "planner" in vars(get_state())
+    if sys.argv[1:] == ["scan"]:
+        get_state().planner
+seen["stopped"] = [m for m in HEAVY if m in sys.modules]
+print(json.dumps(seen))
+"""
+
+
+class TestScanPlaneAtStartup:
+    """A scratchpad daemon starts without the scan plane; any other server warms it."""
+
+    def _start(self, tmp_path, anchor: str, *args: str) -> dict:
+        import json
+        import os
+        import subprocess
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("STRATA_")}
+        env.update(
+            HOME=str(tmp_path / "home"),
+            STRATA_SCRATCH_ANCHOR=anchor,
+            STRATA_ARTIFACT_DIR=str(tmp_path / "artifacts"),
+            STRATA_CACHE_DIR=str(tmp_path / "cache"),
+            STRATA_NOTEBOOK_STORAGE_DIR=str(tmp_path),
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", _STARTUP_PROBE, *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr[-2000:]
+        return json.loads(done.stdout.splitlines()[-1])
+
+    def test_a_scratchpad_daemon_loads_it_on_first_use_only(self, tmp_path):
+        idle = self._start(tmp_path, str(tmp_path))
+        # Its shutdown closes no planner it never built.
+        assert idle == {"started": [], "built": False, "stopped": []}
+
+        scanned = self._start(tmp_path, str(tmp_path), "scan")
+        assert "pyiceberg" in scanned["stopped"] and "strata.planner" in scanned["stopped"]
+
+    def test_any_other_server_warms_it_at_start(self, tmp_path):
+        seen = self._start(tmp_path, "")
+
+        assert "pyiceberg" in seen["started"] and "strata.cache.disk" in seen["started"]
+        assert seen["built"]

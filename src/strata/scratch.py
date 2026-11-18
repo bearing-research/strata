@@ -194,6 +194,10 @@ def _spawn(anchor: Path, port: int) -> int:
         # the project itself here. The environment may still say otherwise.
         "STRATA_NOTEBOOK_MOUNT_CACHE_DIR": str(strata_home / "mount_cache"),
         "STRATA_NOTEBOOK_SHARED_ENV_DIR": str(strata_home / "envs"),
+        # uv's default off macOS. There it clones, and macOS checks each new binary on
+        # its first load: ~3 s of pyarrow in the first cell, against 0.8 s for a file
+        # shared with uv's cache.
+        "UV_LINK_MODE": "hardlink",
         **os.environ,
         "STRATA_HOST": "127.0.0.1",
         "STRATA_PORT": str(port),
