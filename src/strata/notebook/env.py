@@ -127,18 +127,8 @@ def collect_referenced_env_keys(source: str, language: str = "python") -> set[st
 # what that environment holds.
 OVERLAY_DIR = ".venv-overlay"
 ATTACHED_IDENTITY = ".strata-identity"
-# What the overlay installed, from which base, and where the project's packages are.
+# What the overlay installed, and from which base.
 OVERLAY_STATE = ".strata-overlay.json"
-
-# They change where imports resolve, which a scratchpad cell's key does not follow, so its
-# ``# @env`` may not set them.
-IMPORT_VARIABLES = (
-    "PYTHONPATH",
-    "PYTHONHOME",
-    "PYTHONSAFEPATH",
-    "PYTHONNOUSERSITE",
-    "PYTHONPLATLIBDIR",
-)
 
 
 def attached_identity(notebook_dir: Path) -> bytes | None:
@@ -160,10 +150,11 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
     An attached scratchpad's environment identity stands in for ``uv.lock``.
     """
     hasher = hashlib.sha256()
-    attached = attached_identity(notebook_dir)
-    if attached is not None:
+    if attached_identity(notebook_dir) is not None:
+        from strata.notebook.project_env import current_identity
+
         hasher.update(b"\0attached=")
-        hasher.update(attached)
+        hasher.update(current_identity(notebook_dir))
     else:
         _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
     # Tag prefix keeps a uv-only and an renv-only notebook with identical
@@ -593,11 +584,10 @@ def audit_scope(notebook_dir: Path) -> dict[str, Any]:
 def _attached_audit_scope(notebook_dir: Path) -> dict[str, Any]:
     """A scratchpad in its project's environment: the folders its distributions are
     installed in are the environment, which the identity keys. Editable sources are not."""
-    try:
-        state = json.loads((notebook_dir / OVERLAY_DIR / OVERLAY_STATE).read_text("utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {"package_roots": list(state.get("environment") or [])}
+    from strata.notebook.project_env import read_observed
+
+    record = read_observed(notebook_dir) or {}
+    return {"package_roots": list(record.get("roots") or [])}
 
 
 def _read_audit_scope(notebook_dir: Path, site_dirs: list[Path]) -> dict[str, Any]:

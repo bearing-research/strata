@@ -35,6 +35,16 @@ RACY_NS = 2_000_000_000
 # Past this many paths the record would not be kept whole: the run is not cached.
 PATH_CAP = 10_000
 
+# They change where imports resolve: a scratchpad's environment identity holds them, and a
+# cell's ``# @env`` may not set them.
+IMPORT_VARIABLES = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSAFEPATH",
+    "PYTHONNOUSERSITE",
+    "PYTHONPLATLIBDIR",
+)
+
 _SYSTEM = ("/dev", "/proc", "/sys")
 # The path finder's order: extension modules, then source, then bytecode.
 _SUFFIXES = (
@@ -506,6 +516,10 @@ def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
     if config is None:
         yield None
         return
+    anchor = config.get("anchor")
+    if anchor and (not sys.path or sys.path[0] != anchor):
+        # As under ``python -c`` in the project: its own modules import, and shadow.
+        sys.path.insert(0, anchor)
     # A run's own folders (``# @output_dir``) are mounts with no URI; a loop's live
     # outside its run directory.
     own = [m["local_path"] for m in (manifest.get("mounts") or {}).values() if not m.get("uri")]
@@ -552,3 +566,126 @@ def recording(excluded: Iterable[str]) -> Generator[Reads]:
                 setattr(cls, attr, original)
         if finder in sys.meta_path:
             sys.meta_path.remove(finder)
+
+
+def _installs(path: str) -> bool:
+    try:
+        return any(n.endswith(".dist-info") for n in os.listdir(path))
+    except OSError:
+        return False
+
+
+def _direct_url(dist: Any) -> dict[str, Any] | None:
+    import json
+
+    try:
+        found = json.loads(dist.read_text("direct_url.json") or "null")
+    except ValueError:
+        return None
+    return found if isinstance(found, dict) else None
+
+
+def base_candidates(anchor: str, names: Iterable[str]) -> dict[str, str]:
+    """Where a top-level import of each of *names* would look first, under *anchor* at
+    ``sys.path[0]``, and what is there now: one that is no longer absent shadows a module
+    loaded before the cell started, which no import of its records."""
+    found: dict[str, str] = {}
+    for name in names:
+        package = os.path.join(anchor, name)
+        paths = [package]
+        paths += [os.path.join(package, "__init__" + suffix) for suffix in _SUFFIXES]
+        paths += [package + suffix for suffix in _SUFFIXES]
+        for path in paths:
+            found[path] = observe(path)[0]
+    return found
+
+
+def probe_environment(anchor: str, sites: list[str]) -> dict[str, Any]:
+    """A scratchpad's environment identity E's parts, as a cell started here would find
+    them (design 4.2): the distributions D, the interpreter build, the import resolution I,
+    the base record B; and what to observe to know they still hold.
+
+    *sites* are the project's site-packages an overlay adds. Run as the harness, so
+    ``sys.path`` and the modules loaded before a cell are a cell's.
+    """
+    import hashlib as _hashlib
+    import importlib.metadata as metadata
+    import platform
+    import re
+
+    path = [anchor, *(p for p in sys.path if p != anchor)]
+    roots = sorted(
+        set(site.getsitepackages()) | set(sites) | {p for p in sys.path if p and _installs(p)}
+    )
+    watched: dict[str, bool] = {}
+    for root in roots:
+        watched[root] = True
+        try:
+            pth = sorted(n for n in os.listdir(root) if n.endswith(".pth"))
+        except OSError:
+            pth = []
+        watched.update((os.path.join(root, n), False) for n in pth)
+
+    distributions: set[str] = set()
+    editables: list[dict[str, Any]] = []
+    for dist in metadata.distributions():
+        name = dist.metadata["Name"]
+        if not name:
+            continue
+        canonical = re.sub(r"[-_.]+", "-", name).lower()
+        url = _direct_url(dist)
+        if url and url.get("dir_info", {}).get("editable"):
+            # Its code is keyed by what runs read; where it points, and how, is here.
+            files = {}
+            for entry in dist.files or ():
+                base = os.path.basename(str(entry))
+                located = str(dist.locate_file(entry))
+                if base.endswith(".pth") or base.startswith("__editable__"):
+                    files[base] = observe(located)[0]
+                    watched[located] = False
+                elif base == "direct_url.json":
+                    watched[located] = False
+            editables.append({"name": canonical, "url": url.get("url"), "files": files})
+            continue
+        entry = canonical + "==" + dist.version
+        if url:
+            # From a URL, a VCS or a path: one version can be any code, so what it installed.
+            record = (dist.read_text("RECORD") or "").encode()
+            entry += " @" + _hashlib.sha256(record).hexdigest()
+        distributions.add(entry)
+
+    user = site.getusersitepackages()
+    watched[user] = True
+    # Loaded before the cell: a top-level one found on the path, which the anchor could
+    # shadow (a builtin or frozen one it cannot).
+    names = sorted(
+        {
+            name.partition(".")[0]
+            for name, module in list(sys.modules.items())
+            if not name.startswith("_nb_")
+            and getattr(getattr(module, "__spec__", None), "has_location", False)
+        }
+    )
+    identity = {
+        "distributions": sorted(distributions),
+        "build": [
+            sys.implementation.name,
+            platform.python_version(),
+            getattr(sys, "abiflags", ""),
+            sysconfig.get_platform(),
+        ],
+        "path": path,
+        "meta_path": [_name(finder) for finder in sys.meta_path],
+        "path_hooks": [_name(hook) for hook in sys.path_hooks],
+        "editables": sorted(editables, key=lambda e: e["name"]),
+        "variables": {k: os.environ.get(k) for k in IMPORT_VARIABLES},
+        "user_site": [bool(site.ENABLE_USER_SITE), user in sys.path],
+        "base": base_candidates(anchor, names),
+    }
+    return {
+        "identity": identity,
+        "observed": {p: [lst, observe(p, listing=lst)[0]] for p, lst in watched.items()},
+        "anchor_listing": observe(anchor, listing=True)[0],
+        "base_names": names,
+        "roots": roots,
+    }

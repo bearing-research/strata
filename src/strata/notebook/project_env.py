@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,11 +34,16 @@ if TYPE_CHECKING:
 
 _PTH = "_strata_project.pth"
 _TIMEOUT = 600
+# What the identity was probed from, and what to observe to know it still holds.
+_OBSERVED = ".strata-observed.json"
+_HARNESS = Path(__file__).parent / "harness.py"
+
+logger = logging.getLogger(__name__)
 
 # Each runtime package's installed version: None for one missing, "" for one importable
 # with no metadata to say.
 _PROJECT_PROBE = """\
-import importlib.metadata, importlib.util, json, os, site, sys
+import importlib.metadata, importlib.util, json, site, sys
 
 def version(name):
     if importlib.util.find_spec(name) is None:
@@ -46,46 +53,11 @@ def version(name):
     except importlib.metadata.PackageNotFoundError:
         return ""
 
-def installs(path):
-    try:
-        return any(n.endswith(".dist-info") for n in os.listdir(path))
-    except OSError:
-        return False
-
 print(json.dumps({
     "base": sys._base_executable,
     "site": site.getsitepackages(),
-    # The environment: its site-packages, and a folder a .pth adds that distributions are
-    # installed in (an editable's source holds none; what runs read keys it).
-    "installed": sorted(set(site.getsitepackages()) | {p for p in sys.path if p and installs(p)}),
     "versions": {n: version(n) for n in sys.argv[1:]},
 }))
-"""
-
-_IDENTITY_PROBE = """\
-import hashlib, importlib.metadata as m, json, platform, re, sys, sysconfig
-
-def direct(dist):
-    try:
-        return json.loads(dist.read_text("direct_url.json") or "null")
-    except ValueError:
-        return None
-
-names = set()
-for dist in m.distributions():
-    name = dist.metadata["Name"]
-    url = direct(dist)
-    if not name or (url and url.get("dir_info", {}).get("editable")):
-        continue
-    entry = re.sub(r"[-_.]+", "-", name).lower() + "==" + dist.version
-    if url:
-        # From a URL, a VCS or a path: one version can be any code, so what it installed.
-        record = (dist.read_text("RECORD") or "").encode()
-        entry += " @" + hashlib.sha256(record).hexdigest()
-    names.add(entry)
-build = (sys.implementation.name, platform.python_version(), getattr(sys, "abiflags", ""),
-         sysconfig.get_platform())
-print(json.dumps({"build": " ".join(build), "distributions": sorted(names)}))
 """
 
 
@@ -407,24 +379,115 @@ def reconcile(notebook_dir: Path, project_python: Path, runtime: list[str]) -> O
         # After the overlay's own site-packages, so it fills gaps and shadows nothing.
         lines = [f"import site; site.addsitedir({str(s)!r})\n" for s in probed["site"]]
         (Path(own_site) / _PTH).write_text("".join(lines))
-        state = {
-            "base": probed["base"],
-            "installed": sorted(missing),
-            "environment": probed["installed"],
-        }
+        state = {"base": probed["base"], "installed": sorted(missing)}
         state_path.write_text(json.dumps(state, indent=2) + "\n")
-        identity = _identity(python)
+        identity = _probe_identity(notebook_dir, probed["site"])
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         return f"the scratchpad's overlay environment could not be set up: {exc}"
-    (overlay / ATTACHED_IDENTITY).write_text(identity)
     return Overlay(python=python, site=[Path(s) for s in probed["site"]], identity=identity)
 
 
-def _identity(python: Path) -> str:
-    """The environment's distributions (editable ones are code, keyed by what runs read)
-    and interpreter build, as *python* sees them."""
-    probed = json.loads(_run([str(python), "-c", _IDENTITY_PROBE]).stdout)
-    return hashlib.sha256(json.dumps(probed, sort_keys=True).encode()).hexdigest()
+def _probe_identity(notebook_dir: Path, sites: list[str]) -> str:
+    """Probe E in the overlay, as a cell started there would find it, and record it with
+    what proves it; the identity last, so a failure leaves none keying cells."""
+    from strata.notebook.harness_env import configured_allowlist, harness_env
+
+    overlay = notebook_dir / OVERLAY_DIR
+    done = subprocess.run(
+        [
+            str(venv_python(overlay)),
+            str(_HARNESS),
+            "--probe-environment",
+            str(notebook_dir.parent),
+            *sites,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+        cwd=notebook_dir,
+        env=harness_env(configured_allowlist()),
+    )
+    probed = json.loads(done.stdout)
+    identity = hashlib.sha256(json.dumps(probed["identity"], sort_keys=True).encode()).hexdigest()
+    record = {
+        "sites": sites,
+        "variables": probed["identity"]["variables"],
+        "observed": probed["observed"],
+        "anchor_listing": probed["anchor_listing"],
+        "base_names": probed["base_names"],
+        "base": probed["identity"]["base"],
+        "roots": probed["roots"],
+    }
+    _write(overlay / _OBSERVED, json.dumps(record, indent=2) + "\n")
+    _write(overlay / ATTACHED_IDENTITY, identity)
+    return identity
+
+
+def _write(path: Path, text: str) -> None:
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(text)
+    os.replace(partial, path)
+
+
+def read_observed(notebook_dir: Path) -> dict[str, Any] | None:
+    try:
+        found = json.loads((notebook_dir / OVERLAY_DIR / _OBSERVED).read_text())
+    except (OSError, ValueError):
+        return None
+    return found if isinstance(found, dict) else None
+
+
+_identity_locks: dict[Path, threading.Lock] = {}
+_identity_locks_lock = threading.Lock()
+
+
+def current_identity(notebook_dir: Path) -> bytes:
+    """E, once its observations show it still holds, else probed again (design 4.2):
+    before any key is computed, so a changed environment never meets an old result.
+
+    A probe that fails gives an identity nothing matches: a rerun, never a stale hit.
+    """
+    with _identity_locks_lock:
+        lock = _identity_locks.setdefault(Path(notebook_dir), threading.Lock())
+    overlay = notebook_dir / OVERLAY_DIR
+    with lock:
+        record = read_observed(notebook_dir)
+        if record is not None and _holds(notebook_dir, record):
+            try:
+                return (overlay / ATTACHED_IDENTITY).read_bytes()
+            except OSError:
+                pass
+        sites = list(record.get("sites") or []) if record is not None else []
+        try:
+            return _probe_identity(notebook_dir, sites).encode()
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
+            logger.warning("Could not probe %s's environment: %s", notebook_dir, exc)
+            return b"unprobed:" + os.urandom(16).hex().encode()
+
+
+def _holds(notebook_dir: Path, record: dict[str, Any]) -> bool:
+    """Whether what E was probed from is as it was: a few hundred stats and small reads."""
+    from strata.notebook.code_reads import IMPORT_VARIABLES, base_candidates, observe
+
+    if {k: os.environ.get(k) for k in IMPORT_VARIABLES} != record.get("variables"):
+        return False
+    for path, (listing, seen) in (record.get("observed") or {}).items():
+        if observe(path, listing=listing)[0] != seen:
+            return False
+    anchor = str(notebook_dir.parent)
+    listing = observe(anchor, listing=True)[0]
+    if listing != record.get("anchor_listing"):
+        # Something in the project folder changed; only a module that would now shadow
+        # one loaded before the cell changes B.
+        if base_candidates(anchor, record.get("base_names") or []) != record.get("base"):
+            return False
+        record["anchor_listing"] = listing
+        try:
+            _write(notebook_dir / OVERLAY_DIR / _OBSERVED, json.dumps(record, indent=2) + "\n")
+        except OSError as exc:
+            logger.debug("Could not update %s's observations: %s", notebook_dir, exc)
+    return True
 
 
 def remove_overlay(notebook_dir: Path) -> None:

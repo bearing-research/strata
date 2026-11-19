@@ -861,6 +861,10 @@ class _Tee(io.StringIO):
 
 
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == "--probe-environment":
+        # A scratchpad's environment identity, as a cell started here finds it.
+        print(orjson.dumps(_code.probe_environment(sys.argv[2], sys.argv[3:])).decode())
+        return
     _lifeline.watch_lifeline()
     _channel.claim_pipe()
     if len(sys.argv) > 1 and sys.argv[1] == "--batch":

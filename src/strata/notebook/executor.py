@@ -2754,9 +2754,16 @@ class CellExecutor:
             "audit": audit_scope(self.session.path),
         }
         if self.session.notebook_state.scratchpad:
+            from strata.notebook.project_env import read_observed
+
             # A scratchpad cell is keyed on what it read (``code_keys``); its own files are
-            # the store's, not the cell's.
-            fields["code_reads"] = {"exclude": [str(self.session.path)]}
+            # the store's, not the cell's, and its project environment's the identity's.
+            # It runs as under ``python -c`` in the project: the anchor first on the path.
+            roots = (read_observed(self.session.path) or {}).get("roots") or []
+            fields["code_reads"] = {
+                "exclude": [str(self.session.path), *roots],
+                "anchor": str(self.session.path.parent),
+            }
         return fields
 
     # ------------------------------------------------------------------

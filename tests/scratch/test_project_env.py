@@ -284,8 +284,14 @@ def test_the_overlay_runs_the_projects_code_and_installs_nothing_the_project_has
     assert state["installed"] == []
 
 
-def test_the_overlay_fills_a_gap_until_the_project_has_it_then_the_projects_wins(tmp_path):
+def test_the_overlay_fills_a_gap_until_the_project_has_it_then_the_projects_wins(
+    tmp_path, monkeypatch
+):
     """Bare names, after the project's site-packages: nothing shadows the project."""
+    from strata.notebook import project_env
+
+    # Without the runtime packages no harness starts to probe E; this is about the overlay.
+    monkeypatch.setattr(project_env, "_probe_identity", lambda notebook_dir, sites: "e")
     project_site = _venv(tmp_path / "proj" / ".venv")
     project_python = venv_python(tmp_path / "proj" / ".venv")
     notebook = _scratchpad(tmp_path / "proj")
@@ -787,14 +793,14 @@ async def test_the_projects_packages_are_its_environment_and_an_editable_source_
     project, manager
 ):
     """The identity keys what is installed; an editable source is keyed by what runs read,
-    so the audit still names it."""
+    so neither is an undeclared read."""
     site = _site(project / ".venv")
     (site / "projdata.txt").write_text("x")
     src = project / "src"
     src.mkdir()
     (src / "editmod.py").write_text("VALUE = 1\n")
     (site / "_editable_proj.pth").write_text(str(src) + "\n")
-    manager.open_notebook(_scratchpad(project))
+    session = manager.open_notebook(_scratchpad(project))
 
     out = await mcp_server._scratch_run(
         manager,
@@ -806,5 +812,157 @@ async def test_the_projects_packages_are_its_environment_and_an_editable_source_
 
     edited = await mcp_server._scratch_run(manager, "import editmod")
     assert edited["status"] == "ok", str(edited)
-    assert [d["code"] for d in edited["diagnostics"]] == ["undeclared_import"]
-    assert "editmod.py" in edited["diagnostics"][0]["message"]
+    assert "diagnostics" not in edited, str(edited)
+    index = (session.path / ".strata" / "reads" / "code.json").read_text()
+    assert json.dumps(str(src / "editmod.py")) in index
+
+
+# --- environment identity E (design 4.2) ---
+
+
+def _attached(project: Path) -> Path:
+    """A scratchpad on *project*'s environment, its overlay reconciled and E probed."""
+    notebook = _scratchpad(project)
+    overlay = reconcile(notebook, venv_python(project / ".venv"), _notebook_runtime_specifiers())
+    assert not isinstance(overlay, str), overlay
+    return notebook
+
+
+def _probes(monkeypatch) -> list[Path]:
+    from strata.notebook import project_env
+
+    seen: list[Path] = []
+    real = project_env._probe_identity
+
+    def counted(notebook_dir, sites):
+        seen.append(notebook_dir)
+        return real(notebook_dir, sites)
+
+    monkeypatch.setattr(project_env, "_probe_identity", counted)
+    return seen
+
+
+def test_e_holds_while_nothing_it_was_probed_from_changes(project, monkeypatch):
+    from strata.notebook.project_env import current_identity
+
+    notebook = _attached(project)
+    probes = _probes(monkeypatch)
+    first = current_identity(notebook)
+    # A file that shadows nothing preloaded: B is checked again, not probed.
+    (project / "notes.txt").write_text("x")
+    assert current_identity(notebook) == first
+    assert probes == []
+
+
+def test_a_module_in_the_project_that_would_shadow_a_preloaded_one_changes_e(project, monkeypatch):
+    """The harness loaded orjson before the cell; under `python -c` here the project's
+    would win, and no import of the cell's would record it."""
+    from strata.notebook.project_env import current_identity
+
+    notebook = _attached(project)
+    first = current_identity(notebook)
+    (project / "orjson.py").write_text("")
+    assert current_identity(notebook) != first
+
+
+def test_pythonpath_changes_e(project, monkeypatch, tmp_path):
+    from strata.notebook.project_env import current_identity
+
+    notebook = _attached(project)
+    first = current_identity(notebook)
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "elsewhere"))
+    assert current_identity(notebook) != first
+
+
+def test_an_install_into_the_project_changes_e_before_the_next_lookup(project):
+    """No sync in between: the observation list sees the new distribution."""
+    from strata.notebook.project_env import current_identity
+
+    notebook = _attached(project)
+    first = current_identity(notebook)
+    _fake_dist(_site(project / ".venv"), "newlib", "1.0", record="", direct_url=None)
+    assert current_identity(notebook) != first
+
+
+def test_repointing_an_editable_changes_e(project, tmp_path):
+    """Same name, same version, another checkout: different code under one D."""
+    from strata.notebook.project_env import current_identity
+
+    site = _site(project / ".venv")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    url = {"url": (tmp_path / "a").as_uri(), "dir_info": {"editable": True}}
+    record = "edlib-1.0.dist-info/direct_url.json,,\n"
+    _fake_dist(site, "edlib", "1.0", record=record, direct_url=url)
+    notebook = _attached(project)
+    first = current_identity(notebook)
+    url["url"] = (tmp_path / "b").as_uri()
+    (site / "edlib-1.0.dist-info" / "direct_url.json").write_text(json.dumps(url))
+    assert current_identity(notebook) != first
+
+
+def test_a_probe_that_fails_gives_an_identity_nothing_matches(project, monkeypatch):
+    from strata.notebook import project_env
+
+    notebook = _attached(project)
+    _fake_dist(_site(project / ".venv"), "newlib", "1.0", record="", direct_url=None)
+
+    def fails(notebook_dir, sites):
+        raise subprocess.CalledProcessError(1, "probe")
+
+    monkeypatch.setattr(project_env, "_probe_identity", fails)
+    first = project_env.current_identity(notebook)
+    assert first.startswith(b"unprobed:")
+    assert project_env.current_identity(notebook) != first
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_a_cell_imports_a_module_beside_it_in_the_project(project, manager):
+    """The anchor is first on the path, as under `python -c` in the project."""
+    (project / "localmod.py").write_text("VALUE = 1\n")
+    manager.open_notebook(_scratchpad(project))
+    out = await mcp_server._scratch_run(manager, "import localmod\nv = localmod.VALUE")
+    assert out["status"] == "ok", str(out)
+    cell = out["cell"]
+    again = await mcp_server._scratch_run(manager, "import localmod\nv = localmod.VALUE", cell)
+    assert again["cache_hit"] is True, str(again)
+    (project / "localmod.py").write_text("VALUE = 2\n")
+    edited = await mcp_server._scratch_run(manager, "import localmod\nv = localmod.VALUE", cell)
+    assert edited["cache_hit"] is False, str(edited)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_a_changed_environment_misses_with_no_sync_and_no_refresh(
+    project, manager, monkeypatch
+):
+    """Before every key, not only before an MCP run: the executor's own path."""
+    session = manager.open_notebook(_scratchpad(project))
+    out = await mcp_server._scratch_run(manager, "x = 1")
+    assert out["status"] == "ok", str(out)
+
+    async def no_refresh():
+        return None
+
+    monkeypatch.setattr(session, "refresh_project_environment", no_refresh)
+    hit = await mcp_server._scratch_run(manager, "x = 1", out["cell"])
+    assert hit["cache_hit"] is True, str(hit)
+    monkeypatch.setenv("PYTHONPATH", str(project))
+    again = await mcp_server._scratch_run(manager, "x = 1", out["cell"])
+    assert again["status"] == "ok", str(again)
+    assert again["cache_hit"] is False, str(again)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_the_projects_installed_code_is_not_recorded_as_a_read(project, manager):
+    """E covers it: recording every file of numpy on each run would be the cost."""
+    session = manager.open_notebook(_scratchpad(project))
+    out = await mcp_server._scratch_run(manager, "import projmod\nv = projmod.VALUE")
+    assert out["status"] == "ok", str(out)
+    index = (session.path / ".strata" / "reads" / "code.json").read_text()
+    assert str(_site(project / ".venv")) not in index
+    # Looked for first in the project, as `python -c` there would.
+    assert json.dumps(str(project / "projmod.py")) in index
