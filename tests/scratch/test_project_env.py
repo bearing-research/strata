@@ -1250,13 +1250,15 @@ async def test_a_cold_run_and_a_warm_worker_preload_the_same_base_image(project,
 
     _declare(project, "projmod")
     session = manager.open_notebook(_scratchpad(project))
+    # Cold first: a pool the session started may already be warm.
+    if session.warm_pool is not None:
+        await session.warm_pool.drain()
+        session.warm_pool = None
     probe = "import os, sys\nf\"{os.path.basename(sys.argv[0])} {'projmod' in sys.modules}\""
     cold = await mcp_server._scratch_run(manager, probe)
     assert cold["status"] == "ok", str(cold)
     assert "harness.py" in cold["value"] and "True" in cold["value"], cold["value"]
 
-    if session.warm_pool is not None:
-        await session.warm_pool.drain()
     pool = session._python_warm_pool()
     pool.pool_size = 1
     pool.ready_timeout_seconds = LIVE_SERVER_TIMEOUT

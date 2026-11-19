@@ -905,7 +905,8 @@ def main():
             try:
                 __import__(module_name)
             except ImportError:
-                pass
+                # Not importable here; a warm worker skips it the same way.
+                continue
         _work_dir.enter(manifest)
 
         # Before deserializing, not just around the body: a library that reads
