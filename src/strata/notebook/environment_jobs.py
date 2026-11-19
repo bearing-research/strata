@@ -93,7 +93,13 @@ class EnvironmentJobHost(Protocol):
     _environment_state_lock: threading.RLock
 
     def _assert_environment_job_can_start(self, action_label: str) -> None: ...
-    def _apply_uv_sync_result(self, ok: bool, *, duration_ms: int) -> None: ...
+    def _apply_uv_sync_result(
+        self, ok: bool, *, duration_ms: int, error: str | None = None
+    ) -> None: ...
+
+    def detect_scratchpad_environment(self) -> None: ...
+
+    def sync_timeout(self) -> int: ...
     @property
     def _cached_system_r_version(self) -> str | None: ...
     async def _invalidate_warm_pool_for_environment_change(self) -> None: ...
@@ -609,11 +615,12 @@ class EnvironmentJobs:
         job: EnvironmentJobSnapshot,
     ) -> list[str]:
         """Run ``uv sync`` as a background job."""
+        await asyncio.to_thread(self.host.detect_scratchpad_environment)
         old_lockfile_hash = compute_lockfile_hash(self.host.path)
         requested_python = read_requested_python_minor(self.host.path)
         result = await self.host.backend.sync_streaming(
             python_version=requested_python,
-            timeout=60,
+            timeout=self.host.sync_timeout(),
             on_update=lambda stream, text, truncated: self._update_stream(
                 job,
                 stream=stream,
@@ -625,6 +632,7 @@ class EnvironmentJobs:
         self.host._apply_uv_sync_result(
             result.success,
             duration_ms=result.operation_log.duration_ms or 0,
+            error=result.error,
         )
         # No-op without ``renv.lock``; R restores whatever uv did, as an open did inline.
         try:

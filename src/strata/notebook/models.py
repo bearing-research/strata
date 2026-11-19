@@ -553,6 +553,13 @@ class NotebookToml(BaseModel):
             "environment."
         ),
     )
+    scratchpad_environment: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Where a scratchpad's cells run: ``mode`` (attached to its project's "
+            "environment, or owned) and, attached, the interpreter (``attach``)"
+        ),
+    )
     r: dict[str, Any] = Field(
         default_factory=dict,
         description=(

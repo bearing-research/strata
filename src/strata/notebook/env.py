@@ -122,6 +122,32 @@ def collect_referenced_env_keys(source: str, language: str = "python") -> set[st
     return keys
 
 
+# A scratchpad running in its project's environment does so through this venv, and keys
+# on the identity written in it (``project_env.reconcile``): no lock of its own says
+# what that environment holds.
+OVERLAY_DIR = ".venv-overlay"
+ATTACHED_IDENTITY = ".strata-identity"
+
+# They change where imports resolve, which a scratchpad cell's key does not follow, so its
+# ``# @env`` may not set them.
+IMPORT_VARIABLES = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSAFEPATH",
+    "PYTHONNOUSERSITE",
+    "PYTHONPLATLIBDIR",
+)
+
+
+def attached_identity(notebook_dir: Path) -> bytes | None:
+    """The identity of the project environment *notebook_dir* runs in, or ``None``."""
+    try:
+        with open(notebook_dir / OVERLAY_DIR / ATTACHED_IDENTITY, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def compute_lockfile_hash(notebook_dir: Path) -> str:
     """SHA-256 over the notebook's ``uv.lock`` and ``renv.lock``.
 
@@ -129,9 +155,15 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
     same resolved dependencies get one hash. ``renv.lock`` is folded under a
     ``\\0renv=`` tag so it cannot collide with uv.lock bytes. Missing lockfiles
     contribute nothing, so with neither present this is the digest of empty input.
+    An attached scratchpad's environment identity stands in for ``uv.lock``.
     """
     hasher = hashlib.sha256()
-    _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
+    attached = attached_identity(notebook_dir)
+    if attached is not None:
+        hasher.update(b"\0attached=")
+        hasher.update(attached)
+    else:
+        _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
     # Tag prefix keeps a uv-only and an renv-only notebook with identical
     # lockfile bytes from colliding.
     _fold_lockfile_into_hash(hasher, notebook_dir, "renv.lock", tag=b"\0renv=")
@@ -411,6 +443,9 @@ def local_packages(notebook_dir: Path) -> LocalPackages:
     on the event loop run it in a thread.
     """
     lockfile_hash = compute_lockfile_hash(notebook_dir)
+    if attached_identity(notebook_dir) is not None:
+        # The identity covers what is installed; an editable's code, what runs read.
+        return LocalPackages(notebook_dir, lockfile_hash)
     try:
         with open(notebook_dir / "uv.lock", "rb") as f:
             raw = f.read()

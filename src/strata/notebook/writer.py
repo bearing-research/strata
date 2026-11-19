@@ -451,6 +451,11 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         **({"catalogs": toml.catalogs} if toml.catalogs else {}),
         **({"secret_manager": toml.secret_manager} if toml.secret_manager else {}),
         **({"r": toml.r} if toml.r else {}),
+        **(
+            {"scratchpad_environment": toml.scratchpad_environment}
+            if toml.scratchpad_environment
+            else {}
+        ),
         # Runtime state (display outputs, sync timestamps, cache) lives in
         # ``.strata/runtime.json`` so running a notebook doesn't churn git diffs.
     }
@@ -783,7 +788,7 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
     ``notebook.toml``, since it changes on every sync.
     """
     from strata.notebook.dependencies import list_dependencies
-    from strata.notebook.env import compute_lockfile_hash
+    from strata.notebook.env import OVERLAY_DIR, attached_identity, compute_lockfile_hash
     from strata.notebook.runtime_state import (
         EnvironmentRuntime,
         load_runtime_state,
@@ -795,7 +800,9 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
 
     requested_python_version = read_requested_python_minor(notebook_dir) or ""
     runtime_python_version = ""
-    venv_python = notebook_dir / ".venv" / "bin" / "python"
+    # A scratchpad in its project's environment runs through the overlay.
+    venv = OVERLAY_DIR if attached_identity(notebook_dir) is not None else ".venv"
+    venv_python = notebook_dir / venv / "bin" / "python"
     if venv_python.exists():
         runtime_python_version = read_venv_runtime_python_version(venv_python) or ""
         if not runtime_python_version:
@@ -1105,6 +1112,20 @@ def _apply_notebook_toml_update(
     if bump_updated_at:
         toml_data["updated_at"] = datetime.now(tz=UTC)
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
+
+
+@refuses_while_held
+def update_scratchpad_environment(notebook_dir: Path, record: dict[str, str]) -> None:
+    """Record where a scratchpad's cells run, if that changed; not structural, so
+    ``updated_at`` stays."""
+
+    def mutate(toml_data: dict[str, Any]) -> bool:
+        if toml_data.get("scratchpad_environment", {}) == record:
+            return False
+        toml_data["scratchpad_environment"] = record
+        return True
+
+    _apply_notebook_toml_update(notebook_dir, mutate, bump_updated_at=False)
 
 
 @refuses_while_held

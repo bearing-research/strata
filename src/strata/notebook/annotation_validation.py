@@ -89,8 +89,10 @@ def validate_cell_annotations(
     if cell.language == CellLanguage.WIDGET:
         language_checks = _validate_widget_cell_annotations(cell)
     elif cell.language not in (CellLanguage.PROMPT, CellLanguage.SQL):
-        language_checks = _validate_module_export(cell, notebook_state) + _validate_worker(
-            cell, notebook_state
+        language_checks = (
+            _validate_module_export(cell, notebook_state)
+            + _validate_worker(cell, notebook_state)
+            + _validate_import_env(cell, notebook_state)
         )
     analysis = analysis_with(cell, notebook_state, analysis)
     if cell.language == CellLanguage.PROMPT and not analysis.structural_errors:
@@ -148,6 +150,31 @@ def _validate_worker(cell: CellState, notebook_state: NotebookState) -> list[Ann
         )
 
     return diagnostics
+
+
+def _validate_import_env(
+    cell: CellState, notebook_state: NotebookState
+) -> list[AnnotationDiagnostic]:
+    """``env_moves_imports``: a scratchpad cell's ``# @env`` sets where imports resolve."""
+    from strata.notebook.env import IMPORT_VARIABLES
+
+    if not notebook_state.scratchpad:
+        return []
+    env = parse_annotations(cell.source, cell.language).env
+    return [
+        AnnotationDiagnostic(
+            severity=DiagnosticSeverity.ERROR,
+            code="env_moves_imports",
+            message=(
+                f"`@env {name}` changes where this cell's imports resolve, which its cache "
+                "key does not follow, so the cell does not run. Set it in the environment "
+                "the scratchpad starts in (the MCP server's `env`) instead."
+            ),
+            line=_find_annotation_line(cell.source, "env", f"{name}=", language=cell.language),
+        )
+        for name in IMPORT_VARIABLES
+        if name in env
+    ]
 
 
 def _unreadable(code: str, key: str, value: str, why: str, line: int) -> AnnotationDiagnostic:

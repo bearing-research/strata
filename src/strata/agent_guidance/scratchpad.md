@@ -11,9 +11,9 @@ data, training, fetching) in its own cell; later cells that use its variables
 leave it cached. A cell re-runs only when its source, the variables it uses, or
 the environment changed.
 
-Cells run in the notebook's own environment with cwd at its `work/` directory,
-not your project root (`scratchpad` names both): import project code only if that
-environment has it installed, and use absolute paths for project files. Editing a
+Cells run in your project's environment when it has one, else in the notebook's
+own, with cwd at the notebook's `work/` directory, not your project root
+(`scratchpad` names all three): use absolute paths for project files. Editing a
 file a cell read does not re-run it, so pass `fresh=True` after such an edit or
 whenever you doubt a result. First line `# @nocache` for side effects or fresh
 values (clock, random, live APIs). Not for editing files.

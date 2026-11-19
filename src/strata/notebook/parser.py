@@ -185,6 +185,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         catalogs=_parse_catalogs(toml_data),
         secret_manager=toml_data.get("secret_manager", {}),
         r=toml_data.get("r", {}),
+        scratchpad_environment=toml_data.get("scratchpad_environment", {}),
         artifacts=toml_data.get("artifacts", {}),
         environment=toml_data.get("environment", {}),
         cache=toml_data.get("cache", {}),

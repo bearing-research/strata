@@ -136,6 +136,20 @@ exhaustive commit history.
   run does not resume a dead run's checkpoint. A cell on a remote worker, an R, SQL or
   prompt cell, and a loop or fan-out keep the notebook's key. Plain notebooks are
   unchanged. (#1585)
+- **A scratchpad runs in its project's environment.** Its cells run where `uv run
+  python` would in the project: a uv project (a `uv.lock` at its workspace root, or a
+  `[tool.uv]` table) is synced first, inexactly, when uv says it is missing or behind,
+  and again when its `pyproject.toml` files, lock or installed packages change; a sync
+  that fails is returned by `run` with uv's error, and no cell runs. A pip or poetry
+  project's `VIRTUAL_ENV` or `.venv` is used as it is, never synced; anything else gets
+  an environment of its own as before. Cells run through `.strata-scratch/.venv-overlay`,
+  which adds only the runtime packages the project lacks, so its versions win, and are
+  keyed on what the environment has installed and its interpreter. `scratchpad` reports
+  the `environment`, `notebook.toml` records it under `[scratchpad_environment]`,
+  `--python PATH` (or `STRATA_SCRATCH_PYTHON`) on `strata mcp` and `strata scratch start`
+  names the interpreter instead, `add_dependency` is refused there with the project's
+  command, and a scratchpad cell's `# @env` may no longer set `PYTHONPATH` or the other
+  variables that move imports (`env_moves_imports`). (#XXXX)
 ### Changed
 - **A scratchpad's first call takes half the time.** Its daemon no longer
   loads the scan plane (Iceberg, Parquet, pandas) at start: a server started for a

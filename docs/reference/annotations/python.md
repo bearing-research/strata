@@ -136,6 +136,8 @@ model = torch.nn.Linear(384, 10).cuda()
 
 Format: `# @env KEY=value`. Multiple `@env` lines are supported. The variable is available in `os.environ` during cell execution.
 
+In a scratchpad, `# @env` may not set `PYTHONPATH`, `PYTHONHOME`, `PYTHONSAFEPATH`, `PYTHONNOUSERSITE` or `PYTHONPLATLIBDIR`: they change where imports resolve, which a scratchpad cell's key does not follow, so the cell does not run (`env_moves_imports`). Set them in the environment the scratchpad starts in instead.
+
 !!! warning "Don't put secrets in `# @env`"
     `# @env` values live in **committed cell source** (the files under `cells/`).
     The sensitive-key blanking that the notebook.toml `[env]` writer

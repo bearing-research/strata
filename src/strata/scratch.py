@@ -64,6 +64,8 @@ class Daemon:
     version: str = ""
     # Milliseconds per setup step, in order; empty when the daemon was already up.
     setup_ms: dict[str, int] = field(default_factory=dict)
+    # The interpreter it was told to run cells in (``--python``), else ``None``.
+    python: str | None = None
 
 
 def scratch_dir(anchor: Path) -> Path:
@@ -188,6 +190,7 @@ def daemon_serving(notebook_dir: Path) -> Daemon | None:
         session_id=record["session_id"],
         pid=record["pid"],
         version=record["version"],
+        python=record.get("python"),
     )
 
 
@@ -407,6 +410,10 @@ def _start(
     return pid, url, session_id
 
 
+def _interpreter(python: str | None) -> str:
+    return python if python is not None else "the environment it found"
+
+
 def daemon_lock(anchor: Path) -> filelock.FileLock:
     """Held while a daemon is started: held too, none starts behind a writer of the files."""
     return filelock.FileLock(scratch_dir(anchor) / ".strata" / "daemon.lock")
@@ -425,12 +432,20 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
     with daemon_lock(anchor):
         running = find_daemon(anchor)
         current = version("strata-notebook")
-        if running is not None and running.version == current:
+        python = os.environ.get("STRATA_SCRATCH_PYTHON") or None
+        if running is not None and (running.version, running.python) == (current, python):
             return running
         if running is not None:
-            # Started by another install, so its code is not this client's; but stopping it
-            # now would end what it runs for someone. It is asked again on the next call.
+            # Started by another install, or on another interpreter; but stopping it now
+            # would end what it runs for someone. It is asked again on the next call.
             if _busy(running.url):
+                if running.python != python:
+                    # Its cells would run on the other interpreter, keyed as if on this one.
+                    raise ScratchError(
+                        f"the scratchpad's daemon runs cells on {_interpreter(running.python)}, "
+                        f"not {_interpreter(python)}, and it is busy, so it was not replaced; "
+                        "try again once its run finishes, or `strata scratch stop` it"
+                    )
                 return running
             _stop(running)
 
@@ -451,13 +466,21 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
             "session_id": session_id,
             "version": current,
             "anchor": str(anchor),
+            "python": python,
         }
         # Whole or not at all: a torn record would stop every later client.
         path = _record_path(anchor)
         partial = path.with_suffix(".json.tmp")
         partial.write_text(json.dumps(record, indent=2) + "\n")
         os.replace(partial, path)
-        return Daemon(url=url, session_id=session_id, pid=pid, version=current, setup_ms=setup_ms)
+        return Daemon(
+            url=url,
+            session_id=session_id,
+            pid=pid,
+            version=current,
+            setup_ms=setup_ms,
+            python=python,
+        )
 
 
 def _registry_path() -> Path:

@@ -111,7 +111,7 @@ sit behind Claude Code's tool search.
 | Tool | Description |
 | --- | --- |
 | `run(source, cell=None, fresh=False)` | Without `cell`, add a Python cell and run it; with `cell`, replace that cell's source and run it. `fresh=True` ignores this cell's cache (the `rerun` mode). Returns `cell`, `status`, `cache_hit`, `duration_ms`, `saved_ms` on a hit, `reran` (the upstream cells brought up to date first, each with why), `value` (what a trailing expression showed), `stdout` / `stderr`, `traceback`, `diagnostics` (files it read without declaring them, or values it mutated, each with its fix), `defines`, `path` (a file holding an image the cell showed) and `url` (the notebook in the web UI). A `cell` that is not Python is refused. |
-| `scratchpad(name=None)` | Without `name`: each cell's id, `defines`, `status`, why it is stale and what its last uncached run took, plus the notebook directory, the cells' `cwd` (its `work/`), the `python` they run on and the time the cache has saved. With `name`: the cell that defines it, its source and shown `value`, or the names that exist. |
+| `scratchpad(name=None)` | Without `name`: each cell's id, `defines`, `status`, why it is stale and what its last uncached run took, plus the notebook directory, the cells' `cwd` (its `work/`), the `python` they run on, the `environment` that is (`attached` to the project's, with its `project_python` and what found it, or `owned`) and the time the cache has saved. With `name`: the cell that defines it, its source and shown `value`, or the names that exist. |
 
 A failure that is not the cell's own exception (no session or several, an
 unknown or non-Python cell, an environment that is not ready, an annotation that
@@ -147,6 +147,32 @@ call as it is, the result's `note` says so, and the next call asks again. The se
 output goes to `.strata-scratch/.strata/server.log`; it keeps remote-mount copies
 and shared environments under `~/.strata`, as a personal server does.
 Cells read the project read-only as `project` (`project / "data.csv"`).
+
+Cells run in the project's own environment when it has one: the one `uv run
+python` would use there, found by uv's dry run, which creates nothing. A project
+is uv's when its workspace root has a `uv.lock` or its `pyproject.toml` has a
+`[tool.uv]` table; the scratchpad then runs `uv sync --inexact` first when uv says
+the environment is missing or behind, as `uv run` does, and a sync that fails comes
+back from `run` with uv's error, and no cell runs until it succeeds. A project uv
+does not manage (pip, poetry) is used as it is, never synced: the environment
+`VIRTUAL_ENV` names, unless it is the one Strata runs in, else a `.venv` in the
+project. Anything else (no environment, a project in another language, no
+project) gets one of its own, `.strata-scratch/.venv`, where `add_dependency`
+works; in the project's, it is refused with the project's command (`uv add
+numpy`). The cells' interpreter is `.strata-scratch/.venv-overlay`, which adds the
+project's site-packages and only those of `pyarrow`, `orjson` and `cloudpickle`
+the project lacks, so the project's versions win. Cells there are keyed on the
+environment's installed distributions (name and version, editable ones aside,
+whose code is keyed by what runs read) and the interpreter's build. Before each
+`run`, a change to the project's `pyproject.toml` files, its `uv.lock` or its
+installed packages syncs it again; whether a project has an environment at all is
+decided again when the scratchpad opens. `notebook.toml` records the choice under
+`[scratchpad_environment]`. `--python PATH` on `strata mcp` or `strata scratch
+start`, or `STRATA_SCRATCH_PYTHON`, names the interpreter instead; a daemon started
+on another is replaced once idle, and while busy the call is refused with both
+named. A scratchpad cell's `# @env` may not set `PYTHONPATH`, `PYTHONHOME`,
+`PYTHONSAFEPATH`, `PYTHONNOUSERSITE` or `PYTHONPLATLIBDIR` (`env_moves_imports`,
+which keeps it from running): its key does not follow where imports resolve.
 Its `notebook.toml` says `scratchpad = true`, so it keeps every variable a cell defines,
 read or not: the first cell to read one loads it rather than rerunning the cell that
 made it. A plain notebook stores only what a cell downstream reads.
