@@ -291,7 +291,9 @@ def test_the_overlay_fills_a_gap_until_the_project_has_it_then_the_projects_wins
     from strata.notebook import project_env
 
     # Without the runtime packages no harness starts to probe E; this is about the overlay.
-    monkeypatch.setattr(project_env, "_probe_identity", lambda notebook_dir, sites, owned=False: "e")
+    monkeypatch.setattr(
+        project_env, "_probe_identity", lambda notebook_dir, sites, owned=False: "e"
+    )
     project_site = _venv(tmp_path / "proj" / ".venv")
     project_python = venv_python(tmp_path / "proj" / ".venv")
     notebook = _scratchpad(tmp_path / "proj")
