@@ -149,7 +149,7 @@ exhaustive commit history.
   `--python PATH` (or `STRATA_SCRATCH_PYTHON`) on `strata mcp` and `strata scratch start`
   names the interpreter instead, `add_dependency` is refused there with the project's
   command, and a scratchpad cell's `# @env` may no longer set `PYTHONPATH` or the other
-  variables that move imports (`env_moves_imports`). (#XXXX)
+  variables that move imports (`env_moves_imports`). (#1586)
 ### Changed
 - **A scratchpad's first call takes half the time.** Its daemon no longer
   loads the scan plane (Iceberg, Parquet, pandas) at start: a server started for a
