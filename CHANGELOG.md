@@ -515,7 +515,7 @@ exhaustive commit history.
   a module, a cell's function, or what a pickled value imports as it loads resolves with
   the project first on `sys.path`, as an import in the cell does, instead of failing with
   `ModuleNotFoundError`. What that loading reads keys the cell, a native read in a
-  `__setstate__` included; what the harness imports itself to rebuild a value does not. (#PR)
+  `__setstate__` included; what the harness imports itself to rebuild a value does not. (#1590)
 - **The scratchpad's guidance no longer tells agents that editing a file a cell read
   leaves it cached.** It re-runs; only what a process the cell started read goes
   unseen, which is when to pass `fresh=True`. (#1587)
