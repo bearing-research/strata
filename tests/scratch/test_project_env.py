@@ -1701,14 +1701,16 @@ async def test_a_native_read_while_an_input_loads_keys_the_reader(
         pytest.param(
             # A class one cell exports, its instance another's: module/cell-instance.
             [
-                "class Lazy:\n"
-                "    def __init__(self, n):\n"
-                "        self.n = n\n"
-                "    def __getstate__(self):\n"
-                "        return {'n': self.n}\n"
-                "    def __setstate__(self, state):\n"
-                "        import shapes\n"
-                "        self.box = shapes.Box(state['n'])\n",
+                (
+                    "class Lazy:\n"
+                    "    def __init__(self, n):\n"
+                    "        self.n = n\n"
+                    "    def __getstate__(self):\n"
+                    "        return {'n': self.n}\n"
+                    "    def __setstate__(self, state):\n"
+                    "        import shapes\n"
+                    "        self.box = shapes.Box(state['n'])\n"
+                ),
                 "lazy = Lazy(3)",
             ],
             "lazy.box.size()",
