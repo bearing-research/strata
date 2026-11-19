@@ -4015,6 +4015,12 @@ exhaustive commit history.</p>
   is re-checked before every lookup with a few hundred stats, so an install, a
   repointed editable or a new <code>orjson.py</code> in the project misses rather than replays.
   (#1587)</li>
+<li><strong>A scratchpad's cell starts with the same modules loaded on a warm worker and a cold
+  run, and none of them is the project's code.</strong> What the project and the scratchpad
+  declare is imported first on both paths, less any dependency that loads code a run
+  records (an editable sibling, or a package importing one), which the cell imports
+  itself. A warm worker built before the environment changed, or before a project file
+  began to shadow a module it loaded, is replaced when claimed. (#1588)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
