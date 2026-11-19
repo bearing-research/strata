@@ -4007,6 +4007,14 @@ exhaustive commit history.</p>
   names the interpreter instead, <code>add_dependency</code> is refused there with the project's
   command, and a scratchpad cell's <code># @env</code> may no longer set <code>PYTHONPATH</code> or the other
   variables that move imports (<code>env_moves_imports</code>). (#1586)</li>
+<li><strong>A scratchpad's cells run with the project first on <code>sys.path</code>, and its cache follows
+  where imports resolve.</strong> As under <code>python -c</code> in the project, a module beside the
+  cells imports, and editing it misses. A scratchpad is also keyed on the search path,
+  the import hooks, each editable's target, <code>PYTHONPATH</code> and the other import variables,
+  and on any project file that would shadow a module loaded before the cell; all of it
+  is re-checked before every lookup with a few hundred stats, so an install, a
+  repointed editable or a new <code>orjson.py</code> in the project misses rather than replays.
+  (#1587)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -4349,6 +4357,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The scratchpad's guidance no longer tells agents that editing a file a cell read
+  leaves it cached.</strong> It re-runs; only what a process the cell started read goes
+  unseen, which is when to pass <code>fresh=True</code>. (#1587)</li>
+<li><strong>A scratchpad run keyed on what it read no longer warns about those reads.</strong> Its
+  <code>undeclared_import</code>, <code>undeclared_read</code> and <code>undeclared_listing</code> warnings said its
+  cached result would not change with the file, which its key does. (#1587)</li>
 <li><strong>On Windows, a run that read or imported a file on another drive no longer fails.</strong>
   The audit's suggested fix took a path relative to the notebook, which Windows cannot
   do across drives, and the run failed with <code>path is on mount 'D:'</code>; such a path is now

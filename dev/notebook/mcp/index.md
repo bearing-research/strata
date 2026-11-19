@@ -166,8 +166,15 @@ the project's versions win; a project whose own is older than Strata needs is
 refused with that named, since the overlay cannot replace it. Cells there are keyed
 on the environment's installed distributions (name and version, plus what one from
 a URL, a repository or a path installed; editable ones aside, whose code is keyed
-by what runs read) and the interpreter's build, so the read audit counts what is
-installed there as the environment and does not warn about it. Before each
+by what runs read), the interpreter's build and where imports resolve: the
+search path, the import hooks, where each editable points, the `PYTHON*`
+variables that move imports, and whether a file in the project would shadow a
+module loaded before the cell started (a new `orjson.py` there changes every
+key). That is checked before every lookup, with a few hundred stats, and probed
+again when it changed, so an install, a repointed editable or a new `PYTHONPATH`
+misses rather than replays. A scratchpad with an environment of its own is keyed on
+where its imports resolve too, beside its `uv.lock`. The read audit counts what is
+installed in the project's environment as the environment and does not warn about it. Before each
 `run`, a change to the project's `pyproject.toml` files, its `uv.lock` or its
 installed packages syncs it again, once no cell is running; whether a project has an environment at all is
 decided again when the scratchpad opens, and recorded in
@@ -182,7 +189,9 @@ Its `notebook.toml` says `scratchpad = true`, so it keeps every variable a cell 
 read or not: the first cell to read one loads it rather than rerunning the cell that
 made it. A plain notebook stores only what a cell downstream reads.
 
-A scratchpad's Python cell run on this machine is also keyed on what its run
+A scratchpad's cells run as under `python -c` in the project: its folder is first on
+`sys.path`, so a module beside them imports, and shadows an installed one of its
+name. A scratchpad's Python cell run on this machine is also keyed on what its run
 read: each file it opened or directory it listed (pyarrow's, polars' and duckdb's
 readers included), the code it imported from outside its environment, and each
 place an import looked and found nothing. A file it only checked with `exists()`,
@@ -192,7 +201,8 @@ of the project and the cells that read it go stale with reason `code`
 (`changed_code` names the file), then run again; put the file back and they hit
 again. A cell that changed a file it had read, or whose file changed while it ran,
 keeps its outputs for that run only, as does a loop or `@each` cell that read
-files. Run All runs a scratchpad's cells one at a time, so each run records its
+files. Since such a run is keyed on what it imported, opened and listed, the read
+audit does not warn about those reads. Run All runs a scratchpad's cells one at a time, so each run records its
 own reads, and a run never resumes a dead run's checkpoint, whose reads are unknown.
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
