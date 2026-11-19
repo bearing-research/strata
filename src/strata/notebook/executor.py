@@ -2771,9 +2771,11 @@ class CellExecutor:
             code_reads: dict[str, Any] = {
                 "exclude": [str(self.session.path), *roots],
                 "warm": image[1] if image is not None else [],
-                # Project code compiled once per source, not on every run.
-                "pycache": str(self.session.path / ".strata" / "pycache"),
             }
+            if harness_user is None:
+                # Project code compiled once per source, not on every run. Not for a
+                # harness user: code a cell could write would run in later runs.
+                code_reads["pycache"] = str(self.session.path / ".strata" / "pycache")
             if self.session.path.name == SCRATCH_DIR:
                 # Only a scratchpad in a project has one: not a notebook marked one.
                 code_reads["anchor"] = str(self.session.path.parent)

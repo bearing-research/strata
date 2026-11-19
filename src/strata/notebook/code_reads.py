@@ -47,6 +47,9 @@ PYCACHE_BYTES = 256 * 1024 * 1024
 _PYC_MAGIC = b"STRATAPYC\x01"
 _PYC_LENGTHS = struct.Struct(">I")
 _PYC_DIGEST = 32
+# An entry being written, renamed into place once whole.
+_PYC_TEMP = ".tmp-"
+_PYC_TEMP_NS = 3600 * 1_000_000_000
 
 # They change where imports resolve: a scratchpad's environment identity holds them, and a
 # cell's ``# @env`` may not set them.
@@ -229,12 +232,21 @@ class Reads:
         taken = time.time_ns()
         self._put(path, f"sha256:{digest}", fingerprint(path, taken))
 
-    def compiled(self, data: bytes, digest: str, path: str, compile_: Callable[[], Any]) -> Any:
-        """The code of a module's source *data*: from the cache, else *compile_*."""
-        if self.code_cache is None:
-            return compile_()
+    def compiled(self, loader: Any, data: bytes, digest: str, path: str) -> Any:
+        """The code *loader* compiles from a module's source *data*: from the cache when
+        it is the stdlib's compiler, which reads nothing and depends on nothing else."""
+        cache = self.code_cache
+        if cache is None or type(loader).source_to_code is not _STDLIB_SOURCE_TO_CODE:
+            # An instrumenting loader (typeguard's, beartype's) compiles code of its own.
+            return loader.source_to_code(data, path)
         with self.own(), self.audit_hushed():
-            return self.code_cache.code(digest, path, compile_)
+            found = cache.load(digest, path)
+        if found is not None:
+            return found
+        code = loader.source_to_code(data, path)
+        with self.own(), self.audit_hushed():
+            cache.store(digest, path, code)
+        return code
 
     def absent(self, path: str) -> None:
         self._put(path, ABSENT, None)
@@ -372,7 +384,9 @@ class CodeCache:
     interpreter's bytecode magic and cache tag, and the optimization level. A hit is
     unmarshalled only once the entry's checksum and header match what was just derived:
     a changed byte can still unmarshal into code computing something else. Anything
-    else is deleted and compiled again; deleting the whole cache is always safe.
+    else is compiled again and replaced; deleting the whole cache is always safe. The
+    checksum catches damage, not a writer: like the rest of ``.strata/``, the cache
+    trusts what writes there.
     """
 
     def __init__(self, directory: str, limit: int = PYCACHE_BYTES) -> None:
@@ -391,20 +405,16 @@ class CodeCache:
         }
         return json.dumps(fields, sort_keys=True).encode()
 
-    def entry(self, digest: str, path: str) -> str:
-        return os.path.join(self.directory, hashlib.sha256(self.header(digest, path)).hexdigest())
-
-    def code(self, digest: str, path: str, compile_: Callable[[], Any]) -> Any:
+    def _key(self, digest: str, path: str) -> tuple[bytes, str]:
         header = self.header(digest, path)
-        entry = os.path.join(self.directory, hashlib.sha256(header).hexdigest())
-        found = self._load(entry, header)
-        if found is not None:
-            return found
-        code = compile_()
-        self._store(entry, header, marshal.dumps(code))
-        return code
+        return header, os.path.join(self.directory, hashlib.sha256(header).hexdigest())
 
-    def _load(self, entry: str, header: bytes) -> Any:
+    def entry(self, digest: str, path: str) -> str:
+        return self._key(digest, path)[1]
+
+    def load(self, digest: str, path: str) -> Any:
+        """The code kept for this source at *path*, or None."""
+        header, entry = self._key(digest, path)
         try:
             with open(entry, "rb") as f:
                 blob = f.read()
@@ -424,12 +434,13 @@ class CodeCache:
         # Damaged: the code compiled now replaces it.
         return None
 
-    def _store(self, entry: str, header: bytes, payload: bytes) -> None:
-        blob = _PYC_MAGIC + _PYC_LENGTHS.pack(len(header)) + header + payload
+    def store(self, digest: str, path: str, code: Any) -> None:
+        header, entry = self._key(digest, path)
+        blob = _PYC_MAGIC + _PYC_LENGTHS.pack(len(header)) + header + marshal.dumps(code)
         blob += hashlib.sha256(blob).digest()
         try:
             os.makedirs(self.directory, exist_ok=True)
-            fd, temp = tempfile.mkstemp(dir=self.directory, prefix=".tmp-")
+            fd, temp = tempfile.mkstemp(dir=self.directory, prefix=_PYC_TEMP)
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(blob)
@@ -449,6 +460,7 @@ class CodeCache:
 
     def _listing(self) -> list[tuple[int, int, str]]:
         found = []
+        stale = time.time_ns() - _PYC_TEMP_NS
         try:
             with os.scandir(self.directory) as entries:
                 for item in entries:
@@ -456,7 +468,12 @@ class CodeCache:
                         st = item.stat()
                     except OSError:
                         continue  # removed meanwhile
-                    found.append((st.st_mtime_ns, st.st_size, item.path))
+                    if not item.name.startswith(_PYC_TEMP):
+                        found.append((st.st_mtime_ns, st.st_size, item.path))
+                    elif st.st_mtime_ns < stale:
+                        # Left by a writer killed before its rename; a live one is young.
+                        with suppress(OSError):
+                            os.unlink(item.path)
         except OSError:
             return []
         return found
@@ -492,6 +509,8 @@ def _pyc_payload(blob: bytes, header: bytes) -> bytes | None:
 
 
 _code_caches: dict[str, CodeCache] = {}
+# Captured before any cell runs: a loader compiling otherwise is never cached.
+_STDLIB_SOURCE_TO_CODE = machinery.SourceFileLoader.source_to_code
 
 
 def code_cache(directory: str) -> CodeCache:
@@ -631,7 +650,7 @@ def _patch(reads: Reads) -> list[tuple[type, str, Any]]:
             data = self.get_data(path)
         digest = hashlib.sha256(data).hexdigest()
         reads.module(path, digest)
-        return reads.compiled(data, digest, path, lambda: self.source_to_code(data, path))
+        return reads.compiled(self, data, digest, path)
 
     def get_sourceless_code(self: Any, fullname: str) -> Any:
         path = self.get_filename(fullname)

@@ -218,8 +218,10 @@ The project's modules are compiled from the very source a run read, never from a
 `.pyc` that may predate it; the compiled code is kept in
 `.strata-scratch/.strata/pycache/` under the source's sha256, its path and the
 interpreter (256 MiB, least recently used first), so an unchanged module is not
-compiled again. An entry whose checksum or key does not match is compiled again,
-never run.
+compiled again. A damaged or misplaced entry, one whose checksum or key does not
+match, is compiled again, never run; like the rest of `.strata/`, the cache trusts
+what writes there. A module whose loader compiles code of its own (an instrumenting
+import hook) is never cached, and with `notebook_harness_user` set nothing is.
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
 

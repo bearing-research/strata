@@ -1367,3 +1367,21 @@ async def test_a_scratchpad_run_keeps_its_project_code_compiled(project, manager
     assert got["status"] == "ok", str(got)
     # The project's module, and nothing of the interpreter's or the environment's.
     assert len(list((session.path / ".strata" / "pycache").iterdir())) == 1
+
+
+def test_with_a_harness_user_no_code_is_kept_between_runs(project, monkeypatch):
+    """Code a cell could write would run in later runs: the cache is off."""
+    from strata.notebook import executor as executor_module
+    from strata.notebook.executor import CellExecutor
+
+    notebook = _attached(project)
+    executor = CellExecutor.__new__(CellExecutor)
+    executor.session = SimpleNamespace(
+        path=notebook, notebook_state=SimpleNamespace(scratchpad=True)
+    )
+    assert executor._harness_fields()["code_reads"]["pycache"] == str(
+        notebook / ".strata" / "pycache"
+    )
+    monkeypatch.setattr(executor_module, "resolve_harness_user", lambda: object())
+    monkeypatch.setattr(executor_module, "prepare_work_dir", lambda *_args: None)
+    assert "pycache" not in executor._harness_fields()["code_reads"]

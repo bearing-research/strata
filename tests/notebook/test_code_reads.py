@@ -541,13 +541,14 @@ def test_a_folder_on_pythonpath_is_the_users_code_not_an_install_root(tmp_path, 
 
 # Imports one module, saying which modules were compiled from source.
 _COUNTED = """
-import importlib.machinery as machinery
-real = machinery.SourceFileLoader.source_to_code
+import builtins
+real = builtins.compile
 compiled = []
-def counted(self, data, path, *args, **kwargs):
-    compiled.append(path)
-    return real(self, data, path, *args, **kwargs)
-machinery.SourceFileLoader.source_to_code = counted
+def counted(source, filename, *args, **kwargs):
+    if str(filename).startswith({lib!r}):
+        compiled.append(filename)
+    return real(source, filename, *args, **kwargs)
+builtins.compile = counted
 sys.path.insert(0, {lib!r})
 import {name}
 value = [{name}.VALUE, compiled]
@@ -633,12 +634,10 @@ def test_the_cache_keeps_the_most_recently_used_within_its_limit(tmp_path):
 
     def load(name: str) -> None:
         data = f"VALUE = {name!r}\n".encode()
-
-        def compile_() -> object:
+        digest = hashlib.sha256(data).hexdigest()
+        if cache.load(digest, name) is None:
             compiled.append(name)
-            return compile(data, name, "exec")
-
-        cache.code(hashlib.sha256(data).hexdigest(), name, compile_)
+            cache.store(digest, name, compile(data, name, "exec"))
 
     load("a")
     (size,) = {p.stat().st_size for p in tmp_path.iterdir()}
@@ -681,3 +680,43 @@ def test_the_read_audit_sees_nothing_of_the_cache(tmp_path):
         files = _script(tmp_path, script)
         assert str(tmp_path / "lib" / "geom.py") in files
         assert not [f for f in files if f.startswith(str(tmp_path / "pycache"))], files
+
+
+def test_a_loader_compiling_code_of_its_own_is_never_cached(tmp_path):
+    """An instrumenting import hook's code is not the plain code, either way round."""
+    module = _module(tmp_path, "geom", "first")
+    instrumented = f"""
+    import importlib.machinery as machinery, importlib.util
+    class Instrumenting(machinery.SourceFileLoader):
+        def source_to_code(self, data, path, *args, **kwargs):
+            data += b"\\nINSTRUMENTED = True\\n"
+            return super().source_to_code(data, path, *args, **kwargs)
+    path = {str(module)!r}
+    spec = importlib.util.spec_from_file_location("geom", path, loader=Instrumenting("geom", path))
+    geom = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(geom)
+    value = hasattr(geom, "INSTRUMENTED")
+    """
+    lib = str(tmp_path / "lib")
+    plain = f"sys.path.insert(0, {lib!r})\nimport geom\nvalue = hasattr(geom, 'INSTRUMENTED')"
+    pycache = str(tmp_path / "pycache")
+
+    assert _record(tmp_path, plain, pycache=pycache)["value"] is False
+    assert _record(tmp_path, instrumented, pycache=pycache)["value"] is True
+    assert _record(tmp_path, plain, pycache=pycache)["value"] is False
+    assert len(list((tmp_path / "pycache").iterdir())) == 1
+
+
+def test_a_writer_killed_midway_leaves_nothing_that_counts(tmp_path):
+    cache = code_reads.CodeCache(str(tmp_path))
+    stale = tmp_path / ".tmp-stale"
+    stale.write_bytes(b"x" * 1000)
+    os.utime(stale, ns=(1, 1))
+    live = tmp_path / ".tmp-live"
+    live.write_bytes(b"x" * 1000)
+    data = b"VALUE = 1\n"
+    cache.store(hashlib.sha256(data).hexdigest(), "m", compile(data, "m", "exec"))
+
+    assert not stale.exists()
+    assert live.exists()  # another writer's, still being written
+    assert cache._total == Path(cache.entry(hashlib.sha256(data).hexdigest(), "m")).stat().st_size
