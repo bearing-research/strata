@@ -3484,6 +3484,7 @@ the connection.</p>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="mi">384</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span><span class="o">.</span><span class="n">cuda</span><span class="p">()</span>
 </code></pre></div>
 <p>Format: <code># @env KEY=value</code>. Multiple <code>@env</code> lines are supported. The variable is available in <code>os.environ</code> during cell execution.</p>
+<p>In a scratchpad, <code># @env</code> may not set <code>PYTHONPATH</code>, <code>PYTHONHOME</code>, <code>PYTHONSAFEPATH</code>, <code>PYTHONNOUSERSITE</code> or <code>PYTHONPLATLIBDIR</code>: they change where imports resolve, which a scratchpad cell's key does not follow, so the cell does not run (<code>env_moves_imports</code>). Set them in the environment the scratchpad starts in instead.</p>
 <div class="admonition warning">
 <p class="admonition-title">Don't put secrets in <code># @env</code></p>
 <p><code># @env</code> values live in <strong>committed cell source</strong> (the files under <code>cells/</code>).

@@ -3337,7 +3337,7 @@ sit behind Claude Code's tool search.</p>
 </tr>
 <tr>
 <td><code>scratchpad(name=None)</code></td>
-<td>Without <code>name</code>: each cell's id, <code>defines</code>, <code>status</code>, why it is stale and what its last uncached run took, plus the notebook directory, the cells' <code>cwd</code> (its <code>work/</code>), the <code>python</code> they run on and the time the cache has saved. With <code>name</code>: the cell that defines it, its source and shown <code>value</code>, or the names that exist.</td>
+<td>Without <code>name</code>: each cell's id, <code>defines</code>, <code>status</code>, why it is stale and what its last uncached run took, plus the notebook directory, the cells' <code>cwd</code> (its <code>work/</code>), the <code>python</code> they run on, the <code>environment</code> that is (<code>attached</code> to the project's, with its <code>project_python</code> and what found it, or <code>owned</code>) and the time the cache has saved. With <code>name</code>: the cell that defines it, its source and shown <code>value</code>, or the names that exist.</td>
 </tr>
 </tbody>
 </table>
@@ -3371,7 +3371,37 @@ A daemon another Strata version started is stopped and replaced once it is idle
 call as it is, the result's <code>note</code> says so, and the next call asks again. The server's
 output goes to <code>.strata-scratch/.strata/server.log</code>; it keeps remote-mount copies
 and shared environments under <code>~/.strata</code>, as a personal server does.
-Cells read the project read-only as <code>project</code> (<code>project / "data.csv"</code>).
+Cells read the project read-only as <code>project</code> (<code>project / "data.csv"</code>).</p>
+<p>Cells run in the project's own environment when it has one: the one <code>uv run
+python</code> would use there, found by uv's dry run, which creates nothing. A project
+is uv's when its workspace root has a <code>uv.lock</code> or its <code>pyproject.toml</code> has a
+<code>[tool.uv]</code> table; the scratchpad then runs <code>uv sync --inexact</code> first when uv says
+the environment is missing or behind, as <code>uv run</code> does, and a sync that fails comes
+back from <code>run</code> with uv's error, and no cell runs until it succeeds. A project uv
+does not manage (pip, poetry) is used as it is, never synced: the environment
+<code>VIRTUAL_ENV</code> names, unless it is the one Strata runs in, else a <code>.venv</code> in the
+project. Anything else (no environment, a project in another language, no
+project) gets one of its own, <code>.strata-scratch/.venv</code>, where <code>add_dependency</code>
+works; in the project's, it is refused with the project's command (<code>uv add
+numpy</code>). The cells' interpreter is <code>.strata-scratch/.venv-overlay</code>, which adds the
+project's site-packages and only those of <code>pyarrow</code>, <code>orjson</code> and <code>cloudpickle</code>
+the project lacks (at Strata's minimum version, without their dependencies), so
+the project's versions win; a project whose own is older than Strata needs is
+refused with that named, since the overlay cannot replace it. Cells there are keyed
+on the environment's installed distributions (name and version, plus what one from
+a URL, a repository or a path installed; editable ones aside, whose code is keyed
+by what runs read) and the interpreter's build, so the read audit counts what is
+installed there as the environment and does not warn about it. Before each
+<code>run</code>, a change to the project's <code>pyproject.toml</code> files, its <code>uv.lock</code> or its
+installed packages syncs it again, once no cell is running; whether a project has an environment at all is
+decided again when the scratchpad opens, and recorded in
+<code>.strata-scratch/.strata/scratchpad_environment.json</code>. <code>--python PATH</code> on <code>strata
+mcp</code> or <code>strata scratch start</code>, or <code>STRATA_SCRATCH_PYTHON</code>, names the interpreter
+instead. A client asking for another than the daemon's replaces it once idle, and
+while it is busy is refused with both named; a client asking for none keeps the
+daemon's. A scratchpad cell's <code># @env</code> may not set <code>PYTHONPATH</code>, <code>PYTHONHOME</code>,
+<code>PYTHONSAFEPATH</code>, <code>PYTHONNOUSERSITE</code> or <code>PYTHONPLATLIBDIR</code> (<code>env_moves_imports</code>,
+which keeps it from running): its key does not follow where imports resolve.
 Its <code>notebook.toml</code> says <code>scratchpad = true</code>, so it keeps every variable a cell defines,
 read or not: the first cell to read one loads it rather than rerunning the cell that
 made it. A plain notebook stores only what a cell downstream reads.</p>

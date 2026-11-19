@@ -3994,6 +3994,19 @@ exhaustive commit history.</p>
   run does not resume a dead run's checkpoint. A cell on a remote worker, an R, SQL or
   prompt cell, and a loop or fan-out keep the notebook's key. Plain notebooks are
   unchanged. (#1585)</li>
+<li><strong>A scratchpad runs in its project's environment.</strong> Its cells run where <code>uv run
+  python</code> would in the project: a uv project (a <code>uv.lock</code> at its workspace root, or a
+  <code>[tool.uv]</code> table) is synced first, inexactly, when uv says it is missing or behind,
+  and again when its <code>pyproject.toml</code> files, lock or installed packages change; a sync
+  that fails is returned by <code>run</code> with uv's error, and no cell runs. A pip or poetry
+  project's <code>VIRTUAL_ENV</code> or <code>.venv</code> is used as it is, never synced; anything else gets
+  an environment of its own as before. Cells run through <code>.strata-scratch/.venv-overlay</code>,
+  which adds only the runtime packages the project lacks, so its versions win (one older
+  than Strata needs is refused, named), and are keyed on what the environment has
+  installed and its interpreter, so the read audit does not warn about it. <code>scratchpad</code> reports the <code>environment</code>, <code>--python PATH</code> (or <code>STRATA_SCRATCH_PYTHON</code>) on <code>strata mcp</code> and <code>strata scratch start</code>
+  names the interpreter instead, <code>add_dependency</code> is refused there with the project's
+  command, and a scratchpad cell's <code># @env</code> may no longer set <code>PYTHONPATH</code> or the other
+  variables that move imports (<code>env_moves_imports</code>). (#1586)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -4336,6 +4349,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>On Windows, a run that read or imported a file on another drive no longer fails.</strong>
+  The audit's suggested fix took a path relative to the notebook, which Windows cannot
+  do across drives, and the run failed with <code>path is on mount 'D:'</code>; such a path is now
+  named as it is, and a drive root is never suggested as a mount. (#1586)</li>
 <li><strong>Showing a cell's value no longer imports matplotlib or PIL.</strong> To tell whether a value
   was a figure or an image, the serializer imported both, so every cold run in an
   environment with matplotlib paid its import, and the first on a machine (or under a new
