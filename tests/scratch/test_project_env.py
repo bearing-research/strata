@@ -345,7 +345,8 @@ def test_a_dependency_change_is_refused_with_the_projects_command(tmp_path):
     assert not added.success
     assert "runs in your project's environment" in (added.error or "")
     assert f"`uv add numpy` in {tmp_path}" in (added.error or "")
-    assert "`uv remove numpy`" in (backend.remove("numpy", timeout=10).error or "")
+    removed = backend.remove("numpy", timeout=10)
+    assert "`uv remove numpy`" in (removed.error or "")
 
 
 def test_a_project_change_or_an_install_means_syncing_again(project):
@@ -464,6 +465,22 @@ async def test_the_first_sync_of_a_deferred_open_finds_the_project(project, mana
     assert isinstance(session.backend, ProjectEnvBackend)
     assert session.environment_sync_state == "ready"
     assert session.venv_python == venv_python(session.path / OVERLAY_DIR)
+
+
+def test_a_service_never_runs_a_notebooks_project_environment(project, monkeypatch):
+    """Its probe would run that interpreter as the server, not as the harness user."""
+    from strata.notebook import session as session_module
+
+    real = session_module._session_setting
+    monkeypatch.setattr(
+        session_module,
+        "_session_setting",
+        lambda name: "service" if name == "deployment_mode" else real(name),
+    )
+    session = SessionManager().open_notebook(_scratchpad(project), defer_initial_venv_sync=True)
+    session.detect_scratchpad_environment()
+    assert isinstance(session.backend, UvBackend)
+    assert _record(session.path) is None
 
 
 def test_a_project_that_loses_its_environment_gives_the_scratchpad_its_own(project):

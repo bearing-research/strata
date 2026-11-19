@@ -2872,7 +2872,8 @@ class NotebookSession:
     def detect_scratchpad_environment(self) -> None:
         """Choose, and record, whether a scratchpad runs in its project's environment; a
         no-op for any other notebook. Before every sync."""
-        if not self.notebook_state.scratchpad:
+        # Personal only: detection runs the project's interpreter as the server's user.
+        if not self.notebook_state.scratchpad or _session_setting("deployment_mode") != "personal":
             return
         from strata.notebook.env_backend import get_backend
         from strata.notebook.project_env import (
