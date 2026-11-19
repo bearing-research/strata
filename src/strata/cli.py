@@ -45,6 +45,20 @@ def _root_help(what: str) -> str:
     )
 
 
+_PYTHON_HELP = (
+    "The interpreter the scratchpad's cells run in, instead of the project environment "
+    "it finds (default: $STRATA_SCRATCH_PYTHON)"
+)
+
+
+def _use_python(args: argparse.Namespace) -> None:
+    """Hand ``--python`` to the daemon this command starts, which inherits the environment."""
+    given = getattr(args, "python", None)
+    if given:
+        # Not resolved: a venv's python is often a link to its base interpreter.
+        os.environ["STRATA_SCRATCH_PYTHON"] = os.path.abspath(given)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="strata",
@@ -741,6 +755,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ):
         sub = scratch_sub.add_parser(name, help=help_text)
         sub.add_argument("--root", help=_root_help(f"to {name}"))
+        if name == "start":
+            sub.add_argument("--python", help=_PYTHON_HELP)
         sub.set_defaults(func=_dispatch_scratch)
     ls_parser = scratch_sub.add_parser(
         "ls", help="List every scratchpad: size, last use, daemon, overage"
@@ -776,6 +792,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     mcp_parser.add_argument("--root", help=_root_help("to serve"))
+    mcp_parser.add_argument("--python", help=_PYTHON_HELP)
     mcp_parser.set_defaults(func=_dispatch_mcp)
 
     watch_parser = subparsers.add_parser(
@@ -895,6 +912,7 @@ def _dispatch_mcp(args: argparse.Namespace) -> int:
         return 2
     from strata.scratch import resolve_anchor
 
+    _use_python(args)
     return mcp_main(resolve_anchor(args.root))
 
 
@@ -906,6 +924,7 @@ def _dispatch_scratch(args: argparse.Namespace) -> int:
     from strata import scratch
 
     root = scratch.resolve_anchor(args.root)
+    _use_python(args)
     if args.scratch_command == "stop":
         try:
             stopped = scratch.stop_daemon(root)

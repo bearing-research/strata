@@ -33,8 +33,8 @@ class EnvironmentBackend(Protocol):
     supports_mutations: bool
     """Whether ``add``/``remove``/``sync``/``set_python_version`` are
     callable on this backend. ``False`` for read-only backends like
-    the attached-venv mode planned for Phase 2; those raise a clear
-    error if mutation methods are called anyway."""
+    the attached-venv mode (``ProjectEnvBackend``); those refuse
+    mutation methods with a clear error."""
 
     def python_executable(self) -> Path:
         """Absolute path to the interpreter cell execution should use."""
@@ -217,14 +217,26 @@ def get_backend(notebook_dir: Path) -> EnvironmentBackend:
 
     The server-wide ``notebook_env_backend`` chooses: ``uv`` gives each notebook
     its own ``.venv``; ``shared`` links it into one environment per lockfile
-    (``strata.notebook.shared_env``).
+    (``strata.notebook.shared_env``). A scratchpad its last detection recorded as
+    attached runs in its project's environment (``strata.notebook.project_env``).
     """
+    if _recorded_mode(notebook_dir) == "attached":
+        from strata.notebook.project_env import ProjectEnvBackend
+
+        return ProjectEnvBackend(notebook_dir)
     config = _config()
     if getattr(config, "notebook_env_backend", "uv") == "shared":
         from strata.notebook.shared_env import SharedEnvBackend
 
         return SharedEnvBackend(notebook_dir, shared_env_root(config))
     return UvBackend(notebook_dir)
+
+
+def _recorded_mode(notebook_dir: Path) -> str | None:
+    """A scratchpad's environment mode, as its last detection recorded it."""
+    from strata.notebook.project_env import read_record
+
+    return (read_record(notebook_dir) or {}).get("mode")
 
 
 def shared_root() -> Path | None:

@@ -300,6 +300,7 @@ class NotebookSession:
         # "could not be computed".
         self.dag_error: str | None = None
         self.backend: EnvironmentBackend = get_backend(self.path)
+        self._project_refresh = asyncio.Lock()
 
         from strata.notebook.artifact_integration import NotebookArtifactManager
 
@@ -2852,17 +2853,65 @@ class NotebookSession:
 
         started = _time.perf_counter()
         python_version = read_requested_python_minor(self.path)
+        self.detect_scratchpad_environment()
+        error = None
         if isinstance(self.backend, UvBackend):
             ok = _uv_sync(self.path, python_version=python_version)
         else:
             # Never sync a shared environment through the notebook's link: ``uv sync``
             # would (un)install inside an env other notebooks use. The backend syncs into
             # the key and moves this notebook's link.
-            ok = self.backend.sync(python_version=python_version, timeout=60).success
+            result = self.backend.sync(python_version=python_version, timeout=self.sync_timeout())
+            ok, error = result.success, result.error
         self._apply_uv_sync_result(
             ok,
             duration_ms=int((_time.perf_counter() - started) * 1000),
+            error=error,
         )
+
+    def detect_scratchpad_environment(self) -> None:
+        """Choose, and record, whether a scratchpad runs in its project's environment; a
+        no-op for any other notebook. Before every sync."""
+        # Personal only: detection runs the project's interpreter as the server's user.
+        if not self.notebook_state.scratchpad or _session_setting("deployment_mode") != "personal":
+            return
+        from strata.notebook.env_backend import get_backend
+        from strata.notebook.project_env import (
+            ProjectEnvBackend,
+            detect,
+            remove_overlay,
+            write_record,
+        )
+
+        found = detect(self.path.parent)
+        write_record(self.path, found)
+        if found.mode == "attached":
+            self.backend = ProjectEnvBackend(self.path, found)
+            return
+        # Its identity would otherwise key the cells of the environment that replaces it.
+        remove_overlay(self.path)
+        self.backend = get_backend(self.path)
+
+    def sync_timeout(self) -> int:
+        """Seconds a sync may take: a project's own dependencies, on a cold cache, minutes."""
+        from strata.notebook.project_env import ProjectEnvBackend
+
+        return 600 if isinstance(self.backend, ProjectEnvBackend) else 60
+
+    async def refresh_project_environment(self) -> None:
+        """Sync a scratchpad in its project's environment again once the project's files or
+        installed packages changed, or after its last sync failed."""
+        from strata.notebook.project_env import ProjectEnvBackend
+
+        if not isinstance(self.backend, ProjectEnvBackend):
+            return
+        # One at a time, and never under a run or another environment change, which would
+        # see the overlay rebuilt beneath it; the next run tries again.
+        async with self._project_refresh:
+            if self._has_active_execution() or self.has_active_environment_mutation():
+                return
+            if await asyncio.to_thread(self.backend.changed):
+                await self.sync_environment()
 
     def environment_attestation_error(self) -> str | None:
         """Why this environment cannot be published from, or ``None`` if it can.
@@ -2901,12 +2950,28 @@ class NotebookSession:
 
         return None
 
-    def _apply_uv_sync_result(self, ok: bool, *, duration_ms: int) -> None:
-        """Update runtime state after a uv sync attempt."""
+    def _apply_uv_sync_result(
+        self, ok: bool, *, duration_ms: int, error: str | None = None
+    ) -> None:
+        """Update runtime state after a uv sync attempt that failed with *error*, if not *ok*."""
+        from strata.notebook.project_env import ProjectEnvBackend
+
         self.environment_last_synced_at = int(_time.time() * 1000)
         self.environment_last_sync_duration_ms = duration_ms
 
-        venv_python = self.path / ".venv" / "bin" / "python"
+        if not ok and isinstance(self.backend, ProjectEnvBackend):
+            # Not the overlay as it was, nor PATH python: neither is the project's now.
+            self.venv_python = None
+            self.environment_interpreter_source = "unknown"
+            self.environment_sync_state = "failed"
+            self.environment_sync_error = (
+                f"The project's environment is not ready: {error or 'its sync failed'}"
+            )
+            self.environment_sync_notice = None
+            logger.warning("The project environment for %s failed: %s", self.path, error)
+            return
+
+        venv_python = self.backend.python_executable()
         if venv_python.exists():
             self.venv_python = venv_python
             self.environment_interpreter_source = "venv"
@@ -3137,7 +3202,7 @@ class NotebookSession:
         ``uv add`` / ``uv remove`` already synced the venv, so this only re-probes. If
         the venv is missing it falls back to ``ensure_venv_synced()``.
         """
-        venv_python = self.path / ".venv" / "bin" / "python"
+        venv_python = self.backend.python_executable()
         if not venv_python.exists():
             if self.has_active_environment_mutation():
                 self.mark_environment_pending()
@@ -3598,7 +3663,7 @@ class SessionManager:
                     phase, prepare = "session_env_refresh", existing.refresh_environment_runtime
                 if defer_initial_venv_sync and (
                     phase == "session_env_sync"
-                    or not (existing.path / ".venv" / "bin" / "python").exists()
+                    or not existing.backend.python_executable().exists()
                     or existing._renv_restore_due() is not None
                 ):
                     existing.mark_environment_pending()

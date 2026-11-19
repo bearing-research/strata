@@ -38,7 +38,7 @@ from strata.notebook.cell_paths.context import no_interpreter_message as _no_int
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.code_keys import code_key
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
-from strata.notebook.env import moved_input
+from strata.notebook.env import OVERLAY_DIR, moved_input
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
     HarnessUser,
@@ -206,6 +206,10 @@ def python_harness_command(
     if harness_user is not None:
         # Straight to the venv interpreter: ``uv run`` wants a writable uv cache a separate
         # user would need arranged, and the venv is already synced.
+        return [str(venv_python), str(harness_path), str(manifest_path)]
+    if venv_python.parent.parent == notebook_path / OVERLAY_DIR:
+        # A scratchpad in its project's environment: ``uv run`` would sync and use the
+        # scratchpad's own ``.venv`` instead.
         return [str(venv_python), str(harness_path), str(manifest_path)]
     uv = resolve_uv()
     if uv is None:

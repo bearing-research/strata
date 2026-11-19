@@ -29,8 +29,8 @@ def project(tmp_path, monkeypatch):
     started: list[int] = []
     spawn = scratch._spawn
 
-    def recorded(anchor, port):
-        pid = spawn(anchor, port)
+    def recorded(anchor, port, python=None):
+        pid = spawn(anchor, port, python)
         started.append(pid)
         return pid
 

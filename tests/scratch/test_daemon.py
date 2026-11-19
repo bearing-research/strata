@@ -296,7 +296,9 @@ def test_a_daemon_too_busy_to_answer_is_not_replaced(project, monkeypatch):
 
     monkeypatch.setattr(scratch.httpx, "get", slow)
     started = []
-    monkeypatch.setattr(scratch, "_spawn", lambda anchor, port: started.append(port) or 1)
+    monkeypatch.setattr(
+        scratch, "_spawn", lambda anchor, port, python=None: started.append(port) or 1
+    )
     # Alive and slow: a second daemon would write the directory beside it.
     with pytest.raises(scratch.NotAnswering, match=rf"pid {os.getpid()}\) is not answering"):
         scratch.ensure_daemon(project)

@@ -907,9 +907,35 @@ def _stale_reason(reasons: list[str]) -> str:
 
 
 def _environment_fix(session: Any) -> str:
+    from strata.notebook.project_env import ProjectEnvBackend
+
+    if isinstance(session.backend, ProjectEnvBackend) and session.environment_sync_state in (
+        "failed",
+        "unknown",
+    ):
+        return (
+            f"fix the project's environment in {session.path.parent} (the error says "
+            "how), then call `run` again: it tries again"
+        )
     if session.environment_sync_state in ("failed", "unknown"):
         return f"run `uv sync` in {session.path}, then call `run` again"
     return "call `run` again once it finishes"
+
+
+def _environment_view(session: Any) -> dict[str, Any]:
+    """Where the cells run: the project's environment (``attached``, with what found it), or
+    the scratchpad's own (``owned``)."""
+    from strata.notebook.project_env import ProjectEnvBackend
+
+    backend = session.backend
+    if not isinstance(backend, ProjectEnvBackend):
+        return {"mode": "owned"}
+    described = backend.described()
+    return {
+        "mode": "attached",
+        "project_python": described.get("attach"),
+        "found_by": described.get("found_by"),
+    }
 
 
 def _why_it_ran(cell: Any) -> str:
@@ -951,6 +977,8 @@ async def _scratch_run(
                     f"cell {cell!r} is a {existing.language} cell, and `run` writes Python",
                     "leave out `cell` to add a Python cell",
                 )
+        # A project whose files or packages changed is synced first, as `uv run` would.
+        await session.refresh_project_environment()
         # Before the cell is added, so a refusal leaves nothing behind.
         block = session.environment_execution_block_message()
         if block:
@@ -1123,6 +1151,7 @@ def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dic
         "notebook": str(session.path),
         "cwd": str(session.path / WORK_DIR),
         "python": str(session.venv_python) if session.venv_python else None,
+        "environment": _environment_view(session),
         "saved_ms": session.get_profiling_summary()["cache_savings_ms"],
         "cells": cells,
         "url": url,
