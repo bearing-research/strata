@@ -52,6 +52,8 @@ def establish_ssh_worker(
 
     worker_name = name or default_worker_name(ssh_target)
     # Before provisioning anything: the registration would be refused after.
+    if worker_name == "local":
+        raise NotebookOpsError("'local' is reserved for the built-in worker")
     refusal = scratchpad_worker_refusal(session.notebook_state, worker_name)
     if refusal is not None:
         raise NotebookOpsError(refusal)

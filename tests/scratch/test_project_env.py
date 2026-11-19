@@ -1498,9 +1498,60 @@ async def test_a_scratchpads_worker_routes_refuse(tmp_path):
     )
     with pytest.raises(HTTPException, match="runs on this machine"):
         await update_notebook_workers_endpoint("nb", session, WorkersConfigRequest(workers=[spec]))
-    with pytest.raises(HTTPException, match="runs on this machine"):
+    with pytest.raises(HTTPException, match="runs on this machine") as refused:
         await update_notebook_worker_endpoint("nb", session, WorkerConfigRequest(worker="gpu"))
+    assert refused.value.status_code == 400
     assert parse_notebook(notebook).workers == []
+
+
+@pytest.mark.asyncio
+async def test_a_scratchpads_listed_workers_can_still_go(tmp_path, manager):
+    """One written before scratchpads took none: removed one at a time, never added to."""
+    from fastapi import HTTPException
+
+    from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
+    from strata.notebook.routes import WorkersConfigRequest, update_notebook_workers_endpoint
+    from strata.notebook.writer import update_notebook_workers
+
+    def spec(name: str) -> WorkerSpec:
+        config = WorkerConfig(url=_WORKER_URL)
+        return WorkerSpec(name=name, backend=WorkerBackendType.EXECUTOR, config=config)
+
+    notebook = _scratchpad(tmp_path)
+    update_notebook_workers(notebook, [spec("gpu"), spec("cpu")])
+    session = manager.open_notebook(notebook)
+    with pytest.raises(HTTPException, match="worker 'new'"):
+        await update_notebook_workers_endpoint(
+            "nb", session, WorkersConfigRequest(workers=[spec("cpu"), spec("new")])
+        )
+    await update_notebook_workers_endpoint(
+        "nb", session, WorkersConfigRequest(workers=[spec("cpu")])
+    )
+    assert [w.name for w in parse_notebook(notebook).workers] == ["cpu"]
+
+
+def test_a_cells_own_worker_is_named_as_its_own(tmp_path):
+    state = parse_notebook(_scratchpad(tmp_path))
+    cell = CellState(id="c1", source="x = 1\n", worker="gpu")
+    state.cells.append(cell)
+    (found,) = [
+        d for d in validate_cell_annotations(cell, state) if d.severity == DiagnosticSeverity.ERROR
+    ]
+    assert found.message.startswith("The cell's worker `gpu` in notebook.toml")
+
+
+def test_an_ssh_worker_named_local_is_refused_before_provisioning(tmp_path):
+    from strata.notebook.ops import NotebookOpsError
+    from strata.notebook.ssh_worker_service import establish_ssh_worker
+
+    class Untouched:
+        def establish(self, *_args, **_kwargs):
+            raise AssertionError("provisioned a box for a name that is refused")
+
+    notebook = create_notebook(tmp_path, "nb", initialize_environment=False)
+    session = SimpleNamespace(notebook_state=parse_notebook(notebook))
+    with pytest.raises(NotebookOpsError, match="reserved"):
+        establish_ssh_worker(session, Untouched(), ssh_target="user@box", name="local")
 
 
 @pytest.mark.asyncio

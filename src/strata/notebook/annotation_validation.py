@@ -144,6 +144,8 @@ def _validate_worker(cell: CellState, notebook_state: NotebookState) -> list[Ann
                 message=(
                     f"`@worker {worker}`: {SCRATCHPAD_LOCAL_ONLY}."
                     if annotations.worker
+                    else f"The cell's worker `{worker}` in notebook.toml: {SCRATCHPAD_LOCAL_ONLY}."
+                    if (configured := notebook_state.get_cell(cell.id)) and configured.worker
                     else f"The default worker `{worker}`: {SCRATCHPAD_LOCAL_ONLY}."
                 ),
                 line=_find_annotation_line(cell.source, "worker") if annotations.worker else None,

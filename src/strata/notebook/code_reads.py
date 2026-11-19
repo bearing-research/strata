@@ -445,10 +445,7 @@ class CodeCache:
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(blob)
-                try:
-                    replaced = os.stat(entry).st_size  # a damaged entry, or another writer's
-                except FileNotFoundError:
-                    replaced = 0
+                replaced = os.path.exists(entry)  # a damaged entry, or another writer's
                 os.replace(temp, entry)
             except OSError:
                 os.unlink(temp)
@@ -456,10 +453,11 @@ class CodeCache:
         except OSError:
             # Not writable here: the next run compiles it again.
             return
-        if self._total is None:
+        if self._total is None or replaced:
+            # Counted afresh: what it replaced may be an entry this process never counted.
             self._total = self._size()
         else:
-            self._total += len(blob) - replaced
+            self._total += len(blob)
         if self._total > self.limit:
             self._evict()
 

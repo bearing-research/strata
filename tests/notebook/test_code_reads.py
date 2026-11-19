@@ -787,3 +787,19 @@ def test_a_compiler_replaced_before_the_recorder_loaded_is_never_cached(tmp_path
     """
     assert _script(tmp_path, script) is True
     assert not (tmp_path / "pycache").exists()
+
+
+def test_replacing_another_processs_entry_counts_the_cache_afresh(tmp_path):
+    ours, theirs = code_reads.CodeCache(str(tmp_path)), code_reads.CodeCache(str(tmp_path))
+
+    def store(cache: code_reads.CodeCache, name: str) -> str:
+        data = f"VALUE = {name!r}\n".encode()
+        digest = hashlib.sha256(data).hexdigest()
+        cache.store(digest, name, compile(data, name, "exec"))
+        return cache.entry(digest, name)
+
+    store(ours, "x")
+    damaged = Path(store(theirs, "y"))  # written after ours counted
+    damaged.write_bytes(b"damaged")
+    store(ours, "y")
+    assert ours._total == sum(p.stat().st_size for p in tmp_path.iterdir())
