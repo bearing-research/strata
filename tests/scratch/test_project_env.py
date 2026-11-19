@@ -753,7 +753,8 @@ def test_the_environment_is_reported_from_the_record_without_detecting(
         "project_python": str(venv_python(project / ".venv")),
         "found_by": ".venv",
     }
-    assert "`remove it there" not in (session.backend.remove("x", timeout=1).error or "")
+    removed = session.backend.remove("x", timeout=1)
+    assert "`remove it there" not in (removed.error or "")
 
 
 @pytest.mark.asyncio
