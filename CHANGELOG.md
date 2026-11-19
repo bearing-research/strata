@@ -149,6 +149,14 @@ exhaustive commit history.
   names the interpreter instead, `add_dependency` is refused there with the project's
   command, and a scratchpad cell's `# @env` may no longer set `PYTHONPATH` or the other
   variables that move imports (`env_moves_imports`). (#1586)
+- **A scratchpad's cells run with the project first on `sys.path`, and its cache follows
+  where imports resolve.** As under `python -c` in the project, a module beside the
+  cells imports, and editing it misses. A scratchpad is also keyed on the search path,
+  the import hooks, each editable's target, `PYTHONPATH` and the other import variables,
+  and on any project file that would shadow a module loaded before the cell; all of it
+  is re-checked before every lookup with a few hundred stats, so an install, a
+  repointed editable or a new `orjson.py` in the project misses rather than replays.
+  (#1587)
 ### Changed
 - **A scratchpad's first call takes half the time.** Its daemon no longer
   loads the scan plane (Iceberg, Parquet, pandas) at start: a server started for a
@@ -488,6 +496,9 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A scratchpad run keyed on what it read no longer warns about those reads.** Its
+  `undeclared_import`, `undeclared_read` and `undeclared_listing` warnings said its
+  cached result would not change with the file, which its key does. (#1587)
 - **On Windows, a run that read or imported a file on another drive no longer fails.**
   The audit's suggested fix took a path relative to the notebook, which Windows cannot
   do across drives, and the run failed with `path is on mount 'D:'`; such a path is now
