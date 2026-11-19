@@ -1244,16 +1244,24 @@ def test_a_worker_built_before_a_shadowing_file_no_longer_holds(project):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_server")
-async def test_a_cold_run_and_a_warm_worker_preload_the_same_base_image(project, manager):
+async def test_a_cold_run_and_a_warm_worker_preload_the_same_base_image(
+    project, manager, monkeypatch
+):
+    from strata.notebook import session as session_module
     from tests.conftest import LIVE_SERVER_TIMEOUT
     from tests.notebook.pool_helpers import warm_again
 
+    # No pool of the session's own: the cold run is cold, and the one below is the only
+    # one, which the manager drains.
+    real = session_module._session_setting
+    monkeypatch.setattr(
+        session_module,
+        "_session_setting",
+        lambda name: 0 if name == "notebook_warm_pool_size" else real(name),
+    )
     _declare(project, "projmod")
     session = manager.open_notebook(_scratchpad(project))
-    # Cold first: a pool the session started may already be warm.
-    if session.warm_pool is not None:
-        await session.warm_pool.drain()
-        session.warm_pool = None
+    assert session.warm_pool is None
     probe = "import os, sys\nf\"{os.path.basename(sys.argv[0])} {'projmod' in sys.modules}\""
     cold = await mcp_server._scratch_run(manager, probe)
     assert cold["status"] == "ok", str(cold)
