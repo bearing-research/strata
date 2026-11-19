@@ -9,12 +9,13 @@ Runs in the notebook's venv and cannot ``import strata``; ``serializer.py`` in
 the same directory is loaded via ``importlib.util``.
 """
 
+import functools
 import importlib.util
 import io
 import os
 import platform
 import sys
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -273,21 +274,28 @@ def execute_harness(manifest: dict) -> dict:
         # at import (jax and JAX_ENABLE_X64) would otherwise take the worker's env,
         # silently downcasting float64 inputs to float32.
         with _apply_env_overrides(manifest):
-            with _code.for_run(manifest) as code:
-                for var_name, spec in inputs.items():
-                    # Sweep-group input -> {variant_name: value}; parity with
-                    # harness.deserialize_inputs.
-                    if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
-                        bundle: dict[str, Any] = {}
-                        for variant_name, variant_spec in spec.get("variants", {}).items():
-                            value = _deser_one(variant_spec, var_name)
-                            if value is not _MISSING:
-                                bundle[variant_name] = value
-                        namespace[var_name] = bundle
-                        continue
-                    value = _deser_one(spec, var_name)
-                    if value is not _MISSING:
-                        namespace[var_name] = value
+            with _code.for_run(manifest) as code, ExitStack() as audit:
+                observed = None
+                if code is not None:
+                    # A scratchpad's inputs load as part of its run: what unpickling a
+                    # project class reads, natively too, is the cell's.
+                    observed = audit.enter_context(_audit.recording())
+                    audit.enter_context(_code.observing(code, observed))
+                with _ser.resolving_classes(functools.partial(_code.anchored, code)):
+                    for var_name, spec in inputs.items():
+                        # Sweep-group input -> {variant_name: value}; parity with
+                        # harness.deserialize_inputs.
+                        if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
+                            bundle: dict[str, Any] = {}
+                            for variant_name, variant_spec in spec.get("variants", {}).items():
+                                value = _deser_one(variant_spec, var_name)
+                                if value is not _MISSING:
+                                    bundle[variant_name] = value
+                            namespace[var_name] = bundle
+                            continue
+                        value = _deser_one(spec, var_name)
+                        if value is not _MISSING:
+                            namespace[var_name] = value
 
                 _inject_mounts(manifest, namespace)
                 _inject_tables(manifest, namespace)
@@ -304,11 +312,9 @@ def execute_harness(manifest: dict) -> dict:
                 sys.stdout = stdout_buf
                 sys.stderr = stderr_buf
 
-                with (
-                    display_capture.capture_side_effects(),
-                    _audit.recording() as observed,
-                    _code.observing(code, observed),
-                ):
+                if observed is None:
+                    observed = audit.enter_context(_audit.recording())
+                with display_capture.capture_side_effects(), _code.anchored(code):
                     _display_value = _exec_with_display(
                         source, namespace, manifest.get("strata_cell_id")
                     )

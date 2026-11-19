@@ -14,6 +14,7 @@ file by path with ``importlib.util``: they run in the notebook's venv and cannot
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import io
 import json
@@ -211,6 +212,32 @@ class ObjectCodec(Protocol):
         """Deserialize backend-specific bytes to a Python object."""
 
 
+# Set while a scratchpad's inputs load: a pickled class's module resolves as it would in
+# the cell, the project first on the path (``code_reads.anchored``).
+_class_scope: Callable[[], contextlib.AbstractContextManager[Any]] = contextlib.nullcontext
+
+
+@contextlib.contextmanager
+def resolving_classes(scope: Callable[[], contextlib.AbstractContextManager[Any]]) -> Any:
+    """Resolve each class a pickle names inside *scope*, and only that."""
+    global _class_scope
+    was, _class_scope = _class_scope, scope
+    try:
+        yield
+    finally:
+        _class_scope = was
+
+
+class _Unpickler(pickle.Unpickler):
+    def find_class(self, module_name: str, name: str, /) -> Any:
+        with _class_scope():
+            return super().find_class(module_name, name)
+
+
+def _unpickle(data: bytes) -> Any:
+    return _Unpickler(io.BytesIO(data)).load()
+
+
 class _PickleObjectCodec:
     name = "pickle"
 
@@ -218,7 +245,7 @@ class _PickleObjectCodec:
         return pickle.dumps(value, protocol=5)
 
     def loads(self, data: bytes) -> Any:
-        return pickle.loads(data)
+        return _unpickle(data)
 
 
 class _CloudPickleObjectCodec:
@@ -237,7 +264,7 @@ class _CloudPickleObjectCodec:
         return self._cloudpickle.dumps(value, protocol=5)
 
     def loads(self, data: bytes) -> Any:
-        return pickle.loads(data)
+        return _unpickle(data)
 
 
 def _resolve_object_codec(codec_name: str | None = None) -> ObjectCodec:
@@ -1814,7 +1841,7 @@ def _deserialize_rds(file_path: Path) -> Any:
 
 def _deserialize_pickle(file_path: Path) -> Any:
     with open(file_path, "rb") as f:
-        data = pickle.load(f)
+        data = _Unpickler(f).load()
 
     codec_payload = _unwrap_codec_payload(data)
     if codec_payload is None:
@@ -1899,7 +1926,7 @@ def deserialize_cell_module_with_injection(file_path: Path, injected: dict[str, 
 
 def _deserialize_cell_instance(file_path: Path) -> Any:
     with open(file_path, "rb") as f:
-        data = pickle.load(f)
+        data = _Unpickler(f).load()
 
     if not isinstance(data, dict):
         raise ValueError("Invalid notebook-exported instance payload")
@@ -1929,7 +1956,7 @@ def _deserialize_cell_instance(file_path: Path) -> Any:
     else:
         # The first module/cell-instance format.
         state_pickle = data["state_pickle"]
-        state = pickle.loads(state_pickle)
+        state = _unpickle(state_pickle)
     instance = cls.__new__(cls)
 
     setstate = getattr(instance, "__setstate__", None)

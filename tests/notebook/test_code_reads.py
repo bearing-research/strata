@@ -502,19 +502,22 @@ spec.loader.exec_module(code_reads)
 manifest = {{"code_reads": {{"exclude": [], "anchor": {anchor!r}}}}}
 observed = types.SimpleNamespace(quiet=False, hushed=contextlib.nullcontext)
 with code_reads.for_run(manifest) as reads, code_reads.observing(reads, observed):
-    during = sys.path[0]
-print(json.dumps({{"during": during, "after": {anchor!r} in sys.path}}))
+    before = {anchor!r} in sys.path
+    with code_reads.anchored(reads):
+        during = sys.path[0]
+print(json.dumps({{"before": before, "during": during, "after": {anchor!r} in sys.path}}))
 """
 
 
 def test_the_project_is_on_the_path_for_the_cell_alone(tmp_path):
-    """What the harness imports after the cell (serializing) never finds the project's."""
+    """What the harness imports itself, loading inputs or serializing outputs, never finds
+    the project's."""
     script = _FOR_RUN.format(module=code_reads.__file__, anchor=str(tmp_path))
     run = subprocess.run(
         [sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True, check=True
     )
     got = json.loads(run.stdout.splitlines()[-1])
-    assert got == {"during": str(tmp_path), "after": False}
+    assert got == {"before": False, "during": str(tmp_path), "after": False}
 
 
 def test_the_probe_watches_the_interpreter_and_what_rewrites_the_path(tmp_path, monkeypatch):

@@ -179,6 +179,8 @@ class Reads:
         # Makes the read audit's hook skip this thread: the code cache's files are neither.
         self.audit_hushed: Callable[[], AbstractContextManager[Any]] = nullcontext
         self.code_cache: CodeCache | None = None
+        # The project's folder, first on the path where the cell's own imports resolve.
+        self.anchor: str | None = None
 
     @property
     def quiet(self) -> bool:
@@ -703,32 +705,38 @@ def for_run(manifest: dict[str, Any]) -> Generator[Reads | None]:
     else None.
 
     Entered before its inputs load: a pickled value of a project class imports its
-    module, from the project (the anchor is first on the path) and recorded, since the
-    cell runs that module's code. The run's own directory (its inputs and folders) is
-    left out. Around the cell body, :func:`observing` joins the read audit to it.
+    module (:func:`anchored`, from the unpickler), recorded since the cell runs that
+    module's code; :func:`observing` joins the read audit to it from there. The run's own
+    directory (its inputs and folders) is left out.
     """
     config = manifest.get("code_reads")
     if config is None:
         yield None
         return
-    anchor = config.get("anchor")
-    inserted = bool(anchor) and (not sys.path or sys.path[0] != anchor)
-    if inserted:
-        # As under ``python -c`` in the project: its own modules import, and shadow.
-        sys.path.insert(0, anchor)
     # A run's own folders (``# @output_dir``) are mounts with no URI; a loop's live
     # outside its run directory.
     own = [m["local_path"] for m in (manifest.get("mounts") or {}).values() if not m.get("uri")]
+    with recording(
+        [*config["exclude"], manifest.get("output_dir") or "", *own],
+        pycache=config.get("pycache"),
+    ) as reads:
+        reads.anchor = config.get("anchor")
+        yield reads
+
+
+@contextmanager
+def anchored(reads: Reads | None) -> Generator[None]:
+    """The project first on ``sys.path``, as under ``python -c`` in it: its own modules
+    import, and shadow. Only around what resolves as the cell would, its body and the
+    classes its inputs name; what the harness imports itself never looks there."""
+    anchor = reads.anchor if reads is not None else None
+    inserted = bool(anchor) and (not sys.path or sys.path[0] != anchor)
+    if inserted:
+        sys.path.insert(0, anchor)
     try:
-        with recording(
-            [*config["exclude"], manifest.get("output_dir") or "", *own],
-            pycache=config.get("pycache"),
-        ) as reads:
-            yield reads
+        yield
     finally:
         if inserted and anchor in sys.path:
-            # Only the cell resolves against the project: what the harness imports after
-            # (serializing its outputs) is recorded nowhere.
             sys.path.remove(anchor)
 
 
@@ -748,8 +756,6 @@ def observing(reads: Reads | None, observed: Any) -> Generator[None]:
     finally:
         observed.on_native_read = None
         observed.on_native_write = None
-        reads.audit_quiet = lambda: False
-        reads.audit_hushed = nullcontext
 
 
 @contextmanager

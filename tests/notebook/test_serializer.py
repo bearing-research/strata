@@ -580,6 +580,40 @@ class TestPickleSerialization:
 
             assert obj_loaded == obj_orig
 
+    def test_only_the_classes_a_pickle_names_resolve_in_the_class_scope(
+        self, tmp_path, monkeypatch
+    ):
+        """A scratchpad resolves them against its project; the codec's own import does
+        not look there."""
+        inside: list[str] = []
+        log: list[tuple[str, bool]] = []
+        real_init = serializer_module._CloudPickleObjectCodec.__init__
+
+        def codec_init(codec):
+            log.append(("codec", bool(inside)))
+            real_init(codec)
+
+        @contextlib.contextmanager
+        def scope():
+            log.append(("class", bool(inside)))
+            inside.append("class")
+            try:
+                yield
+            finally:
+                inside.pop()
+
+        meta = serialize_value(_PickleTestMyModel("test", 123), tmp_path, "model")
+        monkeypatch.setattr(serializer_module._CloudPickleObjectCodec, "__init__", codec_init)
+        with serializer_module.resolving_classes(scope):
+            loaded = deserialize_value(meta["content_type"], tmp_path / meta["file"])
+        assert loaded == _PickleTestMyModel("test", 123)
+        # Each class lookup in the scope, one at a time; the codec's import outside it.
+        assert log.count(("codec", False)) == 1, log
+        assert ("class", False) in log, log
+        assert ("class", True) not in log, log
+        # Outside, as before: nothing of the scope is left in place.
+        assert serializer_module._class_scope is contextlib.nullcontext
+
     def test_pickle_serialization_uses_codec_envelope(self):
         obj = _PickleTestCustomClass(42)
 

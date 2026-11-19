@@ -11,6 +11,8 @@ import sysconfig
 from pathlib import Path
 from types import SimpleNamespace
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from strata import cli, scratch
@@ -1593,17 +1595,22 @@ async def test_a_value_of_a_project_class_loads_and_its_code_keys_the_reader(
     session = manager.open_notebook(_attached(project))
     if path == "warm":
         pool = session._python_warm_pool()
-        pool.pool_size = 1
+        # Two: the edit below reruns the maker too, each run on a warm worker.
+        pool.pool_size = 2
         pool.ready_timeout_seconds = LIVE_SERVER_TIMEOUT
         session.warm_pool = pool
         await pool.start()
+        await warm_again(pool)
     made = await mcp_server._scratch_run(manager, "from shapes import Box\nbox = Box(3)")
     assert made["status"] == "ok", str(made)
     if path == "warm":
         await warm_again(session.warm_pool)
-    read = await mcp_server._scratch_run(manager, "box.size()")
+    # Names the process that ran it: the warm case must not quietly run cold.
+    reader = 'import os, sys\nf"{box.size()} {os.path.basename(sys.argv[0])}"'
+    runner = "pool_worker.py" if path == "warm" else "harness.py"
+    read = await mcp_server._scratch_run(manager, reader)
     assert read["status"] == "ok", str(read)
-    assert read["value"] == 3, str(read)
+    assert read["value"] == f"3 {runner}", str(read)
     # Both runs recorded the module: the one that imported it, and the one whose input
     # loading did.
     index = json.loads((session.path / ".strata" / "reads" / "code.json").read_text())
@@ -1613,6 +1620,58 @@ async def test_a_value_of_a_project_class_loads_and_its_code_keys_the_reader(
     shapes.write_text(shapes.read_text().replace("return self.n", "return self.n * 10"))
     if path == "warm":
         await warm_again(session.warm_pool)
-    again = await mcp_server._scratch_run(manager, "box.size()", cell=read["cell"])
+    again = await mcp_server._scratch_run(manager, reader, cell=read["cell"])
     assert again["status"] == "ok", str(again)
-    assert again["value"] == 30, str(again)
+    assert again["value"] == f"30 {runner}", str(again)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+@pytest.mark.parametrize("path", ["cold", "warm"])
+async def test_a_native_read_while_an_input_loads_keys_the_reader(
+    project, manager, monkeypatch, path
+):
+    """Project code unpickling runs (``__setstate__``) is the cell's, its native reads too."""
+    from tests.conftest import LIVE_SERVER_TIMEOUT
+    from tests.notebook.pool_helpers import warm_again
+
+    _no_warm_pool(monkeypatch)
+    data = project / "rows.parquet"
+    pq.write_table(pa.table({"x": [1, 2]}), data)
+    (project / "shapes.py").write_text(
+        "import pyarrow.parquet as pq\n"
+        "class Rows:\n"
+        "    def __init__(self, path):\n"
+        "        self.path = path\n"
+        "    def __getstate__(self):\n"
+        "        return {'path': self.path}\n"
+        "    def __setstate__(self, state):\n"
+        "        self.path = state['path']\n"
+        "        self.count = pq.read_table(self.path).num_rows\n"
+    )
+    session = manager.open_notebook(_attached(project))
+    if path == "warm":
+        pool = session._python_warm_pool()
+        pool.pool_size = 1
+        pool.ready_timeout_seconds = LIVE_SERVER_TIMEOUT
+        session.warm_pool = pool
+        await pool.start()
+        await warm_again(pool)
+    made = await mcp_server._scratch_run(
+        manager, f"from shapes import Rows\nrows = Rows({str(data)!r})"
+    )
+    assert made["status"] == "ok", str(made)
+    if path == "warm":
+        await warm_again(session.warm_pool)
+    reader = 'import os, sys\nf"{rows.count} {os.path.basename(sys.argv[0])}"'
+    runner = "pool_worker.py" if path == "warm" else "harness.py"
+    read = await mcp_server._scratch_run(manager, reader)
+    assert read["status"] == "ok", str(read)
+    assert read["value"] == f"2 {runner}", str(read)
+
+    pq.write_table(pa.table({"x": [1, 2, 3]}), data)
+    if path == "warm":
+        await warm_again(session.warm_pool)
+    again = await mcp_server._scratch_run(manager, reader, cell=read["cell"])
+    assert again["status"] == "ok", str(again)
+    assert again["value"] == f"3 {runner}", str(again)

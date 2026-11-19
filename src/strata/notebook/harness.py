@@ -8,6 +8,7 @@ stdout/stderr and serializes outputs. Runs in the notebook's venv and cannot
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import io
 import os
@@ -15,7 +16,7 @@ import platform
 import sys
 import time
 import traceback
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -913,8 +914,15 @@ def main():
         # config once at import (jax and JAX_ENABLE_X64) would otherwise take the
         # server's env and silently downcast float64 inputs to float32.
         with apply_env_overrides(manifest):
-            with _code.for_run(manifest) as code:
-                inputs = deserialize_inputs(manifest)
+            with _code.for_run(manifest) as code, ExitStack() as audit:
+                observed = None
+                if code is not None:
+                    # A scratchpad's inputs load as part of its run: what unpickling a
+                    # project class reads, natively too, is the cell's.
+                    observed = audit.enter_context(_audit.recording())
+                    audit.enter_context(_code.observing(code, observed))
+                with _ser.resolving_classes(functools.partial(_code.anchored, code)):
+                    inputs = deserialize_inputs(manifest)
                 inject_mounts(manifest, inputs)
                 inject_tables(manifest, inputs)
                 ambient_client = inject_client(manifest, inputs)
@@ -922,7 +930,9 @@ def main():
                 loop_until_expr = (
                     loop_config.get("until_expr") if isinstance(loop_config, dict) else None
                 )
-                with _audit.recording() as observed, _code.observing(code, observed):
+                if observed is None:
+                    observed = audit.enter_context(_audit.recording())
+                with _code.anchored(code):
                     (
                         outputs,
                         display_values,
