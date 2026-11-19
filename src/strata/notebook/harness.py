@@ -133,7 +133,7 @@ def deserialize_inputs(manifest: dict) -> dict[str, Any]:
 def _exec_with_display(source: str, namespace: dict, cell_id: str | None) -> Any | None:
     """Execute source; if the last statement is a bare expression, eval and return it."""
     # The cell's code, and any process it starts, can tell which cell it runs in.
-    with _traceback.cell_id_set(cell_id):
+    with _traceback.cell_id_set(cell_id), _traceback.exit_fails_the_cell():
         return _exec_source(source, namespace, cell_id)
 
 
@@ -1022,8 +1022,10 @@ def main():
         if loop_state is not None:
             result["loop"] = loop_state
 
-    except Exception as e:
-        # SystemExit still runs the finally block; the parent checks result.json, not the exit code.
+    except BaseException as e:
+        # Any, so the finally block always has a result to write (an interrupt: Ctrl-C in
+        # the server's terminal reaches its children too). The parent checks result.json,
+        # not the exit code.
         hint = _work_dir.hint(e, manifest) or no_client_hint(e, manifest)
         result = {
             "success": False,

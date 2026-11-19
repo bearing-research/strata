@@ -91,7 +91,7 @@ def warm_imports(imports: list[str]) -> None:
 def _exec_with_display(source: str, namespace: dict, cell_id: str | None) -> Any | None:
     """Execute source; if the last statement is a bare expression, eval and return it."""
     # The cell's code, and any process it starts, can tell which cell it runs in.
-    with _traceback.cell_id_set(cell_id):
+    with _traceback.cell_id_set(cell_id), _traceback.exit_fails_the_cell():
         return _exec_source(source, namespace, cell_id)
 
 

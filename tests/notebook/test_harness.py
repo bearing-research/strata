@@ -708,3 +708,29 @@ def test_around_body_wraps_the_cells_own_code_alone(monkeypatch):
         ("loop_until", True),
         ("detect_mutations", False),
     ], log
+
+
+@pytest.mark.parametrize(
+    ("call", "shown"),
+    [
+        ("sys.exit(0)", "sys.exit(0)"),
+        ("sys.exit()", "sys.exit()"),
+        ("sys.exit('bye')", "sys.exit('bye')"),
+    ],
+)
+def test_a_cells_sys_exit_fails_the_cell(harness_script, call, shown):
+    """It stops the cell before its end; the harness still writes its result."""
+    result = run_harness(harness_script, {"source": f"import sys\nx = 1\n{call}\n", "inputs": {}})
+
+    assert result["success"] is False
+    assert result["error"] == f"CellExited: the cell called {shown}, which stops it before its end"
+    assert "line 3" in result["traceback"], result["traceback"]
+    assert result["variables"] == {}
+
+
+def test_an_interrupt_still_writes_the_result(harness_script):
+    """Ctrl-C in the server's terminal reaches the harness too."""
+    result = run_harness(harness_script, {"source": "raise KeyboardInterrupt", "inputs": {}})
+
+    assert result["success"] is False
+    assert result["error"] == "KeyboardInterrupt"

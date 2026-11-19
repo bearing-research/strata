@@ -822,3 +822,44 @@ def test_batch_seeds_upstream_inputs_under_the_shared_env(batch_pipes, monkeypat
     assert seen["shared"] == "1", "inputs were seeded before the batch's shared [env] applied"
     assert seen["private"] is None, "a value only one cell sets must not configure the batch"
     assert os.environ.get("STRATA_BATCH_PROBE") is None, "the override must not leak"
+
+
+def test_a_cells_sys_exit_ends_the_batch_as_its_error(batch_pipes):
+    """Not the batch's process: the cell fails, as one that raised does."""
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+    cells = [
+        {
+            "cell_id": "c1",
+            "source": "import sys\nsys.exit(3)",
+            "consumed_vars": [],
+            "env": {},
+            "mount_manifest": {},
+        },
+        {
+            "cell_id": "c2",
+            "source": "z = 99",
+            "consumed_vars": ["z"],
+            "env": {},
+            "mount_manifest": {},
+        },
+    ]
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "batch_end":
+            break
+    thread.join(timeout=5)
+
+    assert not errors
+    cell_errors = [f["payload"] for f in frames if f["type"] == "cell_error"]
+    assert [e["cell_id"] for e in cell_errors] == ["c1"]
+    assert cell_errors[0]["error"] == (
+        "CellExited: the cell called sys.exit(3), which stops it before its end"
+    )
+    assert frames[-1]["payload"]["reason"] == "cell_error"

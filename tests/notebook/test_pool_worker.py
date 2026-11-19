@@ -159,3 +159,20 @@ class TestExecuteHarnessDisplayDeduplication:
         assert result["success"] is True
         assert result["displays"][0]["file"] != result["variables"]["df"]["file"]
         assert list(tmp_path.glob("__display__*"))
+
+
+def test_a_cells_sys_exit_fails_the_cell_and_the_worker_lives(tmp_path: Path) -> None:
+    """The worker reports it as the cell's failure, and its streams are its own again."""
+    import sys
+
+    stdout, stderr = sys.stdout, sys.stderr
+    result = execute_harness(
+        {"source": "import sys\nprint('before')\nsys.exit(0)\n", "output_dir": str(tmp_path)}
+    )
+
+    assert result["success"] is False
+    assert (
+        result["error"] == "CellExited: the cell called sys.exit(0), which stops it before its end"
+    )
+    assert result["stdout"] == "before\n"
+    assert (sys.stdout, sys.stderr) == (stdout, stderr)

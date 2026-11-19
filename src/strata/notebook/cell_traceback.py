@@ -37,6 +37,21 @@ def cell_id_set(cell_id: str | None) -> Generator[None]:
             os.environ[CELL_ID_VAR] = previous
 
 
+class CellExited(Exception):
+    """The cell called ``sys.exit()``: it stopped before its end, so it failed."""
+
+
+@contextmanager
+def exit_fails_the_cell() -> Generator[None]:
+    """A cell's ``sys.exit()`` ends the cell, not the process that runs it: every harness
+    catches what an exception is, and a warm worker serves the next run."""
+    try:
+        yield
+    except SystemExit as exc:
+        called = "sys.exit()" if exc.code is None else f"sys.exit({exc.code!r})"
+        raise CellExited(f"the cell called {called}, which stops it before its end") from exc
+
+
 _CELL_PREFIX = "<cell"
 
 

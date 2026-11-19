@@ -513,6 +513,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A cell that calls `sys.exit()` fails like one that raises.** The error says it called
+  `sys.exit()`, on every path: before, the cold harness left an empty result file, the warm
+  worker died without a result, and a run-all batch's process exited with no frame for the
+  cell. An interrupt (Ctrl-C in the server's terminal) also leaves a result now. (#PR)
 - **A scratchpad cell can read a value that needs the project's code.** A project class,
   a module, a cell's function, or what a pickled value imports as it loads resolves with
   the project first on `sys.path`, as an import in the cell does, instead of failing with
