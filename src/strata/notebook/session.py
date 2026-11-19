@@ -3245,18 +3245,31 @@ class NotebookSession:
             return False
         return self.environment_sync_state in {"ready", "fallback"}
 
+    def _python_warm_pool(self) -> WarmProcessPool:
+        """The Python warm pool; a scratchpad's builds its workers on its base image (4.2)."""
+        from strata.notebook.pool import WarmProcessPool
+
+        hooks: dict[str, Any] = {}
+        if self.notebook_state.scratchpad:
+            from strata.notebook.project_env import base_image, base_image_holds
+
+            hooks = {
+                "base_image": functools.partial(base_image, self.path),
+                "base_image_holds": functools.partial(base_image_holds, self.path),
+            }
+        return WarmProcessPool(
+            notebook_dir=self.path,
+            pool_size=_session_setting("notebook_warm_pool_size"),
+            python_executable=self.venv_python or Path("python"),
+            **hooks,
+        )
+
     async def _ensure_warm_pool_started(
         self, owner: EnvironmentJobSnapshot | str | None = None
     ) -> None:
         """Create and start the warm process pools when the runtime is ready."""
         if self.warm_pool is None and self._should_start_warm_pool(owner):
-            from strata.notebook.pool import WarmProcessPool
-
-            self.warm_pool = WarmProcessPool(
-                notebook_dir=self.path,
-                pool_size=_session_setting("notebook_warm_pool_size"),
-                python_executable=self.venv_python or Path("python"),
-            )
+            self.warm_pool = self._python_warm_pool()
             try:
                 task = asyncio.get_running_loop().create_task(self.warm_pool.start())
                 self.warm_pool.track_background_task(task)
@@ -3736,13 +3749,7 @@ class SessionManager:
         try:
             if session._should_start_warm_pool():
                 if timing is None:
-                    from strata.notebook.pool import WarmProcessPool
-
-                    session.warm_pool = WarmProcessPool(
-                        notebook_dir=Path(directory),
-                        pool_size=_session_setting("notebook_warm_pool_size"),
-                        python_executable=session.venv_python or Path("python"),
-                    )
+                    session.warm_pool = session._python_warm_pool()
                     # Don't block notebook open.
                     import asyncio
 
@@ -3753,13 +3760,7 @@ class SessionManager:
                         pass  # No running loop; pool stays cold until first acquire
                 else:
                     with timing.phase("session_warm_pool"):
-                        from strata.notebook.pool import WarmProcessPool
-
-                        session.warm_pool = WarmProcessPool(
-                            notebook_dir=Path(directory),
-                            pool_size=_session_setting("notebook_warm_pool_size"),
-                            python_executable=session.venv_python or Path("python"),
-                        )
+                        session.warm_pool = session._python_warm_pool()
                         # Don't block notebook open.
                         import asyncio
 

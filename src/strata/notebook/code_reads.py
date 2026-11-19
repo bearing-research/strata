@@ -593,6 +593,51 @@ def warm_list(notebook_dir: str) -> list[str]:
     return result
 
 
+def scratch_warm_list(anchor: str, notebook_dir: str) -> list[str]:
+    """A scratchpad's warm list (design 4.2): what its project and the scratchpad itself
+    declare, as the modules those distributions install."""
+    import importlib.metadata as metadata
+    import re
+
+    def canonical(name: str) -> str:
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    provides: dict[str, list[str]] = {}
+    for module, dists in metadata.packages_distributions().items():
+        for dist in dists:
+            provides.setdefault(canonical(dist), []).append(module)
+    modules: list[str] = []
+    for dep in [*warm_list(anchor), *warm_list(notebook_dir)]:
+        found = provides.get(canonical(dep)) or [dep.replace("-", "_")]
+        modules += [m for m in sorted(found) if m.isidentifier() and not m.startswith("_")]
+    return list(dict.fromkeys(modules))
+
+
+def _warm_up(warm: Iterable[str], excluded: list[str]) -> tuple[list[str], list[str]]:
+    """Import each of *warm* under the recorder; return those that loaded no tracked code
+    (none outside *excluded*, the installed environment), and those that did."""
+    kept: list[str] = []
+    dropped: list[str] = []
+    for name in warm:
+        if name in sys.modules:
+            kept.append(name)
+            continue
+        with recording(excluded) as reads:
+            try:
+                __import__(name)
+            except Exception:  # noqa: BLE001 - a worker that fails to import it has not loaded it
+                loaded = False
+            else:
+                loaded = True
+        record = reads.finish()
+        if record["unstable"] or any(state != ABSENT for state in record["reads"].values()):
+            # Tracked code in the base image would be invisible to every run's record.
+            dropped.append(name)
+        elif loaded:
+            kept.append(name)
+    return kept, dropped
+
+
 def watch_state(path: str, mode: bool | None) -> str:
     """What :func:`probe_environment` watches at *path*: its listing (``True``), its bytes
     (``False``), or (``None``) its stat alone, for a file too big to read on every key."""
@@ -651,27 +696,26 @@ def base_names_to_check(anchor: str, names: Iterable[str], base: dict[str, str])
 
 
 def probe_environment(
-    anchor: str, sites: list[str], notebook_dir: str | None = None
+    anchor: str,
+    sites: list[str],
+    notebook_dir: str | None = None,
+    warm: list[str] | None = None,
 ) -> dict[str, Any]:
     """A scratchpad's environment identity E's parts, as a cell started here would find
     them (design 4.2): the distributions D, the interpreter build, the import resolution I,
     the base record B; and what to observe to know they still hold.
 
-    *sites* are the project's site-packages an overlay adds. What a warm worker of
-    *notebook_dir* imports before its cell (:func:`warm_list`) is imported here first
-    too. Run as the harness, so ``sys.path`` and the modules loaded before a cell are a
-    cell's.
+    *sites* are the project's site-packages an overlay adds. The base image is imported
+    here first, as before a scratchpad's cell: *warm*, else :func:`scratch_warm_list` of
+    *notebook_dir*, less what loads tracked code (``warm_dropped``; the caller probes
+    again with ``warm``). Run as the harness, so ``sys.path`` and the modules loaded
+    before a cell are a cell's.
     """
     import hashlib as _hashlib
     import importlib.metadata as metadata
     import platform
     import re
 
-    for module_name in warm_list(notebook_dir) if notebook_dir else []:
-        try:
-            __import__(module_name)
-        except Exception:  # noqa: BLE001 - one the worker fails to import, it has not loaded
-            continue
     path = [anchor, *(p for p in sys.path if p != anchor)]
     # A folder installed into (a dist-info in it) a ``.pth`` put on the path; never one on
     # PYTHONPATH, whose code is the user's: a run records what it reads there.
@@ -681,6 +725,9 @@ def probe_environment(
         | set(sites)
         | {p for p in sys.path if p and p not in chosen and _installs(p)}
     )
+    if warm is None:
+        warm = scratch_warm_list(anchor, notebook_dir) if notebook_dir else []
+    kept, dropped = _warm_up(warm, [*roots, *([notebook_dir] if notebook_dir else [])])
     watched: dict[str, bool | None] = {}
     for root in roots:
         watched[root] = True
@@ -695,8 +742,9 @@ def probe_environment(
             watched.setdefault(os.path.join(entry, name), False)
     watched[os.path.join(sys.prefix, "pyvenv.cfg")] = False
     if notebook_dir:
-        # Its dependencies are the warm list.
+        # Their dependencies are the warm list.
         watched[os.path.join(notebook_dir, "pyproject.toml")] = False
+        watched[os.path.join(anchor, "pyproject.toml")] = False
     # The build: an interpreter upgraded in place is a new binary and standard library.
     watched[os.path.realpath(sys.executable)] = None
     watched[os.path.realpath(os.__file__)] = None
@@ -760,6 +808,7 @@ def probe_environment(
         "variables": {k: os.environ.get(k) for k in IMPORT_VARIABLES},
         "user_site": [bool(site.ENABLE_USER_SITE), user in sys.path],
         "base": base_candidates(anchor, names),
+        "warm": kept,
     }
     return {
         "identity": identity,
@@ -767,4 +816,6 @@ def probe_environment(
         "anchor_listing": observe(anchor, listing=True)[0],
         "base_names": names,
         "roots": roots,
+        "warm": kept,
+        "warm_dropped": dropped,
     }

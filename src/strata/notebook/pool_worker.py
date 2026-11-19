@@ -398,7 +398,11 @@ def execute_harness(manifest: dict) -> dict:
 def main() -> None:
     _lifeline.watch_lifeline()
     try:
-        imports = parse_common_imports()
+        if len(sys.argv) > 3 and sys.argv[2] == "--warm":
+            # A scratchpad's base image, the one its cold runs import too.
+            imports = orjson.loads(sys.argv[3])
+        else:
+            imports = parse_common_imports()
         warm_imports(imports)
 
         print("ready", flush=True)

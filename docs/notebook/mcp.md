@@ -173,7 +173,17 @@ module loaded before the cell started (a new `orjson.py` there changes every
 key). That is checked before every lookup, with a few hundred stats, and probed
 again when it changed, so an install, a repointed editable or a new `PYTHONPATH`
 misses rather than replays. A scratchpad with an environment of its own is keyed on
-where its imports resolve too, beside its `uv.lock`. The read audit counts what is
+where its imports resolve too, beside its `uv.lock`.
+
+Before a scratchpad's cell starts, the modules its project and the scratchpad
+declare as dependencies are imported, on a warm worker and on a cold run alike, so
+a cell's result does not depend on which ran it. A dependency whose import loads
+code a run would record (an editable sibling, the project's own package, or an
+installed one that imports either) is left out, and is imported by the cell, which
+records it. The list is part of the key and re-derived when a `pyproject.toml`
+changes. A warm worker built before the environment changed, or before a file in
+the project began to shadow a module it loaded, is replaced when claimed, never
+used. The read audit counts what is
 installed in the project's environment as the environment and does not warn about it. Before each
 `run`, a change to the project's `pyproject.toml` files, its `uv.lock` or its
 installed packages syncs it again, once no cell is running; whether a project has an environment at all is

@@ -1180,3 +1180,98 @@ def test_a_pth_that_prints_does_not_fail_the_probe(project):
     (_site(project / ".venv") / "noisy.pth").write_text("import sys; print('noise')\n")
     notebook = _attached(project)
     assert not (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).read_bytes().startswith(b"unprobed")
+
+
+def _declare(project: Path, *deps: str) -> None:
+    """*project*'s declared dependencies: a PEP 621 project with no uv.lock is never synced."""
+    listed = ", ".join(json.dumps(d) for d in deps)
+    (project / "pyproject.toml").write_text(
+        f'[project]\nname = "proj"\nversion = "0"\ndependencies = [{listed}]\n'
+    )
+
+
+def test_the_warm_list_is_the_modules_the_declared_distributions_install(tmp_path):
+    from strata.notebook.code_reads import scratch_warm_list
+
+    _declare(tmp_path, "PyYAML>=6", "attrs")
+    notebook = tmp_path / "nb"
+    notebook.mkdir()
+    warm = scratch_warm_list(str(tmp_path), str(notebook))
+    assert {"yaml", "attr", "attrs"} <= set(warm)
+    assert "PyYAML" not in warm and "_yaml" not in warm
+
+
+def test_a_warm_entry_that_loads_tracked_code_is_dropped_and_so_is_one_reaching_it(project):
+    """An editable sibling in the base image would be invisible to every run's record."""
+    from strata.notebook.project_env import environment_record
+
+    site = _site(project / ".venv")
+    source = project / "packages" / "localdep"
+    source.mkdir(parents=True)
+    (source / "localdep.py").write_text("VALUE = 1\n")
+    (site / "localdep.pth").write_text(f"{source}\n")
+    # Installed, but it imports the sibling: seen only once the sibling is not loaded first.
+    (site / "wrapper.py").write_text("import localdep\n")
+    _declare(project, "localdep", "wrapper", "projmod")
+    warm = (environment_record(_attached(project)) or {})["warm"]
+    assert "projmod" in warm
+    assert "localdep" not in warm and "wrapper" not in warm
+
+
+def test_a_worker_built_before_a_shadowing_file_no_longer_holds(project):
+    from strata.notebook.project_env import base_image, base_image_holds, current_identity
+
+    _declare(project, "projmod")
+    notebook = _attached(project)
+    found = base_image(notebook)
+    assert found is not None and "projmod" in found[1]
+    stamp = found[0]
+    assert base_image_holds(notebook, stamp)
+    assert not base_image_holds(notebook, None)
+    (project / "projmod.py").write_text("")
+    # Before any key checked E again: the worker's own B.
+    assert not base_image_holds(notebook, stamp)
+    current_identity(notebook)
+    now = base_image(notebook)
+    assert now is not None and now[0] != stamp
+    assert base_image_holds(notebook, now[0])
+    # The new E's B holds, but the worker was built on the old one.
+    assert not base_image_holds(notebook, stamp)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_a_cold_run_and_a_warm_worker_preload_the_same_base_image(project, manager):
+    from tests.conftest import LIVE_SERVER_TIMEOUT
+    from tests.notebook.pool_helpers import warm_again
+
+    _declare(project, "projmod")
+    session = manager.open_notebook(_scratchpad(project))
+    probe = "import os, sys\nf\"{os.path.basename(sys.argv[0])} {'projmod' in sys.modules}\""
+    cold = await mcp_server._scratch_run(manager, probe)
+    assert cold["status"] == "ok", str(cold)
+    assert "harness.py" in cold["value"] and "True" in cold["value"], cold["value"]
+
+    if session.warm_pool is not None:
+        await session.warm_pool.drain()
+    pool = session._python_warm_pool()
+    pool.pool_size = 1
+    pool.ready_timeout_seconds = LIVE_SERVER_TIMEOUT
+    session.warm_pool = pool
+    await pool.start()
+    await warm_again(pool)
+    warm = await mcp_server._scratch_run(manager, "x = 1\n" + probe)
+    assert warm["status"] == "ok", str(warm)
+    assert "pool_worker.py" in warm["value"] and "True" in warm["value"], warm["value"]
+
+
+def test_declaring_a_dependency_in_the_project_changes_the_base_image(project):
+    from strata.notebook.project_env import current_identity, environment_record
+
+    _declare(project)
+    notebook = _attached(project)
+    first = current_identity(notebook)
+    assert "projmod" not in (environment_record(notebook) or {})["warm"]
+    _declare(project, "projmod")
+    assert current_identity(notebook) != first
+    assert "projmod" in (environment_record(notebook) or {})["warm"]
