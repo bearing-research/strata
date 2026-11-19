@@ -4021,6 +4021,15 @@ exhaustive commit history.</p>
   records (an editable sibling, or a package importing one), which the cell imports
   itself. A warm worker built before the environment changed, or before a project file
   began to shadow a module it loaded, is replaced when claimed. (#1588)</li>
+<li><strong>A scratchpad's run compiles a project module once per source, not on every run.</strong>
+  The code compiled from what a run read is kept under the source's hash and checked
+  before it is loaded, so a 1.8 MB package imports in about 40 ms instead of 0.7 s, and
+  a damaged entry is compiled again, never run. (#1589)</li>
+<li><strong>A scratchpad runs on this machine only.</strong> A <code># @worker</code> other than <code>local</code> in a
+  scratchpad cell, or a default worker, is an error that keeps the cell from running,
+  and registering a worker or connecting one over SSH is refused: a run elsewhere
+  records nothing of what it read, so its key would miss an edited project file or
+  module and could replay a stale result. (#1589)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>

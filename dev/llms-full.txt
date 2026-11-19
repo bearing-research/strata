@@ -7058,12 +7058,14 @@ made it. A plain notebook stores only what a cell downstream reads.
 
 A scratchpad's cells run as under `python -c` in the project: its folder is first on
 `sys.path`, so a module beside them imports, and shadows an installed one of its
-name. A scratchpad's Python cell run on this machine is also keyed on what its run
-read: each file it opened or directory it listed (pyarrow's, polars' and duckdb's
-readers included), the code it imported from outside its environment, and each
-place an import looked and found nothing. A file it only checked with `exists()`,
-or one a subprocess read, is not recorded, and neither is anything a cell on a
-remote worker reads, keyed as in any notebook. Edit `project / "config.yaml"` or a module
+name. They run on this machine only, in either environment mode: a `# @worker` other
+than `local`, or a default worker, is an error that keeps the cell from running, and
+`add_worker`, `set_default_worker` and `connect_ssh_worker` refuse a scratchpad
+(for remote compute, use a notebook). A scratchpad's Python cell is also keyed on
+what its run read: each file it opened or directory it listed (pyarrow's, polars'
+and duckdb's readers included), the code it imported from outside its environment,
+and each place an import looked and found nothing. A file it only checked with
+`exists()`, or one a subprocess read, is not recorded. Edit `project / "config.yaml"` or a module
 of the project and the cells that read it go stale with reason `code`
 (`changed_code` names the file), then run again; put the file back and they hit
 again. A cell that changed a file it had read, or whose file changed while it ran,
@@ -7071,6 +7073,14 @@ keeps its outputs for that run only, as does a loop or `@each` cell that read
 files. Since such a run is keyed on what it imported, opened and listed, the read
 audit does not warn about those reads. Run All runs a scratchpad's cells one at a time, so each run records its
 own reads, and a run never resumes a dead run's checkpoint, whose reads are unknown.
+The project's modules are compiled from the very source a run read, never from a
+`.pyc` that may predate it; the compiled code is kept in
+`.strata-scratch/.strata/pycache/` under the source's sha256, its path and the
+interpreter (256 MiB, least recently used first), so an unchanged module is not
+compiled again. A damaged or misplaced entry, one whose checksum or key does not
+match, is compiled again, never run; like the rest of `.strata/`, the cache trusts
+what writes there. A module whose loader compiles code of its own (an instrumenting
+import hook) is never cached, and with `notebook_harness_user` set nothing is.
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
 
