@@ -165,7 +165,7 @@ def _evaluate(expr, namespace):
             response["stdout"] = stdout_text
         return response
     except (Exception, SystemExit):
-        # ``exit()`` typed at the prompt fails the line, not the inspect process.
+        # ``exit()`` typed at the prompt fails that line; the process serves the next.
         sys.stdout, sys.stderr = old_stdout, old_stderr
         return {"ok": False, "error": traceback.format_exc()}
 
@@ -182,7 +182,10 @@ def main():
 
     _emit({"ok": True, "result": "ready", "type": "str"})
 
-    for line in sys.stdin:
+    # The commands' own stream: code at the prompt gets an empty one, so ``exit()``
+    # (which closes ``sys.stdin``) and ``input()`` never touch the next command.
+    commands, sys.stdin = sys.stdin, io.StringIO()
+    for line in commands:
         line = line.strip()
         if not line:
             continue

@@ -377,7 +377,7 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        with _traceback.exit_fails_the_cell():
+        with _traceback.exit_fails_the_cell("the @loop_until predicate"):
             result = eval(code, namespace)  # noqa: S307 (the user declares the predicate)
     except Exception as exc:
         return {
@@ -898,7 +898,7 @@ def main():
     stderr_buffer: io.StringIO = io.StringIO()
     ambient_client: Any = None
     # Should the handler below fail too, the finally block still has a result to write.
-    result: dict[str, Any] = {
+    fallback: dict[str, Any] = {
         "success": False,
         "error": "the harness failed reporting the cell's failure",
         "variables": {},
@@ -906,6 +906,7 @@ def main():
         "stderr": "",
         "mutation_warnings": [],
     }
+    result = fallback
 
     try:
         manifest = load_manifest(manifest_path)
@@ -1049,6 +1050,13 @@ def main():
 
     finally:
         close_client(ambient_client)
+        if result is fallback:
+            # The cell's print trail, which matters most on failure.
+            result = {
+                **fallback,
+                "stdout": stdout_buffer.getvalue(),
+                "stderr": stderr_buffer.getvalue(),
+            }
         # A separate name from the input manifest, so the parent can tell a crash
         # from unread input. The hyphen can't be a Python identifier, so it can't
         # collide with a variable's ``<var_name>.json``.

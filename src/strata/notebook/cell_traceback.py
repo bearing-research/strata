@@ -38,19 +38,24 @@ def cell_id_set(cell_id: str | None) -> Generator[None]:
             os.environ[CELL_ID_VAR] = previous
 
 
+# A message passed to ``sys.exit`` is the cell's own error text: kept whole.
+_EXIT_CODE = reprlib.Repr(maxstring=10_000, maxother=200)
+
+
 @contextmanager
-def exit_fails_the_cell() -> Generator[None]:
+def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
     """A cell's ``SystemExit`` (``sys.exit()``, ``exit()``, a library's, as argparse's)
     fails the cell as an exception does, which is what each harness reports; it does not
     end the process before that process returns its result."""
     try:
         yield
     except SystemExit as exc:
-        code = "" if exc.code is None else reprlib.repr(exc.code)
-        # The cell's own frames: a traceback starts at the first of them.
+        code = "" if exc.code is None else _EXIT_CODE.repr(exc.code)
+        # The cell's own frames, a traceback starting at the first of them, and what it
+        # was handling when it exited (``except ValueError: sys.exit(1)``) as the cause.
         raise RuntimeError(
-            f"the cell exited (SystemExit({code})), which stops it before its end"
-        ).with_traceback(exc.__traceback__) from None
+            f"{what} exited (SystemExit({code})), which stops it before its end"
+        ).with_traceback(exc.__traceback__) from exc.__context__
 
 
 _CELL_PREFIX = "<cell"

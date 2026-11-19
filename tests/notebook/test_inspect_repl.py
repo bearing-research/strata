@@ -125,10 +125,34 @@ async def test_inspect_repl_does_not_start_without_an_interpreter(monkeypatch, t
     assert spawned == []
 
 
-def test_exit_at_the_inspect_prompt_fails_the_line_not_the_process():
+def test_exit_at_the_inspect_prompt_fails_the_line_not_the_process(tmp_path):
+    """The builtin ``exit()`` closes ``sys.stdin`` before it raises: the commands keep
+    their own stream, so the next one is still answered."""
+    import json
+    import subprocess
+    import sys
+
     from strata.notebook import inspect_harness
 
-    response = inspect_harness._evaluate("exit()", {})
-    assert response["ok"] is False
-    assert "SystemExit" in response["error"]
-    assert inspect_harness._evaluate("1 + 1", {})["result"] == "2"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"inputs": {}, "output_dir": str(tmp_path)}))
+    commands = "".join(
+        json.dumps(c) + "\n"
+        for c in ({"expr": "exit()"}, {"expr": "input()"}, {"expr": "1 + 1"}, {"cmd": "close"})
+    )
+    run = subprocess.run(
+        [sys.executable, inspect_harness.__file__, str(manifest)],
+        input=commands,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    replies = [json.loads(line) for line in run.stdout.splitlines() if line.startswith("{")]
+
+    assert run.returncode == 0, run.stderr
+    ready, exited, read, two = replies
+    assert ready["result"] == "ready"
+    assert exited["ok"] is False and "SystemExit" in exited["error"]
+    # Code at the prompt reads nothing of the commands.
+    assert read["ok"] is False, read
+    assert two["result"] == "2"

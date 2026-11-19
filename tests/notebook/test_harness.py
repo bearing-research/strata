@@ -712,7 +712,16 @@ def test_around_body_wraps_the_cells_own_code_alone(monkeypatch):
 
 @pytest.mark.parametrize(
     ("call", "shown"),
-    [("sys.exit(0)", "0"), ("sys.exit()", ""), ("exit('bye')", "'bye'")],
+    [
+        ("sys.exit(0)", "0"),
+        ("sys.exit()", ""),
+        ("exit('bye')", "'bye'"),
+        # The message is the cell's own error text: whole.
+        (
+            "sys.exit('Could not find the config file at /data/config.yaml')",
+            "'Could not find the config file at /data/config.yaml'",
+        ),
+    ],
 )
 def test_a_cells_sys_exit_fails_the_cell(harness_script, call, shown):
     """It stops the cell before its end; the harness still writes its result."""
@@ -736,7 +745,16 @@ def test_a_sys_exit_in_loop_until_is_the_loops_error():
     exec("import sys\ndef done():\n    sys.exit(0)\n", namespace)
     state = harness._eval_loop_until("done()", namespace)
     assert state["until_reached"] is False
-    assert "SystemExit(0)" in state["error"], state
+    assert "the @loop_until predicate exited (SystemExit(0))" in state["error"], state
+
+
+def test_what_the_cell_handled_when_it_exited_is_its_cause(harness_script):
+    source = "import sys\ntry:\n    int('x')\nexcept ValueError:\n    sys.exit(1)\n"
+    result = run_harness(harness_script, {"source": source, "inputs": {}})
+
+    assert result["success"] is False
+    assert "ValueError: invalid literal for int()" in result["traceback"], result["traceback"]
+    assert "cell_traceback" not in result["traceback"], result["traceback"]
 
 
 def test_an_interrupt_still_writes_the_result(harness_script):
@@ -750,6 +768,7 @@ def test_an_interrupt_still_writes_the_result(harness_script):
 def test_a_failure_the_handler_cannot_read_still_writes_a_result(harness_script):
     """An exception whose ``str()`` raises breaks the failure's own report."""
     source = (
+        "print('step 1 done')\n"
         "class Unreadable(Exception):\n"
         "    def __str__(self):\n"
         "        raise ValueError\n"
@@ -759,3 +778,4 @@ def test_a_failure_the_handler_cannot_read_still_writes_a_result(harness_script)
 
     assert result["success"] is False
     assert result["error"] == "the harness failed reporting the cell's failure"
+    assert result["stdout"] == "step 1 done\n"
