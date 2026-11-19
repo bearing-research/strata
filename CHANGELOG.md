@@ -167,6 +167,10 @@ exhaustive commit history.
   The code compiled from what a run read is kept under the source's hash and checked
   before it is loaded, so a 1.8 MB package imports in about 40 ms instead of 0.7 s, and
   a damaged entry is compiled again, never run. (#PR)
+- **A scratchpad runs on this machine only.** A `# @worker` other than `local` in a
+  scratchpad cell, or a default worker, is an error that keeps the cell from running,
+  and registering a worker or connecting one over SSH is refused: a run elsewhere
+  would record nothing of what it read, so it could never be cached. (#PR)
 ### Changed
 - **A scratchpad's first call takes half the time.** Its daemon no longer
   loads the scan plane (Iceberg, Parquet, pandas) at start: a server started for a

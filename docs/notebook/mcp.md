@@ -201,12 +201,14 @@ made it. A plain notebook stores only what a cell downstream reads.
 
 A scratchpad's cells run as under `python -c` in the project: its folder is first on
 `sys.path`, so a module beside them imports, and shadows an installed one of its
-name. A scratchpad's Python cell run on this machine is also keyed on what its run
-read: each file it opened or directory it listed (pyarrow's, polars' and duckdb's
-readers included), the code it imported from outside its environment, and each
-place an import looked and found nothing. A file it only checked with `exists()`,
-or one a subprocess read, is not recorded, and neither is anything a cell on a
-remote worker reads, keyed as in any notebook. Edit `project / "config.yaml"` or a module
+name. They run on this machine only, in either environment mode: a `# @worker` other
+than `local`, or a default worker, is an error that keeps the cell from running, and
+`add_worker`, `set_default_worker` and `connect_ssh_worker` refuse a scratchpad
+(for remote compute, use a notebook). A scratchpad's Python cell is also keyed on
+what its run read: each file it opened or directory it listed (pyarrow's, polars'
+and duckdb's readers included), the code it imported from outside its environment,
+and each place an import looked and found nothing. A file it only checked with
+`exists()`, or one a subprocess read, is not recorded. Edit `project / "config.yaml"` or a module
 of the project and the cells that read it go stale with reason `code`
 (`changed_code` names the file), then run again; put the file back and they hit
 again. A cell that changed a file it had read, or whose file changed while it ran,

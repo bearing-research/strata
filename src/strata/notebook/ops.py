@@ -759,12 +759,16 @@ class LocalNotebookOps:
         from strata.notebook.workers import (
             check_worker_transport,
             notebook_worker_definitions_editable,
+            scratchpad_worker_refusal,
         )
         from strata.notebook.writer import update_notebook_worker, update_notebook_workers
 
         state = self._session.notebook_state
         if not notebook_worker_definitions_editable(state):
             raise NotebookOpsError("worker definitions are managed by the server")
+        refusal = scratchpad_worker_refusal(state, name)
+        if refusal is not None:
+            raise NotebookOpsError(refusal)
         # Resolution returns the built-in first, so a "local" entry would never run.
         if name == "local":
             raise NotebookOpsError("'local' is reserved for the built-in worker")
@@ -826,9 +830,13 @@ class LocalNotebookOps:
         NotebookOpsError
             If ``name`` isn't the built-in ``local`` worker or a defined worker.
         """
+        from strata.notebook.workers import scratchpad_worker_refusal
         from strata.notebook.writer import update_notebook_worker
 
         normalized = (name or "").strip() or None
+        refusal = scratchpad_worker_refusal(self._session.notebook_state, normalized)
+        if refusal is not None:
+            raise NotebookOpsError(refusal)
         if normalized is not None and normalized != "local":
             known = {w.name for w in self._session.notebook_state.workers}
             if normalized not in known:

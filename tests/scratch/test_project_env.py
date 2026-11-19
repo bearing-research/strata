@@ -1413,3 +1413,100 @@ def test_a_notebook_runs_as_before_the_scratchpad_profile(tmp_path, monkeypatch)
     )
     assert pool.base_image is None and pool.base_image_holds is None
     assert environment_hash(path) == _lockfile_hash(path, None, None)
+
+
+# --- a scratchpad runs on this machine (4.9.3) ---
+
+_WORKER_URL = "http://127.0.0.1:9000/v1/execute"
+
+
+@pytest.mark.parametrize("scratchpad", [True, False])
+@pytest.mark.parametrize("by", ["annotation", "default"])
+def test_a_scratchpad_cell_runs_on_this_machine_only(tmp_path, scratchpad, by):
+    from strata.notebook.writer import update_notebook_worker
+
+    notebook = (
+        _scratchpad(tmp_path)
+        if scratchpad
+        else create_notebook(tmp_path, "nb", initialize_environment=False)
+    )
+    if by == "default":
+        update_notebook_worker(notebook, "gpu")
+    state = parse_notebook(notebook)
+
+    def errors(source: str) -> list:
+        cell = CellState(id="c1", source=source)
+        found = validate_cell_annotations(cell, state)
+        return [d for d in found if d.severity == DiagnosticSeverity.ERROR]
+
+    found = errors("# @worker gpu\nx = 1\n" if by == "annotation" else "x = 1\n")
+    # Kept local by its own annotation, whatever the default.
+    assert errors("# @worker local\nx = 1\n") == []
+    if not scratchpad:
+        assert found == []
+        return
+    line = 1 if by == "annotation" else None
+    assert [(d.code, d.line) for d in found] == [("scratchpad_remote_worker", line)]
+    assert "runs on this machine" in found[0].message
+    assert "use a notebook" in found[0].message
+
+
+def test_a_scratchpad_takes_no_worker(tmp_path):
+    from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
+
+    notebook = _scratchpad(tmp_path)
+    ops = LocalNotebookOps(notebook)
+    with pytest.raises(NotebookOpsError, match="runs on this machine"):
+        ops.add_worker("gpu", url=_WORKER_URL)
+    with pytest.raises(NotebookOpsError, match="runs on this machine"):
+        ops.set_default_worker("gpu")
+    ops.set_default_worker("local")
+    state = parse_notebook(notebook)
+    assert state.workers == []
+    assert state.worker is None
+
+
+def test_a_scratchpad_connects_no_ssh_worker_before_provisioning(tmp_path):
+    from strata.notebook.ops import NotebookOpsError
+    from strata.notebook.ssh_worker_service import establish_ssh_worker
+
+    class Untouched:
+        def establish(self, *_args, **_kwargs):
+            raise AssertionError("provisioned a box the scratchpad cannot use")
+
+    session = SimpleNamespace(notebook_state=parse_notebook(_scratchpad(tmp_path)))
+    with pytest.raises(NotebookOpsError, match="runs on this machine"):
+        establish_ssh_worker(session, Untouched(), ssh_target="user@gpu-box")
+
+
+@pytest.mark.asyncio
+async def test_a_scratchpads_worker_routes_refuse(tmp_path):
+    from fastapi import HTTPException
+
+    from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
+    from strata.notebook.routes import (
+        WorkerConfigRequest,
+        WorkersConfigRequest,
+        update_notebook_worker_endpoint,
+        update_notebook_workers_endpoint,
+    )
+
+    notebook = _scratchpad(tmp_path)
+    session = SimpleNamespace(notebook_state=parse_notebook(notebook), path=notebook)
+    spec = WorkerSpec(
+        name="gpu", backend=WorkerBackendType.EXECUTOR, config=WorkerConfig(url=_WORKER_URL)
+    )
+    with pytest.raises(HTTPException, match="runs on this machine"):
+        await update_notebook_workers_endpoint("nb", session, WorkersConfigRequest(workers=[spec]))
+    with pytest.raises(HTTPException, match="runs on this machine"):
+        await update_notebook_worker_endpoint("nb", session, WorkerConfigRequest(worker="gpu"))
+    assert parse_notebook(notebook).workers == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_a_scratchpad_run_on_a_remote_worker_is_refused_with_the_reason(project, manager):
+    manager.open_notebook(_attached(project))
+    got = await mcp_server._scratch_run(manager, "# @worker gpu\nx = 1")
+    assert got["status"] != "ok", str(got)
+    assert "runs on this machine" in str(got), str(got)

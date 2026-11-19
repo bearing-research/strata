@@ -60,6 +60,7 @@ from strata.notebook.workers import (
     build_worker_catalog_with_health,
     check_worker_transport,
     notebook_worker_definitions_editable,
+    scratchpad_worker_refusal,
     validate_worker_assignment,
 )
 from strata.notebook.writer import (
@@ -2432,6 +2433,10 @@ async def update_notebook_workers_endpoint(
     # Resolution returns the built-in first, so a "local" entry would never run.
     if any(worker.name == "local" for worker in req.workers):
         raise HTTPException(status_code=400, detail="'local' is reserved for the built-in worker")
+    for worker in req.workers:
+        refusal = scratchpad_worker_refusal(session.notebook_state, worker.name)
+        if refusal is not None:
+            raise HTTPException(status_code=400, detail=refusal)
 
     try:
         for worker in req.workers:
