@@ -108,6 +108,18 @@ def _scratchpad(anchor: Path) -> Path:
     )
 
 
+def _no_warm_pool(monkeypatch) -> None:
+    """Sessions start no warm pool of their own."""
+    from strata.notebook import session as session_module
+
+    real = session_module._session_setting
+    monkeypatch.setattr(
+        session_module,
+        "_session_setting",
+        lambda name: 0 if name == "notebook_warm_pool_size" else real(name),
+    )
+
+
 @pytest.fixture
 async def manager():
     """Sessions whose warm processes are released before the test's loop closes."""
@@ -1247,18 +1259,12 @@ def test_a_worker_built_before_a_shadowing_file_no_longer_holds(project):
 async def test_a_cold_run_and_a_warm_worker_preload_the_same_base_image(
     project, manager, monkeypatch
 ):
-    from strata.notebook import session as session_module
     from tests.conftest import LIVE_SERVER_TIMEOUT
     from tests.notebook.pool_helpers import warm_again
 
     # No pool of the session's own: the cold run is cold, and the one below is the only
     # one, which the manager drains.
-    real = session_module._session_setting
-    monkeypatch.setattr(
-        session_module,
-        "_session_setting",
-        lambda name: 0 if name == "notebook_warm_pool_size" else real(name),
-    )
+    _no_warm_pool(monkeypatch)
     _declare(project, "projmod")
     session = manager.open_notebook(_scratchpad(project))
     assert session.warm_pool is None
@@ -1360,7 +1366,8 @@ def test_a_cold_run_loads_the_base_image_only_while_e_is_known(project, tmp_path
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_server")
-async def test_a_scratchpad_run_keeps_its_project_code_compiled(project, manager):
+async def test_a_scratchpad_run_keeps_its_project_code_compiled(project, manager, monkeypatch):
+    _no_warm_pool(monkeypatch)
     (project / "helper.py").write_text("VALUE = 5\n")
     session = manager.open_notebook(_scratchpad(project))
     got = await mcp_server._scratch_run(manager, "import helper\nx = helper.VALUE")
@@ -1384,7 +1391,7 @@ def test_with_a_harness_user_no_code_is_kept_between_runs(project, monkeypatch):
     assert executor._harness_fields()["code_reads"]["pycache"] == str(
         notebook / ".strata" / "pycache"
     )
-    monkeypatch.setattr(executor_module, "resolve_harness_user", lambda: object())
+    monkeypatch.setattr(executor_module, "resolve_harness_user", object)
     assert "pycache" not in executor._harness_fields()["code_reads"]
 
 
@@ -1556,7 +1563,10 @@ def test_an_ssh_worker_named_local_is_refused_before_provisioning(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_server")
-async def test_a_scratchpad_run_on_a_remote_worker_is_refused_with_the_reason(project, manager):
+async def test_a_scratchpad_run_on_a_remote_worker_is_refused_with_the_reason(
+    project, manager, monkeypatch
+):
+    _no_warm_pool(monkeypatch)  # the refusal is over before a pool would be ready to drain
     manager.open_notebook(_attached(project))
     got = await mcp_server._scratch_run(manager, "# @worker gpu\nx = 1")
     assert got["status"] != "ok", str(got)
