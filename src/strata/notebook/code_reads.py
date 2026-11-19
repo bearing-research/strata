@@ -613,15 +613,35 @@ def scratch_warm_list(anchor: str, notebook_dir: str) -> list[str]:
     return list(dict.fromkeys(modules))
 
 
-def _warm_up(warm: Iterable[str], excluded: list[str]) -> tuple[list[str], list[str]]:
-    """Import each of *warm* under the recorder; return those that loaded no tracked code
-    (none outside *excluded*, the installed environment), and those that did."""
+def _top_level(names: Iterable[str]) -> set[str]:
+    """The top-level ones of *names* found on the path, which the anchor could shadow."""
+    return {
+        name.partition(".")[0]
+        for name in names
+        if not name.startswith("_nb_")
+        and getattr(getattr(sys.modules.get(name), "__spec__", None), "has_location", False)
+    }
+
+
+def _warm_up(warm: Iterable[str], excluded: list[str], anchor: str) -> tuple[list[str], list[str]]:
+    """Import each of *warm* under the recorder; return those whose import loaded no
+    tracked code (none outside *excluded*, the installed environment) and nothing the
+    *anchor* shadows, and those that did."""
     kept: list[str] = []
     dropped: list[str] = []
+    before = set(sys.modules)
+    # Loaded by a dropped import: an entry found already loaded was not checked itself.
+    tainted: set[str] = set()
     for name in warm:
-        if name in sys.modules:
+        if name in before:
+            # The harness's own: loaded before any cell either way.
             kept.append(name)
             continue
+        if name in sys.modules:
+            # Loaded by an earlier entry's import, so only as clean as that one.
+            (dropped if name.partition(".")[0] in tainted else kept).append(name)
+            continue
+        loaded_before = set(sys.modules)
         with recording(excluded) as reads:
             try:
                 __import__(name)
@@ -630,9 +650,14 @@ def _warm_up(warm: Iterable[str], excluded: list[str]) -> tuple[list[str], list[
             else:
                 loaded = True
         record = reads.finish()
-        if record["unstable"] or any(state != ABSENT for state in record["reads"].values()):
-            # Tracked code in the base image would be invisible to every run's record.
+        new = _top_level(set(sys.modules) - loaded_before)
+        # Under ``python -c`` in the project, a file there would be what these import.
+        shadowed = any(state != ABSENT for state in base_candidates(anchor, new).values())
+        tracked = any(state != ABSENT for state in record["reads"].values())
+        if record["unstable"] or tracked or shadowed:
+            # Neither would show in any run's record: the cell imports it, and records it.
             dropped.append(name)
+            tainted |= new
         elif loaded:
             kept.append(name)
     return kept, dropped
@@ -727,7 +752,7 @@ def probe_environment(
     )
     if warm is None:
         warm = scratch_warm_list(anchor, notebook_dir) if notebook_dir else []
-    kept, dropped = _warm_up(warm, [*roots, *([notebook_dir] if notebook_dir else [])])
+    kept, dropped = _warm_up(warm, [*roots, *([notebook_dir] if notebook_dir else [])], anchor)
     watched: dict[str, bool | None] = {}
     for root in roots:
         watched[root] = True

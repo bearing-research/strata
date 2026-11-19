@@ -1110,8 +1110,10 @@ async def dispatch_local(
         )
 
         # Without an interpreter nothing runs, not even in a pre-started warm process:
-        # _run_harness refuses below.
-        if context.pool is not None and venv_path is not None:
+        # _run_harness refuses below. A scratchpad cell with env overrides runs cold: its
+        # warm worker imported the base image before any override (``_write_manifest``).
+        warm_ok = not (host.notebook_state.scratchpad and runtime_env)
+        if context.pool is not None and venv_path is not None and warm_ok:
             from strata.notebook.pool import PooledCellExecutor
 
             try:

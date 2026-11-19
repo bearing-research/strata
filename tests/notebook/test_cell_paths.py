@@ -4346,7 +4346,7 @@ class TestPythonDispatchLocal:
             "pool": pool,
         }
         return (
-            SimpleNamespace(path=Path("nb")),
+            SimpleNamespace(path=Path("nb"), notebook_state=SimpleNamespace(scratchpad=False)),
             LocalDispatchContext(**{**fields, **overrides}),
             seen,
         )

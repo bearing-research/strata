@@ -36,9 +36,9 @@ _PTH = "_strata_project.pth"
 _TIMEOUT = 600
 # What the identity was probed from, and what to observe to know it still holds.
 _OBSERVED = ".strata-observed.json"
-# A probe imports the warm list (torch, say), so it may take a while.
+# A probe imports the warm list (torch, say), so it may take a while: all its rounds.
 _PROBE_TIMEOUT = 300
-# Each round with a dropped warm entry shortens the list; a list this unsettled is a bug.
+# Each round with a dropped warm entry shortens the list; one this unsettled loads none.
 _WARM_ROUNDS = 5
 # An owned scratchpad's E, beside its own ``.venv`` (which ``uv sync`` may rebuild).
 _OWNED = Path(".strata") / "environment"
@@ -433,11 +433,18 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
     overlay = _identity_dir(notebook_dir, owned)
     overlay.mkdir(parents=True, exist_ok=True)
     (overlay / ATTACHED_IDENTITY).unlink(missing_ok=True)
+    import time
+
     env, spawn = _cell_env()
     warm: list[str] | None = None
+    # One deadline for every round: each waits under E's lock, which every key takes.
+    deadline = time.monotonic() + _PROBE_TIMEOUT
     # A warm entry that loads tracked code is dropped; a later one may have loaded it too,
     # unseen while the dropped one held it, so the rest are tried again in a fresh process.
-    for _ in range(_WARM_ROUNDS):
+    # A list still unsettled after that many rounds is given up: none always settles.
+    for round_ in range(_WARM_ROUNDS + 1):
+        if round_ == _WARM_ROUNDS:
+            warm = []
         done = subprocess.run(
             [
                 str(_cell_python(notebook_dir, owned)),
@@ -450,7 +457,7 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
             capture_output=True,
             text=True,
             check=True,
-            timeout=_PROBE_TIMEOUT,
+            timeout=max(deadline - time.monotonic(), 1.0),
             cwd=notebook_dir,
             env=env,
             **spawn,
@@ -461,8 +468,6 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
         if not probed["warm_dropped"]:
             break
         warm = probed["warm"]
-    else:
-        raise ValueError("the warm list did not settle")
     identity = hashlib.sha256(json.dumps(probed["identity"], sort_keys=True).encode()).hexdigest()
     record = {
         "sites": sites,
@@ -524,13 +529,16 @@ def base_image(notebook_dir: Path) -> tuple[str, list[str]] | None:
     """What a scratchpad's warm worker spawned now is built from: E as last found (its
     stamp) and the warm list probed with it; ``None`` before any probe, or for a notebook.
     """
-    owned = _owned(notebook_dir)
-    record = environment_record(notebook_dir)
+    stamp = _identity_dir(notebook_dir, _owned(notebook_dir)) / ATTACHED_IDENTITY
     try:
-        identity = (_identity_dir(notebook_dir, owned) / ATTACHED_IDENTITY).read_text()
+        # The identity, the list, the identity: a probe writes the list then the
+        # identity, so one between the reads cannot pair its list with the old identity.
+        identity = stamp.read_text()
+        record = environment_record(notebook_dir)
+        again = stamp.read_text()
     except OSError:
         return None
-    if record is None:
+    if record is None or again != identity:
         return None
     return identity, [str(m) for m in record.get("warm") or []]
 
@@ -550,7 +558,11 @@ def base_image_holds(notebook_dir: Path, stamp: str | None) -> bool:
     record = environment_record(notebook_dir) or {}
     base = record.get("base") or {}
     now = base_candidates(str(notebook_dir.parent), record.get("base_names") or [])
-    return all(base.get(path) == seen for path, seen in now.items())
+    if all(base.get(path) == seen for path, seen in now.items()):
+        return True
+    # E's B no longer holds: found again now, so the replacement is built on the new one.
+    current_identity(notebook_dir, owned=_owned(notebook_dir))
+    return False
 
 
 def _identity_lock(notebook_dir: Path, *, owned: bool) -> threading.Lock:

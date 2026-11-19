@@ -2724,6 +2724,10 @@ class CellExecutor:
             "strata_promote_url": self._ambient_promote_url(),
             **self._harness_fields(),
         }
+        if runtime_env and "code_reads" in manifest:
+            # No base image: a library reading its config at import (JAX_ENABLE_X64)
+            # would take it before the overrides apply. Never warm either.
+            manifest["code_reads"]["warm"] = []
         if loop_config is not None:
             manifest["loop"] = loop_config
         if run_token is not None:
@@ -2754,18 +2758,19 @@ class CellExecutor:
             "audit": audit_scope(self.session.path),
         }
         if self.session.notebook_state.scratchpad:
-            from strata.notebook.project_env import environment_record
+            from strata.notebook.project_env import base_image, environment_record
             from strata.scratch import SCRATCH_DIR
 
             # A scratchpad cell is keyed on what it read (``code_keys``); its own files are
             # the store's, not the cell's, and its project environment's the identity's.
             # It runs as under ``python -c`` in the project: the anchor first on the path.
-            observed = environment_record(self.session.path) or {}
-            roots = observed.get("roots") or []
-            # The base image its warm workers load, which a cold run loads too.
+            roots = (environment_record(self.session.path) or {}).get("roots") or []
+            # The base image its warm workers load, which a cold run loads too: none
+            # without an identity (a failed probe), as a worker spawned then.
+            image = base_image(self.session.path)
             code_reads: dict[str, Any] = {
                 "exclude": [str(self.session.path), *roots],
-                "warm": list(observed.get("warm") or []),
+                "warm": image[1] if image is not None else [],
             }
             if self.session.path.name == SCRATCH_DIR:
                 # Only a scratchpad in a project has one: not a notebook marked one.

@@ -1036,10 +1036,13 @@ def test_a_notebook_and_an_unbuilt_owned_scratchpad_key_on_their_lock_alone(tmp_
     empty = create_notebook(tmp_path / "empty", "empty", initialize_environment=False)
     assert environment_hash(unbuilt) == environment_hash(empty)
 
-    # Owned once, attached now with no overlay built: its old `.venv` keys nothing.
+    # Owned once, attached now with no overlay built: its old `.venv` keys nothing, and
+    # with no identity yet it is probed (failing here) rather than keyed on its lock.
     moved = _owned(tmp_path / "moved")
     write_record(moved, ProjectEnv(tmp_path / "moved", "attached", Path("/p/python"), ".venv"))
-    assert environment_hash(moved) == environment_hash(empty)
+    unprobed = environment_hash(moved)
+    assert unprobed != environment_hash(empty)
+    assert environment_hash(moved) == unprobed
 
 
 def test_the_lockfile_hash_never_probes_and_the_key_does(project, monkeypatch):
@@ -1219,7 +1222,7 @@ def test_a_warm_entry_that_loads_tracked_code_is_dropped_and_so_is_one_reaching_
 
 
 def test_a_worker_built_before_a_shadowing_file_no_longer_holds(project):
-    from strata.notebook.project_env import base_image, base_image_holds, current_identity
+    from strata.notebook.project_env import base_image, base_image_holds
 
     _declare(project, "projmod")
     notebook = _attached(project)
@@ -1229,9 +1232,9 @@ def test_a_worker_built_before_a_shadowing_file_no_longer_holds(project):
     assert base_image_holds(notebook, stamp)
     assert not base_image_holds(notebook, None)
     (project / "projmod.py").write_text("")
-    # Before any key checked E again: the worker's own B.
+    # Before any key checked E again: the worker's own B. Found failing, E is probed
+    # again, so the worker replacing it is built on the new one.
     assert not base_image_holds(notebook, stamp)
-    current_identity(notebook)
     now = base_image(notebook)
     assert now is not None and now[0] != stamp
     assert base_image_holds(notebook, now[0])
@@ -1264,6 +1267,13 @@ async def test_a_cold_run_and_a_warm_worker_preload_the_same_base_image(project,
     assert warm["status"] == "ok", str(warm)
     assert "pool_worker.py" in warm["value"] and "True" in warm["value"], warm["value"]
 
+    # An env override reaches a library only if it is imported after: no base image,
+    # and no warm worker, whose base came before any override.
+    await warm_again(pool)
+    overridden = await mcp_server._scratch_run(manager, "# @env FLAG=1\n" + probe)
+    assert overridden["status"] == "ok", str(overridden)
+    assert "harness.py False" in overridden["value"], overridden["value"]
+
 
 def test_declaring_a_dependency_in_the_project_changes_the_base_image(project):
     from strata.notebook.project_env import current_identity, environment_record
@@ -1275,3 +1285,64 @@ def test_declaring_a_dependency_in_the_project_changes_the_base_image(project):
     _declare(project, "projmod")
     assert current_identity(notebook) != first
     assert "projmod" in (environment_record(notebook) or {})["warm"]
+
+
+def test_a_chain_of_editable_siblings_settles_in_one_round(project):
+    """Each loaded by the one before: all are dropped together, not one per round."""
+    from strata.notebook.project_env import environment_record
+
+    site = _site(project / ".venv")
+    names = ["sib_a", "sib_b", "sib_c", "sib_d", "sib_e", "sib_f"]
+    for name, after in zip(names, [*names[1:], None], strict=True):
+        source = project / "packages" / name
+        source.mkdir(parents=True)
+        (source / f"{name}.py").write_text(f"import {after}\n" if after else "")
+        (site / f"{name}.pth").write_text(f"{source}\n")
+    _declare(project, *names, "projmod")
+    warm = (environment_record(_attached(project)) or {})["warm"]
+    assert "projmod" in warm
+    assert not set(names) & set(warm)
+
+
+def test_a_warm_entry_a_project_file_shadows_is_left_to_the_cell(project):
+    """Under `python -c` in the project its own file is what an import finds."""
+    from strata.notebook.project_env import environment_record
+
+    _declare(project, "projmod")
+    (project / "projmod.py").write_text("")
+    assert "projmod" not in (environment_record(_attached(project)) or {})["warm"]
+
+
+def test_a_probe_between_the_reads_gives_no_base_image(project, monkeypatch):
+    """Never an older list beside a newer identity."""
+    from strata.notebook import project_env
+
+    _declare(project, "projmod")
+    notebook = _attached(project)
+    real = project_env.environment_record
+    identity = notebook / OVERLAY_DIR / ATTACHED_IDENTITY
+
+    def probed_meanwhile(notebook_dir):
+        found = real(notebook_dir)
+        identity.write_text("another")
+        return found
+
+    monkeypatch.setattr(project_env, "environment_record", probed_meanwhile)
+    assert project_env.base_image(notebook) is None
+
+
+def test_a_cold_run_loads_the_base_image_only_while_e_is_known(project, tmp_path):
+    """After a failed probe no identity stands, and workers spawn with none: so cold too."""
+    from types import SimpleNamespace
+
+    from strata.notebook.executor import CellExecutor
+
+    _declare(project, "projmod")
+    notebook = _attached(project)
+    executor = CellExecutor.__new__(CellExecutor)
+    executor.session = SimpleNamespace(
+        path=notebook, notebook_state=SimpleNamespace(scratchpad=True)
+    )
+    assert "projmod" in executor._harness_fields()["code_reads"]["warm"]
+    (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).unlink()
+    assert executor._harness_fields()["code_reads"]["warm"] == []

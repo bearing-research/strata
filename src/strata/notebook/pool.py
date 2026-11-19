@@ -212,7 +212,12 @@ class WarmProcessPool:
                 return None
             if self.base_image_holds is None:
                 return warm_proc
-            if await asyncio.to_thread(self.base_image_holds, warm_proc.stamp):
+            holds = await asyncio.to_thread(self.base_image_holds, warm_proc.stamp)
+            if not self._started:
+                # Drained while it was checked, off the queue where the drain looked.
+                await terminate_subprocess_tree(warm_proc.process)
+                return None
+            if holds:
                 return warm_proc
             # Its preloaded modules predate the environment, or a project file now
             # shadows one of them: what it runs would not be what the key says.
@@ -223,6 +228,9 @@ class WarmProcessPool:
         """Kill a used process and spawn a replacement in the background."""
         if process.process and process.process.returncode is None:
             await terminate_subprocess_tree(process.process)
+        if not self._started:
+            # Drained meanwhile: a spawn now would refill the pool behind it.
+            return
 
         task = asyncio.create_task(self._spawn_warm_process())
         self.track_background_task(task)

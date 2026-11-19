@@ -159,13 +159,15 @@ def environment_hash(notebook_dir: Path, *, check: bool = True) -> str:
     E checked to still hold (probed again if not), and an owned one's folded beside its
     ``uv.lock``. Checking may probe, so never on the event loop; without *check*, E as
     last found."""
-    from strata.notebook.project_env import current_identity, owned_identity
+    from strata.notebook.project_env import current_identity, owned_identity, read_record
 
     attached = attached_identity(notebook_dir)
-    if attached is not None:
-        return _lockfile_hash(
-            notebook_dir, current_identity(notebook_dir) if check else attached, None
-        )
+    record = read_record(notebook_dir)
+    if attached is not None or (record is not None and record.get("mode") == "attached"):
+        # Its record says so even when a failed probe left no identity: probed again.
+        if check:
+            return _lockfile_hash(notebook_dir, current_identity(notebook_dir), None)
+        return _lockfile_hash(notebook_dir, attached or b"", None)
     return _lockfile_hash(notebook_dir, None, owned_identity(notebook_dir, check=check))
 
 
