@@ -214,6 +214,12 @@ keeps its outputs for that run only, as does a loop or `@each` cell that read
 files. Since such a run is keyed on what it imported, opened and listed, the read
 audit does not warn about those reads. Run All runs a scratchpad's cells one at a time, so each run records its
 own reads, and a run never resumes a dead run's checkpoint, whose reads are unknown.
+The project's modules are compiled from the very source a run read, never from a
+`.pyc` that may predate it; the compiled code is kept in
+`.strata-scratch/.strata/pycache/` under the source's sha256, its path and the
+interpreter (256 MiB, least recently used first), so an unchanged module is not
+compiled again. An entry whose checksum or key does not match is compiled again,
+never run.
 `strata scratch status` prints the running daemon and `strata scratch stop`
 stops it. Once it is stopped, deleting `.strata-scratch/` costs reruns, nothing else.
 

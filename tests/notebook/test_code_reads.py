@@ -6,12 +6,16 @@ installs an audit hook that cannot be removed.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import marshal
 import os
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+import pytest
 
 from strata.notebook import code_reads
 from strata.notebook.code_reads import ABSENT
@@ -21,17 +25,20 @@ import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("_code_reads", {module!r})
 code_reads = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(code_reads)
-with code_reads.recording({exclude!r}) as reads:
+with code_reads.recording({exclude!r}, pycache={pycache!r}) as reads:
 {body}
 record = reads.finish()
 print(json.dumps({{"record": record, "value": globals().get("value")}}))
 """
 
 
-def _record(tmp_path: Path, body: str, *, exclude: list[str] | None = None) -> dict:
+def _record(
+    tmp_path: Path, body: str, *, exclude: list[str] | None = None, pycache: str | None = None
+) -> dict:
     script = _RUN.format(
         module=code_reads.__file__,
         exclude=exclude or [],
+        pycache=pycache,
         body=textwrap.indent(textwrap.dedent(body), "    "),
     )
     run = subprocess.run(
@@ -256,11 +263,13 @@ def test_the_runs_own_directory_is_not_recorded(tmp_path):
     (run / "input.arrow").write_text("x")
     (tmp_path / "data.txt").write_text("y")
     script = f"""
-import importlib.util, json, types
+import contextlib, importlib.util, json, types
 spec = importlib.util.spec_from_file_location("_code_reads", {code_reads.__file__!r})
 code_reads = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(code_reads)
-observed = types.SimpleNamespace(on_native_read=None, on_native_write=None, quiet=False)
+observed = types.SimpleNamespace(
+    on_native_read=None, on_native_write=None, quiet=False, hushed=contextlib.nullcontext
+)
 manifest = {{"code_reads": {{"exclude": []}}, "output_dir": {str(run)!r}}}
 with code_reads.for_run(manifest, observed) as reads:
     told = observed.on_native_read == reads.file
@@ -362,9 +371,11 @@ def test_the_runs_own_folders_are_not_recorded(tmp_path):
     got = _script(
         tmp_path,
         f"""
-        import json, types
+        import contextlib, json, types
         from strata.notebook import code_reads
-        observed = types.SimpleNamespace(on_native_read=None, on_native_write=None, quiet=False)
+        observed = types.SimpleNamespace(
+            on_native_read=None, on_native_write=None, quiet=False, hushed=contextlib.nullcontext
+        )
         manifest = {{"code_reads": {{"exclude": []}}, "mounts": {mounts!r}}}
         with code_reads.for_run(manifest, observed) as reads:
             open({str(own / "f.txt")!r}).read()
@@ -483,12 +494,13 @@ def test_a_package_with_an_empty_path_searches_nowhere(tmp_path):
 
 
 _FOR_RUN = """\
-import importlib.util, json, sys, types
+import contextlib, importlib.util, json, sys, types
 spec = importlib.util.spec_from_file_location("_code_reads", {module!r})
 code_reads = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(code_reads)
 manifest = {{"code_reads": {{"exclude": [], "anchor": {anchor!r}}}}}
-with code_reads.for_run(manifest, types.SimpleNamespace(quiet=False)) as reads:
+observed = types.SimpleNamespace(quiet=False, hushed=contextlib.nullcontext)
+with code_reads.for_run(manifest, observed) as reads:
     during = sys.path[0]
 print(json.dumps({{"during": during, "after": {anchor!r} in sys.path}}))
 """
@@ -525,3 +537,147 @@ def test_a_folder_on_pythonpath_is_the_users_code_not_an_install_root(tmp_path, 
     roots = code_reads.probe_environment(str(tmp_path / "anchor"), [])["roots"]
     assert str(vendor) not in roots
     assert str(installed) in roots
+
+
+# Imports one module, saying which modules were compiled from source.
+_COUNTED = """
+import importlib.machinery as machinery
+real = machinery.SourceFileLoader.source_to_code
+compiled = []
+def counted(self, data, path, *args, **kwargs):
+    compiled.append(path)
+    return real(self, data, path, *args, **kwargs)
+machinery.SourceFileLoader.source_to_code = counted
+sys.path.insert(0, {lib!r})
+import {name}
+value = [{name}.VALUE, compiled]
+"""
+
+
+def _cached(tmp_path: Path, name: str = "geom", pycache: Path | None = None) -> list:
+    body = _COUNTED.format(lib=str(tmp_path / "lib"), name=name)
+    return _record(tmp_path, body, pycache=str(pycache or tmp_path / "pycache"))["value"]
+
+
+def _module(tmp_path: Path, name: str, value: str) -> Path:
+    module = tmp_path / "lib" / f"{name}.py"
+    module.parent.mkdir(exist_ok=True)
+    module.write_text(f"VALUE = {value!r}\n")
+    return module
+
+
+def _entry(tmp_path: Path, module: Path) -> Path:
+    cache = code_reads.CodeCache(str(tmp_path / "pycache"))
+    return Path(cache.entry(hashlib.sha256(module.read_bytes()).hexdigest(), str(module)))
+
+
+def test_a_module_is_compiled_once_per_source(tmp_path):
+    module = _module(tmp_path, "geom", "first")
+
+    assert _cached(tmp_path) == ["first", [str(module)]]
+    assert _cached(tmp_path) == ["first", []]
+    module.write_text('VALUE = "second"\n')
+    assert _cached(tmp_path) == ["second", [str(module)]]
+
+
+@pytest.mark.parametrize("damage", ["constant", "truncated", "version", "another_key"])
+def test_a_damaged_entry_is_compiled_again_never_run(tmp_path, damage):
+    module = _module(tmp_path, "geom", "first")
+    other = _module(tmp_path, "other", "other")
+    _cached(tmp_path)
+    _cached(tmp_path, "other")
+    entry = _entry(tmp_path, module)
+    blob = entry.read_bytes()
+    if damage == "constant":
+        assert blob.count(b"first") == 1
+        changed = blob.replace(b"first", b"fxrst")
+        # Still code, computing something else: only the checksum stands in the way.
+        header = code_reads.CodeCache("").header(
+            hashlib.sha256(module.read_bytes()).hexdigest(), str(module)
+        )
+        fixed = len(code_reads._PYC_MAGIC) + code_reads._PYC_LENGTHS.size + len(header)
+        namespace: dict = {}
+        exec(marshal.loads(changed[fixed : -code_reads._PYC_DIGEST]), namespace)
+        assert namespace["VALUE"] == "fxrst"
+    elif damage == "truncated":
+        changed = blob[: len(blob) // 2]
+    elif damage == "version":
+        changed = blob.replace(code_reads._PYC_MAGIC, b"STRATAPYC\x02", 1)
+        changed = changed[: -code_reads._PYC_DIGEST]
+        changed += hashlib.sha256(changed).digest()
+    else:
+        changed = _entry(tmp_path, other).read_bytes()
+    entry.write_bytes(changed)
+
+    assert _cached(tmp_path) == ["first", [str(module)]]
+    assert _cached(tmp_path) == ["first", []]
+
+
+def test_the_same_source_at_two_paths_keeps_its_own_filename(tmp_path):
+    """The path is compiled in (``co_filename``, so tracebacks): it is part of the key."""
+    source = "import sys\nVALUE = sys._getframe().f_code.co_filename\n"
+    (tmp_path / "lib").mkdir()
+    for name in ("one", "two"):
+        (tmp_path / "lib" / f"{name}.py").write_text(source)
+    _cached(tmp_path, "one")
+    assert _cached(tmp_path, "two") == [
+        str(tmp_path / "lib" / "two.py"),
+        [str(tmp_path / "lib" / "two.py")],
+    ]
+    assert _cached(tmp_path, "one") == [str(tmp_path / "lib" / "one.py"), []]
+
+
+def test_the_cache_keeps_the_most_recently_used_within_its_limit(tmp_path):
+    cache = code_reads.CodeCache(str(tmp_path))
+    compiled: list[str] = []
+
+    def load(name: str) -> None:
+        data = f"VALUE = {name!r}\n".encode()
+
+        def compile_() -> object:
+            compiled.append(name)
+            return compile(data, name, "exec")
+
+        cache.code(hashlib.sha256(data).hexdigest(), name, compile_)
+
+    load("a")
+    (size,) = {p.stat().st_size for p in tmp_path.iterdir()}
+    cache.limit = int(size * 2.5)
+    load("b")
+    os.utime(cache.entry(hashlib.sha256(b"VALUE = 'a'\n").hexdigest(), "a"), ns=(1, 1))
+    os.utime(cache.entry(hashlib.sha256(b"VALUE = 'b'\n").hexdigest(), "b"), ns=(2, 2))
+    load("a")  # used again: now the most recent
+    load("c")
+    assert len(list(tmp_path.iterdir())) == 2
+    compiled.clear()
+    load("a")
+    load("c")
+    load("b")
+    assert compiled == ["b"]
+
+
+def test_a_cache_that_cannot_be_written_compiles_every_run(tmp_path):
+    module = _module(tmp_path, "geom", "first")
+    (tmp_path / "file").write_text("")
+    pycache = tmp_path / "file" / "pycache"
+
+    assert _cached(tmp_path, pycache=pycache) == ["first", [str(module)]]
+    assert _cached(tmp_path, pycache=pycache) == ["first", [str(module)]]
+
+
+def test_the_read_audit_sees_nothing_of_the_cache(tmp_path):
+    """Its files are the recorder's, never an undeclared read or write of the cell's."""
+    _module(tmp_path, "geom", "first")
+    script = f"""
+    import json, sys
+    from strata.notebook import code_reads, read_audit
+    manifest = {{"code_reads": {{"exclude": [], "pycache": {str(tmp_path / "pycache")!r}}}}}
+    with read_audit.recording() as observed, code_reads.for_run(manifest, observed):
+        sys.path.insert(0, {str(tmp_path / "lib")!r})
+        import geom
+    print(json.dumps(sorted(observed.files)))
+    """
+    for _ in range(2):  # a miss, which stores, then a hit, which reads
+        files = _script(tmp_path, script)
+        assert str(tmp_path / "lib" / "geom.py") in files
+        assert not [f for f in files if f.startswith(str(tmp_path / "pycache"))], files

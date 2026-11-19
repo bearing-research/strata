@@ -2771,6 +2771,8 @@ class CellExecutor:
             code_reads: dict[str, Any] = {
                 "exclude": [str(self.session.path), *roots],
                 "warm": image[1] if image is not None else [],
+                # Project code compiled once per source, not on every run.
+                "pycache": str(self.session.path / ".strata" / "pycache"),
             }
             if self.session.path.name == SCRATCH_DIR:
                 # Only a scratchpad in a project has one: not a notebook marked one.

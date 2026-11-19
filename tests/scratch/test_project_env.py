@@ -1356,3 +1356,14 @@ def test_a_cold_run_loads_the_base_image_only_while_e_is_known(project, tmp_path
     assert "projmod" in executor._harness_fields()["code_reads"]["warm"]
     (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).unlink()
     assert executor._harness_fields()["code_reads"]["warm"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_a_scratchpad_run_keeps_its_project_code_compiled(project, manager):
+    (project / "helper.py").write_text("VALUE = 5\n")
+    session = manager.open_notebook(_scratchpad(project))
+    got = await mcp_server._scratch_run(manager, "import helper\nx = helper.VALUE")
+    assert got["status"] == "ok", str(got)
+    # The project's module, and nothing of the interpreter's or the environment's.
+    assert len(list((session.path / ".strata" / "pycache").iterdir())) == 1
