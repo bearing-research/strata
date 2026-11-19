@@ -656,3 +656,47 @@ def test_the_cell_id_is_set_for_the_cell_and_put_back_after(module, before, monk
     import os
 
     assert os.environ.get("STRATA_CELL_ID") == before
+
+
+def test_around_body_wraps_the_cells_own_code_alone(monkeypatch):
+    """The cold path's audit window: the body and ``loop_until``, as the warm worker's
+    is, not the input snapshot or the mutation check after."""
+    import contextlib
+
+    from strata.notebook import harness
+
+    log: list[tuple[str, bool]] = []
+    inside: list[bool] = []
+
+    @contextlib.contextmanager
+    def around_body():
+        log.append(("enter", bool(inside)))
+        inside.append(True)
+        try:
+            yield
+        finally:
+            inside.pop()
+
+    for name in ("snapshot_inputs", "detect_mutations"):
+        real = getattr(harness._immut, name)
+
+        def logged(*args, _name=name, _real=real, **kwargs):
+            log.append((_name, bool(inside)))
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(harness._immut, name, logged)
+    monkeypatch.setattr(
+        harness,
+        "_eval_loop_until",
+        lambda expr, namespace: log.append(("loop_until", bool(inside))) or {},
+    )
+    outputs, *_ = harness.execute_cell(
+        "y = x + 1", {"x": 1}, loop_until_expr="y > 1", around_body=around_body
+    )
+    assert outputs["y"] == 2
+    assert log == [
+        ("snapshot_inputs", False),
+        ("enter", False),
+        ("loop_until", True),
+        ("detect_mutations", False),
+    ], log

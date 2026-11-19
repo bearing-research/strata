@@ -759,6 +759,7 @@ def _unanchor(anchor: str, equal: int) -> None:
     at = next((i for i, entry in enumerate(sys.path) if entry is anchor), None)
     if at is None and sys.path.count(anchor) > equal:
         # The cell rebuilt the path from equal strings: one of them is the inserted one.
+        # (One the cell added itself after dropping ours goes instead: the same folder.)
         at = sys.path.index(anchor)
     if at is not None:
         del sys.path[at]
