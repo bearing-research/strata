@@ -123,3 +123,12 @@ async def test_inspect_repl_does_not_start_without_an_interpreter(monkeypatch, t
     assert "not ready" in status
     assert not inspect.ready
     assert spawned == []
+
+
+def test_exit_at_the_inspect_prompt_fails_the_line_not_the_process():
+    from strata.notebook import inspect_harness
+
+    response = inspect_harness._evaluate("exit()", {})
+    assert response["ok"] is False
+    assert "SystemExit" in response["error"]
+    assert inspect_harness._evaluate("1 + 1", {})["result"] == "2"

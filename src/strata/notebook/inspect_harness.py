@@ -164,7 +164,8 @@ def _evaluate(expr, namespace):
         if stdout_text:
             response["stdout"] = stdout_text
         return response
-    except Exception:
+    except (Exception, SystemExit):
+        # ``exit()`` typed at the prompt fails the line, not the inspect process.
         sys.stdout, sys.stderr = old_stdout, old_stderr
         return {"ok": False, "error": traceback.format_exc()}
 

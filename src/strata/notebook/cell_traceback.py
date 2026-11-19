@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import linecache
 import os
+import reprlib
 import traceback
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -37,19 +38,19 @@ def cell_id_set(cell_id: str | None) -> Generator[None]:
             os.environ[CELL_ID_VAR] = previous
 
 
-class CellExited(Exception):
-    """The cell called ``sys.exit()``: it stopped before its end, so it failed."""
-
-
 @contextmanager
 def exit_fails_the_cell() -> Generator[None]:
-    """A cell's ``sys.exit()`` ends the cell, not the process that runs it: every harness
-    catches what an exception is, and a warm worker serves the next run."""
+    """A cell's ``SystemExit`` (``sys.exit()``, ``exit()``, a library's, as argparse's)
+    fails the cell as an exception does, which is what each harness reports; it does not
+    end the process before that process returns its result."""
     try:
         yield
     except SystemExit as exc:
-        called = "sys.exit()" if exc.code is None else f"sys.exit({exc.code!r})"
-        raise CellExited(f"the cell called {called}, which stops it before its end") from exc
+        code = "" if exc.code is None else reprlib.repr(exc.code)
+        # The cell's own frames: a traceback starts at the first of them.
+        raise RuntimeError(
+            f"the cell exited (SystemExit({code})), which stops it before its end"
+        ).with_traceback(exc.__traceback__) from None
 
 
 _CELL_PREFIX = "<cell"

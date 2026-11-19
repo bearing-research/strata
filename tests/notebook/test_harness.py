@@ -712,20 +712,31 @@ def test_around_body_wraps_the_cells_own_code_alone(monkeypatch):
 
 @pytest.mark.parametrize(
     ("call", "shown"),
-    [
-        ("sys.exit(0)", "sys.exit(0)"),
-        ("sys.exit()", "sys.exit()"),
-        ("sys.exit('bye')", "sys.exit('bye')"),
-    ],
+    [("sys.exit(0)", "0"), ("sys.exit()", ""), ("exit('bye')", "'bye'")],
 )
 def test_a_cells_sys_exit_fails_the_cell(harness_script, call, shown):
     """It stops the cell before its end; the harness still writes its result."""
     result = run_harness(harness_script, {"source": f"import sys\nx = 1\n{call}\n", "inputs": {}})
 
+    message = f"the cell exited (SystemExit({shown})), which stops it before its end"
     assert result["success"] is False
-    assert result["error"] == f"CellExited: the cell called {shown}, which stops it before its end"
-    assert "line 3" in result["traceback"], result["traceback"]
+    assert result["error"] == f"RuntimeError: {message}"
     assert result["variables"] == {}
+    # From the cell's own frame, the harness's left out.
+    traceback = result["traceback"]
+    assert "line 3" in traceback, traceback
+    assert "cell_traceback" not in traceback and "contextlib" not in traceback, traceback
+    assert traceback.rstrip().endswith(f"RuntimeError: {message}"), traceback
+
+
+def test_a_sys_exit_in_loop_until_is_the_loops_error():
+    from strata.notebook import harness
+
+    namespace: dict = {}
+    exec("import sys\ndef done():\n    sys.exit(0)\n", namespace)
+    state = harness._eval_loop_until("done()", namespace)
+    assert state["until_reached"] is False
+    assert "SystemExit(0)" in state["error"], state
 
 
 def test_an_interrupt_still_writes_the_result(harness_script):
@@ -734,3 +745,17 @@ def test_an_interrupt_still_writes_the_result(harness_script):
 
     assert result["success"] is False
     assert result["error"] == "KeyboardInterrupt"
+
+
+def test_a_failure_the_handler_cannot_read_still_writes_a_result(harness_script):
+    """An exception whose ``str()`` raises breaks the failure's own report."""
+    source = (
+        "class Unreadable(Exception):\n"
+        "    def __str__(self):\n"
+        "        raise ValueError\n"
+        "raise Unreadable()\n"
+    )
+    result = run_harness(harness_script, {"source": source, "inputs": {}})
+
+    assert result["success"] is False
+    assert result["error"] == "the harness failed reporting the cell's failure"

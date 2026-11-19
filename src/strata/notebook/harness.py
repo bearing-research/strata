@@ -377,7 +377,8 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        result = eval(code, namespace)  # noqa: S307 (the user declares the predicate)
+        with _traceback.exit_fails_the_cell():
+            result = eval(code, namespace)  # noqa: S307 (the user declares the predicate)
     except Exception as exc:
         return {
             "until_reached": False,
@@ -896,6 +897,15 @@ def main():
     stdout_buffer: io.StringIO = io.StringIO()
     stderr_buffer: io.StringIO = io.StringIO()
     ambient_client: Any = None
+    # Should the handler below fail too, the finally block still has a result to write.
+    result: dict[str, Any] = {
+        "success": False,
+        "error": "the harness failed reporting the cell's failure",
+        "variables": {},
+        "stdout": "",
+        "stderr": "",
+        "mutation_warnings": [],
+    }
 
     try:
         manifest = load_manifest(manifest_path)

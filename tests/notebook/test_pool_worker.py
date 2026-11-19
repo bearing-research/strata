@@ -161,8 +161,8 @@ class TestExecuteHarnessDisplayDeduplication:
         assert list(tmp_path.glob("__display__*"))
 
 
-def test_a_cells_sys_exit_fails_the_cell_and_the_worker_lives(tmp_path: Path) -> None:
-    """The worker reports it as the cell's failure, and its streams are its own again."""
+def test_a_cells_sys_exit_fails_the_cell_and_the_worker_reports_it(tmp_path: Path) -> None:
+    """The worker returns it as the cell's failure, and its streams are its own again."""
     import sys
 
     stdout, stderr = sys.stdout, sys.stderr
@@ -171,8 +171,19 @@ def test_a_cells_sys_exit_fails_the_cell_and_the_worker_lives(tmp_path: Path) ->
     )
 
     assert result["success"] is False
-    assert (
-        result["error"] == "CellExited: the cell called sys.exit(0), which stops it before its end"
+    assert result["error"] == (
+        "RuntimeError: the cell exited (SystemExit(0)), which stops it before its end"
     )
     assert result["stdout"] == "before\n"
     assert (sys.stdout, sys.stderr) == (stdout, stderr)
+
+
+def test_an_interrupt_still_returns_a_result(tmp_path: Path) -> None:
+    import sys
+
+    stdout = sys.stdout
+    result = execute_harness({"source": "raise KeyboardInterrupt", "output_dir": str(tmp_path)})
+
+    assert result["success"] is False
+    assert result["error"] == "KeyboardInterrupt"
+    assert sys.stdout is stdout

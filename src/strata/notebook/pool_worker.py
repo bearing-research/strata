@@ -387,7 +387,9 @@ def execute_harness(manifest: dict) -> dict:
             "build_env": build_env_identity(),
         }
 
-    except Exception as e:
+    except BaseException as e:
+        # Any, so the worker returns a result: an interrupt, or a SystemExit outside the
+        # cell's body (an input's unpickling), included.
         sys.stdout = old_stdout
         sys.stderr = old_stderr
         return {
