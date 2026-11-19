@@ -8,15 +8,16 @@ Strata scratchpad: a persistent, cached Python session. Use `run` instead of
 something: the result stays. Variables persist: call `scratchpad` to see what
 already exists and reference it instead of recomputing. Put a slow step (loading
 data, training, fetching) in its own cell; later cells that use its variables
-leave it cached. A cell re-runs only when its source, the variables it uses, or
-the environment changed.
+leave it cached. A cell re-runs only when its source, the variables it uses, a
+file it read or imported, or the environment changed.
 
 Cells run in your project's environment when it has one, else in the notebook's
 own, with cwd at the notebook's `work/` directory, not your project root
 (`scratchpad` names all three): use absolute paths for project files. Editing a
-file a cell read does not re-run it, so pass `fresh=True` after such an edit or
-whenever you doubt a result. First line `# @nocache` for side effects or fresh
-values (clock, random, live APIs). Not for editing files.
+file a cell read re-runs it, but what a process it started read is not seen:
+pass `fresh=True` after editing such a file, or whenever you doubt a result.
+First line `# @nocache` for side effects or fresh values (clock, random, live
+APIs). Not for editing files.
 
 <!-- section: notebook_claude_md -->
 # Driving this Strata notebook

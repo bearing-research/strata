@@ -498,6 +498,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **The scratchpad's guidance no longer tells agents that editing a file a cell read
+  leaves it cached.** It re-runs; only what a process the cell started read goes
+  unseen, which is when to pass `fresh=True`. (#1587)
 - **A scratchpad run keyed on what it read no longer warns about those reads.** Its
   `undeclared_import`, `undeclared_read` and `undeclared_listing` warnings said its
   cached result would not change with the file, which its key does. (#1587)
