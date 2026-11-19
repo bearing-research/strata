@@ -685,6 +685,13 @@ def test_around_body_wraps_the_cells_own_code_alone(monkeypatch):
             return _real(*args, **kwargs)
 
         monkeypatch.setattr(harness._immut, name, logged)
+    real_exec = harness._exec_with_display
+
+    def body(*args, **kwargs):
+        log.append(("body", bool(inside)))
+        return real_exec(*args, **kwargs)
+
+    monkeypatch.setattr(harness, "_exec_with_display", body)
     monkeypatch.setattr(
         harness,
         "_eval_loop_until",
@@ -697,6 +704,7 @@ def test_around_body_wraps_the_cells_own_code_alone(monkeypatch):
     assert log == [
         ("snapshot_inputs", False),
         ("enter", False),
+        ("body", True),
         ("loop_until", True),
         ("detect_mutations", False),
     ], log
