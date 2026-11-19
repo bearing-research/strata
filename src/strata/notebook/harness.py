@@ -8,6 +8,7 @@ stdout/stderr and serializes outputs. Runs in the notebook's venv and cannot
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import io
 import os
@@ -15,7 +16,8 @@ import platform
 import sys
 import time
 import traceback
-from contextlib import contextmanager
+from collections.abc import Callable
+from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -284,8 +286,12 @@ def execute_cell(
     stdout_capture: io.StringIO | None = None,
     stderr_capture: io.StringIO | None = None,
     cell_id: str | None = None,
+    around_body: Callable[[], AbstractContextManager[Any]] = nullcontext,
 ) -> tuple[dict, list[Any], str, str, list[dict], dict[str, Any] | None]:
     """Execute a cell; return outputs, displays, captured streams, mutations and loop state.
+
+    *around_body* wraps the cell's own code alone, its body and ``loop_until`` (a run's
+    audit, the project on the path), as the warm worker and the batch path wrap theirs.
 
     ``mutation_defines`` (in-place mutations such as ``df["col"] = ...``) are always
     serialized, even when ``id()`` is unchanged. With ``loop_until_expr`` set, the
@@ -313,12 +319,12 @@ def execute_cell(
             namespace, [n for n in namespace_before if n not in _AMBIENT_NAMES]
         )
 
-        with display_capture.capture_side_effects():
-            _display_value = _exec_with_display(source, namespace, cell_id)
-
         loop_state: dict[str, Any] | None = None
-        if loop_until_expr is not None:
-            loop_state = _eval_loop_until(loop_until_expr, namespace)
+        with display_capture.capture_side_effects(), around_body():
+            _display_value = _exec_with_display(source, namespace, cell_id)
+            # The cell's code too (only a loop's, which runs cold).
+            if loop_until_expr is not None:
+                loop_state = _eval_loop_until(loop_until_expr, namespace)
 
         _skip = {"__builtins__", "__name__", "__doc__", "__package__"}
         new_vars: dict[str, Any] = {}
@@ -913,15 +919,39 @@ def main():
         # config once at import (jax and JAX_ENABLE_X64) would otherwise take the
         # server's env and silently downcast float64 inputs to float32.
         with apply_env_overrides(manifest):
-            inputs = deserialize_inputs(manifest)
-            inject_mounts(manifest, inputs)
-            inject_tables(manifest, inputs)
-            ambient_client = inject_client(manifest, inputs)
-            loop_config = manifest.get("loop") or {}
-            loop_until_expr = (
-                loop_config.get("until_expr") if isinstance(loop_config, dict) else None
-            )
-            with _audit.recording() as observed, _code.for_run(manifest, observed) as code:
+            # The run's recordings, closed as the body ends: the warm worker's window.
+            recorded = ExitStack()
+            with recorded:
+                code = recorded.enter_context(_code.for_run(manifest))
+                observed = None
+                if code is not None:
+                    # A scratchpad's inputs load as part of its run: what unpickling a
+                    # project class reads, natively too, is the cell's.
+                    observed = recorded.enter_context(_audit.recording())
+                    recorded.enter_context(_code.observing(code, observed))
+                with _ser.resolving_code(functools.partial(_code.anchored, code)):
+                    inputs = deserialize_inputs(manifest)
+                inject_mounts(manifest, inputs)
+                inject_tables(manifest, inputs)
+                ambient_client = inject_client(manifest, inputs)
+                loop_config = manifest.get("loop") or {}
+                loop_until_expr = (
+                    loop_config.get("until_expr") if isinstance(loop_config, dict) else None
+                )
+
+                @contextmanager
+                def body():
+                    nonlocal observed
+                    if observed is None:
+                        observed = recorded.enter_context(_audit.recording())
+                    elif code is not None:
+                        observed.cell_starts(code.imported)
+                    try:
+                        with _code.anchored(code):
+                            yield
+                    finally:
+                        recorded.close()
+
                 (
                     outputs,
                     display_values,
@@ -937,6 +967,7 @@ def main():
                     stdout_capture=stdout_buffer,
                     stderr_capture=stderr_buffer,
                     cell_id=manifest.get("strata_cell_id"),
+                    around_body=body,
                 )
             read_audit = _audit.report(
                 observed,

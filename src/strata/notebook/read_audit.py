@@ -22,7 +22,7 @@ import os
 import stat
 import sys
 import threading
-from collections.abc import Callable, Generator, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
@@ -181,6 +181,8 @@ class Observed:
         self.made: set[str] = set()
         self.programs: set[str] = set()
         self.modules_before = frozenset(sys.modules)
+        # What the harness imported itself while a scratchpad's inputs loaded.
+        self.harness_modules: frozenset[str] = frozenset()
         self.work_dir = os.getcwd()
         self.partial = False
         # Folders a native reader walked, once a run.
@@ -192,6 +194,14 @@ class Observed:
         self.on_native_read: Callable[[str], None] | None = None
         # Told of each file a native writer wrote and folder it made (``code_reads``).
         self.on_native_write: Callable[[str, bool], None] | None = None
+
+    def cell_starts(self, values_imported: Iterable[str]) -> None:
+        """Of what loading a scratchpad's inputs imported, only *values_imported* (the
+        values' own code, as the cell would) are the cell's imports; the rest are the
+        harness's. The files read meanwhile stay the cell's reads."""
+        self.harness_modules = frozenset(
+            set(sys.modules) - self.modules_before - set(values_imported)
+        )
 
     @property
     def quiet(self) -> bool:
@@ -670,7 +680,9 @@ def _static_imports(source: str) -> set[str]:
 def _module_files(observed: Observed, source: str) -> dict[str, str]:
     """Each module the run loaded or names, by its file."""
     files: dict[str, str] = {}
-    names = (set(sys.modules) - observed.modules_before) | _static_imports(source)
+    names = (set(sys.modules) - observed.modules_before - observed.harness_modules) | (
+        _static_imports(source)
+    )
     for name in names:
         module = sys.modules.get(name)
         file = getattr(module, "__file__", None)
@@ -810,7 +822,14 @@ def _report(
     work = _Roots([observed.work_dir])
     modules = _module_files(observed, source)
     module_files = set(modules)
-    for name in modules.values():
+    # The harness's own imports read their files too, which are no input of the cell's.
+    harness = {
+        os.path.abspath(file)
+        for name in observed.harness_modules
+        if isinstance(file := getattr(sys.modules.get(name), "__file__", None), str)
+    }
+    module_files |= harness
+    for name in [*modules.values(), *observed.harness_modules]:
         cached = getattr(getattr(sys.modules.get(name), "__spec__", None), "cached", None)
         if isinstance(cached, str):
             module_files.add(os.path.abspath(cached))

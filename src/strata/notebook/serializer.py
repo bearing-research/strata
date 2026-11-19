@@ -14,6 +14,8 @@ file by path with ``importlib.util``: they run in the notebook's venv and cannot
 from __future__ import annotations
 
 import base64
+import contextlib
+import contextvars
 import hashlib
 import io
 import json
@@ -211,6 +213,35 @@ class ObjectCodec(Protocol):
         """Deserialize backend-specific bytes to a Python object."""
 
 
+# Set while a scratchpad's inputs load, on that thread alone: a value's own code (the
+# classes and modules it names, what its reduce callables and ``__setstate__`` import)
+# resolves as it would in the cell, the project first on the path (``code_reads.anchored``).
+_code_scope: contextvars.ContextVar[Callable[[], contextlib.AbstractContextManager[Any]]] = (
+    contextvars.ContextVar("strata_code_scope", default=contextlib.nullcontext)
+)
+
+
+@contextlib.contextmanager
+def resolving_code(scope: Callable[[], contextlib.AbstractContextManager[Any]]) -> Any:
+    """Run what a loading value runs of its own inside *scope*; the codecs and the
+    libraries that rebuild a value stay outside it."""
+    token = _code_scope.set(scope)
+    try:
+        yield
+    finally:
+        _code_scope.reset(token)
+
+
+class _Unpickler(pickle.Unpickler):
+    def load(self) -> Any:
+        with _code_scope.get()():
+            return super().load()
+
+
+def _unpickle(data: bytes) -> Any:
+    return _Unpickler(io.BytesIO(data)).load()
+
+
 class _PickleObjectCodec:
     name = "pickle"
 
@@ -218,7 +249,7 @@ class _PickleObjectCodec:
         return pickle.dumps(value, protocol=5)
 
     def loads(self, data: bytes) -> Any:
-        return pickle.loads(data)
+        return _unpickle(data)
 
 
 class _CloudPickleObjectCodec:
@@ -237,7 +268,7 @@ class _CloudPickleObjectCodec:
         return self._cloudpickle.dumps(value, protocol=5)
 
     def loads(self, data: bytes) -> Any:
-        return pickle.loads(data)
+        return _unpickle(data)
 
 
 def _resolve_object_codec(codec_name: str | None = None) -> ObjectCodec:
@@ -1814,7 +1845,7 @@ def _deserialize_rds(file_path: Path) -> Any:
 
 def _deserialize_pickle(file_path: Path) -> Any:
     with open(file_path, "rb") as f:
-        data = pickle.load(f)
+        data = _Unpickler(f).load()
 
     codec_payload = _unwrap_codec_payload(data)
     if codec_payload is None:
@@ -1831,7 +1862,8 @@ def _deserialize_module(file_path: Path) -> Any:
 
     with open(file_path, encoding="utf-8") as f:
         data = json.load(f)
-    return importlib.import_module(data["module_name"])
+    with _code_scope.get()():
+        return importlib.import_module(data["module_name"])
 
 
 def _ensure_cell_module(
@@ -1858,7 +1890,13 @@ def _ensure_cell_module(
             module_source.splitlines(keepends=True),
             module_name,
         )
-        exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
+        try:
+            with _code_scope.get()():
+                exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
+        except BaseException:
+            # Half-built: a later load (a warm worker's next run) must exec it again.
+            sys.modules.pop(module_name, None)
+            raise
     module.__dict__[_CELL_MODULE_SOURCE_ATTR] = module_source
     module.__dict__[_CELL_MODULE_FLAG_ATTR] = True
     for value in module.__dict__.values():
@@ -1899,7 +1937,7 @@ def deserialize_cell_module_with_injection(file_path: Path, injected: dict[str, 
 
 def _deserialize_cell_instance(file_path: Path) -> Any:
     with open(file_path, "rb") as f:
-        data = pickle.load(f)
+        data = _Unpickler(f).load()
 
     if not isinstance(data, dict):
         raise ValueError("Invalid notebook-exported instance payload")
@@ -1929,22 +1967,22 @@ def _deserialize_cell_instance(file_path: Path) -> Any:
     else:
         # The first module/cell-instance format.
         state_pickle = data["state_pickle"]
-        state = pickle.loads(state_pickle)
-    instance = cls.__new__(cls)
-
-    setstate = getattr(instance, "__setstate__", None)
-    if callable(setstate):
-        setstate(state)
-    elif _is_default_cell_instance_state(state):
-        _restore_default_cell_instance_state(instance, state)
-    elif state is None:
-        pass
-    elif isinstance(state, dict):
-        instance.__dict__.update(state)
-    else:
-        raise ValueError(
-            f"Cannot restore notebook-exported instance '{class_name}' without __setstate__"
-        )
+        state = _unpickle(state_pickle)
+    with _code_scope.get()():
+        instance = cls.__new__(cls)
+        setstate = getattr(instance, "__setstate__", None)
+        if callable(setstate):
+            setstate(state)
+        elif _is_default_cell_instance_state(state):
+            _restore_default_cell_instance_state(instance, state)
+        elif state is None:
+            pass
+        elif isinstance(state, dict):
+            instance.__dict__.update(state)
+        else:
+            raise ValueError(
+                f"Cannot restore notebook-exported instance '{class_name}' without __setstate__"
+            )
 
     return instance
 

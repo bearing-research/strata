@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+import linecache
 import logging
 import math
 import pickle
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -579,6 +581,71 @@ class TestPickleSerialization:
             obj_loaded = deserialize_value(meta["content_type"], file_path)
 
             assert obj_loaded == obj_orig
+
+    def test_a_values_own_code_loads_in_the_code_scope(self, tmp_path, monkeypatch):
+        """A scratchpad resolves it against its project; the codec's own import does not
+        look there."""
+        inside: list[str] = []
+        log: list[tuple[str, bool]] = []
+        real_init = serializer_module._CloudPickleObjectCodec.__init__
+
+        def codec_init(codec):
+            log.append(("codec", bool(inside)))
+            real_init(codec)
+
+        @contextlib.contextmanager
+        def scope():
+            log.append(("scope", bool(inside)))
+            inside.append("scope")
+            try:
+                yield
+            finally:
+                inside.pop()
+
+        meta = serialize_value(_PickleTestMyModel("test", 123), tmp_path, "model")
+        monkeypatch.setattr(serializer_module._CloudPickleObjectCodec, "__init__", codec_init)
+        with serializer_module.resolving_code(scope):
+            loaded = deserialize_value(meta["content_type"], tmp_path / meta["file"])
+        assert loaded == _PickleTestMyModel("test", 123)
+        # The envelope and the payload each load in it; the codec's import outside it.
+        assert log == [("scope", False), ("codec", False), ("scope", False)], log
+        assert serializer_module._code_scope.get() is contextlib.nullcontext
+
+    def test_the_code_scope_is_the_loading_threads_alone(self, tmp_path):
+        """Another thread unpickling meanwhile (one an earlier cell left on a warm worker)
+        does not enter it."""
+        entered: list[str] = []
+
+        @contextlib.contextmanager
+        def scope():
+            entered.append(threading.current_thread().name)
+            yield
+
+        meta = serialize_value(_PickleTestMyModel("test", 123), tmp_path, "model")
+        with serializer_module.resolving_code(scope):
+            other = threading.Thread(
+                target=deserialize_value,
+                args=(meta["content_type"], tmp_path / meta["file"]),
+                name="other",
+            )
+            other.start()
+            other.join()
+        assert entered == [], entered
+
+    def test_a_cell_module_that_fails_to_load_is_not_left_half_built(self, tmp_path):
+        """A warm worker's next run execs it again, once what it imports is fixed."""
+        name = "__strata_cell_test_half_built"
+        try:
+            with pytest.raises(ImportError):
+                serializer_module._ensure_cell_module(
+                    name, "raise ImportError('not yet')\n", tmp_path / "m.py"
+                )
+            assert name not in sys.modules
+            module = serializer_module._ensure_cell_module(name, "VALUE = 1\n", tmp_path / "m.py")
+            assert module.VALUE == 1
+        finally:
+            sys.modules.pop(name, None)
+            linecache.cache.pop(name, None)
 
     def test_pickle_serialization_uses_codec_envelope(self):
         obj = _PickleTestCustomClass(42)

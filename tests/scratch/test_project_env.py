@@ -11,6 +11,8 @@ import sysconfig
 from pathlib import Path
 from types import SimpleNamespace
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from strata import cli, scratch
@@ -1571,3 +1573,171 @@ async def test_a_scratchpad_run_on_a_remote_worker_is_refused_with_the_reason(
     got = await mcp_server._scratch_run(manager, "# @worker gpu\nx = 1")
     assert got["status"] != "ok", str(got)
     assert "runs on this machine" in str(got), str(got)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+@pytest.mark.parametrize("path", ["cold", "warm"])
+async def test_a_value_of_a_project_class_loads_and_its_code_keys_the_reader(
+    project, manager, monkeypatch, path
+):
+    """A pickled instance imports its class's module as it loads: from the project, and
+    recorded, since the reading cell runs that module's code."""
+    from tests.conftest import LIVE_SERVER_TIMEOUT
+    from tests.notebook.pool_helpers import warm_again
+
+    _no_warm_pool(monkeypatch)
+    shapes = project / "shapes.py"
+    shapes.write_text(
+        "class Box:\n    def __init__(self, n):\n        self.n = n\n"
+        "    def size(self):\n        return self.n\n"
+    )
+    session = manager.open_notebook(_attached(project))
+    if path == "warm":
+        pool = session._python_warm_pool()
+        # Two: the edit below reruns the maker too, each run on a warm worker.
+        pool.pool_size = 2
+        pool.ready_timeout_seconds = LIVE_SERVER_TIMEOUT
+        session.warm_pool = pool
+        await pool.start()
+        await warm_again(pool)
+    made = await mcp_server._scratch_run(manager, "from shapes import Box\nbox = Box(3)")
+    assert made["status"] == "ok", str(made)
+    if path == "warm":
+        await warm_again(session.warm_pool)
+    # Names the process that ran it: the warm case must not quietly run cold.
+    reader = 'import os, sys\nf"{box.size()} {os.path.basename(sys.argv[0])}"'
+    runner = "pool_worker.py" if path == "warm" else "harness.py"
+    read = await mcp_server._scratch_run(manager, reader)
+    assert read["status"] == "ok", str(read)
+    assert read["value"] == f"3 {runner}", str(read)
+    # Both runs recorded the module: the one that imported it, and the one whose input
+    # loading did.
+    index = json.loads((session.path / ".strata" / "reads" / "code.json").read_text())
+    runs = [run for entries in index.values() for run in entries]
+    assert sum(any(p.endswith(f"{os.sep}shapes.py") for p in run) for run in runs) == 2, index
+
+    shapes.write_text(shapes.read_text().replace("return self.n", "return self.n * 10"))
+    if path == "warm":
+        await warm_again(session.warm_pool)
+    again = await mcp_server._scratch_run(manager, reader, cell=read["cell"])
+    assert again["status"] == "ok", str(again)
+    assert again["value"] == f"30 {runner}", str(again)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+@pytest.mark.parametrize("path", ["cold", "warm"])
+async def test_a_native_read_while_an_input_loads_keys_the_reader(
+    project, manager, monkeypatch, path
+):
+    """Project code unpickling runs (``__setstate__``) is the cell's, its native reads too."""
+    from tests.conftest import LIVE_SERVER_TIMEOUT
+    from tests.notebook.pool_helpers import warm_again
+
+    _no_warm_pool(monkeypatch)
+    data = project / "rows.parquet"
+    pq.write_table(pa.table({"x": [1, 2]}), data)
+    (project / "shapes.py").write_text(
+        "import pyarrow.parquet as pq\n"
+        "class Rows:\n"
+        "    def __init__(self, path):\n"
+        "        self.path = path\n"
+        "    def __getstate__(self):\n"
+        "        return {'path': self.path}\n"
+        "    def __setstate__(self, state):\n"
+        "        self.path = state['path']\n"
+        "        self.count = pq.read_table(self.path).num_rows\n"
+    )
+    session = manager.open_notebook(_attached(project))
+    if path == "warm":
+        pool = session._python_warm_pool()
+        pool.pool_size = 1
+        pool.ready_timeout_seconds = LIVE_SERVER_TIMEOUT
+        session.warm_pool = pool
+        await pool.start()
+        await warm_again(pool)
+    made = await mcp_server._scratch_run(
+        manager, f"from shapes import Rows\nrows = Rows({str(data)!r})"
+    )
+    assert made["status"] == "ok", str(made)
+    if path == "warm":
+        await warm_again(session.warm_pool)
+    reader = 'import os, sys\nf"{rows.count} {os.path.basename(sys.argv[0])}"'
+    runner = "pool_worker.py" if path == "warm" else "harness.py"
+    read = await mcp_server._scratch_run(manager, reader)
+    assert read["status"] == "ok", str(read)
+    assert read["value"] == f"2 {runner}", str(read)
+
+    pq.write_table(pa.table({"x": [1, 2, 3]}), data)
+    if path == "warm":
+        await warm_again(session.warm_pool)
+    again = await mcp_server._scratch_run(manager, reader, cell=read["cell"])
+    assert again["status"] == "ok", str(again)
+    assert again["value"] == f"3 {runner}", str(again)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+@pytest.mark.parametrize(
+    ("maker", "reader"),
+    [
+        pytest.param(["import shapes"], "shapes.Box(3).size()", id="module"),
+        pytest.param(
+            ["from shapes import Box\ndef make(n):\n    return Box(n)"],
+            "make(3).size()",
+            id="cell-function",
+        ),
+        pytest.param(
+            ["import shapes\nfns = {'mk': lambda n: shapes.Box(n)}"],
+            "fns['mk'](3).size()",
+            id="lambda-subimport",
+        ),
+        pytest.param(
+            ["from shapes import Box\nclass Big(Box):\n    pass\nbig = Big(3)"],
+            "big.size()",
+            id="class-by-value",
+        ),
+        pytest.param(
+            # A class one cell exports, its instance another's: module/cell-instance.
+            [
+                (
+                    "class Lazy:\n"
+                    "    def __init__(self, n):\n"
+                    "        self.n = n\n"
+                    "    def __getstate__(self):\n"
+                    "        return {'n': self.n}\n"
+                    "    def __setstate__(self, state):\n"
+                    "        import shapes\n"
+                    "        self.box = shapes.Box(state['n'])\n"
+                ),
+                "lazy = Lazy(3)",
+            ],
+            "lazy.box.size()",
+            id="cell-instance-setstate",
+        ),
+    ],
+)
+async def test_each_way_a_value_imports_the_project_as_it_loads(
+    project, manager, monkeypatch, maker, reader
+):
+    """Not only a class a pickle names: a module, a cell's own module, what a reduce
+    callable imports. Each resolves against the project and keys the reader."""
+    _no_warm_pool(monkeypatch)
+    shapes = project / "shapes.py"
+    shapes.write_text(
+        "class Box:\n    def __init__(self, n):\n        self.n = n\n"
+        "    def size(self):\n        return self.n\n"
+    )
+    manager.open_notebook(_attached(project))
+    for source in maker:
+        made = await mcp_server._scratch_run(manager, source)
+        assert made["status"] == "ok", str(made)
+    read = await mcp_server._scratch_run(manager, reader)
+    assert read["status"] == "ok", str(read)
+    assert read["value"] == 3, str(read)
+
+    shapes.write_text(shapes.read_text().replace("return self.n", "return self.n * 10"))
+    again = await mcp_server._scratch_run(manager, reader, cell=read["cell"])
+    assert again["status"] == "ok", str(again)
+    assert again["value"] == 30, str(again)

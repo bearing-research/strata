@@ -179,6 +179,10 @@ class Reads:
         # Makes the read audit's hook skip this thread: the code cache's files are neither.
         self.audit_hushed: Callable[[], AbstractContextManager[Any]] = nullcontext
         self.code_cache: CodeCache | None = None
+        # The project's folder, first on the path where the cell's own imports resolve,
+        # and what was imported with it there.
+        self.anchor: str | None = None
+        self.imported: set[str] = set()
 
     @property
     def quiet(self) -> bool:
@@ -698,44 +702,85 @@ def _patch(reads: Reads) -> list[tuple[type, str, Any]]:
 
 
 @contextmanager
-def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
+def for_run(manifest: dict[str, Any]) -> Generator[Reads | None]:
     """A harness run's recording: a scratchpad cell's (its manifest has ``code_reads``),
     else None.
 
-    The run's own directory (its inputs and folders) is left out, and the files a native
-    reader reads come from the read audit's *observed*, which no open event shows.
+    Entered before its inputs load: a pickled value of a project class imports its
+    module (:func:`anchored`, from the unpickler), recorded since the cell runs that
+    module's code; :func:`observing` joins the read audit to it from there. The run's own
+    directory (its inputs and folders) is left out.
     """
     config = manifest.get("code_reads")
     if config is None:
         yield None
         return
-    anchor = config.get("anchor")
-    inserted = bool(anchor) and (not sys.path or sys.path[0] != anchor)
-    if inserted:
-        # As under ``python -c`` in the project: its own modules import, and shadow.
-        sys.path.insert(0, anchor)
     # A run's own folders (``# @output_dir``) are mounts with no URI; a loop's live
     # outside its run directory.
     own = [m["local_path"] for m in (manifest.get("mounts") or {}).values() if not m.get("uri")]
+    with recording(
+        [*config["exclude"], manifest.get("output_dir") or "", *own],
+        pycache=config.get("pycache"),
+    ) as reads:
+        reads.anchor = config.get("anchor")
+        yield reads
+
+
+@contextmanager
+def anchored(reads: Reads | None) -> Generator[None]:
+    """The project first on ``sys.path``, as under ``python -c`` in it: its own modules
+    import, and shadow. Only around what resolves as the cell would: its body, and what
+    a loading input runs of its own (``serializer.resolving_code``: a pickle's whole load,
+    a module input's import, a cell module's exec and restore). The codecs and the
+    libraries that rebuild a value never look there.
+
+    What is imported meanwhile goes in ``reads.imported``, the cell's imports to the read
+    audit. It is the process's, as the audit's own count is: another thread's import in
+    the window counts too.
+    """
+    anchor = reads.anchor if reads is not None else None
+    inserted = bool(anchor) and (not sys.path or sys.path[0] != anchor)
+    equal = sys.path.count(anchor) if inserted else 0
+    if inserted:
+        sys.path.insert(0, anchor)
+    before = set(sys.modules) if reads is not None else None
     try:
-        with recording(
-            [*config["exclude"], manifest.get("output_dir") or "", *own],
-            pycache=config.get("pycache"),
-        ) as reads:
-            reads.audit_quiet = lambda: observed.quiet
-            reads.audit_hushed = observed.hushed
-            observed.on_native_read = reads.file
-            observed.on_native_write = reads.native_wrote
-            try:
-                yield reads
-            finally:
-                observed.on_native_read = None
-                observed.on_native_write = None
+        yield
     finally:
-        if inserted and anchor in sys.path:
-            # Only the cell resolves against the project: what the harness imports after
-            # (serializing its outputs) is recorded nowhere.
-            sys.path.remove(anchor)
+        if reads is not None and before is not None:
+            reads.imported.update(set(sys.modules) - before)
+        if inserted:
+            _unanchor(anchor, equal)
+
+
+def _unanchor(anchor: str, equal: int) -> None:
+    """Remove the entry :func:`anchored` inserted, and only it: the same folder may be on
+    the path otherwise (PYTHONPATH), and a warm worker keeps the path for its next run."""
+    at = next((i for i, entry in enumerate(sys.path) if entry is anchor), None)
+    if at is None and sys.path.count(anchor) > equal:
+        # The cell rebuilt the path from equal strings: one of them is the inserted one.
+        # (One the cell added itself after dropping ours goes instead: the same folder.)
+        at = sys.path.index(anchor)
+    if at is not None:
+        del sys.path[at]
+
+
+@contextmanager
+def observing(reads: Reads | None, observed: Any) -> Generator[None]:
+    """While the read audit records too: the files a native reader reads come from its
+    *observed*, which no open event shows, and neither recorder sees the other's work."""
+    if reads is None:
+        yield
+        return
+    reads.audit_quiet = lambda: observed.quiet
+    reads.audit_hushed = observed.hushed
+    observed.on_native_read = reads.file
+    observed.on_native_write = reads.native_wrote
+    try:
+        yield
+    finally:
+        observed.on_native_read = None
+        observed.on_native_write = None
 
 
 @contextmanager

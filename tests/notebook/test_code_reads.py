@@ -271,7 +271,7 @@ observed = types.SimpleNamespace(
     on_native_read=None, on_native_write=None, quiet=False, hushed=contextlib.nullcontext
 )
 manifest = {{"code_reads": {{"exclude": []}}, "output_dir": {str(run)!r}}}
-with code_reads.for_run(manifest, observed) as reads:
+with code_reads.for_run(manifest) as reads, code_reads.observing(reads, observed):
     told = observed.on_native_read == reads.file
     open({str(run / "input.arrow")!r}).read()
     open({str(tmp_path / "data.txt")!r}).read()
@@ -344,7 +344,8 @@ def test_what_a_native_writer_wrote_is_the_runs_own(tmp_path):
         import pyarrow as pa, pyarrow.parquet as pq
         from strata.notebook import code_reads, read_audit
         manifest = {"code_reads": {"exclude": []}}
-        with read_audit.recording() as observed, code_reads.for_run(manifest, observed) as reads:
+        run, audit = code_reads.for_run(manifest), read_audit.recording()
+        with run as reads, audit as observed, code_reads.observing(reads, observed):
             pq.write_to_dataset(pa.table({"x": [1, 2]}), root_path="out")
             pq.write_table(pa.table({"x": [3]}), "out/part.parquet")
             # Read back, what it wrote is still its own.
@@ -377,7 +378,7 @@ def test_the_runs_own_folders_are_not_recorded(tmp_path):
             on_native_read=None, on_native_write=None, quiet=False, hushed=contextlib.nullcontext
         )
         manifest = {{"code_reads": {{"exclude": []}}, "mounts": {mounts!r}}}
-        with code_reads.for_run(manifest, observed) as reads:
+        with code_reads.for_run(manifest) as reads, code_reads.observing(reads, observed):
             open({str(own / "f.txt")!r}).read()
             open({str(data / "f.txt")!r}).read()
         print(json.dumps(reads.finish()))
@@ -500,20 +501,57 @@ code_reads = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(code_reads)
 manifest = {{"code_reads": {{"exclude": [], "anchor": {anchor!r}}}}}
 observed = types.SimpleNamespace(quiet=False, hushed=contextlib.nullcontext)
-with code_reads.for_run(manifest, observed) as reads:
-    during = sys.path[0]
-print(json.dumps({{"during": during, "after": {anchor!r} in sys.path}}))
+with code_reads.for_run(manifest) as reads, code_reads.observing(reads, observed):
+    before = {anchor!r} in sys.path
+    with code_reads.anchored(reads):
+        during = sys.path[0]
+print(json.dumps({{"before": before, "during": during, "after": {anchor!r} in sys.path}}))
 """
 
 
 def test_the_project_is_on_the_path_for_the_cell_alone(tmp_path):
-    """What the harness imports after the cell (serializing) never finds the project's."""
+    """What the harness imports itself, loading inputs or serializing outputs, never finds
+    the project's."""
     script = _FOR_RUN.format(module=code_reads.__file__, anchor=str(tmp_path))
     run = subprocess.run(
         [sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True, check=True
     )
     got = json.loads(run.stdout.splitlines()[-1])
-    assert got == {"during": str(tmp_path), "after": False}
+    assert got == {"before": False, "during": str(tmp_path), "after": False}
+
+
+_ANCHORED = """\
+import contextlib, importlib.util, json, sys, types
+spec = importlib.util.spec_from_file_location("_code_reads", {module!r})
+code_reads = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(code_reads)
+anchor = {anchor!r}
+sys.path.append("".join(list(anchor)))  # the same folder, as PYTHONPATH lists it
+manifest = {{"code_reads": {{"exclude": [], "anchor": anchor}}}}
+with code_reads.for_run(manifest) as reads:
+    with code_reads.anchored(reads):
+        import anchored_mod
+        sys.path.remove(anchor)  # the cell takes the folder off the path
+    kept = sys.path.count(anchor)
+    with code_reads.anchored(reads):
+        # The cell rebuilds the path, from equal strings: no entry is the inserted one.
+        sys.path[:] = ["".join(list(entry)) for entry in sys.path]
+    rebuilt = sys.path.count(anchor)
+imported = "anchored_mod" in reads.imported
+print(json.dumps({{"imported": imported, "kept": kept, "rebuilt": rebuilt}}))
+"""
+
+
+def test_anchored_notes_what_it_imported_and_removes_only_its_own_entry(tmp_path):
+    """What it imported is a value's own code to the audit. Its entry goes, not the
+    folder's other one (PYTHONPATH's), which a warm worker keeps for its next run."""
+    (tmp_path / "anchored_mod.py").write_text("VALUE = 1\n")
+    script = _ANCHORED.format(module=code_reads.__file__, anchor=str(tmp_path))
+    run = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path / "..", capture_output=True, text=True
+    )
+    assert run.returncode == 0, run.stderr
+    assert json.loads(run.stdout.splitlines()[-1]) == {"imported": True, "kept": 1, "rebuilt": 1}
 
 
 def test_the_probe_watches_the_interpreter_and_what_rewrites_the_path(tmp_path, monkeypatch):
@@ -671,7 +709,8 @@ def test_the_read_audit_sees_nothing_of_the_cache(tmp_path):
     import json, sys
     from strata.notebook import code_reads, read_audit
     manifest = {{"code_reads": {{"exclude": [], "pycache": {str(tmp_path / "pycache")!r}}}}}
-    with read_audit.recording() as observed, code_reads.for_run(manifest, observed):
+    run = code_reads.for_run(manifest)
+    with run as reads, read_audit.recording() as observed, code_reads.observing(reads, observed):
         sys.path.insert(0, {str(tmp_path / "lib")!r})
         import geom
     print(json.dumps(sorted(observed.files)))
