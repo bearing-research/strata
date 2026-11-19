@@ -55,6 +55,11 @@ def _venv(path: Path) -> Path:
         check=True,
         env={k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"},
     )
+    return _site(path)
+
+
+def _site(path: Path) -> Path:
+    """A venv's site-packages, which Windows lays out apart."""
     return Path(
         subprocess.run(
             [
@@ -361,7 +366,7 @@ def test_a_project_change_or_an_install_means_syncing_again(project):
     assert backend.sync(python_version=None, timeout=60).success
     assert not backend.changed()
 
-    site = next((project / ".venv" / "lib").glob("python*/site-packages"))
+    site = _site(project / ".venv")
     (site / "installed_later.py").write_text("")
     assert backend.changed()
 
@@ -406,7 +411,7 @@ async def test_a_scratchpad_runs_its_cells_in_its_projects_environment(project, 
     assert "scratchpad_environment" not in (session.path / "notebook.toml").read_text()
 
     out = await mcp_server._scratch_run(sm, "import projmod, sys\nprint(projmod.VALUE, sys.prefix)")
-    assert out["status"] == "ok", out
+    assert out["status"] == "ok", str(out)
     assert out["stdout"].split() == ["7", str(session.path / OVERLAY_DIR)]
     # Never the scratchpad's own environment.
     assert not (session.path / ".venv").exists()
@@ -448,10 +453,12 @@ async def test_a_changed_project_is_synced_again_before_the_next_run(project, mo
 
     session = next(iter(manager._sessions.values()))
     monkeypatch.setattr(session, "sync_environment", sync_environment)
-    assert (await mcp_server._scratch_run(manager, "x = 1"))["status"] == "ok"
+    first = await mcp_server._scratch_run(manager, "x = 1")
+    assert first["status"] == "ok", str(first)
     assert synced == []
     (project / "pyproject.toml").write_text('[project]\nname = "proj"\nversion = "0.2.0"\n')
-    assert (await mcp_server._scratch_run(manager, "y = 2"))["status"] == "ok"
+    second = await mcp_server._scratch_run(manager, "y = 2")
+    assert second["status"] == "ok", str(second)
     assert synced == [True]
 
 
@@ -648,7 +655,7 @@ def _fake_dist(site: Path, name: str, version: str, *, record: str, direct_url: 
 
 def test_a_package_from_a_url_is_keyed_on_what_it_installed_not_its_version(project):
     """One version string can be any commit of a git dependency."""
-    site = next((project / ".venv" / "lib").glob("python*/site-packages"))
+    site = _site(project / ".venv")
     url = {"url": "https://example.com/mylib.git", "vcs_info": {"vcs": "git", "commit_id": "a"}}
     _fake_dist(site, "mylib", "0.1.0", record="mylib.py,sha256=a,1\n", direct_url=url)
     notebook = _scratchpad(project)
@@ -669,7 +676,7 @@ def test_a_package_from_a_url_is_keyed_on_what_it_installed_not_its_version(proj
 
 
 def test_a_runtime_package_older_than_strata_needs_is_refused_not_shadowed(project):
-    site = next((project / ".venv" / "lib").glob("python*/site-packages"))
+    site = _site(project / ".venv")
     (site / "orjson").mkdir()
     (site / "orjson" / "__init__.py").write_text("")
     _fake_dist(site, "orjson", "3.0.0", record="", direct_url=None)
@@ -723,7 +730,7 @@ def test_a_package_the_lock_does_not_name_leaves_a_synced_project_current(tmp_pa
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
     subprocess.run(["uv", "sync", "-q", "--offline"], cwd=tmp_path, check=True, env=env)
     assert not detect(tmp_path, {}).sync
-    site = next((tmp_path / ".venv" / "lib").glob("python*/site-packages"))
+    site = _site(tmp_path / ".venv")
     _fake_dist(site, "extra-tool", "1.0", record="", direct_url=None)
     assert not detect(tmp_path, {}).sync
 
