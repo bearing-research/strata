@@ -4372,6 +4372,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A scratchpad cell can read a value that needs the project's code.</strong> A project class,
+  a module, a cell's function, or what a pickled value imports as it loads resolves with
+  the project first on <code>sys.path</code>, as an import in the cell does, instead of failing with
+  <code>ModuleNotFoundError</code>. What that loading reads keys the cell, a native read in a
+  <code>__setstate__</code> included; what the harness imports itself to rebuild a value does not. (#1590)</li>
 <li><strong>The scratchpad's guidance no longer tells agents that editing a file a cell read
   leaves it cached.</strong> It re-runs; only what a process the cell started read goes
   unseen, which is when to pass <code>fresh=True</code>. (#1587)</li>
