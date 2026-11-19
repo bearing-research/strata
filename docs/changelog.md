@@ -513,10 +513,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
-- **A scratchpad cell can read a value whose class is in the project.** A class its
-  inputs name resolves with the project first on `sys.path`, as an import in the cell does,
-  instead of failing with `ModuleNotFoundError`. What loading them reads, the class's
-  module and a native read its `__setstate__` makes, keys the cell. (#PR)
+- **A scratchpad cell can read a value that needs the project's code.** A project class,
+  a module, a cell's function, or what a pickled value imports as it loads resolves with
+  the project first on `sys.path`, as an import in the cell does, instead of failing with
+  `ModuleNotFoundError`. What that loading reads keys the cell, a native read in a
+  `__setstate__` included; what the harness imports itself to rebuild a value does not. (#PR)
 - **The scratchpad's guidance no longer tells agents that editing a file a cell read
   leaves it cached.** It re-runs; only what a process the cell started read goes
   unseen, which is when to pass `fresh=True`. (#1587)

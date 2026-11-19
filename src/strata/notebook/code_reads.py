@@ -179,8 +179,10 @@ class Reads:
         # Makes the read audit's hook skip this thread: the code cache's files are neither.
         self.audit_hushed: Callable[[], AbstractContextManager[Any]] = nullcontext
         self.code_cache: CodeCache | None = None
-        # The project's folder, first on the path where the cell's own imports resolve.
+        # The project's folder, first on the path where the cell's own imports resolve,
+        # and what was imported with it there.
         self.anchor: str | None = None
+        self.imported: set[str] = set()
 
     @property
     def quiet(self) -> bool:
@@ -733,11 +735,17 @@ def anchored(reads: Reads | None) -> Generator[None]:
     inserted = bool(anchor) and (not sys.path or sys.path[0] != anchor)
     if inserted:
         sys.path.insert(0, anchor)
+    before = set(sys.modules) if reads is not None else None
     try:
         yield
     finally:
-        if inserted and anchor in sys.path:
-            sys.path.remove(anchor)
+        if reads is not None and before is not None:
+            reads.imported.update(set(sys.modules) - before)
+        # The entry inserted, by identity: the same folder may be on the path otherwise
+        # (PYTHONPATH), and a warm worker keeps the path for its next run.
+        at = next((i for i, entry in enumerate(sys.path) if entry is anchor), None)
+        if inserted and at is not None:
+            del sys.path[at]
 
 
 @contextmanager

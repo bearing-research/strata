@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import contextvars
 import hashlib
 import io
 import json
@@ -212,26 +213,29 @@ class ObjectCodec(Protocol):
         """Deserialize backend-specific bytes to a Python object."""
 
 
-# Set while a scratchpad's inputs load: a pickled class's module resolves as it would in
-# the cell, the project first on the path (``code_reads.anchored``).
-_class_scope: Callable[[], contextlib.AbstractContextManager[Any]] = contextlib.nullcontext
+# Set while a scratchpad's inputs load, on that thread alone: a value's own code (the
+# classes and modules it names, what its reduce callables and ``__setstate__`` import)
+# resolves as it would in the cell, the project first on the path (``code_reads.anchored``).
+_code_scope: contextvars.ContextVar[Callable[[], contextlib.AbstractContextManager[Any]]] = (
+    contextvars.ContextVar("strata_code_scope", default=contextlib.nullcontext)
+)
 
 
 @contextlib.contextmanager
-def resolving_classes(scope: Callable[[], contextlib.AbstractContextManager[Any]]) -> Any:
-    """Resolve each class a pickle names inside *scope*, and only that."""
-    global _class_scope
-    was, _class_scope = _class_scope, scope
+def resolving_code(scope: Callable[[], contextlib.AbstractContextManager[Any]]) -> Any:
+    """Run what a loading value runs of its own inside *scope*; the codecs and the
+    libraries that rebuild a value stay outside it."""
+    token = _code_scope.set(scope)
     try:
         yield
     finally:
-        _class_scope = was
+        _code_scope.reset(token)
 
 
 class _Unpickler(pickle.Unpickler):
-    def find_class(self, module_name: str, name: str, /) -> Any:
-        with _class_scope():
-            return super().find_class(module_name, name)
+    def load(self) -> Any:
+        with _code_scope.get()():
+            return super().load()
 
 
 def _unpickle(data: bytes) -> Any:
@@ -1858,7 +1862,8 @@ def _deserialize_module(file_path: Path) -> Any:
 
     with open(file_path, encoding="utf-8") as f:
         data = json.load(f)
-    return importlib.import_module(data["module_name"])
+    with _code_scope.get()():
+        return importlib.import_module(data["module_name"])
 
 
 def _ensure_cell_module(
@@ -1885,7 +1890,8 @@ def _ensure_cell_module(
             module_source.splitlines(keepends=True),
             module_name,
         )
-        exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
+        with _code_scope.get()():
+            exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
     module.__dict__[_CELL_MODULE_SOURCE_ATTR] = module_source
     module.__dict__[_CELL_MODULE_FLAG_ATTR] = True
     for value in module.__dict__.values():
@@ -1957,21 +1963,21 @@ def _deserialize_cell_instance(file_path: Path) -> Any:
         # The first module/cell-instance format.
         state_pickle = data["state_pickle"]
         state = _unpickle(state_pickle)
-    instance = cls.__new__(cls)
-
-    setstate = getattr(instance, "__setstate__", None)
-    if callable(setstate):
-        setstate(state)
-    elif _is_default_cell_instance_state(state):
-        _restore_default_cell_instance_state(instance, state)
-    elif state is None:
-        pass
-    elif isinstance(state, dict):
-        instance.__dict__.update(state)
-    else:
-        raise ValueError(
-            f"Cannot restore notebook-exported instance '{class_name}' without __setstate__"
-        )
+    with _code_scope.get()():
+        instance = cls.__new__(cls)
+        setstate = getattr(instance, "__setstate__", None)
+        if callable(setstate):
+            setstate(state)
+        elif _is_default_cell_instance_state(state):
+            _restore_default_cell_instance_state(instance, state)
+        elif state is None:
+            pass
+        elif isinstance(state, dict):
+            instance.__dict__.update(state)
+        else:
+            raise ValueError(
+                f"Cannot restore notebook-exported instance '{class_name}' without __setstate__"
+            )
 
     return instance
 

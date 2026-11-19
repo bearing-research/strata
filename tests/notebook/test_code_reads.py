@@ -520,6 +520,34 @@ def test_the_project_is_on_the_path_for_the_cell_alone(tmp_path):
     assert got == {"before": False, "during": str(tmp_path), "after": False}
 
 
+_ANCHORED = """\
+import contextlib, importlib.util, json, sys, types
+spec = importlib.util.spec_from_file_location("_code_reads", {module!r})
+code_reads = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(code_reads)
+anchor = {anchor!r}
+sys.path.append("".join(list(anchor)))  # the same folder, as PYTHONPATH lists it
+manifest = {{"code_reads": {{"exclude": [], "anchor": anchor}}}}
+with code_reads.for_run(manifest) as reads:
+    with code_reads.anchored(reads):
+        import anchored_mod
+        sys.path.remove(anchor)  # the cell takes the folder off the path
+print(json.dumps({{"imported": "anchored_mod" in reads.imported, "kept": anchor in sys.path}}))
+"""
+
+
+def test_anchored_notes_what_it_imported_and_removes_only_its_own_entry(tmp_path):
+    """What it imported is a value's own code to the audit. Its entry goes, not the
+    folder's other one (PYTHONPATH's), which a warm worker keeps for its next run."""
+    (tmp_path / "anchored_mod.py").write_text("VALUE = 1\n")
+    script = _ANCHORED.format(module=code_reads.__file__, anchor=str(tmp_path))
+    run = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path / "..", capture_output=True, text=True
+    )
+    assert run.returncode == 0, run.stderr
+    assert json.loads(run.stdout.splitlines()[-1]) == {"imported": True, "kept": True}
+
+
 def test_the_probe_watches_the_interpreter_and_what_rewrites_the_path(tmp_path, monkeypatch):
     """An interpreter upgraded in place, a ``sitecustomize`` edited, a ``pyvenv.cfg``."""
     probed = code_reads.probe_environment(str(tmp_path), [])

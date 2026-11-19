@@ -921,7 +921,7 @@ def main():
                     # project class reads, natively too, is the cell's.
                     observed = audit.enter_context(_audit.recording())
                     audit.enter_context(_code.observing(code, observed))
-                with _ser.resolving_classes(functools.partial(_code.anchored, code)):
+                with _ser.resolving_code(functools.partial(_code.anchored, code)):
                     inputs = deserialize_inputs(manifest)
                 inject_mounts(manifest, inputs)
                 inject_tables(manifest, inputs)
@@ -932,6 +932,8 @@ def main():
                 )
                 if observed is None:
                     observed = audit.enter_context(_audit.recording())
+                elif code is not None:
+                    observed.cell_starts(code.imported)
                 with _code.anchored(code):
                     (
                         outputs,

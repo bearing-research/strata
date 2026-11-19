@@ -184,6 +184,23 @@ class TestTheRecord:
             "undeclared_import": [str(data / "audit_seen_mod.py")]
         }
 
+    def test_what_the_harness_imports_loading_inputs_is_not_the_cells(self, data, monkeypatch):
+        """A scratchpad's audit starts before its inputs load: a library imported to
+        rebuild one is no import of the cell's, and its files no read; what a value's own
+        code imported is, as the cell would have."""
+        (data / "audit_rebuild_mod.py").write_text("VALUE = 1\n")
+        (data / "audit_value_mod.py").write_text("VALUE = 1\n")
+        monkeypatch.syspath_prepend(str(data))
+        for name in ("audit_rebuild_mod", "audit_value_mod"):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+        with recording() as observed:
+            import audit_rebuild_mod  # noqa: F401
+            import audit_value_mod  # noqa: F401
+
+            observed.cell_starts(["audit_value_mod"])
+
+        assert _report(observed) == {"undeclared_import": [str(data / "audit_value_mod.py")]}
+
     def test_a_module_from_a_dist_the_lock_does_not_hold(self, tmp_path, monkeypatch):
         site_packages = tmp_path / "site-packages"
         (site_packages / "audit_rogue").mkdir(parents=True)

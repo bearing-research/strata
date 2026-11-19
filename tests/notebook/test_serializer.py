@@ -10,6 +10,7 @@ import pickle
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -580,11 +581,9 @@ class TestPickleSerialization:
 
             assert obj_loaded == obj_orig
 
-    def test_only_the_classes_a_pickle_names_resolve_in_the_class_scope(
-        self, tmp_path, monkeypatch
-    ):
-        """A scratchpad resolves them against its project; the codec's own import does
-        not look there."""
+    def test_a_values_own_code_loads_in_the_code_scope(self, tmp_path, monkeypatch):
+        """A scratchpad resolves it against its project; the codec's own import does not
+        look there."""
         inside: list[str] = []
         log: list[tuple[str, bool]] = []
         real_init = serializer_module._CloudPickleObjectCodec.__init__
@@ -595,8 +594,8 @@ class TestPickleSerialization:
 
         @contextlib.contextmanager
         def scope():
-            log.append(("class", bool(inside)))
-            inside.append("class")
+            log.append(("scope", bool(inside)))
+            inside.append("scope")
             try:
                 yield
             finally:
@@ -604,15 +603,33 @@ class TestPickleSerialization:
 
         meta = serialize_value(_PickleTestMyModel("test", 123), tmp_path, "model")
         monkeypatch.setattr(serializer_module._CloudPickleObjectCodec, "__init__", codec_init)
-        with serializer_module.resolving_classes(scope):
+        with serializer_module.resolving_code(scope):
             loaded = deserialize_value(meta["content_type"], tmp_path / meta["file"])
         assert loaded == _PickleTestMyModel("test", 123)
-        # Each class lookup in the scope, one at a time; the codec's import outside it.
-        assert log.count(("codec", False)) == 1, log
-        assert ("class", False) in log, log
-        assert ("class", True) not in log, log
-        # Outside, as before: nothing of the scope is left in place.
-        assert serializer_module._class_scope is contextlib.nullcontext
+        # The envelope and the payload each load in it; the codec's import outside it.
+        assert log == [("scope", False), ("codec", False), ("scope", False)], log
+        assert serializer_module._code_scope.get() is contextlib.nullcontext
+
+    def test_the_code_scope_is_the_loading_threads_alone(self, tmp_path):
+        """Another thread unpickling meanwhile (one an earlier cell left on a warm worker)
+        neither enters it nor sees the path it sets."""
+        entered: list[str] = []
+
+        @contextlib.contextmanager
+        def scope():
+            entered.append(threading.current_thread().name)
+            yield
+
+        meta = serialize_value(_PickleTestMyModel("test", 123), tmp_path, "model")
+        with serializer_module.resolving_code(scope):
+            other = threading.Thread(
+                target=deserialize_value,
+                args=(meta["content_type"], tmp_path / meta["file"]),
+                name="other",
+            )
+            other.start()
+            other.join()
+        assert entered == [], entered
 
     def test_pickle_serialization_uses_codec_envelope(self):
         obj = _PickleTestCustomClass(42)

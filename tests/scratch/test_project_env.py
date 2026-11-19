@@ -1675,3 +1675,67 @@ async def test_a_native_read_while_an_input_loads_keys_the_reader(
     again = await mcp_server._scratch_run(manager, reader, cell=read["cell"])
     assert again["status"] == "ok", str(again)
     assert again["value"] == f"3 {runner}", str(again)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+@pytest.mark.parametrize(
+    ("maker", "reader"),
+    [
+        pytest.param(["import shapes"], "shapes.Box(3).size()", id="module"),
+        pytest.param(
+            ["from shapes import Box\ndef make(n):\n    return Box(n)"],
+            "make(3).size()",
+            id="cell-function",
+        ),
+        pytest.param(
+            ["import shapes\nfns = {'mk': lambda n: shapes.Box(n)}"],
+            "fns['mk'](3).size()",
+            id="lambda-subimport",
+        ),
+        pytest.param(
+            ["from shapes import Box\nclass Big(Box):\n    pass\nbig = Big(3)"],
+            "big.size()",
+            id="class-by-value",
+        ),
+        pytest.param(
+            # A class one cell exports, its instance another's: module/cell-instance.
+            [
+                "class Lazy:\n"
+                "    def __init__(self, n):\n"
+                "        self.n = n\n"
+                "    def __getstate__(self):\n"
+                "        return {'n': self.n}\n"
+                "    def __setstate__(self, state):\n"
+                "        import shapes\n"
+                "        self.box = shapes.Box(state['n'])\n",
+                "lazy = Lazy(3)",
+            ],
+            "lazy.box.size()",
+            id="cell-instance-setstate",
+        ),
+    ],
+)
+async def test_each_way_a_value_imports_the_project_as_it_loads(
+    project, manager, monkeypatch, maker, reader
+):
+    """Not only a class a pickle names: a module, a cell's own module, what a reduce
+    callable imports. Each resolves against the project and keys the reader."""
+    _no_warm_pool(monkeypatch)
+    shapes = project / "shapes.py"
+    shapes.write_text(
+        "class Box:\n    def __init__(self, n):\n        self.n = n\n"
+        "    def size(self):\n        return self.n\n"
+    )
+    manager.open_notebook(_attached(project))
+    for source in maker:
+        made = await mcp_server._scratch_run(manager, source)
+        assert made["status"] == "ok", str(made)
+    read = await mcp_server._scratch_run(manager, reader)
+    assert read["status"] == "ok", str(read)
+    assert read["value"] == 3, str(read)
+
+    shapes.write_text(shapes.read_text().replace("return self.n", "return self.n * 10"))
+    again = await mcp_server._scratch_run(manager, reader, cell=read["cell"])
+    assert again["status"] == "ok", str(again)
+    assert again["value"] == 30, str(again)

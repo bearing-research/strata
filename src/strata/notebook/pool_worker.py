@@ -281,7 +281,7 @@ def execute_harness(manifest: dict) -> dict:
                     # project class reads, natively too, is the cell's.
                     observed = audit.enter_context(_audit.recording())
                     audit.enter_context(_code.observing(code, observed))
-                with _ser.resolving_classes(functools.partial(_code.anchored, code)):
+                with _ser.resolving_code(functools.partial(_code.anchored, code)):
                     for var_name, spec in inputs.items():
                         # Sweep-group input -> {variant_name: value}; parity with
                         # harness.deserialize_inputs.
@@ -314,6 +314,8 @@ def execute_harness(manifest: dict) -> dict:
 
                 if observed is None:
                     observed = audit.enter_context(_audit.recording())
+                elif code is not None:
+                    observed.cell_starts(code.imported)
                 with display_capture.capture_side_effects(), _code.anchored(code):
                     _display_value = _exec_with_display(
                         source, namespace, manifest.get("strata_cell_id")
