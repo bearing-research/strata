@@ -511,6 +511,9 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A scratchpad cell can read a value whose class is in the project.** Its inputs load
+  with the project first on `sys.path`, as the cell runs, instead of failing with
+  `ModuleNotFoundError`; the module that loading imports is recorded as the cell's read. (#PR)
 - **The scratchpad's guidance no longer tells agents that editing a file a cell read
   leaves it cached.** It re-runs; only what a process the cell started read goes
   unseen, which is when to pass `fresh=True`. (#1587)

@@ -913,31 +913,32 @@ def main():
         # config once at import (jax and JAX_ENABLE_X64) would otherwise take the
         # server's env and silently downcast float64 inputs to float32.
         with apply_env_overrides(manifest):
-            inputs = deserialize_inputs(manifest)
-            inject_mounts(manifest, inputs)
-            inject_tables(manifest, inputs)
-            ambient_client = inject_client(manifest, inputs)
-            loop_config = manifest.get("loop") or {}
-            loop_until_expr = (
-                loop_config.get("until_expr") if isinstance(loop_config, dict) else None
-            )
-            with _audit.recording() as observed, _code.for_run(manifest, observed) as code:
-                (
-                    outputs,
-                    display_values,
-                    stdout_text,
-                    stderr_text,
-                    mutation_warnings,
-                    loop_state,
-                ) = execute_cell(
-                    source,
-                    inputs,
-                    mutation_defines=manifest.get("mutation_defines") or [],
-                    loop_until_expr=loop_until_expr,
-                    stdout_capture=stdout_buffer,
-                    stderr_capture=stderr_buffer,
-                    cell_id=manifest.get("strata_cell_id"),
+            with _code.for_run(manifest) as code:
+                inputs = deserialize_inputs(manifest)
+                inject_mounts(manifest, inputs)
+                inject_tables(manifest, inputs)
+                ambient_client = inject_client(manifest, inputs)
+                loop_config = manifest.get("loop") or {}
+                loop_until_expr = (
+                    loop_config.get("until_expr") if isinstance(loop_config, dict) else None
                 )
+                with _audit.recording() as observed, _code.observing(code, observed):
+                    (
+                        outputs,
+                        display_values,
+                        stdout_text,
+                        stderr_text,
+                        mutation_warnings,
+                        loop_state,
+                    ) = execute_cell(
+                        source,
+                        inputs,
+                        mutation_defines=manifest.get("mutation_defines") or [],
+                        loop_until_expr=loop_until_expr,
+                        stdout_capture=stdout_buffer,
+                        stderr_capture=stderr_buffer,
+                        cell_id=manifest.get("strata_cell_id"),
+                    )
             read_audit = _audit.report(
                 observed,
                 source=source,

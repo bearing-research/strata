@@ -1571,3 +1571,48 @@ async def test_a_scratchpad_run_on_a_remote_worker_is_refused_with_the_reason(
     got = await mcp_server._scratch_run(manager, "# @worker gpu\nx = 1")
     assert got["status"] != "ok", str(got)
     assert "runs on this machine" in str(got), str(got)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+@pytest.mark.parametrize("path", ["cold", "warm"])
+async def test_a_value_of_a_project_class_loads_and_its_code_keys_the_reader(
+    project, manager, monkeypatch, path
+):
+    """A pickled instance imports its class's module as it loads: from the project, and
+    recorded, since the reading cell runs that module's code."""
+    from tests.conftest import LIVE_SERVER_TIMEOUT
+    from tests.notebook.pool_helpers import warm_again
+
+    _no_warm_pool(monkeypatch)
+    shapes = project / "shapes.py"
+    shapes.write_text(
+        "class Box:\n    def __init__(self, n):\n        self.n = n\n"
+        "    def size(self):\n        return self.n\n"
+    )
+    session = manager.open_notebook(_attached(project))
+    if path == "warm":
+        pool = session._python_warm_pool()
+        pool.pool_size = 1
+        pool.ready_timeout_seconds = LIVE_SERVER_TIMEOUT
+        session.warm_pool = pool
+        await pool.start()
+    made = await mcp_server._scratch_run(manager, "from shapes import Box\nbox = Box(3)")
+    assert made["status"] == "ok", str(made)
+    if path == "warm":
+        await warm_again(session.warm_pool)
+    read = await mcp_server._scratch_run(manager, "box.size()")
+    assert read["status"] == "ok", str(read)
+    assert read["value"] == 3, str(read)
+    # Both runs recorded the module: the one that imported it, and the one whose input
+    # loading did.
+    index = json.loads((session.path / ".strata" / "reads" / "code.json").read_text())
+    runs = [run for entries in index.values() for run in entries]
+    assert sum(any(p.endswith(f"{os.sep}shapes.py") for p in run) for run in runs) == 2, index
+
+    shapes.write_text(shapes.read_text().replace("return self.n", "return self.n * 10"))
+    if path == "warm":
+        await warm_again(session.warm_pool)
+    again = await mcp_server._scratch_run(manager, "box.size()", cell=read["cell"])
+    assert again["status"] == "ok", str(again)
+    assert again["value"] == 30, str(again)

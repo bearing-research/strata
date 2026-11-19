@@ -698,12 +698,14 @@ def _patch(reads: Reads) -> list[tuple[type, str, Any]]:
 
 
 @contextmanager
-def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
+def for_run(manifest: dict[str, Any]) -> Generator[Reads | None]:
     """A harness run's recording: a scratchpad cell's (its manifest has ``code_reads``),
     else None.
 
-    The run's own directory (its inputs and folders) is left out, and the files a native
-    reader reads come from the read audit's *observed*, which no open event shows.
+    Entered before its inputs load: a pickled value of a project class imports its
+    module, from the project (the anchor is first on the path) and recorded, since the
+    cell runs that module's code. The run's own directory (its inputs and folders) is
+    left out. Around the cell body, :func:`observing` joins the read audit to it.
     """
     config = manifest.get("code_reads")
     if config is None:
@@ -722,20 +724,32 @@ def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
             [*config["exclude"], manifest.get("output_dir") or "", *own],
             pycache=config.get("pycache"),
         ) as reads:
-            reads.audit_quiet = lambda: observed.quiet
-            reads.audit_hushed = observed.hushed
-            observed.on_native_read = reads.file
-            observed.on_native_write = reads.native_wrote
-            try:
-                yield reads
-            finally:
-                observed.on_native_read = None
-                observed.on_native_write = None
+            yield reads
     finally:
         if inserted and anchor in sys.path:
             # Only the cell resolves against the project: what the harness imports after
             # (serializing its outputs) is recorded nowhere.
             sys.path.remove(anchor)
+
+
+@contextmanager
+def observing(reads: Reads | None, observed: Any) -> Generator[None]:
+    """While the read audit records too: the files a native reader reads come from its
+    *observed*, which no open event shows, and neither recorder sees the other's work."""
+    if reads is None:
+        yield
+        return
+    reads.audit_quiet = lambda: observed.quiet
+    reads.audit_hushed = observed.hushed
+    observed.on_native_read = reads.file
+    observed.on_native_write = reads.native_wrote
+    try:
+        yield
+    finally:
+        observed.on_native_read = None
+        observed.on_native_write = None
+        reads.audit_quiet = lambda: False
+        reads.audit_hushed = nullcontext
 
 
 @contextmanager

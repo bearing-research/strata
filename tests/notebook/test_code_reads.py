@@ -271,7 +271,7 @@ observed = types.SimpleNamespace(
     on_native_read=None, on_native_write=None, quiet=False, hushed=contextlib.nullcontext
 )
 manifest = {{"code_reads": {{"exclude": []}}, "output_dir": {str(run)!r}}}
-with code_reads.for_run(manifest, observed) as reads:
+with code_reads.for_run(manifest) as reads, code_reads.observing(reads, observed):
     told = observed.on_native_read == reads.file
     open({str(run / "input.arrow")!r}).read()
     open({str(tmp_path / "data.txt")!r}).read()
@@ -344,7 +344,8 @@ def test_what_a_native_writer_wrote_is_the_runs_own(tmp_path):
         import pyarrow as pa, pyarrow.parquet as pq
         from strata.notebook import code_reads, read_audit
         manifest = {"code_reads": {"exclude": []}}
-        with read_audit.recording() as observed, code_reads.for_run(manifest, observed) as reads:
+        run, audit = code_reads.for_run(manifest), read_audit.recording()
+        with run as reads, audit as observed, code_reads.observing(reads, observed):
             pq.write_to_dataset(pa.table({"x": [1, 2]}), root_path="out")
             pq.write_table(pa.table({"x": [3]}), "out/part.parquet")
             # Read back, what it wrote is still its own.
@@ -377,7 +378,7 @@ def test_the_runs_own_folders_are_not_recorded(tmp_path):
             on_native_read=None, on_native_write=None, quiet=False, hushed=contextlib.nullcontext
         )
         manifest = {{"code_reads": {{"exclude": []}}, "mounts": {mounts!r}}}
-        with code_reads.for_run(manifest, observed) as reads:
+        with code_reads.for_run(manifest) as reads, code_reads.observing(reads, observed):
             open({str(own / "f.txt")!r}).read()
             open({str(data / "f.txt")!r}).read()
         print(json.dumps(reads.finish()))
@@ -500,7 +501,7 @@ code_reads = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(code_reads)
 manifest = {{"code_reads": {{"exclude": [], "anchor": {anchor!r}}}}}
 observed = types.SimpleNamespace(quiet=False, hushed=contextlib.nullcontext)
-with code_reads.for_run(manifest, observed) as reads:
+with code_reads.for_run(manifest) as reads, code_reads.observing(reads, observed):
     during = sys.path[0]
 print(json.dumps({{"during": during, "after": {anchor!r} in sys.path}}))
 """
@@ -671,7 +672,8 @@ def test_the_read_audit_sees_nothing_of_the_cache(tmp_path):
     import json, sys
     from strata.notebook import code_reads, read_audit
     manifest = {{"code_reads": {{"exclude": [], "pycache": {str(tmp_path / "pycache")!r}}}}}
-    with read_audit.recording() as observed, code_reads.for_run(manifest, observed):
+    run = code_reads.for_run(manifest)
+    with run as reads, read_audit.recording() as observed, code_reads.observing(reads, observed):
         sys.path.insert(0, {str(tmp_path / "lib")!r})
         import geom
     print(json.dumps(sorted(observed.files)))

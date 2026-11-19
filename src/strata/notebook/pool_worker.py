@@ -273,44 +273,45 @@ def execute_harness(manifest: dict) -> dict:
         # at import (jax and JAX_ENABLE_X64) would otherwise take the worker's env,
         # silently downcasting float64 inputs to float32.
         with _apply_env_overrides(manifest):
-            for var_name, spec in inputs.items():
-                # Sweep-group input -> {variant_name: value}; parity with
-                # harness.deserialize_inputs.
-                if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
-                    bundle: dict[str, Any] = {}
-                    for variant_name, variant_spec in spec.get("variants", {}).items():
-                        value = _deser_one(variant_spec, var_name)
-                        if value is not _MISSING:
-                            bundle[variant_name] = value
-                    namespace[var_name] = bundle
-                    continue
-                value = _deser_one(spec, var_name)
-                if value is not _MISSING:
-                    namespace[var_name] = value
+            with _code.for_run(manifest) as code:
+                for var_name, spec in inputs.items():
+                    # Sweep-group input -> {variant_name: value}; parity with
+                    # harness.deserialize_inputs.
+                    if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
+                        bundle: dict[str, Any] = {}
+                        for variant_name, variant_spec in spec.get("variants", {}).items():
+                            value = _deser_one(variant_spec, var_name)
+                            if value is not _MISSING:
+                                bundle[variant_name] = value
+                        namespace[var_name] = bundle
+                        continue
+                    value = _deser_one(spec, var_name)
+                    if value is not _MISSING:
+                        namespace[var_name] = value
 
-            _inject_mounts(manifest, namespace)
-            _inject_tables(manifest, namespace)
-            ambient_client = _inject_client(manifest, namespace, old_stdout)
-            display_capture.install(namespace)
+                _inject_mounts(manifest, namespace)
+                _inject_tables(manifest, namespace)
+                ambient_client = _inject_client(manifest, namespace, old_stdout)
+                display_capture.install(namespace)
 
-            namespace_before = set(namespace.keys())
-            input_identities = {name: id(namespace[name]) for name in namespace_before}
-            input_snapshots = _immut.snapshot_inputs(
-                namespace, [n for n in namespace_before if n not in _AMBIENT_NAMES]
-            )
-            mutation_set = set(manifest.get("mutation_defines") or [])
-
-            sys.stdout = stdout_buf
-            sys.stderr = stderr_buf
-
-            with (
-                display_capture.capture_side_effects(),
-                _audit.recording() as observed,
-                _code.for_run(manifest, observed) as code,
-            ):
-                _display_value = _exec_with_display(
-                    source, namespace, manifest.get("strata_cell_id")
+                namespace_before = set(namespace.keys())
+                input_identities = {name: id(namespace[name]) for name in namespace_before}
+                input_snapshots = _immut.snapshot_inputs(
+                    namespace, [n for n in namespace_before if n not in _AMBIENT_NAMES]
                 )
+                mutation_set = set(manifest.get("mutation_defines") or [])
+
+                sys.stdout = stdout_buf
+                sys.stderr = stderr_buf
+
+                with (
+                    display_capture.capture_side_effects(),
+                    _audit.recording() as observed,
+                    _code.observing(code, observed),
+                ):
+                    _display_value = _exec_with_display(
+                        source, namespace, manifest.get("strata_cell_id")
+                    )
             code_reads = code.finish() if code is not None else None
 
         sys.stdout = old_stdout
