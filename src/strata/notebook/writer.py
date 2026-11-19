@@ -451,11 +451,6 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         **({"catalogs": toml.catalogs} if toml.catalogs else {}),
         **({"secret_manager": toml.secret_manager} if toml.secret_manager else {}),
         **({"r": toml.r} if toml.r else {}),
-        **(
-            {"scratchpad_environment": toml.scratchpad_environment}
-            if toml.scratchpad_environment
-            else {}
-        ),
         # Runtime state (display outputs, sync timestamps, cache) lives in
         # ``.strata/runtime.json`` so running a notebook doesn't churn git diffs.
     }
@@ -1112,20 +1107,6 @@ def _apply_notebook_toml_update(
     if bump_updated_at:
         toml_data["updated_at"] = datetime.now(tz=UTC)
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
-
-
-@refuses_while_held
-def update_scratchpad_environment(notebook_dir: Path, record: dict[str, str]) -> None:
-    """Record where a scratchpad's cells run, if that changed; not structural, so
-    ``updated_at`` stays."""
-
-    def mutate(toml_data: dict[str, Any]) -> bool:
-        if toml_data.get("scratchpad_environment", {}) == record:
-            return False
-        toml_data["scratchpad_environment"] = record
-        return True
-
-    _apply_notebook_toml_update(notebook_dir, mutate, bump_updated_at=False)
 
 
 @refuses_while_held

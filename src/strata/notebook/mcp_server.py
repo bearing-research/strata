@@ -914,7 +914,7 @@ def _environment_fix(session: Any) -> str:
         "unknown",
     ):
         return (
-            f"fix the project's environment in {session.backend.env.anchor} (the error says "
+            f"fix the project's environment in {session.path.parent} (the error says "
             "how), then call `run` again: it tries again"
         )
     if session.environment_sync_state in ("failed", "unknown"):
@@ -930,8 +930,12 @@ def _environment_view(session: Any) -> dict[str, Any]:
     backend = session.backend
     if not isinstance(backend, ProjectEnvBackend):
         return {"mode": "owned"}
-    env = backend.env
-    return {"mode": "attached", "project_python": str(env.python), "found_by": env.how}
+    described = backend.described()
+    return {
+        "mode": "attached",
+        "project_python": described.get("attach"),
+        "found_by": described.get("found_by"),
+    }
 
 
 def _why_it_ran(cell: Any) -> str:

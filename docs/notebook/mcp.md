@@ -161,16 +161,20 @@ project) gets one of its own, `.strata-scratch/.venv`, where `add_dependency`
 works; in the project's, it is refused with the project's command (`uv add
 numpy`). The cells' interpreter is `.strata-scratch/.venv-overlay`, which adds the
 project's site-packages and only those of `pyarrow`, `orjson` and `cloudpickle`
-the project lacks, so the project's versions win. Cells there are keyed on the
-environment's installed distributions (name and version, editable ones aside,
-whose code is keyed by what runs read) and the interpreter's build. Before each
+the project lacks (at Strata's minimum version, without their dependencies), so
+the project's versions win; a project whose own is older than Strata needs is
+refused with that named, since the overlay cannot replace it. Cells there are keyed
+on the environment's installed distributions (name and version, plus what one from
+a URL, a repository or a path installed; editable ones aside, whose code is keyed
+by what runs read) and the interpreter's build. Before each
 `run`, a change to the project's `pyproject.toml` files, its `uv.lock` or its
-installed packages syncs it again; whether a project has an environment at all is
-decided again when the scratchpad opens. `notebook.toml` records the choice under
-`[scratchpad_environment]`. `--python PATH` on `strata mcp` or `strata scratch
-start`, or `STRATA_SCRATCH_PYTHON`, names the interpreter instead; a daemon started
-on another is replaced once idle, and while busy the call is refused with both
-named. A scratchpad cell's `# @env` may not set `PYTHONPATH`, `PYTHONHOME`,
+installed packages syncs it again, once no cell is running; whether a project has an environment at all is
+decided again when the scratchpad opens, and recorded in
+`.strata-scratch/.strata/scratchpad_environment.json`. `--python PATH` on `strata
+mcp` or `strata scratch start`, or `STRATA_SCRATCH_PYTHON`, names the interpreter
+instead. A client asking for another than the daemon's replaces it once idle, and
+while it is busy is refused with both named; a client asking for none keeps the
+daemon's. A scratchpad cell's `# @env` may not set `PYTHONPATH`, `PYTHONHOME`,
 `PYTHONSAFEPATH`, `PYTHONNOUSERSITE` or `PYTHONPLATLIBDIR` (`env_moves_imports`,
 which keeps it from running): its key does not follow where imports resolve.
 Its `notebook.toml` says `scratchpad = true`, so it keeps every variable a cell defines,

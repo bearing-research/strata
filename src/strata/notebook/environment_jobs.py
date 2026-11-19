@@ -615,8 +615,9 @@ class EnvironmentJobs:
         job: EnvironmentJobSnapshot,
     ) -> list[str]:
         """Run ``uv sync`` as a background job."""
-        await asyncio.to_thread(self.host.detect_scratchpad_environment)
+        # Before detection, which drops the identity of an environment the scratchpad leaves.
         old_lockfile_hash = compute_lockfile_hash(self.host.path)
+        await asyncio.to_thread(self.host.detect_scratchpad_environment)
         requested_python = read_requested_python_minor(self.host.path)
         result = await self.host.backend.sync_streaming(
             python_version=requested_python,

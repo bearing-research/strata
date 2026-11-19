@@ -145,10 +145,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   that fails is returned by `run` with uv's error, and no cell runs. A pip or poetry
   project's `VIRTUAL_ENV` or `.venv` is used as it is, never synced; anything else gets
   an environment of its own as before. Cells run through `.strata-scratch/.venv-overlay`,
-  which adds only the runtime packages the project lacks, so its versions win, and are
-  keyed on what the environment has installed and its interpreter. `scratchpad` reports
-  the `environment`, `notebook.toml` records it under `[scratchpad_environment]`,
-  `--python PATH` (or `STRATA_SCRATCH_PYTHON`) on `strata mcp` and `strata scratch start`
+  which adds only the runtime packages the project lacks, so its versions win (one older
+  than Strata needs is refused, named), and are keyed on what the environment has
+  installed and its interpreter. `scratchpad` reports the `environment`, `--python PATH` (or `STRATA_SCRATCH_PYTHON`) on `strata mcp` and `strata scratch start`
   names the interpreter instead, `add_dependency` is refused there with the project's
   command, and a scratchpad cell's `# @env` may no longer set `PYTHONPATH` or the other
   variables that move imports (`env_moves_imports`). (#1586)

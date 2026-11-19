@@ -242,7 +242,7 @@ def _server_command() -> list[str]:
     return [sys.executable, "-m", "strata"]
 
 
-def _spawn(anchor: Path, port: int) -> int:
+def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
     """Start the daemon detached; return its pid."""
     from vestigo.file_modes import private_file
 
@@ -269,6 +269,7 @@ def _spawn(anchor: Path, port: int) -> int:
         # scratchpad keeps superseded results so that reverting an edit hits again.
         "STRATA_SCRATCH_ANCHOR": str(anchor),
         "STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS": "0",
+        **({"STRATA_SCRATCH_PYTHON": python} if python is not None else {}),
     }
     try:
         log = private_file(_log_path(anchor))
@@ -362,7 +363,9 @@ def _busy(url: str) -> bool:
 
 
 def _start(
-    anchor: Path, step: Callable[[str], contextlib.AbstractContextManager[None]]
+    anchor: Path,
+    step: Callable[[str], contextlib.AbstractContextManager[None]],
+    python: str | None = None,
 ) -> tuple[int, str, str]:
     """Start a daemon on *anchor* and open its scratchpad; return it, its url and session."""
     deadline = time.monotonic() + _SETUP_TIMEOUT
@@ -371,7 +374,7 @@ def _start(
             _scaffold(anchor)
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
-    pid = _spawn(anchor, port)
+    pid = _spawn(anchor, port, python)
     log = _log_path(anchor)
     try:
         with step("starting the scratchpad"):
@@ -433,6 +436,9 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
         running = find_daemon(anchor)
         current = version("strata-notebook")
         python = os.environ.get("STRATA_SCRATCH_PYTHON") or None
+        if python is None and running is not None:
+            # Not asked for, the interpreter the running daemon was given stays.
+            python = running.python
         if running is not None and (running.version, running.python) == (current, python):
             return running
         if running is not None:
@@ -459,7 +465,7 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
             yield
             setup_ms[name] = round((time.monotonic() - started) * 1000)
 
-        pid, url, session_id = _start(anchor, step)
+        pid, url, session_id = _start(anchor, step, python)
         record = {
             "url": url,
             "pid": pid,

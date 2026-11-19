@@ -35,30 +35,47 @@ _STATE = ".strata-overlay.json"
 _PTH = "_strata_project.pth"
 _TIMEOUT = 600
 
+# Each runtime package's installed version: None for one missing, "" for one importable
+# with no metadata to say.
 _PROJECT_PROBE = """\
-import importlib.util, json, site, sys
+import importlib.metadata, importlib.util, json, site, sys
+
+def version(name):
+    if importlib.util.find_spec(name) is None:
+        return None
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+
 print(json.dumps({
     "base": sys._base_executable,
     "site": site.getsitepackages(),
-    "missing": [n for n in sys.argv[1:] if importlib.util.find_spec(n) is None],
+    "versions": {n: version(n) for n in sys.argv[1:]},
 }))
 """
 
 _IDENTITY_PROBE = """\
-import importlib.metadata as m, json, platform, re, sys, sysconfig
+import hashlib, importlib.metadata as m, json, platform, re, sys, sysconfig
 
-def editable(dist):
+def direct(dist):
     try:
-        url = json.loads(dist.read_text("direct_url.json") or "{}")
+        return json.loads(dist.read_text("direct_url.json") or "null")
     except ValueError:
-        return False
-    return bool(url.get("dir_info", {}).get("editable"))
+        return None
 
 names = set()
 for dist in m.distributions():
     name = dist.metadata["Name"]
-    if name and not editable(dist):
-        names.add(re.sub(r"[-_.]+", "-", name).lower() + "==" + dist.version)
+    url = direct(dist)
+    if not name or (url and url.get("dir_info", {}).get("editable")):
+        continue
+    entry = re.sub(r"[-_.]+", "-", name).lower() + "==" + dist.version
+    if url:
+        # From a URL, a VCS or a path: one version can be any code, so what it installed.
+        record = (dist.read_text("RECORD") or "").encode()
+        entry += " @" + hashlib.sha256(record).hexdigest()
+    names.add(entry)
 build = (sys.implementation.name, platform.python_version(), getattr(sys, "abiflags", ""),
          sysconfig.get_platform())
 print(json.dumps({"build": " ".join(build), "distributions": sorted(names)}))
@@ -89,10 +106,33 @@ class ProjectEnv:
     watched: tuple[Path, ...] = field(default=())
 
     def record(self) -> dict[str, str]:
-        """``notebook.toml``'s ``[scratchpad_environment]``."""
+        """What :func:`write_record` keeps of it."""
         if self.python is None:
-            return {"mode": self.mode}
-        return {"mode": self.mode, "attach": str(self.python)}
+            return {"mode": self.mode, "found_by": self.how}
+        return {"mode": self.mode, "attach": str(self.python), "found_by": self.how}
+
+
+# Runtime state: it follows the machine and the launch, so not ``notebook.toml``.
+_RECORD = Path(".strata") / "scratchpad_environment.json"
+
+
+def write_record(notebook_dir: Path, env: ProjectEnv) -> None:
+    """Record where the scratchpad's cells run, for the next open and for reports."""
+    record = env.record()
+    if read_record(notebook_dir) == record:
+        return
+    path = notebook_dir / _RECORD
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(".json.partial")
+    partial.write_text(json.dumps(record, indent=2) + "\n")
+    os.replace(partial, path)
+
+
+def read_record(notebook_dir: Path) -> dict[str, str] | None:
+    try:
+        return json.loads((Path(notebook_dir) / _RECORD).read_text())
+    except FileNotFoundError:
+        return None
 
 
 def detect(anchor: Path, environ: dict[str, str] | None = None) -> ProjectEnv:
@@ -104,10 +144,12 @@ def detect(anchor: Path, environ: dict[str, str] | None = None) -> ProjectEnv:
         return ProjectEnv(anchor, "attached", Path(override), PYTHON_OVERRIDE)
 
     found = _dry_run(anchor, environ)
-    if found is None and _uv_managed(anchor, anchor):
+    if found is None:
         # uv's, but uv cannot plan it (a broken lock, an unresolvable dependency): the
         # sync reports why, and no cell runs, rather than a fresh environment of its own.
-        found = anchor, anchor / ".venv", True
+        workspace = _locked_root(anchor)
+        if _uv_managed(anchor, workspace):
+            found = workspace, workspace / environ.get("UV_PROJECT_ENVIRONMENT", ".venv"), True
     if found is not None:
         workspace, environment, pending = found
         if _uv_managed(anchor, workspace):
@@ -117,7 +159,7 @@ def detect(anchor: Path, environ: dict[str, str] | None = None) -> ProjectEnv:
                 venv_python(environment),
                 "uv",
                 sync=pending,
-                watched=(*watched, *_workspace_files(workspace)),
+                watched=tuple(dict.fromkeys((*watched, *_workspace_files(workspace)))),
             )
 
     active = environ.get("VIRTUAL_ENV")
@@ -131,6 +173,18 @@ def detect(anchor: Path, environ: dict[str, str] | None = None) -> ProjectEnv:
             anchor, "attached", venv_python(anchor / ".venv"), ".venv", watched=watched
         )
     return ProjectEnv(anchor, "owned", None, "no project environment", watched=watched)
+
+
+def _locked_root(anchor: Path) -> Path:
+    """The nearest directory at or above *anchor* with a ``uv.lock``, within its repository
+    and below home; else *anchor*."""
+    home = Path.home()
+    for directory in [anchor, *anchor.parents]:
+        if (directory / "uv.lock").is_file():
+            return directory
+        if (directory / ".git").exists() or directory == home:
+            break
+    return anchor
 
 
 def _project_uv_vars(environ: dict[str, str]) -> dict[str, str]:
@@ -149,7 +203,8 @@ def _dry_run(anchor: Path, environ: dict[str, str]) -> tuple[Path, Path, bool] |
         return None
     try:
         done = subprocess.run(
-            [uv, "sync", "--dry-run", "--output-format", "json"],
+            # Inexact, as the sync it plans: what the lock lacks is not a change.
+            [uv, "sync", "--dry-run", "--inexact", "--output-format", "json"],
             cwd=anchor,
             env=uv_env(extra=_project_uv_vars(environ)),
             capture_output=True,
@@ -260,15 +315,20 @@ def _uv(notebook_dir: Path, args: list[str], what: str) -> str | None:
     return None if done.success else done.error
 
 
-def reconcile(notebook_dir: Path, project_python: Path, runtime: tuple[str, ...]) -> Overlay | str:
+def reconcile(notebook_dir: Path, project_python: Path, runtime: list[str]) -> Overlay | str:
     """Bring ``.venv-overlay`` in line with the environment *project_python* runs in: its
-    site-packages, plus those of *runtime* it lacks. Returns the overlay, or why not."""
+    site-packages, plus the *runtime* requirements it lacks. Returns the overlay, or why
+    not, which is also a project version *runtime* rules out: it cannot be shadowed."""
+    from packaging.requirements import Requirement
+    from packaging.version import InvalidVersion
+
     overlay = notebook_dir / OVERLAY_DIR
     # Gone until the overlay holds again, so a failure never leaves the old one keying cells.
     (overlay / ATTACHED_IDENTITY).unlink(missing_ok=True)
+    wanted = {r.name: r for r in map(Requirement, runtime)}
     try:
         probed: dict[str, Any] = json.loads(
-            _run([str(project_python), "-c", _PROJECT_PROBE, *runtime]).stdout
+            _run([str(project_python), "-c", _PROJECT_PROBE, *wanted]).stdout
         )
     except FileNotFoundError:
         return f"the project's interpreter {project_python} does not exist"
@@ -294,8 +354,18 @@ def reconcile(notebook_dir: Path, project_python: Path, runtime: tuple[str, ...]
         if error is not None:
             return error
 
+    for name, found in probed["versions"].items():
+        try:
+            too_old = bool(found) and not wanted[name].specifier.contains(found, prereleases=True)
+        except InvalidVersion:
+            too_old = False
+        if too_old:
+            return (
+                f"the project's {name} is {found}, and the scratchpad needs {wanted[name]}; "
+                "upgrade it in the project"
+            )
     held = set(state.get("installed", []))
-    missing = set(probed["missing"])
+    missing = {name for name, found in probed["versions"].items() if found is None}
     # One the project has now would shadow the project's own version.
     if held - missing:
         error = _uv(
@@ -306,10 +376,18 @@ def reconcile(notebook_dir: Path, project_python: Path, runtime: tuple[str, ...]
         if error is not None:
             return error
     if missing - held:
-        # Bare names: a version floor could shadow nothing, but would refuse a project pin.
+        # No dependencies: uv cannot see the project's, and one installed here would
+        # shadow the project's own (the runtime packages need none).
         error = _uv(
             notebook_dir,
-            ["pip", "install", "--python", str(python), *sorted(missing - held)],
+            [
+                "pip",
+                "install",
+                "--no-deps",
+                "--python",
+                str(python),
+                *(str(wanted[name]) for name in sorted(missing - held)),
+            ],
             "uv pip install",
         )
         if error is not None:
@@ -371,9 +449,16 @@ class ProjectEnvBackend:
 
     @property
     def env(self) -> ProjectEnv:
+        """Detected when first needed, which runs uv: off the event loop."""
         if self._env is None:
             self._env = detect(self.notebook_dir.parent)
         return self._env
+
+    def described(self) -> dict[str, str]:
+        """Where its cells run, as last detected; never detects."""
+        if self._env is not None:
+            return self._env.record()
+        return read_record(self.notebook_dir) or {"mode": "attached"}
 
     def python_executable(self) -> Path:
         return venv_python(self.notebook_dir / OVERLAY_DIR)
@@ -393,7 +478,7 @@ class ProjectEnvBackend:
         replaces.
         """
         from strata.notebook.dependencies import EnvironmentOperationLog, _UvCommandResult
-        from strata.notebook.writer import _NOTEBOOK_RUNTIME_PACKAGES
+        from strata.notebook.writer import _notebook_runtime_specifiers
 
         env = self.env
         assert env.python is not None  # attached
@@ -410,7 +495,7 @@ class ProjectEnvBackend:
             )
             if not synced.success:
                 return synced
-        overlay = reconcile(self.notebook_dir, env.python, _NOTEBOOK_RUNTIME_PACKAGES)
+        overlay = reconcile(self.notebook_dir, env.python, _notebook_runtime_specifiers())
         if isinstance(overlay, str):
             return _refused("uv sync", overlay)
         self._site = overlay.site
@@ -420,11 +505,13 @@ class ProjectEnvBackend:
         )
 
     def _mutation(self, verb: str, package: str) -> _UvCommandResult:
-        env = self.env
-        if env.how == "uv":
-            fix = f"`uv {verb} {package}` in {env.anchor}"
+        described = self.described()
+        if described.get("found_by") == "uv":
+            fix = f"`uv {verb} {package}` in {self.notebook_dir.parent}"
+        elif described.get("attach"):
+            fix = f"{verb} it there ({described['attach']})"
         else:
-            fix = f"{verb} it there ({env.python})"
+            fix = f"{verb} it with the tool that manages it"
         return _refused(
             f"uv {verb}",
             f"this scratchpad runs in your project's environment; {verb} it in the project: {fix}",

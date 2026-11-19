@@ -300,6 +300,7 @@ class NotebookSession:
         # "could not be computed".
         self.dag_error: str | None = None
         self.backend: EnvironmentBackend = get_backend(self.path)
+        self._project_refresh = asyncio.Lock()
 
         from strata.notebook.artifact_integration import NotebookArtifactManager
 
@@ -2874,11 +2875,15 @@ class NotebookSession:
         if not self.notebook_state.scratchpad:
             return
         from strata.notebook.env_backend import get_backend
-        from strata.notebook.project_env import ProjectEnvBackend, detect, remove_overlay
-        from strata.notebook.writer import update_scratchpad_environment
+        from strata.notebook.project_env import (
+            ProjectEnvBackend,
+            detect,
+            remove_overlay,
+            write_record,
+        )
 
         found = detect(self.path.parent)
-        update_scratchpad_environment(self.path, found.record())
+        write_record(self.path, found)
         if found.mode == "attached":
             self.backend = ProjectEnvBackend(self.path, found)
             return
@@ -2897,9 +2902,15 @@ class NotebookSession:
         installed packages changed, or after its last sync failed."""
         from strata.notebook.project_env import ProjectEnvBackend
 
-        backend = self.backend
-        if isinstance(backend, ProjectEnvBackend) and await asyncio.to_thread(backend.changed):
-            await self.sync_environment()
+        if not isinstance(self.backend, ProjectEnvBackend):
+            return
+        # One at a time, and never under a run or another environment change, which would
+        # see the overlay rebuilt beneath it; the next run tries again.
+        async with self._project_refresh:
+            if self._has_active_execution() or self.has_active_environment_mutation():
+                return
+            if await asyncio.to_thread(self.backend.changed):
+                await self.sync_environment()
 
     def environment_attestation_error(self) -> str | None:
         """Why this environment cannot be published from, or ``None`` if it can.

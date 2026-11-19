@@ -7,7 +7,6 @@ backend-specific, which is what the protocol separates.
 
 from __future__ import annotations
 
-import tomllib
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -218,7 +217,7 @@ def get_backend(notebook_dir: Path) -> EnvironmentBackend:
 
     The server-wide ``notebook_env_backend`` chooses: ``uv`` gives each notebook
     its own ``.venv``; ``shared`` links it into one environment per lockfile
-    (``strata.notebook.shared_env``). A scratchpad its ``notebook.toml`` records as
+    (``strata.notebook.shared_env``). A scratchpad its last detection recorded as
     attached runs in its project's environment (``strata.notebook.project_env``).
     """
     if _recorded_mode(notebook_dir) == "attached":
@@ -234,16 +233,10 @@ def get_backend(notebook_dir: Path) -> EnvironmentBackend:
 
 
 def _recorded_mode(notebook_dir: Path) -> str | None:
-    """A scratchpad's ``[scratchpad_environment] mode``, as its last detection recorded it."""
-    try:
-        with open(Path(notebook_dir) / "notebook.toml", "rb") as f:
-            data = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
-        return None
-    environment = data.get("scratchpad_environment")
-    if not data.get("scratchpad") or not isinstance(environment, dict):
-        return None
-    return environment.get("mode")
+    """A scratchpad's environment mode, as its last detection recorded it."""
+    from strata.notebook.project_env import read_record
+
+    return (read_record(notebook_dir) or {}).get("mode")
 
 
 def shared_root() -> Path | None:

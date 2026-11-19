@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import sysconfig
-import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,11 +26,12 @@ from strata.notebook.project_env import (
     ProjectEnvBackend,
     detect,
     parse_dry_run,
+    read_record,
     reconcile,
     venv_python,
 )
 from strata.notebook.session import SessionManager
-from strata.notebook.writer import _NOTEBOOK_RUNTIME_PACKAGES, create_notebook
+from strata.notebook.writer import _notebook_runtime_specifiers, create_notebook
 from strata.scratch import SCRATCH_DIR
 
 _PYPROJECT = """\
@@ -83,9 +83,8 @@ def project(tmp_path, monkeypatch):
     return root
 
 
-def _record(notebook: Path) -> dict:
-    with open(notebook / "notebook.toml", "rb") as f:
-        return tomllib.load(f).get("scratchpad_environment")
+def _record(notebook: Path) -> dict | None:
+    return read_record(notebook)
 
 
 def _scratchpad(anchor: Path) -> Path:
@@ -261,7 +260,7 @@ def test_the_override_wins_and_is_never_synced(tmp_path):
 
 def test_the_overlay_runs_the_projects_code_and_installs_nothing_the_project_has(project):
     notebook = _scratchpad(project)
-    overlay = reconcile(notebook, venv_python(project / ".venv"), _NOTEBOOK_RUNTIME_PACKAGES)
+    overlay = reconcile(notebook, venv_python(project / ".venv"), _notebook_runtime_specifiers())
 
     assert not isinstance(overlay, str)
     assert overlay.python == venv_python(notebook / OVERLAY_DIR)
@@ -287,7 +286,7 @@ def test_the_overlay_fills_a_gap_until_the_project_has_it_then_the_projects_wins
     notebook = _scratchpad(tmp_path / "proj")
     where = "import toolz; print(toolz.__file__)"
 
-    first = reconcile(notebook, project_python, ("toolz",))
+    first = reconcile(notebook, project_python, ["toolz"])
     assert not isinstance(first, str)
     overlay_site = Path(
         subprocess.run(
@@ -304,7 +303,7 @@ def test_the_overlay_fills_a_gap_until_the_project_has_it_then_the_projects_wins
     subprocess.run(
         ["uv", "pip", "install", "-q", "--python", str(project_python), "toolz"], check=True
     )
-    second = reconcile(notebook, project_python, ("toolz",))
+    second = reconcile(notebook, project_python, ["toolz"])
 
     assert not isinstance(second, str)
     assert subprocess.run(
@@ -315,7 +314,7 @@ def test_the_overlay_fills_a_gap_until_the_project_has_it_then_the_projects_wins
 def test_the_identity_is_the_key_basis_until_the_scratchpad_owns_its_environment(project):
     notebook = _scratchpad(project)
     owned = compute_lockfile_hash(notebook)
-    overlay = reconcile(notebook, venv_python(project / ".venv"), _NOTEBOOK_RUNTIME_PACKAGES)
+    overlay = reconcile(notebook, venv_python(project / ".venv"), _notebook_runtime_specifiers())
     assert not isinstance(overlay, str)
     attached = compute_lockfile_hash(notebook)
     assert attached != owned
@@ -329,9 +328,9 @@ def test_the_identity_is_the_key_basis_until_the_scratchpad_owns_its_environment
 def test_a_reconcile_that_fails_leaves_no_identity_keying_cells(project, tmp_path):
     notebook = _scratchpad(project)
     assert not isinstance(
-        reconcile(notebook, venv_python(project / ".venv"), _NOTEBOOK_RUNTIME_PACKAGES), str
+        reconcile(notebook, venv_python(project / ".venv"), _notebook_runtime_specifiers()), str
     )
-    failed = reconcile(notebook, tmp_path / "gone" / "python", _NOTEBOOK_RUNTIME_PACKAGES)
+    failed = reconcile(notebook, tmp_path / "gone" / "python", _notebook_runtime_specifiers())
     assert isinstance(failed, str) and "does not exist" in failed
     assert not (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).exists()
 
@@ -341,7 +340,7 @@ def test_a_reconcile_that_fails_leaves_no_identity_keying_cells(project, tmp_pat
 
 def test_a_dependency_change_is_refused_with_the_projects_command(tmp_path):
     _pyproject(tmp_path, extra="\n[tool.uv]\n")
-    backend = ProjectEnvBackend(_scratchpad(tmp_path))
+    backend = ProjectEnvBackend(_scratchpad(tmp_path), detect(tmp_path, {}))
     added = backend.add("numpy", timeout=10)
     assert not added.success
     assert "runs in your project's environment" in (added.error or "")
@@ -369,12 +368,12 @@ def test_a_project_change_or_an_install_means_syncing_again(project):
 def test_the_record_chooses_the_backend(tmp_path):
     notebook = _scratchpad(tmp_path)
     assert isinstance(get_backend(notebook), UvBackend)
-    text = (notebook / "notebook.toml").read_text()
-    (notebook / "notebook.toml").write_text(
-        text + '\n[scratchpad_environment]\nmode = "attached"\nattach = "/p/bin/python"\n'
-    )
+    record = notebook / ".strata" / "scratchpad_environment.json"
+    record.parent.mkdir(exist_ok=True)
+    record.write_text(json.dumps({"mode": "attached", "attach": "/p/bin/python"}))
     assert isinstance(get_backend(notebook), ProjectEnvBackend)
-    assert parse_notebook(notebook).scratchpad
+    # Runtime state: never the committed notebook.toml.
+    assert "/p/bin/python" not in (notebook / "notebook.toml").read_text()
 
 
 def test_an_overlay_interpreter_starts_the_harness_itself(tmp_path):
@@ -398,7 +397,12 @@ async def test_a_scratchpad_runs_its_cells_in_its_projects_environment(project, 
     assert isinstance(session.backend, ProjectEnvBackend)
     assert session.venv_python == venv_python(session.path / OVERLAY_DIR)
     record = _record(session.path)
-    assert record == {"mode": "attached", "attach": str(venv_python(project / ".venv"))}
+    assert record == {
+        "mode": "attached",
+        "attach": str(venv_python(project / ".venv")),
+        "found_by": ".venv",
+    }
+    assert "scratchpad_environment" not in (session.path / "notebook.toml").read_text()
 
     out = await mcp_server._scratch_run(sm, "import projmod, sys\nprint(projmod.VALUE, sys.prefix)")
     assert out["status"] == "ok", out
@@ -472,7 +476,7 @@ def test_a_project_that_loses_its_environment_gives_the_scratchpad_its_own(proje
 
     assert isinstance(session.backend, UvBackend)
     assert not (session.path / OVERLAY_DIR).exists()
-    assert _record(session.path) == {"mode": "owned"}
+    assert _record(session.path) == {"mode": "owned", "found_by": "no project environment"}
 
 
 # --- cells may not move imports ---
@@ -528,7 +532,7 @@ def test_a_daemon_on_another_interpreter_is_replaced_once_idle(tmp_path, monkeyp
     monkeypatch.setattr(scratch, "find_daemon", lambda anchor: running)
     monkeypatch.setattr(scratch, "_busy", lambda url: False)
     monkeypatch.setattr(scratch, "_stop", stopped.append)
-    monkeypatch.setattr(scratch, "_start", lambda anchor, step: (2, "u2", "s2"))
+    monkeypatch.setattr(scratch, "_start", lambda anchor, step, python: (2, "u2", "s2"))
 
     monkeypatch.delenv(PYTHON_OVERRIDE, raising=False)
     assert scratch.ensure_daemon(tmp_path) is running
@@ -552,8 +556,201 @@ def test_a_busy_daemon_on_another_interpreter_is_refused_naming_both(tmp_path, m
     monkeypatch.setenv(PYTHON_OVERRIDE, "/b/python")
     with pytest.raises(scratch.ScratchError, match="runs cells on /a/python, not /b/python"):
         scratch.ensure_daemon(tmp_path)
+    # A client not asking for one keeps the daemon's.
     monkeypatch.delenv(PYTHON_OVERRIDE)
-    with pytest.raises(scratch.ScratchError, match="not the environment it found"):
-        scratch.ensure_daemon(tmp_path)
+    assert scratch.ensure_daemon(tmp_path) is running
     monkeypatch.setenv(PYTHON_OVERRIDE, "/a/python")
     assert scratch.ensure_daemon(tmp_path) is running
+    plain = scratch.Daemon(url="u", session_id="s", pid=1, version=running.version)
+    monkeypatch.setattr(scratch, "find_daemon", lambda anchor: plain)
+    with pytest.raises(scratch.ScratchError, match="on the environment it found, not /a/python"):
+        scratch.ensure_daemon(tmp_path)
+
+
+def test_a_daemon_replaced_for_its_version_keeps_the_interpreter_it_was_given(
+    tmp_path, monkeypatch
+):
+    running = scratch.Daemon(url="u", session_id="s", pid=1, version="0.0.1", python="/a/python")
+    started: list[str | None] = []
+    monkeypatch.delenv(PYTHON_OVERRIDE, raising=False)
+    monkeypatch.setattr(scratch, "find_daemon", lambda anchor: running)
+    monkeypatch.setattr(scratch, "_busy", lambda url: False)
+    monkeypatch.setattr(scratch, "_stop", lambda daemon: None)
+    monkeypatch.setattr(
+        scratch, "_start", lambda anchor, step, python: started.append(python) or (2, "u2", "s2")
+    )
+    assert scratch.ensure_daemon(tmp_path).python == "/a/python"
+    assert started == ["/a/python"]
+
+
+def test_the_daemon_is_told_the_interpreter(tmp_path, monkeypatch):
+    seen = {}
+
+    def run(args, *, env, **kwargs):
+        seen.update(env)
+        raise OSError("not launched")
+
+    monkeypatch.setattr(scratch.subprocess, "run", run)
+    (tmp_path / SCRATCH_DIR / ".strata").mkdir(parents=True)
+    with pytest.raises(scratch.ScratchError):
+        scratch._spawn(tmp_path, 1, "/a/python")
+    assert seen["STRATA_SCRATCH_PYTHON"] == "/a/python"
+
+
+# --- review fixes ---
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_waits_for_a_run_in_progress(project, monkeypatch, manager):
+    """A sync rebuilds the overlay: never beneath a cell running on it."""
+    session = manager.open_notebook(_scratchpad(project))
+    synced: list[bool] = []
+
+    async def sync_environment(**_):
+        synced.append(True)
+        return {}
+
+    monkeypatch.setattr(session, "sync_environment", sync_environment)
+    (project / "pyproject.toml").write_text('[project]\nname = "proj"\nversion = "0.2.0"\n')
+    monkeypatch.setattr(session, "_has_active_execution", lambda: True)
+    await session.refresh_project_environment()
+    assert synced == []
+    monkeypatch.setattr(session, "_has_active_execution", lambda: False)
+    await session.refresh_project_environment()
+    assert synced == [True]
+
+
+def _fake_dist(site: Path, name: str, version: str, *, record: str, direct_url: dict | None):
+    dist = site / f"{name.replace('-', '_')}-{version}.dist-info"
+    dist.mkdir()
+    (dist / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
+    (dist / "RECORD").write_text(record)
+    if direct_url is not None:
+        (dist / "direct_url.json").write_text(json.dumps(direct_url))
+
+
+def test_a_package_from_a_url_is_keyed_on_what_it_installed_not_its_version(project):
+    """One version string can be any commit of a git dependency."""
+    site = next((project / ".venv" / "lib").glob("python*/site-packages"))
+    url = {"url": "https://example.com/mylib.git", "vcs_info": {"vcs": "git", "commit_id": "a"}}
+    _fake_dist(site, "mylib", "0.1.0", record="mylib.py,sha256=a,1\n", direct_url=url)
+    notebook = _scratchpad(project)
+    project_python = venv_python(project / ".venv")
+    first = reconcile(notebook, project_python, _notebook_runtime_specifiers())
+    (site / "mylib-0.1.0.dist-info" / "RECORD").write_text("mylib.py,sha256=b,1\n")
+    second = reconcile(notebook, project_python, _notebook_runtime_specifiers())
+    assert not isinstance(first, str) and not isinstance(second, str)
+    assert second.identity != first.identity
+
+    # A package from an index is keyed on its version alone.
+    _fake_dist(site, "plainlib", "1.0", record="plainlib.py,sha256=a,1\n", direct_url=None)
+    third = reconcile(notebook, project_python, _notebook_runtime_specifiers())
+    (site / "plainlib-1.0.dist-info" / "RECORD").write_text("plainlib.py,sha256=b,1\n")
+    fourth = reconcile(notebook, project_python, _notebook_runtime_specifiers())
+    assert not isinstance(third, str) and not isinstance(fourth, str)
+    assert fourth.identity == third.identity != second.identity
+
+
+def test_a_runtime_package_older_than_strata_needs_is_refused_not_shadowed(project):
+    site = next((project / ".venv" / "lib").glob("python*/site-packages"))
+    (site / "orjson").mkdir()
+    (site / "orjson" / "__init__.py").write_text("")
+    _fake_dist(site, "orjson", "3.0.0", record="", direct_url=None)
+    notebook = _scratchpad(project)
+
+    refused = reconcile(notebook, venv_python(project / ".venv"), _notebook_runtime_specifiers())
+
+    assert isinstance(refused, str)
+    assert "the project's orjson is 3.0.0" in refused and "orjson>=" in refused
+
+
+def test_a_missing_runtime_package_is_installed_with_stratas_floor_and_no_dependencies(
+    tmp_path, monkeypatch
+):
+    from strata.notebook import project_env
+
+    _venv(tmp_path / "proj" / ".venv")
+    notebook = _scratchpad(tmp_path / "proj")
+    calls: list[list[str]] = []
+    real = project_env._uv
+
+    def uv(notebook_dir, args, what):
+        calls.append(args)
+        if args[:2] == ["pip", "install"]:
+            return "stopped here"
+        return real(notebook_dir, args, what)
+
+    monkeypatch.setattr(project_env, "_uv", uv)
+    assert reconcile(notebook, venv_python(tmp_path / "proj" / ".venv"), ["toolz>=0.10"]) == (
+        "stopped here"
+    )
+    install = calls[-1]
+    assert "--no-deps" in install and install[-1] == "toolz>=0.10"
+
+
+def test_a_member_whose_workspace_uv_cannot_plan_is_its_workspaces(tmp_path):
+    root = tmp_path / "w"
+    _pyproject(root, "w", extra='\n[tool.uv.workspace]\nmembers = ["api"]\n')
+    (root / "uv.lock").write_text("not a lock")
+    _pyproject(root / "api", "api")
+    found = detect(root / "api", {})
+    assert (found.mode, found.how, found.sync) == ("attached", "uv", True)
+    assert found.python == venv_python(root / ".venv")
+    elsewhere = detect(root / "api", {"UV_PROJECT_ENVIRONMENT": "envs/main"})
+    assert elsewhere.python == venv_python(root / "envs" / "main")
+
+
+def test_a_package_the_lock_does_not_name_leaves_a_synced_project_current(tmp_path):
+    """The dry run is inexact, as the sync it plans."""
+    _pyproject(tmp_path, extra="\n[tool.uv]\npackage = false\n")
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    subprocess.run(["uv", "sync", "-q", "--offline"], cwd=tmp_path, check=True, env=env)
+    assert not detect(tmp_path, {}).sync
+    site = next((tmp_path / ".venv" / "lib").glob("python*/site-packages"))
+    _fake_dist(site, "extra-tool", "1.0", record="", direct_url=None)
+    assert not detect(tmp_path, {}).sync
+
+
+def test_the_environment_is_reported_from_the_record_without_detecting(
+    project, monkeypatch, _server
+):
+    sm = SessionManager()
+    sm.open_notebook(_scratchpad(project))
+    session = next(iter(sm._sessions.values()))
+    from strata.notebook import project_env
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("detected on the event loop")
+
+    session.backend = get_backend(session.path)
+    monkeypatch.setattr(project_env, "detect", refuse)
+    assert mcp_server._scratchpad(sm)["environment"] == {
+        "mode": "attached",
+        "project_python": str(venv_python(project / ".venv")),
+        "found_by": ".venv",
+    }
+    assert "`remove it there" not in (session.backend.remove("x", timeout=1).error or "")
+
+
+@pytest.mark.asyncio
+async def test_leaving_the_projects_environment_is_reported_as_a_change(
+    project, monkeypatch, manager
+):
+    from strata.notebook.dependencies import EnvironmentOperationLog, _UvCommandResult
+
+    session = manager.open_notebook(_scratchpad(project))
+    assert isinstance(session.backend, ProjectEnvBackend)
+
+    async def synced(self, **_):
+        return _UvCommandResult(
+            success=True, error=None, operation_log=EnvironmentOperationLog(command="uv sync")
+        )
+
+    monkeypatch.setattr(UvBackend, "sync_streaming", synced)
+    import shutil
+
+    shutil.rmtree(project / ".venv")
+    await session.environment_jobs.submit(action="sync")
+    await session.environment_jobs.wait()
+    assert isinstance(session.backend, UvBackend)
+    assert session.environment_jobs.serialize_state()["lockfile_changed"] is True
