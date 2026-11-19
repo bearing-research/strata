@@ -147,7 +147,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   an environment of its own as before. Cells run through `.strata-scratch/.venv-overlay`,
   which adds only the runtime packages the project lacks, so its versions win (one older
   than Strata needs is refused, named), and are keyed on what the environment has
-  installed and its interpreter. `scratchpad` reports the `environment`, `--python PATH` (or `STRATA_SCRATCH_PYTHON`) on `strata mcp` and `strata scratch start`
+  installed and its interpreter, so the read audit does not warn about it. `scratchpad` reports the `environment`, `--python PATH` (or `STRATA_SCRATCH_PYTHON`) on `strata mcp` and `strata scratch start`
   names the interpreter instead, `add_dependency` is refused there with the project's
   command, and a scratchpad cell's `# @env` may no longer set `PYTHONPATH` or the other
   variables that move imports (`env_moves_imports`). (#1586)
@@ -490,6 +490,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **On Windows, a run that read or imported a file on another drive no longer fails.**
+  The audit's suggested fix took a path relative to the notebook, which Windows cannot
+  do across drives, and the run failed with `path is on mount 'D:'`; such a path is now
+  named as it is, and a drive root is never suggested as a mount. (#1586)
 - **Showing a cell's value no longer imports matplotlib or PIL.** To tell whether a value
   was a figure or an image, the serializer imported both, so every cold run in an
   environment with matplotlib paid its import, and the first on a machine (or under a new

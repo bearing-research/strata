@@ -216,7 +216,10 @@ def _mounts(
 
 def _written(root: str, notebook_dir: Path) -> str:
     """*root* relative to the notebook when it is in or beside it, else as it is."""
-    rel = os.path.relpath(os.path.realpath(root), os.path.realpath(notebook_dir))
+    try:
+        rel = os.path.relpath(os.path.realpath(root), os.path.realpath(notebook_dir))
+    except ValueError:  # on another drive
+        return root
     if rel.startswith(os.path.join(os.pardir, os.pardir)):
         return root
     # ``./`` so ``uv add`` reads a path, not a package name. Never ``.``: not mountable.
@@ -224,6 +227,14 @@ def _written(root: str, notebook_dir: Path) -> str:
 
 
 def _roots(dirs: list[str], notebook_dir: Path) -> list[str]:
+    drives = sorted({os.path.splitdrive(path)[0] for path in dirs})
+    if len(drives) > 1:
+        # Windows: no path is common to two drives.
+        return [
+            root
+            for drive in drives
+            for root in _roots([p for p in dirs if os.path.splitdrive(p)[0] == drive], notebook_dir)
+        ]
     common = os.path.commonpath(dirs)
     if _mountable(common, notebook_dir):
         return [common]
@@ -245,7 +256,7 @@ def _mountable(path: str, notebook_dir: Path) -> bool:
     """
     real = os.path.realpath(path)
     over = (os.path.realpath(os.path.expanduser("~")), os.path.realpath(notebook_dir))
-    return real != os.sep and not any(
+    return os.path.dirname(real) != real and not any(
         below == real or below.startswith(real.rstrip(os.sep) + os.sep) for below in over
     )
 
@@ -304,7 +315,10 @@ def _join(parts: list[str]) -> str:
 
 
 def _under(path: str, notebook_dir: Path) -> str:
-    rel = os.path.relpath(path, notebook_dir)
+    try:
+        rel = os.path.relpath(path, notebook_dir)
+    except ValueError:  # on another drive
+        return path
     return path if rel.startswith("..") else rel
 
 

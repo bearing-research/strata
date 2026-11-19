@@ -778,3 +778,32 @@ async def test_leaving_the_projects_environment_is_reported_as_a_change(
     await session.environment_jobs.wait()
     assert isinstance(session.backend, UvBackend)
     assert session.environment_jobs.serialize_state()["lockfile_changed"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_the_projects_packages_are_its_environment_and_an_editable_source_is_not(
+    project, manager
+):
+    """The identity keys what is installed; an editable source is keyed by what runs read,
+    so the audit still names it."""
+    site = _site(project / ".venv")
+    (site / "projdata.txt").write_text("x")
+    src = project / "src"
+    src.mkdir()
+    (src / "editmod.py").write_text("VALUE = 1\n")
+    (site / "_editable_proj.pth").write_text(str(src) + "\n")
+    manager.open_notebook(_scratchpad(project))
+
+    out = await mcp_server._scratch_run(
+        manager,
+        "import pathlib, projmod, pyarrow\n"
+        "text = (pathlib.Path(projmod.__file__).parent / 'projdata.txt').read_text()",
+    )
+    assert out["status"] == "ok", str(out)
+    assert "diagnostics" not in out, str(out)
+
+    edited = await mcp_server._scratch_run(manager, "import editmod")
+    assert edited["status"] == "ok", str(edited)
+    assert [d["code"] for d in edited["diagnostics"]] == ["undeclared_import"]
+    assert "editmod.py" in edited["diagnostics"][0]["message"]

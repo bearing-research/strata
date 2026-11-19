@@ -127,6 +127,8 @@ def collect_referenced_env_keys(source: str, language: str = "python") -> set[st
 # what that environment holds.
 OVERLAY_DIR = ".venv-overlay"
 ATTACHED_IDENTITY = ".strata-identity"
+# What the overlay installed, from which base, and where the project's packages are.
+OVERLAY_STATE = ".strata-overlay.json"
 
 # They change where imports resolve, which a scratchpad cell's key does not follow, so its
 # ``# @env`` may not set them.
@@ -565,6 +567,8 @@ def audit_scope(notebook_dir: Path) -> dict[str, Any]:
     ``unlocked_roots`` the folders their ``.pth`` files add. Empty without a lock: then
     nothing says what is locked. Kept until the lock or a site-packages folder changes.
     """
+    if attached_identity(notebook_dir) is not None:
+        return _attached_audit_scope(notebook_dir)
     venv = notebook_dir / ".venv"
     site_dirs = sorted(venv.glob("lib/python*/site-packages")) + sorted(
         venv.glob("Lib/site-packages")
@@ -584,6 +588,16 @@ def audit_scope(notebook_dir: Path) -> dict[str, Any]:
     with _audit_scopes_lock:
         _audit_scopes[notebook_dir] = (stamp, scope)
     return scope
+
+
+def _attached_audit_scope(notebook_dir: Path) -> dict[str, Any]:
+    """A scratchpad in its project's environment: the folders its distributions are
+    installed in are the environment, which the identity keys. Editable sources are not."""
+    try:
+        state = json.loads((notebook_dir / OVERLAY_DIR / OVERLAY_STATE).read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {"package_roots": list(state.get("environment") or [])}
 
 
 def _read_audit_scope(notebook_dir: Path, site_dirs: list[Path]) -> dict[str, Any]:

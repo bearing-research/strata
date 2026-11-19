@@ -166,7 +166,8 @@ the project's versions win; a project whose own is older than Strata needs is
 refused with that named, since the overlay cannot replace it. Cells there are keyed
 on the environment's installed distributions (name and version, plus what one from
 a URL, a repository or a path installed; editable ones aside, whose code is keyed
-by what runs read) and the interpreter's build. Before each
+by what runs read) and the interpreter's build, so the read audit counts what is
+installed there as the environment and does not warn about it. Before each
 `run`, a change to the project's `pyproject.toml` files, its `uv.lock` or its
 installed packages syncs it again, once no cell is running; whether a project has an environment at all is
 decided again when the scratchpad opens, and recorded in

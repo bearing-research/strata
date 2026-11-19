@@ -35,6 +35,46 @@ def _mounts(message: str) -> list[str]:
     return re.findall(r"`# @mount (\S+ \S+) ro`", message)
 
 
+class TestOnWindows:
+    """Path math as Windows does it, where no path is relative to one on another drive."""
+
+    @pytest.fixture(autouse=True)
+    def _windows_paths(self, monkeypatch):
+        import ntpath
+        from types import SimpleNamespace
+
+        from strata.notebook import run_diagnostics as module
+
+        monkeypatch.setattr(module, "os", SimpleNamespace(path=ntpath, sep="\\", pardir=".."))
+        monkeypatch.setenv("USERPROFILE", "C:\\Users\\me")
+
+    def test_reads_on_two_drives_are_mounted_one_per_drive(self):
+        (message,) = _messages(
+            _finding("undeclared_read", "D:\\data\\a.csv", "E:\\data\\b.csv"),
+            notebook_dir=Path("C:\\work\\nb"),
+        )
+        assert sorted(_mounts(message)) == ["data D:\\data", "data_2 E:\\data"]
+
+    def test_an_import_from_another_drive_is_named_as_it_is(self):
+        (message,) = _messages(
+            _finding("undeclared_import", "D:\\src\\lib\\mod.py"),
+            notebook_dir=Path("C:\\work\\nb"),
+        )
+        assert "`uv add --editable 'D:\\src\\lib'`" in message
+
+    def test_a_drive_root_is_never_a_mount(self):
+        (message,) = _messages(
+            _finding("undeclared_read", "D:\\a.csv"), notebook_dir=Path("C:\\work\\nb")
+        )
+        assert _mounts(message) == []
+
+    def test_a_work_dir_read_on_another_drive_is_named_as_it_is(self):
+        (message,) = _messages(
+            _finding("work_dir_read", "D:\\work\\x.csv"), notebook_dir=Path("C:\\work\\nb")
+        )
+        assert "`D:\\work\\x.csv`" in message
+
+
 class TestTheMessage:
     def test_a_read_names_the_file_and_the_mount_that_covers_it(self):
         (message,) = _messages(_finding("undeclared_read", "/data/events.csv"))

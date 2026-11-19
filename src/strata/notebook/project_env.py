@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from strata.notebook.env import ATTACHED_IDENTITY, OVERLAY_DIR
+from strata.notebook.env import ATTACHED_IDENTITY, OVERLAY_DIR, OVERLAY_STATE
 
 # The interpreter a scratchpad's cells run in instead (``--python``); the daemon reads it.
 PYTHON_OVERRIDE = "STRATA_SCRATCH_PYTHON"
@@ -30,15 +30,13 @@ if TYPE_CHECKING:
     from strata.notebook.dependencies import _UvCommandResult
     from strata.notebook.env_backend import _StreamCallback
 
-# What the overlay installed, and from which base interpreter.
-_STATE = ".strata-overlay.json"
 _PTH = "_strata_project.pth"
 _TIMEOUT = 600
 
 # Each runtime package's installed version: None for one missing, "" for one importable
 # with no metadata to say.
 _PROJECT_PROBE = """\
-import importlib.metadata, importlib.util, json, site, sys
+import importlib.metadata, importlib.util, json, os, site, sys
 
 def version(name):
     if importlib.util.find_spec(name) is None:
@@ -48,9 +46,18 @@ def version(name):
     except importlib.metadata.PackageNotFoundError:
         return ""
 
+def installs(path):
+    try:
+        return any(n.endswith(".dist-info") for n in os.listdir(path))
+    except OSError:
+        return False
+
 print(json.dumps({
     "base": sys._base_executable,
     "site": site.getsitepackages(),
+    # The environment: its site-packages, and a folder a .pth adds that distributions are
+    # installed in (an editable's source holds none; what runs read keys it).
+    "installed": sorted(set(site.getsitepackages()) | {p for p in sys.path if p and installs(p)}),
     "versions": {n: version(n) for n in sys.argv[1:]},
 }))
 """
@@ -337,7 +344,7 @@ def reconcile(notebook_dir: Path, project_python: Path, runtime: list[str]) -> O
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         return f"the project's interpreter {project_python} could not be asked: {exc}"
 
-    state_path = overlay / _STATE
+    state_path = overlay / OVERLAY_STATE
     try:
         state = json.loads(state_path.read_text())
     except (OSError, ValueError):
@@ -400,9 +407,12 @@ def reconcile(notebook_dir: Path, project_python: Path, runtime: list[str]) -> O
         # After the overlay's own site-packages, so it fills gaps and shadows nothing.
         lines = [f"import site; site.addsitedir({str(s)!r})\n" for s in probed["site"]]
         (Path(own_site) / _PTH).write_text("".join(lines))
-        state_path.write_text(
-            json.dumps({"base": probed["base"], "installed": sorted(missing)}, indent=2) + "\n"
-        )
+        state = {
+            "base": probed["base"],
+            "installed": sorted(missing),
+            "environment": probed["installed"],
+        }
+        state_path.write_text(json.dumps(state, indent=2) + "\n")
         identity = _identity(python)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         return f"the scratchpad's overlay environment could not be set up: {exc}"
