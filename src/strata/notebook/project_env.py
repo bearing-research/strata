@@ -300,17 +300,25 @@ def reconcile(notebook_dir: Path, project_python: Path, runtime: list[str]) -> O
     """Bring ``.venv-overlay`` in line with the environment *project_python* runs in: its
     site-packages, plus the *runtime* requirements it lacks. Returns the overlay, or why
     not, which is also a project version *runtime* rules out: it cannot be shadowed."""
+    # Under E's lock: a key checked meanwhile would probe a half-built overlay.
+    with _identity_lock(notebook_dir, owned=False):
+        return _reconcile(notebook_dir, project_python, runtime)
+
+
+def _reconcile(notebook_dir: Path, project_python: Path, runtime: list[str]) -> Overlay | str:
     from packaging.requirements import Requirement
     from packaging.version import InvalidVersion
+
+    from strata.notebook.harness_user import LocalExecutionRefused
 
     overlay = notebook_dir / OVERLAY_DIR
     # Gone until the overlay holds again, so a failure never leaves the old one keying cells.
     (overlay / ATTACHED_IDENTITY).unlink(missing_ok=True)
     wanted = {r.name: r for r in map(Requirement, runtime)}
     try:
-        probed: dict[str, Any] = json.loads(
-            _run([str(project_python), "-c", _PROJECT_PROBE, *wanted]).stdout
-        )
+        # The last line: what a ``.pth`` prints at startup comes before it.
+        out = _run([str(project_python), "-c", _PROJECT_PROBE, *wanted]).stdout.strip()
+        probed: dict[str, Any] = json.loads(out.splitlines()[-1] if out else "")
     except FileNotFoundError:
         return f"the project's interpreter {project_python} does not exist"
     except subprocess.CalledProcessError as exc:
@@ -384,7 +392,13 @@ def reconcile(notebook_dir: Path, project_python: Path, runtime: list[str]) -> O
         state = {"base": probed["base"], "installed": sorted(missing)}
         state_path.write_text(json.dumps(state, indent=2) + "\n")
         identity = _probe_identity(notebook_dir, probed["site"])
-    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        ValueError,
+        KeyError,
+        LocalExecutionRefused,
+    ) as exc:
         return f"the scratchpad's overlay environment could not be set up: {exc}"
     return Overlay(python=python, site=[Path(s) for s in probed["site"]], identity=identity)
 
@@ -397,14 +411,25 @@ def _cell_python(notebook_dir: Path, owned: bool) -> Path:
     return venv_python(notebook_dir / (".venv" if owned else OVERLAY_DIR))
 
 
+def _cell_env() -> tuple[dict[str, str], dict[str, Any]]:
+    """The environment a cell starts with, and how it is spawned: as the cells' user."""
+    from strata.notebook.harness_env import configured_allowlist, harness_env
+    from strata.notebook.harness_user import identity_env, resolve_harness_user, spawn_kwargs
+
+    user = resolve_harness_user()
+    env = identity_env(harness_env(configured_allowlist()), user)
+    return dict(os.environ if env is None else env), spawn_kwargs(user)
+
+
 def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False) -> str:
     """Probe E in the cells' interpreter (the overlay, or an owned scratchpad's ``.venv``),
-    as a cell started there would find it, and record it with what proves it; the
-    identity last, so a failure leaves none keying cells."""
-    from strata.notebook.harness_env import configured_allowlist, harness_env
-
+    as a cell started there would find it, and record it with what proves it. The old
+    identity goes first and the new one comes last, so a failure leaves none keying cells.
+    """
     overlay = _identity_dir(notebook_dir, owned)
     overlay.mkdir(parents=True, exist_ok=True)
+    (overlay / ATTACHED_IDENTITY).unlink(missing_ok=True)
+    env, spawn = _cell_env()
     done = subprocess.run(
         [
             str(_cell_python(notebook_dir, owned)),
@@ -418,9 +443,12 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
         check=True,
         timeout=60,
         cwd=notebook_dir,
-        env=harness_env(configured_allowlist()),
+        env=env,
+        **spawn,
     )
-    probed = json.loads(done.stdout)
+    # The last line: what a ``.pth`` or an import prints comes before it.
+    lines = done.stdout.strip().splitlines()
+    probed = json.loads(lines[-1] if lines else "")
     identity = hashlib.sha256(json.dumps(probed["identity"], sort_keys=True).encode()).hexdigest()
     record = {
         "sites": sites,
@@ -433,13 +461,21 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
     }
     _write(overlay / _OBSERVED, json.dumps(record, indent=2) + "\n")
     _write(overlay / ATTACHED_IDENTITY, identity)
+    _failed.pop((Path(notebook_dir), owned), None)
     return identity
 
 
 def _write(path: Path, text: str) -> None:
-    partial = path.with_name(path.name + ".partial")
-    partial.write_text(text)
-    os.replace(partial, path)
+    import tempfile
+
+    fd, partial = tempfile.mkstemp(prefix=path.name + ".", suffix=".partial", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(partial, path)
+    except BaseException:
+        Path(partial).unlink(missing_ok=True)
+        raise
 
 
 def read_observed(notebook_dir: Path, *, owned: bool = False) -> dict[str, Any] | None:
@@ -452,60 +488,146 @@ def read_observed(notebook_dir: Path, *, owned: bool = False) -> dict[str, Any] 
 
 _identity_locks: dict[tuple[Path, bool], threading.Lock] = {}
 _identity_locks_lock = threading.Lock()
+# A probe that failed, per notebook: what it was tried against, the identity it gave, when.
+_failed: dict[tuple[Path, bool], tuple[str, bytes, float]] = {}
+# How long a failure stands with nothing it could see changed, before one more try.
+_RETRY_SECONDS = 300.0
 
 
-def owned_identity(notebook_dir: Path) -> bytes | None:
+def _identity_lock(notebook_dir: Path, *, owned: bool) -> threading.Lock:
+    with _identity_locks_lock:
+        return _identity_locks.setdefault((Path(notebook_dir), owned), threading.Lock())
+
+
+def owned_identity(notebook_dir: Path, *, check: bool = True) -> bytes | None:
     """An owned scratchpad's E, which its ``uv.lock`` does not hold (where imports resolve,
     what would shadow a preloaded module); ``None`` for any other notebook, and for one
-    whose environment is not built yet, where no cell runs."""
+    whose environment is not built yet, where no cell runs. Without *check*, the last one
+    found, never probing (on the event loop)."""
     record = read_record(notebook_dir)
     if record is None or record.get("mode") != "owned":
         return None
     if not _cell_python(notebook_dir, owned=True).exists():
         return None
+    if not check:
+        try:
+            return (_identity_dir(notebook_dir, True) / ATTACHED_IDENTITY).read_bytes()
+        except OSError:
+            return None
     return current_identity(notebook_dir, owned=True)
 
 
 def current_identity(notebook_dir: Path, *, owned: bool = False) -> bytes:
     """E, once its observations show it still holds, else probed again (design 4.2):
     before any key is computed, so a changed environment never meets an old result.
+    It may start a probe, so never on the event loop.
 
-    A probe that fails gives an identity nothing matches: a rerun, never a stale hit.
+    A probe that fails gives an identity nothing matches: a rerun, never a stale hit. The
+    same one while nothing it could see changes, so the keys it gives agree, and no probe
+    for a while.
     """
-    with _identity_locks_lock:
-        lock = _identity_locks.setdefault((Path(notebook_dir), owned), threading.Lock())
+    import time
+
+    from strata.notebook.harness_user import LocalExecutionRefused
+
+    key = (Path(notebook_dir), owned)
     where = _identity_dir(notebook_dir, owned)
-    with lock:
+    with _identity_lock(notebook_dir, owned=owned):
+        env, _ = _cell_env_or_none()
         record = read_observed(notebook_dir, owned=owned)
-        if record is not None and _holds(notebook_dir, record, where):
+        if env is not None and record is not None and _holds(notebook_dir, record, where, env):
             try:
-                return (where / ATTACHED_IDENTITY).read_bytes()
+                found = (where / ATTACHED_IDENTITY).read_bytes()
             except OSError:
                 pass
+            else:
+                _failed.pop(key, None)
+                return found
+        state = _state(notebook_dir, record, env)
+        before = _failed.get(key)
+        if before is not None and before[0] == state:
+            if time.monotonic() - before[2] < _RETRY_SECONDS:
+                return before[1]
         sites = list(record.get("sites") or []) if record is not None else []
         try:
-            return _probe_identity(notebook_dir, sites, owned=owned).encode()
-        except (OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
+            if env is None:
+                raise LocalExecutionRefused("no cell may start here")
+            identity = _probe_identity(notebook_dir, sites, owned=owned).encode()
+        except (
+            OSError,
+            subprocess.SubprocessError,
+            ValueError,
+            KeyError,
+            LocalExecutionRefused,
+        ) as exc:
             logger.warning("Could not probe %s's environment: %s", notebook_dir, exc)
-            return b"unprobed:" + os.urandom(16).hex().encode()
+            token = (
+                before[1]
+                if before is not None and before[0] == state
+                else b"unprobed:" + os.urandom(16).hex().encode()
+            )
+            _failed[key] = (state, token, time.monotonic())
+            return token
+        _failed.pop(key, None)
+        return identity
 
 
-def _holds(notebook_dir: Path, record: dict[str, Any], where: Path) -> bool:
+def _cell_env_or_none() -> tuple[dict[str, str] | None, dict[str, Any]]:
+    from strata.notebook.harness_user import LocalExecutionRefused
+
+    try:
+        return _cell_env()
+    except LocalExecutionRefused:
+        # No cell can start, nor the probe; nothing holds.
+        return None, {}
+
+
+def _state(notebook_dir: Path, record: dict[str, Any] | None, env: dict[str, str] | None) -> str:
+    """All a probe could see change, observed now: what a failed one is remembered by."""
+    from strata.notebook.code_reads import IMPORT_VARIABLES, base_candidates, observe, watch_state
+
+    anchor = str(notebook_dir.parent)
+    record = record or {}
+    return json.dumps(
+        [
+            None if env is None else {k: env.get(k) for k in IMPORT_VARIABLES},
+            {p: watch_state(p, mode) for p, (mode, _) in (record.get("observed") or {}).items()},
+            observe(anchor, listing=True)[0],
+            base_candidates(anchor, record.get("base_names") or []),
+        ],
+        sort_keys=True,
+    )
+
+
+def _holds(notebook_dir: Path, record: dict[str, Any], where: Path, env: dict[str, str]) -> bool:
     """Whether what E was probed from is as it was: a few hundred stats and small reads."""
-    from strata.notebook.code_reads import IMPORT_VARIABLES, base_candidates, observe
+    from strata.notebook.code_reads import (
+        IMPORT_VARIABLES,
+        base_candidates,
+        base_names_to_check,
+        observe,
+        watch_state,
+    )
 
-    if {k: os.environ.get(k) for k in IMPORT_VARIABLES} != record.get("variables"):
+    # The cells' environment, not the server's: an allowlist may leave a variable out.
+    if {k: env.get(k) for k in IMPORT_VARIABLES} != record.get("variables"):
         return False
-    for path, (listing, seen) in (record.get("observed") or {}).items():
-        if observe(path, listing=listing)[0] != seen:
+    for path, (mode, seen) in (record.get("observed") or {}).items():
+        if watch_state(path, mode) != seen:
             return False
     anchor = str(notebook_dir.parent)
+    names = record.get("base_names") or []
+    base = record.get("base") or {}
     listing = observe(anchor, listing=True)[0]
-    if listing != record.get("anchor_listing"):
-        # Something in the project folder changed; only a module that would now shadow
-        # one loaded before the cell changes B.
-        if base_candidates(anchor, record.get("base_names") or []) != record.get("base"):
-            return False
+    moved = listing != record.get("anchor_listing")
+    if not moved:
+        # Unchanged names; what is already there can change within (an edit, a new
+        # ``__init__.py`` in a folder).
+        names = base_names_to_check(anchor, names, base)
+    if any(base.get(p) != seen for p, seen in base_candidates(anchor, names).items()):
+        return False
+    if moved:
+        # Something in the project folder changed, but nothing that shadows.
         record["anchor_listing"] = listing
         try:
             _write(where / _OBSERVED, json.dumps(record, indent=2) + "\n")

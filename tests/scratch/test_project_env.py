@@ -17,7 +17,12 @@ from strata import cli, scratch
 from strata.notebook import mcp_server
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.cell_paths.python import python_harness_command
-from strata.notebook.env import ATTACHED_IDENTITY, OVERLAY_DIR, compute_lockfile_hash
+from strata.notebook.env import (
+    ATTACHED_IDENTITY,
+    OVERLAY_DIR,
+    compute_lockfile_hash,
+    environment_hash,
+)
 from strata.notebook.env_backend import UvBackend, get_backend
 from strata.notebook.models import CellState, DiagnosticSeverity
 from strata.notebook.parser import parse_notebook
@@ -910,13 +915,21 @@ def test_a_probe_that_fails_gives_an_identity_nothing_matches(project, monkeypat
     notebook = _attached(project)
     _fake_dist(_site(project / ".venv"), "newlib", "1.0", record="", direct_url=None)
 
+    probes = []
+
     def fails(notebook_dir, sites, owned=False):
+        probes.append(notebook_dir)
         raise subprocess.CalledProcessError(1, "probe")
 
     monkeypatch.setattr(project_env, "_probe_identity", fails)
     first = project_env.current_identity(notebook)
     assert first.startswith(b"unprobed:")
-    assert project_env.current_identity(notebook) != first
+    # The same while nothing it could see changes, and not probed again for it.
+    assert project_env.current_identity(notebook) == first
+    assert len(probes) == 1
+    _fake_dist(_site(project / ".venv"), "otherlib", "1.0", record="", direct_url=None)
+    assert project_env.current_identity(notebook) not in (first, b"")
+    assert len(probes) == 2
 
 
 @pytest.mark.asyncio
@@ -990,31 +1003,180 @@ def test_an_owned_scratchpad_is_keyed_on_a_module_that_would_shadow_a_preloaded_
 ):
     monkeypatch.delenv("PYTHONPATH", raising=False)
     notebook = _owned(tmp_path)
-    first = compute_lockfile_hash(notebook)
-    assert compute_lockfile_hash(notebook) == first
+    lock = compute_lockfile_hash(notebook)
+    first = environment_hash(notebook)
+    assert environment_hash(notebook) == first
     (tmp_path / "orjson.py").write_text("")
-    shadowed = compute_lockfile_hash(notebook)
+    shadowed = environment_hash(notebook)
     assert shadowed != first
+    (tmp_path / "orjson.py").write_text("X = 1\n")
+    # An edit to a file already there leaves the project folder's listing as it was.
+    edited = environment_hash(notebook)
+    assert edited not in (first, shadowed)
     (tmp_path / "elsewhere").mkdir()
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "elsewhere"))
-    assert compute_lockfile_hash(notebook) not in (first, shadowed)
+    assert environment_hash(notebook) not in (first, shadowed, edited)
+    # What a sync changed and a publish attests is the lock's alone.
+    assert compute_lockfile_hash(notebook) == lock
+    assert environment_hash(notebook, check=False) == environment_hash(notebook)
 
 
 def test_a_notebook_and_an_unbuilt_owned_scratchpad_key_on_their_lock_alone(tmp_path):
     from strata.notebook.project_env import ProjectEnv, write_record
 
     plain = create_notebook(tmp_path, "plain", initialize_environment=False)
-    before = compute_lockfile_hash(plain)
+    before = environment_hash(plain)
+    assert before == compute_lockfile_hash(plain)
     (plain.parent / "orjson.py").write_text("")
-    assert compute_lockfile_hash(plain) == before
+    assert environment_hash(plain) == before
     assert not (plain / ".strata" / "environment").exists()
 
     unbuilt = _scratchpad(tmp_path / "unbuilt")
     write_record(unbuilt, ProjectEnv(tmp_path / "unbuilt", "owned", None, "none"))
     empty = create_notebook(tmp_path / "empty", "empty", initialize_environment=False)
-    assert compute_lockfile_hash(unbuilt) == compute_lockfile_hash(empty)
+    assert environment_hash(unbuilt) == environment_hash(empty)
 
     # Owned once, attached now with no overlay built: its old `.venv` keys nothing.
     moved = _owned(tmp_path / "moved")
     write_record(moved, ProjectEnv(tmp_path / "moved", "attached", Path("/p/python"), ".venv"))
-    assert compute_lockfile_hash(moved) == compute_lockfile_hash(empty)
+    assert environment_hash(moved) == environment_hash(empty)
+
+
+def test_the_lockfile_hash_never_probes_and_the_key_does(project, monkeypatch):
+    """A sync's 'before' is E as last found (else it sees no change), and the event loop's
+    staleness pass starts no probe."""
+    from strata.notebook.env import local_packages
+
+    notebook = _attached(project)
+    before = compute_lockfile_hash(notebook)
+    probes = _probes(monkeypatch)
+    _fake_dist(_site(project / ".venv"), "newlib", "1.0", record="", direct_url=None)
+    assert compute_lockfile_hash(notebook) == before
+    assert local_packages(notebook, check=False).lockfile_hash == before
+    assert probes == []
+    assert environment_hash(notebook) != before
+    assert len(probes) == 1
+
+
+def test_the_import_variables_are_compared_as_the_cells_get_them(project, monkeypatch):
+    """A variable the cells' environment leaves out is not one the server's has changed."""
+    from strata.notebook import harness_env, project_env
+
+    real = harness_env.harness_env
+
+    def without_pythonpath(allowlist, extra=None):
+        return {k: v for k, v in real(allowlist, extra).items() if k != "PYTHONPATH"}
+
+    monkeypatch.setattr(harness_env, "harness_env", without_pythonpath)
+    notebook = _attached(project)
+    (project / "elsewhere").mkdir()
+    monkeypatch.setenv("PYTHONPATH", str(project / "elsewhere"))
+    probes = _probes(monkeypatch)
+    first = project_env.current_identity(notebook)
+    assert project_env.current_identity(notebook) == first
+    assert probes == []
+
+
+def test_a_warm_workers_preloads_are_in_b(tmp_path, monkeypatch):
+    """A warm worker imports the declared dependencies before its cell: a project file
+    that would shadow one of them is never an import the run records."""
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    notebook = _owned(tmp_path)
+    pyproject = notebook / "pyproject.toml"
+    text = pyproject.read_text()
+    assert text.count("dependencies = [") == 1
+    pyproject.write_text(text.replace("dependencies = [", 'dependencies = ["colorsys", '))
+    first = environment_hash(notebook)
+    (tmp_path / "colorsys.py").write_text("")
+    assert environment_hash(notebook) != first
+
+
+def test_an_edited_sitecustomize_probes_again(project, monkeypatch):
+    """It can rewrite the path at startup, and editing it leaves every listing as it was."""
+    from strata.notebook.project_env import current_identity
+
+    custom = _site(project / ".venv") / "sitecustomize.py"
+    custom.write_text("")
+    notebook = _attached(project)
+    probes = _probes(monkeypatch)
+    current_identity(notebook)
+    assert probes == []
+    custom.write_text("import sys\n")
+    current_identity(notebook)
+    assert len(probes) == 1
+
+
+def test_a_reinstall_from_a_path_at_the_same_version_changes_e(project):
+    from strata.notebook.project_env import current_identity
+
+    site = _site(project / ".venv")
+    url = {"url": "file:///src/mylib", "dir_info": {}}
+    listed = "mylib-0.1.0.dist-info/RECORD,,\n"
+    _fake_dist(site, "mylib", "0.1.0", record="mylib.py,sha256=a,1\n" + listed, direct_url=url)
+    notebook = _attached(project)
+    first = current_identity(notebook)
+    (site / "mylib-0.1.0.dist-info" / "RECORD").write_text("mylib.py,sha256=b,1\n" + listed)
+    assert current_identity(notebook) != first
+
+
+def test_a_failed_write_leaves_no_old_identity_beside_new_observations(project, monkeypatch):
+    from strata.notebook import project_env
+
+    notebook = _attached(project)
+    identity = notebook / OVERLAY_DIR / ATTACHED_IDENTITY
+    old = identity.read_bytes()
+    real = project_env._write
+
+    def fails_on_identity(path, text):
+        if path.name == ATTACHED_IDENTITY:
+            raise OSError("disk full")
+        real(path, text)
+
+    monkeypatch.setattr(project_env, "_write", fails_on_identity)
+    _fake_dist(_site(project / ".venv"), "newlib", "1.0", record="", direct_url=None)
+    assert project_env.current_identity(notebook) != old
+    assert not identity.exists()
+    project_env._failed.clear()
+    monkeypatch.setattr(project_env, "_write", real)
+    assert project_env.current_identity(notebook) not in (old, b"")
+
+
+def test_a_reconcile_holds_es_lock(project, monkeypatch):
+    """A key checked meanwhile waits, rather than probe a half-built overlay."""
+    from strata.notebook import project_env
+
+    notebook = _scratchpad(project)
+    held = []
+
+    def body(notebook_dir, project_python, runtime):
+        held.append(project_env._identity_lock(notebook_dir, owned=False).locked())
+        return "refused"
+
+    monkeypatch.setattr(project_env, "_reconcile", body)
+    assert reconcile(notebook, venv_python(project / ".venv"), []) == "refused"
+    assert held == [True]
+
+
+def test_a_notebook_marked_a_scratchpad_outside_one_gets_no_anchor(tmp_path):
+    """Only a scratchpad in a project runs with the project first on its path."""
+    from types import SimpleNamespace
+
+    from strata.notebook.executor import CellExecutor
+
+    def fields(path):
+        executor = CellExecutor.__new__(CellExecutor)
+        executor.session = SimpleNamespace(
+            path=path, notebook_state=SimpleNamespace(scratchpad=True)
+        )
+        return executor._harness_fields()["code_reads"]
+
+    marked = create_notebook(tmp_path / "plain", "plain", initialize_environment=False)
+    assert "anchor" not in fields(marked)
+    assert fields(_scratchpad(tmp_path / "proj"))["anchor"] == str(tmp_path / "proj")
+
+
+def test_a_pth_that_prints_does_not_fail_the_probe(project):
+    """What runs at startup may print before the probe's own line."""
+    (_site(project / ".venv") / "noisy.pth").write_text("import sys; print('noise')\n")
+    notebook = _attached(project)
+    assert not (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).read_bytes().startswith(b"unprobed")

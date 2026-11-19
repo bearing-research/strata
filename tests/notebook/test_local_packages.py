@@ -253,9 +253,9 @@ def test_a_staleness_walk_reads_the_packages_once(tmp_path, monkeypatch):
     session = _notebook_over(tmp_path, lib, "import mylib\ngreeting = mylib.hello()\n")
     reads: list[Path] = []
 
-    def counted(notebook_dir: Path):
+    def counted(notebook_dir: Path, *, check: bool = True):
         reads.append(notebook_dir)
-        return local_packages(notebook_dir)
+        return local_packages(notebook_dir, check=check)
 
     monkeypatch.setattr("strata.notebook.session.local_packages", counted)
     session.compute_staleness()
@@ -267,8 +267,10 @@ def test_a_staleness_pass_reads_the_lock_once_however_many_cells(tmp_path, monke
     from strata.notebook import env
 
     reads = []
-    real = env.compute_lockfile_hash
-    monkeypatch.setattr(env, "compute_lockfile_hash", lambda d: (reads.append(d), real(d))[1])
+    real = env.environment_hash
+    monkeypatch.setattr(
+        env, "environment_hash", lambda d, check=True: (reads.append(d), real(d, check=check))[1]
+    )
 
     def per_pass(cells: int) -> int:
         nb_dir = create_notebook(tmp_path / str(cells), "nb", initialize_environment=False)

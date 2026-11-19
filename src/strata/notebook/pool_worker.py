@@ -14,7 +14,6 @@ import io
 import os
 import platform
 import sys
-import tomllib
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -73,26 +72,8 @@ _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
 
 
 def parse_common_imports() -> list[str]:
-    """Parse pyproject.toml to find packages to pre-import."""
-    try:
-        notebook_dir = Path(sys.argv[1])
-        pyproject_path = notebook_dir / "pyproject.toml"
-        if not pyproject_path.exists():
-            return []
-
-        with open(pyproject_path, "rb") as f:
-            data = tomllib.load(f)
-
-        dependencies = data.get("project", {}).get("dependencies", [])
-        result = []
-        for dep in dependencies:
-            name = dep.split("[")[0].split(";")[0]
-            for sep in (">=", "==", "!=", "~=", "<", ">"):
-                name = name.split(sep)[0]
-            result.append(name.strip())
-        return result
-    except Exception:
-        return []
+    """The packages to pre-import: the notebook's declared dependencies."""
+    return _code.warm_list(sys.argv[1]) if len(sys.argv) > 1 else []
 
 
 def warm_imports(imports: list[str]) -> None:
