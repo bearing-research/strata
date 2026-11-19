@@ -1385,3 +1385,30 @@ def test_with_a_harness_user_no_code_is_kept_between_runs(project, monkeypatch):
     monkeypatch.setattr(executor_module, "resolve_harness_user", lambda: object())
     monkeypatch.setattr(executor_module, "prepare_work_dir", lambda *_args: None)
     assert "pycache" not in executor._harness_fields()["code_reads"]
+
+
+def test_a_notebook_runs_as_before_the_scratchpad_profile(tmp_path, monkeypatch):
+    """No recorder, base image, code cache, probe or claim-time check outside a scratchpad:
+    a notebook's key never depends on what was preloaded (4.9.2)."""
+    from strata.notebook import project_env
+    from strata.notebook.env import _lockfile_hash
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import create_notebook
+
+    path = create_notebook(tmp_path, "plain", initialize_environment=False)
+    (path / "uv.lock").write_text("version = 1\n")
+
+    def probed(*_args, **_kwargs):
+        raise AssertionError("a notebook's environment was probed")
+
+    monkeypatch.setattr(project_env, "_probe_identity", probed)
+    state = SimpleNamespace(scratchpad=False)
+    executor = CellExecutor.__new__(CellExecutor)
+    executor.session = SimpleNamespace(path=path, notebook_state=state)
+    assert "code_reads" not in executor._harness_fields()
+    pool = NotebookSession._python_warm_pool(
+        SimpleNamespace(path=path, notebook_state=state, venv_python=None)
+    )
+    assert pool.base_image is None and pool.base_image_holds is None
+    assert environment_hash(path) == _lockfile_hash(path, None, None)
