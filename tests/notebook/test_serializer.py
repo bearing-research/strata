@@ -612,7 +612,7 @@ class TestPickleSerialization:
 
     def test_the_code_scope_is_the_loading_threads_alone(self, tmp_path):
         """Another thread unpickling meanwhile (one an earlier cell left on a warm worker)
-        neither enters it nor sees the path it sets."""
+        does not enter it."""
         entered: list[str] = []
 
         @contextlib.contextmanager
@@ -630,6 +630,18 @@ class TestPickleSerialization:
             other.start()
             other.join()
         assert entered == [], entered
+
+    def test_a_cell_module_that_fails_to_load_is_not_left_half_built(self, tmp_path):
+        """A warm worker's next run execs it again, once what it imports is fixed."""
+        name = "__strata_cell_test_half_built"
+        with pytest.raises(ImportError):
+            serializer_module._ensure_cell_module(
+                name, "raise ImportError('not yet')\n", tmp_path / "m.py"
+            )
+        assert name not in sys.modules
+        module = serializer_module._ensure_cell_module(name, "VALUE = 1\n", tmp_path / "m.py")
+        assert module.VALUE == 1
+        del sys.modules[name]
 
     def test_pickle_serialization_uses_codec_envelope(self):
         obj = _PickleTestCustomClass(42)

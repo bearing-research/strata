@@ -300,6 +300,12 @@ def execute_harness(manifest: dict) -> dict:
                 _inject_mounts(manifest, namespace)
                 _inject_tables(manifest, namespace)
                 ambient_client = _inject_client(manifest, namespace, old_stdout)
+                # Where the cold harness's starts (before execute_cell's display hook and
+                # snapshot), so a cell's findings do not depend on which path ran it.
+                if observed is None:
+                    observed = audit.enter_context(_audit.recording())
+                elif code is not None:
+                    observed.cell_starts(code.imported)
                 display_capture.install(namespace)
 
                 namespace_before = set(namespace.keys())
@@ -312,10 +318,6 @@ def execute_harness(manifest: dict) -> dict:
                 sys.stdout = stdout_buf
                 sys.stderr = stderr_buf
 
-                if observed is None:
-                    observed = audit.enter_context(_audit.recording())
-                elif code is not None:
-                    observed.cell_starts(code.imported)
                 with display_capture.capture_side_effects(), _code.anchored(code):
                     _display_value = _exec_with_display(
                         source, namespace, manifest.get("strata_cell_id")

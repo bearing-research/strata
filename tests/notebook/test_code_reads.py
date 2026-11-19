@@ -532,7 +532,13 @@ with code_reads.for_run(manifest) as reads:
     with code_reads.anchored(reads):
         import anchored_mod
         sys.path.remove(anchor)  # the cell takes the folder off the path
-print(json.dumps({{"imported": "anchored_mod" in reads.imported, "kept": anchor in sys.path}}))
+    kept = sys.path.count(anchor)
+    with code_reads.anchored(reads):
+        # The cell rebuilds the path, from equal strings: no entry is the inserted one.
+        sys.path[:] = ["".join(list(entry)) for entry in sys.path]
+    rebuilt = sys.path.count(anchor)
+imported = "anchored_mod" in reads.imported
+print(json.dumps({{"imported": imported, "kept": kept, "rebuilt": rebuilt}}))
 """
 
 
@@ -545,7 +551,7 @@ def test_anchored_notes_what_it_imported_and_removes_only_its_own_entry(tmp_path
         [sys.executable, "-c", script], cwd=tmp_path / "..", capture_output=True, text=True
     )
     assert run.returncode == 0, run.stderr
-    assert json.loads(run.stdout.splitlines()[-1]) == {"imported": True, "kept": True}
+    assert json.loads(run.stdout.splitlines()[-1]) == {"imported": True, "kept": 1, "rebuilt": 1}
 
 
 def test_the_probe_watches_the_interpreter_and_what_rewrites_the_path(tmp_path, monkeypatch):

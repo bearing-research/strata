@@ -729,10 +729,18 @@ def for_run(manifest: dict[str, Any]) -> Generator[Reads | None]:
 @contextmanager
 def anchored(reads: Reads | None) -> Generator[None]:
     """The project first on ``sys.path``, as under ``python -c`` in it: its own modules
-    import, and shadow. Only around what resolves as the cell would, its body and the
-    classes its inputs name; what the harness imports itself never looks there."""
+    import, and shadow. Only around what resolves as the cell would: its body, and what
+    a loading input runs of its own (``serializer.resolving_code``: a pickle's whole load,
+    a module input's import, a cell module's exec and restore). The codecs and the
+    libraries that rebuild a value never look there.
+
+    What is imported meanwhile goes in ``reads.imported``, the cell's imports to the read
+    audit. It is the process's, as the audit's own count is: another thread's import in
+    the window counts too.
+    """
     anchor = reads.anchor if reads is not None else None
     inserted = bool(anchor) and (not sys.path or sys.path[0] != anchor)
+    equal = sys.path.count(anchor) if inserted else 0
     if inserted:
         sys.path.insert(0, anchor)
     before = set(sys.modules) if reads is not None else None
@@ -741,11 +749,19 @@ def anchored(reads: Reads | None) -> Generator[None]:
     finally:
         if reads is not None and before is not None:
             reads.imported.update(set(sys.modules) - before)
-        # The entry inserted, by identity: the same folder may be on the path otherwise
-        # (PYTHONPATH), and a warm worker keeps the path for its next run.
-        at = next((i for i, entry in enumerate(sys.path) if entry is anchor), None)
-        if inserted and at is not None:
-            del sys.path[at]
+        if inserted:
+            _unanchor(anchor, equal)
+
+
+def _unanchor(anchor: str, equal: int) -> None:
+    """Remove the entry :func:`anchored` inserted, and only it: the same folder may be on
+    the path otherwise (PYTHONPATH), and a warm worker keeps the path for its next run."""
+    at = next((i for i, entry in enumerate(sys.path) if entry is anchor), None)
+    if at is None and sys.path.count(anchor) > equal:
+        # The cell rebuilt the path from equal strings: one of them is the inserted one.
+        at = sys.path.index(anchor)
+    if at is not None:
+        del sys.path[at]
 
 
 @contextmanager

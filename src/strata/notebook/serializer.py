@@ -1890,8 +1890,13 @@ def _ensure_cell_module(
             module_source.splitlines(keepends=True),
             module_name,
         )
-        with _code_scope.get()():
-            exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
+        try:
+            with _code_scope.get()():
+                exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
+        except BaseException:
+            # Half-built: a later load (a warm worker's next run) must exec it again.
+            sys.modules.pop(module_name, None)
+            raise
     module.__dict__[_CELL_MODULE_SOURCE_ATTR] = module_source
     module.__dict__[_CELL_MODULE_FLAG_ATTR] = True
     for value in module.__dict__.values():
