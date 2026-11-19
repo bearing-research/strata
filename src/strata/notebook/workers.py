@@ -474,6 +474,22 @@ def delete_server_managed_worker_record(worker_name: str) -> list[ManagedWorkerR
     return _change_server_managed_worker_records(change)
 
 
+SCRATCHPAD_LOCAL_ONLY = "the scratchpad runs on this machine; for remote compute, use a notebook"
+
+
+def scratchpad_worker_refusal(notebook_state: NotebookState, worker_name: str | None) -> str | None:
+    """Why *worker_name* may not run a scratchpad's cells, or ``None``.
+
+    A scratchpad's run is keyed on what it read here, which a run elsewhere does not
+    record, and an attached environment cannot be rebuilt elsewhere: its cells run on
+    the built-in local worker only, in either environment mode.
+    """
+    name = (worker_name or "").strip()
+    if not notebook_state.scratchpad or not name or name == "local":
+        return None
+    return f"worker {name!r}: {SCRATCHPAD_LOCAL_ONLY}"
+
+
 def validate_worker_assignment(
     notebook_state: NotebookState,
     worker_name: str | None,
@@ -482,7 +498,11 @@ def validate_worker_assignment(
 
     Personal mode is permissive so notebooks can name future workers; service mode, or a
     server with notebook-defined workers off, requires a server-managed registry entry.
+    A scratchpad takes only ``local`` (:func:`scratchpad_worker_refusal`).
     """
+    refusal = scratchpad_worker_refusal(notebook_state, worker_name)
+    if refusal is not None:
+        return refusal
     normalized_name = (worker_name or "").strip()
     if not normalized_name or normalized_name == "local":
         return None

@@ -3,7 +3,8 @@ the directories it listed, and the places an import looked and found nothing.
 
 Loaded by path into the harnesses, so stdlib only. Each is recorded when it happens, not
 after the run: a module's hash is of the bytes the loader compiled (its ``.pyc`` is never
-read), a file's of what it held when first opened. At the end each is observed again, and
+read; the code compiled from them is kept under that hash, :class:`CodeCache`), a file's
+of what it held when first opened. At the end each is observed again, and
 one that changed makes the run unstable: its result is kept but never found by its key.
 Nothing under the interpreter's stdlib or environment is recorded; the environment's
 identity covers those.
@@ -13,17 +14,22 @@ from __future__ import annotations
 
 import hashlib
 import importlib.machinery as machinery
+import importlib.util
 import inspect
+import json
+import marshal
 import os
 import site
 import stat
+import struct
 import sys
 import sysconfig
+import tempfile
 import threading
 import time
 import zipimport
 from collections.abc import Callable, Generator, Iterable
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
 from typing import Any
 
 ABSENT = "absent"
@@ -34,6 +40,16 @@ LARGE_BYTES = 64 * 1024 * 1024
 RACY_NS = 2_000_000_000
 # Past this many paths the record would not be kept whole: the run is not cached.
 PATH_CAP = 10_000
+# Compiled code kept by its source's hash: least recently used goes past this.
+PYCACHE_BYTES = 256 * 1024 * 1024
+# An entry: magic (with the format's version), the header's length, the header, the
+# marshalled code, then the sha256 of all of that.
+_PYC_MAGIC = b"STRATAPYC\x01"
+_PYC_LENGTHS = struct.Struct(">I")
+_PYC_DIGEST = 32
+# An entry being written, renamed into place once whole.
+_PYC_TEMP = ".tmp-"
+_PYC_TEMP_NS = 3600 * 1_000_000_000
 
 # They change where imports resolve: a scratchpad's environment identity holds them, and a
 # cell's ``# @env`` may not set them.
@@ -160,6 +176,9 @@ class Reads:
         # Whether this thread is the read audit's own work (listing a native writer's
         # target), which is not the cell's either.
         self.audit_quiet: Callable[[], bool] = lambda: False
+        # Makes the read audit's hook skip this thread: the code cache's files are neither.
+        self.audit_hushed: Callable[[], AbstractContextManager[Any]] = nullcontext
+        self.code_cache: CodeCache | None = None
 
     @property
     def quiet(self) -> bool:
@@ -208,10 +227,27 @@ class Reads:
             return  # opened to list it or to remove it: its listing, if any, is recorded
         self._put(path, seen, print_)
 
-    def module(self, path: str, data: bytes) -> None:
-        """A module's file, as the bytes its loader runs."""
+    def module(self, path: str, digest: str) -> None:
+        """A module's file, by the sha256 of the bytes its loader runs."""
         taken = time.time_ns()
-        self._put(path, f"sha256:{hashlib.sha256(data).hexdigest()}", fingerprint(path, taken))
+        self._put(path, f"sha256:{digest}", fingerprint(path, taken))
+
+    def compiled(self, loader: Any, data: bytes, digest: str, path: str) -> Any:
+        """The code *loader* compiles from a module's source *data*: from the cache when
+        it is the stdlib's compiler, which reads nothing and depends on nothing else."""
+        cache = self.code_cache
+        compile_ = loader.source_to_code
+        if cache is None or not _stdlib_compiler(compile_):
+            # An instrumenting loader (typeguard's, beartype's) compiles code of its own.
+            return compile_(data, path)
+        with self.own(), self.audit_hushed():
+            found = cache.load(digest, path)
+        if found is not None:
+            return found
+        code = compile_(data, path)
+        with self.own(), self.audit_hushed():
+            cache.store(digest, path, code)
+        return code
 
     def absent(self, path: str) -> None:
         self._put(path, ABSENT, None)
@@ -342,6 +378,162 @@ class Reads:
         }
 
 
+class CodeCache:
+    """Code compiled from a module's source, kept under the source's sha256.
+
+    The key holds the path too (compiled into ``co_filename``, so into tracebacks), the
+    interpreter's bytecode magic and cache tag, and the optimization level. A hit is
+    unmarshalled only once the entry's checksum and header match what was just derived:
+    a changed byte can still unmarshal into code computing something else. Anything
+    else is compiled again and replaced; deleting the whole cache is always safe. The
+    checksum catches damage, not a writer: like the rest of ``.strata/``, the cache
+    trusts what writes there.
+    """
+
+    def __init__(self, directory: str, limit: int = PYCACHE_BYTES) -> None:
+        self.directory = directory
+        self.limit = limit
+        # Bytes this process believes the cache holds; found by one listing, then added to.
+        self._total: int | None = None
+
+    def header(self, digest: str, path: str) -> bytes:
+        fields = {
+            "magic": importlib.util.MAGIC_NUMBER.hex(),
+            "tag": sys.implementation.cache_tag,
+            "optimize": sys.flags.optimize,
+            "source": digest,
+            "path": path,
+        }
+        return json.dumps(fields, sort_keys=True).encode()
+
+    def _key(self, digest: str, path: str) -> tuple[bytes, str]:
+        header = self.header(digest, path)
+        return header, os.path.join(self.directory, hashlib.sha256(header).hexdigest())
+
+    def entry(self, digest: str, path: str) -> str:
+        return self._key(digest, path)[1]
+
+    def load(self, digest: str, path: str) -> Any:
+        """The code kept for this source at *path*, or None."""
+        header, entry = self._key(digest, path)
+        try:
+            with open(entry, "rb") as f:
+                blob = f.read()
+        except OSError:
+            # Absent (a miss) or unreadable here: compiled from source.
+            return None
+        payload = _pyc_payload(blob, header)
+        if payload is not None:
+            try:
+                code = marshal.loads(payload)
+            except (EOFError, ValueError, TypeError):
+                code = None
+            if code is not None:
+                with suppress(OSError):  # only the eviction order would be off
+                    os.utime(entry)  # recently used: the last to go
+                return code
+        # Damaged: the code compiled now replaces it.
+        return None
+
+    def store(self, digest: str, path: str, code: Any) -> None:
+        header, entry = self._key(digest, path)
+        blob = _PYC_MAGIC + _PYC_LENGTHS.pack(len(header)) + header + marshal.dumps(code)
+        blob += hashlib.sha256(blob).digest()
+        try:
+            os.makedirs(self.directory, exist_ok=True)
+            fd, temp = tempfile.mkstemp(dir=self.directory, prefix=_PYC_TEMP)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(blob)
+                replaced = os.path.exists(entry)  # a damaged entry, or another writer's
+                os.replace(temp, entry)
+            except OSError:
+                os.unlink(temp)
+                raise
+        except OSError:
+            # Not writable here: the next run compiles it again.
+            return
+        if self._total is None or replaced:
+            # Counted afresh: what it replaced may be an entry this process never counted.
+            self._total = self._size()
+        else:
+            self._total += len(blob)
+        if self._total > self.limit:
+            self._evict()
+
+    def _listing(self) -> list[tuple[int, int, str]]:
+        found = []
+        stale = time.time_ns() - _PYC_TEMP_NS
+        try:
+            with os.scandir(self.directory) as entries:
+                for item in entries:
+                    try:
+                        st = item.stat()
+                    except OSError:
+                        continue  # removed meanwhile
+                    if not item.name.startswith(_PYC_TEMP):
+                        found.append((st.st_mtime_ns, st.st_size, item.path))
+                    elif st.st_mtime_ns < stale:
+                        # Left by a writer killed before its rename; a live one is young.
+                        with suppress(OSError):
+                            os.unlink(item.path)
+        except OSError:
+            return []
+        return found
+
+    def _size(self) -> int:
+        return sum(size for _, size, _ in self._listing())
+
+    def _evict(self) -> None:
+        entries = sorted(self._listing())
+        total = sum(size for _, size, _ in entries)
+        for _, size, path in entries:
+            if total <= self.limit:
+                break
+            try:
+                os.unlink(path)
+            except OSError:
+                continue  # another process took it
+            total -= size
+        self._total = total
+
+
+def _pyc_payload(blob: bytes, header: bytes) -> bytes | None:
+    """The marshalled code in an entry, if its checksum holds and its header is *header*."""
+    fixed = len(_PYC_MAGIC) + _PYC_LENGTHS.size
+    if len(blob) < fixed + _PYC_DIGEST or not blob.startswith(_PYC_MAGIC):
+        return None
+    (header_length,) = _PYC_LENGTHS.unpack_from(blob, len(_PYC_MAGIC))
+    if hashlib.sha256(blob[:-_PYC_DIGEST]).digest() != blob[-_PYC_DIGEST:]:
+        return None
+    if blob[fixed : fixed + header_length] != header:
+        return None
+    return blob[fixed + header_length : -_PYC_DIGEST]
+
+
+_code_caches: dict[str, CodeCache] = {}
+
+
+def _stdlib_compiler(compile_: Any) -> bool:
+    """Whether a loader's bound ``source_to_code`` is the stdlib's own, by its code: a
+    replacement installed on the class or the instance, before the harness or after,
+    is not, however it names itself."""
+    code = getattr(getattr(compile_, "__func__", None), "__code__", None)
+    return (
+        code is not None
+        and code.co_filename == "<frozen importlib._bootstrap_external>"
+        and code.co_name == "source_to_code"
+    )
+
+
+def code_cache(directory: str) -> CodeCache:
+    """The process's cache over *directory*: a warm worker keeps one across its runs."""
+    found = _code_caches.get(directory)
+    if found is None:
+        found = _code_caches[directory] = CodeCache(directory)
+    return found
+
+
 def _name(thing: Any) -> str:
     kind = thing if isinstance(thing, type) else type(thing)
     return f"{kind.__module__}.{kind.__qualname__}"
@@ -469,14 +661,15 @@ def _patch(reads: Reads) -> list[tuple[type, str, Any]]:
         # Compiled from the bytes hashed, never from a .pyc that may predate them.
         with reads.own():
             data = self.get_data(path)
-        reads.module(path, data)
-        return self.source_to_code(data, path)
+        digest = hashlib.sha256(data).hexdigest()
+        reads.module(path, digest)
+        return reads.compiled(self, data, digest, path)
 
     def get_sourceless_code(self: Any, fullname: str) -> Any:
         path = self.get_filename(fullname)
         if not reads.quiet and reads.tracked(path):
             with reads.own():
-                reads.module(path, self.get_data(path))
+                reads.module(path, hashlib.sha256(self.get_data(path)).hexdigest())
         return sourceless_get_code(self, fullname)
 
     def create_module(self: Any, spec: Any) -> Any:
@@ -525,8 +718,12 @@ def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
     # outside its run directory.
     own = [m["local_path"] for m in (manifest.get("mounts") or {}).values() if not m.get("uri")]
     try:
-        with recording([*config["exclude"], manifest.get("output_dir") or "", *own]) as reads:
+        with recording(
+            [*config["exclude"], manifest.get("output_dir") or "", *own],
+            pycache=config.get("pycache"),
+        ) as reads:
             reads.audit_quiet = lambda: observed.quiet
+            reads.audit_hushed = observed.hushed
             observed.on_native_read = reads.file
             observed.on_native_write = reads.native_wrote
             try:
@@ -542,9 +739,10 @@ def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
 
 
 @contextmanager
-def recording(excluded: Iterable[str]) -> Generator[Reads]:
+def recording(excluded: Iterable[str], *, pycache: str | None = None) -> Generator[Reads]:
     """Record the body's reads into the :class:`Reads` it yields; nothing under
-    *excluded* (or the interpreter's own code) is recorded.
+    *excluded* (or the interpreter's own code) is recorded. Code compiled from tracked
+    source is kept in *pycache*, when given.
 
     The audit hook stays installed after: one cannot be removed. The finder and the
     loader patches are undone.
@@ -554,6 +752,8 @@ def recording(excluded: Iterable[str]) -> Generator[Reads]:
         sys.addaudithook(_on_event)
         _hook_added = True
     reads = Reads(excluded)
+    if pycache:
+        reads.code_cache = code_cache(pycache)
     finder = _Absences(reads)
     sys.meta_path.insert(0, finder)
     reads._hooks = (

@@ -42,12 +42,21 @@ def establish_ssh_worker(
     registration tears the tunnel down.
     """
     from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
-    from strata.notebook.workers import notebook_worker_definitions_editable
+    from strata.notebook.workers import (
+        notebook_worker_definitions_editable,
+        scratchpad_worker_refusal,
+    )
 
     if not notebook_worker_definitions_editable(session.notebook_state):
         raise PermissionError("worker definitions are managed by the server")
 
     worker_name = name or default_worker_name(ssh_target)
+    # Before provisioning anything: the registration would be refused after.
+    if worker_name == "local":
+        raise NotebookOpsError("'local' is reserved for the built-in worker")
+    refusal = scratchpad_worker_refusal(session.notebook_state, worker_name)
+    if refusal is not None:
+        raise NotebookOpsError(refusal)
     record = supervisor.establish(
         worker_name,
         ssh_target,

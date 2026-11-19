@@ -108,6 +108,18 @@ def _scratchpad(anchor: Path) -> Path:
     )
 
 
+def _no_warm_pool(monkeypatch) -> None:
+    """Sessions start no warm pool of their own."""
+    from strata.notebook import session as session_module
+
+    real = session_module._session_setting
+    monkeypatch.setattr(
+        session_module,
+        "_session_setting",
+        lambda name: 0 if name == "notebook_warm_pool_size" else real(name),
+    )
+
+
 @pytest.fixture
 async def manager():
     """Sessions whose warm processes are released before the test's loop closes."""
@@ -1247,18 +1259,12 @@ def test_a_worker_built_before_a_shadowing_file_no_longer_holds(project):
 async def test_a_cold_run_and_a_warm_worker_preload_the_same_base_image(
     project, manager, monkeypatch
 ):
-    from strata.notebook import session as session_module
     from tests.conftest import LIVE_SERVER_TIMEOUT
     from tests.notebook.pool_helpers import warm_again
 
     # No pool of the session's own: the cold run is cold, and the one below is the only
     # one, which the manager drains.
-    real = session_module._session_setting
-    monkeypatch.setattr(
-        session_module,
-        "_session_setting",
-        lambda name: 0 if name == "notebook_warm_pool_size" else real(name),
-    )
+    _no_warm_pool(monkeypatch)
     _declare(project, "projmod")
     session = manager.open_notebook(_scratchpad(project))
     assert session.warm_pool is None
@@ -1356,3 +1362,212 @@ def test_a_cold_run_loads_the_base_image_only_while_e_is_known(project, tmp_path
     assert "projmod" in executor._harness_fields()["code_reads"]["warm"]
     (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).unlink()
     assert executor._harness_fields()["code_reads"]["warm"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_a_scratchpad_run_keeps_its_project_code_compiled(project, manager, monkeypatch):
+    _no_warm_pool(monkeypatch)
+    (project / "helper.py").write_text("VALUE = 5\n")
+    session = manager.open_notebook(_scratchpad(project))
+    got = await mcp_server._scratch_run(manager, "import helper\nx = helper.VALUE")
+    assert got["status"] == "ok", str(got)
+    # The project's module, and nothing of the interpreter's or the environment's.
+    assert len(list((session.path / ".strata" / "pycache").iterdir())) == 1
+
+
+def test_with_a_harness_user_no_code_is_kept_between_runs(project, monkeypatch):
+    """Code a cell could write would run in later runs: the cache is off."""
+    from strata.notebook import executor as executor_module
+    from strata.notebook.executor import CellExecutor
+
+    notebook = _attached(project)
+    executor = CellExecutor.__new__(CellExecutor)
+    executor.session = SimpleNamespace(
+        path=notebook, notebook_state=SimpleNamespace(scratchpad=True)
+    )
+    monkeypatch.setattr(executor_module, "prepare_work_dir", lambda *_args: None)
+    monkeypatch.setattr(executor_module, "resolve_harness_user", lambda: None)
+    assert executor._harness_fields()["code_reads"]["pycache"] == str(
+        notebook / ".strata" / "pycache"
+    )
+    monkeypatch.setattr(executor_module, "resolve_harness_user", object)
+    assert "pycache" not in executor._harness_fields()["code_reads"]
+
+
+def test_a_notebook_runs_as_before_the_scratchpad_profile(tmp_path, monkeypatch):
+    """No recorder, base image, code cache, probe or claim-time check outside a scratchpad:
+    a notebook's key never depends on what was preloaded (4.9.2)."""
+    from strata.notebook import project_env
+    from strata.notebook.env import _lockfile_hash
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import create_notebook
+
+    path = create_notebook(tmp_path, "plain", initialize_environment=False)
+    (path / "uv.lock").write_text("version = 1\n")
+
+    def probed(*_args, **_kwargs):
+        raise AssertionError("a notebook's environment was probed")
+
+    monkeypatch.setattr(project_env, "_probe_identity", probed)
+    state = SimpleNamespace(scratchpad=False)
+    executor = CellExecutor.__new__(CellExecutor)
+    executor.session = SimpleNamespace(path=path, notebook_state=state)
+    assert "code_reads" not in executor._harness_fields()
+    pool = NotebookSession._python_warm_pool(
+        SimpleNamespace(path=path, notebook_state=state, venv_python=None)
+    )
+    assert pool.base_image is None and pool.base_image_holds is None
+    assert environment_hash(path) == _lockfile_hash(path, None, None)
+
+
+# --- a scratchpad runs on this machine (4.9.3) ---
+
+_WORKER_URL = "http://127.0.0.1:9000/v1/execute"
+
+
+@pytest.mark.parametrize("scratchpad", [True, False])
+@pytest.mark.parametrize("by", ["annotation", "default"])
+def test_a_scratchpad_cell_runs_on_this_machine_only(tmp_path, scratchpad, by):
+    from strata.notebook.writer import update_notebook_worker
+
+    notebook = (
+        _scratchpad(tmp_path)
+        if scratchpad
+        else create_notebook(tmp_path, "nb", initialize_environment=False)
+    )
+    if by == "default":
+        update_notebook_worker(notebook, "gpu")
+    state = parse_notebook(notebook)
+
+    def errors(source: str) -> list:
+        cell = CellState(id="c1", source=source)
+        found = validate_cell_annotations(cell, state)
+        return [d for d in found if d.severity == DiagnosticSeverity.ERROR]
+
+    found = errors("# @worker gpu\nx = 1\n" if by == "annotation" else "x = 1\n")
+    # Kept local by its own annotation, whatever the default.
+    assert errors("# @worker local\nx = 1\n") == []
+    if not scratchpad:
+        assert found == []
+        return
+    line = 1 if by == "annotation" else None
+    assert [(d.code, d.line) for d in found] == [("scratchpad_remote_worker", line)]
+    assert "runs on this machine" in found[0].message
+    assert "use a notebook" in found[0].message
+
+
+def test_a_scratchpad_takes_no_worker(tmp_path):
+    from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
+
+    notebook = _scratchpad(tmp_path)
+    ops = LocalNotebookOps(notebook)
+    with pytest.raises(NotebookOpsError, match="runs on this machine"):
+        ops.add_worker("gpu", url=_WORKER_URL)
+    with pytest.raises(NotebookOpsError, match="runs on this machine"):
+        ops.set_default_worker("gpu")
+    ops.set_default_worker("local")
+    state = parse_notebook(notebook)
+    assert state.workers == []
+    assert state.worker is None
+
+
+def test_a_scratchpad_connects_no_ssh_worker_before_provisioning(tmp_path):
+    from strata.notebook.ops import NotebookOpsError
+    from strata.notebook.ssh_worker_service import establish_ssh_worker
+
+    class Untouched:
+        def establish(self, *_args, **_kwargs):
+            raise AssertionError("provisioned a box the scratchpad cannot use")
+
+    session = SimpleNamespace(notebook_state=parse_notebook(_scratchpad(tmp_path)))
+    with pytest.raises(NotebookOpsError, match="runs on this machine"):
+        establish_ssh_worker(session, Untouched(), ssh_target="user@gpu-box")
+
+
+@pytest.mark.asyncio
+async def test_a_scratchpads_worker_routes_refuse(tmp_path):
+    from fastapi import HTTPException
+
+    from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
+    from strata.notebook.routes import (
+        WorkerConfigRequest,
+        WorkersConfigRequest,
+        update_notebook_worker_endpoint,
+        update_notebook_workers_endpoint,
+    )
+
+    notebook = _scratchpad(tmp_path)
+    session = SimpleNamespace(notebook_state=parse_notebook(notebook), path=notebook)
+    spec = WorkerSpec(
+        name="gpu", backend=WorkerBackendType.EXECUTOR, config=WorkerConfig(url=_WORKER_URL)
+    )
+    with pytest.raises(HTTPException, match="runs on this machine"):
+        await update_notebook_workers_endpoint("nb", session, WorkersConfigRequest(workers=[spec]))
+    with pytest.raises(HTTPException, match="runs on this machine") as refused:
+        await update_notebook_worker_endpoint("nb", session, WorkerConfigRequest(worker="gpu"))
+    assert refused.value.status_code == 400
+    assert parse_notebook(notebook).workers == []
+
+
+@pytest.mark.asyncio
+async def test_a_scratchpads_listed_workers_can_still_go(tmp_path, manager):
+    """One written before scratchpads took none: removed one at a time, never added to."""
+    from fastapi import HTTPException
+
+    from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
+    from strata.notebook.routes import WorkersConfigRequest, update_notebook_workers_endpoint
+    from strata.notebook.writer import update_notebook_workers
+
+    def spec(name: str) -> WorkerSpec:
+        config = WorkerConfig(url=_WORKER_URL)
+        return WorkerSpec(name=name, backend=WorkerBackendType.EXECUTOR, config=config)
+
+    notebook = _scratchpad(tmp_path)
+    update_notebook_workers(notebook, [spec("gpu"), spec("cpu")])
+    session = manager.open_notebook(notebook)
+    with pytest.raises(HTTPException, match="worker 'new'"):
+        await update_notebook_workers_endpoint(
+            "nb", session, WorkersConfigRequest(workers=[spec("cpu"), spec("new")])
+        )
+    await update_notebook_workers_endpoint(
+        "nb", session, WorkersConfigRequest(workers=[spec("cpu")])
+    )
+    assert [w.name for w in parse_notebook(notebook).workers] == ["cpu"]
+
+
+def test_a_cells_own_worker_is_named_as_its_own(tmp_path):
+    state = parse_notebook(_scratchpad(tmp_path))
+    cell = CellState(id="c1", source="x = 1\n", worker="gpu")
+    state.cells.append(cell)
+    (found,) = [
+        d for d in validate_cell_annotations(cell, state) if d.severity == DiagnosticSeverity.ERROR
+    ]
+    assert found.message.startswith("The cell's worker `gpu` in notebook.toml")
+
+
+def test_an_ssh_worker_named_local_is_refused_before_provisioning(tmp_path):
+    from strata.notebook.ops import NotebookOpsError
+    from strata.notebook.ssh_worker_service import establish_ssh_worker
+
+    class Untouched:
+        def establish(self, *_args, **_kwargs):
+            raise AssertionError("provisioned a box for a name that is refused")
+
+    notebook = create_notebook(tmp_path, "nb", initialize_environment=False)
+    session = SimpleNamespace(notebook_state=parse_notebook(notebook))
+    with pytest.raises(NotebookOpsError, match="reserved"):
+        establish_ssh_worker(session, Untouched(), ssh_target="user@box", name="local")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_a_scratchpad_run_on_a_remote_worker_is_refused_with_the_reason(
+    project, manager, monkeypatch
+):
+    _no_warm_pool(monkeypatch)  # the refusal is over before a pool would be ready to drain
+    manager.open_notebook(_attached(project))
+    got = await mcp_server._scratch_run(manager, "# @worker gpu\nx = 1")
+    assert got["status"] != "ok", str(got)
+    assert "runs on this machine" in str(got), str(got)

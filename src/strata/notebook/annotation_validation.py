@@ -27,7 +27,12 @@ from strata.notebook.models import (
     MalformedConnection,
     NotebookState,
 )
-from strata.notebook.workers import notebook_worker_definitions_editable, resolve_worker_spec
+from strata.notebook.workers import (
+    SCRATCHPAD_LOCAL_ONLY,
+    notebook_worker_definitions_editable,
+    resolve_worker_spec,
+    scratchpad_worker_refusal,
+)
 
 if TYPE_CHECKING:
     import cellgraph as cg
@@ -124,8 +129,28 @@ def _validate_prompt_inputs(analysis: cg.Analysis, cell_id: str) -> list[Annotat
 
 
 def _validate_worker(cell: CellState, notebook_state: NotebookState) -> list[AnnotationDiagnostic]:
-    """``worker_unknown``: a worker execution cannot resolve."""
+    """``worker_unknown``: a worker execution cannot resolve. ``scratchpad_remote_worker``:
+    a scratchpad's cell would run elsewhere, by its annotation or a default."""
+    from strata.notebook.cell_paths.context import effective_worker_name
+
     annotations = parse_annotations(cell.source, cell.language)
+    worker = effective_worker_name(notebook_state, cell.id, annotations.worker)
+    refusal = scratchpad_worker_refusal(notebook_state, worker)
+    if refusal is not None:
+        return [
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.ERROR,
+                code="scratchpad_remote_worker",
+                message=(
+                    f"`@worker {worker}`: {SCRATCHPAD_LOCAL_ONLY}."
+                    if annotations.worker
+                    else f"The cell's worker `{worker}` in notebook.toml: {SCRATCHPAD_LOCAL_ONLY}."
+                    if (configured := notebook_state.get_cell(cell.id)) and configured.worker
+                    else f"The default worker `{worker}`: {SCRATCHPAD_LOCAL_ONLY}."
+                ),
+                line=_find_annotation_line(cell.source, "worker") if annotations.worker else None,
+            )
+        ]
     diagnostics: list[AnnotationDiagnostic] = []
     # The catalog execution resolves against: in service mode the server's registry,
     # where members cannot declare workers at all.
