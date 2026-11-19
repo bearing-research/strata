@@ -35,6 +35,16 @@ RACY_NS = 2_000_000_000
 # Past this many paths the record would not be kept whole: the run is not cached.
 PATH_CAP = 10_000
 
+# They change where imports resolve: a scratchpad's environment identity holds them, and a
+# cell's ``# @env`` may not set them.
+IMPORT_VARIABLES = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONSAFEPATH",
+    "PYTHONNOUSERSITE",
+    "PYTHONPLATLIBDIR",
+)
+
 _SYSTEM = ("/dev", "/proc", "/sys")
 # The path finder's order: extension modules, then source, then bytecode.
 _SUFFIXES = (
@@ -506,18 +516,29 @@ def for_run(manifest: dict[str, Any], observed: Any) -> Generator[Reads | None]:
     if config is None:
         yield None
         return
+    anchor = config.get("anchor")
+    inserted = bool(anchor) and (not sys.path or sys.path[0] != anchor)
+    if inserted:
+        # As under ``python -c`` in the project: its own modules import, and shadow.
+        sys.path.insert(0, anchor)
     # A run's own folders (``# @output_dir``) are mounts with no URI; a loop's live
     # outside its run directory.
     own = [m["local_path"] for m in (manifest.get("mounts") or {}).values() if not m.get("uri")]
-    with recording([*config["exclude"], manifest.get("output_dir") or "", *own]) as reads:
-        reads.audit_quiet = lambda: observed.quiet
-        observed.on_native_read = reads.file
-        observed.on_native_write = reads.native_wrote
-        try:
-            yield reads
-        finally:
-            observed.on_native_read = None
-            observed.on_native_write = None
+    try:
+        with recording([*config["exclude"], manifest.get("output_dir") or "", *own]) as reads:
+            reads.audit_quiet = lambda: observed.quiet
+            observed.on_native_read = reads.file
+            observed.on_native_write = reads.native_wrote
+            try:
+                yield reads
+            finally:
+                observed.on_native_read = None
+                observed.on_native_write = None
+    finally:
+        if inserted and anchor in sys.path:
+            # Only the cell resolves against the project: what the harness imports after
+            # (serializing its outputs) is recorded nowhere.
+            sys.path.remove(anchor)
 
 
 @contextmanager
@@ -552,3 +573,198 @@ def recording(excluded: Iterable[str]) -> Generator[Reads]:
                 setattr(cls, attr, original)
         if finder in sys.meta_path:
             sys.meta_path.remove(finder)
+
+
+def warm_list(notebook_dir: str) -> list[str]:
+    """What a warm worker imports before its cell: the notebook's declared dependencies."""
+    import tomllib
+
+    try:
+        with open(os.path.join(notebook_dir, "pyproject.toml"), "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    result = []
+    for dep in data.get("project", {}).get("dependencies", []):
+        name = dep.split("[")[0].split(";")[0]
+        for sep in (">=", "==", "!=", "~=", "<", ">"):
+            name = name.split(sep)[0]
+        result.append(name.strip())
+    return result
+
+
+def watch_state(path: str, mode: bool | None) -> str:
+    """What :func:`probe_environment` watches at *path*: its listing (``True``), its bytes
+    (``False``), or (``None``) its stat alone, for a file too big to read on every key."""
+    if mode is not None:
+        return observe(path, listing=mode)[0]
+    try:
+        st = os.stat(path)
+    except OSError:
+        return ABSENT
+    return f"stat:{st.st_dev}:{st.st_ino}:{st.st_size}:{st.st_mtime_ns}"
+
+
+def _installs(path: str) -> bool:
+    try:
+        return any(n.endswith(".dist-info") for n in os.listdir(path))
+    except OSError:
+        return False
+
+
+def _direct_url(dist: Any) -> dict[str, Any] | None:
+    import json
+
+    try:
+        found = json.loads(dist.read_text("direct_url.json") or "null")
+    except ValueError:
+        return None
+    return found if isinstance(found, dict) else None
+
+
+def base_candidates(anchor: str, names: Iterable[str]) -> dict[str, str]:
+    """Where a top-level import of each of *names* would look first, under *anchor* at
+    ``sys.path[0]``, and what is there now: one that is no longer absent shadows a module
+    loaded before the cell started, which no import of its records."""
+    found: dict[str, str] = {}
+    for name in names:
+        package = os.path.join(anchor, name)
+        paths = [package]
+        paths += [os.path.join(package, "__init__" + suffix) for suffix in _SUFFIXES]
+        paths += [package + suffix for suffix in _SUFFIXES]
+        for path in paths:
+            found[path] = observe(path)[0]
+    return found
+
+
+def base_names_to_check(anchor: str, names: Iterable[str], base: dict[str, str]) -> list[str]:
+    """Those of *names* with something at one of their places under *anchor* when *base*
+    was recorded: a change in one (an edit, an ``__init__.py`` added to a folder there)
+    leaves the anchor's own listing as it was."""
+    present = {path for path, state in base.items() if state != ABSENT}
+    found = []
+    for name in names:
+        package = os.path.join(anchor, name)
+        if package in present or any(package + s in present for s in _SUFFIXES):
+            found.append(name)
+    return found
+
+
+def probe_environment(
+    anchor: str, sites: list[str], notebook_dir: str | None = None
+) -> dict[str, Any]:
+    """A scratchpad's environment identity E's parts, as a cell started here would find
+    them (design 4.2): the distributions D, the interpreter build, the import resolution I,
+    the base record B; and what to observe to know they still hold.
+
+    *sites* are the project's site-packages an overlay adds. What a warm worker of
+    *notebook_dir* imports before its cell (:func:`warm_list`) is imported here first
+    too. Run as the harness, so ``sys.path`` and the modules loaded before a cell are a
+    cell's.
+    """
+    import hashlib as _hashlib
+    import importlib.metadata as metadata
+    import platform
+    import re
+
+    for module_name in warm_list(notebook_dir) if notebook_dir else []:
+        try:
+            __import__(module_name)
+        except Exception:  # noqa: BLE001 - one the worker fails to import, it has not loaded
+            continue
+    path = [anchor, *(p for p in sys.path if p != anchor)]
+    # A folder installed into (a dist-info in it) a ``.pth`` put on the path; never one on
+    # PYTHONPATH, whose code is the user's: a run records what it reads there.
+    chosen = set(filter(None, os.environ.get("PYTHONPATH", "").split(os.pathsep)))
+    roots = sorted(
+        set(site.getsitepackages())
+        | set(sites)
+        | {p for p in sys.path if p and p not in chosen and _installs(p)}
+    )
+    watched: dict[str, bool | None] = {}
+    for root in roots:
+        watched[root] = True
+        try:
+            pth = sorted(n for n in os.listdir(root) if n.endswith(".pth"))
+        except OSError:
+            pth = []
+        watched.update((os.path.join(root, n), False) for n in pth)
+    # What can rewrite the path and the hooks at startup, wherever site would find it.
+    for entry in path[1:]:
+        for name in ("sitecustomize.py", "usercustomize.py"):
+            watched.setdefault(os.path.join(entry, name), False)
+    watched[os.path.join(sys.prefix, "pyvenv.cfg")] = False
+    if notebook_dir:
+        # Its dependencies are the warm list.
+        watched[os.path.join(notebook_dir, "pyproject.toml")] = False
+    # The build: an interpreter upgraded in place is a new binary and standard library.
+    watched[os.path.realpath(sys.executable)] = None
+    watched[os.path.realpath(os.__file__)] = None
+
+    distributions: set[str] = set()
+    editables: list[dict[str, Any]] = []
+    for dist in metadata.distributions():
+        name = dist.metadata.get("Name")
+        if not name:
+            continue
+        canonical = re.sub(r"[-_.]+", "-", name).lower()
+        url = _direct_url(dist)
+        if url and url.get("dir_info", {}).get("editable"):
+            # Its code is keyed by what runs read; where it points, and how, is here.
+            files = {}
+            for entry in dist.files or ():
+                base = os.path.basename(str(entry))
+                located = str(dist.locate_file(entry))
+                if base.endswith(".pth") or base.startswith("__editable__"):
+                    files[base] = observe(located)[0]
+                    watched[located] = False
+                elif base == "direct_url.json":
+                    watched[located] = False
+            editables.append({"name": canonical, "url": url.get("url"), "files": files})
+            continue
+        entry = canonical + "==" + dist.version
+        if url:
+            # From a URL, a VCS or a path: one version can be any code, so what it installed.
+            record = (dist.read_text("RECORD") or "").encode()
+            entry += " @" + _hashlib.sha256(record).hexdigest()
+            # A reinstall at the same version leaves every listing as it was.
+            for listed in dist.files or ():
+                if listed.name == "RECORD" and listed.parent.name.endswith(".dist-info"):
+                    watched[str(dist.locate_file(listed))] = False
+        distributions.add(entry)
+
+    user = site.getusersitepackages()
+    watched[user] = True
+    # Loaded before the cell: a top-level one found on the path, which the anchor could
+    # shadow (a builtin or frozen one it cannot).
+    names = sorted(
+        {
+            name.partition(".")[0]
+            for name, module in list(sys.modules.items())
+            if not name.startswith("_nb_")
+            and getattr(getattr(module, "__spec__", None), "has_location", False)
+        }
+    )
+    identity = {
+        "distributions": sorted(distributions),
+        "build": [
+            sys.implementation.name,
+            platform.python_version(),
+            getattr(sys, "abiflags", ""),
+            sysconfig.get_platform(),
+        ],
+        "path": path,
+        "meta_path": [_name(finder) for finder in sys.meta_path],
+        "path_hooks": [_name(hook) for hook in sys.path_hooks],
+        "editables": sorted(editables, key=lambda e: e["name"]),
+        "variables": {k: os.environ.get(k) for k in IMPORT_VARIABLES},
+        "user_site": [bool(site.ENABLE_USER_SITE), user in sys.path],
+        "base": base_candidates(anchor, names),
+    }
+    return {
+        "identity": identity,
+        "observed": {p: [mode, watch_state(p, mode)] for p, mode in watched.items()},
+        "anchor_listing": observe(anchor, listing=True)[0],
+        "base_names": names,
+        "roots": roots,
+    }

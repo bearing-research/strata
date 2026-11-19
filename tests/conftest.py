@@ -230,8 +230,11 @@ def _reset_process_globals():
     ``strata.server._state``, the tenant registry and the artifact-store singleton are shared
     by every test on an xdist worker, so a leaked value fails an unrelated later test.
     """
-    yield
+    # Imported before the test: its first import builds the app, which reads the home
+    # folder, and a test may have made that fail by the time it is torn down.
     import strata.server as server_module
+
+    yield
 
     # Drain stream-cleanup tasks: tests that bypass the lifespan (a bare
     # ``TestClient(app)``) would otherwise orphan the TTL tasks, which log "Task was

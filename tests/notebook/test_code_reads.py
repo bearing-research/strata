@@ -480,3 +480,48 @@ def test_a_package_with_an_empty_path_searches_nowhere(tmp_path):
     )
 
     assert not [path for path in got["record"]["reads"] if "child" in path]
+
+
+_FOR_RUN = """\
+import importlib.util, json, sys, types
+spec = importlib.util.spec_from_file_location("_code_reads", {module!r})
+code_reads = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(code_reads)
+manifest = {{"code_reads": {{"exclude": [], "anchor": {anchor!r}}}}}
+with code_reads.for_run(manifest, types.SimpleNamespace(quiet=False)) as reads:
+    during = sys.path[0]
+print(json.dumps({{"during": during, "after": {anchor!r} in sys.path}}))
+"""
+
+
+def test_the_project_is_on_the_path_for_the_cell_alone(tmp_path):
+    """What the harness imports after the cell (serializing) never finds the project's."""
+    script = _FOR_RUN.format(module=code_reads.__file__, anchor=str(tmp_path))
+    run = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True, check=True
+    )
+    got = json.loads(run.stdout.splitlines()[-1])
+    assert got == {"during": str(tmp_path), "after": False}
+
+
+def test_the_probe_watches_the_interpreter_and_what_rewrites_the_path(tmp_path, monkeypatch):
+    """An interpreter upgraded in place, a ``sitecustomize`` edited, a ``pyvenv.cfg``."""
+    probed = code_reads.probe_environment(str(tmp_path), [])
+    observed = probed["observed"]
+    assert observed[os.path.realpath(sys.executable)][0] is None
+    assert observed[os.path.realpath(os.__file__)][0] is None
+    assert observed[os.path.join(sys.prefix, "pyvenv.cfg")][0] is False
+    entry = next(p for p in sys.path if p and os.path.isdir(p))
+    assert observed[os.path.join(entry, "sitecustomize.py")][0] is False
+
+
+def test_a_folder_on_pythonpath_is_the_users_code_not_an_install_root(tmp_path, monkeypatch):
+    """`pip install -t vendor` on PYTHONPATH: its modules are recorded as a run's reads."""
+    vendor, installed = tmp_path / "vendor", tmp_path / "installed"
+    for folder in (vendor, installed):
+        (folder / "x-1.0.dist-info").mkdir(parents=True)
+        monkeypatch.syspath_prepend(str(folder))
+    monkeypatch.setenv("PYTHONPATH", str(vendor))
+    roots = code_reads.probe_environment(str(tmp_path / "anchor"), [])["roots"]
+    assert str(vendor) not in roots
+    assert str(installed) in roots

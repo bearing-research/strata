@@ -70,6 +70,7 @@ from strata.notebook.mounts import (
     moved_parts,
 )
 from strata.notebook.provenance import safe_filename_stem
+from strata.notebook.read_audit import UNDECLARED_IMPORT, UNDECLARED_LISTING, UNDECLARED_READ
 from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
 from strata.notebook.run_scope import RunScope
 from strata.notebook.serializer import ContentType
@@ -89,6 +90,9 @@ if TYPE_CHECKING:
     from strata.notebook.executor_host import ExecutorHost
 
 logger = logging.getLogger(__name__)
+
+# What a run keyed on its reads (``code_keys``) is keyed on, so the audit need not warn.
+_KEYED_READS = frozenset({UNDECLARED_IMPORT, UNDECLARED_READ, UNDECLARED_LISTING})
 
 _OUTPUT_VARIABLE = re.compile(r"_var_([^@]+)")
 
@@ -848,6 +852,14 @@ async def run_python_cell(
                     code_reads, code_stat = code["reads"], code["stat"]
                     provenance_hash = code_key(lookup_hash, code_reads)
                     recorded_code = True
+                    # Keyed on what it imported, opened and listed: "its cached result will
+                    # not change when that does" is no longer so.
+                    exec_result = dataclasses.replace(
+                        exec_result,
+                        read_audit=[
+                            f for f in exec_result.read_audit if f["code"] not in _KEYED_READS
+                        ],
+                    )
 
             # ⑤ Store artifacts for consumed variables.
             if exec_result.success:

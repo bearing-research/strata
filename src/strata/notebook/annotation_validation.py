@@ -156,7 +156,7 @@ def _validate_import_env(
     cell: CellState, notebook_state: NotebookState
 ) -> list[AnnotationDiagnostic]:
     """``env_moves_imports``: a scratchpad cell's ``# @env`` sets where imports resolve."""
-    from strata.notebook.env import IMPORT_VARIABLES
+    from strata.notebook.code_reads import IMPORT_VARIABLES
 
     if not notebook_state.scratchpad:
         return []

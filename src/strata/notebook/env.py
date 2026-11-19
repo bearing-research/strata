@@ -127,18 +127,8 @@ def collect_referenced_env_keys(source: str, language: str = "python") -> set[st
 # what that environment holds.
 OVERLAY_DIR = ".venv-overlay"
 ATTACHED_IDENTITY = ".strata-identity"
-# What the overlay installed, from which base, and where the project's packages are.
+# What the overlay installed, and from which base.
 OVERLAY_STATE = ".strata-overlay.json"
-
-# They change where imports resolve, which a scratchpad cell's key does not follow, so its
-# ``# @env`` may not set them.
-IMPORT_VARIABLES = (
-    "PYTHONPATH",
-    "PYTHONHOME",
-    "PYTHONSAFEPATH",
-    "PYTHONNOUSERSITE",
-    "PYTHONPLATLIBDIR",
-)
 
 
 def attached_identity(notebook_dir: Path) -> bytes | None:
@@ -157,15 +147,39 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
     same resolved dependencies get one hash. ``renv.lock`` is folded under a
     ``\\0renv=`` tag so it cannot collide with uv.lock bytes. Missing lockfiles
     contribute nothing, so with neither present this is the digest of empty input.
-    An attached scratchpad's environment identity stands in for ``uv.lock``.
+    An attached scratchpad's environment identity, as last found, stands in for
+    ``uv.lock``. What a sync changed and what a publish attests; a cell's key folds the
+    identity checked again (:func:`environment_hash`).
     """
-    hasher = hashlib.sha256()
+    return _lockfile_hash(notebook_dir, attached_identity(notebook_dir), None)
+
+
+def environment_hash(notebook_dir: Path, *, check: bool = True) -> str:
+    """:func:`compute_lockfile_hash` for a cell's key: a scratchpad's environment identity
+    E checked to still hold (probed again if not), and an owned one's folded beside its
+    ``uv.lock``. Checking may probe, so never on the event loop; without *check*, E as
+    last found."""
+    from strata.notebook.project_env import current_identity, owned_identity
+
     attached = attached_identity(notebook_dir)
+    if attached is not None:
+        return _lockfile_hash(
+            notebook_dir, current_identity(notebook_dir) if check else attached, None
+        )
+    return _lockfile_hash(notebook_dir, None, owned_identity(notebook_dir, check=check))
+
+
+def _lockfile_hash(notebook_dir: Path, attached: bytes | None, owned: bytes | None) -> str:
+    hasher = hashlib.sha256()
     if attached is not None:
         hasher.update(b"\0attached=")
         hasher.update(attached)
     else:
         _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
+        if owned is not None:
+            # A scratchpad's own environment: also where imports resolve.
+            hasher.update(b"\0environment=")
+            hasher.update(owned)
     # Tag prefix keeps a uv-only and an renv-only notebook with identical
     # lockfile bytes from colliding.
     _fold_lockfile_into_hash(hasher, notebook_dir, "renv.lock", tag=b"\0renv=")
@@ -412,7 +426,7 @@ class LocalPackages:
     enter by content, through the notebook's digest cache. One built from a directory
     runs from what the last sync installed, so its installed ``RECORD``.
 
-    ``lockfile_hash`` is :func:`compute_lockfile_hash` as read with them, so keying many
+    ``lockfile_hash`` is :func:`environment_hash` as read with them, so keying many
     cells reads the lock once.
     """
 
@@ -433,18 +447,19 @@ class LocalPackages:
     def moved(self) -> str | None:
         """``local package <name>`` for one whose content is not what it was when read, or
         ``None``: read after a run, which imports from the live source."""
-        now = local_packages(self.notebook_dir).keys
+        now = local_packages(self.notebook_dir, check=False).keys
         changed = sorted(n for n in self.keys.keys() | now.keys() if self.keys.get(n) != now.get(n))
         return f"{LOCAL_PACKAGE}{changed[0]}" if changed else None
 
 
-def local_packages(notebook_dir: Path) -> LocalPackages:
+def local_packages(notebook_dir: Path, *, check: bool = True) -> LocalPackages:
     """The notebook's local path packages as they are now (see :class:`LocalPackages`).
 
-    Reads every file of an editable one the digest cache holds no digest for, so callers
-    on the event loop run it in a thread.
+    Reads every file of an editable one the digest cache holds no digest for, and checks
+    a scratchpad's environment identity (*check*, :func:`environment_hash`), so callers
+    on the event loop run it in a thread, or pass ``check=False``.
     """
-    lockfile_hash = compute_lockfile_hash(notebook_dir)
+    lockfile_hash = environment_hash(notebook_dir, check=check)
     if attached_identity(notebook_dir) is not None:
         # The identity covers what is installed; an editable's code, what runs read.
         return LocalPackages(notebook_dir, lockfile_hash)
@@ -593,11 +608,10 @@ def audit_scope(notebook_dir: Path) -> dict[str, Any]:
 def _attached_audit_scope(notebook_dir: Path) -> dict[str, Any]:
     """A scratchpad in its project's environment: the folders its distributions are
     installed in are the environment, which the identity keys. Editable sources are not."""
-    try:
-        state = json.loads((notebook_dir / OVERLAY_DIR / OVERLAY_STATE).read_text("utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return {"package_roots": list(state.get("environment") or [])}
+    from strata.notebook.project_env import read_observed
+
+    record = read_observed(notebook_dir) or {}
+    return {"package_roots": list(record.get("roots") or [])}
 
 
 def _read_audit_scope(notebook_dir: Path, site_dirs: list[Path]) -> dict[str, Any]:
@@ -692,9 +706,10 @@ def compute_execution_env_hash(
     the provenance-relevant env vars.
 
     *local_packages* is :func:`local_packages`, read once by a caller keying several cells.
-    Equals ``compute_lockfile_hash`` when the lock names no local package and
-    ``runtime_env`` and ``runtime_identity`` are empty. The local packages stay out of
-    ``compute_lockfile_hash``, which says whether the venv was synced from the lock.
+    Equals :func:`environment_hash` when the lock names no local package and
+    ``runtime_env`` and ``runtime_identity`` are empty. The local packages and a checked
+    environment identity stay out of ``compute_lockfile_hash``, which says whether the
+    venv was synced from the lock.
     """
     lockfile_hash = local_packages.lockfile_hash
     local = local_packages.key

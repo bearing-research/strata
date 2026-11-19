@@ -886,7 +886,8 @@ class NotebookSession:
         with one_policy_read():
             prefetched = self._outside_world_fingerprints()
             # Once for every cell, and outside the lock: it reads the files of a package.
-            packages = local_packages(self.path)
+            # On the loop (no ``check_reads``), the environment identity as last found.
+            packages = local_packages(self.path, check=check_reads)
             if check_reads:
                 # Outside the lock, as the changed reads: the stats may be slow.
                 self._observe_code_keys()
