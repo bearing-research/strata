@@ -861,10 +861,12 @@ class _Tee(io.StringIO):
 
 
 def main():
-    if len(sys.argv) > 2 and sys.argv[1] == "--probe-environment":
-        # A scratchpad's environment identity, as a cell started here finds it.
-        # Its working directory is the notebook's, whose dependencies a warm worker loads.
-        probed = _code.probe_environment(sys.argv[2], sys.argv[3:], os.getcwd())
+    if len(sys.argv) > 3 and sys.argv[1] == "--probe-environment":
+        # A scratchpad's environment identity, as a cell started here finds it: argv is
+        # the anchor, the warm list (JSON, or ``-`` to derive it), the overlay's sites.
+        # Its working directory is the notebook's.
+        warm = None if sys.argv[3] == "-" else orjson.loads(sys.argv[3])
+        probed = _code.probe_environment(sys.argv[2], sys.argv[4:], os.getcwd(), warm)
         print(orjson.dumps(probed).decode())
         return
     _lifeline.watch_lifeline()
@@ -897,6 +899,14 @@ def main():
             stderr_buffer = _Tee(sys.stderr)
         source = manifest.get("source", "")
         output_dir = Path(manifest.get("output_dir", "/tmp/strata_output"))
+        # A scratchpad's base image, as its warm worker loads it before any manifest: one
+        # base on either path, so its observations (and key) do not depend on which ran.
+        for module_name in (manifest.get("code_reads") or {}).get("warm") or []:
+            try:
+                __import__(module_name)
+            except ImportError:
+                # Not importable here; a warm worker skips it the same way.
+                continue
         _work_dir.enter(manifest)
 
         # Before deserializing, not just around the body: a library that reads

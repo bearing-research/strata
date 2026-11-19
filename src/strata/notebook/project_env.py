@@ -36,6 +36,10 @@ _PTH = "_strata_project.pth"
 _TIMEOUT = 600
 # What the identity was probed from, and what to observe to know it still holds.
 _OBSERVED = ".strata-observed.json"
+# A probe imports the warm list (torch, say), so it may take a while: all its rounds.
+_PROBE_TIMEOUT = 300
+# Each round with a dropped warm entry shortens the list; one this unsettled loads none.
+_WARM_ROUNDS = 5
 # An owned scratchpad's E, beside its own ``.venv`` (which ``uv sync`` may rebuild).
 _OWNED = Path(".strata") / "environment"
 _HARNESS = Path(__file__).parent / "harness.py"
@@ -429,26 +433,41 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
     overlay = _identity_dir(notebook_dir, owned)
     overlay.mkdir(parents=True, exist_ok=True)
     (overlay / ATTACHED_IDENTITY).unlink(missing_ok=True)
+    import time
+
     env, spawn = _cell_env()
-    done = subprocess.run(
-        [
-            str(_cell_python(notebook_dir, owned)),
-            str(_HARNESS),
-            "--probe-environment",
-            str(notebook_dir.parent),
-            *sites,
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-        cwd=notebook_dir,
-        env=env,
-        **spawn,
-    )
-    # The last line: what a ``.pth`` or an import prints comes before it.
-    lines = done.stdout.strip().splitlines()
-    probed = json.loads(lines[-1] if lines else "")
+    warm: list[str] | None = None
+    # One deadline for every round: each waits under E's lock, which every key takes.
+    deadline = time.monotonic() + _PROBE_TIMEOUT
+    # A warm entry that loads tracked code is dropped; a later one may have loaded it too,
+    # unseen while the dropped one held it, so the rest are tried again in a fresh process.
+    # A list still unsettled after that many rounds is given up: none always settles.
+    for round_ in range(_WARM_ROUNDS + 1):
+        if round_ == _WARM_ROUNDS:
+            warm = []
+        done = subprocess.run(
+            [
+                str(_cell_python(notebook_dir, owned)),
+                str(_HARNESS),
+                "--probe-environment",
+                str(notebook_dir.parent),
+                "-" if warm is None else json.dumps(warm),
+                *sites,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=max(deadline - time.monotonic(), 1.0),
+            cwd=notebook_dir,
+            env=env,
+            **spawn,
+        )
+        # The last line: what a ``.pth`` or an import prints comes before it.
+        lines = done.stdout.strip().splitlines()
+        probed = json.loads(lines[-1] if lines else "")
+        if not probed["warm_dropped"]:
+            break
+        warm = probed["warm"]
     identity = hashlib.sha256(json.dumps(probed["identity"], sort_keys=True).encode()).hexdigest()
     record = {
         "sites": sites,
@@ -458,6 +477,7 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
         "base_names": probed["base_names"],
         "base": probed["identity"]["base"],
         "roots": probed["roots"],
+        "warm": probed["warm"],
     }
     _write(overlay / _OBSERVED, json.dumps(record, indent=2) + "\n")
     _write(overlay / ATTACHED_IDENTITY, identity)
@@ -492,6 +512,57 @@ _identity_locks_lock = threading.Lock()
 _failed: dict[tuple[Path, bool], tuple[str, bytes, float]] = {}
 # How long a failure stands with nothing it could see changed, before one more try.
 _RETRY_SECONDS = 300.0
+
+
+def _owned(notebook_dir: Path) -> bool:
+    record = read_record(notebook_dir)
+    return record is not None and record.get("mode") == "owned"
+
+
+def environment_record(notebook_dir: Path) -> dict[str, Any] | None:
+    """What a scratchpad's E was last probed from: the attached overlay's, or the owned
+    environment's."""
+    return read_observed(notebook_dir, owned=_owned(notebook_dir))
+
+
+def base_image(notebook_dir: Path) -> tuple[str, list[str]] | None:
+    """What a scratchpad's warm worker spawned now is built from: E as last found (its
+    stamp) and the warm list probed with it; ``None`` before any probe, or for a notebook.
+    """
+    stamp = _identity_dir(notebook_dir, _owned(notebook_dir)) / ATTACHED_IDENTITY
+    try:
+        # The identity, the list, the identity: a probe writes the list then the
+        # identity, so one between the reads cannot pair its list with the old identity.
+        identity = stamp.read_text()
+        record = environment_record(notebook_dir)
+        again = stamp.read_text()
+    except OSError:
+        return None
+    if record is None or again != identity:
+        return None
+    return identity, [str(m) for m in record.get("warm") or []]
+
+
+def base_image_holds(notebook_dir: Path, stamp: str | None) -> bool:
+    """Whether a warm worker built on *stamp* may run a cell now (design 4.2): E is the
+    one it was built on, and that E's base record B still holds. Stats, so off the loop.
+    """
+    from strata.notebook.code_reads import base_candidates
+
+    found = base_image(notebook_dir)
+    if found is None or stamp is None:
+        # Built with no E, it may run only while there is none.
+        return found is None and stamp is None
+    if found[0] != stamp:
+        return False
+    record = environment_record(notebook_dir) or {}
+    base = record.get("base") or {}
+    now = base_candidates(str(notebook_dir.parent), record.get("base_names") or [])
+    if all(base.get(path) == seen for path, seen in now.items()):
+        return True
+    # E's B no longer holds: found again now, so the replacement is built on the new one.
+    current_identity(notebook_dir, owned=_owned(notebook_dir))
+    return False
 
 
 def _identity_lock(notebook_dir: Path, *, owned: bool) -> threading.Lock:

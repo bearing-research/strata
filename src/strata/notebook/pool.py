@@ -45,6 +45,8 @@ class WarmProcess:
     process: asyncio.subprocess.Process
     created_at: float
     ready: bool = False
+    # A scratchpad worker's base image: the environment identity it was built on.
+    stamp: str | None = None
 
 
 class WarmProcessPool:
@@ -63,6 +65,8 @@ class WarmProcessPool:
         python_executable: str | Path = "python",
         worker_command: list[str] | None = None,
         ready_timeout_seconds: float = 60.0,
+        base_image: Callable[[], tuple[str, list[str]] | None] | None = None,
+        base_image_holds: Callable[[str | None], bool] | None = None,
     ):
         """Initialize the warm process pool.
 
@@ -73,12 +77,18 @@ class WarmProcessPool:
             ready_timeout_seconds: Wait for the worker's "ready" line. Long, because nothing
                 waits on it and a first start is slow: Python compiles a fresh environment's
                 modules, R activates renv.
+            base_image: A scratchpad's (design 4.2): what a worker spawned now imports
+                before its cell, and the stamp it is built on (``None``: nothing, unstamped).
+            base_image_holds: Whether a worker on a stamp may still run a cell; one that
+                may not is killed when claimed, and replaced.
         """
         self.notebook_dir = Path(notebook_dir)
         self.pool_size = pool_size
         self.python_executable = str(python_executable)
         self.worker_command = list(worker_command) if worker_command else None
         self.ready_timeout_seconds = ready_timeout_seconds
+        self.base_image = base_image
+        self.base_image_holds = base_image_holds
         self._available: asyncio.Queue[WarmProcess] = asyncio.Queue()
         self._warming: int = 0  # Processes currently starting up
         self._started: bool = False
@@ -111,6 +121,7 @@ class WarmProcessPool:
             return
         self._warming += 1
         try:
+            stamp: str | None = None
             if self.worker_command is not None:
                 command = lifeline_command(self.worker_command)
             else:
@@ -120,6 +131,11 @@ class WarmProcessPool:
                     str(worker_script),
                     str(self.notebook_dir),
                 ]
+                if self.base_image is not None:
+                    found = await asyncio.to_thread(self.base_image)
+                    stamp, warm = found if found is not None else (None, [])
+                    # The base image a cold run of the scratchpad imports too.
+                    command += ["--warm", json.dumps(warm)]
 
             # Process-group leader so cancel/drain kills the whole tree
             # (DataLoader children, fork servers, ...).
@@ -163,6 +179,7 @@ class WarmProcessPool:
                         process=process,
                         created_at=time.time(),
                         ready=True,
+                        stamp=stamp,
                     )
                     await self._available.put(warm_proc)
                     logger.debug(f"Warm process spawned and ready (pid={process.pid})")
@@ -188,16 +205,32 @@ class WarmProcessPool:
         # handed out and then killed by the next invalidate cycle.
         if not self._started:
             return None
-        try:
-            warm_proc = self._available.get_nowait()
-            return warm_proc
-        except asyncio.QueueEmpty:
-            return None
+        while True:
+            try:
+                warm_proc = self._available.get_nowait()
+            except asyncio.QueueEmpty:
+                return None
+            if self.base_image_holds is None:
+                return warm_proc
+            holds = await asyncio.to_thread(self.base_image_holds, warm_proc.stamp)
+            if not self._started:
+                # Drained while it was checked, off the queue where the drain looked.
+                await terminate_subprocess_tree(warm_proc.process)
+                return None
+            if holds:
+                return warm_proc
+            # Its preloaded modules predate the environment, or a project file now
+            # shadows one of them: what it runs would not be what the key says.
+            logger.info("Discarding a warm worker whose base image no longer holds")
+            await self.release_and_replace(warm_proc)
 
     async def release_and_replace(self, process: WarmProcess) -> None:
         """Kill a used process and spawn a replacement in the background."""
         if process.process and process.process.returncode is None:
             await terminate_subprocess_tree(process.process)
+        if not self._started:
+            # Drained meanwhile: a spawn now would refill the pool behind it.
+            return
 
         task = asyncio.create_task(self._spawn_warm_process())
         self.track_background_task(task)

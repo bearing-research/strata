@@ -159,6 +159,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   is re-checked before every lookup with a few hundred stats, so an install, a
   repointed editable or a new `orjson.py` in the project misses rather than replays.
   (#1587)
+- **A scratchpad's cell starts with the same modules loaded on a warm worker and a cold
+  run, and none of them is the project's code.** What the project and the scratchpad
+  declare is imported first on both paths, less any dependency that loads code a run
+  records (an editable sibling, or a package importing one), which the cell imports
+  itself. A warm worker built before the environment changed, or before a project file
+  began to shadow a module it loaded, is replaced when claimed. (#1588)
 ### Changed
 - **A scratchpad's first call takes half the time.** Its daemon no longer
   loads the scan plane (Iceberg, Parquet, pandas) at start: a server started for a

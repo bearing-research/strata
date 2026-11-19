@@ -1036,10 +1036,13 @@ def test_a_notebook_and_an_unbuilt_owned_scratchpad_key_on_their_lock_alone(tmp_
     empty = create_notebook(tmp_path / "empty", "empty", initialize_environment=False)
     assert environment_hash(unbuilt) == environment_hash(empty)
 
-    # Owned once, attached now with no overlay built: its old `.venv` keys nothing.
+    # Owned once, attached now with no overlay built: its old `.venv` keys nothing, and
+    # with no identity yet it is probed (failing here) rather than keyed on its lock.
     moved = _owned(tmp_path / "moved")
     write_record(moved, ProjectEnv(tmp_path / "moved", "attached", Path("/p/python"), ".venv"))
-    assert environment_hash(moved) == environment_hash(empty)
+    unprobed = environment_hash(moved)
+    assert unprobed != environment_hash(empty)
+    assert environment_hash(moved) == unprobed
 
 
 def test_the_lockfile_hash_never_probes_and_the_key_does(project, monkeypatch):
@@ -1180,3 +1183,176 @@ def test_a_pth_that_prints_does_not_fail_the_probe(project):
     (_site(project / ".venv") / "noisy.pth").write_text("import sys; print('noise')\n")
     notebook = _attached(project)
     assert not (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).read_bytes().startswith(b"unprobed")
+
+
+def _declare(project: Path, *deps: str) -> None:
+    """*project*'s declared dependencies: a PEP 621 project with no uv.lock is never synced."""
+    listed = ", ".join(json.dumps(d) for d in deps)
+    (project / "pyproject.toml").write_text(
+        f'[project]\nname = "proj"\nversion = "0"\ndependencies = [{listed}]\n'
+    )
+
+
+def test_the_warm_list_is_the_modules_the_declared_distributions_install(tmp_path):
+    from strata.notebook.code_reads import scratch_warm_list
+
+    _declare(tmp_path, "PyYAML>=6", "attrs")
+    notebook = tmp_path / "nb"
+    notebook.mkdir()
+    warm = scratch_warm_list(str(tmp_path), str(notebook))
+    assert {"yaml", "attr", "attrs"} <= set(warm)
+    assert "PyYAML" not in warm and "_yaml" not in warm
+
+
+def test_a_warm_entry_that_loads_tracked_code_is_dropped_and_so_is_one_reaching_it(project):
+    """An editable sibling in the base image would be invisible to every run's record."""
+    from strata.notebook.project_env import environment_record
+
+    site = _site(project / ".venv")
+    source = project / "packages" / "localdep"
+    source.mkdir(parents=True)
+    (source / "localdep.py").write_text("VALUE = 1\n")
+    (site / "localdep.pth").write_text(f"{source}\n")
+    # Installed, but it imports the sibling: seen only once the sibling is not loaded first.
+    (site / "wrapper.py").write_text("import localdep\n")
+    _declare(project, "localdep", "wrapper", "projmod")
+    warm = (environment_record(_attached(project)) or {})["warm"]
+    assert "projmod" in warm
+    assert "localdep" not in warm and "wrapper" not in warm
+
+
+def test_a_worker_built_before_a_shadowing_file_no_longer_holds(project):
+    from strata.notebook.project_env import base_image, base_image_holds
+
+    _declare(project, "projmod")
+    notebook = _attached(project)
+    found = base_image(notebook)
+    assert found is not None and "projmod" in found[1]
+    stamp = found[0]
+    assert base_image_holds(notebook, stamp)
+    assert not base_image_holds(notebook, None)
+    (project / "projmod.py").write_text("")
+    # Before any key checked E again: the worker's own B. Found failing, E is probed
+    # again, so the worker replacing it is built on the new one.
+    assert not base_image_holds(notebook, stamp)
+    now = base_image(notebook)
+    assert now is not None and now[0] != stamp
+    assert base_image_holds(notebook, now[0])
+    # The new E's B holds, but the worker was built on the old one.
+    assert not base_image_holds(notebook, stamp)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_server")
+async def test_a_cold_run_and_a_warm_worker_preload_the_same_base_image(
+    project, manager, monkeypatch
+):
+    from strata.notebook import session as session_module
+    from tests.conftest import LIVE_SERVER_TIMEOUT
+    from tests.notebook.pool_helpers import warm_again
+
+    # No pool of the session's own: the cold run is cold, and the one below is the only
+    # one, which the manager drains.
+    real = session_module._session_setting
+    monkeypatch.setattr(
+        session_module,
+        "_session_setting",
+        lambda name: 0 if name == "notebook_warm_pool_size" else real(name),
+    )
+    _declare(project, "projmod")
+    session = manager.open_notebook(_scratchpad(project))
+    assert session.warm_pool is None
+    probe = "import os, sys\nf\"{os.path.basename(sys.argv[0])} {'projmod' in sys.modules}\""
+    cold = await mcp_server._scratch_run(manager, probe)
+    assert cold["status"] == "ok", str(cold)
+    assert "harness.py" in cold["value"] and "True" in cold["value"], cold["value"]
+
+    pool = session._python_warm_pool()
+    pool.pool_size = 1
+    pool.ready_timeout_seconds = LIVE_SERVER_TIMEOUT
+    session.warm_pool = pool
+    await pool.start()
+    await warm_again(pool)
+    warm = await mcp_server._scratch_run(manager, "x = 1\n" + probe)
+    assert warm["status"] == "ok", str(warm)
+    assert "pool_worker.py" in warm["value"] and "True" in warm["value"], warm["value"]
+
+    # An env override reaches a library only if it is imported after: no base image,
+    # and no warm worker, whose base came before any override.
+    await warm_again(pool)
+    overridden = await mcp_server._scratch_run(manager, "# @env FLAG=1\n" + probe)
+    assert overridden["status"] == "ok", str(overridden)
+    assert "harness.py False" in overridden["value"], overridden["value"]
+
+
+def test_declaring_a_dependency_in_the_project_changes_the_base_image(project):
+    from strata.notebook.project_env import current_identity, environment_record
+
+    _declare(project)
+    notebook = _attached(project)
+    first = current_identity(notebook)
+    assert "projmod" not in (environment_record(notebook) or {})["warm"]
+    _declare(project, "projmod")
+    assert current_identity(notebook) != first
+    assert "projmod" in (environment_record(notebook) or {})["warm"]
+
+
+def test_a_chain_of_editable_siblings_settles_in_one_round(project):
+    """Each loaded by the one before: all are dropped together, not one per round."""
+    from strata.notebook.project_env import environment_record
+
+    site = _site(project / ".venv")
+    names = ["sib_a", "sib_b", "sib_c", "sib_d", "sib_e", "sib_f"]
+    for name, after in zip(names, [*names[1:], None], strict=True):
+        source = project / "packages" / name
+        source.mkdir(parents=True)
+        (source / f"{name}.py").write_text(f"import {after}\n" if after else "")
+        (site / f"{name}.pth").write_text(f"{source}\n")
+    _declare(project, *names, "projmod")
+    warm = (environment_record(_attached(project)) or {})["warm"]
+    assert "projmod" in warm
+    assert not set(names) & set(warm)
+
+
+def test_a_warm_entry_a_project_file_shadows_is_left_to_the_cell(project):
+    """Under `python -c` in the project its own file is what an import finds."""
+    from strata.notebook.project_env import environment_record
+
+    _declare(project, "projmod")
+    (project / "projmod.py").write_text("")
+    assert "projmod" not in (environment_record(_attached(project)) or {})["warm"]
+
+
+def test_a_probe_between_the_reads_gives_no_base_image(project, monkeypatch):
+    """Never an older list beside a newer identity."""
+    from strata.notebook import project_env
+
+    _declare(project, "projmod")
+    notebook = _attached(project)
+    real = project_env.environment_record
+    identity = notebook / OVERLAY_DIR / ATTACHED_IDENTITY
+
+    def probed_meanwhile(notebook_dir):
+        found = real(notebook_dir)
+        identity.write_text("another")
+        return found
+
+    monkeypatch.setattr(project_env, "environment_record", probed_meanwhile)
+    assert project_env.base_image(notebook) is None
+
+
+def test_a_cold_run_loads_the_base_image_only_while_e_is_known(project, tmp_path):
+    """After a failed probe no identity stands, and workers spawn with none: so cold too."""
+    from types import SimpleNamespace
+
+    from strata.notebook.executor import CellExecutor
+
+    _declare(project, "projmod")
+    notebook = _attached(project)
+    executor = CellExecutor.__new__(CellExecutor)
+    executor.session = SimpleNamespace(
+        path=notebook, notebook_state=SimpleNamespace(scratchpad=True)
+    )
+    assert "projmod" in executor._harness_fields()["code_reads"]["warm"]
+    (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).unlink()
+    assert executor._harness_fields()["code_reads"]["warm"] == []
