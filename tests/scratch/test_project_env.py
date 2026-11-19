@@ -1379,11 +1379,12 @@ def test_with_a_harness_user_no_code_is_kept_between_runs(project, monkeypatch):
     executor.session = SimpleNamespace(
         path=notebook, notebook_state=SimpleNamespace(scratchpad=True)
     )
+    monkeypatch.setattr(executor_module, "prepare_work_dir", lambda *_args: None)
+    monkeypatch.setattr(executor_module, "resolve_harness_user", lambda: None)
     assert executor._harness_fields()["code_reads"]["pycache"] == str(
         notebook / ".strata" / "pycache"
     )
     monkeypatch.setattr(executor_module, "resolve_harness_user", lambda: object())
-    monkeypatch.setattr(executor_module, "prepare_work_dir", lambda *_args: None)
     assert "pycache" not in executor._harness_fields()["code_reads"]
 
 

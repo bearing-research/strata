@@ -236,14 +236,15 @@ class Reads:
         """The code *loader* compiles from a module's source *data*: from the cache when
         it is the stdlib's compiler, which reads nothing and depends on nothing else."""
         cache = self.code_cache
-        if cache is None or type(loader).source_to_code is not _STDLIB_SOURCE_TO_CODE:
+        compile_ = loader.source_to_code
+        if cache is None or not _stdlib_compiler(compile_):
             # An instrumenting loader (typeguard's, beartype's) compiles code of its own.
-            return loader.source_to_code(data, path)
+            return compile_(data, path)
         with self.own(), self.audit_hushed():
             found = cache.load(digest, path)
         if found is not None:
             return found
-        code = loader.source_to_code(data, path)
+        code = compile_(data, path)
         with self.own(), self.audit_hushed():
             cache.store(digest, path, code)
         return code
@@ -444,6 +445,10 @@ class CodeCache:
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(blob)
+                try:
+                    replaced = os.stat(entry).st_size  # a damaged entry, or another writer's
+                except FileNotFoundError:
+                    replaced = 0
                 os.replace(temp, entry)
             except OSError:
                 os.unlink(temp)
@@ -454,7 +459,7 @@ class CodeCache:
         if self._total is None:
             self._total = self._size()
         else:
-            self._total += len(blob)
+            self._total += len(blob) - replaced
         if self._total > self.limit:
             self._evict()
 
@@ -509,8 +514,18 @@ def _pyc_payload(blob: bytes, header: bytes) -> bytes | None:
 
 
 _code_caches: dict[str, CodeCache] = {}
-# Captured before any cell runs: a loader compiling otherwise is never cached.
-_STDLIB_SOURCE_TO_CODE = machinery.SourceFileLoader.source_to_code
+
+
+def _stdlib_compiler(compile_: Any) -> bool:
+    """Whether a loader's bound ``source_to_code`` is the stdlib's own, by its code: a
+    replacement installed on the class or the instance, before the harness or after,
+    is not, however it names itself."""
+    code = getattr(getattr(compile_, "__func__", None), "__code__", None)
+    return (
+        code is not None
+        and code.co_filename == "<frozen importlib._bootstrap_external>"
+        and code.co_name == "source_to_code"
+    )
 
 
 def code_cache(directory: str) -> CodeCache:

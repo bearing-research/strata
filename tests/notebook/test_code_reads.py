@@ -720,3 +720,70 @@ def test_a_writer_killed_midway_leaves_nothing_that_counts(tmp_path):
     assert not stale.exists()
     assert live.exists()  # another writer's, still being written
     assert cache._total == Path(cache.entry(hashlib.sha256(data).hexdigest(), "m")).stat().st_size
+
+
+def test_a_compiler_swapped_on_one_loader_is_never_cached(tmp_path):
+    """Installed on the instance, not the class: still not the stdlib's compiler."""
+    module = _module(tmp_path, "geom", "first")
+    body = f"""
+    import importlib.machinery as machinery, importlib.util
+    path = {str(module)!r}
+    loader = machinery.SourceFileLoader("geom", path)
+    plain = loader.source_to_code
+    def instrumented(data, path, *args, **kwargs):
+        return plain(data + b"\\nINSTRUMENTED = 1\\n", path)
+    loader.source_to_code = instrumented
+    spec = importlib.util.spec_from_file_location("geom", path, loader=loader)
+    geom = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(geom)
+    value = hasattr(geom, "INSTRUMENTED")
+    """
+    assert _record(tmp_path, body, pycache=str(tmp_path / "pycache"))["value"] is True
+    assert not (tmp_path / "pycache").exists()
+
+
+def test_what_an_instrumenting_loader_reads_is_recorded(tmp_path):
+    module = _module(tmp_path, "geom", "first")
+    config = tmp_path / "transform.toml"
+    config.write_text("on = true\n")
+    body = f"""
+    import importlib.machinery as machinery, importlib.util
+    class Configured(machinery.SourceFileLoader):
+        def source_to_code(self, data, path, *args, **kwargs):
+            open({str(config)!r}).read()
+            return super().source_to_code(data, path, *args, **kwargs)
+    path = {str(module)!r}
+    spec = importlib.util.spec_from_file_location("geom", path, loader=Configured("geom", path))
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+    """
+    reads = _record(tmp_path, body, pycache=str(tmp_path / "pycache"))["record"]["reads"]
+    assert reads[str(config)] == _sha(config)
+
+
+def test_replacing_an_entry_counts_only_the_difference(tmp_path):
+    cache = code_reads.CodeCache(str(tmp_path))
+    data = b"VALUE = 1\n"
+    digest = hashlib.sha256(data).hexdigest()
+    for _ in range(3):
+        cache.store(digest, "m", compile(data, "m", "exec"))
+    assert cache._total == Path(cache.entry(digest, "m")).stat().st_size
+
+
+def test_a_compiler_replaced_before_the_recorder_loaded_is_never_cached(tmp_path):
+    """A .pth or sitecustomize wrapping the stdlib's compiler, even under its name."""
+    module = _module(tmp_path, "geom", "first")
+    script = f"""
+    import functools, importlib.machinery as machinery, importlib.util, json, sys
+    plain = machinery.SourceFileLoader.source_to_code
+    @functools.wraps(plain)
+    def instrumented(self, data, path, *args, **kwargs):
+        return plain(self, data + b"\\nINSTRUMENTED = 1\\n", path, *args, **kwargs)
+    machinery.SourceFileLoader.source_to_code = instrumented
+    from strata.notebook import code_reads
+    with code_reads.recording([], pycache={str(tmp_path / "pycache")!r}):
+        sys.path.insert(0, {str(module.parent)!r})
+        import geom
+    print(json.dumps(hasattr(geom, "INSTRUMENTED")))
+    """
+    assert _script(tmp_path, script) is True
+    assert not (tmp_path / "pycache").exists()
