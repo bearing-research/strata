@@ -36,6 +36,8 @@ _PTH = "_strata_project.pth"
 _TIMEOUT = 600
 # What the identity was probed from, and what to observe to know it still holds.
 _OBSERVED = ".strata-observed.json"
+# An owned scratchpad's E, beside its own ``.venv`` (which ``uv sync`` may rebuild).
+_OWNED = Path(".strata") / "environment"
 _HARNESS = Path(__file__).parent / "harness.py"
 
 logger = logging.getLogger(__name__)
@@ -387,15 +389,25 @@ def reconcile(notebook_dir: Path, project_python: Path, runtime: list[str]) -> O
     return Overlay(python=python, site=[Path(s) for s in probed["site"]], identity=identity)
 
 
-def _probe_identity(notebook_dir: Path, sites: list[str]) -> str:
-    """Probe E in the overlay, as a cell started there would find it, and record it with
-    what proves it; the identity last, so a failure leaves none keying cells."""
+def _identity_dir(notebook_dir: Path, owned: bool) -> Path:
+    return notebook_dir / (_OWNED if owned else OVERLAY_DIR)
+
+
+def _cell_python(notebook_dir: Path, owned: bool) -> Path:
+    return venv_python(notebook_dir / (".venv" if owned else OVERLAY_DIR))
+
+
+def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False) -> str:
+    """Probe E in the cells' interpreter (the overlay, or an owned scratchpad's ``.venv``),
+    as a cell started there would find it, and record it with what proves it; the
+    identity last, so a failure leaves none keying cells."""
     from strata.notebook.harness_env import configured_allowlist, harness_env
 
-    overlay = notebook_dir / OVERLAY_DIR
+    overlay = _identity_dir(notebook_dir, owned)
+    overlay.mkdir(parents=True, exist_ok=True)
     done = subprocess.run(
         [
-            str(venv_python(overlay)),
+            str(_cell_python(notebook_dir, owned)),
             str(_HARNESS),
             "--probe-environment",
             str(notebook_dir.parent),
@@ -430,43 +442,55 @@ def _write(path: Path, text: str) -> None:
     os.replace(partial, path)
 
 
-def read_observed(notebook_dir: Path) -> dict[str, Any] | None:
+def read_observed(notebook_dir: Path, *, owned: bool = False) -> dict[str, Any] | None:
     try:
-        found = json.loads((notebook_dir / OVERLAY_DIR / _OBSERVED).read_text())
+        found = json.loads((_identity_dir(notebook_dir, owned) / _OBSERVED).read_text())
     except (OSError, ValueError):
         return None
     return found if isinstance(found, dict) else None
 
 
-_identity_locks: dict[Path, threading.Lock] = {}
+_identity_locks: dict[tuple[Path, bool], threading.Lock] = {}
 _identity_locks_lock = threading.Lock()
 
 
-def current_identity(notebook_dir: Path) -> bytes:
+def owned_identity(notebook_dir: Path) -> bytes | None:
+    """An owned scratchpad's E, which its ``uv.lock`` does not hold (where imports resolve,
+    what would shadow a preloaded module); ``None`` for any other notebook, and for one
+    whose environment is not built yet, where no cell runs."""
+    record = read_record(notebook_dir)
+    if record is None or record.get("mode") != "owned":
+        return None
+    if not _cell_python(notebook_dir, owned=True).exists():
+        return None
+    return current_identity(notebook_dir, owned=True)
+
+
+def current_identity(notebook_dir: Path, *, owned: bool = False) -> bytes:
     """E, once its observations show it still holds, else probed again (design 4.2):
     before any key is computed, so a changed environment never meets an old result.
 
     A probe that fails gives an identity nothing matches: a rerun, never a stale hit.
     """
     with _identity_locks_lock:
-        lock = _identity_locks.setdefault(Path(notebook_dir), threading.Lock())
-    overlay = notebook_dir / OVERLAY_DIR
+        lock = _identity_locks.setdefault((Path(notebook_dir), owned), threading.Lock())
+    where = _identity_dir(notebook_dir, owned)
     with lock:
-        record = read_observed(notebook_dir)
-        if record is not None and _holds(notebook_dir, record):
+        record = read_observed(notebook_dir, owned=owned)
+        if record is not None and _holds(notebook_dir, record, where):
             try:
-                return (overlay / ATTACHED_IDENTITY).read_bytes()
+                return (where / ATTACHED_IDENTITY).read_bytes()
             except OSError:
                 pass
         sites = list(record.get("sites") or []) if record is not None else []
         try:
-            return _probe_identity(notebook_dir, sites).encode()
+            return _probe_identity(notebook_dir, sites, owned=owned).encode()
         except (OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
             logger.warning("Could not probe %s's environment: %s", notebook_dir, exc)
             return b"unprobed:" + os.urandom(16).hex().encode()
 
 
-def _holds(notebook_dir: Path, record: dict[str, Any]) -> bool:
+def _holds(notebook_dir: Path, record: dict[str, Any], where: Path) -> bool:
     """Whether what E was probed from is as it was: a few hundred stats and small reads."""
     from strata.notebook.code_reads import IMPORT_VARIABLES, base_candidates, observe
 
@@ -484,7 +508,7 @@ def _holds(notebook_dir: Path, record: dict[str, Any]) -> bool:
             return False
         record["anchor_listing"] = listing
         try:
-            _write(notebook_dir / OVERLAY_DIR / _OBSERVED, json.dumps(record, indent=2) + "\n")
+            _write(where / _OBSERVED, json.dumps(record, indent=2) + "\n")
         except OSError as exc:
             logger.debug("Could not update %s's observations: %s", notebook_dir, exc)
     return True

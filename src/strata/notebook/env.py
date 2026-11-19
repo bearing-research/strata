@@ -156,7 +156,14 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
         hasher.update(b"\0attached=")
         hasher.update(current_identity(notebook_dir))
     else:
+        from strata.notebook.project_env import owned_identity
+
         _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
+        owned = owned_identity(notebook_dir)
+        if owned is not None:
+            # A scratchpad's own environment: also where imports resolve.
+            hasher.update(b"\0environment=")
+            hasher.update(owned)
     # Tag prefix keeps a uv-only and an renv-only notebook with identical
     # lockfile bytes from colliding.
     _fold_lockfile_into_hash(hasher, notebook_dir, "renv.lock", tag=b"\0renv=")

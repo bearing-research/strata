@@ -172,8 +172,9 @@ variables that move imports, and whether a file in the project would shadow a
 module loaded before the cell started (a new `orjson.py` there changes every
 key). That is checked before every lookup, with a few hundred stats, and probed
 again when it changed, so an install, a repointed editable or a new `PYTHONPATH`
-misses rather than replays. The read audit counts what is installed there as the
-environment and does not warn about it. Before each
+misses rather than replays. A scratchpad with an environment of its own is keyed on
+where its imports resolve too, beside its `uv.lock`. The read audit counts what is
+installed in the project's environment as the environment and does not warn about it. Before each
 `run`, a change to the project's `pyproject.toml` files, its `uv.lock` or its
 installed packages syncs it again, once no cell is running; whether a project has an environment at all is
 decided again when the scratchpad opens, and recorded in

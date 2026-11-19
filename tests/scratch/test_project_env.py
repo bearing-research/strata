@@ -291,7 +291,7 @@ def test_the_overlay_fills_a_gap_until_the_project_has_it_then_the_projects_wins
     from strata.notebook import project_env
 
     # Without the runtime packages no harness starts to probe E; this is about the overlay.
-    monkeypatch.setattr(project_env, "_probe_identity", lambda notebook_dir, sites: "e")
+    monkeypatch.setattr(project_env, "_probe_identity", lambda notebook_dir, sites, owned=False: "e")
     project_site = _venv(tmp_path / "proj" / ".venv")
     project_python = venv_python(tmp_path / "proj" / ".venv")
     notebook = _scratchpad(tmp_path / "proj")
@@ -834,9 +834,9 @@ def _probes(monkeypatch) -> list[Path]:
     seen: list[Path] = []
     real = project_env._probe_identity
 
-    def counted(notebook_dir, sites):
+    def counted(notebook_dir, sites, owned=False):
         seen.append(notebook_dir)
-        return real(notebook_dir, sites)
+        return real(notebook_dir, sites, owned=owned)
 
     monkeypatch.setattr(project_env, "_probe_identity", counted)
     return seen
@@ -908,7 +908,7 @@ def test_a_probe_that_fails_gives_an_identity_nothing_matches(project, monkeypat
     notebook = _attached(project)
     _fake_dist(_site(project / ".venv"), "newlib", "1.0", record="", direct_url=None)
 
-    def fails(notebook_dir, sites):
+    def fails(notebook_dir, sites, owned=False):
         raise subprocess.CalledProcessError(1, "probe")
 
     monkeypatch.setattr(project_env, "_probe_identity", fails)
@@ -966,3 +966,53 @@ async def test_the_projects_installed_code_is_not_recorded_as_a_read(project, ma
     assert str(_site(project / ".venv")) not in index
     # Looked for first in the project, as `python -c` there would.
     assert json.dumps(str(project / "projmod.py")) in index
+
+
+def _owned(anchor: Path) -> Path:
+    """An owned scratchpad whose `.venv` runs this interpreter, as its record says."""
+    from strata.notebook.project_env import ProjectEnv, write_record
+
+    notebook = _scratchpad(anchor)
+    python = venv_python(notebook / ".venv")
+    python.parent.mkdir(parents=True)
+    if os.name == "nt":
+        pytest.skip("a wrapper script is no Windows interpreter")
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
+    write_record(notebook, ProjectEnv(anchor, "owned", None, "no project environment"))
+    return notebook
+
+
+def test_an_owned_scratchpad_is_keyed_on_a_module_that_would_shadow_a_preloaded_one(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    notebook = _owned(tmp_path)
+    first = compute_lockfile_hash(notebook)
+    assert compute_lockfile_hash(notebook) == first
+    (tmp_path / "orjson.py").write_text("")
+    shadowed = compute_lockfile_hash(notebook)
+    assert shadowed != first
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "elsewhere"))
+    assert compute_lockfile_hash(notebook) not in (first, shadowed)
+
+
+def test_a_notebook_and_an_unbuilt_owned_scratchpad_key_on_their_lock_alone(tmp_path):
+    from strata.notebook.project_env import ProjectEnv, write_record
+
+    plain = create_notebook(tmp_path, "plain", initialize_environment=False)
+    before = compute_lockfile_hash(plain)
+    (plain.parent / "orjson.py").write_text("")
+    assert compute_lockfile_hash(plain) == before
+    assert not (plain / ".strata" / "environment").exists()
+
+    unbuilt = _scratchpad(tmp_path / "unbuilt")
+    write_record(unbuilt, ProjectEnv(tmp_path / "unbuilt", "owned", None, "none"))
+    empty = create_notebook(tmp_path / "empty", "empty", initialize_environment=False)
+    assert compute_lockfile_hash(unbuilt) == compute_lockfile_hash(empty)
+
+    # Owned once, attached now with no overlay built: its old `.venv` keys nothing.
+    moved = _owned(tmp_path / "moved")
+    write_record(moved, ProjectEnv(tmp_path / "moved", "attached", Path("/p/python"), ".venv"))
+    assert compute_lockfile_hash(moved) == compute_lockfile_hash(empty)
