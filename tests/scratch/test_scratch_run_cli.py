@@ -104,3 +104,34 @@ def test_a_call_that_fails_is_a_json_error_not_a_traceback(tmp_path, monkeypatch
 
     assert main(["scratch", "run", "-c", "x = 1", "--root", str(tmp_path)]) == 1
     assert json.loads(capsys.readouterr().out)["status"] == "error"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM is POSIX")
+def test_a_terminate_during_setup_ends_the_process(tmp_path):
+    """A first run's setup takes seconds; a shell tool's SIGTERM must not wait it out."""
+    program = (
+        "import sys, time\n"
+        "from strata import scratch\n"
+        "from strata.cli import main\n"
+        "def setup(root, progress=None):\n"
+        "    print('in setup', file=sys.stderr, flush=True)\n"
+        "    time.sleep(600)\n"
+        "scratch.ensure_daemon = setup\n"
+        f"sys.exit(main(['scratch', 'run', '-c', 'x = 1', '--root', {str(tmp_path)!r}]))\n"
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", program], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    try:
+        assert process.stderr is not None
+        assert process.stderr.readline() == "in setup\n"
+        process.send_signal(signal.SIGTERM)
+        # Bounded only so a hang fails the test instead of the suite's timeout.
+        out, _ = process.communicate(timeout=60)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+
+    assert process.returncode == 1
+    assert json.loads(out)["error"].startswith("terminated")

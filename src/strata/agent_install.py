@@ -94,14 +94,17 @@ def strata_command() -> tuple[str, str | None]:
             raise InstallError("cannot find the `strata` command this runs as; is it on PATH?")
         command = Path(found).absolute()
     real = os.path.realpath(command)
-    if re.search(r"[/\\](archive|builds)-v\d+[/\\]", real):
+    environment = Path(real).parent.parent
+    cache = os.environ.get("UV_CACHE_DIR")
+    if re.search(r"[/\\](archive|builds|environments)-v\d+[/\\]", real) or (
+        cache and Path(real).is_relative_to(os.path.realpath(cache))
+    ):
         raise InstallError(
             f"this strata runs from uv's cache ({real}), which uv cleans up; install it "
             "with `uv tool install 'strata-notebook[mcp]'` and run `strata agent install` again"
         )
-    # uv's tool dir: ``~/.local/share/uv/tools`` on POSIX, ``%APPDATA%\\uv\\data\\tools``.
-    in_tool = re.search(r"[/\\]uv[/\\](data[/\\])?tools[/\\]", real) is not None
-    environment = Path(real).parent.parent
+    # A uv tool's environment holds its receipt, wherever UV_TOOL_DIR put it.
+    in_tool = (environment / "uv-receipt.toml").exists()
     if not in_tool and (environment / "pyvenv.cfg").exists():
         return str(command), (
             f"the agent config runs {command}, in the environment {environment}: every "
@@ -237,7 +240,7 @@ def _file_pieces(target: str, base: Path, command: str) -> list[_FilePiece]:
             "MCP server strata",
             base / "config.toml",
             _codex_add(command),
-            lambda text: _TOML.sub("", text),
+            lambda t: _TOML.sub("", t),
         ),
         _FilePiece(
             "scratchpad block",
@@ -420,7 +423,7 @@ def _check_claude(record: dict[str, Any]) -> None:
 def _install_claude_entry(command: str, record: dict[str, Any]) -> Change | None:
     ours = _mcp_entry(command)
     existing = _claude_entry(record)
-    if _same_server(existing, ours) and existing is not None and existing.get("alwaysLoad"):
+    if _same_server(existing, ours):
         record["entry"] = ours
         return None
     if existing is not None:
@@ -428,9 +431,20 @@ def _install_claude_entry(command: str, record: dict[str, Any]) -> Change | None
         _claude(record, "remove", "--scope", "user", SERVER_NAME)
     try:
         _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(ours))
-    except InstallError:
+    except InstallError as exc:
+        if _same_server(_claude_entry(record), ours):
+            # Written, then failed (a timeout): Strata's, so recorded as such.
+            record["entry"] = ours
+            raise
         if existing is not None:
-            _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(existing))
+            try:
+                _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(existing))
+            except InstallError as again:
+                record.pop("entry", None)
+                raise InstallError(
+                    f"{exc}; putting the earlier strata entry back failed too ({again}), so "
+                    "Claude Code has none now: run `strata agent install` again"
+                ) from exc
         raise
     record["entry"] = ours
     return Change("MCP server strata (user scope)", _claude_json(record))
@@ -440,6 +454,10 @@ def _uninstall_claude_entry(record: dict[str, Any]) -> tuple[Change, str] | None
     if not _same_server(_claude_entry(record), record.get("entry")):
         # Not Strata's (replaced since, or removed): left as it is.
         return None
+    if shutil.which("claude") is None:
+        # Claude Code is gone; the rest is still removed, so uninstall can finish.
+        change = Change("MCP server strata (user scope)", _claude_json(record))
+        return change, "left in place: no `claude` CLI to remove it with"
     _claude(record, "remove", "--scope", "user", SERVER_NAME)
     return Change("MCP server strata (user scope)", _claude_json(record)), "removed"
 
@@ -515,6 +533,7 @@ def install(targets: list[str], command: str) -> list[Change]:
                 # Recorded before its first write, so a failure halfway is still undone;
                 # complete only once all of it is written, which ``refresh`` waits for.
                 record["complete"] = False
+                record["command"] = command
                 state["targets"][_target_key(target, base, configured)] = record
                 if target == "claude":
                     entry = _install_claude_entry(command, record)
@@ -526,9 +545,7 @@ def install(targets: list[str], command: str) -> list[Change]:
                     changes += _retire_skill(record)
                 record["complete"] = True
             state["version"] = version("strata-notebook")
-            state["command"] = command
         finally:
-            state.setdefault("command", command)
             _save_state(state)
     return changes
 
@@ -540,7 +557,9 @@ def uninstall() -> list[tuple[Change, str]]:
         try:
             for key, record in list(state["targets"].items()):
                 target = record["target"]
-                for piece in _file_pieces(target, Path(record["dir"]), state["command"]):
+                # Half undone, should the rest fail: never finished again by a refresh.
+                record["complete"] = False
+                for piece in _file_pieces(target, Path(record["dir"]), record["command"]):
                     reverted = _revert(piece, state)
                     done += [reverted] if reverted else []
                 if target == "claude":
@@ -570,7 +589,7 @@ def refresh() -> list[Change]:
             for record in state["targets"].values():
                 if not record.get("complete"):
                     continue
-                for piece in _file_pieces(record["target"], Path(record["dir"]), state["command"]):
+                for piece in _file_pieces(record["target"], Path(record["dir"]), record["command"]):
                     change = _apply(piece, state)
                     changes += [change] if change else []
             state["version"] = version("strata-notebook")

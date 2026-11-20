@@ -17,6 +17,8 @@ from strata import agent_install
 from strata.cli import main
 
 STRATA = "/opt/tools/bin/strata"
+# Windows' PATH lookup does not find the extensionless fake claude.
+_SHEBANG = pytest.mark.skipif(sys.platform == "win32", reason="the fake claude is a shebang script")
 
 # The claude CLI's `mcp add-json` / `mcp remove`, on the file the real one writes.
 _FAKE_CLAUDE = """\
@@ -184,6 +186,7 @@ def test_an_existing_codex_strata_server_is_refused_and_nothing_is_written(agent
     assert not (codex / "AGENTS.md").exists()
 
 
+@_SHEBANG
 def test_a_settings_file_that_is_not_json_is_refused(agent_home):
     claude, _ = agent_home
     claude.mkdir()
@@ -348,9 +351,6 @@ def test_a_refresh_at_the_same_version_leaves_a_removed_block_removed(agent_home
     assert agents_md.read_text() == "the user took it out\n"
 
 
-_SHEBANG = pytest.mark.skipif(sys.platform == "win32", reason="the fake claude is a shebang script")
-
-
 @_SHEBANG
 def test_no_claude_cli_is_refused_before_anything_is_written(agent_home, monkeypatch):
     _, codex = agent_home
@@ -393,6 +393,7 @@ def test_a_failed_add_puts_strata_s_earlier_entry_back(agent_home, monkeypatch):
     assert _servers(claude)["strata"]["command"] == STRATA
 
 
+@_SHEBANG
 def test_a_claude_cli_that_hangs_is_an_install_error(agent_home, monkeypatch):
     import subprocess
 
@@ -511,8 +512,9 @@ def test_the_skill_comes_back_on_uninstall(agent_home):
     ("where", "outcome"),
     [
         ("cache/uv/archive-v0/abc/bin/strata", "refused"),
+        ("cache/uv/environments-v2/abc/bin/strata", "refused"),
         ("share/uv/tools/strata-notebook/bin/strata", "quiet"),
-        ("AppData/Roaming/uv/data/tools/strata-notebook/bin/strata", "quiet"),
+        ("custom-tool-dir/tools/strata-notebook/bin/strata", "quiet"),
         ("repo/.venv/bin/strata", "warned"),
         ("opt/bin/strata", "quiet"),
     ],
@@ -521,9 +523,11 @@ def test_the_command_written_is_a_lasting_one(tmp_path, monkeypatch, where, outc
     command = tmp_path / where
     command.parent.mkdir(parents=True)
     command.write_text("")
-    # Every environment has one, a uv tool's too; told apart by where it is.
-    if "/bin/" in where and not where.startswith("opt"):
+    # Every environment has one, a uv tool's too, which also holds uv's receipt.
+    if not where.startswith("opt"):
         (command.parent.parent / "pyvenv.cfg").write_text("")
+    if "tools" in where:
+        (command.parent.parent / "uv-receipt.toml").write_text("")
     monkeypatch.setattr(sys, "argv", [str(command), "agent", "install"])
 
     if outcome == "refused":
@@ -547,3 +551,94 @@ def test_a_torn_state_file_does_not_keep_strata_mcp_from_serving(
 
     assert main(["mcp", "--root", str(tmp_path)]) == 0
     assert "could not refresh" in capsys.readouterr().err
+
+
+@_SHEBANG
+def test_an_add_that_wrote_then_failed_is_still_strata_s(agent_home, monkeypatch):
+    """A timeout after the CLI wrote the entry: recorded, so neither refused nor stranded."""
+    claude, _ = agent_home
+    real = agent_install.subprocess.run
+
+    def writes_then_hangs(command, **kwargs):
+        done = real(command, **kwargs)
+        if command[2] == "add-json":
+            raise agent_install.subprocess.TimeoutExpired(command, 120)
+        return done
+
+    monkeypatch.setattr(agent_install.subprocess, "run", writes_then_hangs)
+    with pytest.raises(agent_install.InstallError, match="did not run"):
+        agent_install.install(["claude"], STRATA)
+    monkeypatch.setattr(agent_install.subprocess, "run", real)
+
+    agent_install.install(["claude"], STRATA)
+    agent_install.uninstall()
+    assert "strata" not in _servers(claude)
+
+
+@_SHEBANG
+def test_a_rollback_that_fails_too_says_both(agent_home, monkeypatch):
+    agent_install.install(["claude"], STRATA)
+    # A CLI that now takes no entry at all.
+    monkeypatch.setenv("FAKE_CLAUDE_REJECTS", "/new/strata")
+    real = agent_install.subprocess.run
+
+    def rejects_every_add(command, **kwargs):
+        if command[2] == "add-json":
+            command = [*command[:6], json.dumps({"command": "/new/strata"})]
+        return real(command, **kwargs)
+
+    monkeypatch.setattr(agent_install.subprocess, "run", rejects_every_add)
+
+    with pytest.raises(agent_install.InstallError, match="putting the earlier strata entry back"):
+        agent_install.install(["claude"], "/new/strata")
+
+
+@_SHEBANG
+def test_uninstall_finishes_with_claude_code_gone(agent_home, monkeypatch):
+    claude, codex = agent_home
+    agent_install.install(["claude", "codex"], STRATA)
+    empty = claude.parent / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+
+    done = agent_install.uninstall()
+
+    assert any("no `claude` CLI" in what for _, what in done)
+    assert _snapshot(claude, codex) == {}
+    assert agent_install.uninstall() == []
+
+
+@_SHEBANG
+def test_a_half_done_uninstall_is_never_finished_again_by_a_refresh(agent_home, monkeypatch):
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+
+    def fails(record):
+        raise agent_install.InstallError("claude mcp remove failed")
+
+    monkeypatch.setattr(agent_install, "_uninstall_claude_entry", fails)
+    with pytest.raises(agent_install.InstallError):
+        agent_install.uninstall()
+    monkeypatch.setattr(agent_install, "version", lambda name: "9.9.9")
+    agent_install.refresh()
+
+    assert _snapshot(claude) == {}
+
+
+@_SHEBANG
+def test_a_partial_reinstall_refreshes_each_target_with_the_command_it_wrote(
+    agent_home, monkeypatch
+):
+    _, codex = agent_home
+    agent_install.install(["codex"], "/old/strata")
+    monkeypatch.setenv("FAKE_CLAUDE_REJECTS", "/tool/strata")
+    with pytest.raises(agent_install.InstallError):
+        agent_install.install(["codex", "claude"], "/tool/strata")
+
+    monkeypatch.setattr(agent_install, "version", lambda name: "9.9.9")
+    agent_install.refresh()
+
+    assert (
+        tomllib.loads((codex / "config.toml").read_text())["mcp_servers"]["strata"]["command"]
+        == "/tool/strata"
+    )
