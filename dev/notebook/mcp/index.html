@@ -3543,6 +3543,17 @@ in <code>~/.codex/AGENTS.md</code>. <code>CLAUDE_CONFIG_DIR</code> and <code>COD
 hand-copied <code>strata-scratchpad</code> skill it finds is moved to
 <code>~/.strata/agent-install/retired-skills/</code>, since the server and the block replace it,
 and <code>uninstall</code> puts it back.</p>
+<p>For Claude Code it also adds two hooks to <code>settings.json</code>, at session start and on each
+prompt. They tell the agent what the project's scratchpad already holds before it
+computes anything: each cell's variables, what it took to build, and whether it is
+<code>cached</code>, <code>stale</code> (and which file changed, or <code>upstream</code>) or <code>failed</code>. The prompt hook
+says only the cells whose id or variables the prompt names. The hooks read a digest the
+daemon writes (<code>.strata-scratch/.strata/digest.json</code>) and look at each cell's recorded
+reads and the environment's watched paths again first, so a file edited while the daemon
+was stopped makes its cell stale; what one run's budget (1000 paths, 80 ms) leaves
+unchecked is said <code>as of</code> the digest's time, never <code>cached</code>, as is a cell downstream of
+one the digest does not hold (a SQL, prompt or R cell, or one not run). They never start
+the daemon.</p>
 <p>Every piece is marker-fenced or keyed. <code>uninstall</code> puts back the original bytes of a
 file left as <code>install</code> wrote it and removes only Strata's part from one edited since.
 It works from the directories <code>install</code> wrote into, whatever <code>CLAUDE_CONFIG_DIR</code> says

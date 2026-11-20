@@ -21,6 +21,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   another Strata version wrote as it starts. `strata scratch run -c CODE` and
   `strata scratch show [NAME]` are the `run` and `scratchpad` tools for an agent with only
   a shell. (#1594)
+- **The scratchpad tells Claude Code what it holds, checked, before the agent asks.**
+  `strata agent install` also adds a SessionStart and a UserPromptSubmit hook. They read a
+  digest the daemon keeps (`.strata-scratch/.strata/digest.json`: each cell, what it
+  defines, what it read, what it took to build) and say each cell as `cached`, `stale`
+  (with the file that changed, or `upstream`) or `failed`, after looking at the cell's
+  recorded reads and the environment's watched paths again; the prompt hook says only the
+  cells the prompt names. A file edited while the daemon was stopped is stale, never
+  cached, and what the hook's budget leaves unchecked is said `as of` the digest's time.
+  The hook runs on the standard library alone, and says nothing where there is no
+  scratchpad. (#1595)
 - **A cell's checkpoints are listed in the notebook, and a branch starts from one there.**
   A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
   store still holds, by run (running, interrupted, finished or failed, and which

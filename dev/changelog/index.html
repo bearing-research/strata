@@ -3877,6 +3877,16 @@ exhaustive commit history.</p>
   another Strata version wrote as it starts. <code>strata scratch run -c CODE</code> and
   <code>strata scratch show [NAME]</code> are the <code>run</code> and <code>scratchpad</code> tools for an agent with only
   a shell. (#1594)</li>
+<li><strong>The scratchpad tells Claude Code what it holds, checked, before the agent asks.</strong>
+  <code>strata agent install</code> also adds a SessionStart and a UserPromptSubmit hook. They read a
+  digest the daemon keeps (<code>.strata-scratch/.strata/digest.json</code>: each cell, what it
+  defines, what it read, what it took to build) and say each cell as <code>cached</code>, <code>stale</code>
+  (with the file that changed, or <code>upstream</code>) or <code>failed</code>, after looking at the cell's
+  recorded reads and the environment's watched paths again; the prompt hook says only the
+  cells the prompt names. A file edited while the daemon was stopped is stale, never
+  cached, and what the hook's budget leaves unchecked is said <code>as of</code> the digest's time.
+  The hook runs on the standard library alone, and says nothing where there is no
+  scratchpad. (#1595)</li>
 <li><strong>A cell's checkpoints are listed in the notebook, and a branch starts from one there.</strong>
   A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
   store still holds, by run (running, interrupted, finished or failed, and which
