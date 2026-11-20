@@ -1,185 +1,154 @@
 # Agent scratchpad
 
 A coding agent working on *something else* (debugging your service, exploring a
-dataset, checking what a function returns) constantly needs to run a bit of
-throwaway Python. The usual way is `python -c` or a temp script: work that
-vanishes the moment it finishes, that nobody can see, and that recomputes from
-scratch every time.
+dataset, checking what a function returns) keeps running a bit of throwaway
+Python. The usual way is `python -c` or a temp script: work that vanishes when it
+finishes, that nobody can see, and that recomputes from scratch every time.
 
-A Strata notebook is a better home for exactly that. The agent adds a cell and
-runs it; the cell is versioned, content-addressed, and cached.
+The Strata scratchpad is a better home for exactly that: a persistent, cached
+Python session in your project's environment, which the agent reaches through two
+MCP tools, `run` and `scratchpad`. A value it computed ten turns ago, or in
+yesterday's session, is still there, and comes back instantly while nothing it
+depends on has changed.
 
 !!! info "This is not the same as [driving a notebook](agent.md)"
 
     There the notebook is **the deliverable**: you asked for it, you watch it
     being built, you keep it. Here it is **disposable infrastructure** for some
-    other task, created by the agent on demand, and you may never look at it.
-
-    Same machinery, opposite intent. The distinction matters mostly for setup:
-    driving starts with you running `strata agent`; scratchpad use starts with
-    the agent noticing it has a better option than `python -c`.
+    other task, created on the agent's first call, and you may never look at it.
 
 ## Set it up
 
-### 1. Put the `strata` CLI on your `PATH`
+### 1. Install the `strata` CLI
 
 ```bash
-uv tool install strata-notebook
+uv tool install "strata-notebook[mcp]"
 ```
 
-The agent shells out to `strata`, so this is the one hard requirement. Check it
-with `strata --help`.
+A `uv tool` install is the lasting choice: the agent's config names this `strata`
+by its path, so it must outlive the shell you ran it from.
 
-### 2. Install the plugin
+### 2. Wire it into the agent
 
-In any Claude Code session:
+```bash
+strata agent install            # Claude Code and Codex, whichever are installed
+strata agent install claude     # or just one
+```
+
+For Claude Code this writes the user-scope `strata` MCP server, the
+`mcp__strata__*` permission, two hooks (below) and a short block in `CLAUDE.md`
+for subagents that do not see MCP instructions. For Codex it writes the server and
+the block in `AGENTS.md`. `strata agent uninstall` removes exactly what it wrote.
+What each piece is, and how a file you edited since is handled, is in
+[`strata agent install`](mcp.md#install-it-into-the-agent-strata-agent-install).
+
+If you would rather install through Claude Code's plugin manager, the plugin
+bundles the same server and hooks (but not the permission or the `CLAUDE.md`
+block, which a plugin cannot write). Use one or the other, not both:
 
 ```
 /plugin marketplace add bearing-research/strata
 /plugin install strata-scratchpad@strata
 ```
 
-Once installed the skill is auto-discovered in **every** project, so the agent
-reaches for a cached notebook cell even when it wasn't launched anywhere near a
-notebook. The plugin also bundles a `/strata-scratchpad:scratch` command, and
-its source lives in the repo at `plugins/strata-scratchpad/`.
-
-The skill also ships inside `strata-notebook` itself (under
-`<site-packages>/strata/.agents/skills/`), which some agents discover on their
-own; the plugin removes the "some".
-
 ### 3. Confirm it engaged
 
-This is worth doing once, because the whole thing is invisible by design.
-Nothing announces itself, and an agent that quietly kept using `python -c` looks
-identical from the outside.
-
-Ask an agent, in any project, for something it **cannot** answer with shell
-tools. The skill only triggers when it was about to run ad-hoc *Python*, so a
-question `find`/`awk` can answer proves nothing:
+Start a session in any project and ask for something only Python can answer:
 
 ```text
 Fit a linear regression to the points (1,2), (2,4.1), (3,5.9), (4,8.2)
 and tell me the slope and intercept.
 ```
 
-Then look for the notebook:
+The agent should call `run` rather than `python -c`. The first call in a project
+creates `.strata-scratch/` at the project's root and starts its daemon; its result
+carries `setup_ms`, what that took. Then, from a shell in the same project:
 
 ```bash
-ls ./scratch/cells/            # one .py file per snippet it ran
-strata cell list ./scratch     # the same thing as JSON, with each cell's output
+strata scratch show             # what the scratchpad holds, as the agent sees it
 ```
 
-If `./scratch` exists and has cells in it, the skill engaged. If it does not,
-the agent answered with `python -c` and the skill did not fire. Check that
-`strata cell list ./scratch` works **in the agent's environment**, which is
-the usual cause: `strata --help` prints from any Python, but every command
-needs a uv-managed environment.
+## What the agent is told
 
-### 4. Nothing else, for the agent
+Three channels, from one source (`strata/agent_guidance/scratchpad.md`):
 
-The agent needs no server and no session: it drives the notebook through the
-`strata` CLI against the directory. (Looking at it yourself is the one thing
-that does need a server; see [Looking at it](#looking-at-it) below.)
+- **The MCP server's instructions**: use `run` instead of `python -c` or a temp
+  script, look in `scratchpad` before computing, put a slow step in its own cell.
+- **The `CLAUDE.md` block**, the same advice for subagents and harnesses without
+  MCP, naming `strata scratch run` as the shell equivalent.
+- **The hooks.** At session start, and on each prompt for the cells the prompt
+  names, Claude Code is told what the scratchpad holds:
 
-It creates the scratch notebook the first time it needs one, with
+  ```
+  <strata_scratchpad note="Strata scratchpad for this project; build on these with mcp__strata__run">
+  - df (cell c1a2b3c4): 38 s to build, cached
+  - model (cell c9f0d1e2): 2 s to build, stale, src/proj/train.py changed
+  </strata_scratchpad>
+  ```
+
+  `cached` always means checked just now: the hook looks at every file a cell read
+  again before saying it, so a file you edited while no daemon ran makes its cell
+  stale, never cached. What it cannot check within its budget is said `as of` the
+  last pass. It never starts the daemon, and says nothing in a project with no
+  scratchpad.
+
+## When a cell runs again
+
+A cell is keyed on its source, the values it uses, the environment, and every file
+its run read or imported: the project's own modules included. Editing
+`src/proj/features.py` re-runs the cells that imported it and what depends on them,
+and nothing else. Editing a file a cell opened does the same.
+
+Two things the key cannot see:
+
+- **What a process the cell started read** (a `subprocess`, a C extension reading
+  a file). After editing such a file, the agent passes `fresh=True`.
+- **A value that changes by itself**: the clock, `random`, a live API. A cell that
+  reads one, or exists for its side effect (writing a file, calling an API),
+  starts with [`# @nocache`](../reference/annotations/python.md#nocache) and always
+  runs.
+
+How the read set is recorded and checked is in
+[A project's own daemon](mcp.md#a-projects-own-daemon).
+
+## Where it lives
+
+- `.strata-scratch/` at the project's root (the nearest `pyproject.toml`, bounded
+  by the git root): cells, values, and the digest the hooks read. Add it to
+  `.gitignore`; deleting it costs reruns only.
+- Cells run in the project's environment when it has one (`.venv`, or a uv
+  project's), else in the scratchpad's own. Their cwd is the scratchpad's `work/`
+  directory, so the agent uses absolute paths for project files.
+- One daemon per scratchpad, started by the first call and stopped after 30 idle
+  minutes; agents in the same project share it.
 
 ```bash
-strata new scratch --parent . --no-env --project-mount
+strata scratch ls               # every scratchpad: size, last use, daemon
+strata scratch gc               # sweep one now, by idle days then its soft limit
+strata scratch rm               # stop its daemon and delete .strata-scratch/
 ```
-
-which also mounts the project read-only as a `project` variable, so cells read
-your files as `project / "some/file.py"`. Adding `scratch/` to `.gitignore` is
-optional, since it is your workspace and some people keep it.
-
-!!! warning "The project mount is pinned, so editing a file does not restale a cell"
-
-    The mount is written with `pin = "project-root"`, which fingerprints the
-    pin rather than the tree. That is deliberate: hashing a whole repository
-    before every cell run would cost more than the cell. The consequence is
-    that a cell which read `project / "config.yaml"` keeps returning what that
-    file said the first time, however often you edit it, and nothing marks the
-    cell stale.
-
-    A cell that reads a file you are actively changing wants
-    [`# @nocache`](../reference/annotations/python.md#nocache), the same as a clock read. A cell
-    that reads a file you are not changing is fine as it is, and is the case
-    the pin exists for.
-
-    The scratchpad that `strata scratch` and `strata mcp` set up has no such trap:
-    it keys each cell on the files its run read
-    ([A project's own daemon](mcp.md#a-projects-own-daemon)).
-
-## Why it beats a temp script
-
-- **Unchanged work never recomputes.** Every cell is cached by provenance
-  (`sha256(inputs + source + env)`), *including a leaf cell that only `print`s*.
-  An agent that re-runs an unchanged diagnostic gets its output back instantly.
-  The expensive step it ran ten turns ago is still a cache hit now, which is
-  the whole point, because agents re-derive the same thing constantly.
-- **It persists and it can be seen.** Each snippet is a real cell on disk, not
-  an invisible script in `/tmp`. You can open it later, or watch it live.
-- **Side effects stay honest.** A cell that writes a file, calls an API, reads
-  the clock, or reads a file that changes underneath it must not replay a stale
-  result. Those get [`# @nocache`](../reference/annotations/python.md#nocache) and always
-  re-execute; everything else stays cached.
-
-## Why the agent actually reaches for it
-
-A better option that costs more gets ignored. Two things keep the cost equal:
-
-- **One call, not three.** `run_snippet(session_id, source)` over
-  [MCP](mcp.md), or `strata cell add … -c 'src' --run` on the CLI, adds a cell
-  **and** runs it **and** returns `stdout`, the same shape as `python -c`.
-- **No setup step.** The skill tells the agent how to create or reuse a
-  scratch notebook itself, so there is no moment where using the notebook means
-  stopping to configure one.
 
 ## Looking at it
 
-You don't have to, and usually won't. When you want to, the simplest way is:
+You don't have to, and usually won't. Each `run` result carries a `url`: the
+scratchpad open in the notebook UI, served by its daemon, with every cell the agent
+ran. `strata scratch status` prints the daemon's address too.
+
+## From a shell
+
+An agent with only a shell, or you, can use the same session:
 
 ```bash
-strata agent ./scratch        # starts a server scoped to it, then attaches the viewer
+strata scratch run -c 'import pandas as pd; df = pd.read_parquet("/repo/data.parquet"); df.shape'
+strata scratch show df
 ```
 
-It also writes `.mcp.json` and a `CLAUDE.md` working agreement into
-`./scratch`, so an agent started there connects to the session. In an existing
-`CLAUDE.md` it rewrites only its own marked block.
-
-!!! warning "`strata watch ./scratch` on its own usually won't work"
-
-    A server only opens notebooks inside its configured storage root, which
-    defaults to `~/.strata/notebooks`, and a scratchpad lives in your project.
-    Pointed at a default server, opening it is rejected with *"Invalid notebook
-    path: must be inside configured notebook storage"*, and the viewer sits at
-    `connecting…` rather than saying so.
-
-    `strata agent` avoids this because it starts a server scoped to the
-    notebook's parent directory. It does so only when nothing answers on
-    `:8765` (or its `--server`): a server already running there is reused, and
-    then the storage-root rule above applies to it. If you would rather use a
-    server you already run, start it with its root over your project:
-
-    ```bash
-    STRATA_NOTEBOOK_STORAGE_DIR=. strata-notebook &
-    strata watch ./scratch
-    ```
-
-Once something is attached, everything in
-[Watching an agent work](agent.md#watching-an-agent-work) applies here too,
-including opening it in the [web UI](../getting-started/notebook.md) instead.
-
-One thing changes for the agent, though: `strata cell run ./scratch …` opens
-its own offline session on the directory, so its runs do not appear in the
-viewer you just attached, and both sessions are writing the same files. Once
-someone is watching, point the agent at that server instead: MCP, or
-`--server`/`--session` on the same commands, both covered in the
-[CLI guide](cli.md#working-against-a-live-session-server-session).
+They are the `run` and `scratchpad` tools, printing the same JSON.
 
 ## Related
 
-- [Use a coding agent](agent.md): the other use case, where
-  the notebook is the point.
-- [MCP server](mcp.md): the tool list and the endpoint's security model.
+- [MCP server](mcp.md#scratchpad-profile): the scratchpad profile in full, its
+  daemon, and the installer's pieces.
+- [Use a coding agent](agent.md): the other use case, where the notebook is the
+  point.
 - [Annotations](../reference/annotations/index.md): `# @nocache` and the rest.

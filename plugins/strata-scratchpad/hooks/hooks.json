@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/hooks/agent_hook.py\" session-start mcp__plugin_strata-scratchpad_strata__run || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/hooks/agent_hook.py\" prompt mcp__plugin_strata-scratchpad_strata__run || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

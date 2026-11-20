@@ -12,7 +12,7 @@
     {
       "name": "strata-scratchpad",
       "source": "./plugins/strata-scratchpad",
-      "description": "Make a coding agent use a persistent, cached Strata notebook as its scratchpad instead of throwaway python -c / temp scripts."
+      "description": "The Strata scratchpad as MCP tools, with hooks that say what it already holds: a persistent, cached Python session instead of python -c and temp scripts."
     }
   ]
 }

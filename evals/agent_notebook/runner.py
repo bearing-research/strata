@@ -77,16 +77,15 @@ def _strata_run_ok(notebook_dir: Path) -> bool:
 
 
 def _install_scratchpad_skill(project_dir: Path) -> None:
-    """Install the packaged ``strata-scratchpad`` skill into ``.claude/skills/``.
+    """Install the ``strata-scratchpad`` skill into ``.claude/skills/``: the copy arm B
+    keeps (``uptake/arm_b``), since the package no longer ships it.
 
     The un-primed counterpart of the on-ramp's CLAUDE.md: discoverable, but the
     agent is never told to use the notebook.
     """
     import shutil
 
-    import strata
-
-    src = Path(strata.__file__).parent / ".agents" / "skills" / "strata-scratchpad" / "SKILL.md"
+    src = Path(__file__).parent / "uptake" / "arm_b" / "strata-scratchpad" / "SKILL.md"
     dst_dir = project_dir / ".claude" / "skills" / "strata-scratchpad"
     dst_dir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, dst_dir / "SKILL.md")
