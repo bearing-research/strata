@@ -273,7 +273,9 @@ async def test_a_removed_or_edited_cell_is_observed_no_more(tmp_path, scratch):
     assert session._code_seen == {}
 
 
-async def test_an_observation_taken_before_a_run_recorded_is_not_kept(tmp_path, scratch):
+async def test_an_observation_taken_before_a_run_recorded_is_not_kept(
+    tmp_path, scratch, monkeypatch
+):
     """A run's thread records newer reads while another observes: the older observation
     must not come back over the record."""
     data = tmp_path / "data.txt"
@@ -289,18 +291,20 @@ async def test_an_observation_taken_before_a_run_recorded_is_not_kept(tmp_path, 
         session.record_code_reads(lookup, {str(data): "sha256:new"}, {})
         return resolved
 
-    session.code_index.resolve = recorded_meanwhile
+    monkeypatch.setattr(session.code_index, "resolve", recorded_meanwhile)
     session.resolve_code_key(cell.id, lookup)
     assert lookup not in session._code_seen
 
-    session.code_index.resolve = resolve
+    monkeypatch.setattr(session.code_index, "resolve", resolve)
     session.resolve_code_key(cell.id, lookup)
     assert lookup in session._code_seen
 
 
 async def test_a_pass_prunes_its_observations_in_place(tmp_path, scratch):
     """A rebuilt dict would bring back an observation a run's thread dropped meanwhile."""
-    cell = scratch.add_cell(f"print(open({str(tmp_path / 'ran.log')!r}, 'a'))")
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    cell = scratch.add_cell(f"print(open({str(data)!r}).read())")
     await _run(scratch, cell.id)
     session = scratch._session
     session.compute_staleness(hash_mounts=False)

@@ -539,11 +539,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `scratchpad` tool and `strata scratch show` after the file changed, until something
   else made a staleness pass; only a run found it. The tool now looks at those files
   again first and, when one moved, makes the pass, so the cell and its downstream read
-  `stale` with the file named. An observation of what a cell read, taken while a run
-  of it recorded newer reads, no longer comes back over that record. A scripted run of
-  the flagship workflow (load, three
-  questions, a module edit, the daemon stopped, a fourth question in a new session)
-  pins the whole path, its counts exact. (#1597)
+  `stale` with the file named. An observation of what a cell read, taken while a run of
+  it recorded newer reads, no longer comes back over that record. A scripted run of the
+  flagship workflow (load, three questions, a module edit, the daemon stopped, a fourth
+  question in a new session) pins the whole path, its counts exact. (#1597)
 - **An interrupt during a warm cell no longer runs the cell twice.** A worker that printed
   no whole result read as "pool unavailable", so the cell ran again cold. The worker now
   reports the failure with the cell's print trail, as the cold harness does, on a line of

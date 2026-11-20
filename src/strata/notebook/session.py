@@ -326,9 +326,9 @@ class NotebookSession:
         # A scratchpad's code keys as last observed, by lookup key, and each cell's lookup
         # key in the last pass. A pass observes before it takes the staleness lock, never
         # inside it (``resolve_code_key``). Runs' threads record while others observe: an
-        # observation is kept only if no run recorded under its lookup meanwhile.
+        # observation is kept only if no run recorded meanwhile (any run: one count).
         self._code_seen: dict[str, Resolved] = {}
-        self._code_recorded: dict[str, int] = {}
+        self._code_recorded = 0
         self._code_seen_lock = threading.Lock()
         self._code_lookups: dict[str, str] = {}
         # Local mounts a staleness check found too much of unhashed, as
@@ -1967,12 +1967,12 @@ class NotebookSession:
         seen = None if observe else self._code_seen.get(lookup)
         if seen is not None:
             return seen
-        recorded = self._code_recorded.get(lookup, 0)
+        recorded = self._code_recorded
         resolved = self._code_key_now(cell_id, lookup, observe=observe)
         if observe:
             with self._code_seen_lock:
                 # Taken before a run recorded newer reads: not kept, so its record stands.
-                if self._code_recorded.get(lookup, 0) == recorded:
+                if self._code_recorded == recorded:
                     self._code_seen[lookup] = resolved
         return resolved
 
@@ -2020,9 +2020,10 @@ class NotebookSession:
         self, lookup: str, reads: Mapping[str, str], stat: Mapping[str, list[int]]
     ) -> None:
         """Note a scratchpad run under *lookup* and what it read; it is the newest now."""
-        self.code_index.record(lookup, reads, stat)
+        # One hold: no pass reads the run's older observation once the record is in.
         with self._code_seen_lock:
-            self._code_recorded[lookup] = self._code_recorded.get(lookup, 0) + 1
+            self.code_index.record(lookup, reads, stat)
+            self._code_recorded += 1
             self._code_seen.pop(lookup, None)
 
     def resolve_cached_console(
