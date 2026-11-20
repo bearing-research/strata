@@ -34,10 +34,13 @@ def test_the_hooks_run_strata_agent_hook_which_imports_no_notebook():
     for command in _commands().values():
         assert command.startswith("strata-agent-hook ")
     program = (
-        "import sys, strata.agent_hook\n"
-        "skip = set(sys.stdlib_module_names) | {'__main__'}\n"
-        "outside = {m.partition('.')[0] for m in sys.modules} - skip\n"
-        "print(sorted(m for m in sys.modules if m.partition('.')[0] in outside))\n"
+        "import sys\n"
+        "# What startup loaded (a .pth's import, as pywin32's on Windows) is not the hook's.\n"
+        "before = set(sys.modules)\n"
+        "import strata.agent_hook\n"
+        "added = set(sys.modules) - before\n"
+        "outside = {m.partition('.')[0] for m in added} - set(sys.stdlib_module_names)\n"
+        "print(sorted(m for m in added if m.partition('.')[0] in outside))\n"
     )
     done = subprocess.run(
         [sys.executable, "-I", "-c", program], capture_output=True, text=True, check=True
