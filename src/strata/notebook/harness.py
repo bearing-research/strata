@@ -260,10 +260,9 @@ def close_client(client: Any) -> None:
     """Close an injected ambient client, swallowing teardown errors."""
     if client is None:
         return
-    try:
-        client.close()
-    except Exception:
-        pass
+    # The cell's own ``strata.close = sys.exit`` too; an interrupt stays one, which the
+    # batch stops on and the single run writes its result before.
+    _traceback.safely(client.close, None)
 
 
 @contextmanager
@@ -1053,30 +1052,35 @@ def main():
         sys.exit(1)
 
     finally:
-        close_client(ambient_client)
-        if result is fallback:
-            # The cell's print trail, which matters most on failure.
-            result = {
-                **fallback,
-                "stdout": stdout_buffer.getvalue(),
-                "stderr": stderr_buffer.getvalue(),
-            }
-        # A separate name from the input manifest, so the parent can tell a crash
-        # from unread input. The hyphen can't be a Python identifier, so it can't
-        # collide with a variable's ``<var_name>.json``.
-        result_path = Path(manifest.get("output_dir", "/tmp/strata_output")) / "harness-result.json"
-        result_path.parent.mkdir(parents=True, exist_ok=True)
-        # default=str catches what orjson can't encode, so the write never truncates.
-        with open(result_path, "wb") as f:
-            f.write(
-                orjson.dumps(
-                    result,
-                    option=orjson.OPT_INDENT_2
-                    | orjson.OPT_SERIALIZE_NUMPY
-                    | orjson.OPT_NON_STR_KEYS,
-                    default=str,
-                )
+        try:
+            close_client(ambient_client)
+        finally:
+            # Written whatever the close raised (an interrupt): the parent reads this file.
+            if result is fallback:
+                # The cell's print trail, which matters most on failure.
+                result = {
+                    **fallback,
+                    "stdout": stdout_buffer.getvalue(),
+                    "stderr": stderr_buffer.getvalue(),
+                }
+            # A separate name from the input manifest, so the parent can tell a crash
+            # from unread input. The hyphen can't be a Python identifier, so it can't
+            # collide with a variable's ``<var_name>.json``.
+            result_path = (
+                Path(manifest.get("output_dir", "/tmp/strata_output")) / "harness-result.json"
             )
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            # default=str catches what orjson can't encode, so the write never truncates.
+            with open(result_path, "wb") as f:
+                f.write(
+                    orjson.dumps(
+                        result,
+                        option=orjson.OPT_INDENT_2
+                        | orjson.OPT_SERIALIZE_NUMPY
+                        | orjson.OPT_NON_STR_KEYS,
+                        default=str,
+                    )
+                )
 
 
 if __name__ == "__main__":

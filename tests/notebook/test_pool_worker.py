@@ -6,8 +6,13 @@ is the contract pinned here.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
+from strata.notebook import pool_worker
 from strata.notebook.pool_worker import execute_harness
 
 
@@ -187,3 +192,72 @@ def test_an_interrupt_still_returns_a_result(tmp_path: Path) -> None:
     assert result["success"] is False
     assert result["error"] == "KeyboardInterrupt"
     assert sys.stdout is stdout
+
+
+def _without_escape[T](call: Callable[[], T]) -> T:
+    """An interrupt escaping a test would end the pytest session, not fail the test."""
+    try:
+        return call()
+    except BaseException as exc:
+        pytest.fail(f"escaped the worker: {exc!r}")
+
+
+@pytest.mark.parametrize("raised", [KeyboardInterrupt, ValueError])
+def test_a_report_that_fails_still_returns_the_print_trail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raised: type[BaseException]
+) -> None:
+    """As the cold harness writes one: with no result line the pool runs the cell again."""
+
+    def broken(*args: object, **kwargs: object) -> dict:
+        raise raised
+
+    monkeypatch.setattr(pool_worker._traceback, "failure_fields", broken)
+    manifest = {
+        "source": "print('step 1 done')\nraise KeyError('x')\n",
+        "output_dir": str(tmp_path),
+    }
+    result = _without_escape(lambda: execute_harness(manifest))
+
+    assert result["success"] is False
+    assert result["error"] == "the harness failed reporting the cell's failure"
+    assert result["stdout"] == "step 1 done\n"
+
+
+@pytest.mark.parametrize("closing", ["raise KeyboardInterrupt", "sys.exit(5)"])
+def test_a_client_close_that_raises_keeps_the_cells_result(tmp_path: Path, closing: str) -> None:
+    source = f"import sys\nx = 1\ndef close():\n    {closing}\nstrata.close = close\n"
+    manifest = {"source": source, "output_dir": str(tmp_path), "strata_url": "http://127.0.0.1:9"}
+    result = _without_escape(lambda: execute_harness(manifest))
+
+    assert result["success"] is True, result
+    assert "x" in result["variables"]
+
+
+def test_main_prints_a_result_when_an_interrupt_escapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """On the protocol stream, though the cell's capture is still in place."""
+    import io
+    import sys
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
+
+    def interrupted(manifest: dict) -> dict:
+        sys.stdout = io.StringIO()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pool_worker, "execute_harness", interrupted)
+    monkeypatch.setattr(pool_worker._lifeline, "watch_lifeline", lambda: None)
+    monkeypatch.setattr(pool_worker, "warm_imports", lambda imports: None)
+    monkeypatch.setattr(sys, "argv", ["pool_worker.py", str(tmp_path)])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{manifest}\n"))
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+
+    _without_escape(pool_worker.main)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "ready"
+    result = json.loads(lines[1])
+    assert result["success"] is False
+    assert result["error"] == "Pool worker error: KeyboardInterrupt"

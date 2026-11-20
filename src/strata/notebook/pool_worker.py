@@ -225,8 +225,10 @@ def _close_client(client: Any) -> None:
         return
     try:
         client.close()
-    except Exception:
-        pass
+    except BaseException:
+        # Any, an interrupt or the cell's own ``strata.close = sys.exit`` included: this
+        # worker runs one cell, and its result line, printed next, is all that is left.
+        return
 
 
 def execute_harness(manifest: dict) -> dict:
@@ -392,14 +394,26 @@ def execute_harness(manifest: dict) -> dict:
         # cell's body (an input's unpickling), included.
         sys.stdout = old_stdout
         sys.stderr = old_stderr
-        return {
-            "success": False,
-            "variables": {},
-            "stdout": stdout_buf.getvalue(),
-            "stderr": stderr_buf.getvalue(),
-            **_traceback.failure_fields(e, _work_dir.hint(e, manifest)),
-            "mutation_warnings": [],
-        }
+        try:
+            return {
+                "success": False,
+                "variables": {},
+                "stdout": stdout_buf.getvalue(),
+                "stderr": stderr_buf.getvalue(),
+                **_traceback.failure_fields(e, _work_dir.hint(e, manifest)),
+                "mutation_warnings": [],
+            }
+        except BaseException:
+            # Reporting failed too (an interrupt while it ran): still a result, with the
+            # print trail, as the cold harness writes. With none the pool runs the cell again.
+            return {
+                "success": False,
+                "error": "the harness failed reporting the cell's failure",
+                "variables": {},
+                "stdout": stdout_buf.getvalue(),
+                "stderr": stderr_buf.getvalue(),
+                "mutation_warnings": [],
+            }
     finally:
         _close_client(ambient_client)
 
@@ -426,6 +440,8 @@ def main() -> None:
         if not manifest_path:
             return
 
+        # The protocol stream, should an interrupt leave the cell's capture in place.
+        out = sys.stdout
         try:
             with open(manifest_path, "rb") as f:
                 manifest = orjson.loads(f.read())
@@ -433,8 +449,10 @@ def main() -> None:
             if manifest.get("run_token_on_stdin"):
                 manifest["strata_run_token"] = sys.stdin.readline().strip()
             result = execute_harness(manifest)
-            print(_dumps_result(result), flush=True)
-        except Exception as e:
+            print(_dumps_result(result), file=out, flush=True)
+        except BaseException as e:
+            # Any, an interrupt included: with no result line the pool runs the cell
+            # again cold, its side effects twice.
             print(
                 _dumps_result(
                     {
@@ -442,10 +460,11 @@ def main() -> None:
                         "variables": {},
                         "stdout": "",
                         "stderr": "",
-                        "error": f"Pool worker error: {e}",
+                        "error": f"Pool worker error: {_traceback.error_text(e)}",
                         "mutation_warnings": [],
                     }
                 ),
+                file=out,
                 flush=True,
             )
 

@@ -513,6 +513,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **An interrupt while a warm worker reports a cell's failure no longer runs the cell
+  twice.** A worker that printed no result read as "pool unavailable", so the cell ran
+  again cold; it now returns the failure with the cell's print trail, as the cold harness
+  writes one. A client close that raises (an interrupt, or a cell's own
+  `strata.close = sys.exit`) keeps the cell's result on the cold and the warm path, and no
+  longer ends a run-all batch; an interrupt there still stops it. (#1593)
 - **A cell that calls `sys.exit()` fails like one that raises.** Its error says the cell
   exited, with the cell's own traceback, alone, on the cold and the warm path, in a run-all
   batch and in `@loop_until`; `exit()` at the inspect prompt fails that line. Before, the
