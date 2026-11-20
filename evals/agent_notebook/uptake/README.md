@@ -45,7 +45,7 @@ about Strata. `run` refuses such an `--out`; use one under `/tmp`.
 | Arm | Setup |
 | --- | --- |
 | A, control | every `strata*` command on `PATH` answers "command not found"; a `PreToolUse` hook denies any Bash command that runs one or imports `strata` |
-| B, today | the shipped `strata-scratchpad` skill in the config dir; this checkout's `strata` on `PATH` |
+| B, today | the `strata-scratchpad` skill as it shipped before P4 retired it (`arm_b/`), in the config dir; this checkout's `strata` on `PATH` |
 | Cp, the design's C' | a Strata server of the trial's own (`STRATA_MCP_PROFILE=scratchpad`, every store under the trial folder) with one notebook open, whose environment has the project installed editable; a user-scope HTTP MCP entry for it, `alwaysLoad: true`, written with `claude mcp add-json` |
 | Cpp, C' as a user sets it up | a user-scope stdio MCP entry running `strata mcp --root <project>`, `alwaysLoad: true`: the first tool call starts the project's daemon and its `.strata-scratch/`, nothing warmed beforehand; a HOME of the trial's own (on uv's real caches), so each trial is a first use of Strata, with matplotlib's font list built in it beforehand, as in Cp. Until P3, its cells cannot import the project |
 

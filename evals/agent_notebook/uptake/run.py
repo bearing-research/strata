@@ -33,7 +33,8 @@ from .tasks import Task
 ARMS = ("A", "B", "Cp", "Cpp")
 MODEL = "claude-opus-5-5"
 REPO = Path(__file__).resolve().parents[3]
-SKILL = REPO / "src" / "strata" / ".agents" / "skills" / "strata-scratchpad"
+# Arm B is the skill as it shipped before P4 retired it, kept here so B stays "today".
+SKILL = Path(__file__).parent / "arm_b" / "strata-scratchpad"
 
 # A Bash command that runs strata or one of its commands (`strata-notebook`): the word at
 # a command's start, after a separator or whitespace (`uv run strata`), or at the end of a

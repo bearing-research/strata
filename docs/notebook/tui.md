@@ -99,8 +99,7 @@ notebook through the [CLI](cli.md) while you watch it happen:
 1. `strata-notebook` in one terminal, and open the notebook.
 2. `strata-notebook-tui` in a second, pointed at it.
 3. In a third, let the agent work, giving it `--server`/`--session` rather than
-   the notebook path (this is what the [scratchpad skill](scratchpad.md) tells it to
-   do).
+   the notebook path, so its runs reach the session you are watching.
 
 ![The terminal viewer over five moments: an empty notebook, a cell arriving,
 that cell finishing in 1.0s with its output, a second cell arriving that reads
