@@ -107,15 +107,22 @@ def test_a_call_that_fails_is_a_json_error_not_a_traceback(tmp_path, monkeypatch
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM is POSIX")
-def test_a_terminate_during_setup_ends_the_process(tmp_path):
-    """A first run's setup takes seconds; a shell tool's SIGTERM must not wait it out."""
+def test_a_terminate_during_setup_is_answered_at_once_and_setup_still_finishes(tmp_path):
+    """Said at once, for the shell tool; the exit waits for the setup thread, so a daemon
+    it started is recorded (or killed) rather than left running unnamed."""
+    released = tmp_path / "released"
+    finished = tmp_path / "finished"
     program = (
         "import sys, time\n"
+        "from pathlib import Path\n"
         "from strata import scratch\n"
         "from strata.cli import main\n"
         "def setup(root, progress=None):\n"
         "    print('in setup', file=sys.stderr, flush=True)\n"
-        "    time.sleep(600)\n"
+        f"    while not Path({str(released)!r}).exists():\n"
+        "        time.sleep(0.05)\n"
+        f"    Path({str(finished)!r}).write_text('')\n"
+        "    raise scratch.ScratchError('setup done')\n"
         "scratch.ensure_daemon = setup\n"
         f"sys.exit(main(['scratch', 'run', '-c', 'x = 1', '--root', {str(tmp_path)!r}]))\n"
     )
@@ -123,15 +130,29 @@ def test_a_terminate_during_setup_ends_the_process(tmp_path):
         [sys.executable, "-c", program], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     try:
-        assert process.stderr is not None
+        assert process.stderr is not None and process.stdout is not None
         assert process.stderr.readline() == "in setup\n"
         process.send_signal(signal.SIGTERM)
+        said = json.loads(_until_json(process.stdout))
+        assert said["error"].startswith("terminated")
+        assert not finished.exists()
+        released.write_text("")
         # Bounded only so a hang fails the test instead of the suite's timeout.
-        out, _ = process.communicate(timeout=60)
+        process.communicate(timeout=60)
     finally:
         if process.poll() is None:
             process.kill()
             process.communicate()
 
     assert process.returncode == 1
-    assert json.loads(out)["error"].startswith("terminated")
+    assert finished.exists()
+
+
+def _until_json(stream) -> str:
+    """The rest of one JSON object the CLI printed, indented over several lines."""
+    text = ""
+    while not text.endswith("}\n"):
+        line = stream.readline()
+        assert line, "the process ended before it answered"
+        text += line
+    return text

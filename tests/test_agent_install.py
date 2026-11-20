@@ -597,6 +597,7 @@ def test_a_rollback_that_fails_too_says_both(agent_home, monkeypatch):
 def test_uninstall_finishes_with_claude_code_gone(agent_home, monkeypatch):
     claude, codex = agent_home
     agent_install.install(["claude", "codex"], STRATA)
+    path = os.environ["PATH"]
     empty = claude.parent / "empty-bin"
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))
@@ -605,6 +606,12 @@ def test_uninstall_finishes_with_claude_code_gone(agent_home, monkeypatch):
 
     assert any("no `claude` CLI" in what for _, what in done)
     assert _snapshot(claude, codex) == {}
+    # Still Strata's entry: with Claude Code back, an uninstall removes it, and an
+    # install meanwhile would not refuse it as the user's.
+    monkeypatch.setenv("PATH", path)
+    assert "strata" in _servers(claude)
+    agent_install.uninstall()
+    assert "strata" not in _servers(claude)
     assert agent_install.uninstall() == []
 
 
@@ -642,3 +649,40 @@ def test_a_partial_reinstall_refreshes_each_target_with_the_command_it_wrote(
         tomllib.loads((codex / "config.toml").read_text())["mcp_servers"]["strata"]["command"]
         == "/tool/strata"
     )
+
+
+@_SHEBANG
+def test_strata_s_entry_without_always_load_is_rewritten_with_it(agent_home):
+    """Without it the server is loaded lazily, and its tools are not offered up front."""
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+    data = json.loads((claude / ".claude.json").read_text())
+    del data["mcpServers"]["strata"]["alwaysLoad"]
+    (claude / ".claude.json").write_text(json.dumps(data))
+
+    agent_install.install(["claude"], STRATA)
+
+    assert _servers(claude)["strata"]["alwaysLoad"] is True
+
+
+@_SHEBANG
+def test_a_rollback_that_wrote_then_failed_is_still_strata_s(agent_home, monkeypatch):
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+    monkeypatch.setenv("FAKE_CLAUDE_REJECTS", "/new/strata")
+    real = agent_install.subprocess.run
+
+    def rollback_hangs_after_writing(command, **kwargs):
+        done = real(command, **kwargs)
+        if command[2] == "add-json" and json.loads(command[6])["command"] == STRATA:
+            raise agent_install.subprocess.TimeoutExpired(command, 120)
+        return done
+
+    monkeypatch.setattr(agent_install.subprocess, "run", rollback_hangs_after_writing)
+    with pytest.raises(agent_install.InstallError, match="putting the earlier strata entry back"):
+        agent_install.install(["claude"], "/new/strata")
+    monkeypatch.setattr(agent_install.subprocess, "run", real)
+
+    assert _servers(claude)["strata"]["command"] == STRATA
+    agent_install.uninstall()
+    assert "strata" not in _servers(claude)

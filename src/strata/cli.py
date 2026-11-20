@@ -994,7 +994,8 @@ def _dispatch_scratch_call(args: argparse.Namespace) -> int:
         arguments,
         progress=lambda step: print(f"{step}…", file=sys.stderr, flush=True),
     )
-    print(json.dumps(value, indent=2) if not isinstance(value, str) else value)
+    # Flushed: after a SIGTERM the exit may still wait for setup (``mcp_bridge.call_once``).
+    print(json.dumps(value, indent=2) if not isinstance(value, str) else value, flush=True)
     return 1 if failed else 0
 
 

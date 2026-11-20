@@ -10,14 +10,11 @@ one served by another Strata version's daemon, busy so not replaced, carries ``n
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import functools
 import itertools
 import json
 import signal
 import sys
-import threading
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from functools import cache
@@ -283,28 +280,6 @@ def build_server(root: Path) -> Server:
     )
 
 
-async def _in_daemon_thread[T](call: Callable[..., T], *args: Any) -> T:
-    """*call* in a daemon thread, awaited: on a SIGTERM the process exits without waiting for
-    it, as a first run's setup (seconds) would hold the exit past a shell tool's timeout."""
-    loop = asyncio.get_running_loop()
-    done: asyncio.Future[T] = loop.create_future()
-
-    def settle(outcome: Callable[[], None]) -> None:
-        if not done.done():
-            outcome()
-
-    def target() -> None:
-        try:
-            value = call(*args)
-        except BaseException as exc:
-            loop.call_soon_threadsafe(settle, functools.partial(done.set_exception, exc))
-        else:
-            loop.call_soon_threadsafe(settle, functools.partial(done.set_result, value))
-
-    threading.Thread(target=target, name="strata-daemon-start", daemon=True).start()
-    return await done
-
-
 def call_once(
     root: Path,
     name: str,
@@ -321,7 +296,11 @@ def call_once(
         upstream = Upstream()
         try:
             for attempt in range(2):
-                daemon = await _in_daemon_thread(scratch.ensure_daemon, root, progress)
+                # Abandoned on a SIGTERM, so the result is said at once; the exit still
+                # waits for the setup thread, which records (or cleans up) what it started.
+                daemon = await anyio.to_thread.run_sync(
+                    scratch.ensure_daemon, root, progress, abandon_on_cancel=True
+                )
                 try:
                     await upstream.open(daemon.url)
                     result = await upstream.call_tool(name, arguments)

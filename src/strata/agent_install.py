@@ -42,7 +42,7 @@ TARGETS = ("claude", "codex")
 SERVER_NAME = "strata"
 PERMISSION = "mcp__strata__*"
 _SKILL = "strata-scratchpad"
-_STATE_VERSION = 3
+_STATE_VERSION = 4
 
 
 class InstallError(RuntimeError):
@@ -423,7 +423,8 @@ def _check_claude(record: dict[str, Any]) -> None:
 def _install_claude_entry(command: str, record: dict[str, Any]) -> Change | None:
     ours = _mcp_entry(command)
     existing = _claude_entry(record)
-    if _same_server(existing, ours):
+    # alwaysLoad too: an entry without it is loaded lazily. The CLI stores it as given.
+    if _same_server(existing, ours) and existing is not None and existing.get("alwaysLoad"):
         record["entry"] = ours
         return None
     if existing is not None:
@@ -440,7 +441,9 @@ def _install_claude_entry(command: str, record: dict[str, Any]) -> Change | None
             try:
                 _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(existing))
             except InstallError as again:
-                record.pop("entry", None)
+                if not _same_server(_claude_entry(record), existing):
+                    # Nothing is there now; one written before its failure stays Strata's.
+                    record.pop("entry", None)
                 raise InstallError(
                     f"{exc}; putting the earlier strata entry back failed too ({again}), so "
                     "Claude Code has none now: run `strata agent install` again"
@@ -565,6 +568,10 @@ def uninstall() -> list[tuple[Change, str]]:
                 if target == "claude":
                     entry = _uninstall_claude_entry(record)
                     done += [entry] if entry else []
+                    if entry is not None and entry[1].startswith("left in place"):
+                        # Still Strata's, and still serving: kept, for a later uninstall
+                        # with Claude Code back; the skill stays retired meanwhile.
+                        continue
                     done += _restore_skill(record)
                 del state["targets"][key]
         finally:
