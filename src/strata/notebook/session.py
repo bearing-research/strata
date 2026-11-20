@@ -324,8 +324,12 @@ class NotebookSession:
         # awaited from another loop never wakes.
         self._staleness_lock = threading.RLock()
         # A scratchpad's code keys as last observed, by lookup key, and each cell's lookup
-        # key in the last pass: the pass itself observes nothing (``resolve_code_key``).
+        # key in the last pass. A pass observes before it takes the staleness lock, never
+        # inside it (``resolve_code_key``). Runs' threads record while others observe: an
+        # observation is kept only if no run recorded under its lookup meanwhile.
         self._code_seen: dict[str, Resolved] = {}
+        self._code_recorded: dict[str, int] = {}
+        self._code_seen_lock = threading.Lock()
         self._code_lookups: dict[str, str] = {}
         # Local mounts a staleness check found too much of unhashed, as
         # ``(digests_path, root)``, and the task hashing each (``_hash_mounts``).
@@ -1338,10 +1342,10 @@ class NotebookSession:
         # Only this pass's cells are observed again, and their keys' observations kept.
         self._code_lookups = code_lookups
         kept = set(code_lookups.values())
-        # In place, over a snapshot: a run's thread may add or drop an observation meanwhile,
-        # and a rebuilt dict would bring back the one it dropped.
-        for lookup in [k for k in list(self._code_seen) if k not in kept]:
-            self._code_seen.pop(lookup, None)
+        # In place: a rebuilt dict would bring back an observation a run's thread dropped.
+        with self._code_seen_lock:
+            for lookup in [k for k in self._code_seen if k not in kept]:
+                del self._code_seen[lookup]
         self.causality_map = explain_staleness(self, to_explain)
         # Stale once its last run's record says what moved. Without that the result is not
         # known to be wrong (a run of ``# @nocache``, an input that cannot be read), so idle.
@@ -1963,9 +1967,13 @@ class NotebookSession:
         seen = None if observe else self._code_seen.get(lookup)
         if seen is not None:
             return seen
+        recorded = self._code_recorded.get(lookup, 0)
         resolved = self._code_key_now(cell_id, lookup, observe=observe)
         if observe:
-            self._code_seen[lookup] = resolved
+            with self._code_seen_lock:
+                # Taken before a run recorded newer reads: not kept, so its record stands.
+                if self._code_recorded.get(lookup, 0) == recorded:
+                    self._code_seen[lookup] = resolved
         return resolved
 
     def _code_key_now(self, cell_id: str, lookup: str, *, observe: bool) -> Resolved:
@@ -2013,7 +2021,9 @@ class NotebookSession:
     ) -> None:
         """Note a scratchpad run under *lookup* and what it read; it is the newest now."""
         self.code_index.record(lookup, reads, stat)
-        self._code_seen.pop(lookup, None)
+        with self._code_seen_lock:
+            self._code_recorded[lookup] = self._code_recorded.get(lookup, 0) + 1
+            self._code_seen.pop(lookup, None)
 
     def resolve_cached_console(
         self, cell_id: str, provenance_hash: str, *, variant: str | None = None
