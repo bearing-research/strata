@@ -315,6 +315,10 @@ async def test_a_pass_prunes_its_observations_in_place(tmp_path, scratch):
 
     assert session._code_seen is seen
     assert "gone" not in seen and session._code_lookups[cell.id] in seen
+    # A count, unlike an observation, stays: back at zero it could match an observer's.
+    session._code_recorded["gone"] = 2
+    session.compute_staleness(hash_mounts=False)
+    assert session._code_recorded["gone"] == 2
 
 
 async def test_a_run_of_one_cell_keeps_another_cells_observation(tmp_path, scratch, monkeypatch):

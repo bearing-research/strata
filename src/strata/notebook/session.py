@@ -326,7 +326,8 @@ class NotebookSession:
         # A scratchpad's code keys as last observed, by lookup key, and each cell's lookup
         # key in the last pass. A pass observes before it takes the staleness lock, never
         # inside it (``resolve_code_key``). Runs' threads record while others observe: an
-        # observation is kept only if no run recorded under its lookup meanwhile.
+        # observation is kept only if no run recorded under its lookup meanwhile. Counts
+        # are never pruned: one put back to zero could match an observer's again.
         self._code_seen: dict[str, Resolved] = {}
         self._code_recorded: dict[str, int] = {}
         self._code_seen_lock = threading.Lock()
@@ -1346,8 +1347,6 @@ class NotebookSession:
         with self._code_seen_lock:
             for lookup in [k for k in self._code_seen if k not in kept]:
                 del self._code_seen[lookup]
-            for lookup in [k for k in self._code_recorded if k not in kept]:
-                del self._code_recorded[lookup]
         self.causality_map = explain_staleness(self, to_explain)
         # Stale once its last run's record says what moved. Without that the result is not
         # known to be wrong (a run of ``# @nocache``, an input that cannot be read), so idle.
