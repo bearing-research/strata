@@ -194,6 +194,7 @@ strata = "strata.cli:main"
 strata-notebook = "strata.server:main"
 strata-notebook-tui = "strata.notebook.tui.cli:main"
 strata-worker = "strata.notebook.remote_executor:main"
+strata-agent-hook = "strata.agent_hook:run"
 
 [project.urls]
 Homepage = "https://bearingresearch.com/strata/"

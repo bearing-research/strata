@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "strata": {
+      "command": "strata",
+      "args": ["mcp"],
+      "alwaysLoad": true
+    }
+  }
+}
