@@ -65,8 +65,9 @@ def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
         frames = safely(lambda: exited.__traceback__, None)
         # The cell's own frames: a traceback starts at the first of them.
         raise RuntimeError(message).with_traceback(
-            frames if isinstance(frames, types.TracebackType) else None
-        ) from (cause if isinstance(cause, BaseException) else None)
+            # type(), not isinstance: that may read the object's own __class__.
+            frames if type(frames) is types.TracebackType else None
+        ) from (cause if issubclass(type(cause), BaseException) else None)
 
 
 _EXIT_TEXT_MAX = 10_000

@@ -1018,9 +1018,9 @@ def test_an_odd_exception_is_still_reported_and_gets_no_hint(tmp_path, monkeypat
     manifest = {"notebook_dir": str(tmp_path)}
 
     assert cell_traceback.error_text(Cancels()) == "Cancels: <exception str() failed>"
-    for exc in (Cancels(), NoClass(), FileCancels()):
+    for exc in (NoClass(), FileCancels()):
         assert work_dir.hint(exc, manifest) is None, exc
-    for exc in (Cancels(), NoClass(), NameCancels(), NameAmbiguous()):
+    for exc in (NoClass(), NameCancels(), NameAmbiguous()):
         assert harness.no_client_hint(exc, {}) is None, exc
     # Notes that refuse one: the hint stands without its note.
     unnoted = NameError("x", name="strata")
@@ -1038,6 +1038,10 @@ def _unreadable(self):
     raise ValueError
 
 
+class _NoClass:
+    __class__ = property(_unreadable)  # type: ignore[assignment]
+
+
 @pytest.mark.parametrize(
     "odd",
     [
@@ -1046,6 +1050,9 @@ def _unreadable(self):
         {"__cause__": property(lambda self: 5)},
         {"__traceback__": property(_unreadable)},
         {"__traceback__": property(lambda self: 5)},
+        # isinstance would read these objects' own __class__.
+        {"__cause__": property(lambda self: _NoClass())},
+        {"__traceback__": property(lambda self: _NoClass())},
     ],
 )
 def test_an_odd_system_exit_still_reads_as_an_exit(odd):
