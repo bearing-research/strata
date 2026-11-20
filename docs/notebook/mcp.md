@@ -286,13 +286,19 @@ below, for subagents and harnesses that do not see MCP instructions. For Codex i
 writes an `[mcp_servers.strata]` block in `~/.codex/config.toml` and the same block
 in `~/.codex/AGENTS.md`. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honoured. A
 hand-copied `strata-scratchpad` skill it finds is moved to
-`~/.strata/agent-install/retired-skills/`: the server and the block replace it.
+`~/.strata/agent-install/retired-skills/`, since the server and the block replace it,
+and `uninstall` puts it back.
 
 Every piece is marker-fenced or keyed. `uninstall` puts back the original bytes of a
 file left as `install` wrote it, removes only Strata's part from one edited since,
-and puts back a `strata` MCP entry of your own that `install` replaced. A
+and puts back a `strata` MCP entry of your own that `install` replaced. It works from
+the directories `install` wrote into, whatever `CLAUDE_CONFIG_DIR` says now. A
 `config.toml` with an `[mcp_servers.strata]` of its own, or a `settings.json` that is
-not valid JSON, is refused before anything is written. When another Strata version
+not valid JSON, is refused before anything is written. The `strata` written is the one
+that runs `install`: refused from uv's cache (`uvx`), and warned about from a project's
+environment, since every project's agent would use it; `uv tool install` is the
+lasting choice. Ending `strata scratch run` (Ctrl-C, or a shell tool's timeout
+terminating it) cancels its cell on the daemon. When another Strata version
 wrote the files, `strata mcp` rewrites them as it starts.
 
 ### From a shell: `strata scratch run` and `show`

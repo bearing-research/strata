@@ -28,6 +28,8 @@ servers = data.setdefault("mcpServers", {})
 verb, name = sys.argv[2], sys.argv[5]
 assert sys.argv[1] == "mcp" and sys.argv[3:5] == ["--scope", "user"], sys.argv
 if verb == "add-json":
+    if os.environ.get("FAKE_CLAUDE_REJECTS") and "alwaysLoad" in sys.argv[6]:
+        sys.exit("unknown key alwaysLoad")
     if name in servers:
         sys.exit(f"MCP server {name} already exists in user config")
     servers[name] = json.loads(sys.argv[6])
@@ -225,8 +227,9 @@ def test_a_hand_copied_skill_is_moved_aside(agent_home):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the fake claude is a shebang script")
-def test_the_command_installs_and_uninstalls(agent_home, capsys):
+def test_the_command_installs_and_uninstalls(agent_home, capsys, monkeypatch):
     claude, _ = agent_home
+    monkeypatch.setattr(agent_install, "strata_command", lambda: (STRATA, None))
 
     assert main(["agent", "install", "--target", "claude", "--yes"]) == 0
     assert "wrote permission mcp__strata__*" in capsys.readouterr().out
@@ -338,3 +341,153 @@ def test_a_refresh_at_the_same_version_leaves_a_removed_block_removed(agent_home
 
     assert agent_install.refresh() == []
     assert agents_md.read_text() == "the user took it out\n"
+
+
+_SHEBANG = pytest.mark.skipif(sys.platform == "win32", reason="the fake claude is a shebang script")
+
+
+@_SHEBANG
+def test_a_failure_halfway_leaves_what_was_done_undoable(agent_home, monkeypatch):
+    _, codex = agent_home
+    # No claude anywhere on PATH, so the second target fails after the first is written.
+    empty = agent_home[0].parent / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+
+    with pytest.raises(agent_install.InstallError, match="`claude` CLI is not on PATH"):
+        agent_install.install(["codex", "claude"], STRATA)
+    assert (codex / "AGENTS.md").exists()
+    agent_install.uninstall()
+
+    assert _snapshot(codex) == {}
+
+
+@_SHEBANG
+def test_a_failed_add_puts_the_users_own_entry_back(agent_home, monkeypatch):
+    claude, _ = agent_home
+    claude.mkdir()
+    theirs = {"type": "stdio", "command": "strata", "args": ["mcp"]}
+    (claude / ".claude.json").write_text(json.dumps({"mcpServers": {"strata": theirs}}))
+    monkeypatch.setenv("FAKE_CLAUDE_REJECTS", "1")
+
+    with pytest.raises(agent_install.InstallError, match="unknown key alwaysLoad"):
+        agent_install.install(["claude"], STRATA)
+
+    assert _servers(claude)["strata"] == theirs
+
+
+@_SHEBANG
+def test_uninstall_finds_each_install_by_the_directory_it_went_into(agent_home, monkeypatch):
+    """Not by the environment uninstall runs in; nor a directory another one prefixes."""
+    claude, _ = agent_home
+    work = claude.parent / f"{claude.name}-work"
+    for directory in (claude, work):
+        directory.mkdir()
+        (directory / "CLAUDE.md").write_text(f"{directory.name}\n")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(directory))
+        agent_install.install(["claude"], STRATA)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+
+    agent_install.uninstall()
+
+    for directory in (claude, work):
+        assert _snapshot(directory) == {
+            str(directory / "CLAUDE.md"): f"{directory.name}\n".encode()
+        }
+        assert "strata" not in _servers(directory)
+
+
+@_SHEBANG
+def test_an_entry_the_cli_stores_its_own_way_is_still_strata_s(agent_home):
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+    data = json.loads((claude / ".claude.json").read_text())
+    entry = data["mcpServers"]["strata"]
+    del entry["env"]
+    entry["timeout"] = 30
+    (claude / ".claude.json").write_text(json.dumps(data))
+
+    assert [c.what for c in agent_install.install(["claude"], STRATA)] == []
+    agent_install.uninstall()
+
+    assert "strata" not in _servers(claude)
+
+
+@_SHEBANG
+def test_an_entry_the_user_added_between_installs_comes_back(agent_home):
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+    data = json.loads((claude / ".claude.json").read_text())
+    theirs = {"type": "stdio", "command": "/their/strata", "args": ["mcp"]}
+    data["mcpServers"]["strata"] = theirs
+    (claude / ".claude.json").write_text(json.dumps(data))
+
+    agent_install.install(["claude"], STRATA)
+    agent_install.uninstall()
+
+    assert _servers(claude)["strata"] == theirs
+
+
+def test_an_inline_mcp_servers_table_is_refused_and_nothing_is_written(agent_home):
+    _, codex = agent_home
+    codex.mkdir()
+    text = 'mcp_servers = { other = { command = "x" } }\n'
+    (codex / "config.toml").write_text(text)
+
+    with pytest.raises(agent_install.InstallError, match="inline table"):
+        agent_install.install(["codex"], STRATA)
+
+    assert (codex / "config.toml").read_text() == text
+    assert not (codex / "AGENTS.md").exists()
+
+
+@_SHEBANG
+def test_the_skill_comes_back_on_uninstall(agent_home):
+    claude, _ = agent_home
+    skill = claude / "skills" / "strata-scratchpad"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("old")
+
+    agent_install.install(["claude"], STRATA)
+    agent_install.uninstall()
+
+    assert (skill / "SKILL.md").read_text() == "old"
+
+
+@pytest.mark.parametrize(
+    ("where", "outcome"),
+    [
+        ("cache/uv/archive-v0/abc/bin/strata", "refused"),
+        ("share/uv/tools/strata-notebook/bin/strata", "quiet"),
+        ("repo/.venv/bin/strata", "warned"),
+    ],
+)
+def test_the_command_written_is_a_lasting_one(tmp_path, monkeypatch, where, outcome):
+    command = tmp_path / where
+    command.parent.mkdir(parents=True)
+    command.write_text("")
+    monkeypatch.setattr(sys, "argv", [str(command), "agent", "install"])
+    # As in a project's environment, which the test suite runs in too.
+    monkeypatch.setattr(sys, "base_prefix", "/somewhere/else")
+
+    if outcome == "refused":
+        with pytest.raises(agent_install.InstallError, match="uv's cache"):
+            agent_install.strata_command()
+        return
+    found, warning = agent_install.strata_command()
+    assert found == str(command)
+    assert (warning is None) == (outcome == "quiet")
+
+
+def test_a_torn_state_file_does_not_keep_strata_mcp_from_serving(
+    agent_home, monkeypatch, tmp_path, capsys
+):
+    import strata.mcp_bridge
+
+    state = Path.home() / ".strata" / "agent-install" / "state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text('{"state": 2, "targ')
+    monkeypatch.setattr(strata.mcp_bridge, "mcp_main", lambda root: 0)
+
+    assert main(["mcp", "--root", str(tmp_path)]) == 0
+    assert "could not refresh" in capsys.readouterr().err

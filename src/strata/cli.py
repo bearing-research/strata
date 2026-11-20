@@ -948,8 +948,9 @@ def _dispatch_mcp(args: argparse.Namespace) -> int:
 
     try:
         agent_install.refresh()
-    except (OSError, agent_install.InstallError) as exc:
-        # Never in the way of the server the agent is waiting for.
+    except (OSError, ValueError, KeyError, agent_install.InstallError) as exc:
+        # Never in the way of the server the agent is waiting for: a torn state file or a
+        # file that is not UTF-8 is said, and the server starts.
         print(f"strata mcp: could not refresh the installed agent config: {exc}", file=sys.stderr)
     _use_python(args)
     return mcp_main(resolve_anchor(args.root))
@@ -1027,7 +1028,10 @@ def _dispatch_agent_install(args: argparse.Namespace) -> int:
             if answer.strip().lower() not in {"y", "yes"}:
                 print("not installed")
                 return 1
-        changes = agent_install.install(targets, agent_install.strata_command())
+        command, warning = agent_install.strata_command()
+        if warning:
+            print(f"warning: {warning}", file=sys.stderr)
+        changes = agent_install.install(targets, command)
     except agent_install.InstallError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

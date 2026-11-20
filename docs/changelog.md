@@ -14,9 +14,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   writes the user-scope MCP entry (through `claude mcp add-json`, with `alwaysLoad`), the
   `mcp__strata__*` permission and a short block in `CLAUDE.md`, or Codex's
   `[mcp_servers.strata]` and the block in `AGENTS.md`, and moves a hand-copied
-  `strata-scratchpad` skill aside. `strata agent uninstall` removes exactly that: a file
-  left as it was written gets its original bytes back, an edited one loses only Strata's
-  part, and a `strata` MCP entry of your own comes back. `strata mcp` rewrites the pieces
+  `strata-scratchpad` skill aside. `strata agent uninstall` removes exactly that, from the
+  directories it went into: a file left as it was written gets its original bytes back, an
+  edited one loses only Strata's part, and a `strata` MCP entry of your own and the skill
+  come back. `strata mcp` rewrites the pieces
   another Strata version wrote as it starts. `strata scratch run -c CODE` and
   `strata scratch show [NAME]` are the `run` and `scratchpad` tools for an agent with only
   a shell. (#1594)

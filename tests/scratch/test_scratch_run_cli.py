@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 import json
+import signal
+import subprocess
+import sys
+import time
+
+import httpx
+import pytest
 
 from strata import scratch
 from strata.cli import main
@@ -45,3 +52,42 @@ def test_a_source_file_and_a_cell_to_replace(project, tmp_path, capsys):
     assert main(["scratch", "run", "-c", "y = 3\ny * 2", "--cell", cell, "--root", root]) == 0
     replaced = json.loads(capsys.readouterr().out)
     assert (replaced["cell"], replaced["value"]) == (cell, 6)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM is POSIX")
+def test_a_terminated_run_cancels_its_cell_on_the_daemon(project):
+    """An agent's shell tool ends a command past its timeout so; the cell must not run on."""
+    daemon = scratch.ensure_daemon(project)
+    cells_url = f"{daemon.url}/v1/notebooks/{daemon.session_id}/cells"
+    command = [
+        sys.executable,
+        "-c",
+        "import sys; from strata.cli import main; sys.exit(main(sys.argv[1:]))",
+        *["scratch", "run", "-c", "import time\ntime.sleep(600)", "--root", str(project)],
+    ]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert _eventually(lambda: _statuses(cells_url) == ["running"]), _statuses(cells_url)
+        process.send_signal(signal.SIGTERM)
+        out, _ = process.communicate(timeout=60)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+
+    assert process.returncode == 1
+    assert json.loads(out)["error"].startswith("terminated")
+    assert _eventually(lambda: _statuses(cells_url) not in ([], ["running"])), _statuses(cells_url)
+
+
+def _statuses(url: str) -> list[str]:
+    return [cell["status"] for cell in httpx.get(url).json()["cells"]]
+
+
+def _eventually(check, attempts: int = 600) -> bool:
+    """Polls *check* for up to a minute: a wait for a state, never a bound on a duration."""
+    for _ in range(attempts):
+        if check():
+            return True
+        time.sleep(0.1)
+    return False

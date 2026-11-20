@@ -13,6 +13,8 @@ from __future__ import annotations
 import contextlib
 import itertools
 import json
+import signal
+import sys
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from functools import cache
@@ -309,12 +311,42 @@ def call_once(
         finally:
             await upstream.aclose()
 
+    terminated = False
+
+    async def cancellable() -> dict[str, Any] | None:
+        """*call*, cancelled on SIGTERM as on Ctrl-C, so the daemon cancels the cell too:
+        an agent's shell tool ends a command that outlives its timeout so."""
+        nonlocal terminated
+        result: dict[str, Any] | None = None
+        async with anyio.create_task_group() as group:
+
+            async def run() -> None:
+                nonlocal result
+                result = await call()
+                group.cancel_scope.cancel()
+
+            async def on_terminate() -> None:
+                nonlocal terminated
+                with anyio.open_signal_receiver(signal.SIGTERM) as signals:
+                    async for _ in signals:
+                        terminated = True
+                        group.cancel_scope.cancel()
+                        return
+
+            group.start_soon(run)
+            if sys.platform != "win32":
+                group.start_soon(on_terminate)
+        return result
+
     try:
-        result = anyio.run(call)
+        result = anyio.run(cancellable)
     except scratch.ScratchError as exc:
         return {"status": "error", "error": str(exc), "fix": "the error says what to look at"}, True
     except (httpx.HTTPError, UpstreamError) as exc:
         error = f"the scratchpad's server failed the call: {type(exc).__name__}: {exc}"
+        return {"status": "error", "error": error, "fix": "run the command again"}, True
+    if result is None or terminated:
+        error = "terminated: the call was cancelled, and the cell with it"
         return {"status": "error", "error": error, "fix": "run the command again"}, True
     structured = result.get("structuredContent")
     if isinstance(structured, dict):
