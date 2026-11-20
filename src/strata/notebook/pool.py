@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import signal
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -150,7 +151,9 @@ class WarmProcessPool:
                     *command,
                     stdout=asyncio.subprocess.PIPE,
                     stdin=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                    # Nothing reads it: as a pipe, asyncio would buffer what a cell's
+                    # children write there in the server's memory, for nothing.
+                    stderr=asyncio.subprocess.DEVNULL,
                     cwd=str(self.notebook_dir),
                     limit=SUBPROCESS_LINE_LIMIT,
                     env=identity_env(harness_env(allowlist, lifeline_vars), harness_user),
@@ -277,6 +280,37 @@ class WarmProcessPool:
                 kill_subprocess_tree_nowait(proc.process)
 
 
+# An uncaught KeyboardInterrupt ends Python by SIGINT; on Windows, STATUS_CONTROL_C_EXIT;
+# under the lifeline wrapper (R's worker), the shell's 128 + SIGINT. The pool's own
+# terminations (cancel, fence) happen after it stops reading, not here.
+_INTERRUPT_EXITS = {-signal.SIGINT, 128 + signal.SIGINT, 0xC000013A}
+
+
+async def _died_of_an_interrupt(process: Any) -> bool:
+    """Whether a worker whose protocol ended was killed by Ctrl-C. It is exiting by then:
+    the wait is past the cell's deadline only when it was all but up, and a pool miss
+    instead would run the cell twice."""
+    try:
+        returncode = await asyncio.wait_for(process.wait(), timeout=5)
+    except TimeoutError:
+        return False
+    return returncode in _INTERRUPT_EXITS
+
+
+def _interrupted_result() -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": (
+            "Pool worker error: KeyboardInterrupt (the worker was interrupted, and the "
+            "cell's own output with it)"
+        ),
+        "variables": {},
+        "stdout": "",
+        "stderr": "",
+        "mutation_warnings": [],
+    }
+
+
 class PooledCellExecutor:
     """Runs cells on the warm pool for ``CellExecutor`` when one is available."""
 
@@ -328,13 +362,30 @@ class PooledCellExecutor:
                     timeout=deadline - asyncio.get_running_loop().time(),
                 )
                 if not result_json:
+                    if await _died_of_an_interrupt(warm_proc.process):
+                        # Wherever it landed (a torn line, the worker's own report): the
+                        # cell ran, so a cold run would run it twice.
+                        return _interrupted_result()
                     logger.warning("Warm process returned empty result")
                     return None
-                text = result_json.decode()
-                if on_event is not None and is_event_line(text):
-                    await on_event(json.loads(text))
+                text = result_json.decode(errors="replace")
+                if not text.strip():
+                    # The worker starts each line on its own, after any an interrupt tore.
                     continue
-                return json.loads(text)
+                try:
+                    value = json.loads(text)
+                except ValueError:
+                    value = None
+                if is_event_line(text) and value is not None:
+                    if on_event is not None:
+                        await on_event(value)
+                    continue
+                if isinstance(value, dict) and "success" in value:
+                    return value
+                # A protocol line an interrupt tore (None would run the cell again cold),
+                # or what a child of an R cell printed: R's worker shares its fd 1 with
+                # them. Dropped, as the cold paths drop a child's output.
+                logger.debug("Warm process line dropped: %.200r", text)
 
         except asyncio.CancelledError:
             logger.info(

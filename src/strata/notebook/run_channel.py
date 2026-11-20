@@ -127,7 +127,8 @@ class RunChannel:
             self._close = None
 
     def _emit(self, payload: dict[str, Any]) -> None:
-        self._write(json.dumps(payload, sort_keys=False) + "\n")
+        # On a line of its own: an interrupt may have torn the one before.
+        self._write("\n" + json.dumps(payload, sort_keys=False) + "\n")
 
 
 def _regular_files(root: Path) -> list[str]:

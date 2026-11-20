@@ -219,18 +219,27 @@ def build_env_identity() -> str:
     )
 
 
+_FAILED = {"success": False, "variables": {}, "stdout": "", "stderr": "", "mutation_warnings": []}
+_INTERRUPTED_LINE = (
+    _dumps_result({**_FAILED, "error": "Pool worker error: KeyboardInterrupt"}) + "\n"
+)
+
+
 def _close_client(client: Any) -> None:
     """Close an injected ambient client, swallowing teardown errors."""
     if client is None:
         return
     try:
         client.close()
-    except Exception:
-        pass
+    except BaseException:
+        # Any, an interrupt or the cell's own ``strata.close = sys.exit`` included: this
+        # worker runs one cell, and its result line, printed next, is all that is left.
+        return
 
 
-def execute_harness(manifest: dict) -> dict:
-    """Execute a cell manifest and return the result dict."""
+def execute_harness(manifest: dict, protocol: Any = None) -> dict:
+    """Execute a cell manifest and return the result dict; run events go to *protocol*
+    (the worker's own stream, else ``sys.stdout``)."""
     source = manifest.get("source", "")
     inputs = manifest.get("inputs", {})
     output_dir = Path(manifest.get("output_dir", ""))
@@ -299,7 +308,9 @@ def execute_harness(manifest: dict) -> dict:
 
                 _inject_mounts(manifest, namespace)
                 _inject_tables(manifest, namespace)
-                ambient_client = _inject_client(manifest, namespace, old_stdout)
+                ambient_client = _inject_client(
+                    manifest, namespace, old_stdout if protocol is None else protocol
+                )
                 display_capture.install(namespace)
 
                 namespace_before = set(namespace.keys())
@@ -392,14 +403,26 @@ def execute_harness(manifest: dict) -> dict:
         # cell's body (an input's unpickling), included.
         sys.stdout = old_stdout
         sys.stderr = old_stderr
-        return {
-            "success": False,
-            "variables": {},
-            "stdout": stdout_buf.getvalue(),
-            "stderr": stderr_buf.getvalue(),
-            **_traceback.failure_fields(e, _work_dir.hint(e, manifest)),
-            "mutation_warnings": [],
-        }
+        try:
+            return {
+                "success": False,
+                "variables": {},
+                "stdout": stdout_buf.getvalue(),
+                "stderr": stderr_buf.getvalue(),
+                **_traceback.failure_fields(e, _work_dir.hint(e, manifest)),
+                "mutation_warnings": [],
+            }
+        except BaseException:
+            # Reporting failed too (an interrupt while it ran): still a result, with the
+            # print trail, as the cold harness writes. With none the pool runs the cell again.
+            return {
+                "success": False,
+                "error": "the harness failed reporting the cell's failure",
+                "variables": {},
+                "stdout": stdout_buf.getvalue(),
+                "stderr": stderr_buf.getvalue(),
+                "mutation_warnings": [],
+            }
     finally:
         _close_client(ambient_client)
 
@@ -407,8 +430,24 @@ def execute_harness(manifest: dict) -> dict:
 # --- Main loop ---
 
 
+def _protocol_stream() -> Any:
+    """This worker's protocol, alone on a private copy of fd 1.
+
+    Fd 1 itself, which a cell's child processes inherit, goes to the null device, as the
+    cold harness drops what they print: on the protocol a child's line could tear one,
+    or pass for a result. The copy is not inherited (PEP 446).
+    """
+    sys.stdout.flush()
+    private = os.dup(1)
+    null = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(null, 1)
+    os.close(null)
+    return os.fdopen(private, "w", encoding="utf-8")
+
+
 def main() -> None:
     _lifeline.watch_lifeline()
+    out = _protocol_stream()
     try:
         if len(sys.argv) > 3 and sys.argv[2] == "--warm":
             # A scratchpad's base image, the one its cold runs import too.
@@ -417,7 +456,7 @@ def main() -> None:
             imports = parse_common_imports()
         warm_imports(imports)
 
-        print("ready", flush=True)
+        print("ready", file=out, flush=True)
 
         line = sys.stdin.readline()
         if not line:
@@ -426,28 +465,32 @@ def main() -> None:
         if not manifest_path:
             return
 
+        result: dict = {}
         try:
             with open(manifest_path, "rb") as f:
                 manifest = orjson.loads(f.read())
             # The next line, never the manifest file: see harness.read_run_token.
             if manifest.get("run_token_on_stdin"):
                 manifest["strata_run_token"] = sys.stdin.readline().strip()
-            result = execute_harness(manifest)
-            print(_dumps_result(result), flush=True)
-        except Exception as e:
-            print(
-                _dumps_result(
-                    {
-                        "success": False,
-                        "variables": {},
-                        "stdout": "",
-                        "stderr": "",
-                        "error": f"Pool worker error: {e}",
-                        "mutation_warnings": [],
-                    }
-                ),
-                flush=True,
-            )
+            result = execute_harness(manifest, out)
+            # On a line of its own, after any event line an interrupt tore; the pool
+            # skips the blank and the torn.
+            out.write("\n" + _dumps_result(result) + "\n")
+            out.flush()
+        except BaseException as e:
+            # Any, an interrupt included: with no result line the pool runs the cell
+            # again cold, its side effects twice. One that ends the worker even so is
+            # told by its exit status (``pool._died_of_an_interrupt``).
+            try:
+                error = f"Pool worker error: {_traceback.error_text(e)}"
+                # The print trail of a result whose write was torn.
+                trail = {k: result[k] for k in ("stdout", "stderr") if k in result}
+                line = _dumps_result({**_FAILED, **trail, "error": error}) + "\n"
+            except BaseException:
+                # A second interrupt while the line was made: one made in advance.
+                line = _INTERRUPTED_LINE
+            out.write("\n" + line)
+            out.flush()
 
     except Exception as e:
         print(f"fatal: {e}", file=sys.stderr, flush=True)

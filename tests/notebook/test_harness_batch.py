@@ -863,3 +863,83 @@ def test_a_cells_sys_exit_ends_the_batch_as_its_error(batch_pipes):
         "RuntimeError: the cell exited with status 3, which stops it before its end"
     )
     assert frames[-1]["payload"]["reason"] == "cell_error"
+
+
+def _closing_cells(closing: str) -> list[dict]:
+    """c1 replaces its client's close with *closing*; c2 runs after it."""
+    base = {"env": {}, "mount_manifest": {}, "table_manifest": {}, "env_hash": "env"}
+    return [
+        {
+            **base,
+            "cell_id": "c1",
+            "source": f"import sys\ndef close():\n    {closing}\nstrata.close = close\n",
+            "consumed_vars": [],
+            "strata_url": "http://127.0.0.1:9",
+            "source_hash": "src-c1",
+        },
+        {**base, "cell_id": "c2", "source": "z = 99", "consumed_vars": ["z"], "source_hash": "s2"},
+    ]
+
+
+def _drive(batch_pipes, cells: list[dict]) -> tuple[list[dict], list[BaseException]]:
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test/x"})
+        elif frame["type"] == "batch_end":
+            break
+    thread.join(timeout=5)
+    assert not thread.is_alive(), "harness thread did not exit"
+    return frames, errors
+
+
+def test_a_cells_exit_from_its_client_close_does_not_end_the_batch(batch_pipes):
+    frames, errors = _drive(batch_pipes, _closing_cells("sys.exit(5)"))
+
+    assert not errors, errors
+    persisted = [f["payload"]["cell_id"] for f in frames if f["type"] == "persist"]
+    assert persisted == ["c1", "c2"]
+
+
+def test_an_interrupt_in_a_client_close_still_stops_the_batch(batch_pipes):
+    frames, errors = _drive(batch_pipes, _closing_cells("raise KeyboardInterrupt"))
+
+    assert [type(e) for e in errors] == [KeyboardInterrupt]
+    assert "c2" not in [f["payload"].get("cell_id") for f in frames if f["type"] == "cell_start"]
+
+
+def test_an_interrupt_in_a_client_close_still_restores_the_names_it_bound(batch_pipes):
+    from strata.notebook import harness
+
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+    cell = _closing_cells("raise KeyboardInterrupt")[0]
+    namespace = {"strata": "the batch's own"}
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            harness._run_one_batched_cell(cell, namespace, output_dir, frame_w, resp_r, {})
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            frame_w.close()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    while (frame := _read_frame(frame_r)) is not None:
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test/x"})
+    thread.join(timeout=5)
+
+    assert [type(e) for e in errors] == [KeyboardInterrupt]
+    assert namespace["strata"] == "the batch's own"

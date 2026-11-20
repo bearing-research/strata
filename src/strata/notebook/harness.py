@@ -257,13 +257,13 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
 
 
 def close_client(client: Any) -> None:
-    """Close an injected ambient client, swallowing teardown errors."""
+    """Close an injected ambient client, swallowing its teardown errors (the cell's own
+    ``strata.close = sys.exit`` too). An interrupt still propagates: the batch stops on
+    it, and the single run writes its result first."""
     if client is None:
         return
-    try:
-        client.close()
-    except Exception:
-        pass
+    # In the lambda, so the attribute's own read is guarded too.
+    _traceback.safely(lambda: client.close(), None)
 
 
 @contextmanager
@@ -661,13 +661,15 @@ def _run_one_batched_cell(
             return ("ok", None)
     finally:
         # The batch process is reused across cells, so close the client (no leaked
-        # sockets) and restore pre-cell name bindings.
-        close_client(ambient_client)
-        for name, previous in previous_bindings.items():
-            if previous is _MISSING:
-                namespace.pop(name, None)
-            else:
-                namespace[name] = previous
+        # sockets) and restore pre-cell name bindings, whatever the close raised.
+        try:
+            close_client(ambient_client)
+        finally:
+            for name, previous in previous_bindings.items():
+                if previous is _MISSING:
+                    namespace.pop(name, None)
+                else:
+                    namespace[name] = previous
 
 
 def _seed_upstream_namespace(
@@ -1053,30 +1055,35 @@ def main():
         sys.exit(1)
 
     finally:
-        close_client(ambient_client)
-        if result is fallback:
-            # The cell's print trail, which matters most on failure.
-            result = {
-                **fallback,
-                "stdout": stdout_buffer.getvalue(),
-                "stderr": stderr_buffer.getvalue(),
-            }
-        # A separate name from the input manifest, so the parent can tell a crash
-        # from unread input. The hyphen can't be a Python identifier, so it can't
-        # collide with a variable's ``<var_name>.json``.
-        result_path = Path(manifest.get("output_dir", "/tmp/strata_output")) / "harness-result.json"
-        result_path.parent.mkdir(parents=True, exist_ok=True)
-        # default=str catches what orjson can't encode, so the write never truncates.
-        with open(result_path, "wb") as f:
-            f.write(
-                orjson.dumps(
-                    result,
-                    option=orjson.OPT_INDENT_2
-                    | orjson.OPT_SERIALIZE_NUMPY
-                    | orjson.OPT_NON_STR_KEYS,
-                    default=str,
-                )
+        try:
+            close_client(ambient_client)
+        finally:
+            # Written whatever the close raised (an interrupt): the parent reads this file.
+            if result is fallback:
+                # The cell's print trail, which matters most on failure.
+                result = {
+                    **fallback,
+                    "stdout": stdout_buffer.getvalue(),
+                    "stderr": stderr_buffer.getvalue(),
+                }
+            # A separate name from the input manifest, so the parent can tell a crash
+            # from unread input. The hyphen can't be a Python identifier, so it can't
+            # collide with a variable's ``<var_name>.json``.
+            result_path = (
+                Path(manifest.get("output_dir", "/tmp/strata_output")) / "harness-result.json"
             )
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            # default=str catches what orjson can't encode, so the write never truncates.
+            with open(result_path, "wb") as f:
+                f.write(
+                    orjson.dumps(
+                        result,
+                        option=orjson.OPT_INDENT_2
+                        | orjson.OPT_SERIALIZE_NUMPY
+                        | orjson.OPT_NON_STR_KEYS,
+                        default=str,
+                    )
+                )
 
 
 if __name__ == "__main__":

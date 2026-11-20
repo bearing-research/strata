@@ -861,6 +861,17 @@ def test_a_failure_the_handler_cannot_report_still_writes_a_result(harness_scrip
     assert result["stdout"] == "step 1 done\n"
 
 
+@pytest.mark.parametrize("closing", ["raise KeyboardInterrupt", "sys.exit(5)"])
+def test_a_client_close_that_raises_still_writes_the_cells_result(harness_script, closing):
+    """The close runs before the result is written; the parent reads only that file."""
+    source = f"import sys\nx = 1\ndef close():\n    {closing}\nstrata.close = close\n"
+    manifest = {"source": source, "inputs": {}, "strata_url": "http://127.0.0.1:9"}
+    result = run_harness(harness_script, manifest)
+
+    assert result["success"] is True, result
+    assert "x" in result["variables"]
+
+
 @pytest.mark.parametrize(
     ("base", "attribute"), [("FileNotFoundError", "filename"), ("NameError", "name")]
 )
@@ -893,9 +904,10 @@ def test_failure_fields_survive_a_traceback_that_cannot_be_formatted(monkeypatch
         raise SystemExit(2)
 
     monkeypatch.setattr(cell_traceback, "_from_the_cell", unformattable)
+    # An id no other test runs: one whose lines linecache holds would quote them.
     source = "def helper():\n    raise KeyError('it broke')\nhelper()\n"
     try:
-        exec(compile(source, cell_traceback.cell_filename("c1"), "exec"), {})
+        exec(compile(source, cell_traceback.cell_filename("unformat"), "exec"), {})
     except KeyError as exc:
         fields = cell_traceback.failure_fields(exc)
 
@@ -904,8 +916,8 @@ def test_failure_fields_survive_a_traceback_that_cannot_be_formatted(monkeypatch
     # From the cell's first frame, as the trimmed traceback is; the full one keeps this test's.
     assert fields["traceback"] == (
         "Traceback (most recent call last):\n"
-        '  File "<cell c1>", line 3, in <module>\n'
-        '  File "<cell c1>", line 2, in helper\n' + tail
+        '  File "<cell unformat>", line 3, in <module>\n'
+        '  File "<cell unformat>", line 2, in helper\n' + tail
     ), fields["traceback"]
     # What formatted keeps its own text.
     assert "test_failure_fields_survive" in fields["traceback_full"]
@@ -1099,3 +1111,14 @@ def test_a_file_hint_survives_a_filename_that_raises(tmp_path):
             raise ValueError
 
     assert work_dir.hint(Odd(), {"notebook_dir": str(tmp_path)}) is None
+
+
+def test_a_client_whose_close_cannot_even_be_read_is_still_closed_quietly():
+    from strata.notebook.harness import close_client
+
+    class Client:
+        @property
+        def close(self):
+            raise SystemExit(3)
+
+    close_client(Client())

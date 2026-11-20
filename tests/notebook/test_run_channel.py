@@ -31,7 +31,9 @@ def test_a_checkpoint_writes_its_parts_and_emits_one_line(tmp_path: Path):
     assert channel.checkpoint(model={"w": 1}, metrics=[0.5]) == 1
     assert channel.checkpoint(model={"w": 2}) == 2
 
-    assert len(lines) == 2 and all(line.endswith("\n") for line in lines)
+    # Each on a line of its own: an interrupt may have torn the one before.
+    assert len(lines) == 2 and all(line.startswith("\n") and line.endswith("\n") for line in lines)
+    lines = [line.lstrip("\n") for line in lines]
     first = json.loads(lines[0])
     assert first["event"] == "checkpoint" and first["sequence"] == 1
     assert set(first["parts"]) == {"model", "metrics"}
@@ -179,7 +181,7 @@ def test_the_pipe_channel_writes_lines_the_executor_reads(tmp_path: Path, monkey
     channel.checkpoint(x=1)
     channel.close()
     with os.fdopen(read_fd) as reader:
-        assert [json.loads(line)["event"] for line in reader] == ["checkpoint"]
+        assert [json.loads(line)["event"] for line in reader if line.strip()] == ["checkpoint"]
 
     monkeypatch.delenv(run_channel.EVENTS_FD_ENV)
     assert (
