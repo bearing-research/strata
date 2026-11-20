@@ -527,29 +527,51 @@ class TestArmCp:
             with server.installed_scratchpad(tmp_path / "h3", tmp_path, fresh, claude="nope", **kw):
                 pass
 
-    @pytest.mark.parametrize("environment", [".venv-overlay", ".venv"])
+    @pytest.mark.parametrize("attached", [True, False])
     def test_c_scratchpad_is_started_loaded_and_stopped_before_the_clock(
-        self, tmp_path, monkeypatch, environment
+        self, tmp_path, monkeypatch, attached
     ):
+        from strata import scratch
+        from strata.notebook import env as notebook_env
+
         project, agent_env, steps = tmp_path / "harbor", {"HOME": "trial"}, []
-        python = project / ".strata-scratch" / environment / "bin" / "python"
+        venv = ".venv-overlay" if attached else ".venv"
+        python = str(project / ".strata-scratch" / venv / "bin" / "python")
+        failing: set[str] = set()
+        running = [False]
 
         def fake_run(command, *, cwd, env, **kw):
             assert (cwd, env) == (project, agent_env)
-            if command[1:3] == ["scratch", "start"]:
-                python.parent.mkdir(parents=True, exist_ok=True)
-                python.touch()
-            steps.append(command[1:3] if command[1] != "-c" else ["python", command[0]])
-            return subprocess.CompletedProcess(command, 1 if "fail" in env else 0, "", "boom")
+            name = "python" if command[1] == "-c" else command[2]
+            steps.append([name, command[0]] if name == "python" else [name])
+            return subprocess.CompletedProcess(command, int(name in failing), "", "boom")
 
         monkeypatch.setattr(server.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            notebook_env, "attached_identity", lambda home: b"id" if attached else None
+        )
         monkeypatch.setattr(server, "stop_daemon", lambda where: steps.append(["stop", where]))
+        monkeypatch.setattr(scratch, "find_daemon", lambda anchor: object() if running[0] else None)
 
         server._warm_scratchpad(project, agent_env)
+        assert steps == [["start"], ["python", python], ["stop", project]]
 
-        assert steps == [["scratch", "start"], ["python", str(python)], ["stop", project]]
-        agent_env["fail"] = "1"
-        with pytest.raises(server.SetupError, match="warming the scratchpad: scratch start"):
+        failing.add("python")
+        steps.clear()
+        with pytest.raises(server.SetupError, match=f"importing in {venv}"):
+            server._warm_scratchpad(project, agent_env)
+        assert ["stop", project] not in steps
+
+        failing.clear()
+        running[0] = True
+        with pytest.raises(server.SetupError, match="its daemon did not stop"):
+            server._warm_scratchpad(project, agent_env)
+
+        def busy(anchor):
+            raise scratch.NotAnswering("busy")
+
+        monkeypatch.setattr(scratch, "find_daemon", busy)
+        with pytest.raises(server.SetupError, match="its daemon did not stop"):
             server._warm_scratchpad(project, agent_env)
 
     def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):

@@ -203,29 +203,36 @@ def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
     Its first use in a project, the sync above all (28.6 s on the first C trial), is no
     part of a working session; the agent's first call still starts the daemon.
     """
-    from strata.notebook.env import OVERLAY_DIR
-    from strata.scratch import scratch_dir
+    from strata import scratch
+    from strata.notebook.env import OVERLAY_DIR, attached_identity
 
     def step(what: str, command: list[str], timeout: float) -> None:
-        with as_setup_error():
+        try:
             done = subprocess.run(
                 command, cwd=project, env=agent_env, capture_output=True, text=True, timeout=timeout
             )
+        except _SETUP_FAILURES as exc:
+            raise SetupError(f"warming the scratchpad: {what} failed: {exc!r}") from exc
         if done.returncode != 0:
             raise SetupError(f"warming the scratchpad: {what} failed: {done.stderr[-300:]}")
 
     # Past the CLI's own setup deadline, so a slow start ends in the CLI, which stops the
     # daemon it launched, not in a kill that leaves it running.
     step("scratch start", [str(Path(sys.executable).parent / "strata"), "scratch", "start"], 900)
-    # The overlay over the project's .venv, else the scratchpad's own environment.
-    home = scratch_dir(project)
-    python = next(
-        (p for p in (home / OVERLAY_DIR, home / ".venv") if (p / "bin" / "python").exists()),
-        home / OVERLAY_DIR,
-    )
-    step(f"importing in {python}", [str(python / "bin" / "python"), "-c", _WARM], 600)
-    # With its group: pools and cells the start left would run on under the agent's clock.
+    # The environment its cells run in, as the notebook's own record says (writer.py).
+    home = scratch.scratch_dir(project)
+    venv = OVERLAY_DIR if attached_identity(home) is not None else ".venv"
+    step(f"importing in {venv}", [str(home / venv / "bin" / "python"), "-c", _WARM], 600)
+    # SIGTERM lets the daemon stop its pools and cells; what outlives the wait is killed
+    # with its group. Its pools and cells have sessions of their own, so not by that kill.
     stop_daemon(project)
+    try:
+        still = scratch.find_daemon(project.resolve()) is not None
+    except scratch.ScratchError:
+        still = True
+    if still:
+        # The agent's first call would find it warm.
+        raise SetupError("warming the scratchpad: its daemon did not stop")
 
 
 def _warm_home(home: Path) -> None:
