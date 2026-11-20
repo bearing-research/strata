@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -24,12 +25,26 @@ def _commands() -> dict[str, str]:
     return {event: groups[0]["hooks"][0]["command"] for event, groups in HOOKS.items()}
 
 
-def test_the_plugins_hook_is_the_packages():
-    """A copy, run by path from the plugin: the package's is under a site-packages the
-    plugin cannot name."""
-    assert (PLUGIN / "hooks" / "agent_hook.py").read_bytes() == Path(
-        agent_hook.__file__
-    ).read_bytes()
+def test_the_hooks_run_strata_agent_hook_which_imports_no_notebook():
+    """A console script beside ``strata``: on its interpreter, and on PATH wherever it is.
+    The hook runs before every prompt, and ``strata.notebook`` takes half a second."""
+    scripts = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["scripts"]
+    assert scripts["strata-agent-hook"] == "strata.agent_hook:run"
+    for command in _commands().values():
+        assert command.startswith("strata-agent-hook ")
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys, strata.agent_hook; "
+            "print(sorted(m for m in sys.modules if m.startswith('strata.')))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert done.stdout.strip() == "['strata.agent_hook']"
 
 
 def test_the_server_is_strata_mcp_loaded_up_front():
@@ -55,7 +70,9 @@ def test_each_hook_says_the_scratchpad_as_claude_code_runs_it(tmp_path):
     digest.parent.mkdir(parents=True)
     cell = {"cell": "c1", "defines": ["df"], "status": "ready", "upstream": [], "reads": {}}
     digest.write_text(json.dumps({"version": 1, "environment": {}, "cells": [cell]}))
-    env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(PLUGIN)}
+    # The console script as an install puts it: beside this interpreter.
+    path = f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}"
+    env = {**os.environ, "PATH": path}
     payload = json.dumps({"cwd": str(tmp_path), "prompt": "plot df"})
 
     for command in _commands().values():
@@ -69,8 +86,9 @@ def test_each_hook_says_the_scratchpad_as_claude_code_runs_it(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the commands are bash's")
-def test_a_hook_whose_script_is_gone_never_blocks_the_prompt(tmp_path):
-    env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(tmp_path)}
+def test_a_hook_whose_script_is_not_on_path_never_blocks_the_prompt(tmp_path):
+    """Exit 127 there; never 2, which blocks the prompt."""
+    env = {**os.environ, "PATH": "/usr/bin:/bin"}
 
     done = subprocess.run(
         ["bash", "-c", _commands()["UserPromptSubmit"]], input=b"{}", capture_output=True, env=env
@@ -81,6 +99,7 @@ def test_a_hook_whose_script_is_gone_never_blocks_the_prompt(tmp_path):
 
 def test_the_skill_is_retired():
     """The MCP instructions and the hooks replace it; arm B's eval keeps its own copy."""
+    assert not (PLUGIN / "commands").exists()
     assert not (PLUGIN / "skills").exists()
     assert not (Path(agent_hook.__file__).parent / ".agents").exists()
 

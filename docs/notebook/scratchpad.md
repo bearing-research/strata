@@ -43,8 +43,9 @@ What each piece is, and how a file you edited since is handled, is in
 [`strata agent install`](mcp.md#install-it-into-the-agent-strata-agent-install).
 
 If you would rather install through Claude Code's plugin manager, the plugin
-bundles the same server and hooks (but not the permission or the `CLAUDE.md`
-block, which a plugin cannot write). Use one or the other, not both:
+bundles the same server and hooks, but not the permission (allow
+`mcp__plugin_strata-scratchpad_strata__*` yourself) or the `CLAUDE.md` block, which
+a plugin cannot write. Use one or the other, not both:
 
 ```
 /plugin marketplace add bearing-research/strata
@@ -70,7 +71,8 @@ strata scratch show             # what the scratchpad holds, as the agent sees i
 
 ## What the agent is told
 
-Three channels, from one source (`strata/agent_guidance/scratchpad.md`):
+Three channels; the first two read one source (`strata/agent_guidance/scratchpad.md`),
+and the hooks' lines are written by `strata/agent_hook.py`:
 
 - **The MCP server's instructions**: use `run` instead of `python -c` or a temp
   script, look in `scratchpad` before computing, put a slow step in its own cell.
@@ -86,6 +88,7 @@ Three channels, from one source (`strata/agent_guidance/scratchpad.md`):
   </strata_scratchpad>
   ```
 
+  A plugin install names its own tool, `mcp__plugin_strata-scratchpad_strata__run`.
   `cached` always means checked just now: the hook looks at every file a cell read
   again before saying it, so a file you edited while no daemon ran makes its cell
   stale, never cached. What it cannot check within its budget is said `as of` the

@@ -312,5 +312,11 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+def run() -> int:
+    """``strata-agent-hook``, the plugin's: on strata's own interpreter, wherever
+    ``strata`` is on PATH, and importing nothing of Strata's but its root."""
+    return main(sys.argv)
+
+
 if __name__ == "__main__":
     sys.exit(main(sys.argv))
