@@ -128,7 +128,10 @@ def test_installing_twice_changes_nothing_and_still_uninstalls_clean(agent_home)
     second = agent_install.install(["claude"], STRATA)
     agent_install.uninstall()
 
-    assert {change.what for change in first} >= {"scratchpad block", "permission mcp__strata__*"}
+    assert {change.what for change in first} >= {
+        "scratchpad block",
+        "permission mcp__strata__* and the scratchpad hooks",
+    }
     assert second == []
     assert _snapshot(claude) == {str(claude / "CLAUDE.md"): b"mine\n"}
     assert written != _snapshot(claude)
@@ -711,3 +714,136 @@ def test_a_rollback_that_wrote_then_failed_is_still_strata_s(agent_home, monkeyp
     assert _servers(claude)["strata"]["command"] == STRATA
     agent_install.uninstall()
     assert "strata" not in _servers(claude)
+
+
+@_SHEBANG
+def test_the_hooks_are_written_run_and_removed_beside_the_users_own(agent_home, tmp_path):
+    import subprocess
+
+    claude, _ = agent_home
+    claude.mkdir()
+    theirs = {"hooks": [{"type": "command", "command": "echo mine"}]}
+    (claude / "settings.json").write_text(
+        json.dumps({"hooks": {"SessionStart": [theirs], "Stop": [theirs]}}, indent=2) + "\n"
+    )
+
+    agent_install.install(["claude"], STRATA)
+    hooks = json.loads((claude / "settings.json").read_text())["hooks"]
+    assert hooks["SessionStart"][0] == theirs
+    ours = {
+        event: hooks[event][-1]["hooks"][0]["command"]
+        for event in ("SessionStart", "UserPromptSubmit")
+    }
+    for command in ours.values():
+        # As Claude Code runs it: through the shell, the payload on stdin.
+        done = subprocess.run(
+            command,
+            shell=True,
+            input=json.dumps({"cwd": str(tmp_path)}),
+            capture_output=True,
+            text=True,
+        )
+        assert (done.returncode, done.stderr) == (0, "")
+    # Edited since, so uninstall takes out only Strata's part.
+    edited = json.loads((claude / "settings.json").read_text())
+    edited["model"] = "mine"
+    (claude / "settings.json").write_text(json.dumps(edited))
+    agent_install.uninstall()
+
+    left = json.loads((claude / "settings.json").read_text())
+    assert left["hooks"] == {"SessionStart": [theirs], "Stop": [theirs]}
+    assert left["model"] == "mine"
+
+
+@_SHEBANG
+def test_a_reinstall_writes_each_hook_once(agent_home):
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+    # Edited, so the reinstall adds over what is there rather than from the original.
+    settings = json.loads((claude / "settings.json").read_text())
+    settings["model"] = "mine"
+    (claude / "settings.json").write_text(json.dumps(settings))
+
+    agent_install.install(["claude"], STRATA)
+
+    hooks = json.loads((claude / "settings.json").read_text())["hooks"]
+    assert [len(hooks[event]) for event in ("SessionStart", "UserPromptSubmit")] == [1, 1]
+
+
+@_SHEBANG
+def test_a_hook_entry_with_no_record_of_it_is_replaced_not_doubled(agent_home):
+    """One from an install whose state is gone, or another interpreter's."""
+    claude, _ = agent_home
+    claude.mkdir()
+    old = {
+        "hooks": [{"type": "command", "command": "/old/python -I /old/strata/agent_hook.py prompt"}]
+    }
+    (claude / "settings.json").write_text(json.dumps({"hooks": {"UserPromptSubmit": [old]}}))
+
+    agent_install.install(["claude"], STRATA)
+
+    (group,) = json.loads((claude / "settings.json").read_text())["hooks"]["UserPromptSubmit"]
+    assert group != old
+
+
+@_SHEBANG
+def test_the_users_own_hooks_survive_install_and_uninstall(agent_home):
+    """One named like Strata's script, and one in a group Strata's command is put into."""
+    claude, _ = agent_home
+    claude.mkdir()
+    named = {"hooks": [{"type": "command", "command": "python ~/hooks/agent_hook.py prompt"}]}
+    mine = {"type": "command", "command": "echo mine"}
+    settings = {"hooks": {"UserPromptSubmit": [named], "SessionStart": [{"hooks": [mine]}]}}
+    (claude / "settings.json").write_text(json.dumps(settings))
+    agent_install.install(["claude"], STRATA)
+    # Strata's command moved into the user's group by hand, and the file edited so.
+    edited = json.loads((claude / "settings.json").read_text())
+    ours = edited["hooks"]["SessionStart"].pop()["hooks"][0]
+    edited["hooks"]["SessionStart"][0]["hooks"].append(ours)
+    (claude / "settings.json").write_text(json.dumps(edited))
+
+    agent_install.uninstall()
+
+    assert json.loads((claude / "settings.json").read_text())["hooks"] == {
+        "UserPromptSubmit": [named],
+        "SessionStart": [{"hooks": [mine]}],
+    }
+
+
+@_SHEBANG
+@pytest.mark.parametrize(
+    ("settings", "key"),
+    [
+        ({"hooks": []}, "hooks"),
+        ({"hooks": {"SessionStart": {"hooks": []}}}, "hooks"),
+        ({"permissions": []}, "permissions"),
+        ({"permissions": {"allow": "mcp__strata__*"}}, "permissions"),
+    ],
+)
+def test_settings_claude_code_cannot_read_are_refused_before_anything_is_written(
+    agent_home, settings, key
+):
+    claude, _ = agent_home
+    claude.mkdir()
+    (claude / "settings.json").write_text(json.dumps(settings))
+
+    with pytest.raises(agent_install.InstallError, match=f"`{key}`"):
+        agent_install.install(["claude"], STRATA)
+
+    assert "strata" not in _servers(claude)
+
+
+@_SHEBANG
+def test_a_hook_whose_script_is_gone_never_blocks_the_prompt(agent_home, tmp_path):
+    """Exit 2 would: Claude Code erases the prompt."""
+    import subprocess
+
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+    hooks = json.loads((claude / "settings.json").read_text())["hooks"]
+    command = hooks["UserPromptSubmit"][0]["hooks"][0]["command"]
+    gone = command.replace("agent_hook.py", "agent_hook_gone.py")
+
+    done = subprocess.run(gone, shell=True, input="{}", capture_output=True, text=True)
+
+    assert done.returncode == 0

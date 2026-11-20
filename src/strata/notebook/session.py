@@ -29,7 +29,7 @@ from vestigo.provenance import derive_subkey
 from strata.notebook import console_relay, nonce, output_file_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
-from strata.notebook.code_keys import CodeIndex, Resolved
+from strata.notebook.code_keys import CodeIndex, Resolved, code_key
 from strata.notebook.dag import NotebookDag
 from strata.notebook.dependencies import (
     DependencyChangeResult,
@@ -901,6 +901,8 @@ class NotebookSession:
                 changed = self._changed_reads()
                 with self._staleness_lock:
                     self._hint_changed_reads(changed, staleness)
+        if check_reads:
+            self._write_digest()
         if hash_mounts:
             self._hash_mounts()
         return staleness
@@ -1479,6 +1481,16 @@ class NotebookSession:
         )
         cell.status = CellStatus.READY
         self.causality_map.pop(cell_id, None)
+        self._write_digest()
+
+    def _write_digest(self) -> None:
+        """A scratchpad's digest, for the agent hook, after a pass or a run ends: the pass
+        during a run sees the cell running. Small files (each cell's source), so on the loop
+        too."""
+        if self.notebook_state.scratchpad:
+            from strata.notebook import scratch_digest
+
+            scratch_digest.write(self)
 
     def mark_cell_running(self, cell_id: str) -> None:
         """Mark a cell as currently executing.
@@ -1502,6 +1514,7 @@ class NotebookSession:
             return []
         cell.status = CellStatus.ERROR
         if self.dag is None:
+            self._write_digest()
             return []
         affected: list[str] = []
         seen: set[str] = set()
@@ -1516,6 +1529,8 @@ class NotebookSession:
                 downstream_cell.status = CellStatus.STALE
                 affected.append(nid)
             queue.extend(self.dag.cell_downstream.get(nid, []))
+        # With its downstream stale: the digest outlives the daemon.
+        self._write_digest()
         return affected
 
     def _set_run_diagnostics(self, cell: Any, result: Any) -> None:
@@ -1912,6 +1927,25 @@ class NotebookSession:
             return False
         annotations = parse_annotations(cell.source, cell.language)
         return annotations.loop is None and annotations.each is None and not annotations.per_variant
+
+    def code_reads(self, cell_id: str) -> dict[str, list[Any]] | None:
+        """What a scratchpad cell's result was computed from, ``{path: [seen, stat]}``, as
+        the last observation found it; ``None`` for a cell not keyed on its reads.
+
+        The run whose reads match now (a revert finds an older one), else the newest.
+        No file is looked at.
+        """
+        lookup = self._code_lookups.get(cell_id)
+        if lookup is None:
+            return None
+        sets = self.code_index.sets(lookup)
+        resolved = self._code_seen.get(lookup)
+        if resolved is not None:
+            for entry in sets:
+                recorded = {path: seen for path, (seen, _) in entry.items()}
+                if code_key(lookup, recorded) == resolved.key:
+                    return entry
+        return sets[0] if sets else None
 
     def resolve_code_key(self, cell_id: str, lookup: str, *, observe: bool = True) -> Resolved:
         """The key a scratchpad cell's result under *lookup* is stored under, as what its

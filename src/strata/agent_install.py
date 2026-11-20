@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -159,19 +160,95 @@ class _FilePiece:
     remove: Callable[[str], str]
 
 
+# The agent hook (``strata/agent_hook.py``): at session start, and on each prompt for the
+# cells it names. Run by path, isolated, on this install's interpreter: stdlib only.
+_HOOK_EVENTS = {"SessionStart": "session-start", "UserPromptSubmit": "prompt"}
+
+
+# Strata's hook command: ``.../strata/agent_hook.py <mode>``, as written below.
+_OURS = re.compile(r"[/\\]strata[/\\]agent_hook\.py\W* (?:session-start|prompt)\b")
+
+
+def _hook_command(mode: str) -> str:
+    from strata import agent_hook
+
+    # Claude Code runs hooks through bash, Git Bash on Windows, which takes C:/... paths
+    # (a backslashed one with no slash it would look up on PATH). Never exit 2, which
+    # blocks the prompt, should the script be gone (a reinstall on another Python): the
+    # hook only informs.
+    argv = [Path(sys.executable).as_posix(), "-I", Path(agent_hook.__file__).as_posix(), mode]
+    return " ".join(shlex.quote(part) for part in argv) + " || true"
+
+
+def _is_ours(hook: Any) -> bool:
+    return isinstance(hook, dict) and bool(_OURS.search(str(hook.get("command", ""))))
+
+
+def _hook_lists(settings: dict[str, Any]) -> dict[str, list[Any]]:
+    """``settings["hooks"]``, refused as ``_load_json`` refuses a file it cannot read."""
+    hooks = settings.setdefault("hooks", {})
+    if not isinstance(hooks, dict) or not all(
+        isinstance(hooks.get(event, []), list) for event in _HOOK_EVENTS
+    ):
+        raise InstallError("settings.json's `hooks` is not as Claude Code reads it: fix it first")
+    return hooks
+
+
+def _allow_list(settings: dict[str, Any]) -> list[Any]:
+    """``settings["permissions"]["allow"]``, refused as ``_hook_lists`` refuses."""
+    permissions = settings.setdefault("permissions", {})
+    allow = permissions.setdefault("allow", []) if isinstance(permissions, dict) else None
+    if not isinstance(allow, list):
+        raise InstallError(
+            "settings.json's `permissions` is not as Claude Code reads it: fix it first"
+        )
+    return allow
+
+
 def _settings_add(text: str) -> str:
-    settings = _load_json(text, "settings.json")
-    allow = settings.setdefault("permissions", {}).setdefault("allow", [])
+    settings = _load_json(_settings_remove(text), "settings.json")
+    allow = _allow_list(settings)
     if PERMISSION not in allow:
         allow.append(PERMISSION)
+    hooks = _hook_lists(settings)
+    for event, mode in _HOOK_EVENTS.items():
+        command = {"type": "command", "command": _hook_command(mode), "timeout": 5}
+        hooks.setdefault(event, []).append({"hooks": [command]})
     return json.dumps(settings, indent=2) + "\n"
 
 
 def _settings_remove(text: str) -> str:
     settings = _load_json(text, "settings.json")
-    allow = settings.get("permissions", {}).get("allow")
+    permissions = settings.get("permissions")
+    allow = permissions.get("allow") if isinstance(permissions, dict) else None
     if isinstance(allow, list) and PERMISSION in allow:
         allow.remove(PERMISSION)
+    hooks = settings.get("hooks")
+    if isinstance(hooks, dict):
+        emptied = False
+        for event in _HOOK_EVENTS:
+            groups = hooks.get(event)
+            if not isinstance(groups, list):
+                continue
+            kept = []
+            for group in groups:
+                inner = group.get("hooks") if isinstance(group, dict) else None
+                if not isinstance(inner, list) or not any(_is_ours(h) for h in inner):
+                    kept.append(group)
+                    continue
+                # Only Strata's command goes; a group it shares with the user's stays.
+                rest = [h for h in inner if not _is_ours(h)]
+                if rest:
+                    kept.append({**group, "hooks": rest})
+            if kept != groups:
+                hooks[event] = kept
+                if not kept:
+                    del hooks[event]
+                    emptied = True
+        # Emptied by Strata: an empty ``hooks`` of the user's own goes too, and means as
+        # little to Claude Code as none.
+        if emptied and not hooks:
+            del settings["hooks"]
     return json.dumps(settings, indent=2) + "\n"
 
 
@@ -226,7 +303,10 @@ def _file_pieces(target: str, base: Path, command: str) -> list[_FilePiece]:
         block = _markdown_block("the `mcp__strata__run` tool", "`mcp__strata__scratchpad`")
         return [
             _FilePiece(
-                "permission mcp__strata__*", base / "settings.json", _settings_add, _settings_remove
+                "permission mcp__strata__* and the scratchpad hooks",
+                base / "settings.json",
+                _settings_add,
+                _settings_remove,
             ),
             _FilePiece(
                 "scratchpad block",
