@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -442,6 +443,179 @@ class TestArmCp:
         assert trial.discarded is None and trial.turns[0].passed
         assert events == [("up", "trial/home", "harbor"), ("down",)]
 
+    def test_arm_c_runs_its_turns_after_the_install_on_a_home_of_its_own(
+        self, tmp_path, claude, monkeypatch
+    ):
+        events = []
+
+        @contextmanager
+        def fake_install(home, project, agent_env, *, claude, load_log, load_seconds):
+            bin_dir = Path(agent_env["PATH"].split(os.pathsep)[0])
+            events.append(("up", home, agent_env["HOME"], (bin_dir / "strata").exists()))
+            yield
+            events.append(("down",))
+
+        monkeypatch.setattr(server, "installed_scratchpad", fake_install)
+
+        trial = _trial(
+            tmp_path,
+            claude,
+            monkeypatch,
+            "neutral_modpow",
+            "C",
+            [[None, "246"]],
+            FAKE_SERVERS="strata",
+            FAKE_TOOLS="mcp__strata__run,mcp__strata__scratchpad",
+        )
+
+        assert trial.discarded is None and trial.turns[0].passed
+        home = tmp_path / "trial" / "home"
+        assert events == [("up", home, str(home), True), ("down",)]
+        assert run.preflight("C", self.INIT) is None
+
+    def test_arm_c_without_uvs_dirs_is_discarded_not_raised(self, tmp_path, claude, monkeypatch):
+        def no_uv(*args):
+            raise subprocess.CalledProcessError(2, ["uv", "cache", "dir"])
+
+        monkeypatch.setattr(server, "cell_env", no_uv)
+
+        trial = _trial(tmp_path, claude, monkeypatch, "neutral_modpow", "C", [[None, "246"]])
+
+        assert trial.discarded.startswith("setup: CalledProcessError") and not trial.turns
+
+    def test_the_install_writes_a_users_config_into_the_trials(self, tmp_path, monkeypatch):
+        # As a native install has it: `claude` a link to a file named for its version, and
+        # its folder not on the agent's PATH.
+        (tmp_path / "versions").mkdir()
+        recorder = tmp_path / "versions" / "9.9.9"
+        recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args"\n')
+        recorder.chmod(0o755)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "claude").symlink_to(recorder)
+        claude = str(bin_dir / "claude")
+        monkeypatch.setattr(server, "_warm_home", lambda home: None)
+        warmed = []
+        monkeypatch.setattr(server, "_warm_scratchpad", lambda *args: warmed.append(args))
+        config, home = tmp_path / "config", tmp_path / "home"
+        config.mkdir()
+        env = {
+            **server.host_env(),
+            "PATH": f"/usr/bin{os.pathsep}/bin",
+            "HOME": str(home),
+            "CLAUDE_CONFIG_DIR": str(config),
+        }
+        kw = {"load_log": tmp_path / "l.jsonl", "load_seconds": 0}
+
+        with server.installed_scratchpad(home, tmp_path, env, claude=claude, **kw):
+            args = (tmp_path / "args").read_text().splitlines()
+            assert args[:5] == ["mcp", "add-json", "--scope", "user", "strata"]
+            assert Path(json.loads(args[5])["command"]).parent == Path(sys.executable).parent
+            settings = json.loads((config / "settings.json").read_text())
+            assert settings["permissions"]["allow"] == ["mcp__strata__*"]
+            assert set(settings["hooks"]) == {"SessionStart", "UserPromptSubmit"}
+            assert "mcp__strata__run" in (config / "CLAUDE.md").read_text()
+            # The install's record is the trial's, not the runner's home.
+            assert (home / ".strata" / "agent-install" / "state.json").exists()
+            assert warmed == [(tmp_path, env)]
+
+        recorder.write_text("#!/bin/sh\nexit 1\n")
+        fresh = {**env, "HOME": str(tmp_path / "h2")}
+        with pytest.raises(server.SetupError, match="strata agent install failed"):
+            with server.installed_scratchpad(tmp_path / "h2", tmp_path, fresh, claude=claude, **kw):
+                pass
+        with pytest.raises(server.SetupError, match="not on PATH"):
+            with server.installed_scratchpad(tmp_path / "h3", tmp_path, fresh, claude="nope", **kw):
+                pass
+
+    @pytest.mark.parametrize("attached", [True, False])
+    def test_c_scratchpad_is_started_loaded_and_stopped_before_the_clock(
+        self, tmp_path, monkeypatch, attached
+    ):
+        from strata import scratch
+        from strata.notebook import env as notebook_env
+
+        project, agent_env, steps = tmp_path / "harbor", {"HOME": "trial"}, []
+        venv = ".venv-overlay" if attached else ".venv"
+        python = str(project / ".strata-scratch" / venv / "bin" / "python")
+        failing: set[str] = set()
+        running = [False]
+
+        def fake_run(command, *, cwd, env, **kw):
+            assert (cwd, env) == (project, agent_env)
+            name = "python" if command[1] == "-c" else command[2]
+            steps.append([name, command[0]] if name == "python" else [name])
+            return subprocess.CompletedProcess(command, int(name in failing), "", "boom")
+
+        monkeypatch.setattr(server.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            notebook_env, "attached_identity", lambda home: b"id" if attached else None
+        )
+        monkeypatch.setattr(server, "stop_daemon", lambda where: steps.append(["stop", where]))
+        monkeypatch.setattr(scratch, "find_daemon", lambda anchor: object() if running[0] else None)
+
+        server._warm_scratchpad(project, agent_env)
+        assert steps == [["start"], ["python", python], ["stop", project]]
+
+        failing.add("python")
+        steps.clear()
+        with pytest.raises(server.SetupError, match=re.escape(f"importing in {venv}")):
+            server._warm_scratchpad(project, agent_env)
+        assert ["stop", project] not in steps
+
+        failing.clear()
+        running[0] = True
+        with pytest.raises(server.SetupError, match="its daemon did not stop"):
+            server._warm_scratchpad(project, agent_env)
+
+        def busy(anchor):
+            raise scratch.NotAnswering("busy")
+
+        monkeypatch.setattr(scratch, "find_daemon", busy)
+        with pytest.raises(server.SetupError, match="its daemon did not stop"):
+            server._warm_scratchpad(project, agent_env)
+
+        def unreadable(anchor):
+            raise KeyError("anchor")
+
+        monkeypatch.setattr(scratch, "find_daemon", unreadable)
+        with pytest.raises(server.SetupError, match="its daemon did not stop: KeyError"):
+            server._warm_scratchpad(project, agent_env)
+
+        failing.add("start")
+        with pytest.raises(server.SetupError, match="warming the scratchpad: scratch start"):
+            server._warm_scratchpad(project, agent_env)
+
+        def slow(command, **kw):
+            raise subprocess.TimeoutExpired(command, 900)
+
+        monkeypatch.setattr(server.subprocess, "run", slow)
+        with pytest.raises(server.SetupError, match="scratch start failed: TimeoutExpired"):
+            server._warm_scratchpad(project, agent_env)
+
+    def test_c_warms_the_overlay_its_record_names_without_an_identity(self, tmp_path, monkeypatch):
+        from strata.notebook import env as notebook_env
+        from strata.notebook import project_env
+
+        steps = []
+
+        def fake_run(command, **kw):
+            steps.append(command[0])
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        monkeypatch.setattr(server.subprocess, "run", fake_run)
+        monkeypatch.setattr(notebook_env, "attached_identity", lambda home: None)
+        monkeypatch.setattr(project_env, "read_record", lambda home: {"mode": "attached"})
+        monkeypatch.setattr(server, "stop_daemon", lambda where: None)
+
+        server._warm_scratchpad(tmp_path, {})
+
+        assert steps[1] == str(tmp_path / ".strata-scratch" / ".venv-overlay" / "bin" / "python")
+
+        monkeypatch.setattr(project_env, "read_record", lambda home: json.loads("{"))
+        with pytest.raises(server.SetupError, match="its environment record: JSONDecodeError"):
+            server._warm_scratchpad(tmp_path, {})
+
     def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):
         command = server.stdio_entry_command(
             "claude", tmp_path / "harbor", tmp_path / "home", tmp_path / "l.jsonl", 20.0
@@ -609,15 +783,15 @@ class TestArmCp:
     )
     def test_a_failure_bringing_it_up_is_a_setup_error(self, failure):
         with pytest.raises(server.SetupError, match=type(failure).__name__):
-            with server._as_setup_error():
+            with server.as_setup_error():
                 raise failure
 
     def test_its_own_refusals_and_other_errors_pass_through(self):
         with pytest.raises(server.SetupError, match="^uv add failed$"):
-            with server._as_setup_error():
+            with server.as_setup_error():
                 raise server.SetupError("uv add failed")
         with pytest.raises(ZeroDivisionError):
-            with server._as_setup_error():
+            with server.as_setup_error():
                 raise ZeroDivisionError
 
     def test_its_entry_is_user_scope_and_always_loaded(self):

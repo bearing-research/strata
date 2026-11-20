@@ -48,6 +48,7 @@ about Strata. `run` refuses such an `--out`; use one under `/tmp`.
 | B, today | the shipped `strata-scratchpad` skill in the config dir; this checkout's `strata` on `PATH` |
 | Cp, the design's C' | a Strata server of the trial's own (`STRATA_MCP_PROFILE=scratchpad`, every store under the trial folder) with one notebook open, whose environment has the project installed editable; a user-scope HTTP MCP entry for it, `alwaysLoad: true`, written with `claude mcp add-json` |
 | Cpp, C' as a user sets it up | a user-scope stdio MCP entry running `strata mcp --root <project>`, `alwaysLoad: true`: the first tool call starts the project's daemon and its `.strata-scratch/`, nothing warmed beforehand; a HOME of the trial's own (on uv's real caches), so each trial is a first use of Strata, with matplotlib's font list built in it beforehand, as in Cp. Until P3, its cells cannot import the project |
+| C, what ships | `strata agent install --target claude --yes` run in the project, into the trial's config dir: the user-scope stdio entry `strata mcp` (`alwaysLoad: true`), the `mcp__strata__*` permission, the SessionStart and UserPromptSubmit hooks, the `CLAUDE.md` block; this checkout's `strata` on `PATH`. A HOME of the trial's own, as in Cpp, for the agent too, so the install's record and the daemon's registry are the trial's. Before the clock, as a returning user has it: `strata scratch start` (the scratchpad created, its environment synced: 28.6 s on a first trial, once per project), the cells' imports loaded once in its environment, as in Cp, then `strata scratch stop`, so the agent's first call starts the daemon |
 
 ```bash
 uv run python -m evals.agent_notebook.uptake run --arm A --out /tmp/uptake-runs/ --split train --runs 3
@@ -64,9 +65,9 @@ calls started (Cpp's, or B's `strata` commands') is stopped with its cells and p
 turn past its timeout is killed with everything it started. Each trial folder keeps the project as the agent left it, each turn's stream,
 the load counter and `trial.json`; once a trial is scored its venvs and artifact stores
 (about 520 MB in Cp) are removed. A trial is **discarded**, never scored, when a turn's
-`system/init` event does not show the arm's setup (in Cp, anything but `strata`
+`system/init` event does not show the arm's setup (in Cp, Cpp and C, anything but `strata`
 connected with `run` and `scratchpad` loaded; a strata MCP server in A or B; the skill
-missing in B or present in A or Cp), when Cp's server does not come up, when a turn
+missing in B or present in A or Cp), when Cp's server does not come up or C's install fails, when a turn
 never reached the model, when a resumed turn starts a new session, or when a turn runs
 past its timeout (30 min).
 

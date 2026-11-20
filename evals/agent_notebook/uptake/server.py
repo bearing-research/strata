@@ -13,6 +13,7 @@ import functools
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -41,7 +42,7 @@ _SETUP_FAILURES = (httpx.HTTPError, KeyError, ValueError, OSError, subprocess.Su
 
 
 @contextmanager
-def _as_setup_error() -> Iterator[None]:
+def as_setup_error() -> Iterator[None]:
     try:
         yield
     except _SETUP_FAILURES as exc:
@@ -70,7 +71,7 @@ def _uv_dir(*args: str) -> str:
     return subprocess.run(["uv", *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def _cell_env(home: Path, load_log: Path, load_seconds: float) -> dict[str, str]:
+def cell_env(home: Path, load_log: Path, load_seconds: float) -> dict[str, str]:
     """What both scratchpad arms give the process whose cells the agent runs: a HOME of the
     trial's own, uv's real cache and interpreters (nothing is downloaded again), and the
     load counter."""
@@ -88,7 +89,7 @@ def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> di
     Strata or Anthropic settings, and the load counter its cells inherit."""
     env = host_env()
     env.update(
-        _cell_env(_home(root), load_log, load_seconds),
+        cell_env(_home(root), load_log, load_seconds),
         STRATA_HOST="127.0.0.1",
         STRATA_PORT=str(port),
         STRATA_MCP_ENABLED="true",
@@ -124,7 +125,7 @@ def stdio_entry_command(
         "type": "stdio",
         "command": str(Path(sys.executable).parent / "strata"),
         "args": ["mcp", "--root", str(project)],
-        "env": _cell_env(home, load_log, load_seconds),
+        "env": cell_env(home, load_log, load_seconds),
         "alwaysLoad": True,
     }
     return [claude, "mcp", "add-json", "-s", "user", SERVER_NAME, json.dumps(entry)]
@@ -142,9 +143,9 @@ def stdio_scratchpad(
 ) -> Iterator[None]:
     """Arm Cpp: its HOME warmed and its entry written. The daemon its calls start is
     stopped by the runner, which stops any arm's (:func:`stop_daemon`)."""
-    home.mkdir(parents=True)
-    _warm_home(home)
-    with _as_setup_error():
+    with as_setup_error():
+        home.mkdir(parents=True)
+        _warm_home(home)
         registered = subprocess.run(
             stdio_entry_command(claude, project, home, load_log, load_seconds),
             env=agent_env,
@@ -157,11 +158,99 @@ def stdio_scratchpad(
     yield
 
 
+@contextmanager
+def installed_scratchpad(
+    home: Path,
+    project: Path,
+    agent_env: dict[str, str],
+    *,
+    claude: str,
+    load_log: Path,
+    load_seconds: float,
+) -> Iterator[None]:
+    """Arm C: ``strata agent install`` as a user runs it, into the config dir and HOME
+    *agent_env* names (the runner gives arm C the trial's own, :func:`cell_env`). The
+    daemon its calls start is stopped by the runner (:func:`stop_daemon`)."""
+    with as_setup_error():
+        home.mkdir(parents=True)
+        _warm_home(home)
+    found = shutil.which(claude, path=agent_env["PATH"]) or shutil.which(claude)
+    if found is None:
+        raise SetupError(f"{claude} is not on PATH, and the installer runs it")
+    # The installer finds `claude` on PATH, as it would on a user's machine. Not resolved:
+    # a native install's `claude` is a link to a file named for its version.
+    path = f"{Path(found).absolute().parent}{os.pathsep}{agent_env['PATH']}"
+    with as_setup_error():
+        installed = subprocess.run(
+            [str(Path(sys.executable).parent / "strata"), "agent", "install"]
+            + ["--target", "claude", "--yes"],
+            cwd=project,
+            env={**agent_env, "PATH": path},
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    if installed.returncode != 0:
+        raise SetupError(f"strata agent install failed: {installed.stderr.strip()[-300:]}")
+    _warm_scratchpad(project, agent_env)
+    yield
+
+
+def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
+    """The project's scratchpad as a returning user has it: created, its environment synced
+    and first loaded (Cp's notebook is too), its daemon stopped, as the next day finds it.
+
+    Its first use in a project, the sync above all (28.6 s on the first C trial), is no
+    part of a working session; the agent's first call still starts the daemon.
+    """
+    from strata import scratch
+    from strata.notebook.env import OVERLAY_DIR, attached_identity
+    from strata.notebook.project_env import read_record
+
+    def step(what: str, command: list[str], timeout: float) -> None:
+        try:
+            done = subprocess.run(
+                command, cwd=project, env=agent_env, capture_output=True, text=True, timeout=timeout
+            )
+        except _SETUP_FAILURES as exc:
+            raise SetupError(f"warming the scratchpad: {what} failed: {exc!r}") from exc
+        if done.returncode != 0:
+            raise SetupError(f"warming the scratchpad: {what} failed: {done.stderr[-300:]}")
+
+    # Past the CLI's own setup deadline, so a slow start ends in the CLI, which stops the
+    # daemon it launched, not in a kill that leaves it running.
+    step("scratch start", [str(Path(sys.executable).parent / "strata"), "scratch", "start"], 900)
+    # The environment its cells run in, decided as environment_hash decides it: its record
+    # says attached even when a failed probe left no identity.
+    home = scratch.scratch_dir(project)
+    try:
+        record = read_record(home)
+    except _SETUP_FAILURES as exc:
+        raise SetupError(f"warming the scratchpad: its environment record: {exc!r}") from exc
+    attached = attached_identity(home) is not None or (
+        record is not None and record.get("mode") == "attached"
+    )
+    venv = OVERLAY_DIR if attached else ".venv"
+    step(f"importing in {venv}", [str(home / venv / "bin" / "python"), "-c", _WARM], 600)
+    # SIGTERM lets the daemon stop its pools and cells; what outlives the wait is killed
+    # with its group. Its pools and cells have sessions of their own, so not by that kill.
+    stop_daemon(project)
+    try:
+        still = scratch.find_daemon(project.resolve()) is not None
+    except (scratch.ScratchError, *_SETUP_FAILURES) as exc:
+        # Busy, or its record unreadable: not shown stopped.
+        raise SetupError(f"warming the scratchpad: its daemon did not stop: {exc!r}") from exc
+    if still:
+        # The agent's first call would find it warm.
+        raise SetupError("warming the scratchpad: its daemon did not stop")
+
+
 def _warm_home(home: Path) -> None:
     """Build matplotlib's font list under *home*, as Cp's notebook does before the agent's
     clock: a user's machine is past it, and it is no part of a first use of Strata."""
     warmed = subprocess.run(
         [sys.executable, "-c", "import matplotlib.font_manager"],
+        timeout=300,
         env={**host_env(), "HOME": str(home)},
         capture_output=True,
         text=True,
@@ -172,7 +261,8 @@ def _warm_home(home: Path) -> None:
 
 def stop_daemon(project: Path, wait: float = 30.0) -> None:
     """Stop the scratchpad daemon a trial's calls started on *project* (Cpp's entry, or B's
-    ``strata`` commands), and its group: cells, pools and what outlived its shutdown.
+    ``strata`` commands): SIGTERM, on which it stops its pools and cells (sessions of
+    their own), then what is left of its group.
     Detached, it would idle on for 30 minutes, loading the machine under later trials
     and holding files being removed."""
     from strata import scratch
@@ -247,7 +337,7 @@ def scratchpad_server(
     """A running scratchpad-profile server over one open notebook under *root* that
     can import *project*; its MCP entry is written to the agent's config dir. Yields
     the server's URL and stops the server on exit."""
-    with _as_setup_error():
+    with as_setup_error():
         notebook = _prepare_notebook(root, project)
         port = _free_port()
         env = server_env(root, port, load_log, load_seconds)
@@ -255,7 +345,7 @@ def scratchpad_server(
     url = f"http://127.0.0.1:{port}"
     proc: subprocess.Popen | None = None
     try:
-        with _as_setup_error():
+        with as_setup_error():
             proc = subprocess.Popen(
                 [sys.executable, "-m", "strata"],
                 cwd=root,
