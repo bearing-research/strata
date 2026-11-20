@@ -223,8 +223,11 @@ def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
     # The environment its cells run in, decided as environment_hash decides it: its record
     # says attached even when a failed probe left no identity.
     home = scratch.scratch_dir(project)
-    record = read_record(home) or {}
-    attached = attached_identity(home) is not None or record.get("mode") == "attached"
+    with as_setup_error():
+        record = read_record(home)
+        attached = attached_identity(home) is not None or (
+            isinstance(record, dict) and record.get("mode") == "attached"
+        )
     venv = OVERLAY_DIR if attached else ".venv"
     step(f"importing in {venv}", [str(home / venv / "bin" / "python"), "-c", _WARM], 600)
     # SIGTERM lets the daemon stop its pools and cells; what outlives the wait is killed
@@ -232,9 +235,9 @@ def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
     stop_daemon(project)
     try:
         still = scratch.find_daemon(project.resolve()) is not None
-    except (scratch.ScratchError, *_SETUP_FAILURES):
+    except (scratch.ScratchError, *_SETUP_FAILURES) as exc:
         # Busy, or its record unreadable: not shown stopped.
-        still = True
+        raise SetupError(f"warming the scratchpad: its daemon did not stop: {exc!r}") from exc
     if still:
         # The agent's first call would find it warm.
         raise SetupError("warming the scratchpad: its daemon did not stop")
