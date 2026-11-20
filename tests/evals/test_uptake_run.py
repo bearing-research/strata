@@ -472,6 +472,16 @@ class TestArmCp:
         assert events == [("up", home, str(home), True), ("down",)]
         assert run.preflight("C", self.INIT) is None
 
+    def test_arm_c_without_uvs_dirs_is_discarded_not_raised(self, tmp_path, claude, monkeypatch):
+        def no_uv(*args):
+            raise subprocess.CalledProcessError(2, ["uv", "cache", "dir"])
+
+        monkeypatch.setattr(server, "cell_env", no_uv)
+
+        trial = _trial(tmp_path, claude, monkeypatch, "neutral_modpow", "C", [[None, "246"]])
+
+        assert trial.discarded.startswith("setup: CalledProcessError") and not trial.turns
+
     def test_the_install_writes_a_users_config_into_the_trials(self, tmp_path, monkeypatch):
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
@@ -501,11 +511,14 @@ class TestArmCp:
             assert (home / ".strata" / "agent-install" / "state.json").exists()
 
         recorder.write_text("#!/bin/sh\nexit 1\n")
+        fresh = {**env, "HOME": str(tmp_path / "h2")}
         with pytest.raises(server.SetupError, match="strata agent install failed"):
-            with server.installed_scratchpad(tmp_path / "h2", tmp_path, env, claude="claude", **kw):
+            with server.installed_scratchpad(
+                tmp_path / "h2", tmp_path, fresh, claude="claude", **kw
+            ):
                 pass
         with pytest.raises(server.SetupError, match="not on PATH"):
-            with server.installed_scratchpad(tmp_path / "h3", tmp_path, env, claude="nope", **kw):
+            with server.installed_scratchpad(tmp_path / "h3", tmp_path, fresh, claude="nope", **kw):
                 pass
 
     def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):
@@ -675,15 +688,15 @@ class TestArmCp:
     )
     def test_a_failure_bringing_it_up_is_a_setup_error(self, failure):
         with pytest.raises(server.SetupError, match=type(failure).__name__):
-            with server._as_setup_error():
+            with server.as_setup_error():
                 raise failure
 
     def test_its_own_refusals_and_other_errors_pass_through(self):
         with pytest.raises(server.SetupError, match="^uv add failed$"):
-            with server._as_setup_error():
+            with server.as_setup_error():
                 raise server.SetupError("uv add failed")
         with pytest.raises(ZeroDivisionError):
-            with server._as_setup_error():
+            with server.as_setup_error():
                 raise ZeroDivisionError
 
     def test_its_entry_is_user_scope_and_always_loaded(self):

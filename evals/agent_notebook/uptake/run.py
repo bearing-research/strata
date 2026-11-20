@@ -293,13 +293,14 @@ def run_trial(
     prepare_arm(arm, config, bin_dir, path)
     work = prepare_workspace(trial_dir / "harbor", rows=rows, sync=sync)
     env = agent_env(config, bin_dir, path, load_log, load_seconds)
-    if arm == "C":
-        # A HOME of its own, so the install's record, the daemon's registry and shared
-        # environments are the trial's: each trial is a first use (as Cpp's server gets).
-        env.update(server.cell_env(trial_dir / "home", load_log, load_seconds))
     # Before the agent can touch the workspace's data; a files check reads it after.
     expected = task.expected(work)
     try:
+        if arm == "C":
+            # A HOME of its own, so the install's record, the daemon's registry and shared
+            # environments are the trial's: each trial is a first use (as Cpp's server gets).
+            with server.as_setup_error():
+                env.update(server.cell_env(trial_dir / "home", load_log, load_seconds))
         arm_server = {
             "Cp": server.scratchpad_server,
             "Cpp": server.stdio_scratchpad,
@@ -334,8 +335,8 @@ def shrink(trial_dir: Path) -> None:
     A scratchpad trial holds about 520 MB of them. ``trial.json``, the turns, the cells'
     sources and the workspace's git status (what the agent changed) stay.
     """
-    # Cpp's and C's HOME holds the daemon's shared environments and registry, nothing the
-    # agent made.
+    # Cpp's HOME holds the daemon's shared environments and registry, nothing the agent
+    # made; C's is the agent's too, and goes with them.
     _remove([trial_dir / "scratchpad" / "artifacts", trial_dir / "home"])
     found = []
     for root, dirs, _ in os.walk(trial_dir):

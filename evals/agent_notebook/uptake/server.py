@@ -42,7 +42,7 @@ _SETUP_FAILURES = (httpx.HTTPError, KeyError, ValueError, OSError, subprocess.Su
 
 
 @contextmanager
-def _as_setup_error() -> Iterator[None]:
+def as_setup_error() -> Iterator[None]:
     try:
         yield
     except _SETUP_FAILURES as exc:
@@ -145,7 +145,7 @@ def stdio_scratchpad(
     stopped by the runner, which stops any arm's (:func:`stop_daemon`)."""
     home.mkdir(parents=True)
     _warm_home(home)
-    with _as_setup_error():
+    with as_setup_error():
         registered = subprocess.run(
             stdio_entry_command(claude, project, home, load_log, load_seconds),
             env=agent_env,
@@ -177,8 +177,8 @@ def installed_scratchpad(
     if found is None:
         raise SetupError(f"{claude} is not on PATH, and the installer runs it")
     # The installer finds `claude` on PATH, as it would on a user's machine.
-    path = f"{Path(found).parent}{os.pathsep}{agent_env['PATH']}"
-    with _as_setup_error():
+    path = f"{Path(found).resolve().parent}{os.pathsep}{agent_env['PATH']}"
+    with as_setup_error():
         installed = subprocess.run(
             [str(Path(sys.executable).parent / "strata"), "agent", "install"]
             + ["--target", "claude", "--yes"],
@@ -283,7 +283,7 @@ def scratchpad_server(
     """A running scratchpad-profile server over one open notebook under *root* that
     can import *project*; its MCP entry is written to the agent's config dir. Yields
     the server's URL and stops the server on exit."""
-    with _as_setup_error():
+    with as_setup_error():
         notebook = _prepare_notebook(root, project)
         port = _free_port()
         env = server_env(root, port, load_log, load_seconds)
@@ -291,7 +291,7 @@ def scratchpad_server(
     url = f"http://127.0.0.1:{port}"
     proc: subprocess.Popen | None = None
     try:
-        with _as_setup_error():
+        with as_setup_error():
             proc = subprocess.Popen(
                 [sys.executable, "-m", "strata"],
                 cwd=root,
