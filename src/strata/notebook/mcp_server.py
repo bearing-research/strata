@@ -1097,6 +1097,25 @@ def _came_back(record: dict[str, Any], names: list[str]) -> str:
     )
 
 
+async def _observe_code_reads(session_manager: SessionManager) -> None:
+    """Before the inventory: a file a cell's run read that changed under the daemon (a
+    module edited) makes a staleness pass, so the cell reads stale rather than ready. Not
+    while a run is active (``refresh_staleness``); the check keeps no observation, so the
+    next call makes it again."""
+    import anyio
+
+    from strata.notebook.ws import refresh_staleness
+
+    try:
+        _, session = _one_session(session_manager)
+    except _Refused:
+        # ``_scratchpad`` says why.
+        return
+    # On anyio's limiter, as the store's pool is sized to it (``compute_staleness_async``).
+    if await anyio.to_thread.run_sync(session.code_keys_moved):
+        await refresh_staleness(session)
+
+
 def _scratchpad(session_manager: SessionManager, name: str | None = None) -> dict[str, Any]:
     """The inventory, or with *name* the cell that defines it."""
     from strata.notebook.layout import WORK_DIR
@@ -1771,7 +1790,7 @@ def build_mcp_app(
             return await _scratch_run(session_manager, source, cell, fresh)
 
         @mcp.tool(meta=always_load)
-        def scratchpad(name: str | None = None) -> dict[str, Any]:
+        async def scratchpad(name: str | None = None) -> dict[str, Any]:
             """What the scratchpad already holds; look here before computing again.
 
             Without ``name``: every cell's id, ``defines``, ``status``, why it is
@@ -1780,6 +1799,7 @@ def build_mcp_app(
             the cache has saved. With ``name``: the cell defining that variable, its
             source and shown ``value``, or the names that do exist.
             """
+            await _observe_code_reads(session_manager)
             return _scratchpad(session_manager, name)
 
     from mcp.server.transport_security import TransportSecuritySettings

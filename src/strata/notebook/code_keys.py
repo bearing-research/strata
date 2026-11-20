@@ -144,9 +144,11 @@ class CodeIndex:
     def _retake(self, lookup: str, entry: dict[str, list[Any]], retaken: dict[str, Any]) -> None:
         """Keep the fresh stat of paths hashed again and found as they were, so the next
         check takes the fast path."""
+        seen = {path: hashed for path, (hashed, _) in entry.items()}
         with self._lock:
             for stored in self._load().get(lookup, []):
-                if stored.keys() == entry.keys():
+                # The record observed, not a newer one over the same paths: its hashes too.
+                if {path: hashed for path, (hashed, _) in stored.items()} == seen:
                     for path, print_ in retaken.items():
                         stored[path][1] = print_
                     self._save()

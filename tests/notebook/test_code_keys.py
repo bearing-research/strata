@@ -46,3 +46,17 @@ def test_an_index_that_cannot_be_written_costs_nothing_but_itself(tmp_path):
 
     assert not (tmp_path / INDEX).exists()
     assert [p.name for p in tmp_path.iterdir()] == [".strata"]
+
+
+def test_a_fresh_stat_goes_only_to_the_record_it_was_taken_for(tmp_path):
+    """An observation of an older record must not stamp its stat on a newer one over the
+    same paths: the stat would vouch for content the newer record never saw."""
+    index = CodeIndex(tmp_path)
+    index.record("L", {"/a": "sha256:new"}, {"/a": [1, 2, 3]})
+    older = {"/a": ["sha256:old", [0, 0, 0]]}
+
+    index._retake("L", older, {"/a": [9, 9, 9]})
+
+    assert index.sets("L") == [{"/a": ["sha256:new", [1, 2, 3]]}]
+    index._retake("L", {"/a": ["sha256:new", [1, 2, 3]]}, {"/a": [9, 9, 9]})
+    assert index.sets("L") == [{"/a": ["sha256:new", [9, 9, 9]]}]

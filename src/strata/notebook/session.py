@@ -324,8 +324,13 @@ class NotebookSession:
         # awaited from another loop never wakes.
         self._staleness_lock = threading.RLock()
         # A scratchpad's code keys as last observed, by lookup key, and each cell's lookup
-        # key in the last pass: the pass itself observes nothing (``resolve_code_key``).
+        # key in the last pass. A pass observes before it takes the staleness lock, never
+        # inside it (``resolve_code_key``). Runs' threads record while others observe: an
+        # observation is kept only if no run recorded under its lookup meanwhile. Counts
+        # are never pruned: one put back to zero could match an observer's again.
         self._code_seen: dict[str, Resolved] = {}
+        self._code_recorded: dict[str, int] = {}
+        self._code_seen_lock = threading.Lock()
         self._code_lookups: dict[str, str] = {}
         # Local mounts a staleness check found too much of unhashed, as
         # ``(digests_path, root)``, and the task hashing each (``_hash_mounts``).
@@ -1337,9 +1342,11 @@ class NotebookSession:
 
         # Only this pass's cells are observed again, and their keys' observations kept.
         self._code_lookups = code_lookups
-        self._code_seen = {
-            k: v for k, v in self._code_seen.items() if k in set(code_lookups.values())
-        }
+        kept = set(code_lookups.values())
+        # In place: a rebuilt dict would bring back an observation a run's thread dropped.
+        with self._code_seen_lock:
+            for lookup in [k for k in self._code_seen if k not in kept]:
+                del self._code_seen[lookup]
         self.causality_map = explain_staleness(self, to_explain)
         # Stale once its last run's record says what moved. Without that the result is not
         # known to be wrong (a run of ``# @nocache``, an input that cannot be read), so idle.
@@ -1957,8 +1964,22 @@ class NotebookSession:
         """
         if not self.notebook_state.scratchpad:
             return Resolved(lookup)
-        if not observe and lookup in self._code_seen:
-            return self._code_seen[lookup]
+        # One read: a run's thread may drop the entry between a test and a get.
+        seen = None if observe else self._code_seen.get(lookup)
+        if seen is not None:
+            return seen
+        recorded = self._code_recorded.get(lookup, 0)
+        resolved = self._code_key_now(cell_id, lookup, observe=observe)
+        if observe:
+            with self._code_seen_lock:
+                # Taken before a run recorded newer reads: not kept, so its record stands.
+                if self._code_recorded.get(lookup, 0) == recorded:
+                    self._code_seen[lookup] = resolved
+        return resolved
+
+    def _code_key_now(self, cell_id: str, lookup: str, *, observe: bool) -> Resolved:
+        """``resolve_code_key``'s answer, kept as no observation (observing may still
+        refresh the index's stats of files found unchanged)."""
         consumed = sorted(self.dag.consumed_variables.get(cell_id, set())) if self.dag else []
         manager = self.artifact_manager
         console_id = manager.cell_artifact_id(cell_id, "__console__")
@@ -1972,10 +1993,7 @@ class NotebookSession:
             )
             return found is not None
 
-        resolved = self.code_index.resolve(lookup, has_result, observe=observe)
-        if observe:
-            self._code_seen[lookup] = resolved
-        return resolved
+        return self.code_index.resolve(lookup, has_result, observe=observe)
 
     def _observe_code_keys(self) -> None:
         """Observe again the code keys the cells had in the last pass."""
@@ -1983,12 +2001,36 @@ class NotebookSession:
             for cell_id, lookup in list(self._code_lookups.items()):
                 self.resolve_code_key(cell_id, lookup)
 
+    def code_keys_moved(self) -> bool:
+        """Whether a file a scratchpad cell's runs read is not as the last pass took it.
+
+        Nothing watches those files, so a status asked for between passes checks them
+        itself; off the loop, as it may hash files. It keeps no observation (only the
+        index's stats of files found unchanged are refreshed), so a check whose pass did
+        not happen is made again; the pass observes for itself.
+        """
+        if not self.notebook_state.scratchpad:
+            return False
+        return any(
+            self._code_key_now(cell_id, lookup, observe=True)
+            != self.resolve_code_key(cell_id, lookup, observe=False)
+            for cell_id, lookup in list(self._code_lookups.items())
+        )
+
     def record_code_reads(
         self, lookup: str, reads: Mapping[str, str], stat: Mapping[str, list[int]]
     ) -> None:
         """Note a scratchpad run under *lookup* and what it read; it is the newest now."""
+        # Before and after the write, which stays outside the lock (a pass on the loop
+        # takes it): an observation overlapping either step is not kept.
+        self._drop_code_seen(lookup)
         self.code_index.record(lookup, reads, stat)
-        self._code_seen.pop(lookup, None)
+        self._drop_code_seen(lookup)
+
+    def _drop_code_seen(self, lookup: str) -> None:
+        with self._code_seen_lock:
+            self._code_recorded[lookup] = self._code_recorded.get(lookup, 0) + 1
+            self._code_seen.pop(lookup, None)
 
     def resolve_cached_console(
         self, cell_id: str, provenance_hash: str, *, variant: str | None = None

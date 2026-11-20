@@ -271,3 +271,98 @@ async def test_a_removed_or_edited_cell_is_observed_no_more(tmp_path, scratch):
     session.compute_staleness()
     assert session._code_lookups == {}
     assert session._code_seen == {}
+
+
+async def test_an_observation_taken_before_a_run_recorded_is_not_kept(
+    tmp_path, scratch, monkeypatch
+):
+    """A run's thread records newer reads while another observes: the older observation
+    must not come back over the record."""
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    cell = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    await _run(scratch, cell.id)
+    session = scratch._session
+    lookup = session._code_lookups[cell.id]
+    resolve = session.code_index.resolve
+
+    def recorded_meanwhile(*args, **kwargs):
+        resolved = resolve(*args, **kwargs)
+        session.record_code_reads(lookup, {str(data): "sha256:new"}, {})
+        return resolved
+
+    monkeypatch.setattr(session.code_index, "resolve", recorded_meanwhile)
+    session.resolve_code_key(cell.id, lookup)
+    assert lookup not in session._code_seen
+
+    monkeypatch.setattr(session.code_index, "resolve", resolve)
+    session.resolve_code_key(cell.id, lookup)
+    assert lookup in session._code_seen
+
+
+async def test_a_pass_prunes_its_observations_in_place(tmp_path, scratch):
+    """A rebuilt dict would bring back an observation a run's thread dropped meanwhile."""
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    cell = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    await _run(scratch, cell.id)
+    session = scratch._session
+    session.compute_staleness(hash_mounts=False)
+    seen = session._code_seen
+    seen["gone"] = seen[session._code_lookups[cell.id]]
+
+    session.compute_staleness(hash_mounts=False)
+
+    assert session._code_seen is seen
+    assert "gone" not in seen and session._code_lookups[cell.id] in seen
+    # A count, unlike an observation, stays: back at zero it could match an observer's.
+    session._code_recorded["gone"] = 2
+    session.compute_staleness(hash_mounts=False)
+    assert session._code_recorded["gone"] == 2
+
+
+async def test_a_run_of_one_cell_keeps_another_cells_observation(tmp_path, scratch, monkeypatch):
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    reader = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    other = scratch.add_cell("y = 1")
+    await _run(scratch, reader.id)
+    await _run(scratch, other.id)
+    session = scratch._session
+    session.compute_staleness(hash_mounts=False)
+    lookup, other_lookup = session._code_lookups[reader.id], session._code_lookups[other.id]
+    resolve = session.code_index.resolve
+
+    def other_recorded_meanwhile(*args, **kwargs):
+        resolved = resolve(*args, **kwargs)
+        session.record_code_reads(other_lookup, {}, {})
+        return resolved
+
+    session._code_seen.pop(lookup)
+    monkeypatch.setattr(session.code_index, "resolve", other_recorded_meanwhile)
+    session.resolve_code_key(reader.id, lookup)
+
+    assert lookup in session._code_seen
+
+
+async def test_an_observation_made_while_the_record_is_written_is_dropped(
+    tmp_path, scratch, monkeypatch
+):
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    cell = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    await _run(scratch, cell.id)
+    session = scratch._session
+    lookup = session._code_lookups[cell.id]
+    record = session.code_index.record
+
+    def observed_meanwhile(*args, **kwargs):
+        # Another thread observes the index as it was before this write.
+        session.resolve_code_key(cell.id, lookup)
+        assert lookup in session._code_seen
+        record(*args, **kwargs)
+
+    monkeypatch.setattr(session.code_index, "record", observed_meanwhile)
+    session.record_code_reads(lookup, {str(data): "sha256:new"}, {})
+
+    assert lookup not in session._code_seen
