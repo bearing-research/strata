@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -159,11 +160,37 @@ class _FilePiece:
     remove: Callable[[str], str]
 
 
+# The agent hook (``strata/agent_hook.py``): at session start, and on each prompt for the
+# cells it names. Run by path, isolated, on this install's interpreter: stdlib only.
+_HOOK_EVENTS = {"SessionStart": "session-start", "UserPromptSubmit": "prompt"}
+_HOOK_SCRIPT = "agent_hook.py"
+
+
+def _hook_command(mode: str) -> str:
+    from strata import agent_hook
+
+    argv = [sys.executable, "-I", agent_hook.__file__, mode]
+    if sys.platform == "win32":
+        return subprocess.list2cmdline(argv)
+    return " ".join(shlex.quote(part) for part in argv)
+
+
+def _is_ours(group: Any) -> bool:
+    hooks = group.get("hooks") if isinstance(group, dict) else None
+    return isinstance(hooks, list) and any(
+        isinstance(h, dict) and _HOOK_SCRIPT in str(h.get("command", "")) for h in hooks
+    )
+
+
 def _settings_add(text: str) -> str:
-    settings = _load_json(text, "settings.json")
+    settings = _load_json(_settings_remove(text), "settings.json")
     allow = settings.setdefault("permissions", {}).setdefault("allow", [])
     if PERMISSION not in allow:
         allow.append(PERMISSION)
+    hooks = settings.setdefault("hooks", {})
+    for event, mode in _HOOK_EVENTS.items():
+        command = {"type": "command", "command": _hook_command(mode), "timeout": 5}
+        hooks.setdefault(event, []).append({"hooks": [command]})
     return json.dumps(settings, indent=2) + "\n"
 
 
@@ -172,6 +199,16 @@ def _settings_remove(text: str) -> str:
     allow = settings.get("permissions", {}).get("allow")
     if isinstance(allow, list) and PERMISSION in allow:
         allow.remove(PERMISSION)
+    hooks = settings.get("hooks")
+    if isinstance(hooks, dict):
+        for event in _HOOK_EVENTS:
+            groups = hooks.get(event)
+            if isinstance(groups, list):
+                hooks[event] = [group for group in groups if not _is_ours(group)]
+                if not hooks[event]:
+                    del hooks[event]
+        if not hooks:
+            del settings["hooks"]
     return json.dumps(settings, indent=2) + "\n"
 
 
@@ -226,7 +263,10 @@ def _file_pieces(target: str, base: Path, command: str) -> list[_FilePiece]:
         block = _markdown_block("the `mcp__strata__run` tool", "`mcp__strata__scratchpad`")
         return [
             _FilePiece(
-                "permission mcp__strata__*", base / "settings.json", _settings_add, _settings_remove
+                "permission mcp__strata__* and the scratchpad hooks",
+                base / "settings.json",
+                _settings_add,
+                _settings_remove,
             ),
             _FilePiece(
                 "scratchpad block",

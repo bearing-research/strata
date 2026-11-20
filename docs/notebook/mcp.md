@@ -289,6 +289,16 @@ hand-copied `strata-scratchpad` skill it finds is moved to
 `~/.strata/agent-install/retired-skills/`, since the server and the block replace it,
 and `uninstall` puts it back.
 
+For Claude Code it also adds two hooks to `settings.json`, at session start and on each
+prompt. They tell the agent what the project's scratchpad already holds before it
+computes anything: each cell's variables, what it took to build, and whether it is
+`cached`, `stale` (and which file changed, or `upstream`) or `failed`. The prompt hook
+says only the cells whose id or variables the prompt names. The hooks read a digest the
+daemon writes (`.strata-scratch/.strata/digest.json`) and look at each cell's recorded
+reads and the environment's watched paths again first, so a file edited while the daemon
+was stopped makes its cell stale; what one run's budget (1000 paths, 80 ms) leaves
+unchecked is said `as of` the digest's time, never `cached`. They never start the daemon.
+
 Every piece is marker-fenced or keyed. `uninstall` puts back the original bytes of a
 file left as `install` wrote it and removes only Strata's part from one edited since.
 It works from the directories `install` wrote into, whatever `CLAUDE_CONFIG_DIR` says

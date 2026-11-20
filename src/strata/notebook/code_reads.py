@@ -941,15 +941,18 @@ def base_candidates(anchor: str, names: Iterable[str]) -> dict[str, str]:
     """Where a top-level import of each of *names* would look first, under *anchor* at
     ``sys.path[0]``, and what is there now: one that is no longer absent shadows a module
     loaded before the cell started, which no import of its records."""
-    found: dict[str, str] = {}
+    return {path: observe(path)[0] for path in base_paths(anchor, names)}
+
+
+def base_paths(anchor: str, names: Iterable[str]) -> list[str]:
+    """The places :func:`base_candidates` looks at for *names*, looked at or not."""
+    paths: list[str] = []
     for name in names:
         package = os.path.join(anchor, name)
-        paths = [package]
+        paths.append(package)
         paths += [os.path.join(package, "__init__" + suffix) for suffix in _SUFFIXES]
         paths += [package + suffix for suffix in _SUFFIXES]
-        for path in paths:
-            found[path] = observe(path)[0]
-    return found
+    return paths
 
 
 def base_names_to_check(anchor: str, names: Iterable[str], base: dict[str, str]) -> list[str]:

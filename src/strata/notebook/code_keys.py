@@ -105,6 +105,11 @@ class CodeIndex:
                 del data[stale]
             self._save()
 
+    def sets(self, lookup: str) -> list[dict[str, list[Any]]]:
+        """The runs under *lookup*, newest first, each ``{path: [seen, stat]}``."""
+        with self._lock:
+            return [dict(entry) for entry in self._load().get(lookup, [])]
+
     def resolve(
         self, lookup: str, has_result: Callable[[str], bool], *, observe: bool = True
     ) -> Resolved:
