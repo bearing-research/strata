@@ -589,14 +589,19 @@ def test_a_rollback_that_fails_too_says_both(agent_home, monkeypatch):
 
     monkeypatch.setattr(agent_install.subprocess, "run", rejects_every_add)
 
-    with pytest.raises(agent_install.InstallError, match="putting the earlier strata entry back"):
+    with pytest.raises(
+        agent_install.InstallError, match="putting the earlier strata entry back failed too"
+    ):
         agent_install.install(["claude"], "/new/strata")
 
 
 @_SHEBANG
-def test_uninstall_finishes_with_claude_code_gone(agent_home, monkeypatch):
+def test_uninstall_with_claude_code_gone_leaves_its_target_as_installed(agent_home, monkeypatch):
+    """Its server would still start without its permission or the skill; Codex's target
+    is uninstalled."""
     claude, codex = agent_home
     agent_install.install(["claude", "codex"], STRATA)
+    installed = _snapshot(claude)
     path = os.environ["PATH"]
     empty = claude.parent / "empty-bin"
     empty.mkdir()
@@ -605,13 +610,33 @@ def test_uninstall_finishes_with_claude_code_gone(agent_home, monkeypatch):
     done = agent_install.uninstall()
 
     assert any("no `claude` CLI" in what for _, what in done)
-    assert _snapshot(claude, codex) == {}
-    # Still Strata's entry: with Claude Code back, an uninstall removes it, and an
-    # install meanwhile would not refuse it as the user's.
+    assert _snapshot(claude) == installed
+    assert _snapshot(codex) == {}
+    # Still Strata's entry: with Claude Code back, an uninstall removes it all.
     monkeypatch.setenv("PATH", path)
     assert "strata" in _servers(claude)
     agent_install.uninstall()
     assert "strata" not in _servers(claude)
+    assert _snapshot(claude) == {}
+    assert agent_install.uninstall() == []
+
+
+@_SHEBANG
+def test_with_claude_code_gone_an_entry_removed_by_hand_lets_uninstall_finish(
+    agent_home, monkeypatch
+):
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+    data = json.loads((claude / ".claude.json").read_text())
+    del data["mcpServers"]["strata"]
+    (claude / ".claude.json").write_text(json.dumps(data))
+    empty = claude.parent / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+
+    agent_install.uninstall()
+
+    assert _snapshot(claude) == {}
     assert agent_install.uninstall() == []
 
 
@@ -679,7 +704,7 @@ def test_a_rollback_that_wrote_then_failed_is_still_strata_s(agent_home, monkeyp
         return done
 
     monkeypatch.setattr(agent_install.subprocess, "run", rollback_hangs_after_writing)
-    with pytest.raises(agent_install.InstallError, match="putting the earlier strata entry back"):
+    with pytest.raises(agent_install.InstallError, match="the earlier strata entry is back"):
         agent_install.install(["claude"], "/new/strata")
     monkeypatch.setattr(agent_install.subprocess, "run", real)
 

@@ -7,7 +7,8 @@ Per target, every piece is keyed or marker-fenced, so ``uninstall`` removes what
   ``~/.claude.json`` and may be writing it); the ``mcp__strata__*`` permission in
   ``settings.json``; a block in ``CLAUDE.md``, for subagents and harnesses that do not
   see MCP instructions. A hand-copied scratchpad skill is moved aside, and back. A
-  ``strata`` entry of the user's own is refused, as Codex's is.
+  ``strata`` entry of the user's own is refused, as Codex's is. With no ``claude`` CLI
+  to remove Strata's entry, ``uninstall`` leaves this target as installed.
 - Codex: an ``[mcp_servers.strata]`` block in ``config.toml``; a block in ``AGENTS.md``.
 
 A file Strata writes is backed up first. ``uninstall`` puts its original bytes back
@@ -441,9 +442,13 @@ def _install_claude_entry(command: str, record: dict[str, Any]) -> Change | None
             try:
                 _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(existing))
             except InstallError as again:
-                if not _same_server(_claude_entry(record), existing):
-                    # Nothing is there now; one written before its failure stays Strata's.
-                    record.pop("entry", None)
+                if _same_server(_claude_entry(record), existing):
+                    # Written before its failure: back, and still Strata's.
+                    raise InstallError(
+                        f"{exc}; the earlier strata entry is back, though putting it back "
+                        f"reported a failure ({again})"
+                    ) from exc
+                record.pop("entry", None)
                 raise InstallError(
                     f"{exc}; putting the earlier strata entry back failed too ({again}), so "
                     "Claude Code has none now: run `strata agent install` again"
@@ -453,14 +458,17 @@ def _install_claude_entry(command: str, record: dict[str, Any]) -> Change | None
     return Change("MCP server strata (user scope)", _claude_json(record))
 
 
+def _claude_entry_stays(record: dict[str, Any]) -> bool:
+    """Whether Strata's entry is there with no ``claude`` CLI to remove it."""
+    return shutil.which("claude") is None and _same_server(
+        _claude_entry(record), record.get("entry")
+    )
+
+
 def _uninstall_claude_entry(record: dict[str, Any]) -> tuple[Change, str] | None:
     if not _same_server(_claude_entry(record), record.get("entry")):
         # Not Strata's (replaced since, or removed): left as it is.
         return None
-    if shutil.which("claude") is None:
-        # Claude Code is gone; the rest is still removed, so uninstall can finish.
-        change = Change("MCP server strata (user scope)", _claude_json(record))
-        return change, "left in place: no `claude` CLI to remove it with"
     _claude(record, "remove", "--scope", "user", SERVER_NAME)
     return Change("MCP server strata (user scope)", _claude_json(record)), "removed"
 
@@ -560,6 +568,18 @@ def uninstall() -> list[tuple[Change, str]]:
         try:
             for key, record in list(state["targets"].items()):
                 target = record["target"]
+                if target == "claude" and _claude_entry_stays(record):
+                    # Its server would keep starting without its permission or the skill:
+                    # all of it stays, as installed, until the entry can go.
+                    done.append(
+                        (
+                            Change("Claude Code target", Path(record["dir"])),
+                            "left as installed: no `claude` CLI to remove the MCP entry "
+                            "with; run this again with it on PATH, or remove the strata "
+                            f"entry from {_claude_json(record)} yourself first",
+                        )
+                    )
+                    continue
                 # Half undone, should the rest fail: never finished again by a refresh.
                 record["complete"] = False
                 for piece in _file_pieces(target, Path(record["dir"]), record["command"]):
@@ -568,10 +588,6 @@ def uninstall() -> list[tuple[Change, str]]:
                 if target == "claude":
                     entry = _uninstall_claude_entry(record)
                     done += [entry] if entry else []
-                    if entry is not None and entry[1].startswith("left in place"):
-                        # Still Strata's, and still serving: kept, for a later uninstall
-                        # with Claude Code back; the skill stays retired meanwhile.
-                        continue
                     done += _restore_skill(record)
                 del state["targets"][key]
         finally:

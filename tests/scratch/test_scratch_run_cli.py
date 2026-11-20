@@ -95,7 +95,7 @@ def _eventually(check, attempts: int = 600) -> bool:
 
 @pytest.mark.parametrize("raised", ["scratch", "http"])
 def test_a_call_that_fails_is_a_json_error_not_a_traceback(tmp_path, monkeypatch, capsys, raised):
-    def fails(root, progress=None):
+    def fails(root, progress=None, cancel=None):
         if raised == "scratch":
             raise scratch.ScratchError("no project here")
         raise httpx.ConnectError("refused")
@@ -117,7 +117,7 @@ def test_a_terminate_during_setup_is_answered_at_once_and_setup_still_finishes(t
         "from pathlib import Path\n"
         "from strata import scratch\n"
         "from strata.cli import main\n"
-        "def setup(root, progress=None):\n"
+        "def setup(root, progress=None, cancel=None):\n"
         "    print('in setup', file=sys.stderr, flush=True)\n"
         f"    while not Path({str(released)!r}).exists():\n"
         "        time.sleep(0.05)\n"
@@ -146,6 +146,45 @@ def test_a_terminate_during_setup_is_answered_at_once_and_setup_still_finishes(t
 
     assert process.returncode == 1
     assert finished.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM is POSIX")
+def test_a_terminate_while_another_setup_holds_the_lock_ends_the_wait(tmp_path):
+    """Nothing was started, so nothing is waited for: the exit is not held by the other
+    client's setup, however long it takes."""
+    program = (
+        "import sys\n"
+        "from strata import scratch\n"
+        "from strata.cli import main\n"
+        "held = scratch._held\n"
+        "def waiting(lock, cancel):\n"
+        "    print('waiting', file=sys.stderr, flush=True)\n"
+        "    return held(lock, cancel)\n"
+        "scratch._held = waiting\n"
+        f"sys.exit(main(['scratch', 'run', '-c', 'x = 1', '--root', {str(tmp_path)!r}]))\n"
+    )
+    (scratch.scratch_dir(tmp_path) / ".strata").mkdir(parents=True)
+    with scratch.daemon_lock(tmp_path):
+        process = subprocess.Popen(
+            [sys.executable, "-c", program],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert process.stderr is not None and process.stdout is not None
+            assert process.stderr.readline() == "waiting\n"
+            process.send_signal(signal.SIGTERM)
+            said = json.loads(_until_json(process.stdout))
+            # Bounded only so a hang fails the test instead of the suite's timeout.
+            process.communicate(timeout=60)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+
+    assert said["error"].startswith("terminated")
+    assert process.returncode == 1
 
 
 def _until_json(stream) -> str:

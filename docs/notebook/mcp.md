@@ -296,11 +296,15 @@ now. A `strata` MCP server of your own (Claude Code's, or a `config.toml`
 `[mcp_servers.strata]`), a missing `claude` CLI, or a `settings.json` that is not valid
 JSON, is refused before anything is written: remove yours (`claude mcp remove --scope
 user strata`) and install again. An install that fails halfway is recorded, so
-`uninstall` still removes what it wrote. The `strata` written is the one
+`uninstall` still removes what it wrote. With no `claude` CLI to remove Strata's MCP
+entry, `uninstall` leaves the Claude Code target as installed, its server being still
+configured: run it again with `claude` on PATH, or remove the entry from
+`~/.claude.json` yourself first. The `strata` written is the one
 that runs `install`: refused from uv's cache (`uvx`), and warned about from a project's
 environment, since every project's agent would use it; `uv tool install` is the
 lasting choice. Ending `strata scratch run` (Ctrl-C, or a shell tool's timeout
-terminating it) cancels its cell on the daemon. When another Strata version
+terminating it) cancels its cell on the daemon, or the daemon's setup, killing a daemon
+not yet recorded. When another Strata version
 wrote the files, `strata mcp` rewrites them as it starts.
 
 ### From a shell: `strata scratch run` and `show`

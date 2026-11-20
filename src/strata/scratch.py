@@ -19,6 +19,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -362,10 +363,46 @@ def _busy(url: str) -> bool:
     return response.json()["busy"]
 
 
+class SetupCancel:
+    """Set from another thread to stop a setup: the daemon it has started, not yet
+    recorded, is killed (and the setup fails); one it has not started never starts."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._set = False
+        self._pid: int | None = None
+
+    def set(self) -> None:
+        with self._lock:
+            self._set = True
+            pid, self._pid = self._pid, None
+        if pid is not None:
+            _kill(pid)
+
+    def is_set(self) -> bool:
+        return self._set
+
+    def started(self, pid: int) -> None:
+        with self._lock:
+            if not self._set:
+                self._pid = pid
+                return
+        _kill(pid)
+
+    def finished(self) -> None:
+        with self._lock:
+            self._pid = None
+
+
+def _cancelled() -> ScratchError:
+    return ScratchError("cancelled before the scratchpad's server started")
+
+
 def _start(
     anchor: Path,
     step: Callable[[str], contextlib.AbstractContextManager[None]],
     python: str | None = None,
+    cancel: SetupCancel | None = None,
 ) -> tuple[int, str, str]:
     """Start a daemon on *anchor* and open its scratchpad; return it, its url and session."""
     deadline = time.monotonic() + _SETUP_TIMEOUT
@@ -374,9 +411,14 @@ def _start(
             _scaffold(anchor)
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
+    if cancel is not None and cancel.is_set():
+        raise _cancelled()
     pid = _spawn(anchor, port, python)
     log = _log_path(anchor)
     try:
+        if cancel is not None:
+            # Killed from here on by a cancel: what the steps wait on then fails.
+            cancel.started(pid)
         with step("starting the scratchpad"):
             _until(lambda: _healthy(url), pid, "starting", deadline, log)
         with step("opening the scratchpad"):
@@ -422,17 +464,39 @@ def daemon_lock(anchor: Path) -> filelock.FileLock:
     return filelock.FileLock(scratch_dir(anchor) / ".strata" / "daemon.lock")
 
 
-def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -> Daemon:
+@contextmanager
+def _held(lock: filelock.FileLock, cancel: SetupCancel | None) -> Generator[None]:
+    """*lock*, polled for, so a cancel ends the wait for another client's setup."""
+    while True:
+        if cancel is not None and cancel.is_set():
+            raise _cancelled()
+        try:
+            lock.acquire(timeout=0.2)
+            break
+        except filelock.Timeout:
+            continue
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def ensure_daemon(
+    anchor: Path,
+    progress: Callable[[str], None] | None = None,
+    cancel: SetupCancel | None = None,
+) -> Daemon:
     """The daemon for *anchor*'s scratchpad, started (and the scratchpad created) if none runs.
 
-    *progress* hears each setup step as it starts.
+    *progress* hears each setup step as it starts; *cancel*, set, ends the wait for the
+    lock and the setup, with no daemon left that no record names.
     """
     anchor = anchor.resolve()
     try:
         (scratch_dir(anchor) / ".strata").mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         raise ScratchError(f"the scratchpad cannot be created in {anchor}: {exc}") from exc
-    with daemon_lock(anchor):
+    with _held(daemon_lock(anchor), cancel):
         running = find_daemon(anchor)
         current = version("strata-notebook")
         python = os.environ.get("STRATA_SCRATCH_PYTHON") or None
@@ -465,7 +529,10 @@ def ensure_daemon(anchor: Path, progress: Callable[[str], None] | None = None) -
             yield
             setup_ms[name] = round((time.monotonic() - started) * 1000)
 
-        pid, url, session_id = _start(anchor, step, python)
+        pid, url, session_id = _start(anchor, step, python, cancel)
+        if cancel is not None:
+            # Recorded next: a cancel from now on leaves it running, named.
+            cancel.finished()
         record = {
             "url": url,
             "pid": pid,

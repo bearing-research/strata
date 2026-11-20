@@ -15,7 +15,7 @@ import itertools
 import json
 import signal
 import sys
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from functools import cache
 from importlib.metadata import version
@@ -292,14 +292,16 @@ def call_once(
     daemon it found stopped before the call reached it.
     """
 
+    # Set on a SIGTERM or Ctrl-C: the setup thread, abandoned so the answer is said at
+    # once, stops soon after (the exit waits for it), killing a daemon it had not recorded.
+    cancel = scratch.SetupCancel()
+
     async def call() -> dict[str, Any]:
         upstream = Upstream()
         try:
             for attempt in range(2):
-                # Abandoned on a SIGTERM, so the result is said at once; the exit still
-                # waits for the setup thread, which records (or cleans up) what it started.
                 daemon = await anyio.to_thread.run_sync(
-                    scratch.ensure_daemon, root, progress, abandon_on_cancel=True
+                    scratch.ensure_daemon, root, progress, cancel, abandon_on_cancel=True
                 )
                 try:
                     await upstream.open(daemon.url)
@@ -320,33 +322,44 @@ def call_once(
         an agent's shell tool ends a command that outlives its timeout so."""
         result: dict[str, Any] | None = None
         failure: Exception | None = None
-        async with anyio.create_task_group() as group:
+        with contextlib.ExitStack() as stack:
+            # Received from before the call starts: a SIGTERM never finds the default action.
+            signals = (
+                stack.enter_context(anyio.open_signal_receiver(signal.SIGTERM))
+                if sys.platform != "win32"
+                else None
+            )
+            async with anyio.create_task_group() as group:
 
-            async def run() -> None:
-                nonlocal result, failure
-                try:
-                    result = await call()
-                except Exception as exc:
-                    # Raised after the group, as itself: the group would wrap it in an
-                    # ExceptionGroup, which the caller's handlers do not catch.
-                    failure = exc
-                group.cancel_scope.cancel()
+                async def run() -> None:
+                    nonlocal result, failure
+                    try:
+                        result = await call()
+                    except Exception as exc:
+                        # Raised after the group, as itself: the group would wrap it in an
+                        # ExceptionGroup, which the caller's handlers do not catch.
+                        failure = exc
+                    group.cancel_scope.cancel()
 
-            async def on_terminate() -> None:
-                with anyio.open_signal_receiver(signal.SIGTERM) as signals:
-                    async for _ in signals:
+                async def on_terminate(received: AsyncIterator[int]) -> None:
+                    async for _ in received:
+                        cancel.set()
                         group.cancel_scope.cancel()
                         return
 
-            group.start_soon(run)
-            if sys.platform != "win32":
-                group.start_soon(on_terminate)
+                group.start_soon(run)
+                if signals is not None:
+                    group.start_soon(on_terminate, signals)
         if failure is not None:
             raise failure
         return result
 
     try:
-        result = anyio.run(cancellable)
+        try:
+            result = anyio.run(cancellable)
+        except KeyboardInterrupt:
+            cancel.set()
+            raise
     except scratch.ScratchError as exc:
         return {"status": "error", "error": str(exc), "fix": "the error says what to look at"}, True
     except (httpx.HTTPError, UpstreamError) as exc:
