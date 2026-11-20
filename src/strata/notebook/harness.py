@@ -257,12 +257,13 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
 
 
 def close_client(client: Any) -> None:
-    """Close an injected ambient client, swallowing teardown errors."""
+    """Close an injected ambient client, swallowing its teardown errors (the cell's own
+    ``strata.close = sys.exit`` too). An interrupt still propagates: the batch stops on
+    it, and the single run writes its result first."""
     if client is None:
         return
-    # The cell's own ``strata.close = sys.exit`` too; an interrupt stays one, which the
-    # batch stops on and the single run writes its result before.
-    _traceback.safely(client.close, None)
+    # In the lambda, so the attribute's own read is guarded too.
+    _traceback.safely(lambda: client.close(), None)
 
 
 @contextmanager
@@ -660,13 +661,15 @@ def _run_one_batched_cell(
             return ("ok", None)
     finally:
         # The batch process is reused across cells, so close the client (no leaked
-        # sockets) and restore pre-cell name bindings.
-        close_client(ambient_client)
-        for name, previous in previous_bindings.items():
-            if previous is _MISSING:
-                namespace.pop(name, None)
-            else:
-                namespace[name] = previous
+        # sockets) and restore pre-cell name bindings, whatever the close raised.
+        try:
+            close_client(ambient_client)
+        finally:
+            for name, previous in previous_bindings.items():
+                if previous is _MISSING:
+                    namespace.pop(name, None)
+                else:
+                    namespace[name] = previous
 
 
 def _seed_upstream_namespace(

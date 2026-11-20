@@ -330,11 +330,16 @@ class PooledCellExecutor:
                 if not result_json:
                     logger.warning("Warm process returned empty result")
                     return None
-                text = result_json.decode()
+                text = result_json.decode(errors="replace")
                 if on_event is not None and is_event_line(text):
                     await on_event(json.loads(text))
                     continue
-                return json.loads(text)
+                try:
+                    return json.loads(text)
+                except ValueError:
+                    # A result line an interrupt tore: the worker writes its failure on
+                    # the next. Returning None would run the cell again cold.
+                    logger.warning("Warm process wrote a line that is not a result: %.200r", text)
 
         except asyncio.CancelledError:
             logger.info(

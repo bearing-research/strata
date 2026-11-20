@@ -98,3 +98,18 @@ async def test_batch_service_loop_survives_oversized_frame(tmp_path):
     )
     assert end_reason == "subprocess_died"
     assert failed_cell_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_torn_result_line_is_skipped_for_the_next(tmp_path):
+    """An interrupt mid-write leaves a line that is not JSON; the worker writes its failure
+    on the next. None ("pool unavailable") would run the cell again cold."""
+    reader = asyncio.StreamReader(limit=SUBPROCESS_LINE_LIMIT)
+    reader.feed_data(b'{"success": true, "varia\n{"success": false, "error": "interrupted"}\n')
+    reader.feed_eof()
+
+    result = await PooledCellExecutor.execute_with_pool(
+        _FakePool(reader), tmp_path / "manifest.json", tmp_path, timeout_seconds=30
+    )
+
+    assert result == {"success": False, "error": "interrupted"}

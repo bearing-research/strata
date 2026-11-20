@@ -219,6 +219,12 @@ def build_env_identity() -> str:
     )
 
 
+_FAILED = {"success": False, "variables": {}, "stdout": "", "stderr": "", "mutation_warnings": []}
+_INTERRUPTED_LINE = (
+    _dumps_result({**_FAILED, "error": "Pool worker error: KeyboardInterrupt"}) + "\n"
+)
+
+
 def _close_client(client: Any) -> None:
     """Close an injected ambient client, swallowing teardown errors."""
     if client is None:
@@ -442,31 +448,29 @@ def main() -> None:
 
         # The protocol stream, should an interrupt leave the cell's capture in place.
         out = sys.stdout
+        began = False
         try:
             with open(manifest_path, "rb") as f:
                 manifest = orjson.loads(f.read())
             # The next line, never the manifest file: see harness.read_run_token.
             if manifest.get("run_token_on_stdin"):
                 manifest["strata_run_token"] = sys.stdin.readline().strip()
-            result = execute_harness(manifest)
-            print(_dumps_result(result), file=out, flush=True)
+            line = _dumps_result(execute_harness(manifest)) + "\n"
+            began = True
+            out.write(line)
+            out.flush()
         except BaseException as e:
             # Any, an interrupt included: with no result line the pool runs the cell
-            # again cold, its side effects twice.
-            print(
-                _dumps_result(
-                    {
-                        "success": False,
-                        "variables": {},
-                        "stdout": "",
-                        "stderr": "",
-                        "error": f"Pool worker error: {_traceback.error_text(e)}",
-                        "mutation_warnings": [],
-                    }
-                ),
-                file=out,
-                flush=True,
-            )
+            # again cold, its side effects twice. After a torn write, on a line of its
+            # own; the pool skips the torn one.
+            try:
+                error = f"Pool worker error: {_traceback.error_text(e)}"
+                line = _dumps_result({**_FAILED, "error": error}) + "\n"
+            except BaseException:
+                # A second interrupt while the line was made: one made in advance.
+                line = _INTERRUPTED_LINE
+            out.write(("\n" if began else "") + line)
+            out.flush()
 
     except Exception as e:
         print(f"fatal: {e}", file=sys.stderr, flush=True)

@@ -914,3 +914,32 @@ def test_an_interrupt_in_a_client_close_still_stops_the_batch(batch_pipes):
 
     assert [type(e) for e in errors] == [KeyboardInterrupt]
     assert "c2" not in [f["payload"].get("cell_id") for f in frames if f["type"] == "cell_start"]
+
+
+def test_an_interrupt_in_a_client_close_still_restores_the_names_it_bound(batch_pipes):
+    from strata.notebook import harness
+
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+    cell = _closing_cells("raise KeyboardInterrupt")[0]
+    namespace = {"strata": "the batch's own"}
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            harness._run_one_batched_cell(cell, namespace, output_dir, frame_w, resp_r, {})
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            frame_w.close()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    while (frame := _read_frame(frame_r)) is not None:
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test/x"})
+    thread.join(timeout=5)
+
+    assert [type(e) for e in errors] == [KeyboardInterrupt]
+    assert namespace["strata"] == "the batch's own"

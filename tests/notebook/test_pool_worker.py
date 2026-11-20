@@ -261,3 +261,72 @@ def test_main_prints_a_result_when_an_interrupt_escapes(
     result = json.loads(lines[1])
     assert result["success"] is False
     assert result["error"] == "Pool worker error: KeyboardInterrupt"
+
+
+class _TornStdout:
+    """Writes half of the result line, then is interrupted: Ctrl-C mid-write."""
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.torn = False
+
+    def write(self, text: str) -> int:
+        if not self.torn and text.startswith("{"):
+            self.torn = True
+            self.text += text[: len(text) // 2]
+            raise KeyboardInterrupt
+        self.text += text
+        return len(text)
+
+    def flush(self) -> None:
+        return None
+
+
+def _run_main(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, execute: Callable[[dict], dict], out: object
+) -> None:
+    import io
+    import sys
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
+    monkeypatch.setattr(pool_worker, "execute_harness", execute)
+    monkeypatch.setattr(pool_worker._lifeline, "watch_lifeline", lambda: None)
+    monkeypatch.setattr(pool_worker, "warm_imports", lambda imports: None)
+    monkeypatch.setattr(sys, "argv", ["pool_worker.py", str(tmp_path)])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{manifest}\n"))
+    monkeypatch.setattr(sys, "stdout", out)
+    _without_escape(pool_worker.main)
+
+
+def test_a_torn_result_line_is_followed_by_a_whole_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = _TornStdout()
+    _run_main(tmp_path, monkeypatch, lambda manifest: {"success": True, "variables": {}}, out)
+
+    ready, torn, line = out.text.split("\n")[:3]
+    assert ready == "ready"
+    with pytest.raises(ValueError):
+        json.loads(torn)
+    assert json.loads(line)["error"] == "Pool worker error: KeyboardInterrupt"
+
+
+def test_an_interrupt_while_the_error_line_is_made_still_writes_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+
+    def interrupted(manifest: dict) -> dict:
+        raise KeyboardInterrupt
+
+    def again(exc: BaseException) -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pool_worker._traceback, "error_text", again)
+    out = io.StringIO()
+    _run_main(tmp_path, monkeypatch, interrupted, out)
+
+    result = json.loads(out.getvalue().splitlines()[1])
+    assert result["success"] is False
+    assert result["error"] == "Pool worker error: KeyboardInterrupt"
