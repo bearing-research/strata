@@ -710,24 +710,26 @@ def test_around_body_wraps_the_cells_own_code_alone(monkeypatch):
     ], log
 
 
+_STOPS = "which stops it before its end"
+
+
 @pytest.mark.parametrize(
-    ("call", "shown"),
+    ("call", "message"),
     [
-        ("sys.exit(0)", "0"),
-        ("sys.exit()", ""),
-        ("exit('bye')", "'bye'"),
-        # The message is the cell's own error text: whole.
+        ("sys.exit(0)", f"the cell exited (SystemExit(0)), {_STOPS}"),
+        ("sys.exit()", f"the cell exited (SystemExit()), {_STOPS}"),
+        ("exit('bye')", f"the cell exited, {_STOPS}: bye"),
+        # A message is the cell's own error text: whole, its lines kept.
         (
-            "sys.exit('Could not find the config file at /data/config.yaml')",
-            "'Could not find the config file at /data/config.yaml'",
+            "sys.exit('Config errors:\\n- missing key A\\n- missing key B')",
+            f"the cell exited, {_STOPS}: Config errors:\n- missing key A\n- missing key B",
         ),
     ],
 )
-def test_a_cells_sys_exit_fails_the_cell(harness_script, call, shown):
+def test_a_cells_sys_exit_fails_the_cell(harness_script, call, message):
     """It stops the cell before its end; the harness still writes its result."""
     result = run_harness(harness_script, {"source": f"import sys\nx = 1\n{call}\n", "inputs": {}})
 
-    message = f"the cell exited (SystemExit({shown})), which stops it before its end"
     assert result["success"] is False
     assert result["error"] == f"RuntimeError: {message}"
     assert result["variables"] == {}
@@ -736,6 +738,26 @@ def test_a_cells_sys_exit_fails_the_cell(harness_script, call, shown):
     assert "line 3" in traceback, traceback
     assert "cell_traceback" not in traceback and "contextlib" not in traceback, traceback
     assert traceback.rstrip().endswith(f"RuntimeError: {message}"), traceback
+
+
+@pytest.mark.parametrize(
+    ("exits", "shown", "hidden"),
+    [
+        ("sys.exit(1)", "ValueError: invalid literal for int()", None),
+        ("raise SystemExit(1) from None", None, "ValueError"),
+        ("raise SystemExit(1) from KeyError('cfg')", "KeyError: 'cfg'", "ValueError"),
+    ],
+)
+def test_a_cells_exit_shows_the_cause_python_would(harness_script, exits, shown, hidden):
+    """What it was handling, unless ``from`` named another cause or ``from None`` hid it."""
+    source = f"import sys\ntry:\n    int('x')\nexcept ValueError:\n    {exits}\n"
+    traceback = run_harness(harness_script, {"source": source, "inputs": {}})["traceback"]
+
+    if shown is not None:
+        assert shown in traceback, traceback
+    if hidden is not None:
+        assert hidden not in traceback, traceback
+    assert "cell_traceback" not in traceback, traceback
 
 
 def test_a_sys_exit_in_loop_until_is_the_loops_error():
@@ -748,15 +770,6 @@ def test_a_sys_exit_in_loop_until_is_the_loops_error():
     assert "the @loop_until predicate exited (SystemExit(0))" in state["error"], state
 
 
-def test_what_the_cell_handled_when_it_exited_is_its_cause(harness_script):
-    source = "import sys\ntry:\n    int('x')\nexcept ValueError:\n    sys.exit(1)\n"
-    result = run_harness(harness_script, {"source": source, "inputs": {}})
-
-    assert result["success"] is False
-    assert "ValueError: invalid literal for int()" in result["traceback"], result["traceback"]
-    assert "cell_traceback" not in result["traceback"], result["traceback"]
-
-
 def test_an_interrupt_still_writes_the_result(harness_script):
     """Ctrl-C in the server's terminal reaches the harness too."""
     result = run_harness(harness_script, {"source": "raise KeyboardInterrupt", "inputs": {}})
@@ -765,16 +778,32 @@ def test_an_interrupt_still_writes_the_result(harness_script):
     assert result["error"] == "KeyboardInterrupt"
 
 
-def test_a_failure_the_handler_cannot_read_still_writes_a_result(harness_script):
-    """An exception whose ``str()`` raises breaks the failure's own report."""
+def test_an_exception_whose_str_raises_is_still_reported(harness_script):
     source = (
-        "print('step 1 done')\n"
         "class Unreadable(Exception):\n"
         "    def __str__(self):\n"
         "        raise ValueError\n"
         "raise Unreadable()\n"
     )
     result = run_harness(harness_script, {"source": source, "inputs": {}})
+
+    assert result["success"] is False
+    assert result["error"] == "Unreadable: <exception str() failed>"
+
+
+def test_a_failure_the_handler_cannot_report_still_writes_a_result(harness_script, tmp_path):
+    """Its hints read the exception too (a FileNotFoundError's filename): should one
+    raise, the result still says so, with the cell's print trail."""
+    source = (
+        "print('step 1 done')\n"
+        "class Odd(FileNotFoundError):\n"
+        "    @property\n"
+        "    def filename(self):\n"
+        "        raise ValueError\n"
+        "raise Odd()\n"
+    )
+    manifest = {"source": source, "inputs": {}, "notebook_dir": str(tmp_path)}
+    result = run_harness(harness_script, manifest)
 
     assert result["success"] is False
     assert result["error"] == "the harness failed reporting the cell's failure"

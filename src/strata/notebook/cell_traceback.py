@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import linecache
 import os
-import reprlib
 import traceback
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -38,10 +37,6 @@ def cell_id_set(cell_id: str | None) -> Generator[None]:
             os.environ[CELL_ID_VAR] = previous
 
 
-# A message passed to ``sys.exit`` is the cell's own error text: kept whole.
-_EXIT_CODE = reprlib.Repr(maxstring=10_000, maxother=200)
-
-
 @contextmanager
 def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
     """A cell's ``SystemExit`` (``sys.exit()``, ``exit()``, a library's, as argparse's)
@@ -50,12 +45,28 @@ def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
     try:
         yield
     except SystemExit as exc:
-        code = "" if exc.code is None else _EXIT_CODE.repr(exc.code)
-        # The cell's own frames, a traceback starting at the first of them, and what it
-        # was handling when it exited (``except ValueError: sys.exit(1)``) as the cause.
-        raise RuntimeError(
-            f"{what} exited (SystemExit({code})), which stops it before its end"
-        ).with_traceback(exc.__traceback__) from exc.__context__
+        # The cell's own frames: a traceback starts at the first of them.
+        raise RuntimeError(_exited(what, exc.code)).with_traceback(exc.__traceback__) from _cause(
+            exc
+        )
+
+
+def _exited(what: str, code: object) -> str:
+    if isinstance(code, str):
+        # The cell's own error text, as Python prints it: whole, its lines kept.
+        return f"{what} exited, which stops it before its end: {code}"
+    shown = "" if code is None else repr(code)
+    if len(shown) > 200:
+        shown = f"{shown[:200]}..."
+    return f"{what} exited (SystemExit({shown})), which stops it before its end"
+
+
+def _cause(exc: BaseException) -> BaseException | None:
+    """What Python shows before *exc*: its ``from`` cause, else what it was raised while
+    handling (``except ValueError: sys.exit(1)``) unless ``from None`` hid that."""
+    if exc.__cause__ is not None:
+        return exc.__cause__
+    return None if exc.__suppress_context__ else exc.__context__
 
 
 _CELL_PREFIX = "<cell"
@@ -82,7 +93,11 @@ def _is_cell(filename: str | None) -> bool:
 
 def error_text(exc: BaseException) -> str:
     """A cell's failure as one reads it: ``str(KeyError("MAX"))`` alone says only ``'MAX'``."""
-    text = str(exc)
+    try:
+        text = str(exc)
+    except Exception:
+        # As the traceback module shows it: the failure is still reported.
+        text = "<exception str() failed>"
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 

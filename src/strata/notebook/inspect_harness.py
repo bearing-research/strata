@@ -125,6 +125,18 @@ def _take_stdout():
     return os.fdopen(reply_fd, "w")
 
 
+def _take_stdin():
+    """Keep the parent's stdin pipe for commands only: code at the prompt, and a process
+    it starts, read an empty stdin, and ``exit()`` (which closes ``sys.stdin``) closes
+    that one."""
+    command_fd = os.dup(0)
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+    sys.stdin = io.StringIO()
+    return os.fdopen(command_fd, "r")
+
+
 def _emit(response):
     """Write one JSON response line to the reply stream and flush."""
     _replies.write(json.dumps(response) + "\n")
@@ -182,9 +194,7 @@ def main():
 
     _emit({"ok": True, "result": "ready", "type": "str"})
 
-    # The commands' own stream: code at the prompt gets an empty one, so ``exit()``
-    # (which closes ``sys.stdin``) and ``input()`` never touch the next command.
-    commands, sys.stdin = sys.stdin, io.StringIO()
+    commands = _take_stdin()
     for line in commands:
         line = line.strip()
         if not line:
