@@ -1100,9 +1100,9 @@ def _came_back(record: dict[str, Any], names: list[str]) -> str:
 async def _observe_code_reads(session_manager: SessionManager) -> None:
     """Before the inventory: a file a cell's run read that changed under the daemon (a
     module edited) makes a staleness pass, so the cell reads stale rather than ready. Not
-    while a run is active (``refresh_staleness``); the check records nothing, so the next
-    call makes it again."""
-    import asyncio
+    while a run is active (``refresh_staleness``); the check keeps no observation, so the
+    next call makes it again."""
+    import anyio
 
     from strata.notebook.ws import refresh_staleness
 
@@ -1111,7 +1111,8 @@ async def _observe_code_reads(session_manager: SessionManager) -> None:
     except _Refused:
         # ``_scratchpad`` says why.
         return
-    if await asyncio.to_thread(session.code_keys_moved):
+    # On anyio's limiter, as the store's pool is sized to it (``compute_staleness_async``).
+    if await anyio.to_thread.run_sync(session.code_keys_moved):
         await refresh_staleness(session)
 
 

@@ -1957,8 +1957,10 @@ class NotebookSession:
         """
         if not self.notebook_state.scratchpad:
             return Resolved(lookup)
-        if not observe and lookup in self._code_seen:
-            return self._code_seen[lookup]
+        # One read: a run's thread may drop the entry between a test and a get.
+        seen = None if observe else self._code_seen.get(lookup)
+        if seen is not None:
+            return seen
         resolved = self._code_key_now(cell_id, lookup, observe=observe)
         if observe:
             self._code_seen[lookup] = resolved
@@ -1991,8 +1993,8 @@ class NotebookSession:
         """Whether a file a scratchpad cell's runs read is not as the last pass took it.
 
         Nothing watches those files, so a status asked for between passes checks them
-        itself; off the loop, as it may hash files. It records nothing, so a check whose
-        pass did not happen is made again; the pass observes for itself.
+        itself; off the loop, as it may hash files. It keeps no observation, so a check
+        whose pass did not happen is made again; the pass observes for itself.
         """
         if not self.notebook_state.scratchpad:
             return False
