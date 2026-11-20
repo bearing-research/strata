@@ -1337,9 +1337,9 @@ class NotebookSession:
 
         # Only this pass's cells are observed again, and their keys' observations kept.
         self._code_lookups = code_lookups
-        self._code_seen = {
-            k: v for k, v in self._code_seen.items() if k in set(code_lookups.values())
-        }
+        kept = set(code_lookups.values())
+        # A snapshot: a run's thread may add or drop an observation meanwhile.
+        self._code_seen = {k: v for k, v in list(self._code_seen.items()) if k in kept}
         self.causality_map = explain_staleness(self, to_explain)
         # Stale once its last run's record says what moved. Without that the result is not
         # known to be wrong (a run of ``# @nocache``, an input that cannot be read), so idle.
@@ -1967,7 +1967,8 @@ class NotebookSession:
         return resolved
 
     def _code_key_now(self, cell_id: str, lookup: str, *, observe: bool) -> Resolved:
-        """``resolve_code_key``'s answer, recording nothing."""
+        """``resolve_code_key``'s answer, kept as no observation (observing may still
+        refresh the index's stats of files found unchanged)."""
         consumed = sorted(self.dag.consumed_variables.get(cell_id, set())) if self.dag else []
         manager = self.artifact_manager
         console_id = manager.cell_artifact_id(cell_id, "__console__")
@@ -1993,8 +1994,9 @@ class NotebookSession:
         """Whether a file a scratchpad cell's runs read is not as the last pass took it.
 
         Nothing watches those files, so a status asked for between passes checks them
-        itself; off the loop, as it may hash files. It keeps no observation, so a check
-        whose pass did not happen is made again; the pass observes for itself.
+        itself; off the loop, as it may hash files. It keeps no observation (only the
+        index's stats of files found unchanged are refreshed), so a check whose pass did
+        not happen is made again; the pass observes for itself.
         """
         if not self.notebook_state.scratchpad:
             return False
