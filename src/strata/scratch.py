@@ -389,9 +389,11 @@ class SetupCancel:
                 return
         _kill(pid)
 
-    def finished(self) -> None:
+    def finished(self) -> bool:
+        """Done with the daemon: whether it is still running, not killed by a cancel."""
         with self._lock:
-            self._pid = None
+            held, self._pid = self._pid is not None, None
+            return held or not self._set
 
 
 def _cancelled() -> ScratchError:
@@ -448,9 +450,14 @@ def _start(
                 deadline,
                 log,
             )
-    except BaseException:
+    except BaseException as exc:
         # Not left running for nobody: no server.json names it.
         _kill(pid)
+        if cancel is not None:
+            cancelled = not cancel.finished()
+            if cancelled and isinstance(exc, ScratchError):
+                # Its wait failed because the cancel killed it, not as a crash.
+                raise _cancelled() from exc
         raise
     return pid, url, session_id
 
@@ -530,9 +537,10 @@ def ensure_daemon(
             setup_ms[name] = round((time.monotonic() - started) * 1000)
 
         pid, url, session_id = _start(anchor, step, python, cancel)
-        if cancel is not None:
-            # Recorded next: a cancel from now on leaves it running, named.
-            cancel.finished()
+        if cancel is not None and not cancel.finished():
+            # Killed by a cancel as it finished: not recorded.
+            raise _cancelled()
+        # Recorded next: a cancel from now on leaves it running, named.
         record = {
             "url": url,
             "pid": pid,

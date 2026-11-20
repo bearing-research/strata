@@ -86,7 +86,7 @@ def test_a_cancel_during_a_setup_step_fails_the_setup_and_ends_its_daemon(tmp_pa
     monkeypatch.setattr(scratch, "_spawn", spawn)
     monkeypatch.setattr(scratch, "_healthy", healthy)
 
-    with pytest.raises(scratch.ScratchError, match="exited while starting"):
+    with pytest.raises(scratch.ScratchError, match="cancelled"):
         scratch.ensure_daemon(tmp_path, cancel=cancel)
 
     assert _ended(started[0])
@@ -112,3 +112,37 @@ def test_a_cancel_after_the_lock_starts_nothing(tmp_path, monkeypatch):
 
     with pytest.raises(scratch.ScratchError, match="cancelled"):
         scratch.ensure_daemon(tmp_path, progress, cancel)
+
+
+def test_a_setup_that_failed_forgets_its_daemon(tmp_path, monkeypatch):
+    """Its pid could be another process's by the time a cancel comes."""
+    cancel = scratch.SetupCancel()
+    monkeypatch.setattr(scratch, "_spawn", lambda *args: _daemon())
+    monkeypatch.setattr(scratch, "_SETUP_TIMEOUT", 0)
+    monkeypatch.setattr(scratch, "_healthy", lambda url: False)
+    with pytest.raises(scratch.ScratchError, match="timed out"):
+        scratch.ensure_daemon(tmp_path, cancel=cancel)
+    killed: list[int] = []
+    monkeypatch.setattr(scratch, "_kill", killed.append)
+
+    cancel.set()
+
+    assert killed == []
+
+
+def test_a_daemon_a_cancel_killed_as_setup_ended_is_not_recorded(tmp_path, monkeypatch):
+    cancel = scratch.SetupCancel()
+    pid = _daemon()
+
+    def start(anchor, step, python=None, cancel_=None):
+        cancel.started(pid)
+        cancel.set()  # as the last step returns
+        return pid, "http://127.0.0.1:1", "session"
+
+    monkeypatch.setattr(scratch, "_start", start)
+
+    with pytest.raises(scratch.ScratchError, match="cancelled"):
+        scratch.ensure_daemon(tmp_path, cancel=cancel)
+
+    assert _ended(pid)
+    assert not scratch._record_path(tmp_path).exists()
