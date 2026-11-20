@@ -237,8 +237,9 @@ def _close_client(client: Any) -> None:
         return
 
 
-def execute_harness(manifest: dict) -> dict:
-    """Execute a cell manifest and return the result dict."""
+def execute_harness(manifest: dict, protocol: Any = None) -> dict:
+    """Execute a cell manifest and return the result dict; run events go to *protocol*
+    (the worker's own stream, else ``sys.stdout``)."""
     source = manifest.get("source", "")
     inputs = manifest.get("inputs", {})
     output_dir = Path(manifest.get("output_dir", ""))
@@ -307,7 +308,9 @@ def execute_harness(manifest: dict) -> dict:
 
                 _inject_mounts(manifest, namespace)
                 _inject_tables(manifest, namespace)
-                ambient_client = _inject_client(manifest, namespace, old_stdout)
+                ambient_client = _inject_client(
+                    manifest, namespace, old_stdout if protocol is None else protocol
+                )
                 display_capture.install(namespace)
 
                 namespace_before = set(namespace.keys())
@@ -427,8 +430,24 @@ def execute_harness(manifest: dict) -> dict:
 # --- Main loop ---
 
 
+def _protocol_stream() -> Any:
+    """This worker's protocol, alone on a private copy of fd 1.
+
+    Fd 1 itself, which a cell's child processes inherit, goes to the null device, as the
+    cold harness drops what they print: on the protocol a child's line could tear one,
+    or pass for a result. The copy is not inherited (PEP 446).
+    """
+    sys.stdout.flush()
+    private = os.dup(1)
+    null = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(null, 1)
+    os.close(null)
+    return os.fdopen(private, "w", encoding="utf-8")
+
+
 def main() -> None:
     _lifeline.watch_lifeline()
+    out = _protocol_stream()
     try:
         if len(sys.argv) > 3 and sys.argv[2] == "--warm":
             # A scratchpad's base image, the one its cold runs import too.
@@ -437,7 +456,7 @@ def main() -> None:
             imports = parse_common_imports()
         warm_imports(imports)
 
-        print("ready", flush=True)
+        print("ready", file=out, flush=True)
 
         line = sys.stdin.readline()
         if not line:
@@ -446,8 +465,6 @@ def main() -> None:
         if not manifest_path:
             return
 
-        # The protocol stream, should an interrupt leave the cell's capture in place.
-        out = sys.stdout
         result: dict = {}
         try:
             with open(manifest_path, "rb") as f:
@@ -455,7 +472,7 @@ def main() -> None:
             # The next line, never the manifest file: see harness.read_run_token.
             if manifest.get("run_token_on_stdin"):
                 manifest["strata_run_token"] = sys.stdin.readline().strip()
-            result = execute_harness(manifest)
+            result = execute_harness(manifest, out)
             # On a line of its own, after any event line an interrupt tore; the pool
             # skips the blank and the torn.
             out.write("\n" + _dumps_result(result) + "\n")

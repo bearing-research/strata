@@ -148,19 +148,9 @@ async def test_a_torn_line_is_skipped_for_the_next(tmp_path, torn):
         on_event=on_event,
     )
 
-    assert result["error"] == "interrupted"
+    assert result == {"success": False, "error": "interrupted"}
     # The event after the torn one still counts.
     assert events == [json.loads(event)]
-
-
-@pytest.mark.asyncio
-async def test_a_line_a_child_wrote_is_the_cells_output_not_the_result(tmp_path):
-    """A process the cell started writes to the stdout it inherited."""
-    data = b'hello\n{}\n1\n\n{"success": true, "variables": {}, "stdout": "own\\n"}\n'
-
-    result = await _pooled(tmp_path, data)
-
-    assert result == {"success": True, "variables": {}, "stdout": "own\nhello\n{}\n1\n"}
 
 
 @pytest.mark.asyncio
@@ -168,13 +158,12 @@ async def test_a_line_a_child_wrote_is_the_cells_output_not_the_result(tmp_path)
 async def test_a_worker_an_interrupt_ended_is_a_failed_cell_not_a_pool_miss(
     tmp_path, returncode, interrupted
 ):
-    result = await _pooled(tmp_path, b'a child\n{"success": true, "va', returncode)
+    result = await _pooled(tmp_path, b'{"success": true, "va', returncode)
 
     if interrupted:
         assert result is not None
         assert result["success"] is False
         assert "KeyboardInterrupt" in result["error"]
-        assert result["stdout"].startswith("a child\n")
     else:
         # Died some other way (a crash, a kill): the pool is unavailable, run it cold.
         assert result is None

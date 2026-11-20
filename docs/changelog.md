@@ -517,9 +517,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   no whole result read as "pool unavailable", so the cell ran again cold. The worker now
   reports the failure with the cell's print trail, as the cold harness does, on a line of
   its own after any it tore, as is each run event; the pool and the cold relay skip a
-  torn line, and a worker that Ctrl-C ended before any result fails the cell instead. A
-  line a child process of a warm cell wrote to the inherited stdout no longer sends the
-  cell to a second, cold run: it is kept in the cell's stdout. A client close
+  torn line, and a worker that Ctrl-C ended before any result fails the cell instead. The
+  warm worker's protocol has its own copy of fd 1, which a cell's child processes do not
+  hold: what they print goes nowhere, as on the cold path, where before its first line
+  sent the cell to a second, cold run. A client close
   that raises (an interrupt, or a cell's own `strata.close = sys.exit`) keeps the cell's
   result on the cold and the warm path, and no longer ends a run-all batch; an interrupt
   there still stops it. (#1593)

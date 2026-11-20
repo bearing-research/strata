@@ -234,29 +234,20 @@ def test_a_client_close_that_raises_keeps_the_cells_result(tmp_path: Path, closi
 
 
 def test_main_prints_a_result_when_an_interrupt_escapes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """On the protocol stream, though the cell's capture is still in place."""
     import io
     import sys
 
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text("{}")
-
-    def interrupted(manifest: dict) -> dict:
+    def interrupted(manifest: dict, protocol: object = None) -> dict:
         sys.stdout = io.StringIO()
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(pool_worker, "execute_harness", interrupted)
-    monkeypatch.setattr(pool_worker._lifeline, "watch_lifeline", lambda: None)
-    monkeypatch.setattr(pool_worker, "warm_imports", lambda imports: None)
-    monkeypatch.setattr(sys, "argv", ["pool_worker.py", str(tmp_path)])
-    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{manifest}\n"))
-    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    out = io.StringIO()
+    _run_main(tmp_path, monkeypatch, interrupted, out)
 
-    _without_escape(pool_worker.main)
-
-    lines = [line for line in capsys.readouterr().out.splitlines() if line]
+    lines = [line for line in out.getvalue().splitlines() if line]
     assert lines[0] == "ready"
     result = json.loads(lines[1])
     assert result["success"] is False
@@ -283,7 +274,7 @@ class _TornStdout:
 
 
 def _run_main(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, execute: Callable[[dict], dict], out: object
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, execute: Callable[..., dict], out: object
 ) -> None:
     import io
     import sys
@@ -295,7 +286,8 @@ def _run_main(
     monkeypatch.setattr(pool_worker, "warm_imports", lambda imports: None)
     monkeypatch.setattr(sys, "argv", ["pool_worker.py", str(tmp_path)])
     monkeypatch.setattr(sys, "stdin", io.StringIO(f"{manifest}\n"))
-    monkeypatch.setattr(sys, "stdout", out)
+    # Not the real fd 1, which is pytest's.
+    monkeypatch.setattr(pool_worker, "_protocol_stream", lambda: out)
     _without_escape(pool_worker.main)
 
 
@@ -306,7 +298,7 @@ def test_a_torn_result_line_is_followed_by_a_whole_one(
     _run_main(
         tmp_path,
         monkeypatch,
-        lambda manifest: {"success": True, "variables": {}, "stdout": "progress\n"},
+        lambda manifest, protocol=None: {"success": True, "variables": {}, "stdout": "progress\n"},
         out,
     )
 
@@ -325,7 +317,7 @@ def test_an_interrupt_while_the_error_line_is_made_still_writes_one(
 ) -> None:
     import io
 
-    def interrupted(manifest: dict) -> dict:
+    def interrupted(manifest: dict, protocol: object = None) -> dict:
         raise KeyboardInterrupt
 
     def again(exc: BaseException) -> str:
@@ -347,7 +339,7 @@ def test_the_result_starts_its_own_line_after_a_torn_event_line(
 
     out = io.StringIO()
 
-    def torn_event(manifest: dict) -> dict:
+    def torn_event(manifest: dict, protocol: object = None) -> dict:
         # A checkpoint event an interrupt cut short, on the protocol stream.
         out.write('{"event": "checkpoint", "par')
         return {"success": True, "variables": {}}
@@ -355,3 +347,25 @@ def test_the_result_starts_its_own_line_after_a_torn_event_line(
     _run_main(tmp_path, monkeypatch, torn_event, out)
 
     assert json.loads(out.getvalue().splitlines()[-1]) == {"success": True, "variables": {}}
+
+
+def test_a_cells_child_processes_print_nowhere_near_the_protocol(tmp_path: Path) -> None:
+    """A child inherits fd 1; as the cold harness drops what children print, so does the
+    warm worker, and the protocol is a copy no child holds."""
+    import subprocess
+    import sys
+
+    program = (
+        "import os, subprocess, sys\n"
+        "from strata.notebook import pool_worker\n"
+        "protocol = pool_worker._protocol_stream()\n"
+        "subprocess.run([sys.executable, '-c', 'print(1)'], check=True)\n"
+        "os.write(1, b'at fd 1\\n')\n"
+        "print('from python', flush=True)\n"
+        "protocol.write('the protocol\\n')\n"
+        "protocol.flush()\n"
+    )
+    done = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "the protocol\n"
