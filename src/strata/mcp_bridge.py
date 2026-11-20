@@ -13,7 +13,9 @@ from __future__ import annotations
 import contextlib
 import itertools
 import json
-from collections.abc import AsyncGenerator
+import signal
+import sys
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from functools import cache
 from importlib.metadata import version
@@ -276,6 +278,102 @@ def build_server(root: Path) -> Server:
         on_list_tools=list_tools,
         on_call_tool=call_tool,
     )
+
+
+def call_once(
+    root: Path,
+    name: str,
+    arguments: dict[str, Any],
+    progress: Callable[[str], None] | None = None,
+) -> tuple[Any, bool]:
+    """One tool call on the scratchpad of *root*, for the CLI: its value, and whether it failed.
+
+    Finds or starts the daemon as the bridge does, and sends the call once more if the
+    daemon it found stopped before the call reached it.
+    """
+
+    # Set on a SIGTERM or Ctrl-C: the setup thread, abandoned so the answer is said at
+    # once, stops soon after (the exit waits for it), killing a daemon it had not recorded.
+    cancel = scratch.SetupCancel()
+
+    async def call() -> dict[str, Any]:
+        upstream = Upstream()
+        try:
+            for attempt in range(2):
+                daemon = await anyio.to_thread.run_sync(
+                    scratch.ensure_daemon, root, progress, cancel, abandon_on_cancel=True
+                )
+                try:
+                    await upstream.open(daemon.url)
+                    result = await upstream.call_tool(name, arguments)
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    if attempt:
+                        raise
+                    continue
+                if daemon.setup_ms:
+                    result = _with_fields(result, {"setup_ms": daemon.setup_ms})
+                return result
+            raise AssertionError("unreachable")
+        finally:
+            await upstream.aclose()
+
+    async def cancellable() -> dict[str, Any] | None:
+        """*call*, cancelled on SIGTERM as on Ctrl-C, so the daemon cancels the cell too:
+        an agent's shell tool ends a command that outlives its timeout so."""
+        result: dict[str, Any] | None = None
+        failure: Exception | None = None
+        with contextlib.ExitStack() as stack:
+            # Received from before the call starts: a SIGTERM never finds the default action.
+            signals = (
+                stack.enter_context(anyio.open_signal_receiver(signal.SIGTERM))
+                if sys.platform != "win32"
+                else None
+            )
+            async with anyio.create_task_group() as group:
+
+                async def run() -> None:
+                    nonlocal result, failure
+                    try:
+                        result = await call()
+                    except Exception as exc:
+                        # Raised after the group, as itself: the group would wrap it in an
+                        # ExceptionGroup, which the caller's handlers do not catch.
+                        failure = exc
+                    group.cancel_scope.cancel()
+
+                async def on_terminate(received: AsyncIterator[int]) -> None:
+                    async for _ in received:
+                        cancel.set()
+                        group.cancel_scope.cancel()
+                        return
+
+                group.start_soon(run)
+                if signals is not None:
+                    group.start_soon(on_terminate, signals)
+        if failure is not None:
+            raise failure
+        return result
+
+    try:
+        try:
+            result = anyio.run(cancellable)
+        except KeyboardInterrupt:
+            cancel.set()
+            raise
+    except scratch.ScratchError as exc:
+        return {"status": "error", "error": str(exc), "fix": "the error says what to look at"}, True
+    except (httpx.HTTPError, UpstreamError) as exc:
+        error = f"the scratchpad's server failed the call: {type(exc).__name__}: {exc}"
+        return {"status": "error", "error": error, "fix": "run the command again"}, True
+    if result is None:
+        # A result that arrived with the signal stands: the cell ran.
+        error = "terminated: the call was cancelled, with its cell if one had started"
+        return {"status": "error", "error": error, "fix": "run the command again"}, True
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict):
+        return structured, bool(result.get("isError")) or structured.get("status") == "error"
+    text = "\n".join(part.get("text", "") for part in result.get("content") or [])
+    return text, bool(result.get("isError"))
 
 
 async def serve(root: Path) -> None:

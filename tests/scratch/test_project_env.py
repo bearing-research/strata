@@ -583,7 +583,9 @@ def test_a_daemon_on_another_interpreter_is_replaced_once_idle(tmp_path, monkeyp
     monkeypatch.setattr(scratch, "find_daemon", lambda anchor: running)
     monkeypatch.setattr(scratch, "_busy", lambda url: False)
     monkeypatch.setattr(scratch, "_stop", stopped.append)
-    monkeypatch.setattr(scratch, "_start", lambda anchor, step, python: (2, "u2", "s2"))
+    monkeypatch.setattr(
+        scratch, "_start", lambda anchor, step, python, cancel=None: (2, "u2", "s2")
+    )
 
     monkeypatch.delenv(PYTHON_OVERRIDE, raising=False)
     assert scratch.ensure_daemon(tmp_path) is running
@@ -628,7 +630,9 @@ def test_a_daemon_replaced_for_its_version_keeps_the_interpreter_it_was_given(
     monkeypatch.setattr(scratch, "_busy", lambda url: False)
     monkeypatch.setattr(scratch, "_stop", lambda daemon: None)
     monkeypatch.setattr(
-        scratch, "_start", lambda anchor, step, python: started.append(python) or (2, "u2", "s2")
+        scratch,
+        "_start",
+        lambda anchor, step, python, cancel=None: started.append(python) or (2, "u2", "s2"),
     )
     assert scratch.ensure_daemon(tmp_path).python == "/a/python"
     assert started == ["/a/python"]

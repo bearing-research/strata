@@ -74,3 +74,14 @@ the box's, not this machine's; keep a specific cell local with `# @worker local`
 Needs key-based SSH (no password prompts) and may take a moment on first connect
 while it installs. `list_workers` shows what's connected;
 `disconnect_ssh_worker(session_id, name)` tears one down.
+
+<!-- section: agent_block -->
+## Strata scratchpad
+
+For Python you run to compute or inspect something (not to edit files), use the
+Strata scratchpad: {run_tool}, or `strata scratch run -c '<code>'` where that tool
+is not available. It is a persistent, cached session in this project's
+environment: variables persist, and a cell re-runs only when its source, the
+variables it uses, a file it read or the environment changed. Cells run in the
+scratchpad's own `work/` directory, so use absolute paths for project files.
+{inventory_tool} (`strata scratch show`) lists what already exists; build on it.
