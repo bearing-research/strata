@@ -34,11 +34,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **The Claude Code plugin is the scratchpad's MCP server and hooks; the skill is
   retired.** `plugins/strata-scratchpad` now bundles the `strata` MCP server
   (`strata mcp`, loaded up front) and the session-start and prompt hooks, which name
-  the plugin's own `run` tool; its hook script is a copy of `strata/agent_hook.py`,
-  kept identical by a test. The `strata-scratchpad` skill and the
-  `/strata-scratchpad:scratch` command are gone from the plugin and the package: the
-  MCP instructions, the hooks and the `CLAUDE.md` block that `strata agent install`
-  writes replace them. The eval's arm B keeps the skill as it shipped. The Agent
+  the plugin's own `run` tool and run `strata-agent-hook`, a new console script
+  beside `strata` that imports nothing of the notebook. The `strata-scratchpad`
+  skill and the `/strata-scratchpad:scratch` command are gone from the plugin and
+  the package: the MCP instructions and the hooks replace them, and
+  `strata agent install` also writes the `CLAUDE.md` block and the permission,
+  which a plugin cannot. The eval's arm B keeps the skill as it shipped. The Agent
   scratchpad guide is rewritten around `strata agent install`. (#1596)
 - **A cell's checkpoints are listed in the notebook, and a branch starts from one there.**
   A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
