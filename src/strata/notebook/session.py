@@ -1338,8 +1338,10 @@ class NotebookSession:
         # Only this pass's cells are observed again, and their keys' observations kept.
         self._code_lookups = code_lookups
         kept = set(code_lookups.values())
-        # A snapshot: a run's thread may add or drop an observation meanwhile.
-        self._code_seen = {k: v for k, v in list(self._code_seen.items()) if k in kept}
+        # In place, over a snapshot: a run's thread may add or drop an observation meanwhile,
+        # and a rebuilt dict would bring back the one it dropped.
+        for lookup in [k for k in list(self._code_seen) if k not in kept]:
+            self._code_seen.pop(lookup, None)
         self.causality_map = explain_staleness(self, to_explain)
         # Stale once its last run's record says what moved. Without that the result is not
         # known to be wrong (a run of ``# @nocache``, an input that cannot be read), so idle.

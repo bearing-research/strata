@@ -271,3 +271,32 @@ async def test_a_removed_or_edited_cell_is_observed_no_more(tmp_path, scratch):
     session.compute_staleness()
     assert session._code_lookups == {}
     assert session._code_seen == {}
+
+
+class _DroppedMidPrune(dict):
+    """An observation a run's thread drops while a pass prunes the rest."""
+
+    def __init__(self, seen, lookup):
+        super().__init__(seen)
+        self.lookup = lookup
+
+    def __iter__(self):
+        keys = list(super().__iter__())
+        self.pop(self.lookup, None)
+        return iter(keys)
+
+
+async def test_an_observation_a_run_drops_during_a_pass_stays_dropped(tmp_path, scratch):
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    cell = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    await _run(scratch, cell.id)
+    session = scratch._session
+    session.compute_staleness(hash_mounts=False)
+    lookup = session._code_lookups[cell.id]
+    assert lookup in session._code_seen
+
+    session._code_seen = _DroppedMidPrune(session._code_seen, lookup)
+    session.compute_staleness(hash_mounts=False)
+
+    assert lookup not in session._code_seen
