@@ -46,7 +46,7 @@ def hint(exc: BaseException, manifest: dict[str, Any]) -> str | None:
         raise
     except BaseException:
         # Its notes may refuse one (``__notes__`` not a list): the hint stands without.
-        pass
+        return text
     return text
 
 

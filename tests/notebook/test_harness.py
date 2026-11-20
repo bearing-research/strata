@@ -966,12 +966,16 @@ def test_an_odd_exit_code_still_reads_as_an_exit():
     for code, message in (
         (cancels(), f"the cell exited, {stops}: <str() failed>"),
         (returns_odd(), f"the cell exited, {stops}: odd"),
-        (no_class(), f"the cell exited, {stops}"),
         (bad_int(3), f"the cell exited with status <int() failed>, {stops}"),
     ):
         with pytest.raises(RuntimeError) as raised, cell_traceback.exit_fails_the_cell():
             sys.exit(code)
         assert str(raised.value) == message, code
+    # Its text, though its own __class__ raises.
+    with pytest.raises(RuntimeError) as raised, cell_traceback.exit_fails_the_cell():
+        sys.exit(no_class())
+    assert str(raised.value).startswith(f"the cell exited, {stops}: <"), raised.value
+    assert "NoClass object at" in str(raised.value), raised.value
 
 
 def test_an_odd_exception_is_still_reported_and_gets_no_hint(tmp_path, monkeypatch):

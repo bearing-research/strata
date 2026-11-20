@@ -12,7 +12,7 @@ import traceback
 import types
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 CELL_ID_VAR = "STRATA_CELL_ID"
 
@@ -79,9 +79,10 @@ def _exited(what: str, code: object) -> str:
     anything else, lines kept, capped)."""
     if code is None:
         return f"{what} exited, {_STOPS}"
-    if isinstance(code, int):
+    if issubclass(type(code), int):
         # A bool too, as its status (True exits 1).
-        number = safely(lambda: int(code), None)
+        # An int (or bool) by the check above, which ty cannot narrow from type().
+        number = safely(lambda: int(cast(int, code)), None)
         status = (
             "<int() failed>"
             if number is None
