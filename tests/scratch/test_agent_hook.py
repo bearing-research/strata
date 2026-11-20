@@ -167,9 +167,63 @@ def test_a_source_the_session_has_not_taken_in_is_stale(held):
     assert list(found.values())[0].endswith("changed")
 
 
+def test_a_source_with_crlf_the_session_read_is_cached(held):
+    """The parser translates newlines; the file's bytes are not what the session holds."""
+    from strata.notebook import scratch_digest
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+
+    project, _ = held
+    notebook = scratch.scratch_dir(project)
+    digest = json.loads((project / agent_hook.DIGEST).read_text())
+    (source,) = [c["source"][0] for c in digest["cells"]]
+    Path(source).write_bytes(b"value = 41\r\nvalue += 1\r\n")
+    session = NotebookSession(parse_notebook(notebook), notebook)
+    (cell,) = session.notebook_state.cells
+    cell.status = scratch_digest.CellStatus.READY
+
+    found = agent_hook.verdicts(scratch_digest.build(session), str(project))
+
+    assert list(found.values()) == ["cached"]
+
+
+def test_a_cell_downstream_of_an_unchecked_one_is_never_cached(tmp_path, monkeypatch):
+    read = tmp_path / "data.txt"
+    read.write_text("x")
+    _, print_ = agent_hook.observe(str(read))
+    seen = agent_hook.observe(str(read))[0]
+    reads = {str(read): [seen, print_], str(tmp_path / "gone"): [agent_hook.ABSENT, None]}
+    # b comes first, and is checked; the budget runs out on a.
+    digest = {"environment": {}, "cells": [_cell("b", ["a"]), _cell("a", [], reads)]}
+    monkeypatch.setattr(agent_hook, "MAX_PATHS", 1)
+
+    found = agent_hook.verdicts(digest, str(tmp_path))
+
+    assert found["a"].startswith("as of") and found["b"] == found["a"]
+
+
+def test_the_prompt_hook_checks_only_the_named_cells_and_their_upstream(tmp_path, monkeypatch):
+    def held(name: str) -> dict:
+        path = tmp_path / name
+        path.write_text(name)
+        return {str(path): [agent_hook.observe(str(path))[0], None]}
+
+    # Each cell's read holds, and costs one path of a budget of two.
+    cells = [_cell(f"other{i}", [], held(f"o{i}")) for i in range(3)]
+    cells += [_cell("up", [], held("u")), _cell("named", ["up"], held("n"))]
+    monkeypatch.setattr(agent_hook, "MAX_PATHS", 2)
+
+    block = agent_hook.render(
+        {"environment": {}, "cells": cells}, str(tmp_path), "run", "plot named"
+    )
+
+    assert block.splitlines()[1:-1] == ["- named (cell named): cached"]
+
+
 @pytest.mark.parametrize(
     "digest",
     [
+        {"version": 1, "written_at": 1e30, "cells": [{"cell": "a", "defines": ["a"]}]},
         {"version": 1, "cells": [{"defines": ["x"]}]},
         {"version": 1, "cells": [{"cell": "a", "reads": [1, 2]}]},
         {"version": 1, "cells": "a", "environment": {"observed": {"p": "x"}}},

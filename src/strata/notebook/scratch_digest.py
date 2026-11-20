@@ -46,6 +46,20 @@ def _files(notebook_dir: Path) -> dict[str, str]:
     }
 
 
+def _source(path: Path, keyed: str) -> list[Any]:
+    """The cell's source file as the hook checks it: as it is now if the session keyed the
+    cell on what it holds (read as the parser reads it, newlines translated), else the
+    source keyed, which no file matches, so an edit not taken in is stale."""
+    seen, print_ = observe(str(path))
+    try:
+        taken_in = path.read_text(encoding="utf-8") == keyed
+    except (OSError, UnicodeDecodeError):
+        taken_in = False
+    if taken_in:
+        return [str(path), seen, print_]
+    return [str(path), "sha256:" + hashlib.sha256(keyed.encode("utf-8")).hexdigest(), None]
+
+
 def build(session: NotebookSession) -> dict[str, Any]:
     """The digest of *session*'s scratchpad as it stands."""
     from strata.notebook.project_env import environment_record
@@ -74,11 +88,7 @@ def build(session: NotebookSession) -> dict[str, Any]:
             except ValueError:
                 path = None
             if path is not None:
-                # The source the session keyed the cell on, not the file's as it is now:
-                # an edit the session has not taken in makes the cell stale.
-                keyed = "sha256:" + hashlib.sha256(cell.source.encode("utf-8")).hexdigest()
-                seen, print_ = observe(str(path))
-                entry["source"] = [str(path), keyed, print_ if seen == keyed else None]
+                entry["source"] = _source(path, cell.source)
         reads = session.code_reads(cell.id)
         if reads is not None:
             entry["reads"] = reads

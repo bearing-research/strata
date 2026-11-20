@@ -217,8 +217,8 @@ def verdicts(digest: dict[str, Any], anchor: str) -> dict[str, str]:
             found[cell_id] = f"stale, {_shown(moved, anchor)} {what}"
         else:
             found[cell_id] = "cached" if complete else as_of
-    # Downstream of a stale or failed cell is stale too, to a fixed point: the notebook's
-    # order need not be the graph's.
+    # Downstream of a stale or failed cell is stale too, and of an unchecked one unchecked,
+    # to a fixed point: the notebook's order need not be the graph's.
     changed = True
     while changed:
         changed = False
@@ -230,7 +230,26 @@ def verdicts(digest: dict[str, Any], anchor: str) -> dict[str, str]:
             if any(v.startswith("stale") or v == "failed" for v in upstream):
                 found[cell["cell"]] = "stale, upstream"
                 changed = True
+            elif verdict == "cached" and any(v.startswith("as of") for v in upstream):
+                found[cell["cell"]] = as_of
+                changed = True
     return found
+
+
+def _with_upstream(
+    cells: list[dict[str, Any]], named: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """*named* and every cell upstream of them, in the digest's order."""
+    by_id = {c["cell"]: c for c in cells}
+    keep: set[str] = set()
+    todo = [c["cell"] for c in named]
+    while todo:
+        cell_id = todo.pop()
+        if cell_id in keep or cell_id not in by_id:
+            continue
+        keep.add(cell_id)
+        todo.extend(by_id[cell_id].get("upstream") or [])
+    return [c for c in cells if c["cell"] in keep]
 
 
 def _cost(cold_ms: int | None) -> str | None:
@@ -247,8 +266,9 @@ def render(digest: dict[str, Any], anchor: str, run_tool: str, prompt: str | Non
         cells = [c for c in cells if c["cell"] in words or words & set(c.get("defines") or [])]
     if not cells:
         return ""
-    # Over every cell, so a named one downstream of a stale one is said stale.
-    found = verdicts(digest, anchor)
+    # Over the named cells and their upstream: a named one downstream of a stale one is
+    # stale, and the budget goes on nothing else.
+    found = verdicts({**digest, "cells": _with_upstream(digest.get("cells") or [], cells)}, anchor)
     lines = []
     for cell in cells[:MAX_LINES]:
         names = ", ".join(cell.get("defines") or []) or "no variables"
@@ -280,7 +300,7 @@ def main(argv: list[str]) -> int:
     prompt = str(payload.get("prompt") or "") if mode == "prompt" else None
     try:
         block = render(digest, anchor, run_tool, prompt)
-    except (KeyError, TypeError, ValueError, AttributeError, IndexError):
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError, OverflowError, OSError):
         # A digest of another shape (another Strata version's): nothing to say.
         return 0
     sys.stdout.write(block)

@@ -173,10 +173,9 @@ def _hook_command(mode: str) -> str:
     from strata import agent_hook
 
     argv = [sys.executable, "-I", agent_hook.__file__, mode]
-    if sys.platform == "win32":
-        return subprocess.list2cmdline(argv)
-    # Never exit 2, which blocks the prompt, should the script be gone (a reinstall on
-    # another Python): the hook only informs.
+    # Claude Code runs hooks through bash, Git Bash on Windows. Never exit 2, which blocks
+    # the prompt, should the script be gone (a reinstall on another Python): the hook
+    # only informs.
     return " ".join(shlex.quote(part) for part in argv) + " || true"
 
 
@@ -194,9 +193,20 @@ def _hook_lists(settings: dict[str, Any]) -> dict[str, list[Any]]:
     return hooks
 
 
+def _allow_list(settings: dict[str, Any]) -> list[Any]:
+    """``settings["permissions"]["allow"]``, refused as ``_hook_lists`` refuses."""
+    permissions = settings.setdefault("permissions", {})
+    allow = permissions.setdefault("allow", []) if isinstance(permissions, dict) else None
+    if not isinstance(allow, list):
+        raise InstallError(
+            "settings.json's `permissions` is not as Claude Code reads it: fix it first"
+        )
+    return allow
+
+
 def _settings_add(text: str) -> str:
     settings = _load_json(_settings_remove(text), "settings.json")
-    allow = settings.setdefault("permissions", {}).setdefault("allow", [])
+    allow = _allow_list(settings)
     if PERMISSION not in allow:
         allow.append(PERMISSION)
     hooks = _hook_lists(settings)
@@ -208,7 +218,8 @@ def _settings_add(text: str) -> str:
 
 def _settings_remove(text: str) -> str:
     settings = _load_json(text, "settings.json")
-    allow = settings.get("permissions", {}).get("allow")
+    permissions = settings.get("permissions")
+    allow = permissions.get("allow") if isinstance(permissions, dict) else None
     if isinstance(allow, list) and PERMISSION in allow:
         allow.remove(PERMISSION)
     hooks = settings.get("hooks")
@@ -228,11 +239,13 @@ def _settings_remove(text: str) -> str:
                 rest = [h for h in inner if not _is_ours(h)]
                 if rest:
                     kept.append({**group, "hooks": rest})
-            if len(kept) != len(groups) or kept != groups:
-                emptied = emptied or not kept
+            if kept != groups:
                 hooks[event] = kept
                 if not kept:
                     del hooks[event]
+                    emptied = True
+        # Emptied by Strata: an empty ``hooks`` of the user's own goes too, and means as
+        # little to Claude Code as none.
         if emptied and not hooks:
             del settings["hooks"]
     return json.dumps(settings, indent=2) + "\n"

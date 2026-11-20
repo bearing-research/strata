@@ -811,13 +811,23 @@ def test_the_users_own_hooks_survive_install_and_uninstall(agent_home):
 
 
 @_SHEBANG
-@pytest.mark.parametrize("hooks", [[], {"SessionStart": {"hooks": []}}])
-def test_hooks_claude_code_cannot_read_are_refused_before_anything_is_written(agent_home, hooks):
+@pytest.mark.parametrize(
+    ("settings", "key"),
+    [
+        ({"hooks": []}, "hooks"),
+        ({"hooks": {"SessionStart": {"hooks": []}}}, "hooks"),
+        ({"permissions": []}, "permissions"),
+        ({"permissions": {"allow": "mcp__strata__*"}}, "permissions"),
+    ],
+)
+def test_settings_claude_code_cannot_read_are_refused_before_anything_is_written(
+    agent_home, settings, key
+):
     claude, _ = agent_home
     claude.mkdir()
-    (claude / "settings.json").write_text(json.dumps({"hooks": hooks}))
+    (claude / "settings.json").write_text(json.dumps(settings))
 
-    with pytest.raises(agent_install.InstallError, match="`hooks`"):
+    with pytest.raises(agent_install.InstallError, match=f"`{key}`"):
         agent_install.install(["claude"], STRATA)
 
     assert "strata" not in _servers(claude)
