@@ -613,7 +613,7 @@ class TestArmCp:
         assert steps[1] == str(tmp_path / ".strata-scratch" / ".venv-overlay" / "bin" / "python")
 
         monkeypatch.setattr(project_env, "read_record", lambda home: json.loads("{"))
-        with pytest.raises(server.SetupError, match="JSONDecodeError"):
+        with pytest.raises(server.SetupError, match="its environment record: JSONDecodeError"):
             server._warm_scratchpad(tmp_path, {})
 
     def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):

@@ -223,11 +223,13 @@ def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
     # The environment its cells run in, decided as environment_hash decides it: its record
     # says attached even when a failed probe left no identity.
     home = scratch.scratch_dir(project)
-    with as_setup_error():
+    try:
         record = read_record(home)
-        attached = attached_identity(home) is not None or (
-            isinstance(record, dict) and record.get("mode") == "attached"
-        )
+    except _SETUP_FAILURES as exc:
+        raise SetupError(f"warming the scratchpad: its environment record: {exc!r}") from exc
+    attached = attached_identity(home) is not None or (
+        record is not None and record.get("mode") == "attached"
+    )
     venv = OVERLAY_DIR if attached else ".venv"
     step(f"importing in {venv}", [str(home / venv / "bin" / "python"), "-c", _WARM], 600)
     # SIGTERM lets the daemon stop its pools and cells; what outlives the wait is killed
