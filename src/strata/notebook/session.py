@@ -1983,6 +1983,16 @@ class NotebookSession:
             for cell_id, lookup in list(self._code_lookups.items()):
                 self.resolve_code_key(cell_id, lookup)
 
+    def refresh_code_keys(self) -> bool:
+        """Observe the code keys again and say whether one moved since the last observation.
+
+        Nothing watches the files a scratchpad cell's run read, so a status asked for
+        between passes checks them itself; off the loop, as it may hash files.
+        """
+        before = dict(self._code_seen)
+        self._observe_code_keys()
+        return self._code_seen != before
+
     def record_code_reads(
         self, lookup: str, reads: Mapping[str, str], stat: Mapping[str, list[int]]
     ) -> None:

@@ -194,6 +194,26 @@ async def test_scratchpad_lists_what_exists_and_finds_a_name(scratch):
     assert _scratchpad(sm, "nope") == {"variable": "nope", "defined": False, "available": ["df"]}
 
 
+@pytest.mark.asyncio
+async def test_the_inventory_sees_a_file_a_cell_read_change_under_the_session(tmp_path):
+    """Nothing watches it, so the tool looks again: stale, not the last pass's ready."""
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    sm = SessionManager()
+    session = sm.open_notebook(create_notebook(tmp_path, "scratch", scratchpad=True))
+    cell = (await _scratch_run(sm, f"x = int(open({str(data)!r}).read())"))["cell"]
+    await mcp_server._observe_code_reads(sm)
+    assert _scratchpad(sm)["cells"][0]["status"] == "ready"
+    assert not session.refresh_code_keys()
+
+    data.write_text("3")
+    await mcp_server._observe_code_reads(sm)
+
+    (entry,) = _scratchpad(sm)["cells"]
+    assert (entry["cell"], entry["status"], entry["changed_code"]) == (cell, "stale", str(data))
+    assert not session.refresh_code_keys()
+
+
 def _listed(app) -> dict[str, dict | None]:
     return {tool.name: tool.meta for tool in asyncio.run(app.state.mcp_server.list_tools())}
 
