@@ -29,6 +29,28 @@ def hint(exc: BaseException, manifest: dict[str, Any]) -> str | None:
     relatively, like ``enter``. Added to the exception as a note, so the traceback
     carries it too.
     """
+    # A failing cell's own exception: whatever reading it raises (its class, its
+    # filename) gives no hint, and the failure is still reported.
+    try:
+        text = _hint(exc, manifest)
+    except KeyboardInterrupt:
+        raise
+    except BaseException:
+        return None
+    if text is None:
+        return None
+    # So the traceback carries it too.
+    try:
+        exc.add_note(text)
+    except KeyboardInterrupt:
+        raise
+    except BaseException:
+        # Its notes may refuse one (``__notes__`` not a list): the hint stands without.
+        return text
+    return text
+
+
+def _hint(exc: BaseException, manifest: dict[str, Any]) -> str | None:
     if not manifest.get("notebook_dir") or not isinstance(exc, FileNotFoundError):
         return None
     if not exc.filename:
@@ -38,10 +60,7 @@ def hint(exc: BaseException, manifest: dict[str, Any]) -> str | None:
         return None
     if not os.path.exists(os.path.join(os.pardir, name)):
         return None
-    text = (
+    return (
         f"{name} is in the notebook's directory, not in the cell's working directory "
         f"work/: read it as ../{name}"
     )
-    if hasattr(exc, "add_note"):
-        exc.add_note(text)
-    return text

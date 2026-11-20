@@ -91,7 +91,7 @@ def warm_imports(imports: list[str]) -> None:
 def _exec_with_display(source: str, namespace: dict, cell_id: str | None) -> Any | None:
     """Execute source; if the last statement is a bare expression, eval and return it."""
     # The cell's code, and any process it starts, can tell which cell it runs in.
-    with _traceback.cell_id_set(cell_id):
+    with _traceback.cell_id_set(cell_id), _traceback.exit_fails_the_cell():
         return _exec_source(source, namespace, cell_id)
 
 
@@ -387,7 +387,9 @@ def execute_harness(manifest: dict) -> dict:
             "build_env": build_env_identity(),
         }
 
-    except Exception as e:
+    except BaseException as e:
+        # Any, so the worker returns a result: an interrupt, or a SystemExit outside the
+        # cell's body (an input's unpickling), included.
         sys.stdout = old_stdout
         sys.stderr = old_stderr
         return {

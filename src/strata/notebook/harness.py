@@ -133,7 +133,7 @@ def deserialize_inputs(manifest: dict) -> dict[str, Any]:
 def _exec_with_display(source: str, namespace: dict, cell_id: str | None) -> Any | None:
     """Execute source; if the last statement is a bare expression, eval and return it."""
     # The cell's code, and any process it starts, can tell which cell it runs in.
-    with _traceback.cell_id_set(cell_id):
+    with _traceback.cell_id_set(cell_id), _traceback.exit_fails_the_cell():
         return _exec_source(source, namespace, cell_id)
 
 
@@ -193,16 +193,20 @@ def inject_tables(manifest: dict, namespace: dict) -> None:
 
 def no_client_hint(exc: BaseException, manifest: dict) -> str | None:
     """Why ``strata`` is undefined on a worker, in place of a bare ``NameError``."""
-    if manifest.get("strata_url") or not isinstance(exc, NameError) or exc.name != "strata":
+    if manifest.get("strata_url"):
+        return None
+    # A failing cell's own exception: its attributes, even its class, may raise.
+    if not _traceback.safely(
+        lambda: bool(isinstance(exc, NameError) and exc.name == "strata"), False
+    ):
         return None
     text = (
         "A cell on a worker has no ambient `strata` client, so it cannot scan or read "
         "artifacts through the notebook's server. Do that in a cell that runs on the "
         "server and use its result here."
     )
-    # So the traceback carries it too.
-    if hasattr(exc, "add_note"):
-        exc.add_note(text)
+    # So the traceback carries it too; the hint stands without its note.
+    _traceback.safely(lambda: exc.add_note(text), None)
     return text
 
 
@@ -377,11 +381,12 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        result = eval(code, namespace)  # noqa: S307 (the user declares the predicate)
+        with _traceback.exit_fails_the_cell("the @loop_until predicate"):
+            result = eval(code, namespace)  # noqa: S307 (the user declares the predicate)
     except Exception as exc:
         return {
             "until_reached": False,
-            "error": f"@loop_until evaluation failed: {type(exc).__name__}: {exc}",
+            "error": f"@loop_until evaluation failed: {_traceback.error_text(exc)}",
         }
 
     return {"until_reached": bool(result)}
@@ -896,6 +901,16 @@ def main():
     stdout_buffer: io.StringIO = io.StringIO()
     stderr_buffer: io.StringIO = io.StringIO()
     ambient_client: Any = None
+    # Should the handler below fail too, the finally block still has a result to write.
+    fallback: dict[str, Any] = {
+        "success": False,
+        "error": "the harness failed reporting the cell's failure",
+        "variables": {},
+        "stdout": "",
+        "stderr": "",
+        "mutation_warnings": [],
+    }
+    result = fallback
 
     try:
         manifest = load_manifest(manifest_path)
@@ -1022,8 +1037,10 @@ def main():
         if loop_state is not None:
             result["loop"] = loop_state
 
-    except Exception as e:
-        # SystemExit still runs the finally block; the parent checks result.json, not the exit code.
+    except BaseException as e:
+        # Any, so the finally block always has a result to write (an interrupt: Ctrl-C in
+        # the server's terminal reaches its children too). The parent checks result.json,
+        # not the exit code.
         hint = _work_dir.hint(e, manifest) or no_client_hint(e, manifest)
         result = {
             "success": False,
@@ -1037,6 +1054,13 @@ def main():
 
     finally:
         close_client(ambient_client)
+        if result is fallback:
+            # The cell's print trail, which matters most on failure.
+            result = {
+                **fallback,
+                "stdout": stdout_buffer.getvalue(),
+                "stderr": stderr_buffer.getvalue(),
+            }
         # A separate name from the input manifest, so the parent can tell a crash
         # from unread input. The hyphen can't be a Python identifier, so it can't
         # collide with a variable's ``<var_name>.json``.
