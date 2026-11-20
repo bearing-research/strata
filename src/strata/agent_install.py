@@ -163,7 +163,10 @@ class _FilePiece:
 # The agent hook (``strata/agent_hook.py``): at session start, and on each prompt for the
 # cells it names. Run by path, isolated, on this install's interpreter: stdlib only.
 _HOOK_EVENTS = {"SessionStart": "session-start", "UserPromptSubmit": "prompt"}
-_HOOK_SCRIPT = "agent_hook.py"
+
+
+# Strata's hook command: ``.../strata/agent_hook.py <mode>``, as written below.
+_OURS = re.compile(r"[/\\]strata[/\\]agent_hook\.py\W* (?:session-start|prompt)\b")
 
 
 def _hook_command(mode: str) -> str:
@@ -172,14 +175,23 @@ def _hook_command(mode: str) -> str:
     argv = [sys.executable, "-I", agent_hook.__file__, mode]
     if sys.platform == "win32":
         return subprocess.list2cmdline(argv)
-    return " ".join(shlex.quote(part) for part in argv)
+    # Never exit 2, which blocks the prompt, should the script be gone (a reinstall on
+    # another Python): the hook only informs.
+    return " ".join(shlex.quote(part) for part in argv) + " || true"
 
 
-def _is_ours(group: Any) -> bool:
-    hooks = group.get("hooks") if isinstance(group, dict) else None
-    return isinstance(hooks, list) and any(
-        isinstance(h, dict) and _HOOK_SCRIPT in str(h.get("command", "")) for h in hooks
-    )
+def _is_ours(hook: Any) -> bool:
+    return isinstance(hook, dict) and bool(_OURS.search(str(hook.get("command", ""))))
+
+
+def _hook_lists(settings: dict[str, Any]) -> dict[str, list[Any]]:
+    """``settings["hooks"]``, refused as ``_load_json`` refuses a file it cannot read."""
+    hooks = settings.setdefault("hooks", {})
+    if not isinstance(hooks, dict) or not all(
+        isinstance(hooks.get(event, []), list) for event in _HOOK_EVENTS
+    ):
+        raise InstallError("settings.json's `hooks` is not as Claude Code reads it: fix it first")
+    return hooks
 
 
 def _settings_add(text: str) -> str:
@@ -187,7 +199,7 @@ def _settings_add(text: str) -> str:
     allow = settings.setdefault("permissions", {}).setdefault("allow", [])
     if PERMISSION not in allow:
         allow.append(PERMISSION)
-    hooks = settings.setdefault("hooks", {})
+    hooks = _hook_lists(settings)
     for event, mode in _HOOK_EVENTS.items():
         command = {"type": "command", "command": _hook_command(mode), "timeout": 5}
         hooks.setdefault(event, []).append({"hooks": [command]})
@@ -201,13 +213,27 @@ def _settings_remove(text: str) -> str:
         allow.remove(PERMISSION)
     hooks = settings.get("hooks")
     if isinstance(hooks, dict):
+        emptied = False
         for event in _HOOK_EVENTS:
             groups = hooks.get(event)
-            if isinstance(groups, list):
-                hooks[event] = [group for group in groups if not _is_ours(group)]
-                if not hooks[event]:
+            if not isinstance(groups, list):
+                continue
+            kept = []
+            for group in groups:
+                inner = group.get("hooks") if isinstance(group, dict) else None
+                if not isinstance(inner, list) or not any(_is_ours(h) for h in inner):
+                    kept.append(group)
+                    continue
+                # Only Strata's command goes; a group it shares with the user's stays.
+                rest = [h for h in inner if not _is_ours(h)]
+                if rest:
+                    kept.append({**group, "hooks": rest})
+            if len(kept) != len(groups) or kept != groups:
+                emptied = emptied or not kept
+                hooks[event] = kept
+                if not kept:
                     del hooks[event]
-        if not hooks:
+        if emptied and not hooks:
             del settings["hooks"]
     return json.dumps(settings, indent=2) + "\n"
 

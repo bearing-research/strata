@@ -217,11 +217,19 @@ def verdicts(digest: dict[str, Any], anchor: str) -> dict[str, str]:
             found[cell_id] = f"stale, {_shown(moved, anchor)} {what}"
         else:
             found[cell_id] = "cached" if complete else as_of
-    # Downstream of a stale cell is stale too, in the digest's order (the notebook's).
-    for cell in cells:
-        if found[cell["cell"]] in ("cached",) or found[cell["cell"]].startswith("as of"):
-            if any(found.get(up, "").startswith("stale") for up in cell.get("upstream") or []):
+    # Downstream of a stale or failed cell is stale too, to a fixed point: the notebook's
+    # order need not be the graph's.
+    changed = True
+    while changed:
+        changed = False
+        for cell in cells:
+            verdict = found[cell["cell"]]
+            if verdict != "cached" and not verdict.startswith("as of"):
+                continue
+            upstream = [found.get(up, "") for up in cell.get("upstream") or []]
+            if any(v.startswith("stale") or v == "failed" for v in upstream):
                 found[cell["cell"]] = "stale, upstream"
+                changed = True
     return found
 
 
@@ -237,9 +245,9 @@ def render(digest: dict[str, Any], anchor: str, run_tool: str, prompt: str | Non
     if prompt is not None:
         words = set(re.findall(r"\w+", prompt))
         cells = [c for c in cells if c["cell"] in words or words & set(c.get("defines") or [])]
-        digest = {**digest, "cells": cells}
     if not cells:
         return ""
+    # Over every cell, so a named one downstream of a stale one is said stale.
     found = verdicts(digest, anchor)
     lines = []
     for cell in cells[:MAX_LINES]:
@@ -270,7 +278,12 @@ def main(argv: list[str]) -> int:
     if not isinstance(digest, dict) or digest.get("version") != 1:
         return 0
     prompt = str(payload.get("prompt") or "") if mode == "prompt" else None
-    sys.stdout.write(render(digest, anchor, run_tool, prompt))
+    try:
+        block = render(digest, anchor, run_tool, prompt)
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError):
+        # A digest of another shape (another Strata version's): nothing to say.
+        return 0
+    sys.stdout.write(block)
     return 0
 
 

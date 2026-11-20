@@ -8,6 +8,7 @@ record of what to check, never the answer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -38,7 +39,11 @@ def _files(notebook_dir: Path) -> dict[str, str]:
         cells = tomllib.loads((notebook_dir / "notebook.toml").read_text()).get("cells") or []
     except (OSError, tomllib.TOMLDecodeError):
         return {}
-    return {c["id"]: c["file"] for c in cells if isinstance(c, dict) and "id" in c and "file" in c}
+    return {
+        c["id"]: c["file"]
+        for c in cells
+        if isinstance(c, dict) and isinstance(c.get("id"), str) and isinstance(c.get("file"), str)
+    }
 
 
 def build(session: NotebookSession) -> dict[str, Any]:
@@ -69,8 +74,11 @@ def build(session: NotebookSession) -> dict[str, Any]:
             except ValueError:
                 path = None
             if path is not None:
+                # The source the session keyed the cell on, not the file's as it is now:
+                # an edit the session has not taken in makes the cell stale.
+                keyed = "sha256:" + hashlib.sha256(cell.source.encode("utf-8")).hexdigest()
                 seen, print_ = observe(str(path))
-                entry["source"] = [str(path), seen, print_]
+                entry["source"] = [str(path), keyed, print_ if seen == keyed else None]
         reads = session.code_reads(cell.id)
         if reads is not None:
             entry["reads"] = reads

@@ -1513,8 +1513,8 @@ class NotebookSession:
         if cell is None:
             return []
         cell.status = CellStatus.ERROR
-        self._write_digest()
         if self.dag is None:
+            self._write_digest()
             return []
         affected: list[str] = []
         seen: set[str] = set()
@@ -1529,6 +1529,8 @@ class NotebookSession:
                 downstream_cell.status = CellStatus.STALE
                 affected.append(nid)
             queue.extend(self.dag.cell_downstream.get(nid, []))
+        # With its downstream stale: the digest outlives the daemon.
+        self._write_digest()
         return affected
 
     def _set_run_diagnostics(self, cell: Any, result: Any) -> None:

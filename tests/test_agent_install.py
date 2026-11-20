@@ -775,10 +775,65 @@ def test_a_hook_entry_with_no_record_of_it_is_replaced_not_doubled(agent_home):
     """One from an install whose state is gone, or another interpreter's."""
     claude, _ = agent_home
     claude.mkdir()
-    old = {"hooks": [{"type": "command", "command": "/old/python -I /old/agent_hook.py prompt"}]}
+    old = {
+        "hooks": [{"type": "command", "command": "/old/python -I /old/strata/agent_hook.py prompt"}]
+    }
     (claude / "settings.json").write_text(json.dumps({"hooks": {"UserPromptSubmit": [old]}}))
 
     agent_install.install(["claude"], STRATA)
 
     (group,) = json.loads((claude / "settings.json").read_text())["hooks"]["UserPromptSubmit"]
     assert group != old
+
+
+@_SHEBANG
+def test_the_users_own_hooks_survive_install_and_uninstall(agent_home):
+    """One named like Strata's script, and one in a group Strata's command is put into."""
+    claude, _ = agent_home
+    claude.mkdir()
+    named = {"hooks": [{"type": "command", "command": "python ~/hooks/agent_hook.py prompt"}]}
+    mine = {"type": "command", "command": "echo mine"}
+    settings = {"hooks": {"UserPromptSubmit": [named], "SessionStart": [{"hooks": [mine]}]}}
+    (claude / "settings.json").write_text(json.dumps(settings))
+    agent_install.install(["claude"], STRATA)
+    # Strata's command moved into the user's group by hand, and the file edited so.
+    edited = json.loads((claude / "settings.json").read_text())
+    ours = edited["hooks"]["SessionStart"].pop()["hooks"][0]
+    edited["hooks"]["SessionStart"][0]["hooks"].append(ours)
+    (claude / "settings.json").write_text(json.dumps(edited))
+
+    agent_install.uninstall()
+
+    assert json.loads((claude / "settings.json").read_text())["hooks"] == {
+        "UserPromptSubmit": [named],
+        "SessionStart": [{"hooks": [mine]}],
+    }
+
+
+@_SHEBANG
+@pytest.mark.parametrize("hooks", [[], {"SessionStart": {"hooks": []}}])
+def test_hooks_claude_code_cannot_read_are_refused_before_anything_is_written(agent_home, hooks):
+    claude, _ = agent_home
+    claude.mkdir()
+    (claude / "settings.json").write_text(json.dumps({"hooks": hooks}))
+
+    with pytest.raises(agent_install.InstallError, match="`hooks`"):
+        agent_install.install(["claude"], STRATA)
+
+    assert "strata" not in _servers(claude)
+
+
+@_SHEBANG
+def test_a_hook_whose_script_is_gone_never_blocks_the_prompt(agent_home, tmp_path):
+    """Exit 2 would: Claude Code erases the prompt."""
+    import subprocess
+
+    claude, _ = agent_home
+    agent_install.install(["claude"], STRATA)
+    hooks = json.loads((claude / "settings.json").read_text())["hooks"]
+    command = hooks["UserPromptSubmit"][0]["hooks"][0]["command"]
+    gone = command.replace("agent_hook.py", "agent_hook_gone.py")
+
+    done = subprocess.run(gone, shell=True, input="{}", capture_output=True, text=True)
+
+    assert done.returncode == 0

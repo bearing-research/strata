@@ -82,6 +82,108 @@ def test_downstream_of_a_stale_cell_is_stale(project, capsys):
     assert doubled.endswith("stale, upstream")
 
 
+def test_a_named_cell_downstream_of_a_stale_one_is_stale(project, capsys):
+    data = project / "data.txt"
+    data.write_text("41")
+    _run(project, f"value = int(open({str(data)!r}).read())", capsys)
+    _run(project, "doubled = value * 2", capsys)
+    assert scratch.stop_daemon(project)
+    data.write_text("42")
+
+    block = _hook(project, "prompt", "plot doubled")
+
+    (line,) = [line for line in block.splitlines() if line.startswith("- ")]
+    assert line.startswith("- doubled ") and line.endswith("stale, upstream")
+
+
+def test_a_failed_runs_digest_has_its_downstream_stale(project, capsys):
+    """As the session has them: the digest outlives the daemon."""
+    cell = _run(project, "value = 1", capsys)["cell"]
+    _run(project, "doubled = value * 2", capsys)
+    assert (
+        main(["scratch", "run", "-c", "value = 1 / 0", "--cell", cell, "--root", str(project)]) == 1
+    )
+    capsys.readouterr()
+
+    digest = json.loads((project / agent_hook.DIGEST).read_text())
+
+    assert [c["status"] for c in digest["cells"]] == ["error", "stale"]
+
+
+def _cell(cell: str, upstream: list[str], reads: dict | None = None) -> dict:
+    return {
+        "cell": cell,
+        "defines": [cell],
+        "status": "ready",
+        "upstream": upstream,
+        "reads": reads or {},
+    }
+
+
+def test_staleness_reaches_every_cell_downstream_in_any_order(tmp_path):
+    moved = tmp_path / "data.txt"
+    moved.write_text("now")
+    digest = {
+        "environment": {},
+        "cells": [
+            _cell("c", ["b"]),
+            _cell("a", [], {str(moved): ["sha256:before", None]}),
+            _cell("b", ["a"]),
+        ],
+    }
+
+    found = agent_hook.verdicts(digest, str(tmp_path))
+
+    assert found == {"a": "stale, data.txt changed", "b": "stale, upstream", "c": "stale, upstream"}
+
+
+def test_downstream_of_a_failed_cell_is_stale(tmp_path):
+    digest = {
+        "environment": {},
+        "cells": [{**_cell("a", []), "status": "error"}, _cell("b", ["a"])],
+    }
+
+    assert agent_hook.verdicts(digest, str(tmp_path)) == {"a": "failed", "b": "stale, upstream"}
+
+
+def test_a_source_the_session_has_not_taken_in_is_stale(held):
+    """The digest records the source the session keyed the cell on, not the file's."""
+    from strata.notebook import scratch_digest
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+
+    project, _ = held
+    notebook = scratch.scratch_dir(project)
+    session = NotebookSession(parse_notebook(notebook), notebook)
+    (cell,) = session.notebook_state.cells
+    cell.status = scratch_digest.CellStatus.READY
+    digest = scratch_digest.build(session)
+    (source,) = [c["source"][0] for c in digest["cells"]]
+    # Edited after the session read it: what a later pass would write the digest from.
+    Path(source).write_text("value = 0\n")
+
+    found = agent_hook.verdicts(scratch_digest.build(session), str(project))
+
+    assert list(found.values())[0].endswith("changed")
+
+
+@pytest.mark.parametrize(
+    "digest",
+    [
+        {"version": 1, "cells": [{"defines": ["x"]}]},
+        {"version": 1, "cells": [{"cell": "a", "reads": [1, 2]}]},
+        {"version": 1, "cells": "a", "environment": {"observed": {"p": "x"}}},
+    ],
+)
+def test_a_digest_of_another_shape_says_nothing(tmp_path, digest):
+    (tmp_path / "pyproject.toml").write_text("")
+    path = tmp_path / agent_hook.DIGEST
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(digest))
+
+    assert _hook(tmp_path) == ""
+
+
 def test_the_prompt_hook_says_only_the_cells_it_names(held):
     project, _ = held
 
@@ -157,16 +259,6 @@ def test_a_module_that_would_shadow_the_base_makes_every_cell_stale(held, shadow
     found = agent_hook.verdicts(digest, str(project))
 
     assert {v.partition(" (")[0] for v in found.values()} == {"stale, environment changed"}
-
-
-def test_the_hook_is_quick(held, capsys):
-    """Not asserted (no timing thresholds here); said, for the design's 100 ms."""
-    project, _ = held
-    started = time.perf_counter()
-    for _ in range(5):
-        _hook(project)
-    with capsys.disabled():
-        print(f"\nagent hook: {(time.perf_counter() - started) / 5 * 1000:.0f} ms a run")
 
 
 # --- the copies the hook carries, pinned to their originals --------------------------
