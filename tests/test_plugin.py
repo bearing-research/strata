@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -32,19 +33,17 @@ def test_the_hooks_run_strata_agent_hook_which_imports_no_notebook():
     assert scripts["strata-agent-hook"] == "strata.agent_hook:run"
     for command in _commands().values():
         assert command.startswith("strata-agent-hook ")
-    done = subprocess.run(
-        [
-            sys.executable,
-            "-I",
-            "-c",
-            "import sys, strata.agent_hook; "
-            "print(sorted(m for m in sys.modules if m.startswith('strata.')))",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
+    program = (
+        "import sys, strata.agent_hook\n"
+        "skip = set(sys.stdlib_module_names) | {'__main__'}\n"
+        "outside = {m.partition('.')[0] for m in sys.modules} - skip\n"
+        "print(sorted(m for m in sys.modules if m.partition('.')[0] in outside))\n"
     )
-    assert done.stdout.strip() == "['strata.agent_hook']"
+    done = subprocess.run(
+        [sys.executable, "-I", "-c", program], capture_output=True, text=True, check=True
+    )
+    # The package root's one import (the URI scheme) beside the hook, nothing else.
+    assert done.stdout.strip() == str(["strata", "strata.agent_hook", "vestigo", "vestigo.uris"])
 
 
 def test_the_server_is_strata_mcp_loaded_up_front():
@@ -73,6 +72,7 @@ def test_each_hook_says_the_scratchpad_as_claude_code_runs_it(tmp_path):
     # The console script as an install puts it: beside this interpreter.
     path = f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}"
     env = {**os.environ, "PATH": path}
+    assert shutil.which("strata-agent-hook", path=path), "not installed: run uv sync"
     payload = json.dumps({"cwd": str(tmp_path), "prompt": "plot df"})
 
     for command in _commands().values():
