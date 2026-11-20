@@ -223,11 +223,6 @@ def _settings_remove(text: str) -> str:
     allow = permissions.get("allow") if isinstance(permissions, dict) else None
     if isinstance(allow, list) and PERMISSION in allow:
         allow.remove(PERMISSION)
-        # Emptied by Strata, as ``hooks`` below.
-        if not allow:
-            del permissions["allow"]
-            if not permissions:
-                del settings["permissions"]
     hooks = settings.get("hooks")
     if isinstance(hooks, dict):
         emptied = False

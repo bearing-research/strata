@@ -188,7 +188,7 @@ def verdicts(digest: dict[str, Any], anchor: str) -> dict[str, str]:
     written = digest.get("written_at") or 0
     try:
         as_of = "as of " + time.strftime("%Y-%m-%d %H:%M", time.localtime(written / 1000))
-    except (OverflowError, OSError, ValueError):
+    except (OverflowError, OSError, ValueError, TypeError):
         as_of = "as of the last pass"
     environment, checked = _environment_moved(digest.get("environment") or {}, budget)
     cells = digest.get("cells") or []
@@ -229,7 +229,7 @@ def verdicts(digest: dict[str, Any], anchor: str) -> dict[str, str]:
             verdict = found[cell["cell"]]
             if verdict != "cached" and not verdict.startswith("as of"):
                 continue
-            # One not in the digest (a SQL or prompt cell, one not run) is unchecked.
+            # One not in the digest (a SQL, prompt or R cell, one not run) is unchecked.
             upstream = [found.get(up, "as of") for up in cell.get("upstream") or []]
             if any(v.startswith("stale") or v == "failed" for v in upstream):
                 found[cell["cell"]] = "stale, upstream"

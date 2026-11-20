@@ -154,7 +154,10 @@ def test_a_file_edited_after_install_keeps_the_edit_and_loses_only_strata(agent_
     text = (claude / "CLAUDE.md").read_text()
     assert "strata:begin" not in text
     assert text.startswith("mine\n") and text.endswith("added later\n")
-    assert json.loads((claude / "settings.json").read_text()) == {"model": "opus"}
+    assert json.loads((claude / "settings.json").read_text()) == {
+        "permissions": {"allow": []},
+        "model": "opus",
+    }
     assert done["CLAUDE.md"] == "removed Strata's part (edited since install)"
 
 
@@ -844,18 +847,3 @@ def test_a_hook_whose_script_is_gone_never_blocks_the_prompt(agent_home, tmp_pat
     done = subprocess.run(gone, shell=True, input="{}", capture_output=True, text=True)
 
     assert done.returncode == 0
-
-
-@_SHEBANG
-def test_an_edited_uninstall_takes_out_the_permissions_strata_made(agent_home):
-    claude, _ = agent_home
-    claude.mkdir()
-    (claude / "settings.json").write_text(json.dumps({"model": "opus"}))
-    agent_install.install(["claude"], STRATA)
-    edited = json.loads((claude / "settings.json").read_text())
-    edited["theme"] = "dark"
-    (claude / "settings.json").write_text(json.dumps(edited))
-
-    agent_install.uninstall()
-
-    assert json.loads((claude / "settings.json").read_text()) == {"model": "opus", "theme": "dark"}

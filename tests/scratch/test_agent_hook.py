@@ -239,11 +239,12 @@ def test_a_digest_of_another_shape_says_nothing(tmp_path, digest):
 
 
 def test_a_digest_time_it_cannot_format_still_says_each_cell(tmp_path):
-    digest = {"version": 1, "written_at": 1e30, "cells": [_cell("a", [])]}
+    for written in (1e30, "2026-11-20"):
+        digest = {"version": 1, "written_at": written, "cells": [_cell("a", [])]}
 
-    block = agent_hook.render(digest, str(tmp_path), "run", None)
+        block = agent_hook.render(digest, str(tmp_path), "run", None)
 
-    assert "- a (cell a): cached" in block
+        assert "- a (cell a): cached" in block
 
 
 def test_downstream_of_a_cell_the_digest_does_not_hold_is_unchecked(tmp_path):

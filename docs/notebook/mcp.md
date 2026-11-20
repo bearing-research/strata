@@ -297,7 +297,9 @@ says only the cells whose id or variables the prompt names. The hooks read a dig
 daemon writes (`.strata-scratch/.strata/digest.json`) and look at each cell's recorded
 reads and the environment's watched paths again first, so a file edited while the daemon
 was stopped makes its cell stale; what one run's budget (1000 paths, 80 ms) leaves
-unchecked is said `as of` the digest's time, never `cached`. They never start the daemon.
+unchecked is said `as of` the digest's time, never `cached`, as is a cell downstream of
+one the digest does not hold (a SQL, prompt or R cell, or one not run). They never start
+the daemon.
 
 Every piece is marker-fenced or keyed. `uninstall` puts back the original bytes of a
 file left as `install` wrote it and removes only Strata's part from one edited since.
