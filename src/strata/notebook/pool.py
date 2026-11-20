@@ -151,7 +151,9 @@ class WarmProcessPool:
                     *command,
                     stdout=asyncio.subprocess.PIPE,
                     stdin=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                    # Nothing reads it: as a pipe, asyncio would buffer what a cell's
+                    # children write there in the server's memory, for nothing.
+                    stderr=asyncio.subprocess.DEVNULL,
                     cwd=str(self.notebook_dir),
                     limit=SUBPROCESS_LINE_LIMIT,
                     env=identity_env(harness_env(allowlist, lifeline_vars), harness_user),
@@ -278,16 +280,18 @@ class WarmProcessPool:
                 kill_subprocess_tree_nowait(proc.process)
 
 
-# An uncaught KeyboardInterrupt ends Python by SIGINT; on Windows, STATUS_CONTROL_C_EXIT.
-# The pool's own terminations (cancel, fence) happen after it stops reading, not here.
-_INTERRUPT_EXITS = {-signal.SIGINT, 0xC000013A}
+# An uncaught KeyboardInterrupt ends Python by SIGINT; on Windows, STATUS_CONTROL_C_EXIT;
+# under the lifeline wrapper (R's worker), the shell's 128 + SIGINT. The pool's own
+# terminations (cancel, fence) happen after it stops reading, not here.
+_INTERRUPT_EXITS = {-signal.SIGINT, 128 + signal.SIGINT, 0xC000013A}
 
 
-async def _died_of_an_interrupt(process: Any) -> bool:
-    """Whether a worker whose protocol ended was killed by Ctrl-C. Only the worker holds
-    the protocol's fd, so it is exiting by now."""
+async def _died_of_an_interrupt(process: Any, seconds: float) -> bool:
+    """Whether a worker whose protocol ended was killed by Ctrl-C: it is exiting by then,
+    unless a child it forked holds the protocol too, and then the cell times out instead.
+    Waits no longer than the cell has left, but at least a second, to be reaped."""
     try:
-        returncode = await asyncio.wait_for(process.wait(), timeout=5)
+        returncode = await asyncio.wait_for(process.wait(), timeout=min(5.0, max(seconds, 1.0)))
     except TimeoutError:
         return False
     return returncode in _INTERRUPT_EXITS
@@ -352,13 +356,17 @@ class PooledCellExecutor:
             await warm_proc.process.stdin.drain()
 
             deadline = asyncio.get_running_loop().time() + timeout_seconds
+            # What a cell's children printed on the protocol: R's worker shares its fd 1
+            # with them (the Python worker does not). The cell's output, as before.
+            outside: list[str] = []
             while True:
                 result_json = await asyncio.wait_for(
                     warm_proc.process.stdout.readline(),
                     timeout=deadline - asyncio.get_running_loop().time(),
                 )
                 if not result_json:
-                    if await _died_of_an_interrupt(warm_proc.process):
+                    left = deadline - asyncio.get_running_loop().time()
+                    if await _died_of_an_interrupt(warm_proc.process, left):
                         # Wherever it landed (a torn line, the worker's own report): the
                         # cell ran, so a cold run would run it twice.
                         return _interrupted_result()
@@ -371,14 +379,20 @@ class PooledCellExecutor:
                 try:
                     value = json.loads(text)
                 except ValueError:
-                    # One an interrupt tore. Returning None would run the cell again cold.
-                    logger.warning("Warm process wrote a torn line: %.200r", text)
-                    continue
-                if is_event_line(text):
+                    value = None
+                if is_event_line(text) and value is not None:
                     if on_event is not None:
                         await on_event(value)
                     continue
-                return value
+                if isinstance(value, dict) and "success" in value:
+                    # The first whole result counts.
+                    if outside:
+                        value["stdout"] = (value.get("stdout") or "") + "".join(outside)
+                    return value
+                if not text.startswith("{"):
+                    outside.append(text)
+                # Else a protocol line an interrupt tore: dropped. None would run the cell
+                # again cold.
 
         except asyncio.CancelledError:
             logger.info(

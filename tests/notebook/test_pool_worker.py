@@ -288,6 +288,8 @@ def _run_main(
     monkeypatch.setattr(sys, "stdin", io.StringIO(f"{manifest}\n"))
     # Not the real fd 1, which is pytest's.
     monkeypatch.setattr(pool_worker, "_protocol_stream", lambda: out)
+    # Restored after: an interrupted cell leaves its capture in place.
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
     _without_escape(pool_worker.main)
 
 
@@ -369,3 +371,36 @@ def test_a_cells_child_processes_print_nowhere_near_the_protocol(tmp_path: Path)
 
     assert done.returncode == 0, done.stderr
     assert done.stdout == "the protocol\n"
+
+
+CHATTY = (
+    "import subprocess, sys\n"
+    "program = 'import os; [os.write(fd, b\"x\" * 65536) for fd in (1, 2) for _ in range(8)]'\n"
+    "subprocess.run([sys.executable, '-c', program], check=True)\n"
+    "print('own')\n"
+    "done = 1\n"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.warm_pool
+async def test_a_warm_cell_whose_children_print_megabytes_still_finishes(tmp_path, warm_pool):
+    """On both fds, past any pipe's buffer: nothing of it reaches the protocol."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook = create_notebook(tmp_path, "Chatty")
+    add_cell_to_notebook(notebook, "c", None)
+    write_cell(notebook, "c", CHATTY)
+    session = NotebookSession(parse_notebook(notebook), notebook)
+    session.refresh_environment_runtime()
+    executor = CellExecutor(session, await warm_pool(session))
+
+    result = await executor.execute_cell("c", CHATTY)
+
+    assert result.success is True, result.error
+    assert result.execution_method == "warm"
+    assert result.stdout == "own\n"

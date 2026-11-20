@@ -520,7 +520,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   torn line, and a worker that Ctrl-C ended before any result fails the cell instead. The
   warm worker's protocol has its own copy of fd 1, which a cell's child processes do not
   hold: what they print goes nowhere, as on the cold path, where before its first line
-  sent the cell to a second, cold run. A client close
+  sent the cell to a second, cold run (R's worker keeps it in the cell's stdout). A warm
+  R worker that Ctrl-C ended fails its cell too. A client close
   that raises (an interrupt, or a cell's own `strata.close = sys.exit`) keeps the cell's
   result on the cold and the warm path, and no longer ends a run-all batch; an interrupt
   there still stops it. (#1593)

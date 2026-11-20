@@ -154,7 +154,21 @@ async def test_a_torn_line_is_skipped_for_the_next(tmp_path, torn):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("returncode", "interrupted"), [(-signal.SIGINT, True), (0, False)])
+async def test_a_line_a_child_wrote_is_the_cells_output_not_the_result(tmp_path):
+    """R's worker shares its fd 1 with the cell's children; a torn protocol line is not
+    output."""
+    data = b'42\nnull\n{"success": tr\n\n{"success": true, "variables": {}, "stdout": "own\\n"}\n'
+
+    result = await _pooled(tmp_path, data)
+
+    assert result == {"success": True, "variables": {}, "stdout": "own\n42\nnull\n"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("returncode", "interrupted"),
+    [(-signal.SIGINT, True), (128 + signal.SIGINT, True), (0, False), (-signal.SIGKILL, False)],
+)
 async def test_a_worker_an_interrupt_ended_is_a_failed_cell_not_a_pool_miss(
     tmp_path, returncode, interrupted
 ):
@@ -169,7 +183,6 @@ async def test_a_worker_an_interrupt_ended_is_a_failed_cell_not_a_pool_miss(
         assert result is None
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the POSIX exit status is pinned")
 def test_an_uncaught_interrupt_ends_python_with_the_status_the_pool_reads():
     from strata.notebook import pool
 
