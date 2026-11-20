@@ -186,7 +186,10 @@ def verdicts(digest: dict[str, Any], anchor: str) -> dict[str, str]:
     """Each cell's state, checked now: ``cached``, ``stale, ...``, ``failed`` or ``as of ...``."""
     budget = _Budget()
     written = digest.get("written_at") or 0
-    as_of = "as of " + time.strftime("%Y-%m-%d %H:%M", time.localtime(written / 1000))
+    try:
+        as_of = "as of " + time.strftime("%Y-%m-%d %H:%M", time.localtime(written / 1000))
+    except (OverflowError, OSError, ValueError):
+        as_of = "as of the last pass"
     environment, checked = _environment_moved(digest.get("environment") or {}, budget)
     cells = digest.get("cells") or []
     found: dict[str, str] = {}
@@ -226,7 +229,8 @@ def verdicts(digest: dict[str, Any], anchor: str) -> dict[str, str]:
             verdict = found[cell["cell"]]
             if verdict != "cached" and not verdict.startswith("as of"):
                 continue
-            upstream = [found.get(up, "") for up in cell.get("upstream") or []]
+            # One not in the digest (a SQL or prompt cell, one not run) is unchecked.
+            upstream = [found.get(up, "as of") for up in cell.get("upstream") or []]
             if any(v.startswith("stale") or v == "failed" for v in upstream):
                 found[cell["cell"]] = "stale, upstream"
                 changed = True
@@ -268,9 +272,10 @@ def render(digest: dict[str, Any], anchor: str, run_tool: str, prompt: str | Non
         return ""
     # Over the named cells and their upstream: a named one downstream of a stale one is
     # stale, and the budget goes on nothing else.
-    found = verdicts({**digest, "cells": _with_upstream(digest.get("cells") or [], cells)}, anchor)
+    shown = cells[:MAX_LINES]
+    found = verdicts({**digest, "cells": _with_upstream(digest.get("cells") or [], shown)}, anchor)
     lines = []
-    for cell in cells[:MAX_LINES]:
+    for cell in shown:
         names = ", ".join(cell.get("defines") or []) or "no variables"
         parts = [p for p in (_cost(cell.get("cold_ms")), found[cell["cell"]]) if p]
         lines.append(f"- {names} (cell {cell['cell']}): {', '.join(parts)}")

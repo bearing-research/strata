@@ -172,10 +172,11 @@ _OURS = re.compile(r"[/\\]strata[/\\]agent_hook\.py\W* (?:session-start|prompt)\
 def _hook_command(mode: str) -> str:
     from strata import agent_hook
 
-    argv = [sys.executable, "-I", agent_hook.__file__, mode]
-    # Claude Code runs hooks through bash, Git Bash on Windows. Never exit 2, which blocks
-    # the prompt, should the script be gone (a reinstall on another Python): the hook
-    # only informs.
+    # Claude Code runs hooks through bash, Git Bash on Windows, which takes C:/... paths
+    # (a backslashed one with no slash it would look up on PATH). Never exit 2, which
+    # blocks the prompt, should the script be gone (a reinstall on another Python): the
+    # hook only informs.
+    argv = [Path(sys.executable).as_posix(), "-I", Path(agent_hook.__file__).as_posix(), mode]
     return " ".join(shlex.quote(part) for part in argv) + " || true"
 
 
@@ -222,6 +223,11 @@ def _settings_remove(text: str) -> str:
     allow = permissions.get("allow") if isinstance(permissions, dict) else None
     if isinstance(allow, list) and PERMISSION in allow:
         allow.remove(PERMISSION)
+        # Emptied by Strata, as ``hooks`` below.
+        if not allow:
+            del permissions["allow"]
+            if not permissions:
+                del settings["permissions"]
     hooks = settings.get("hooks")
     if isinstance(hooks, dict):
         emptied = False

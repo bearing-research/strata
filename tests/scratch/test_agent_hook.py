@@ -147,7 +147,8 @@ def test_downstream_of_a_failed_cell_is_stale(tmp_path):
 
 
 def test_a_source_the_session_has_not_taken_in_is_stale(held):
-    """The digest records the source the session keyed the cell on, not the file's."""
+    """An edit the session has not taken in is recorded as the source it keyed the cell on,
+    which no file matches."""
     from strata.notebook import scratch_digest
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
@@ -223,7 +224,6 @@ def test_the_prompt_hook_checks_only_the_named_cells_and_their_upstream(tmp_path
 @pytest.mark.parametrize(
     "digest",
     [
-        {"version": 1, "written_at": 1e30, "cells": [{"cell": "a", "defines": ["a"]}]},
         {"version": 1, "cells": [{"defines": ["x"]}]},
         {"version": 1, "cells": [{"cell": "a", "reads": [1, 2]}]},
         {"version": 1, "cells": "a", "environment": {"observed": {"p": "x"}}},
@@ -236,6 +236,21 @@ def test_a_digest_of_another_shape_says_nothing(tmp_path, digest):
     path.write_text(json.dumps(digest))
 
     assert _hook(tmp_path) == ""
+
+
+def test_a_digest_time_it_cannot_format_still_says_each_cell(tmp_path):
+    digest = {"version": 1, "written_at": 1e30, "cells": [_cell("a", [])]}
+
+    block = agent_hook.render(digest, str(tmp_path), "run", None)
+
+    assert "- a (cell a): cached" in block
+
+
+def test_downstream_of_a_cell_the_digest_does_not_hold_is_unchecked(tmp_path):
+    """A SQL or prompt cell, or one not run: nothing says it holds."""
+    digest = {"environment": {}, "written_at": 0, "cells": [_cell("b", ["sql"])]}
+
+    assert agent_hook.verdicts(digest, str(tmp_path))["b"].startswith("as of")
 
 
 def test_the_prompt_hook_says_only_the_cells_it_names(held):
