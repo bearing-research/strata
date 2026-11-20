@@ -716,9 +716,16 @@ _STOPS = "which stops it before its end"
 @pytest.mark.parametrize(
     ("call", "message"),
     [
-        ("sys.exit(0)", f"the cell exited (SystemExit(0)), {_STOPS}"),
-        ("sys.exit()", f"the cell exited (SystemExit()), {_STOPS}"),
+        ("sys.exit(0)", f"the cell exited with status 0, {_STOPS}"),
+        ("sys.exit()", f"the cell exited, {_STOPS}"),
+        ("sys.exit('')", f"the cell exited, {_STOPS}"),
         ("exit('bye')", f"the cell exited, {_STOPS}: bye"),
+        # What Python prints for anything else: its str().
+        ("sys.exit(ValueError('bad config'))", f"the cell exited, {_STOPS}: bad config"),
+        (
+            "sys.exit(type('Bad', (), {'__str__': lambda self: 1 / 0})())",
+            f"the cell exited, {_STOPS}: <str() failed>",
+        ),
         # A message is the cell's own error text: whole, its lines kept.
         (
             "sys.exit('Config errors:\\n- missing key A\\n- missing key B')",
@@ -767,7 +774,33 @@ def test_a_sys_exit_in_loop_until_is_the_loops_error():
     exec("import sys\ndef done():\n    sys.exit(0)\n", namespace)
     state = harness._eval_loop_until("done()", namespace)
     assert state["until_reached"] is False
-    assert "the @loop_until predicate exited (SystemExit(0))" in state["error"], state
+    assert "the @loop_until predicate exited with status 0" in state["error"], state
+
+
+def test_a_loop_until_error_whose_str_raises_is_still_reported():
+    from strata.notebook import harness
+
+    namespace: dict = {}
+    exec(
+        "class Unreadable(Exception):\n"
+        "    def __str__(self):\n"
+        "        raise ValueError\n"
+        "def check():\n"
+        "    raise Unreadable()\n",
+        namespace,
+    )
+    state = harness._eval_loop_until("check()", namespace)
+    assert state["error"] == (
+        "@loop_until evaluation failed: Unreadable: <exception str() failed>"
+    ), state
+
+
+def test_a_long_exit_text_is_capped():
+    from strata.notebook import cell_traceback
+
+    text = cell_traceback._exited("the cell", "x" * 50_000)
+    assert text.endswith("x" * 10 + "...")
+    assert len(text) < 10_100
 
 
 def test_an_interrupt_still_writes_the_result(harness_script):
@@ -791,20 +824,31 @@ def test_an_exception_whose_str_raises_is_still_reported(harness_script):
     assert result["error"] == "Unreadable: <exception str() failed>"
 
 
-def test_a_failure_the_handler_cannot_report_still_writes_a_result(harness_script, tmp_path):
-    """Its hints read the exception too (a FileNotFoundError's filename): should one
-    raise, the result still says so, with the cell's print trail."""
+def test_a_failure_the_handler_cannot_report_still_writes_a_result(harness_script):
+    """Its hints read the exception too (a NameError's name): should one raise, the
+    result still says so, with the cell's print trail."""
     source = (
         "print('step 1 done')\n"
-        "class Odd(FileNotFoundError):\n"
+        "class Odd(NameError):\n"
         "    @property\n"
-        "    def filename(self):\n"
+        "    def name(self):\n"
         "        raise ValueError\n"
         "raise Odd()\n"
     )
-    manifest = {"source": source, "inputs": {}, "notebook_dir": str(tmp_path)}
-    result = run_harness(harness_script, manifest)
+    result = run_harness(harness_script, {"source": source, "inputs": {}})
 
     assert result["success"] is False
     assert result["error"] == "the harness failed reporting the cell's failure"
     assert result["stdout"] == "step 1 done\n"
+
+
+def test_a_file_hint_survives_a_filename_that_raises(tmp_path):
+    """Every harness asks it, the warm worker and a batch with no fallback of their own."""
+    from strata.notebook import work_dir
+
+    class Odd(FileNotFoundError):
+        @property
+        def filename(self):
+            raise ValueError
+
+    assert work_dir.hint(Odd(), {"notebook_dir": str(tmp_path)}) is None

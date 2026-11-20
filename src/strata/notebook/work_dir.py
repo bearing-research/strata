@@ -31,9 +31,13 @@ def hint(exc: BaseException, manifest: dict[str, Any]) -> str | None:
     """
     if not manifest.get("notebook_dir") or not isinstance(exc, FileNotFoundError):
         return None
-    if not exc.filename:
+    try:
+        # A subclass's own ``filename`` may raise: no hint, and the failure still reported.
+        name = os.fsdecode(exc.filename) if exc.filename else None
+    except Exception:
         return None
-    name = os.fsdecode(exc.filename)
+    if not name:
+        return None
     if os.path.isabs(name) or os.path.exists(name):
         return None
     if not os.path.exists(os.path.join(os.pardir, name)):

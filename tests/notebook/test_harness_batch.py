@@ -860,6 +860,6 @@ def test_a_cells_sys_exit_ends_the_batch_as_its_error(batch_pipes):
     cell_errors = [f["payload"] for f in frames if f["type"] == "cell_error"]
     assert [e["cell_id"] for e in cell_errors] == ["c1"]
     assert cell_errors[0]["error"] == (
-        "RuntimeError: the cell exited (SystemExit(3)), which stops it before its end"
+        "RuntimeError: the cell exited with status 3, which stops it before its end"
     )
     assert frames[-1]["payload"]["reason"] == "cell_error"

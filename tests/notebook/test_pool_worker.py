@@ -172,7 +172,7 @@ def test_a_cells_sys_exit_fails_the_cell_and_the_worker_reports_it(tmp_path: Pat
 
     assert result["success"] is False
     assert result["error"] == (
-        "RuntimeError: the cell exited (SystemExit(0)), which stops it before its end"
+        "RuntimeError: the cell exited with status 0, which stops it before its end"
     )
     assert result["stdout"] == "before\n"
     assert (sys.stdout, sys.stderr) == (stdout, stderr)

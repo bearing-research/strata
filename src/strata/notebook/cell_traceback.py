@@ -51,14 +51,24 @@ def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
         )
 
 
+_EXIT_TEXT_MAX = 10_000
+
+
 def _exited(what: str, code: object) -> str:
-    if isinstance(code, str):
-        # The cell's own error text, as Python prints it: whole, its lines kept.
-        return f"{what} exited, which stops it before its end: {code}"
-    shown = "" if code is None else repr(code)
-    if len(shown) > 200:
-        shown = f"{shown[:200]}..."
-    return f"{what} exited (SystemExit({shown})), which stops it before its end"
+    """As Python reads an exit: no code, a status, or text it prints (``str()`` of
+    anything else, lines kept, capped)."""
+    stops = f"{what} exited, which stops it before its end"
+    if code is None:
+        return stops
+    if isinstance(code, int):
+        return f"{what} exited with status {code}, which stops it before its end"
+    try:
+        text = str(code)
+    except Exception:
+        text = "<str() failed>"
+    if len(text) > _EXIT_TEXT_MAX:
+        text = f"{text[:_EXIT_TEXT_MAX]}..."
+    return f"{stops}: {text}" if text else stops
 
 
 def _cause(exc: BaseException) -> BaseException | None:
@@ -119,7 +129,8 @@ def _from_the_cell(exc: BaseException) -> str:
             # Source that does not parse has no frame of its own to start from.
             entry.stack = traceback.StackSummary.from_list([])
         pending.extend(chained for chained in (entry.__cause__, entry.__context__) if chained)
-        pending.extend(entry.exceptions or [])
+        # An exception group's members: Python 3.11's (a project's Python may be older).
+        pending.extend(getattr(entry, "exceptions", None) or [])
     return "".join(top.format())
 
 

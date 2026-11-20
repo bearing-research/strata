@@ -382,7 +382,7 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         return {
             "until_reached": False,
-            "error": f"@loop_until evaluation failed: {type(exc).__name__}: {exc}",
+            "error": f"@loop_until evaluation failed: {_traceback.error_text(exc)}",
         }
 
     return {"until_reached": bool(result)}
