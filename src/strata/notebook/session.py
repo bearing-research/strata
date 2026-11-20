@@ -1959,6 +1959,13 @@ class NotebookSession:
             return Resolved(lookup)
         if not observe and lookup in self._code_seen:
             return self._code_seen[lookup]
+        resolved = self._code_key_now(cell_id, lookup, observe=observe)
+        if observe:
+            self._code_seen[lookup] = resolved
+        return resolved
+
+    def _code_key_now(self, cell_id: str, lookup: str, *, observe: bool) -> Resolved:
+        """``resolve_code_key``'s answer, recording nothing."""
         consumed = sorted(self.dag.consumed_variables.get(cell_id, set())) if self.dag else []
         manager = self.artifact_manager
         console_id = manager.cell_artifact_id(cell_id, "__console__")
@@ -1972,10 +1979,7 @@ class NotebookSession:
             )
             return found is not None
 
-        resolved = self.code_index.resolve(lookup, has_result, observe=observe)
-        if observe:
-            self._code_seen[lookup] = resolved
-        return resolved
+        return self.code_index.resolve(lookup, has_result, observe=observe)
 
     def _observe_code_keys(self) -> None:
         """Observe again the code keys the cells had in the last pass."""
@@ -1983,15 +1987,20 @@ class NotebookSession:
             for cell_id, lookup in list(self._code_lookups.items()):
                 self.resolve_code_key(cell_id, lookup)
 
-    def refresh_code_keys(self) -> bool:
-        """Observe the code keys again and say whether one moved since the last observation.
+    def code_keys_moved(self) -> bool:
+        """Whether a file a scratchpad cell's runs read is not as the last pass took it.
 
-        Nothing watches the files a scratchpad cell's run read, so a status asked for
-        between passes checks them itself; off the loop, as it may hash files.
+        Nothing watches those files, so a status asked for between passes checks them
+        itself; off the loop, as it may hash files. It records nothing, so a check whose
+        pass did not happen is made again; the pass observes for itself.
         """
-        before = dict(self._code_seen)
-        self._observe_code_keys()
-        return self._code_seen != before
+        if not self.notebook_state.scratchpad:
+            return False
+        return any(
+            self._code_key_now(cell_id, lookup, observe=True)
+            != self.resolve_code_key(cell_id, lookup, observe=False)
+            for cell_id, lookup in list(self._code_lookups.items())
+        )
 
     def record_code_reads(
         self, lookup: str, reads: Mapping[str, str], stat: Mapping[str, list[int]]

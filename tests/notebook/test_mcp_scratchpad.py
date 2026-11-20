@@ -194,24 +194,48 @@ async def test_scratchpad_lists_what_exists_and_finds_a_name(scratch):
     assert _scratchpad(sm, "nope") == {"variable": "nope", "defined": False, "available": ["df"]}
 
 
-@pytest.mark.asyncio
-async def test_the_inventory_sees_a_file_a_cell_read_change_under_the_session(tmp_path):
-    """Nothing watches it, so the tool looks again: stale, not the last pass's ready."""
+@pytest.fixture
+def read_a_file(tmp_path):
+    """A scratchpad whose one cell read a file; the manager, its session and that file."""
     data = tmp_path / "data.txt"
     data.write_text("2")
     sm = SessionManager()
     session = sm.open_notebook(create_notebook(tmp_path, "scratch", scratchpad=True))
-    cell = (await _scratch_run(sm, f"x = int(open({str(data)!r}).read())"))["cell"]
-    await mcp_server._observe_code_reads(sm)
-    assert _scratchpad(sm)["cells"][0]["status"] == "ready"
-    assert not session.refresh_code_keys()
+    out = asyncio.run(_scratch_run(sm, f"x = int(open({str(data)!r}).read())"))
+    assert out["status"] == "ok", out
+    return sm, session, data
+
+
+@pytest.mark.asyncio
+async def test_the_inventory_sees_a_file_a_cell_read_change_under_the_session(read_a_file):
+    """Nothing watches it, so the tool looks again: stale, not the last pass's ready."""
+    sm, session, data = read_a_file
+    # Just after a run nothing moved, so no pass is made.
+    assert not session.code_keys_moved()
 
     data.write_text("3")
+    # A check records nothing.
+    assert session.code_keys_moved() and session.code_keys_moved()
     await mcp_server._observe_code_reads(sm)
 
     (entry,) = _scratchpad(sm)["cells"]
-    assert (entry["cell"], entry["status"], entry["changed_code"]) == (cell, "stale", str(data))
-    assert not session.refresh_code_keys()
+    assert (entry["status"], entry["changed_code"]) == ("stale", str(data))
+    assert not session.code_keys_moved()
+
+
+@pytest.mark.asyncio
+async def test_while_a_run_is_active_the_inventory_checks_again_later(read_a_file, monkeypatch):
+    sm, session, data = read_a_file
+    data.write_text("3")
+    running = [True]
+    monkeypatch.setattr(ws, "notebook_has_active_execution", lambda notebook_id: running[0])
+
+    await mcp_server._observe_code_reads(sm)
+
+    assert _scratchpad(sm)["cells"][0]["status"] == "ready"
+    running[0] = False
+    await mcp_server._observe_code_reads(sm)
+    assert _scratchpad(sm)["cells"][0]["status"] == "stale"
 
 
 def _listed(app) -> dict[str, dict | None]:
