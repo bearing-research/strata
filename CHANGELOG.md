@@ -538,7 +538,9 @@ exhaustive commit history.
   else made a staleness pass; only a run found it. The tool now looks at those files
   again first and, when one moved, makes the pass, so the cell and its downstream read
   `stale` with the file named. An observation of what a cell read, taken while a run of
-  it recorded newer reads, no longer comes back over that record. A scripted run of the
+  it recorded newer reads, no longer comes back over that record, and a file's fresh stat
+  goes only to the record it was taken for, so restoring older content over the same
+  paths no longer serves the newer run's result. A scripted run of the
   flagship workflow (load, three questions, a module edit, the daemon stopped, a fourth
   question in a new session) pins the whole path, its counts exact. (#1597)
 - **An interrupt during a warm cell no longer runs the cell twice.** A worker that printed

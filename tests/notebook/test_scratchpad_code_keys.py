@@ -315,3 +315,50 @@ async def test_a_pass_prunes_its_observations_in_place(tmp_path, scratch):
 
     assert session._code_seen is seen
     assert "gone" not in seen and session._code_lookups[cell.id] in seen
+
+
+async def test_a_run_of_one_cell_keeps_another_cells_observation(tmp_path, scratch, monkeypatch):
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    reader = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    other = scratch.add_cell("y = 1")
+    await _run(scratch, reader.id)
+    await _run(scratch, other.id)
+    session = scratch._session
+    session.compute_staleness(hash_mounts=False)
+    lookup, other_lookup = session._code_lookups[reader.id], session._code_lookups[other.id]
+    resolve = session.code_index.resolve
+
+    def other_recorded_meanwhile(*args, **kwargs):
+        resolved = resolve(*args, **kwargs)
+        session.record_code_reads(other_lookup, {}, {})
+        return resolved
+
+    session._code_seen.pop(lookup)
+    monkeypatch.setattr(session.code_index, "resolve", other_recorded_meanwhile)
+    session.resolve_code_key(reader.id, lookup)
+
+    assert lookup in session._code_seen
+
+
+async def test_an_observation_made_while_the_record_is_written_is_dropped(
+    tmp_path, scratch, monkeypatch
+):
+    data = tmp_path / "data.txt"
+    data.write_text("2")
+    cell = scratch.add_cell(f"print(open({str(data)!r}).read())")
+    await _run(scratch, cell.id)
+    session = scratch._session
+    lookup = session._code_lookups[cell.id]
+    record = session.code_index.record
+
+    def observed_meanwhile(*args, **kwargs):
+        # Another thread observes the index as it was before this write.
+        session.resolve_code_key(cell.id, lookup)
+        assert lookup in session._code_seen
+        record(*args, **kwargs)
+
+    monkeypatch.setattr(session.code_index, "record", observed_meanwhile)
+    session.record_code_reads(lookup, {str(data): "sha256:new"}, {})
+
+    assert lookup not in session._code_seen
