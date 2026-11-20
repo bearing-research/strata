@@ -893,16 +893,104 @@ def test_failure_fields_survive_a_traceback_that_cannot_be_formatted(monkeypatch
         raise SystemExit(2)
 
     monkeypatch.setattr(cell_traceback, "_from_the_cell", unformattable)
+    source = "def helper():\n    raise KeyError('it broke')\nhelper()\n"
     try:
-        raise KeyError("it broke")
+        exec(compile(source, cell_traceback.cell_filename("c1"), "exec"), {})
     except KeyError as exc:
         fields = cell_traceback.failure_fields(exc)
 
     assert fields["error"] == "KeyError: 'it broke'"
-    assert "test_failure_fields_survive_a_traceback_that_cannot_be_formatted" in fields["traceback"]
-    assert fields["traceback"].endswith(
-        "KeyError: 'it broke'\n(its traceback could not be formatted: SystemExit: 2)"
+    tail = "KeyError: 'it broke'\n(its traceback could not be formatted)\n"
+    # From the cell's first frame, as the trimmed traceback is; the full one keeps this test's.
+    assert fields["traceback"] == (
+        "Traceback (most recent call last):\n"
+        '  File "<cell c1>", line 3, in <module>\n'
+        '  File "<cell c1>", line 2, in helper\n' + tail
     ), fields["traceback"]
+    assert "test_failure_fields_survive" in fields["traceback_full"]
+    assert fields["traceback_full"].endswith(tail)
+
+
+def test_safely_keeps_an_interrupt_and_nothing_else():
+    import asyncio
+
+    from strata.notebook import cell_traceback
+
+    def raising(exc):
+        def read():
+            raise exc
+
+        return read
+
+    assert cell_traceback.safely(raising(asyncio.CancelledError()), "d") == "d"
+    assert cell_traceback.safely(raising(SystemExit(2)), "d") == "d"
+    with pytest.raises(KeyboardInterrupt):
+        cell_traceback.safely(raising(KeyboardInterrupt()), "d")
+
+
+def _odd_objects():
+    import asyncio
+
+    class Cancels:
+        def __str__(self):
+            raise asyncio.CancelledError
+
+    class Unmeasurable(str):
+        def __len__(self):
+            raise ValueError
+
+    class ReturnsOdd:
+        def __str__(self):
+            return Unmeasurable("odd")
+
+    class NoClass:
+        @property
+        def __class__(self):
+            raise ValueError
+
+    class BadInt(int):
+        def __int__(self):
+            raise ValueError
+
+    return Cancels, ReturnsOdd, NoClass, BadInt
+
+
+def test_an_odd_exit_code_still_reads_as_an_exit():
+    import sys
+
+    from strata.notebook import cell_traceback
+
+    cancels, returns_odd, no_class, bad_int = _odd_objects()
+    stops = "which stops it before its end"
+    for code, message in (
+        (cancels(), f"the cell exited, {stops}: <str() failed>"),
+        (returns_odd(), f"the cell exited, {stops}: odd"),
+        (no_class(), f"the cell exited, {stops}"),
+        (bad_int(3), f"the cell exited with status <int() failed>, {stops}"),
+    ):
+        with pytest.raises(RuntimeError) as raised, cell_traceback.exit_fails_the_cell():
+            sys.exit(code)
+        assert str(raised.value) == message, code
+
+
+def test_an_odd_exception_is_still_reported_and_gets_no_hint(tmp_path):
+    import asyncio
+
+    from strata.notebook import cell_traceback, harness, work_dir
+
+    class Cancels(Exception):
+        def __str__(self):
+            raise asyncio.CancelledError
+
+    class NoClass(Exception):
+        @property
+        def __class__(self):
+            raise ValueError
+
+    assert cell_traceback.error_text(Cancels()) == "Cancels: <exception str() failed>"
+    for exc in (Cancels(), NoClass()):
+        assert work_dir.hint(exc, {"notebook_dir": str(tmp_path)}) is None
+        assert harness.no_client_hint(exc, {}) is None
 
 
 def test_a_file_hint_survives_a_filename_that_raises(tmp_path):

@@ -9,7 +9,7 @@ from __future__ import annotations
 import linecache
 import os
 import traceback
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -37,9 +37,16 @@ def cell_id_set(cell_id: str | None) -> Generator[None]:
             os.environ[CELL_ID_VAR] = previous
 
 
-# What reading a failing cell's own objects may raise while it is reported: an exit
-# there still yields a report; an interrupt stays one, for the harness's own handler.
-REPORTING_FAILURES = (Exception, SystemExit)
+def safely[T](read: Callable[[], T], default: T) -> T:
+    """*read* a failing cell's own objects while its failure is reported: whatever that
+    raises (an exit, a cancellation) gives *default*, so a report is still made; an
+    interrupt stays one, for the harness's own handler."""
+    try:
+        return read()
+    except KeyboardInterrupt:
+        raise
+    except BaseException:
+        return default
 
 
 @contextmanager
@@ -50,35 +57,35 @@ def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
     try:
         yield
     except SystemExit as exc:
+        code = exc.code
+        message = safely(lambda: _exited(what, code), f"{what} exited, {_STOPS}")
         # The cell's own frames: a traceback starts at the first of them.
-        raise RuntimeError(_exited(what, exc.code)).with_traceback(exc.__traceback__) from _cause(
-            exc
-        )
+        raise RuntimeError(message).with_traceback(exc.__traceback__) from _cause(exc)
 
 
 _EXIT_TEXT_MAX = 10_000
+_STOPS = "which stops it before its end"
 
 
 def _exited(what: str, code: object) -> str:
     """As Python reads an exit: no code, a status, or text it prints (``str()`` of
     anything else, lines kept, capped)."""
-    stops = f"{what} exited, which stops it before its end"
     if code is None:
-        return stops
+        return f"{what} exited, {_STOPS}"
     if isinstance(code, int):
-        try:
-            # A bool too, as its status (True exits 1).
-            status = str(int(code))
-        except REPORTING_FAILURES:
-            status = "<too large to print>"
-        return f"{what} exited with status {status}, which stops it before its end"
-    try:
-        text = str(code)
-    except REPORTING_FAILURES:
-        text = "<str() failed>"
+        # A bool too, as its status (True exits 1).
+        number = safely(lambda: int(code), None)
+        status = (
+            "<int() failed>"
+            if number is None
+            else safely(lambda: str(number), "<too large to print>")
+        )
+        return f"{what} exited with status {status}, {_STOPS}"
+    # A plain str, whatever str() returned (a subclass's own methods could raise).
+    text = safely(lambda: str.__str__(str(code)), "<str() failed>")
     if len(text) > _EXIT_TEXT_MAX:
         text = f"{text[:_EXIT_TEXT_MAX]}..."
-    return f"{stops}: {text}" if text else stops
+    return f"{what} exited, {_STOPS}: {text}" if text else f"{what} exited, {_STOPS}"
 
 
 def _cause(exc: BaseException) -> BaseException | None:
@@ -113,11 +120,8 @@ def _is_cell(filename: str | None) -> bool:
 
 def error_text(exc: BaseException) -> str:
     """A cell's failure as one reads it: ``str(KeyError("MAX"))`` alone says only ``'MAX'``."""
-    try:
-        text = str(exc)
-    except REPORTING_FAILURES:
-        # As the traceback module shows it: the failure is still reported.
-        text = "<exception str() failed>"
+    # As the traceback module shows it: the failure is still reported.
+    text = safely(lambda: str.__str__(str(exc)), "<exception str() failed>")
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
@@ -147,20 +151,27 @@ def _from_the_cell(exc: BaseException) -> str:
 def failure_fields(exc: BaseException, hint: str | None = None) -> dict[str, Any]:
     """A failed run's ``error``, ``traceback`` and ``traceback_full``."""
     text = error_text(exc)
-    try:
-        trimmed = _from_the_cell(exc)
-        full = "".join(traceback.format_exception(exc))
-    except REPORTING_FAILURES as failed:
-        # The exception's own attributes can raise (a NameError's ``name``): every
-        # path still reports the failure, with its frames, which need none of them.
-        try:
-            frames = "".join(traceback.format_tb(exc.__traceback__))
-        except REPORTING_FAILURES:
-            frames = ""
-        note = f"(its traceback could not be formatted: {error_text(failed)})"
-        trimmed = full = f"{frames}{text}\n{note}"
+    trimmed = safely(lambda: _from_the_cell(exc), None)
+    full = safely(lambda: "".join(traceback.format_exception(exc)), None)
+    if trimmed is None or full is None:
+        # The exception's own attributes can raise (a NameError's ``name``): every path
+        # still reports the failure, with its frames, which need none of them.
+        note = f"{text}\n(its traceback could not be formatted)\n"
+        trimmed = _frames_alone(exc, cell_only=True) + note
+        full = _frames_alone(exc, cell_only=False) + note
     return {
         "error": f"{text}\n{hint}" if hint else text,
         "traceback": trimmed,
         "traceback_full": full,
     }
+
+
+def _frames_alone(exc: BaseException, *, cell_only: bool) -> str:
+    def read() -> str:
+        frames = traceback.extract_tb(exc.__traceback__)
+        first = next((i for i, f in enumerate(frames) if _is_cell(f.filename)), None)
+        if cell_only and first is not None:
+            frames = traceback.StackSummary.from_list(frames[first:])
+        return "Traceback (most recent call last):\n" + "".join(frames.format())
+
+    return safely(read, "")
