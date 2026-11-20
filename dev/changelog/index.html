@@ -3866,6 +3866,17 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>strata agent install</code> wires the project scratchpad into Claude Code or Codex.</strong> It
+  writes the user-scope MCP entry (through <code>claude mcp add-json</code>, with <code>alwaysLoad</code>), the
+  <code>mcp__strata__*</code> permission and a short block in <code>CLAUDE.md</code>, or Codex's
+  <code>[mcp_servers.strata]</code> and the block in <code>AGENTS.md</code>, and moves a hand-copied
+  <code>strata-scratchpad</code> skill aside. <code>strata agent uninstall</code> removes exactly that, from the
+  directories it went into: a file left as it was written gets its original bytes back, an
+  edited one loses only Strata's part, and the skill comes back. A <code>strata</code> MCP server
+  of your own is refused, never replaced. <code>strata mcp</code> rewrites the pieces
+  another Strata version wrote as it starts. <code>strata scratch run -c CODE</code> and
+  <code>strata scratch show [NAME]</code> are the <code>run</code> and <code>scratchpad</code> tools for an agent with only
+  a shell. (#1594)</li>
 <li><strong>A cell's checkpoints are listed in the notebook, and a branch starts from one there.</strong>
   A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
   store still holds, by run (running, interrupted, finished or failed, and which

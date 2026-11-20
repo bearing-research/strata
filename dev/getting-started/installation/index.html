@@ -3449,6 +3449,14 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 <td>List every project's scratchpad (size, last use, overage, daemon up), retire its idle cells and sweep it now (<code>gc [--root DIR \| --all]</code>), stop its daemon and delete it (<code>rm [--root DIR]</code>, which costs reruns only), or retire one cell by hand (<code>retire &lt;cell&gt; [--root DIR]</code>). See <a href="../../notebook/mcp/#a-projects-own-daemon">A project's own daemon</a>.</td>
 </tr>
 <tr>
+<td><code>uv run strata scratch run\|show [--root DIR]</code></td>
+<td>Run Python in the project's scratchpad (<code>run -c CODE</code>, or <code>--file</code>, <code>--cell ID</code> to replace one, <code>--fresh</code>) or print what it holds (<code>show [NAME]</code>), as the MCP <code>run</code> and <code>scratchpad</code> tools do, starting its daemon if none runs; prints JSON. For an agent with only a shell. Needs the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/#from-a-shell-strata-scratch-run-and-show">From a shell</a>.</td>
+</tr>
+<tr>
+<td><code>strata agent install\|uninstall</code></td>
+<td>From a <code>uv tool install</code> of Strata, since the config it writes runs that <code>strata</code> in every project: wire the project scratchpad into Claude Code's or Codex's own config (<code>--target claude,codex</code>, default every one on PATH; <code>--yes</code> skips the question): the MCP entry, its permission, and a block in <code>CLAUDE.md</code> / <code>AGENTS.md</code>. <code>uninstall</code> removes exactly that. See <a href="../../notebook/mcp/#install-it-into-the-agent-strata-agent-install">Install it into the agent</a>.</td>
+</tr>
+<tr>
 <td><code>uv run strata mcp [--root DIR]</code></td>
 <td>Serve a project's scratchpad to a coding agent as a stdio MCP server, for the agent's MCP config: it lists the tools at once and starts the project's scratchpad daemon on the first tool call. Needs the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/#from-an-agents-config-strata-mcp">MCP server</a>.</td>
 </tr>

@@ -239,6 +239,8 @@ and call `strata-notebook` / `strata` / `strata-worker` directly.
 | `uv run strata agent <notebook-dir>` | One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the `.mcp.json` + `CLAUDE.md` the agent needs, and attach the TUI (skip it with `--no-tui` and watch in the web UI instead). Then run `claude` in the notebook directory to drive it live. Needs the `[mcp]` extra, plus `[tui]` unless you pass `--no-tui`. See [Use a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/). |
 | `uv run strata scratch start\|stop\|status [--root DIR]` | Start, stop or show a project's scratchpad daemon: a server with the [scratchpad MCP profile](https://bearingresearch.com/strata/dev/notebook/mcp/#a-projects-own-daemon) serving `<DIR>/.strata-scratch/`, which it creates on first start. `DIR` defaults to the project the command runs in: the nearest directory at or above it holding a `pyproject.toml`, within its git repository, else the repository ([which project](https://bearingresearch.com/strata/dev/notebook/mcp/#a-projects-own-daemon)). One per project, shared by every client there; it stops itself after 30 idle minutes. |
 | `uv run strata scratch ls\|gc\|rm\|retire` | List every project's scratchpad (size, last use, overage, daemon up), retire its idle cells and sweep it now (`gc [--root DIR \| --all]`), stop its daemon and delete it (`rm [--root DIR]`, which costs reruns only), or retire one cell by hand (`retire <cell> [--root DIR]`). See [A project's own daemon](https://bearingresearch.com/strata/dev/notebook/mcp/#a-projects-own-daemon). |
+| `uv run strata scratch run\|show [--root DIR]` | Run Python in the project's scratchpad (`run -c CODE`, or `--file`, `--cell ID` to replace one, `--fresh`) or print what it holds (`show [NAME]`), as the MCP `run` and `scratchpad` tools do, starting its daemon if none runs; prints JSON. For an agent with only a shell. Needs the `[mcp]` extra. See [From a shell](https://bearingresearch.com/strata/dev/notebook/mcp/#from-a-shell-strata-scratch-run-and-show). |
+| `strata agent install\|uninstall` | From a `uv tool install` of Strata, since the config it writes runs that `strata` in every project: wire the project scratchpad into Claude Code's or Codex's own config (`--target claude,codex`, default every one on PATH; `--yes` skips the question): the MCP entry, its permission, and a block in `CLAUDE.md` / `AGENTS.md`. `uninstall` removes exactly that. See [Install it into the agent](https://bearingresearch.com/strata/dev/notebook/mcp/#install-it-into-the-agent-strata-agent-install). |
 | `uv run strata mcp [--root DIR]` | Serve a project's scratchpad to a coding agent as a stdio MCP server, for the agent's MCP config: it lists the tools at once and starts the project's scratchpad daemon on the first tool call. Needs the `[mcp]` extra. See [MCP server](https://bearingresearch.com/strata/dev/notebook/mcp/#from-an-agents-config-strata-mcp). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot), or write a portable snapshot zip with `--to snapshot`. See [Export and import](https://bearingresearch.com/strata/dev/notebook/export/). |
 | `uv run strata import <file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory, or unpack a snapshot zip back into one. See [Coming from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/). |
@@ -7126,6 +7128,57 @@ of a call that had to set it up carries `setup_ms`, the
 milliseconds each step took. A call that cannot reach the daemon (it stopped while
 idle) starts it again and is sent once more; a call the agent cancels is cancelled
 on the daemon too. Needs the `[mcp]` extra.
+
+### Install it into the agent: `strata agent install`
+
+```bash
+strata agent install            # every agent whose CLI is on PATH; asks first
+strata agent install --target claude --yes
+strata agent uninstall
+```
+
+`install` writes, for Claude Code, the user-scope MCP entry above (through
+`claude mcp add-json`, with the absolute path of the `strata` it runs as and
+`alwaysLoad`), the `mcp__strata__*` permission in `~/.claude/settings.json`, and a
+short block in `~/.claude/CLAUDE.md` naming the tools and the shell commands
+below, for subagents and harnesses that do not see MCP instructions. For Codex it
+writes an `[mcp_servers.strata]` block in `~/.codex/config.toml` and the same block
+in `~/.codex/AGENTS.md`. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honoured. A
+hand-copied `strata-scratchpad` skill it finds is moved to
+`~/.strata/agent-install/retired-skills/`, since the server and the block replace it,
+and `uninstall` puts it back.
+
+Every piece is marker-fenced or keyed. `uninstall` puts back the original bytes of a
+file left as `install` wrote it and removes only Strata's part from one edited since.
+It works from the directories `install` wrote into, whatever `CLAUDE_CONFIG_DIR` says
+now. A `strata` MCP server of your own (Claude Code's, or a `config.toml`
+`[mcp_servers.strata]`), a missing `claude` CLI, or a `settings.json` that is not valid
+JSON, is refused before anything is written: remove yours (`claude mcp remove --scope
+user strata`) and install again. An install that fails halfway is recorded, so
+`uninstall` still removes what it wrote. With no `claude` CLI to remove Strata's MCP
+entry, `uninstall` leaves the Claude Code target as installed, its server being still
+configured: run it again with `claude` on PATH, or remove the entry from
+`~/.claude.json` yourself first. The `strata` written is the one
+that runs `install`: refused from uv's cache (`uvx`), and warned about from a project's
+environment, since every project's agent would use it; `uv tool install` is the
+lasting choice. Ending `strata scratch run` (Ctrl-C, or a shell tool's timeout
+terminating it) cancels its cell on the daemon, or the daemon's setup, killing a daemon
+not yet recorded. When another Strata version
+wrote the files, `strata mcp` rewrites them as it starts.
+
+### From a shell: `strata scratch run` and `show`
+
+```bash
+strata scratch run -c 'import pandas as pd; df = pd.read_parquet("/repo/data.parquet"); df.shape'
+strata scratch run --cell c1a2b3c4 -c 'df.describe()'   # replace that cell's source
+strata scratch show df                                   # the cell defining df, its value
+```
+
+The `run` and `scratchpad` tools for an agent that has only a shell: each command
+is one tool call on the project's daemon, starting it if none runs, and prints the
+tool's result as JSON. `run` exits 1 when the cell failed; `--file` reads the source
+from a file (`-` for stdin) and `--fresh` runs it again whatever its cache says.
+Needs the `[mcp]` extra.
 
 ## Tools
 

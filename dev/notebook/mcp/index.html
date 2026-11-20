@@ -1753,6 +1753,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#install-it-into-the-agent-strata-agent-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install it into the agent: strata agent install
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-a-shell-strata-scratch-run-and-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From a shell: strata scratch run and show
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3149,6 +3171,28 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#install-it-into-the-agent-strata-agent-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install it into the agent: strata agent install
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-a-shell-strata-scratch-run-and-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From a shell: strata scratch run and show
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3484,6 +3528,48 @@ of a call that had to set it up carries <code>setup_ms</code>, the
 milliseconds each step took. A call that cannot reach the daemon (it stopped while
 idle) starts it again and is sent once more; a call the agent cancels is cancelled
 on the daemon too. Needs the <code>[mcp]</code> extra.</p>
+<h3 id="install-it-into-the-agent-strata-agent-install">Install it into the agent: <code>strata agent install</code><a class="headerlink" href="#install-it-into-the-agent-strata-agent-install" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>agent<span class="w"> </span>install<span class="w">            </span><span class="c1"># every agent whose CLI is on PATH; asks first</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>strata<span class="w"> </span>agent<span class="w"> </span>install<span class="w"> </span>--target<span class="w"> </span>claude<span class="w"> </span>--yes
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>strata<span class="w"> </span>agent<span class="w"> </span>uninstall
+</code></pre></div>
+<p><code>install</code> writes, for Claude Code, the user-scope MCP entry above (through
+<code>claude mcp add-json</code>, with the absolute path of the <code>strata</code> it runs as and
+<code>alwaysLoad</code>), the <code>mcp__strata__*</code> permission in <code>~/.claude/settings.json</code>, and a
+short block in <code>~/.claude/CLAUDE.md</code> naming the tools and the shell commands
+below, for subagents and harnesses that do not see MCP instructions. For Codex it
+writes an <code>[mcp_servers.strata]</code> block in <code>~/.codex/config.toml</code> and the same block
+in <code>~/.codex/AGENTS.md</code>. <code>CLAUDE_CONFIG_DIR</code> and <code>CODEX_HOME</code> are honoured. A
+hand-copied <code>strata-scratchpad</code> skill it finds is moved to
+<code>~/.strata/agent-install/retired-skills/</code>, since the server and the block replace it,
+and <code>uninstall</code> puts it back.</p>
+<p>Every piece is marker-fenced or keyed. <code>uninstall</code> puts back the original bytes of a
+file left as <code>install</code> wrote it and removes only Strata's part from one edited since.
+It works from the directories <code>install</code> wrote into, whatever <code>CLAUDE_CONFIG_DIR</code> says
+now. A <code>strata</code> MCP server of your own (Claude Code's, or a <code>config.toml</code>
+<code>[mcp_servers.strata]</code>), a missing <code>claude</code> CLI, or a <code>settings.json</code> that is not valid
+JSON, is refused before anything is written: remove yours (<code>claude mcp remove --scope
+user strata</code>) and install again. An install that fails halfway is recorded, so
+<code>uninstall</code> still removes what it wrote. With no <code>claude</code> CLI to remove Strata's MCP
+entry, <code>uninstall</code> leaves the Claude Code target as installed, its server being still
+configured: run it again with <code>claude</code> on PATH, or remove the entry from
+<code>~/.claude.json</code> yourself first. The <code>strata</code> written is the one
+that runs <code>install</code>: refused from uv's cache (<code>uvx</code>), and warned about from a project's
+environment, since every project's agent would use it; <code>uv tool install</code> is the
+lasting choice. Ending <code>strata scratch run</code> (Ctrl-C, or a shell tool's timeout
+terminating it) cancels its cell on the daemon, or the daemon's setup, killing a daemon
+not yet recorded. When another Strata version
+wrote the files, <code>strata mcp</code> rewrites them as it starts.</p>
+<h3 id="from-a-shell-strata-scratch-run-and-show">From a shell: <code>strata scratch run</code> and <code>show</code><a class="headerlink" href="#from-a-shell-strata-scratch-run-and-show" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>scratch<span class="w"> </span>run<span class="w"> </span>-c<span class="w"> </span><span class="s1">'import pandas as pd; df = pd.read_parquet("/repo/data.parquet"); df.shape'</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>strata<span class="w"> </span>scratch<span class="w"> </span>run<span class="w"> </span>--cell<span class="w"> </span>c1a2b3c4<span class="w"> </span>-c<span class="w"> </span><span class="s1">'df.describe()'</span><span class="w">   </span><span class="c1"># replace that cell's source</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>strata<span class="w"> </span>scratch<span class="w"> </span>show<span class="w"> </span>df<span class="w">                                   </span><span class="c1"># the cell defining df, its value</span>
+</code></pre></div>
+<p>The <code>run</code> and <code>scratchpad</code> tools for an agent that has only a shell: each command
+is one tool call on the project's daemon, starting it if none runs, and prints the
+tool's result as JSON. <code>run</code> exits 1 when the cell failed; <code>--file</code> reads the source
+from a file (<code>-</code> for stdin) and <code>--fresh</code> runs it again whatever its cache says.
+Needs the <code>[mcp]</code> extra.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3648,10 +3734,10 @@ already exist.</p>
 <p>On a server that <a href="../lake-aware-cells/#asking-before-a-large-read">asks before a large read</a>,
 pass <code>confirm_reads=true</code> so a run that would move more than the threshold
 returns, rather than starting:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"error"</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"large_read"</span><span class="p">,</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w"> </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;the server's message&gt;"</span><span class="p">,</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w"> </span><span class="nt">"reads"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"machine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">            </span><span class="nt">"bytes_to_move"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">}]}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"error"</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"large_read"</span><span class="p">,</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w"> </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;the server's message&gt;"</span><span class="p">,</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w"> </span><span class="nt">"reads"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"machine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">            </span><span class="nt">"bytes_to_move"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">}]}</span>
 </code></pre></div>
 <p><code>reads</code> has one entry per cell of the run (its stale upstreams included) that
 reads past the threshold with no approval kept. Ask the user, then call again
