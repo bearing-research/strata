@@ -37,6 +37,11 @@ def cell_id_set(cell_id: str | None) -> Generator[None]:
             os.environ[CELL_ID_VAR] = previous
 
 
+# What reading a failing cell's own objects may raise while it is reported: an exit
+# there still yields a report; an interrupt stays one, for the harness's own handler.
+REPORTING_FAILURES = (Exception, SystemExit)
+
+
 @contextmanager
 def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
     """A cell's ``SystemExit`` (``sys.exit()``, ``exit()``, a library's, as argparse's)
@@ -60,13 +65,16 @@ def _exited(what: str, code: object) -> str:
     stops = f"{what} exited, which stops it before its end"
     if code is None:
         return stops
-    # Inside the exit's own handler: whatever reading the code raises, the exit stands.
-    try:
-        if isinstance(code, int):
+    if isinstance(code, int):
+        try:
             # A bool too, as its status (True exits 1).
-            return f"{what} exited with status {int(code)}, which stops it before its end"
+            status = str(int(code))
+        except REPORTING_FAILURES:
+            status = "<too large to print>"
+        return f"{what} exited with status {status}, which stops it before its end"
+    try:
         text = str(code)
-    except BaseException:
+    except REPORTING_FAILURES:
         text = "<str() failed>"
     if len(text) > _EXIT_TEXT_MAX:
         text = f"{text[:_EXIT_TEXT_MAX]}..."
@@ -107,7 +115,7 @@ def error_text(exc: BaseException) -> str:
     """A cell's failure as one reads it: ``str(KeyError("MAX"))`` alone says only ``'MAX'``."""
     try:
         text = str(exc)
-    except Exception:
+    except REPORTING_FAILURES:
         # As the traceback module shows it: the failure is still reported.
         text = "<exception str() failed>"
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
@@ -142,10 +150,15 @@ def failure_fields(exc: BaseException, hint: str | None = None) -> dict[str, Any
     try:
         trimmed = _from_the_cell(exc)
         full = "".join(traceback.format_exception(exc))
-    except Exception as failed:
+    except REPORTING_FAILURES as failed:
         # The exception's own attributes can raise (a NameError's ``name``): every
-        # path still reports the failure, without its traceback.
-        trimmed = full = f"{text}\n(its traceback could not be formatted: {error_text(failed)})"
+        # path still reports the failure, with its frames, which need none of them.
+        try:
+            frames = "".join(traceback.format_tb(exc.__traceback__))
+        except REPORTING_FAILURES:
+            frames = ""
+        note = f"(its traceback could not be formatted: {error_text(failed)})"
+        trimmed = full = f"{frames}{text}\n{note}"
     return {
         "error": f"{text}\n{hint}" if hint else text,
         "traceback": trimmed,

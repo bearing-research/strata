@@ -727,8 +727,6 @@ _STOPS = "which stops it before its end"
             f"the cell exited, {_STOPS}: <str() failed>",
         ),
         ("sys.exit(True)", f"the cell exited with status 1, {_STOPS}"),
-        # More digits than Python turns into text.
-        ("sys.exit(10 ** 5000)", f"the cell exited, {_STOPS}: <str() failed>"),
         (
             "sys.exit(type('Bad', (), {'__str__': lambda self: sys.exit(2)})())",
             f"the cell exited, {_STOPS}: <str() failed>",
@@ -802,6 +800,20 @@ def test_a_loop_until_error_whose_str_raises_is_still_reported():
     ), state
 
 
+def test_a_status_too_large_to_print_is_still_a_status():
+    import sys
+
+    from strata.notebook import cell_traceback
+
+    limit = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(4300)
+    try:
+        text = cell_traceback._exited("the cell", 10**5000)
+    finally:
+        sys.set_int_max_str_digits(limit)
+    assert text == "the cell exited with status <too large to print>, which stops it before its end"
+
+
 def test_a_long_exit_text_is_capped():
     from strata.notebook import cell_traceback
 
@@ -852,15 +864,17 @@ def test_a_failure_the_handler_cannot_report_still_writes_a_result(harness_scrip
 @pytest.mark.parametrize(
     ("base", "attribute"), [("FileNotFoundError", "filename"), ("NameError", "name")]
 )
+@pytest.mark.parametrize("raises", ["raise ValueError", "sys.exit(2)"])
 def test_an_exception_whose_attributes_raise_is_its_own_error(
-    harness_script, tmp_path, base, attribute
+    harness_script, tmp_path, base, attribute, raises
 ):
     """The hints and the traceback read them: a failure is still reported as itself."""
     source = (
+        "import sys\n"
         f"class Odd({base}):\n"
         "    @property\n"
         f"    def {attribute}(self):\n"
-        "        raise ValueError\n"
+        f"        {raises}\n"
         "raise Odd('it broke')\n"
     )
     manifest = {"source": source, "inputs": {}, "notebook_dir": str(tmp_path)}
@@ -870,18 +884,25 @@ def test_an_exception_whose_attributes_raise_is_its_own_error(
     assert result["error"] == "Odd: it broke", result
 
 
-def test_failure_fields_survive_a_traceback_that_cannot_be_formatted():
-    """What the warm worker and a batch report, with no fallback of their own."""
+def test_failure_fields_survive_a_traceback_that_cannot_be_formatted(monkeypatch):
+    """The warm worker's own fallback and a batch's would lose the cell's error and
+    console, so the report itself must not raise; the frames need nothing it read."""
     from strata.notebook import cell_traceback
 
-    class Odd(NameError):
-        @property
-        def name(self):
-            raise ValueError
+    def unformattable(exc):
+        raise SystemExit(2)
 
-    fields = cell_traceback.failure_fields(Odd("it broke"))
-    assert fields["error"] == "Odd: it broke"
-    assert "its traceback could not be formatted: ValueError" in fields["traceback"]
+    monkeypatch.setattr(cell_traceback, "_from_the_cell", unformattable)
+    try:
+        raise KeyError("it broke")
+    except KeyError as exc:
+        fields = cell_traceback.failure_fields(exc)
+
+    assert fields["error"] == "KeyError: 'it broke'"
+    assert "test_failure_fields_survive_a_traceback_that_cannot_be_formatted" in fields["traceback"]
+    assert fields["traceback"].endswith(
+        "KeyError: 'it broke'\n(its traceback could not be formatted: SystemExit: 2)"
+    ), fields["traceback"]
 
 
 def test_a_file_hint_survives_a_filename_that_raises(tmp_path):

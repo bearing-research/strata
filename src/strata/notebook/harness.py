@@ -199,7 +199,7 @@ def no_client_hint(exc: BaseException, manifest: dict) -> str | None:
         # A subclass's own ``name`` may raise: no hint, and the failure still reported.
         if exc.name != "strata":
             return None
-    except Exception:
+    except _traceback.REPORTING_FAILURES:
         return None
     text = (
         "A cell on a worker has no ambient `strata` client, so it cannot scan or read "
