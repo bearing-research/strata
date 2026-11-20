@@ -8,12 +8,14 @@
 #   3. Print "ready"; the parent pool counts this worker as available.
 #   4. Block on stdin for one manifest path.
 #   5. Execute it by sourcing harness.R with the manifest pre-set in the
-#      global env, stdout sunk to stderr so nothing pollutes the frame
-#      protocol.
-#   6. Relay harness-result.json as a single stdout line and exit.
+#      global env, R's own output sunk to stderr. A child process the cell
+#      starts still writes to fd 1, which this worker shares with it: the
+#      pool drops every line that is not a result.
+#   6. Relay harness-result.json as one stdout line, started on a line of
+#      its own (a child may have left one unfinished), and exit.
 #
-# The stdin/stdout frame protocol is identical to the Python pool worker:
-# manifest path in, one JSON result line out.
+# Manifest path in, one JSON result line out, as the Python pool worker
+# (which keeps its protocol on a private fd).
 
 suppressPackageStartupMessages({
   library(jsonlite)
