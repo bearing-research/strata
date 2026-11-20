@@ -205,6 +205,7 @@ def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
     """
     from strata import scratch
     from strata.notebook.env import OVERLAY_DIR, attached_identity
+    from strata.notebook.project_env import read_record
 
     def step(what: str, command: list[str], timeout: float) -> None:
         try:
@@ -219,16 +220,20 @@ def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
     # Past the CLI's own setup deadline, so a slow start ends in the CLI, which stops the
     # daemon it launched, not in a kill that leaves it running.
     step("scratch start", [str(Path(sys.executable).parent / "strata"), "scratch", "start"], 900)
-    # The environment its cells run in, as the notebook's own record says (writer.py).
+    # The environment its cells run in, decided as environment_hash decides it: its record
+    # says attached even when a failed probe left no identity.
     home = scratch.scratch_dir(project)
-    venv = OVERLAY_DIR if attached_identity(home) is not None else ".venv"
+    record = read_record(home) or {}
+    attached = attached_identity(home) is not None or record.get("mode") == "attached"
+    venv = OVERLAY_DIR if attached else ".venv"
     step(f"importing in {venv}", [str(home / venv / "bin" / "python"), "-c", _WARM], 600)
     # SIGTERM lets the daemon stop its pools and cells; what outlives the wait is killed
     # with its group. Its pools and cells have sessions of their own, so not by that kill.
     stop_daemon(project)
     try:
         still = scratch.find_daemon(project.resolve()) is not None
-    except scratch.ScratchError:
+    except (scratch.ScratchError, *_SETUP_FAILURES):
+        # Busy, or its record unreadable: not shown stopped.
         still = True
     if still:
         # The agent's first call would find it warm.
@@ -251,7 +256,8 @@ def _warm_home(home: Path) -> None:
 
 def stop_daemon(project: Path, wait: float = 30.0) -> None:
     """Stop the scratchpad daemon a trial's calls started on *project* (Cpp's entry, or B's
-    ``strata`` commands), and its group: cells, pools and what outlived its shutdown.
+    ``strata`` commands): SIGTERM, on which it stops its pools and cells (sessions of
+    their own), then what is left of its group.
     Detached, it would idle on for 30 minutes, loading the machine under later trials
     and holding files being removed."""
     from strata import scratch

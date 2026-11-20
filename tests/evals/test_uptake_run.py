@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -558,7 +559,7 @@ class TestArmCp:
 
         failing.add("python")
         steps.clear()
-        with pytest.raises(server.SetupError, match=f"importing in {venv}"):
+        with pytest.raises(server.SetupError, match=re.escape(f"importing in {venv}")):
             server._warm_scratchpad(project, agent_env)
         assert ["stop", project] not in steps
 
@@ -573,6 +574,43 @@ class TestArmCp:
         monkeypatch.setattr(scratch, "find_daemon", busy)
         with pytest.raises(server.SetupError, match="its daemon did not stop"):
             server._warm_scratchpad(project, agent_env)
+
+        def unreadable(anchor):
+            raise KeyError("anchor")
+
+        monkeypatch.setattr(scratch, "find_daemon", unreadable)
+        with pytest.raises(server.SetupError, match="its daemon did not stop"):
+            server._warm_scratchpad(project, agent_env)
+
+        failing.add("start")
+        with pytest.raises(server.SetupError, match="warming the scratchpad: scratch start"):
+            server._warm_scratchpad(project, agent_env)
+
+        def slow(command, **kw):
+            raise subprocess.TimeoutExpired(command, 900)
+
+        monkeypatch.setattr(server.subprocess, "run", slow)
+        with pytest.raises(server.SetupError, match="scratch start failed: TimeoutExpired"):
+            server._warm_scratchpad(project, agent_env)
+
+    def test_c_warms_the_overlay_its_record_names_without_an_identity(self, tmp_path, monkeypatch):
+        from strata.notebook import env as notebook_env
+        from strata.notebook import project_env
+
+        steps = []
+
+        def fake_run(command, **kw):
+            steps.append(command[0])
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        monkeypatch.setattr(server.subprocess, "run", fake_run)
+        monkeypatch.setattr(notebook_env, "attached_identity", lambda home: None)
+        monkeypatch.setattr(project_env, "read_record", lambda home: {"mode": "attached"})
+        monkeypatch.setattr(server, "stop_daemon", lambda where: None)
+
+        server._warm_scratchpad(tmp_path, {})
+
+        assert steps[1] == str(tmp_path / ".strata-scratch" / ".venv-overlay" / "bin" / "python")
 
     def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):
         command = server.stdio_entry_command(
