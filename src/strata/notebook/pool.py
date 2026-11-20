@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import signal
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -277,6 +278,30 @@ class WarmProcessPool:
                 kill_subprocess_tree_nowait(proc.process)
 
 
+# An uncaught KeyboardInterrupt ends Python by SIGINT; on Windows, STATUS_CONTROL_C_EXIT.
+_INTERRUPT_EXITS = {-signal.SIGINT, 0xC000013A}
+
+
+async def _died_of_an_interrupt(process: Any) -> bool:
+    """Whether a worker whose stdout ended was killed by Ctrl-C (it is exiting by now)."""
+    try:
+        returncode = await asyncio.wait_for(process.wait(), timeout=5)
+    except TimeoutError:
+        return False
+    return returncode in _INTERRUPT_EXITS
+
+
+def _interrupted_result() -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": "Pool worker error: KeyboardInterrupt (the worker was interrupted)",
+        "variables": {},
+        "stdout": "",
+        "stderr": "",
+        "mutation_warnings": [],
+    }
+
+
 class PooledCellExecutor:
     """Runs cells on the warm pool for ``CellExecutor`` when one is available."""
 
@@ -328,18 +353,31 @@ class PooledCellExecutor:
                     timeout=deadline - asyncio.get_running_loop().time(),
                 )
                 if not result_json:
+                    if await _died_of_an_interrupt(warm_proc.process):
+                        # Wherever it landed (a torn line, the worker's own report): the
+                        # cell ran, so a cold run would run it twice.
+                        return _interrupted_result()
                     logger.warning("Warm process returned empty result")
                     return None
                 text = result_json.decode(errors="replace")
-                if on_event is not None and is_event_line(text):
-                    await on_event(json.loads(text))
+                if not text.strip():
                     continue
                 try:
-                    return json.loads(text)
+                    value = json.loads(text)
                 except ValueError:
-                    # A result line an interrupt tore: the worker writes its failure on
-                    # the next. Returning None would run the cell again cold.
-                    logger.warning("Warm process wrote a line that is not a result: %.200r", text)
+                    # A line an interrupt tore: the worker starts its next on a line of
+                    # its own. Returning None would run the cell again cold.
+                    logger.warning("Warm process wrote a line that is not JSON: %.200r", text)
+                    continue
+                if is_event_line(text):
+                    if on_event is not None:
+                        await on_event(value)
+                    continue
+                if isinstance(value, dict) and "success" in value:
+                    # The first whole result counts.
+                    return value
+                # A child of the cell writing to the inherited stdout: not the result.
+                logger.warning("Warm process wrote a line that is not a result: %.200r", text)
 
         except asyncio.CancelledError:
             logger.info(

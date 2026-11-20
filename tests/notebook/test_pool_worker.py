@@ -256,7 +256,7 @@ def test_main_prints_a_result_when_an_interrupt_escapes(
 
     _without_escape(pool_worker.main)
 
-    lines = capsys.readouterr().out.splitlines()
+    lines = [line for line in capsys.readouterr().out.splitlines() if line]
     assert lines[0] == "ready"
     result = json.loads(lines[1])
     assert result["success"] is False
@@ -271,7 +271,7 @@ class _TornStdout:
         self.torn = False
 
     def write(self, text: str) -> int:
-        if not self.torn and text.startswith("{"):
+        if not self.torn and "{" in text:
             self.torn = True
             self.text += text[: len(text) // 2]
             raise KeyboardInterrupt
@@ -303,13 +303,21 @@ def test_a_torn_result_line_is_followed_by_a_whole_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     out = _TornStdout()
-    _run_main(tmp_path, monkeypatch, lambda manifest: {"success": True, "variables": {}}, out)
+    _run_main(
+        tmp_path,
+        monkeypatch,
+        lambda manifest: {"success": True, "variables": {}, "stdout": "progress\n"},
+        out,
+    )
 
-    ready, torn, line = out.text.split("\n")[:3]
+    ready, torn, line = [line for line in out.text.split("\n") if line][:3]
     assert ready == "ready"
     with pytest.raises(ValueError):
         json.loads(torn)
-    assert json.loads(line)["error"] == "Pool worker error: KeyboardInterrupt"
+    failed = json.loads(line)
+    assert failed["error"] == "Pool worker error: KeyboardInterrupt"
+    # The torn result's print trail.
+    assert failed["stdout"] == "progress\n"
 
 
 def test_an_interrupt_while_the_error_line_is_made_still_writes_one(
@@ -327,6 +335,23 @@ def test_an_interrupt_while_the_error_line_is_made_still_writes_one(
     out = io.StringIO()
     _run_main(tmp_path, monkeypatch, interrupted, out)
 
-    result = json.loads(out.getvalue().splitlines()[1])
+    result = json.loads([line for line in out.getvalue().splitlines() if line][1])
     assert result["success"] is False
     assert result["error"] == "Pool worker error: KeyboardInterrupt"
+
+
+def test_the_result_starts_its_own_line_after_a_torn_event_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+
+    out = io.StringIO()
+
+    def torn_event(manifest: dict) -> dict:
+        # A checkpoint event an interrupt cut short, on the protocol stream.
+        out.write('{"event": "checkpoint", "par')
+        return {"success": True, "variables": {}}
+
+    _run_main(tmp_path, monkeypatch, torn_event, out)
+
+    assert json.loads(out.getvalue().splitlines()[-1]) == {"success": True, "variables": {}}

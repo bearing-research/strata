@@ -448,28 +448,31 @@ def main() -> None:
 
         # The protocol stream, should an interrupt leave the cell's capture in place.
         out = sys.stdout
-        began = False
+        result: dict = {}
         try:
             with open(manifest_path, "rb") as f:
                 manifest = orjson.loads(f.read())
             # The next line, never the manifest file: see harness.read_run_token.
             if manifest.get("run_token_on_stdin"):
                 manifest["strata_run_token"] = sys.stdin.readline().strip()
-            line = _dumps_result(execute_harness(manifest)) + "\n"
-            began = True
-            out.write(line)
+            result = execute_harness(manifest)
+            # On a line of its own, after any event line an interrupt tore; the pool
+            # skips the blank and the torn.
+            out.write("\n" + _dumps_result(result) + "\n")
             out.flush()
         except BaseException as e:
             # Any, an interrupt included: with no result line the pool runs the cell
-            # again cold, its side effects twice. After a torn write, on a line of its
-            # own; the pool skips the torn one.
+            # again cold, its side effects twice. One that ends the worker even so is
+            # told by its exit status (``pool._died_of_an_interrupt``).
             try:
                 error = f"Pool worker error: {_traceback.error_text(e)}"
-                line = _dumps_result({**_FAILED, "error": error}) + "\n"
+                # The print trail of a result whose write was torn.
+                trail = {k: result[k] for k in ("stdout", "stderr") if k in result}
+                line = _dumps_result({**_FAILED, **trail, "error": error}) + "\n"
             except BaseException:
                 # A second interrupt while the line was made: one made in advance.
                 line = _INTERRUPTED_LINE
-            out.write(("\n" if began else "") + line)
+            out.write("\n" + line)
             out.flush()
 
     except Exception as e:
