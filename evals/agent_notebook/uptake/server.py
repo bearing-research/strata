@@ -13,6 +13,7 @@ import functools
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -70,7 +71,7 @@ def _uv_dir(*args: str) -> str:
     return subprocess.run(["uv", *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def _cell_env(home: Path, load_log: Path, load_seconds: float) -> dict[str, str]:
+def cell_env(home: Path, load_log: Path, load_seconds: float) -> dict[str, str]:
     """What both scratchpad arms give the process whose cells the agent runs: a HOME of the
     trial's own, uv's real cache and interpreters (nothing is downloaded again), and the
     load counter."""
@@ -88,7 +89,7 @@ def server_env(root: Path, port: int, load_log: Path, load_seconds: float) -> di
     Strata or Anthropic settings, and the load counter its cells inherit."""
     env = host_env()
     env.update(
-        _cell_env(_home(root), load_log, load_seconds),
+        cell_env(_home(root), load_log, load_seconds),
         STRATA_HOST="127.0.0.1",
         STRATA_PORT=str(port),
         STRATA_MCP_ENABLED="true",
@@ -124,7 +125,7 @@ def stdio_entry_command(
         "type": "stdio",
         "command": str(Path(sys.executable).parent / "strata"),
         "args": ["mcp", "--root", str(project)],
-        "env": _cell_env(home, load_log, load_seconds),
+        "env": cell_env(home, load_log, load_seconds),
         "alwaysLoad": True,
     }
     return [claude, "mcp", "add-json", "-s", "user", SERVER_NAME, json.dumps(entry)]
@@ -154,6 +155,41 @@ def stdio_scratchpad(
         )
     if registered.returncode != 0:
         raise SetupError(f"claude mcp add-json failed: {registered.stderr.strip()}")
+    yield
+
+
+@contextmanager
+def installed_scratchpad(
+    home: Path,
+    project: Path,
+    agent_env: dict[str, str],
+    *,
+    claude: str,
+    load_log: Path,
+    load_seconds: float,
+) -> Iterator[None]:
+    """Arm C: ``strata agent install`` as a user runs it, into the config dir and HOME
+    *agent_env* names (the runner gives arm C the trial's own, :func:`cell_env`). The
+    daemon its calls start is stopped by the runner (:func:`stop_daemon`)."""
+    home.mkdir(parents=True)
+    _warm_home(home)
+    found = shutil.which(claude, path=agent_env["PATH"]) or shutil.which(claude)
+    if found is None:
+        raise SetupError(f"{claude} is not on PATH, and the installer runs it")
+    # The installer finds `claude` on PATH, as it would on a user's machine.
+    path = f"{Path(found).parent}{os.pathsep}{agent_env['PATH']}"
+    with _as_setup_error():
+        installed = subprocess.run(
+            [str(Path(sys.executable).parent / "strata"), "agent", "install"]
+            + ["--target", "claude", "--yes"],
+            cwd=project,
+            env={**agent_env, "PATH": path},
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    if installed.returncode != 0:
+        raise SetupError(f"strata agent install failed: {installed.stderr.strip()[-300:]}")
     yield
 
 

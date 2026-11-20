@@ -442,6 +442,72 @@ class TestArmCp:
         assert trial.discarded is None and trial.turns[0].passed
         assert events == [("up", "trial/home", "harbor"), ("down",)]
 
+    def test_arm_c_runs_its_turns_after_the_install_on_a_home_of_its_own(
+        self, tmp_path, claude, monkeypatch
+    ):
+        events = []
+
+        @contextmanager
+        def fake_install(home, project, agent_env, *, claude, load_log, load_seconds):
+            bin_dir = Path(agent_env["PATH"].split(os.pathsep)[0])
+            events.append(("up", home, agent_env["HOME"], (bin_dir / "strata").exists()))
+            yield
+            events.append(("down",))
+
+        monkeypatch.setattr(server, "installed_scratchpad", fake_install)
+
+        trial = _trial(
+            tmp_path,
+            claude,
+            monkeypatch,
+            "neutral_modpow",
+            "C",
+            [[None, "246"]],
+            FAKE_SERVERS="strata",
+            FAKE_TOOLS="mcp__strata__run,mcp__strata__scratchpad",
+        )
+
+        assert trial.discarded is None and trial.turns[0].passed
+        home = tmp_path / "trial" / "home"
+        assert events == [("up", home, str(home), True), ("down",)]
+        assert run.preflight("C", self.INIT) is None
+
+    def test_the_install_writes_a_users_config_into_the_trials(self, tmp_path, monkeypatch):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        recorder = bin_dir / "claude"
+        recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args"\n')
+        recorder.chmod(0o755)
+        monkeypatch.setattr(server, "_warm_home", lambda home: None)
+        config, home = tmp_path / "config", tmp_path / "home"
+        config.mkdir()
+        env = {
+            **server.host_env(),
+            "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "HOME": str(home),
+            "CLAUDE_CONFIG_DIR": str(config),
+        }
+        kw = {"load_log": tmp_path / "l.jsonl", "load_seconds": 0}
+
+        with server.installed_scratchpad(home, tmp_path, env, claude="claude", **kw):
+            args = (tmp_path / "args").read_text().splitlines()
+            assert args[:5] == ["mcp", "add-json", "--scope", "user", "strata"]
+            assert Path(json.loads(args[5])["command"]).parent == Path(sys.executable).parent
+            settings = json.loads((config / "settings.json").read_text())
+            assert settings["permissions"]["allow"] == ["mcp__strata__*"]
+            assert set(settings["hooks"]) == {"SessionStart", "UserPromptSubmit"}
+            assert "mcp__strata__run" in (config / "CLAUDE.md").read_text()
+            # The install's record is the trial's, not the runner's home.
+            assert (home / ".strata" / "agent-install" / "state.json").exists()
+
+        recorder.write_text("#!/bin/sh\nexit 1\n")
+        with pytest.raises(server.SetupError, match="strata agent install failed"):
+            with server.installed_scratchpad(tmp_path / "h2", tmp_path, env, claude="claude", **kw):
+                pass
+        with pytest.raises(server.SetupError, match="not on PATH"):
+            with server.installed_scratchpad(tmp_path / "h3", tmp_path, env, claude="nope", **kw):
+                pass
+
     def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):
         command = server.stdio_entry_command(
             "claude", tmp_path / "harbor", tmp_path / "home", tmp_path / "l.jsonl", 20.0
