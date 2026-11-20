@@ -730,9 +730,9 @@ class CellView(CellState, WsPayload):
     """
 
     # Narrowed to what the session sends; pydantic validates a subclass's fields as declared.
-    test_result: CellTestResultView | None = None  # ty: ignore[invalid-mutable-override]
-    display_outputs: list[DisplayOutput] = Field(default_factory=list)  # ty: ignore[invalid-attribute-override]
-    display_output: DisplayOutput | None = None  # ty: ignore[invalid-attribute-override]
+    test_result: CellTestResultView | None = None  # ty: ignore[incompatible-mutable-override]
+    display_outputs: list[DisplayOutput] = Field(default_factory=list)  # ty: ignore[incompatible-attribute-override]
+    display_output: DisplayOutput | None = None  # ty: ignore[incompatible-attribute-override]
     staleness_reasons: list[str]
     # A ready cell's undeclared reads that changed since: it may be out of date.
     changed_reads: list[str]
@@ -811,7 +811,7 @@ class NotebookStatePayload(NotebookState, WsPayload):
     ``exclude_unset`` in Python mode, so the wire is what it was before it was typed.
     """
 
-    cells: list[CellView] = Field(default_factory=list)  # ty: ignore[invalid-attribute-override]
+    cells: list[CellView] = Field(default_factory=list)  # ty: ignore[incompatible-attribute-override]
     environment: EnvironmentStateModel
     environment_job: EnvironmentJobModel | None
     environment_job_history: list[EnvironmentJobModel]
