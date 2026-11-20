@@ -576,8 +576,16 @@ async def relay_events(
             line = await reader.readline()
             if not line:
                 return None
+            if not line.strip():
+                continue
             try:
-                await on_event(json.loads(line))
+                event = json.loads(line)
+            except ValueError:
+                # One an interrupt tore; the channel starts the next on a line of its own.
+                logger.warning("A run event line is not JSON: %.200r", line)
+                continue
+            try:
+                await on_event(event)
             except RunFenced as exc:
                 await terminate_subprocess_tree(proc)
                 return exc

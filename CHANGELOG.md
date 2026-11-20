@@ -514,8 +514,10 @@ exhaustive commit history.
 - **An interrupt during a warm cell no longer runs the cell twice.** A worker that printed
   no whole result read as "pool unavailable", so the cell ran again cold. The worker now
   reports the failure with the cell's print trail, as the cold harness does, on a line of
-  its own after any it tore; the pool skips a torn line, and one a child process wrote,
-  and a worker that Ctrl-C ended before any result fails the cell instead. A client close
+  its own after any it tore, as is each run event; the pool and the cold relay skip a
+  torn line, and a worker that Ctrl-C ended before any result fails the cell instead. A
+  line a child process of a warm cell wrote to the inherited stdout no longer sends the
+  cell to a second, cold run: it is kept in the cell's stdout. A client close
   that raises (an interrupt, or a cell's own `strata.close = sys.exit`) keeps the cell's
   result on the cold and the warm path, and no longer ends a run-all batch; an interrupt
   there still stops it. (#1593)

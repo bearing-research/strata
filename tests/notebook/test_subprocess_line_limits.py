@@ -9,6 +9,8 @@ cold re-execution.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import signal
 import subprocess
 import sys
@@ -139,20 +141,26 @@ async def test_a_torn_line_is_skipped_for_the_next(tmp_path, torn):
     async def on_event(event):
         events.append(event)
 
+    event = b'{"' + EVENT_KEY.encode() + b'": "head", "name": "best", "sequence": 1}'
     result = await _pooled(
-        tmp_path, torn + b'\n{"success": false, "error": "interrupted"}\n', on_event=on_event
+        tmp_path,
+        torn + b"\n" + event + b'\n{"success": false, "error": "interrupted"}\n',
+        on_event=on_event,
     )
 
-    assert result == {"success": False, "error": "interrupted"}
-    assert events == []
+    assert result["error"] == "interrupted"
+    # The event after the torn one still counts.
+    assert events == [json.loads(event)]
 
 
 @pytest.mark.asyncio
-async def test_a_line_a_child_wrote_is_not_the_result(tmp_path):
+async def test_a_line_a_child_wrote_is_the_cells_output_not_the_result(tmp_path):
     """A process the cell started writes to the stdout it inherited."""
-    result = await _pooled(tmp_path, b'{}\n1\nnull\n\n{"success": true, "variables": {}}\n')
+    data = b'hello\n{}\n1\n\n{"success": true, "variables": {}, "stdout": "own\\n"}\n'
 
-    assert result == {"success": True, "variables": {}}
+    result = await _pooled(tmp_path, data)
+
+    assert result == {"success": True, "variables": {}, "stdout": "own\nhello\n{}\n1\n"}
 
 
 @pytest.mark.asyncio
@@ -160,12 +168,13 @@ async def test_a_line_a_child_wrote_is_not_the_result(tmp_path):
 async def test_a_worker_an_interrupt_ended_is_a_failed_cell_not_a_pool_miss(
     tmp_path, returncode, interrupted
 ):
-    result = await _pooled(tmp_path, b'{"success": true, "va', returncode)
+    result = await _pooled(tmp_path, b'a child\n{"success": true, "va', returncode)
 
     if interrupted:
         assert result is not None
         assert result["success"] is False
         assert "KeyboardInterrupt" in result["error"]
+        assert result["stdout"].startswith("a child\n")
     else:
         # Died some other way (a crash, a kill): the pool is unavailable, run it cold.
         assert result is None
@@ -186,4 +195,38 @@ async def test_the_blank_line_before_a_result_is_not_logged(tmp_path, caplog):
         result = await _pooled(tmp_path, b'\n{"success": true}\n')
 
     assert result == {"success": True}
-    assert caplog.records == []
+    assert [r for r in caplog.records if r.name == "strata.notebook.pool"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_cold_relay_reads_past_a_torn_event_line(caplog):
+    from strata.notebook.local_runs import relay_events
+
+    read_fd, write_fd = os.pipe()
+    event = {EVENT_KEY: "head", "name": "best", "sequence": 1}
+    with os.fdopen(write_fd, "wb") as pipe:
+        pipe.write(b'{"' + EVENT_KEY.encode() + b'": "checkp\n\n' + json.dumps(event).encode())
+    events = []
+
+    async def on_event(payload):
+        events.append(payload)
+
+    with caplog.at_level("WARNING", logger="strata.notebook.local_runs"):
+        assert await relay_events(read_fd, on_event, None) is None
+
+    assert events == [event]
+    # The torn line is said; the blank one before every event is not.
+    said = [r for r in caplog.records if r.name == "strata.notebook.local_runs"]
+    assert len(said) == 1
+
+
+def test_an_event_starts_its_own_line_after_a_torn_one(tmp_path):
+    from strata.notebook.run_channel import RunChannel
+
+    written = ['{"event": "checkp']
+    channel = RunChannel(
+        written.append, tmp_path, serialize=lambda *a: {}, deserialize=lambda *a: None
+    )
+    channel.head("best", 1)
+
+    assert json.loads("".join(written).splitlines()[-1])["name"] == "best"

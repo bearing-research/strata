@@ -278,25 +278,29 @@ class WarmProcessPool:
                 kill_subprocess_tree_nowait(proc.process)
 
 
-# An uncaught KeyboardInterrupt ends Python by SIGINT; on Windows, STATUS_CONTROL_C_EXIT.
-_INTERRUPT_EXITS = {-signal.SIGINT, 0xC000013A}
+# An uncaught KeyboardInterrupt ends Python by SIGINT. Windows' STATUS_CONTROL_C_EXIT is
+# left out: a CTRL_BREAK, which the pool's own tree termination sends, ends with it too.
+_INTERRUPT_EXITS = {-signal.SIGINT}
 
 
-async def _died_of_an_interrupt(process: Any) -> bool:
+async def _died_of_an_interrupt(process: Any, seconds: float) -> bool:
     """Whether a worker whose stdout ended was killed by Ctrl-C (it is exiting by now)."""
     try:
-        returncode = await asyncio.wait_for(process.wait(), timeout=5)
+        returncode = await asyncio.wait_for(process.wait(), timeout=min(5.0, max(seconds, 0.0)))
     except TimeoutError:
         return False
     return returncode in _INTERRUPT_EXITS
 
 
-def _interrupted_result() -> dict[str, Any]:
+def _interrupted_result(stdout: str) -> dict[str, Any]:
     return {
         "success": False,
-        "error": "Pool worker error: KeyboardInterrupt (the worker was interrupted)",
+        "error": (
+            "Pool worker error: KeyboardInterrupt (the worker was interrupted, and the "
+            "cell's own output with it)"
+        ),
         "variables": {},
-        "stdout": "",
+        "stdout": stdout,
         "stderr": "",
         "mutation_warnings": [],
     }
@@ -347,16 +351,20 @@ class PooledCellExecutor:
             await warm_proc.process.stdin.drain()
 
             deadline = asyncio.get_running_loop().time() + timeout_seconds
+            # Lines a process the cell started wrote to the stdout it inherited (or one an
+            # interrupt tore): the cell's output, not the protocol's.
+            outside: list[str] = []
             while True:
                 result_json = await asyncio.wait_for(
                     warm_proc.process.stdout.readline(),
                     timeout=deadline - asyncio.get_running_loop().time(),
                 )
                 if not result_json:
-                    if await _died_of_an_interrupt(warm_proc.process):
+                    left = deadline - asyncio.get_running_loop().time()
+                    if await _died_of_an_interrupt(warm_proc.process, left):
                         # Wherever it landed (a torn line, the worker's own report): the
                         # cell ran, so a cold run would run it twice.
-                        return _interrupted_result()
+                        return _interrupted_result("".join(outside))
                     logger.warning("Warm process returned empty result")
                     return None
                 text = result_json.decode(errors="replace")
@@ -365,19 +373,19 @@ class PooledCellExecutor:
                 try:
                     value = json.loads(text)
                 except ValueError:
-                    # A line an interrupt tore: the worker starts its next on a line of
-                    # its own. Returning None would run the cell again cold.
-                    logger.warning("Warm process wrote a line that is not JSON: %.200r", text)
-                    continue
-                if is_event_line(text):
+                    value = None
+                if is_event_line(text) and value is not None:
                     if on_event is not None:
                         await on_event(value)
                     continue
                 if isinstance(value, dict) and "success" in value:
                     # The first whole result counts.
+                    if outside:
+                        logger.debug("Warm cell's children wrote %d lines", len(outside))
+                        value["stdout"] = (value.get("stdout") or "") + "".join(outside)
                     return value
-                # A child of the cell writing to the inherited stdout: not the result.
-                logger.warning("Warm process wrote a line that is not a result: %.200r", text)
+                # Returning None for it would run the cell again cold.
+                outside.append(text)
 
         except asyncio.CancelledError:
             logger.info(
