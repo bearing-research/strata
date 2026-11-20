@@ -143,9 +143,9 @@ def stdio_scratchpad(
 ) -> Iterator[None]:
     """Arm Cpp: its HOME warmed and its entry written. The daemon its calls start is
     stopped by the runner, which stops any arm's (:func:`stop_daemon`)."""
-    home.mkdir(parents=True)
-    _warm_home(home)
     with as_setup_error():
+        home.mkdir(parents=True)
+        _warm_home(home)
         registered = subprocess.run(
             stdio_entry_command(claude, project, home, load_log, load_seconds),
             env=agent_env,
@@ -171,13 +171,15 @@ def installed_scratchpad(
     """Arm C: ``strata agent install`` as a user runs it, into the config dir and HOME
     *agent_env* names (the runner gives arm C the trial's own, :func:`cell_env`). The
     daemon its calls start is stopped by the runner (:func:`stop_daemon`)."""
-    home.mkdir(parents=True)
-    _warm_home(home)
+    with as_setup_error():
+        home.mkdir(parents=True)
+        _warm_home(home)
     found = shutil.which(claude, path=agent_env["PATH"]) or shutil.which(claude)
     if found is None:
         raise SetupError(f"{claude} is not on PATH, and the installer runs it")
-    # The installer finds `claude` on PATH, as it would on a user's machine.
-    path = f"{Path(found).resolve().parent}{os.pathsep}{agent_env['PATH']}"
+    # The installer finds `claude` on PATH, as it would on a user's machine. Not resolved:
+    # a native install's `claude` is a link to a file named for its version.
+    path = f"{Path(found).absolute().parent}{os.pathsep}{agent_env['PATH']}"
     with as_setup_error():
         installed = subprocess.run(
             [str(Path(sys.executable).parent / "strata"), "agent", "install"]
@@ -190,7 +192,34 @@ def installed_scratchpad(
         )
     if installed.returncode != 0:
         raise SetupError(f"strata agent install failed: {installed.stderr.strip()[-300:]}")
+    _warm_scratchpad(project, agent_env)
     yield
+
+
+def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
+    """The project's scratchpad as a returning user has it: created, its environment synced
+    and first loaded (Cp's notebook is too), its daemon stopped, as the next day finds it.
+
+    Its first use in a project, the sync above all (28.6 s on the first C trial), is no
+    part of a working session; the agent's first call still starts the daemon.
+    """
+    from strata.notebook.env import OVERLAY_DIR
+    from strata.scratch import scratch_dir
+
+    strata = str(Path(sys.executable).parent / "strata")
+    overlay = scratch_dir(project) / OVERLAY_DIR / "bin" / "python"
+    steps = (
+        [strata, "scratch", "start"],
+        [str(overlay), "-c", _WARM],
+        [strata, "scratch", "stop"],
+    )
+    for step in steps:
+        with as_setup_error():
+            done = subprocess.run(
+                step, cwd=project, env=agent_env, capture_output=True, text=True, timeout=600
+            )
+        if done.returncode != 0:
+            raise SetupError(f"warming the scratchpad ({step[1:3]}) failed: {done.stderr[-300:]}")
 
 
 def _warm_home(home: Path) -> None:
@@ -198,6 +227,7 @@ def _warm_home(home: Path) -> None:
     clock: a user's machine is past it, and it is no part of a first use of Strata."""
     warmed = subprocess.run(
         [sys.executable, "-c", "import matplotlib.font_manager"],
+        timeout=300,
         env={**host_env(), "HOME": str(home)},
         capture_output=True,
         text=True,

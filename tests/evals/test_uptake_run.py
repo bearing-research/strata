@@ -483,23 +483,30 @@ class TestArmCp:
         assert trial.discarded.startswith("setup: CalledProcessError") and not trial.turns
 
     def test_the_install_writes_a_users_config_into_the_trials(self, tmp_path, monkeypatch):
-        bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
-        recorder = bin_dir / "claude"
+        # As a native install has it: `claude` a link to a file named for its version, and
+        # its folder not on the agent's PATH.
+        (tmp_path / "versions").mkdir()
+        recorder = tmp_path / "versions" / "9.9.9"
         recorder.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args"\n')
         recorder.chmod(0o755)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "claude").symlink_to(recorder)
+        claude = str(bin_dir / "claude")
         monkeypatch.setattr(server, "_warm_home", lambda home: None)
+        warmed = []
+        monkeypatch.setattr(server, "_warm_scratchpad", lambda *args: warmed.append(args))
         config, home = tmp_path / "config", tmp_path / "home"
         config.mkdir()
         env = {
             **server.host_env(),
-            "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "PATH": f"/usr/bin{os.pathsep}/bin",
             "HOME": str(home),
             "CLAUDE_CONFIG_DIR": str(config),
         }
         kw = {"load_log": tmp_path / "l.jsonl", "load_seconds": 0}
 
-        with server.installed_scratchpad(home, tmp_path, env, claude="claude", **kw):
+        with server.installed_scratchpad(home, tmp_path, env, claude=claude, **kw):
             args = (tmp_path / "args").read_text().splitlines()
             assert args[:5] == ["mcp", "add-json", "--scope", "user", "strata"]
             assert Path(json.loads(args[5])["command"]).parent == Path(sys.executable).parent
@@ -509,17 +516,34 @@ class TestArmCp:
             assert "mcp__strata__run" in (config / "CLAUDE.md").read_text()
             # The install's record is the trial's, not the runner's home.
             assert (home / ".strata" / "agent-install" / "state.json").exists()
+            assert warmed == [(tmp_path, env)]
 
         recorder.write_text("#!/bin/sh\nexit 1\n")
         fresh = {**env, "HOME": str(tmp_path / "h2")}
         with pytest.raises(server.SetupError, match="strata agent install failed"):
-            with server.installed_scratchpad(
-                tmp_path / "h2", tmp_path, fresh, claude="claude", **kw
-            ):
+            with server.installed_scratchpad(tmp_path / "h2", tmp_path, fresh, claude=claude, **kw):
                 pass
         with pytest.raises(server.SetupError, match="not on PATH"):
             with server.installed_scratchpad(tmp_path / "h3", tmp_path, fresh, claude="nope", **kw):
                 pass
+
+    def test_c_scratchpad_is_started_loaded_and_stopped_before_the_clock(
+        self, tmp_path, monkeypatch
+    ):
+        steps = []
+
+        def fake_run(command, *, cwd, env, **kw):
+            steps.append(command[1:3] if command[1] != "-c" else ["python", command[0]])
+            return subprocess.CompletedProcess(command, 1 if "fail" in env else 0, "", "boom")
+
+        monkeypatch.setattr(server.subprocess, "run", fake_run)
+
+        server._warm_scratchpad(tmp_path / "harbor", {})
+
+        overlay = str(tmp_path / "harbor" / ".strata-scratch" / ".venv-overlay" / "bin" / "python")
+        assert steps == [["scratch", "start"], ["python", overlay], ["scratch", "stop"]]
+        with pytest.raises(server.SetupError, match="warming the scratchpad"):
+            server._warm_scratchpad(tmp_path / "harbor", {"fail": "1"})
 
     def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):
         command = server.stdio_entry_command(

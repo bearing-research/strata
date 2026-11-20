@@ -333,7 +333,8 @@ def shrink(trial_dir: Path) -> None:
     """Remove what only the trial itself needed: its venvs and artifact stores.
 
     A scratchpad trial holds about 520 MB of them. ``trial.json``, the turns, the cells'
-    sources and the workspace's git status (what the agent changed) stay.
+    sources and the workspace's git status (what the agent changed) stay; in arm C, what
+    the agent wrote under its HOME goes with that HOME.
     """
     # Cpp's HOME holds the daemon's shared environments and registry, nothing the agent
     # made; C's is the agent's too, and goes with them.
