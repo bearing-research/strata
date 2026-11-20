@@ -9,6 +9,7 @@ from __future__ import annotations
 import linecache
 import os
 import traceback
+import types
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from typing import Any
@@ -61,8 +62,11 @@ def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
         code = safely(lambda: exited.code, None)
         message = safely(lambda: _exited(what, code), f"{what} exited, {_STOPS}")
         cause = safely(lambda: _cause(exited), None)
+        frames = safely(lambda: exited.__traceback__, None)
         # The cell's own frames: a traceback starts at the first of them.
-        raise RuntimeError(message).with_traceback(exc.__traceback__) from cause
+        raise RuntimeError(message).with_traceback(
+            frames if isinstance(frames, types.TracebackType) else None
+        ) from (cause if isinstance(cause, BaseException) else None)
 
 
 _EXIT_TEXT_MAX = 10_000
@@ -175,6 +179,8 @@ def _frames_alone(exc: BaseException, *, cell_only: bool) -> str:
         if cell_only and first is not None:
             frames = traceback.StackSummary.from_list(frames[first:])
         # As Python prints it: no header without a frame.
-        return "Traceback (most recent call last):\n" + "".join(frames.format()) if frames else ""
+        if not frames:
+            return ""
+        return "Traceback (most recent call last):\n" + "".join(frames.format())
 
     return safely(read, "")

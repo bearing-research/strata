@@ -205,9 +205,8 @@ def no_client_hint(exc: BaseException, manifest: dict) -> str | None:
         "artifacts through the notebook's server. Do that in a cell that runs on the "
         "server and use its result here."
     )
-    # So the traceback carries it too.
-    if hasattr(exc, "add_note"):
-        exc.add_note(text)
+    # So the traceback carries it too; the hint stands without its note.
+    _traceback.safely(lambda: exc.add_note(text), None)
     return text
 
 

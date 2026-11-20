@@ -1018,24 +1018,40 @@ def test_an_odd_exception_is_still_reported_and_gets_no_hint(tmp_path, monkeypat
     manifest = {"notebook_dir": str(tmp_path)}
 
     assert cell_traceback.error_text(Cancels()) == "Cancels: <exception str() failed>"
-    for exc in (NoClass(), FileCancels()):
+    for exc in (Cancels(), NoClass(), FileCancels()):
         assert work_dir.hint(exc, manifest) is None, exc
-    for exc in (NoClass(), NameCancels(), NameAmbiguous()):
+    for exc in (Cancels(), NoClass(), NameCancels(), NameAmbiguous()):
         assert harness.no_client_hint(exc, {}) is None, exc
+    # Notes that refuse one: the hint stands without its note.
+    unnoted = NameError("x", name="strata")
+    unnoted.__notes__ = ()
+    assert harness.no_client_hint(unnoted, {}).startswith("A cell on a worker")
     monkeypatch.chdir(work)
-    assert work_dir.hint(NotesTuple(2, "No such file", "data.csv"), manifest) is None
+    assert "read it as ../data.csv" in work_dir.hint(
+        NotesTuple(2, "No such file", "data.csv"), manifest
+    )
     # The plain error gets its hint.
     assert work_dir.hint(FileNotFoundError(2, "No such file", "data.csv"), manifest)
 
 
-@pytest.mark.parametrize("odd", ["code", "__cause__"])
+def _unreadable(self):
+    raise ValueError
+
+
+@pytest.mark.parametrize(
+    "odd",
+    [
+        {"code": property(_unreadable)},
+        {"__cause__": property(_unreadable)},
+        {"__cause__": property(lambda self: 5)},
+        {"__traceback__": property(_unreadable)},
+        {"__traceback__": property(lambda self: 5)},
+    ],
+)
 def test_an_odd_system_exit_still_reads_as_an_exit(odd):
     from strata.notebook import cell_traceback
 
-    def unreadable(self):
-        raise ValueError
-
-    odd_exit = type("OddExit", (SystemExit,), {odd: property(unreadable)})
+    odd_exit = type("OddExit", (SystemExit,), odd)
     message = escaped = None
     try:
         with cell_traceback.exit_fails_the_cell():
