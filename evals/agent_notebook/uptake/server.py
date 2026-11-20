@@ -206,20 +206,26 @@ def _warm_scratchpad(project: Path, agent_env: dict[str, str]) -> None:
     from strata.notebook.env import OVERLAY_DIR
     from strata.scratch import scratch_dir
 
-    strata = str(Path(sys.executable).parent / "strata")
-    overlay = scratch_dir(project) / OVERLAY_DIR / "bin" / "python"
-    steps = (
-        [strata, "scratch", "start"],
-        [str(overlay), "-c", _WARM],
-        [strata, "scratch", "stop"],
-    )
-    for step in steps:
+    def step(what: str, command: list[str], timeout: float) -> None:
         with as_setup_error():
             done = subprocess.run(
-                step, cwd=project, env=agent_env, capture_output=True, text=True, timeout=600
+                command, cwd=project, env=agent_env, capture_output=True, text=True, timeout=timeout
             )
         if done.returncode != 0:
-            raise SetupError(f"warming the scratchpad ({step[1:3]}) failed: {done.stderr[-300:]}")
+            raise SetupError(f"warming the scratchpad: {what} failed: {done.stderr[-300:]}")
+
+    # Past the CLI's own setup deadline, so a slow start ends in the CLI, which stops the
+    # daemon it launched, not in a kill that leaves it running.
+    step("scratch start", [str(Path(sys.executable).parent / "strata"), "scratch", "start"], 900)
+    # The overlay over the project's .venv, else the scratchpad's own environment.
+    home = scratch_dir(project)
+    python = next(
+        (p for p in (home / OVERLAY_DIR, home / ".venv") if (p / "bin" / "python").exists()),
+        home / OVERLAY_DIR,
+    )
+    step(f"importing in {python}", [str(python / "bin" / "python"), "-c", _WARM], 600)
+    # With its group: pools and cells the start left would run on under the agent's clock.
+    stop_daemon(project)
 
 
 def _warm_home(home: Path) -> None:

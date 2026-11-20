@@ -527,23 +527,30 @@ class TestArmCp:
             with server.installed_scratchpad(tmp_path / "h3", tmp_path, fresh, claude="nope", **kw):
                 pass
 
+    @pytest.mark.parametrize("environment", [".venv-overlay", ".venv"])
     def test_c_scratchpad_is_started_loaded_and_stopped_before_the_clock(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, environment
     ):
-        steps = []
+        project, agent_env, steps = tmp_path / "harbor", {"HOME": "trial"}, []
+        python = project / ".strata-scratch" / environment / "bin" / "python"
 
         def fake_run(command, *, cwd, env, **kw):
+            assert (cwd, env) == (project, agent_env)
+            if command[1:3] == ["scratch", "start"]:
+                python.parent.mkdir(parents=True, exist_ok=True)
+                python.touch()
             steps.append(command[1:3] if command[1] != "-c" else ["python", command[0]])
             return subprocess.CompletedProcess(command, 1 if "fail" in env else 0, "", "boom")
 
         monkeypatch.setattr(server.subprocess, "run", fake_run)
+        monkeypatch.setattr(server, "stop_daemon", lambda where: steps.append(["stop", where]))
 
-        server._warm_scratchpad(tmp_path / "harbor", {})
+        server._warm_scratchpad(project, agent_env)
 
-        overlay = str(tmp_path / "harbor" / ".strata-scratch" / ".venv-overlay" / "bin" / "python")
-        assert steps == [["scratch", "start"], ["python", overlay], ["scratch", "stop"]]
-        with pytest.raises(server.SetupError, match="warming the scratchpad"):
-            server._warm_scratchpad(tmp_path / "harbor", {"fail": "1"})
+        assert steps == [["scratch", "start"], ["python", str(python)], ["stop", project]]
+        agent_env["fail"] = "1"
+        with pytest.raises(server.SetupError, match="warming the scratchpad: scratch start"):
+            server._warm_scratchpad(project, agent_env)
 
     def test_the_stdio_entry_is_strata_mcp_on_the_trials_home(self, tmp_path):
         command = server.stdio_entry_command(
