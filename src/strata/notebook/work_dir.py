@@ -30,17 +30,21 @@ def hint(exc: BaseException, manifest: dict[str, Any]) -> str | None:
     carries it too.
     """
     try:
-        # A failing cell's own exception: its attributes, even its class, may raise, which
-        # gives no hint, and the failure is still reported (``cell_traceback.safely``).
-        if not manifest.get("notebook_dir") or not isinstance(exc, FileNotFoundError):
-            return None
-        name = os.fsdecode(exc.filename) if exc.filename else None
+        return _hint(exc, manifest)
     except KeyboardInterrupt:
         raise
     except BaseException:
+        # A failing cell's own exception: whatever reading it raises (its class, its
+        # filename, its notes) gives no hint, and the failure is still reported.
         return None
-    if not name:
+
+
+def _hint(exc: BaseException, manifest: dict[str, Any]) -> str | None:
+    if not manifest.get("notebook_dir") or not isinstance(exc, FileNotFoundError):
         return None
+    if not exc.filename:
+        return None
+    name = os.fsdecode(exc.filename)
     if os.path.isabs(name) or os.path.exists(name):
         return None
     if not os.path.exists(os.path.join(os.pardir, name)):

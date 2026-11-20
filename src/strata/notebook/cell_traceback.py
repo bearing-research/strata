@@ -57,10 +57,12 @@ def exit_fails_the_cell(what: str = "the cell") -> Generator[None]:
     try:
         yield
     except SystemExit as exc:
-        code = exc.code
+        exited = exc
+        code = safely(lambda: exited.code, None)
         message = safely(lambda: _exited(what, code), f"{what} exited, {_STOPS}")
+        cause = safely(lambda: _cause(exited), None)
         # The cell's own frames: a traceback starts at the first of them.
-        raise RuntimeError(message).with_traceback(exc.__traceback__) from _cause(exc)
+        raise RuntimeError(message).with_traceback(exc.__traceback__) from cause
 
 
 _EXIT_TEXT_MAX = 10_000
@@ -143,21 +145,21 @@ def _from_the_cell(exc: BaseException) -> str:
             # Source that does not parse has no frame of its own to start from.
             entry.stack = traceback.StackSummary.from_list([])
         pending.extend(chained for chained in (entry.__cause__, entry.__context__) if chained)
-        # An exception group's members: Python 3.11's (a project's Python may be older).
-        pending.extend(getattr(entry, "exceptions", None) or [])
+        pending.extend(entry.exceptions or [])
     return "".join(top.format())
 
 
 def failure_fields(exc: BaseException, hint: str | None = None) -> dict[str, Any]:
     """A failed run's ``error``, ``traceback`` and ``traceback_full``."""
     text = error_text(exc)
+    # The exception's own attributes can raise (a NameError's ``name``): every path
+    # still reports the failure, with its frames, which need none of them.
+    note = f"{text}\n(its traceback could not be formatted)\n"
     trimmed = safely(lambda: _from_the_cell(exc), None)
-    full = safely(lambda: "".join(traceback.format_exception(exc)), None)
-    if trimmed is None or full is None:
-        # The exception's own attributes can raise (a NameError's ``name``): every path
-        # still reports the failure, with its frames, which need none of them.
-        note = f"{text}\n(its traceback could not be formatted)\n"
+    if trimmed is None:
         trimmed = _frames_alone(exc, cell_only=True) + note
+    full = safely(lambda: "".join(traceback.format_exception(exc)), None)
+    if full is None:
         full = _frames_alone(exc, cell_only=False) + note
     return {
         "error": f"{text}\n{hint}" if hint else text,
@@ -172,6 +174,7 @@ def _frames_alone(exc: BaseException, *, cell_only: bool) -> str:
         first = next((i for i, f in enumerate(frames) if _is_cell(f.filename)), None)
         if cell_only and first is not None:
             frames = traceback.StackSummary.from_list(frames[first:])
-        return "Traceback (most recent call last):\n" + "".join(frames.format())
+        # As Python prints it: no header without a frame.
+        return "Traceback (most recent call last):\n" + "".join(frames.format()) if frames else ""
 
     return safely(read, "")

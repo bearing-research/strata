@@ -196,7 +196,9 @@ def no_client_hint(exc: BaseException, manifest: dict) -> str | None:
     if manifest.get("strata_url"):
         return None
     # A failing cell's own exception: its attributes, even its class, may raise.
-    if not _traceback.safely(lambda: isinstance(exc, NameError) and exc.name == "strata", False):
+    if not _traceback.safely(
+        lambda: bool(isinstance(exc, NameError) and exc.name == "strata"), False
+    ):
         return None
     text = (
         "A cell on a worker has no ambient `strata` client, so it cannot scan or read "

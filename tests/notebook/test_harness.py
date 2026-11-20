@@ -907,8 +907,9 @@ def test_failure_fields_survive_a_traceback_that_cannot_be_formatted(monkeypatch
         '  File "<cell c1>", line 3, in <module>\n'
         '  File "<cell c1>", line 2, in helper\n' + tail
     ), fields["traceback"]
+    # What formatted keeps its own text.
     assert "test_failure_fields_survive" in fields["traceback_full"]
-    assert fields["traceback_full"].endswith(tail)
+    assert fields["traceback_full"].endswith("KeyError: 'it broke'\n"), fields["traceback_full"]
 
 
 def test_safely_keeps_an_interrupt_and_nothing_else():
@@ -973,24 +974,92 @@ def test_an_odd_exit_code_still_reads_as_an_exit():
         assert str(raised.value) == message, code
 
 
-def test_an_odd_exception_is_still_reported_and_gets_no_hint(tmp_path):
+def test_an_odd_exception_is_still_reported_and_gets_no_hint(tmp_path, monkeypatch):
     import asyncio
 
     from strata.notebook import cell_traceback, harness, work_dir
 
+    def cancel(self):
+        raise asyncio.CancelledError
+
+    class Ambiguous:
+        """As a numpy array compares: a result with no truth value."""
+
+        def __eq__(self, other):
+            return self
+
+        def __bool__(self):
+            raise ValueError
+
     class Cancels(Exception):
-        def __str__(self):
-            raise asyncio.CancelledError
+        __str__ = cancel
 
     class NoClass(Exception):
         @property
         def __class__(self):
             raise ValueError
 
+    class FileCancels(FileNotFoundError):
+        filename = property(cancel)
+
+    class NotesTuple(FileNotFoundError):
+        def add_note(self, note):
+            raise TypeError
+
+    class NameCancels(NameError):
+        name = property(cancel)
+
+    class NameAmbiguous(NameError):
+        name = Ambiguous()
+
+    (tmp_path / "data.csv").write_text("")
+    work = tmp_path / "work"
+    work.mkdir()
+    manifest = {"notebook_dir": str(tmp_path)}
+
     assert cell_traceback.error_text(Cancels()) == "Cancels: <exception str() failed>"
-    for exc in (Cancels(), NoClass()):
-        assert work_dir.hint(exc, {"notebook_dir": str(tmp_path)}) is None
-        assert harness.no_client_hint(exc, {}) is None
+    for exc in (NoClass(), FileCancels()):
+        assert work_dir.hint(exc, manifest) is None, exc
+    for exc in (NoClass(), NameCancels(), NameAmbiguous()):
+        assert harness.no_client_hint(exc, {}) is None, exc
+    monkeypatch.chdir(work)
+    assert work_dir.hint(NotesTuple(2, "No such file", "data.csv"), manifest) is None
+    # The plain error gets its hint.
+    assert work_dir.hint(FileNotFoundError(2, "No such file", "data.csv"), manifest)
+
+
+@pytest.mark.parametrize("odd", ["code", "__cause__"])
+def test_an_odd_system_exit_still_reads_as_an_exit(odd):
+    from strata.notebook import cell_traceback
+
+    def unreadable(self):
+        raise ValueError
+
+    odd_exit = type("OddExit", (SystemExit,), {odd: property(unreadable)})
+    message = escaped = None
+    try:
+        with cell_traceback.exit_fails_the_cell():
+            raise odd_exit
+    except RuntimeError as exc:
+        message = str(exc)
+    except BaseException as exc:
+        escaped = type(exc).__name__
+    # Failed outside the handler, so pytest never formats the odd exit itself.
+    assert escaped is None, escaped
+    assert message == "the cell exited, which stops it before its end"
+
+
+def test_a_traceback_with_no_frames_has_no_header(monkeypatch):
+    from strata.notebook import cell_traceback
+
+    def unformattable(exc):
+        raise ValueError
+
+    monkeypatch.setattr(cell_traceback, "_from_the_cell", unformattable)
+    fields = cell_traceback.failure_fields(KeyError("x"))
+    assert fields["traceback"] == "KeyError: 'x'\n(its traceback could not be formatted)\n"
+    # What formatted keeps its own text.
+    assert fields["traceback_full"] == "KeyError: 'x'\n"
 
 
 def test_a_file_hint_survives_a_filename_that_raises(tmp_path):
