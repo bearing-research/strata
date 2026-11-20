@@ -8,6 +8,16 @@ exhaustive commit history.
 ## Unreleased
 
 ### Added
+- **`strata agent install` wires the project scratchpad into Claude Code or Codex.** It
+  writes the user-scope MCP entry (through `claude mcp add-json`, with `alwaysLoad`), the
+  `mcp__strata__*` permission and a short block in `CLAUDE.md`, or Codex's
+  `[mcp_servers.strata]` and the block in `AGENTS.md`, and moves a hand-copied
+  `strata-scratchpad` skill aside. `strata agent uninstall` removes exactly that: a file
+  left as it was written gets its original bytes back, an edited one loses only Strata's
+  part, and a `strata` MCP entry of your own comes back. `strata mcp` rewrites the pieces
+  another Strata version wrote as it starts. `strata scratch run -c CODE` and
+  `strata scratch show [NAME]` are the `run` and `scratchpad` tools for an agent with only
+  a shell. (#1594)
 - **A cell's checkpoints are listed in the notebook, and a branch starts from one there.**
   A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
   store still holds, by run (running, interrupted, finished or failed, and which

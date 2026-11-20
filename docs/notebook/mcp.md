@@ -270,6 +270,45 @@ milliseconds each step took. A call that cannot reach the daemon (it stopped whi
 idle) starts it again and is sent once more; a call the agent cancels is cancelled
 on the daemon too. Needs the `[mcp]` extra.
 
+### Install it into the agent: `strata agent install`
+
+```bash
+strata agent install            # every agent whose CLI is on PATH; asks first
+strata agent install --target claude --yes
+strata agent uninstall
+```
+
+`install` writes, for Claude Code, the user-scope MCP entry above (through
+`claude mcp add-json`, with the absolute path of the `strata` it runs as and
+`alwaysLoad`), the `mcp__strata__*` permission in `~/.claude/settings.json`, and a
+short block in `~/.claude/CLAUDE.md` naming the tools and the shell commands
+below, for subagents and harnesses that do not see MCP instructions. For Codex it
+writes an `[mcp_servers.strata]` block in `~/.codex/config.toml` and the same block
+in `~/.codex/AGENTS.md`. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honoured. A
+hand-copied `strata-scratchpad` skill it finds is moved to
+`~/.strata/agent-install/retired-skills/`: the server and the block replace it.
+
+Every piece is marker-fenced or keyed. `uninstall` puts back the original bytes of a
+file left as `install` wrote it, removes only Strata's part from one edited since,
+and puts back a `strata` MCP entry of your own that `install` replaced. A
+`config.toml` with an `[mcp_servers.strata]` of its own, or a `settings.json` that is
+not valid JSON, is refused before anything is written. When another Strata version
+wrote the files, `strata mcp` rewrites them as it starts.
+
+### From a shell: `strata scratch run` and `show`
+
+```bash
+strata scratch run -c 'import pandas as pd; df = pd.read_parquet("/repo/data.parquet"); df.shape'
+strata scratch run --cell c1a2b3c4 -c 'df.describe()'   # replace that cell's source
+strata scratch show df                                   # the cell defining df, its value
+```
+
+The `run` and `scratchpad` tools for an agent that has only a shell: each command
+is one tool call on the project's daemon, starting it if none runs, and prints the
+tool's result as JSON. `run` exits 1 when the cell failed; `--file` reads the source
+from a file (`-` for stdin) and `--fresh` runs it again whatever its cache says.
+Needs the `[mcp]` extra.
+
 ## Tools
 
 | Tool | Description |

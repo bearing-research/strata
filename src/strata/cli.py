@@ -720,7 +720,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "One-command on-ramp: create-or-open a notebook, start (or reuse) a "
             "server with the MCP endpoint enabled, open a session, write the "
             ".mcp.json + CLAUDE.md a coding agent needs, and attach the TUI. "
-            "Then run `claude` in the notebook directory to drive it."
+            "Then run `claude` in the notebook directory to drive it. "
+            "`strata agent install` (and `uninstall`) wires the project scratchpad into "
+            "Claude Code's or Codex's own config instead."
         ),
     )
     add_agent_arguments(agent_parser)
@@ -758,6 +760,37 @@ def _build_parser() -> argparse.ArgumentParser:
         if name == "start":
             sub.add_argument("--python", help=_PYTHON_HELP)
         sub.set_defaults(func=_dispatch_scratch)
+    run_parser = scratch_sub.add_parser(
+        "run",
+        help="Run Python in the scratchpad, as the MCP `run` tool does; print its result",
+        description=(
+            "For an agent without the MCP tools. Adds a cell (or, with --cell, replaces "
+            "that one's source) and runs it on the project's scratchpad daemon, starting "
+            "it if none runs. Prints the result as JSON; exits 1 when the cell failed."
+        ),
+    )
+    run_source = run_parser.add_mutually_exclusive_group(required=True)
+    run_source.add_argument("-c", "--code", help="The cell's source")
+    run_source.add_argument("--file", help="A file holding the cell's source (`-` for stdin)")
+    run_parser.add_argument("--cell", help="Replace this cell's source and run it")
+    run_parser.add_argument(
+        "--fresh", action="store_true", help="Run it again whatever its cache says"
+    )
+    run_parser.add_argument("--root", help=_root_help("to run in"))
+    run_parser.add_argument("--python", help=_PYTHON_HELP)
+    run_parser.set_defaults(func=_dispatch_scratch_call)
+    show_parser = scratch_sub.add_parser(
+        "show",
+        help="Print what the scratchpad holds, as the MCP `scratchpad` tool does",
+        description=(
+            "Every cell's id, variables, status and cost; with a NAME, the cell defining "
+            "it and its value. Starts the daemon if none runs."
+        ),
+    )
+    show_parser.add_argument("name", nargs="?", help="A variable the scratchpad defines")
+    show_parser.add_argument("--root", help=_root_help("to show"))
+    show_parser.add_argument("--python", help=_PYTHON_HELP)
+    show_parser.set_defaults(func=_dispatch_scratch_call)
     ls_parser = scratch_sub.add_parser(
         "ls", help="List every scratchpad: size, last use, daemon, overage"
     )
@@ -910,10 +943,123 @@ def _dispatch_mcp(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    from strata import agent_install
+    from strata.scratch import resolve_anchor
+
+    try:
+        agent_install.refresh()
+    except (OSError, agent_install.InstallError) as exc:
+        # Never in the way of the server the agent is waiting for.
+        print(f"strata mcp: could not refresh the installed agent config: {exc}", file=sys.stderr)
+    _use_python(args)
+    return mcp_main(resolve_anchor(args.root))
+
+
+def _dispatch_scratch_call(args: argparse.Namespace) -> int:
+    """``strata scratch run`` / ``show``: one MCP tool call on the project's daemon."""
+    import json
+
+    try:
+        from strata.mcp_bridge import call_once
+    except ModuleNotFoundError as exc:
+        if exc.name is None or not exc.name.startswith("mcp"):
+            raise
+        print(
+            f"strata scratch {args.scratch_command} needs the [mcp] extra: "
+            "uv tool install 'strata-notebook[mcp]'",
+            file=sys.stderr,
+        )
+        return 2
     from strata.scratch import resolve_anchor
 
     _use_python(args)
-    return mcp_main(resolve_anchor(args.root))
+    if args.scratch_command == "run":
+        if args.code is not None:
+            source = args.code
+        elif args.file == "-":
+            source = sys.stdin.read()
+        else:
+            source = Path(args.file).read_text(encoding="utf-8")
+        name = "run"
+        arguments: dict[str, object] = {"source": source, "fresh": args.fresh}
+        if args.cell:
+            arguments["cell"] = args.cell
+    else:
+        name = "scratchpad"
+        arguments = {"name": args.name} if args.name else {}
+    value, failed = call_once(
+        resolve_anchor(args.root),
+        name,
+        arguments,
+        progress=lambda step: print(f"{step}…", file=sys.stderr, flush=True),
+    )
+    print(json.dumps(value, indent=2) if not isinstance(value, str) else value)
+    return 1 if failed else 0
+
+
+def _dispatch_agent_install(args: argparse.Namespace) -> int:
+    from strata import agent_install
+
+    try:
+        if args.agent_command == "uninstall":
+            done = agent_install.uninstall()
+            for change, how in done:
+                print(f"{change.what}: {how} ({change.where})")
+            if not done:
+                print("nothing to remove: Strata wrote no agent config here")
+            return 0
+        if args.target == "auto":
+            targets = agent_install.available_targets()
+            if not targets:
+                print("error: neither `claude` nor `codex` is on PATH; name one with --target")
+                return 2
+        else:
+            targets = args.target.split(",")
+            unknown = sorted(set(targets) - set(agent_install.TARGETS))
+            if unknown:
+                print(f"error: unknown target {', '.join(unknown)}; choose from claude, codex")
+                return 2
+        if not args.yes:
+            if not sys.stdin.isatty():
+                print("error: pass --yes to install without asking", file=sys.stderr)
+                return 2
+            answer = input(f"Install the Strata scratchpad for {', '.join(targets)}? [y/N] ")
+            if answer.strip().lower() not in {"y", "yes"}:
+                print("not installed")
+                return 1
+        changes = agent_install.install(targets, agent_install.strata_command())
+    except agent_install.InstallError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    for change in changes:
+        print(f"wrote {change.what} ({change.where})")
+    if not changes:
+        print("already installed")
+    print("`strata agent uninstall` removes it.")
+    return 0
+
+
+def _agent_install_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="strata agent",
+        description=(
+            "Wire the project scratchpad into a coding agent's own config: the MCP server, "
+            "its permission, and a short block in CLAUDE.md / AGENTS.md. `uninstall` "
+            "removes exactly that; a file left as Strata wrote it gets its original bytes."
+        ),
+    )
+    sub = parser.add_subparsers(dest="agent_command", required=True)
+    install = sub.add_parser("install", help="Install the scratchpad for Claude Code or Codex")
+    install.add_argument(
+        "--target",
+        default="auto",
+        help="claude, codex, or both comma-separated (default: auto, every one on PATH)",
+    )
+    install.add_argument("--yes", action="store_true", help="Install without asking")
+    install.set_defaults(func=_dispatch_agent_install)
+    uninstall = sub.add_parser("uninstall", help="Remove what `install` wrote")
+    uninstall.set_defaults(func=_dispatch_agent_install)
+    return parser
 
 
 def _dispatch_scratch(args: argparse.Namespace) -> int:
@@ -1163,8 +1309,16 @@ def _dispatch_watch(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     from strata._uv_runtime import assert_uv_managed_runtime
 
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+    words = sys.argv[1:] if argv is None else argv
+    # `strata agent <path>` opens a notebook; these two words are commands (a notebook
+    # dir named so is reached as ./install).
+    if words[:1] == ["agent"] and words[1:2] in (["install"], ["uninstall"]):
+        parser = _agent_install_parser()
+        args = parser.parse_args(words[1:])
+        args.command = "agent"
+    else:
+        parser = _build_parser()
+        args = parser.parse_args(argv)
 
     if not getattr(args, "command", None):
         parser.print_help()
