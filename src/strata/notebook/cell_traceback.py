@@ -60,11 +60,13 @@ def _exited(what: str, code: object) -> str:
     stops = f"{what} exited, which stops it before its end"
     if code is None:
         return stops
-    if isinstance(code, int):
-        return f"{what} exited with status {code}, which stops it before its end"
+    # Inside the exit's own handler: whatever reading the code raises, the exit stands.
     try:
+        if isinstance(code, int):
+            # A bool too, as its status (True exits 1).
+            return f"{what} exited with status {int(code)}, which stops it before its end"
         text = str(code)
-    except Exception:
+    except BaseException:
         text = "<str() failed>"
     if len(text) > _EXIT_TEXT_MAX:
         text = f"{text[:_EXIT_TEXT_MAX]}..."
@@ -137,8 +139,15 @@ def _from_the_cell(exc: BaseException) -> str:
 def failure_fields(exc: BaseException, hint: str | None = None) -> dict[str, Any]:
     """A failed run's ``error``, ``traceback`` and ``traceback_full``."""
     text = error_text(exc)
+    try:
+        trimmed = _from_the_cell(exc)
+        full = "".join(traceback.format_exception(exc))
+    except Exception as failed:
+        # The exception's own attributes can raise (a NameError's ``name``): every
+        # path still reports the failure, without its traceback.
+        trimmed = full = f"{text}\n(its traceback could not be formatted: {error_text(failed)})"
     return {
         "error": f"{text}\n{hint}" if hint else text,
-        "traceback": _from_the_cell(exc),
-        "traceback_full": "".join(traceback.format_exception(exc)),
+        "traceback": trimmed,
+        "traceback_full": full,
     }

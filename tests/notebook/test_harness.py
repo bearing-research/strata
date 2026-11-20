@@ -726,6 +726,13 @@ _STOPS = "which stops it before its end"
             "sys.exit(type('Bad', (), {'__str__': lambda self: 1 / 0})())",
             f"the cell exited, {_STOPS}: <str() failed>",
         ),
+        ("sys.exit(True)", f"the cell exited with status 1, {_STOPS}"),
+        # More digits than Python turns into text.
+        ("sys.exit(10 ** 5000)", f"the cell exited, {_STOPS}: <str() failed>"),
+        (
+            "sys.exit(type('Bad', (), {'__str__': lambda self: sys.exit(2)})())",
+            f"the cell exited, {_STOPS}: <str() failed>",
+        ),
         # A message is the cell's own error text: whole, its lines kept.
         (
             "sys.exit('Config errors:\\n- missing key A\\n- missing key B')",
@@ -825,21 +832,56 @@ def test_an_exception_whose_str_raises_is_still_reported(harness_script):
 
 
 def test_a_failure_the_handler_cannot_report_still_writes_a_result(harness_script):
-    """Its hints read the exception too (a NameError's name): should one raise, the
-    result still says so, with the cell's print trail."""
+    """Should reporting the failure itself raise, the result still says so, with the
+    cell's print trail."""
     source = (
+        "import sys\n"
         "print('step 1 done')\n"
-        "class Odd(NameError):\n"
-        "    @property\n"
-        "    def name(self):\n"
-        "        raise ValueError\n"
-        "raise Odd()\n"
+        "def broken(*args, **kwargs):\n"
+        "    raise ValueError\n"
+        "sys.modules['_nb_cell_traceback'].failure_fields = broken\n"
+        "raise KeyError('x')\n"
     )
     result = run_harness(harness_script, {"source": source, "inputs": {}})
 
     assert result["success"] is False
     assert result["error"] == "the harness failed reporting the cell's failure"
     assert result["stdout"] == "step 1 done\n"
+
+
+@pytest.mark.parametrize(
+    ("base", "attribute"), [("FileNotFoundError", "filename"), ("NameError", "name")]
+)
+def test_an_exception_whose_attributes_raise_is_its_own_error(
+    harness_script, tmp_path, base, attribute
+):
+    """The hints and the traceback read them: a failure is still reported as itself."""
+    source = (
+        f"class Odd({base}):\n"
+        "    @property\n"
+        f"    def {attribute}(self):\n"
+        "        raise ValueError\n"
+        "raise Odd('it broke')\n"
+    )
+    manifest = {"source": source, "inputs": {}, "notebook_dir": str(tmp_path)}
+    result = run_harness(harness_script, manifest)
+
+    assert result["success"] is False
+    assert result["error"] == "Odd: it broke", result
+
+
+def test_failure_fields_survive_a_traceback_that_cannot_be_formatted():
+    """What the warm worker and a batch report, with no fallback of their own."""
+    from strata.notebook import cell_traceback
+
+    class Odd(NameError):
+        @property
+        def name(self):
+            raise ValueError
+
+    fields = cell_traceback.failure_fields(Odd("it broke"))
+    assert fields["error"] == "Odd: it broke"
+    assert "its traceback could not be formatted: ValueError" in fields["traceback"]
 
 
 def test_a_file_hint_survives_a_filename_that_raises(tmp_path):

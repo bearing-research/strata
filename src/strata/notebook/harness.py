@@ -193,7 +193,13 @@ def inject_tables(manifest: dict, namespace: dict) -> None:
 
 def no_client_hint(exc: BaseException, manifest: dict) -> str | None:
     """Why ``strata`` is undefined on a worker, in place of a bare ``NameError``."""
-    if manifest.get("strata_url") or not isinstance(exc, NameError) or exc.name != "strata":
+    if manifest.get("strata_url") or not isinstance(exc, NameError):
+        return None
+    try:
+        # A subclass's own ``name`` may raise: no hint, and the failure still reported.
+        if exc.name != "strata":
+            return None
+    except Exception:
         return None
     text = (
         "A cell on a worker has no ambient `strata` client, so it cannot scan or read "
