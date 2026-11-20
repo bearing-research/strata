@@ -290,11 +290,13 @@ hand-copied `strata-scratchpad` skill it finds is moved to
 and `uninstall` puts it back.
 
 Every piece is marker-fenced or keyed. `uninstall` puts back the original bytes of a
-file left as `install` wrote it, removes only Strata's part from one edited since,
-and puts back a `strata` MCP entry of your own that `install` replaced. It works from
-the directories `install` wrote into, whatever `CLAUDE_CONFIG_DIR` says now. A
-`config.toml` with an `[mcp_servers.strata]` of its own, or a `settings.json` that is
-not valid JSON, is refused before anything is written. The `strata` written is the one
+file left as `install` wrote it and removes only Strata's part from one edited since.
+It works from the directories `install` wrote into, whatever `CLAUDE_CONFIG_DIR` says
+now. A `strata` MCP server of your own (Claude Code's, or a `config.toml`
+`[mcp_servers.strata]`), a missing `claude` CLI, or a `settings.json` that is not valid
+JSON, is refused before anything is written: remove yours (`claude mcp remove --scope
+user strata`) and install again. An install that fails halfway is recorded, so
+`uninstall` still removes what it wrote. The `strata` written is the one
 that runs `install`: refused from uv's cache (`uvx`), and warned about from a project's
 environment, since every project's agent would use it; `uv tool install` is the
 lasting choice. Ending `strata scratch run` (Ctrl-C, or a shell tool's timeout

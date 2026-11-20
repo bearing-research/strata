@@ -14,8 +14,8 @@ exhaustive commit history.
   `[mcp_servers.strata]` and the block in `AGENTS.md`, and moves a hand-copied
   `strata-scratchpad` skill aside. `strata agent uninstall` removes exactly that, from the
   directories it went into: a file left as it was written gets its original bytes back, an
-  edited one loses only Strata's part, and a `strata` MCP entry of your own and the skill
-  come back. `strata mcp` rewrites the pieces
+  edited one loses only Strata's part, and the skill comes back. A `strata` MCP server
+  of your own is refused, never replaced. `strata mcp` rewrites the pieces
   another Strata version wrote as it starts. `strata scratch run -c CODE` and
   `strata scratch show [NAME]` are the `run` and `scratchpad` tools for an agent with only
   a shell. (#1594)

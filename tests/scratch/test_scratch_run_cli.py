@@ -91,3 +91,16 @@ def _eventually(check, attempts: int = 600) -> bool:
             return True
         time.sleep(0.1)
     return False
+
+
+@pytest.mark.parametrize("raised", ["scratch", "http"])
+def test_a_call_that_fails_is_a_json_error_not_a_traceback(tmp_path, monkeypatch, capsys, raised):
+    def fails(root, progress=None):
+        if raised == "scratch":
+            raise scratch.ScratchError("no project here")
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(scratch, "ensure_daemon", fails)
+
+    assert main(["scratch", "run", "-c", "x = 1", "--root", str(tmp_path)]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "error"

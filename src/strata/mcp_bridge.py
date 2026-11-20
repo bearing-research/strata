@@ -296,7 +296,11 @@ def call_once(
         upstream = Upstream()
         try:
             for attempt in range(2):
-                daemon = await anyio.to_thread.run_sync(scratch.ensure_daemon, root, progress)
+                # Abandoned on a SIGTERM: a first run's setup takes seconds, past which a
+                # shell tool kills harder.
+                daemon = await anyio.to_thread.run_sync(
+                    scratch.ensure_daemon, root, progress, abandon_on_cancel=True
+                )
                 try:
                     await upstream.open(daemon.url)
                     result = await upstream.call_tool(name, arguments)
@@ -318,11 +322,17 @@ def call_once(
         an agent's shell tool ends a command that outlives its timeout so."""
         nonlocal terminated
         result: dict[str, Any] | None = None
+        failure: Exception | None = None
         async with anyio.create_task_group() as group:
 
             async def run() -> None:
-                nonlocal result
-                result = await call()
+                nonlocal result, failure
+                try:
+                    result = await call()
+                except Exception as exc:
+                    # Raised after the group, as itself: the group would wrap it in an
+                    # ExceptionGroup, which the caller's handlers do not catch.
+                    failure = exc
                 group.cancel_scope.cancel()
 
             async def on_terminate() -> None:
@@ -336,6 +346,8 @@ def call_once(
             group.start_soon(run)
             if sys.platform != "win32":
                 group.start_soon(on_terminate)
+        if failure is not None:
+            raise failure
         return result
 
     try:

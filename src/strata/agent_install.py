@@ -6,7 +6,8 @@ Per target, every piece is keyed or marker-fenced, so ``uninstall`` removes what
 - Claude Code: the user-scope MCP entry, through the ``claude`` CLI (which owns
   ``~/.claude.json`` and may be writing it); the ``mcp__strata__*`` permission in
   ``settings.json``; a block in ``CLAUDE.md``, for subagents and harnesses that do not
-  see MCP instructions. A hand-copied scratchpad skill is moved aside, and back.
+  see MCP instructions. A hand-copied scratchpad skill is moved aside, and back. A
+  ``strata`` entry of the user's own is refused, as Codex's is.
 - Codex: an ``[mcp_servers.strata]`` block in ``config.toml``; a block in ``AGENTS.md``.
 
 A file Strata writes is backed up first. ``uninstall`` puts its original bytes back
@@ -41,7 +42,7 @@ TARGETS = ("claude", "codex")
 SERVER_NAME = "strata"
 PERMISSION = "mcp__strata__*"
 _SKILL = "strata-scratchpad"
-_STATE_VERSION = 2
+_STATE_VERSION = 3
 
 
 class InstallError(RuntimeError):
@@ -98,10 +99,12 @@ def strata_command() -> tuple[str, str | None]:
             f"this strata runs from uv's cache ({real}), which uv cleans up; install it "
             "with `uv tool install 'strata-notebook[mcp]'` and run `strata agent install` again"
         )
-    in_tool = re.search(r"[/\\]uv[/\\]tools[/\\]", real) is not None
-    if not in_tool and sys.prefix != sys.base_prefix:
+    # uv's tool dir: ``~/.local/share/uv/tools`` on POSIX, ``%APPDATA%\\uv\\data\\tools``.
+    in_tool = re.search(r"[/\\]uv[/\\](data[/\\])?tools[/\\]", real) is not None
+    environment = Path(real).parent.parent
+    if not in_tool and (environment / "pyvenv.cfg").exists():
         return str(command), (
-            f"the agent config runs {command}, in the environment {sys.prefix}: every "
+            f"the agent config runs {command}, in the environment {environment}: every "
             "project's agent uses it, so removing that environment breaks them all. "
             "`uv tool install 'strata-notebook[mcp]'` is the lasting choice"
         )
@@ -349,27 +352,29 @@ def _revert(piece: _FilePiece, state: dict[str, Any]) -> tuple[Change, str] | No
 def _claude_json(record: dict[str, Any]) -> Path:
     # Where the claude CLI keeps user-scope MCP servers: beside the config dir it was
     # pointed at, else in the home directory.
-    return (
-        Path(record["dir"]) / ".claude.json"
-        if record["configured"]
-        else Path.home() / ".claude.json"
-    )
+    if record["configured"]:
+        return Path(record["dir"]) / ".claude.json"
+    return Path.home() / ".claude.json"
 
 
 def _claude(record: dict[str, Any], *args: str) -> None:
     claude = shutil.which("claude")
     if claude is None:
-        raise InstallError(
-            "the `claude` CLI is not on PATH; install Claude Code or pass --target codex"
-        )
+        raise InstallError(_NO_CLAUDE)
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
     if record["configured"]:
         env["CLAUDE_CONFIG_DIR"] = record["dir"]
-    done = subprocess.run(
-        [claude, "mcp", *args], capture_output=True, text=True, timeout=120, env=env
-    )
+    try:
+        done = subprocess.run(
+            [claude, "mcp", *args], capture_output=True, text=True, timeout=120, env=env
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise InstallError(f"`claude mcp {args[0]}` did not run: {exc}") from exc
     if done.returncode != 0:
         raise InstallError(f"`claude mcp {args[0]}` failed: {(done.stderr or done.stdout).strip()}")
+
+
+_NO_CLAUDE = "the `claude` CLI is not on PATH; install Claude Code or pass --target codex"
 
 
 def _claude_entry(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -395,43 +400,48 @@ def _same_server(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
     return (a.get("command"), a.get("args")) == (b.get("command"), b.get("args"))
 
 
-def _install_claude_entry(
-    command: str, record: dict[str, Any], save: Callable[[], None]
-) -> Change | None:
+def _check_claude(record: dict[str, Any]) -> None:
+    """Refuse before anything is written: no ``claude``, or a ``strata`` entry not Strata's.
+
+    One of the user's own is theirs to remove, as Codex's is: replacing it and putting it
+    back would leave it lost whenever the CLI fails between the two.
+    """
+    if shutil.which("claude") is None:
+        raise InstallError(_NO_CLAUDE)
+    existing = _claude_entry(record)
+    if existing is not None and not _same_server(existing, record.get("entry")):
+        raise InstallError(
+            f"Claude Code already has its own `strata` MCP server in {_claude_json(record)}; "
+            "remove it with `claude mcp remove --scope user strata` and run this again, or "
+            "install for Codex only with --target codex"
+        )
+
+
+def _install_claude_entry(command: str, record: dict[str, Any]) -> Change | None:
     ours = _mcp_entry(command)
     existing = _claude_entry(record)
     if _same_server(existing, ours) and existing is not None and existing.get("alwaysLoad"):
         record["entry"] = ours
         return None
     if existing is not None:
-        if not _same_server(existing, record.get("entry")):
-            # Someone else's (the user's own): kept, to put back, before it is removed.
-            record["previous_entry"] = existing
-            save()
+        # Strata's own, from an earlier install (another command): replaced.
         _claude(record, "remove", "--scope", "user", SERVER_NAME)
     try:
         _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(ours))
     except InstallError:
-        previous = record.get("previous_entry")
-        if existing is not None and previous is not None:
-            _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(previous))
+        if existing is not None:
+            _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(existing))
         raise
     record["entry"] = ours
     return Change("MCP server strata (user scope)", _claude_json(record))
 
 
 def _uninstall_claude_entry(record: dict[str, Any]) -> tuple[Change, str] | None:
-    existing = _claude_entry(record)
-    if not _same_server(existing, record.get("entry")):
+    if not _same_server(_claude_entry(record), record.get("entry")):
         # Not Strata's (replaced since, or removed): left as it is.
         return None
     _claude(record, "remove", "--scope", "user", SERVER_NAME)
-    change = Change("MCP server strata (user scope)", _claude_json(record))
-    previous = record.get("previous_entry")
-    if previous is not None:
-        _claude(record, "add-json", "--scope", "user", SERVER_NAME, json.dumps(previous))
-        return change, "put back the one there before"
-    return change, "removed"
+    return Change("MCP server strata (user scope)", _claude_json(record)), "removed"
 
 
 # --- the skill ---------------------------------------------------------------------
@@ -449,20 +459,24 @@ def _retire_skill(record: dict[str, Any]) -> list[Change]:
         destination = destination.with_name(f"{_SKILL}-{suffix}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(skill), destination)
-    record["skill"] = [str(skill), str(destination)]
+    record.setdefault("skills", []).append([str(skill), str(destination)])
     return [Change(f"retired skill, moved to {destination}", skill)]
 
 
-def _restore_skill(record: dict[str, Any]) -> tuple[Change, str] | None:
-    moved = record.get("skill")
-    if moved is None:
-        return None
-    skill, destination = Path(moved[0]), Path(moved[1])
-    if skill.exists() or not destination.exists():
-        return None
-    skill.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(destination), skill)
-    return Change("skill", skill), "put back"
+def _restore_skill(record: dict[str, Any]) -> list[tuple[Change, str]]:
+    """The newest retired copy back in place; any older one is said where it stays."""
+    done: list[tuple[Change, str]] = []
+    for skill, destination in reversed(record.get("skills") or []):
+        skill, destination = Path(skill), Path(destination)
+        if not destination.exists():
+            continue
+        if skill.exists():
+            done.append((Change("an older copy of the skill", destination), "left there"))
+            continue
+        skill.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(destination), skill)
+        done.append((Change("skill", skill), "put back"))
+    return done
 
 
 # --- commands ----------------------------------------------------------------------
@@ -473,33 +487,47 @@ def available_targets() -> list[str]:
     return [target for target in TARGETS if shutil.which(target)]
 
 
+def _target_key(target: str, base: Path, configured: bool) -> str:
+    # Claude's entry lives beside a configured dir, else in the home directory: two installs.
+    where = ":configured" if target == "claude" and configured else ""
+    return f"{target}:{base}{where}"
+
+
 def install(targets: list[str], command: str) -> list[Change]:
     changes: list[Change] = []
     with _lock():
         state = _load_state()
         found = {target: _config_dir(target) for target in targets}
-        # Every file checked before anything is written: a refusal leaves nothing behind.
+        records = {
+            target: state["targets"].get(_target_key(target, base, configured))
+            or {"target": target, "dir": str(base), "configured": configured}
+            for target, (base, configured) in found.items()
+        }
+        # Every piece checked before anything is written: a refusal leaves nothing behind.
         for target, (base, _) in found.items():
+            if target == "claude":
+                _check_claude(records[target])
             for piece in _file_pieces(target, base, command):
                 piece.add(_read(piece.path) or "")
         try:
             for target, (base, configured) in found.items():
-                record = state["targets"].setdefault(
-                    f"{target}:{base}",
-                    {"target": target, "dir": str(base), "configured": configured},
-                )
+                record = records[target]
+                # Recorded before its first write, so a failure halfway is still undone;
+                # complete only once all of it is written, which ``refresh`` waits for.
+                record["complete"] = False
+                state["targets"][_target_key(target, base, configured)] = record
                 if target == "claude":
-                    entry = _install_claude_entry(command, record, lambda: _save_state(state))
+                    entry = _install_claude_entry(command, record)
                     changes += [entry] if entry else []
                 for piece in _file_pieces(target, base, command):
                     change = _apply(piece, state)
                     changes += [change] if change else []
                 if target == "claude":
                     changes += _retire_skill(record)
+                record["complete"] = True
             state["version"] = version("strata-notebook")
             state["command"] = command
         finally:
-            # What was done is recorded even when a later step failed, so it can be undone.
             state.setdefault("command", command)
             _save_state(state)
     return changes
@@ -518,8 +546,7 @@ def uninstall() -> list[tuple[Change, str]]:
                 if target == "claude":
                     entry = _uninstall_claude_entry(record)
                     done += [entry] if entry else []
-                    skill = _restore_skill(record)
-                    done += [skill] if skill else []
+                    done += _restore_skill(record)
                 del state["targets"][key]
         finally:
             _save_state(state)
@@ -529,7 +556,8 @@ def uninstall() -> list[tuple[Change, str]]:
 def refresh() -> list[Change]:
     """Rewrite the file pieces another Strata version wrote; nothing if none did.
 
-    For ``strata mcp`` on start. The MCP entry is left as it is: it started this.
+    For ``strata mcp`` on start. The MCP entry is left as it is: it started this. A
+    target whose install failed halfway is left for ``install`` or ``uninstall``.
     """
     if not _state_path().exists():
         return []
@@ -540,6 +568,8 @@ def refresh() -> list[Change]:
         changes: list[Change] = []
         try:
             for record in state["targets"].values():
+                if not record.get("complete"):
+                    continue
                 for piece in _file_pieces(record["target"], Path(record["dir"]), state["command"]):
                     change = _apply(piece, state)
                     changes += [change] if change else []

@@ -22,13 +22,14 @@ STRATA = "/opt/tools/bin/strata"
 _FAKE_CLAUDE = """\
 import json, os, sys
 from pathlib import Path
-path = Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json"
+configured = os.environ.get("CLAUDE_CONFIG_DIR")
+path = Path(configured or os.environ["HOME"]) / ".claude.json"
 data = json.loads(path.read_text()) if path.exists() else {}
 servers = data.setdefault("mcpServers", {})
 verb, name = sys.argv[2], sys.argv[5]
 assert sys.argv[1] == "mcp" and sys.argv[3:5] == ["--scope", "user"], sys.argv
 if verb == "add-json":
-    if os.environ.get("FAKE_CLAUDE_REJECTS") and "alwaysLoad" in sys.argv[6]:
+    if json.loads(sys.argv[6])["command"] == os.environ.get("FAKE_CLAUDE_REJECTS"):
         sys.exit("unknown key alwaysLoad")
     if name in servers:
         sys.exit(f"MCP server {name} already exists in user config")
@@ -47,6 +48,8 @@ def agent_home(tmp_path, monkeypatch):
     codex = tmp_path / "codex-home"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
     monkeypatch.setenv("CODEX_HOME", str(codex))
+    # The claude CLI's default, beside the home directory: the test's own.
+    monkeypatch.setenv("HOME", str(Path.home()))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     script = bin_dir / "claude"
@@ -154,17 +157,19 @@ def test_a_file_edited_after_install_keeps_the_edit_and_loses_only_strata(agent_
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the fake claude is a shebang script")
-def test_the_users_own_strata_entry_is_put_back(agent_home):
+def test_the_users_own_strata_entry_is_refused_and_nothing_is_written(agent_home):
+    """Theirs to remove, as Codex's is: replacing it and putting it back loses it whenever
+    the CLI fails between the two."""
     claude, _ = agent_home
     claude.mkdir()
-    theirs = {"type": "stdio", "command": "strata", "args": ["mcp"], "env": {}}
+    theirs = {"type": "stdio", "command": "strata", "args": ["mcp"], "alwaysLoad": True}
     (claude / ".claude.json").write_text(json.dumps({"mcpServers": {"strata": theirs}}))
 
-    agent_install.install(["claude"], STRATA)
-    assert _servers(claude)["strata"]["command"] == STRATA
-    agent_install.uninstall()
+    with pytest.raises(agent_install.InstallError, match="claude mcp remove --scope user"):
+        agent_install.install(["claude"], STRATA)
 
     assert _servers(claude)["strata"] == theirs
+    assert _snapshot(claude) == {}
 
 
 def test_an_existing_codex_strata_server_is_refused_and_nothing_is_written(agent_home):
@@ -347,33 +352,74 @@ _SHEBANG = pytest.mark.skipif(sys.platform == "win32", reason="the fake claude i
 
 
 @_SHEBANG
-def test_a_failure_halfway_leaves_what_was_done_undoable(agent_home, monkeypatch):
+def test_no_claude_cli_is_refused_before_anything_is_written(agent_home, monkeypatch):
     _, codex = agent_home
-    # No claude anywhere on PATH, so the second target fails after the first is written.
     empty = agent_home[0].parent / "empty-bin"
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))
 
     with pytest.raises(agent_install.InstallError, match="`claude` CLI is not on PATH"):
         agent_install.install(["codex", "claude"], STRATA)
+
+    assert _snapshot(codex) == {}
+
+
+@_SHEBANG
+def test_a_failure_halfway_is_undone_and_never_finished_by_a_refresh(agent_home, monkeypatch):
+    claude, codex = agent_home
+    monkeypatch.setenv("FAKE_CLAUDE_REJECTS", STRATA)
+
+    with pytest.raises(agent_install.InstallError, match="unknown key alwaysLoad"):
+        agent_install.install(["codex", "claude"], STRATA)
     assert (codex / "AGENTS.md").exists()
+    # A later `strata mcp` (Codex's) must not write Claude's half.
+    monkeypatch.setattr(agent_install, "version", lambda name: "9.9.9")
+    agent_install.refresh()
+    assert _snapshot(claude) == {}
     agent_install.uninstall()
 
     assert _snapshot(codex) == {}
 
 
 @_SHEBANG
-def test_a_failed_add_puts_the_users_own_entry_back(agent_home, monkeypatch):
+def test_a_failed_add_puts_strata_s_earlier_entry_back(agent_home, monkeypatch):
     claude, _ = agent_home
-    claude.mkdir()
-    theirs = {"type": "stdio", "command": "strata", "args": ["mcp"]}
-    (claude / ".claude.json").write_text(json.dumps({"mcpServers": {"strata": theirs}}))
-    monkeypatch.setenv("FAKE_CLAUDE_REJECTS", "1")
+    agent_install.install(["claude"], STRATA)
+    monkeypatch.setenv("FAKE_CLAUDE_REJECTS", "/new/strata")
 
     with pytest.raises(agent_install.InstallError, match="unknown key alwaysLoad"):
+        agent_install.install(["claude"], "/new/strata")
+
+    assert _servers(claude)["strata"]["command"] == STRATA
+
+
+def test_a_claude_cli_that_hangs_is_an_install_error(agent_home, monkeypatch):
+    import subprocess
+
+    def hangs(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 120)
+
+    monkeypatch.setattr(agent_install.subprocess, "run", hangs)
+
+    with pytest.raises(agent_install.InstallError, match="did not run"):
         agent_install.install(["claude"], STRATA)
 
-    assert _servers(claude)["strata"] == theirs
+
+@_SHEBANG
+def test_the_default_location_and_a_configured_one_are_two_installs(agent_home, monkeypatch):
+    """Claude reads ``~/.claude.json`` by default, and ``$CLAUDE_CONFIG_DIR/.claude.json``
+    when it is set, though both name ``~/.claude``."""
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    default = Path.home() / ".claude"
+    agent_install.install(["claude"], STRATA)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(default))
+    agent_install.install(["claude"], STRATA)
+
+    assert _servers(Path.home())["strata"]["command"] == STRATA
+    assert _servers(default)["strata"]["command"] == STRATA
+    agent_install.uninstall()
+    assert "strata" not in _servers(Path.home())
+    assert "strata" not in _servers(default)
 
 
 @_SHEBANG
@@ -414,7 +460,7 @@ def test_an_entry_the_cli_stores_its_own_way_is_still_strata_s(agent_home):
 
 
 @_SHEBANG
-def test_an_entry_the_user_added_between_installs_comes_back(agent_home):
+def test_an_entry_the_user_put_in_place_since_is_refused_and_kept(agent_home):
     claude, _ = agent_home
     agent_install.install(["claude"], STRATA)
     data = json.loads((claude / ".claude.json").read_text())
@@ -422,7 +468,8 @@ def test_an_entry_the_user_added_between_installs_comes_back(agent_home):
     data["mcpServers"]["strata"] = theirs
     (claude / ".claude.json").write_text(json.dumps(data))
 
-    agent_install.install(["claude"], STRATA)
+    with pytest.raises(agent_install.InstallError, match="already has its own"):
+        agent_install.install(["claude"], STRATA)
     agent_install.uninstall()
 
     assert _servers(claude)["strata"] == theirs
@@ -449,9 +496,15 @@ def test_the_skill_comes_back_on_uninstall(agent_home):
     (skill / "SKILL.md").write_text("old")
 
     agent_install.install(["claude"], STRATA)
-    agent_install.uninstall()
+    # Copied in again and retired again: the newest comes back, the older is said.
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("newer")
+    agent_install.install(["claude"], STRATA)
+    done = agent_install.uninstall()
 
-    assert (skill / "SKILL.md").read_text() == "old"
+    assert (skill / "SKILL.md").read_text() == "newer"
+    (older,) = [change.where for change, what in done if what == "left there"]
+    assert (older / "SKILL.md").read_text() == "old"
 
 
 @pytest.mark.parametrize(
@@ -459,16 +512,19 @@ def test_the_skill_comes_back_on_uninstall(agent_home):
     [
         ("cache/uv/archive-v0/abc/bin/strata", "refused"),
         ("share/uv/tools/strata-notebook/bin/strata", "quiet"),
+        ("AppData/Roaming/uv/data/tools/strata-notebook/bin/strata", "quiet"),
         ("repo/.venv/bin/strata", "warned"),
+        ("opt/bin/strata", "quiet"),
     ],
 )
 def test_the_command_written_is_a_lasting_one(tmp_path, monkeypatch, where, outcome):
     command = tmp_path / where
     command.parent.mkdir(parents=True)
     command.write_text("")
+    # Every environment has one, a uv tool's too; told apart by where it is.
+    if "/bin/" in where and not where.startswith("opt"):
+        (command.parent.parent / "pyvenv.cfg").write_text("")
     monkeypatch.setattr(sys, "argv", [str(command), "agent", "install"])
-    # As in a project's environment, which the test suite runs in too.
-    monkeypatch.setattr(sys, "base_prefix", "/somewhere/else")
 
     if outcome == "refused":
         with pytest.raises(agent_install.InstallError, match="uv's cache"):
