@@ -4372,6 +4372,14 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell that calls <code>sys.exit()</code> fails like one that raises.</strong> Its error says the cell
+  exited, with the cell's own traceback, alone, on the cold and the warm path, in a run-all
+  batch and in <code>@loop_until</code>; <code>exit()</code> at the inspect prompt fails that line. Before, the
+  cold harness left an empty result file, the warm worker exited without a result, and a
+  batch's process exited with no frame for the cell. An interrupt (Ctrl-C in the server's
+  terminal) now leaves a result on the cold and the warm path, and a failure whose
+  exception cannot be read (a <code>str()</code> or an attribute that raises) is still reported as
+  itself. (#1591)</li>
 <li><strong>A scratchpad cell can read a value that needs the project's code.</strong> A project class,
   a module, a cell's function, or what a pickled value imports as it loads resolves with
   the project first on <code>sys.path</code>, as an import in the cell does, instead of failing with
