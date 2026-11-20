@@ -28,7 +28,8 @@ harness_path <- file.path(dirname(sub(
 )), "harness.R")
 
 emit_error_line <- function(message) {
-  cat(jsonlite::toJSON(
+  # On its own line: a cell's child may have left one unfinished on the shared fd 1.
+  cat("\n", jsonlite::toJSON(
     list(
       success = FALSE,
       variables = setNames(list(), character(0)),
@@ -89,5 +90,5 @@ result <- tryCatch(
   }
 )
 
-cat(result, "\n", sep = "")
+cat("\n", result, "\n", sep = "")
 flush(stdout())

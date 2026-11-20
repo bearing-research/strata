@@ -286,12 +286,12 @@ class WarmProcessPool:
 _INTERRUPT_EXITS = {-signal.SIGINT, 128 + signal.SIGINT, 0xC000013A}
 
 
-async def _died_of_an_interrupt(process: Any, seconds: float) -> bool:
-    """Whether a worker whose protocol ended was killed by Ctrl-C: it is exiting by then,
-    unless a child it forked holds the protocol too, and then the cell times out instead.
-    Waits no longer than the cell has left, but at least a second, to be reaped."""
+async def _died_of_an_interrupt(process: Any) -> bool:
+    """Whether a worker whose protocol ended was killed by Ctrl-C. It is exiting by then:
+    the wait is past the cell's deadline only when it was all but up, and a pool miss
+    instead would run the cell twice."""
     try:
-        returncode = await asyncio.wait_for(process.wait(), timeout=min(5.0, max(seconds, 1.0)))
+        returncode = await asyncio.wait_for(process.wait(), timeout=5)
     except TimeoutError:
         return False
     return returncode in _INTERRUPT_EXITS
@@ -356,17 +356,13 @@ class PooledCellExecutor:
             await warm_proc.process.stdin.drain()
 
             deadline = asyncio.get_running_loop().time() + timeout_seconds
-            # What a cell's children printed on the protocol: R's worker shares its fd 1
-            # with them (the Python worker does not). The cell's output, as before.
-            outside: list[str] = []
             while True:
                 result_json = await asyncio.wait_for(
                     warm_proc.process.stdout.readline(),
                     timeout=deadline - asyncio.get_running_loop().time(),
                 )
                 if not result_json:
-                    left = deadline - asyncio.get_running_loop().time()
-                    if await _died_of_an_interrupt(warm_proc.process, left):
+                    if await _died_of_an_interrupt(warm_proc.process):
                         # Wherever it landed (a torn line, the worker's own report): the
                         # cell ran, so a cold run would run it twice.
                         return _interrupted_result()
@@ -385,14 +381,11 @@ class PooledCellExecutor:
                         await on_event(value)
                     continue
                 if isinstance(value, dict) and "success" in value:
-                    # The first whole result counts.
-                    if outside:
-                        value["stdout"] = (value.get("stdout") or "") + "".join(outside)
                     return value
-                if not text.startswith("{"):
-                    outside.append(text)
-                # Else a protocol line an interrupt tore: dropped. None would run the cell
-                # again cold.
+                # A protocol line an interrupt tore (None would run the cell again cold),
+                # or what a child of an R cell printed: R's worker shares its fd 1 with
+                # them. Dropped, as the cold paths drop a child's output.
+                logger.debug("Warm process line dropped: %.200r", text)
 
         except asyncio.CancelledError:
             logger.info(

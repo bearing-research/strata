@@ -155,19 +155,22 @@ async def test_a_torn_line_is_skipped_for_the_next(tmp_path, torn):
 
 @pytest.mark.asyncio
 async def test_a_line_a_child_wrote_is_the_cells_output_not_the_result(tmp_path):
-    """R's worker shares its fd 1 with the cell's children; a torn protocol line is not
-    output."""
-    data = b'42\nnull\n{"success": tr\n\n{"success": true, "variables": {}, "stdout": "own\\n"}\n'
+    """R's worker shares its fd 1 with the cell's children: their lines are dropped, as
+    the cold path drops them, and none passes for the result."""
+    data = (
+        b'42\nnull\n{"items": [1]}\n{"success": tr\n'
+        b'\n{"success": true, "variables": {}, "stdout": "own\\n"}\n'
+    )
 
     result = await _pooled(tmp_path, data)
 
-    assert result == {"success": True, "variables": {}, "stdout": "own\n42\nnull\n"}
+    assert result == {"success": True, "variables": {}, "stdout": "own\n"}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("returncode", "interrupted"),
-    [(-signal.SIGINT, True), (128 + signal.SIGINT, True), (0, False), (-signal.SIGKILL, False)],
+    [(-signal.SIGINT, True), (128 + signal.SIGINT, True), (0, False), (1, False)],
 )
 async def test_a_worker_an_interrupt_ended_is_a_failed_cell_not_a_pool_miss(
     tmp_path, returncode, interrupted
