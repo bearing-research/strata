@@ -330,22 +330,27 @@ def build_server(root: Path) -> Server:
 
     @asynccontextmanager
     async def lifespan(server: Server) -> AsyncGenerator[None]:
+        nonlocal opening
+        own: BaseException | None = None
         try:
-            async with anyio.create_task_group() as group:
-                opening.group, opening.cancel = group, scratch.SetupCancel()
-                opening.begun = False
-                try:
-                    yield
-                finally:
-                    opening.group = None
-                    opening.cancel.set()
-                    group.cancel_scope.cancel()
-        except BaseExceptionGroup as error:
-            # The server's own error, as itself (its own cause kept): the start raises none.
-            if len(error.exceptions) == 1:
+            try:
+                async with anyio.create_task_group() as group:
+                    # A start of its own: none of an earlier run's state carries over.
+                    opening = _Opening(group=group)
+                    try:
+                        yield
+                    finally:
+                        opening.group = None
+                        opening.cancel.set()
+                        group.cancel_scope.cancel()
+            except BaseExceptionGroup as error:
+                # The server's own error: the start raises none.
+                if len(error.exceptions) != 1:
+                    raise
                 own = error.exceptions[0]
-                raise own from own.__cause__
-            raise
+            if own is not None:
+                # Out of the handler, so its own cause and context stay as they were.
+                raise own
         finally:
             await upstream.aclose()
 

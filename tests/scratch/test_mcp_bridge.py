@@ -97,17 +97,20 @@ async def test_a_project_with_a_scratchpad_starts_its_daemon_as_the_session_open
     project, monkeypatch
 ):
     _made(project)
-    starts = _counted(monkeypatch)
+    done = threading.Event()
+    starts = _counted(monkeypatch, done=done)
     async with _bridge(project) as client:
         # As an agent's session opens: the tool list, no call yet.
         await client.list_tools()
-        async with asyncio.timeout(120):
-            while scratch.find_daemon(project.resolve()) is None:
-                await asyncio.sleep(0.05)
+        assert await asyncio.to_thread(done.wait, 120)
+        # The bridge takes the started daemon up on its loop.
+        await asyncio.sleep(0.2)
         first = _value(await client.call_tool("run", {"source": "1 + 1"}))
     assert first["value"] == 2
-    # The opening's start (no progress sink), none of the call's.
+    # The opening's start (no progress sink), none of the call's, and the call, made once
+    # the start was done, waited for nothing.
     assert starts == [None]
+    assert "setup_ms" not in first
 
 
 def _counted(
@@ -115,22 +118,27 @@ def _counted(
     *,
     entered: threading.Event | None = None,
     release: threading.Event | None = None,
+    done: threading.Event | None = None,
     fails: int = 0,
 ) -> list:
     """Each ensure_daemon's progress sink, in order. Each one sets *entered* and waits for
-    *release*, if given; the first *fails* raise."""
+    *release*, if given; the first *fails* raise; *done* is set as one returns or raises."""
     starts: list[object] = []
     ensure = scratch.ensure_daemon
 
     def counted(*args, **kwargs):
         starts.append(args[1])
-        if entered is not None:
-            entered.set()
-        if release is not None:
-            assert release.wait(60)
-        if len(starts) <= fails:
-            raise PermissionError("the lock")
-        return ensure(*args, **kwargs)
+        try:
+            if entered is not None:
+                entered.set()
+            if release is not None:
+                assert release.wait(60)
+            if len(starts) <= fails:
+                raise PermissionError("the lock")
+            return ensure(*args, **kwargs)
+        finally:
+            if done is not None:
+                done.set()
 
     monkeypatch.setattr(scratch, "ensure_daemon", counted)
     return starts
@@ -186,13 +194,14 @@ async def test_a_project_with_no_scratchpad_starts_nothing_until_a_call(project,
 async def test_a_start_that_fails_as_the_session_opens_is_left_to_the_call(project, monkeypatch):
     _made(project)
     # Not a ScratchError: still the start alone fails, not the session.
-    starts = _counted(monkeypatch, fails=1)
+    done = threading.Event()
+    starts = _counted(monkeypatch, done=done, fails=1)
     async with _bridge(project) as client:
         await client.list_tools()
-        async with asyncio.timeout(60):
-            while not starts:
-                await asyncio.sleep(0.05)
-        # Once a session: a later tool list does not start it again.
+        assert await asyncio.to_thread(done.wait, 60)
+        # The bridge takes the failure up on its loop.
+        await asyncio.sleep(0.2)
+        # Once a session: a later tool list, the failed start over, does not start it again.
         await client.list_tools()
         await asyncio.sleep(0.2)
         assert len(starts) == 1
@@ -241,9 +250,14 @@ async def test_a_session_that_ends_during_the_start_cancels_it(project, monkeypa
 @pytest.mark.asyncio
 async def test_the_servers_own_error_leaves_its_lifespan_as_itself(project):
     server = mcp_bridge.build_server(project)
-    with pytest.raises(LookupError, match="the server's"):
+    with pytest.raises(LookupError, match="the server's") as raised:
         async with server.lifespan(server):
-            raise LookupError("the server's")
+            try:
+                raise KeyError("handled")
+            except KeyError:
+                raise LookupError("the server's") from OSError("its cause")
+    assert isinstance(raised.value.__cause__, OSError)
+    assert isinstance(raised.value.__context__, KeyError)
 
 
 def _refused(url: str) -> bool:
