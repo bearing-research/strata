@@ -3472,8 +3472,9 @@ alongside Markdown and HTML.</p>
 <li><strong>Markdown</strong> (including an <a href="../../reference/annotations/python/#output_dir"><code># @output_dir</code></a>
   folder's summary) rendered as content in markdown exports and as
   preformatted text in HTML.</li>
-<li><strong>Pickled</strong> values become a placeholder with the type hint
-  from the serializer (e.g. <em>Pickled output (<code>&lt;MyThing object&gt;</code>) not rendered in export</em>).</li>
+<li><strong>Pickled</strong> values as text: the serializer's preview, which prints lists, tuples,
+  dicts and sets of plain values as Python would (<code>[(1, 0.5), (2, 0.9)]</code>) and anything
+  else as <code>&lt;MyThing object&gt;</code>.</li>
 <li><strong>An output that could not be stored</strong> (a serialization error)
   renders its error as a text block.</li>
 </ul>

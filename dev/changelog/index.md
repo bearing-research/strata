@@ -534,6 +534,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A pickled value previews as Python prints it, not as its type name.** A list of
+  tuples or a dict with int keys previewed as `<list object>`, so the scratchpad's `run`
+  showed no answer and the agent ran the cell again to print it. Lists, tuples, dicts,
+  sets, the standard library's counters and ordered and default dicts, named tuples and
+  plain values (numbers, strings, dates, decimals, UUIDs, paths, numpy numbers) now print
+  as Python prints them, cut at 1,000 characters; a counter ranks its counts only when
+  they are Python's own numbers. Anything else, a subclass among them, shows as
+  `<Name object>`, so building the preview runs none of the cell's code. The web UI, the
+  TUI and export show the same text. (#1599)
 - **The scratchpad's inventory sees a project file edited under a running daemon.** A
   cell keyed on a module it imported, or a file it read, stayed `ready` in the
   `scratchpad` tool and `strata scratch show` after the file changed, until something

@@ -4393,6 +4393,15 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A pickled value previews as Python prints it, not as its type name.</strong> A list of
+  tuples or a dict with int keys previewed as <code>&lt;list object&gt;</code>, so the scratchpad's <code>run</code>
+  showed no answer and the agent ran the cell again to print it. Lists, tuples, dicts,
+  sets, the standard library's counters and ordered and default dicts, named tuples and
+  plain values (numbers, strings, dates, decimals, UUIDs, paths, numpy numbers) now print
+  as Python prints them, cut at 1,000 characters; a counter ranks its counts only when
+  they are Python's own numbers. Anything else, a subclass among them, shows as
+  <code>&lt;Name object&gt;</code>, so building the preview runs none of the cell's code. The web UI, the
+  TUI and export show the same text. (#1599)</li>
 <li><strong>The scratchpad's inventory sees a project file edited under a running daemon.</strong> A
   cell keyed on a module it imported, or a file it read, stayed <code>ready</code> in the
   <code>scratchpad</code> tool and <code>strata scratch show</code> after the file changed, until something

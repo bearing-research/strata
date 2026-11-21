@@ -6230,8 +6230,9 @@ For each cell, the exporter emits in order:
     - **Markdown** (including an [`# @output_dir`](https://bearingresearch.com/strata/dev/reference/annotations/python/#output_dir)
       folder's summary) rendered as content in markdown exports and as
       preformatted text in HTML.
-    - **Pickled** values become a placeholder with the type hint
-      from the serializer (e.g. *Pickled output (`<MyThing object>`) not rendered in export*).
+    - **Pickled** values as text: the serializer's preview, which prints lists, tuples,
+      dicts and sets of plain values as Python would (`[(1, 0.5), (2, 0.9)]`) and anything
+      else as `<MyThing object>`.
     - **An output that could not be stored** (a serialization error)
       renders its error as a text block.
 4. **Console output**: `stdout` / `stderr` snapshots if present.
