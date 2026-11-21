@@ -3518,9 +3518,13 @@ retired, and its source to run again. <code>strata scratch retire
 config starts as a command:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"strata"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"strata"</span><span class="p">,</span><span class="w"> </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"mcp"</span><span class="p">]}}}</span>
 </code></pre></div>
-<p>It answers the handshake and the tool list itself, so a session that never calls
-a tool starts nothing. The first tool call finds the project's daemon or starts
-it (creating <code>.strata-scratch/</code> if needed), and every call runs there. The
+<p>It answers the handshake and the tool list itself. In a project that already has
+a scratchpad (<code>.strata-scratch/</code>), the session's first tool list starts the
+project's daemon in the background, so the first call does not wait for it; a
+call made while it starts waits for that one, told so as progress. A client that
+only connects, as a health check does, starts nothing. Elsewhere a session that never calls a
+tool starts nothing: the first tool call finds the project's daemon or starts it
+(creating <code>.strata-scratch/</code>). Every call runs there. The
 project is the one <code>strata mcp</code> starts in
 (<a href="#a-projects-own-daemon">A project's own daemon</a>). While the scratchpad is set
 up, each step is sent as MCP progress when the call asks for it, and the result

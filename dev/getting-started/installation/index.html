@@ -3458,7 +3458,7 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 </tr>
 <tr>
 <td><code>uv run strata mcp [--root DIR]</code></td>
-<td>Serve a project's scratchpad to a coding agent as a stdio MCP server, for the agent's MCP config: it lists the tools at once and starts the project's scratchpad daemon on the first tool call. Needs the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/#from-an-agents-config-strata-mcp">MCP server</a>.</td>
+<td>Serve a project's scratchpad to a coding agent as a stdio MCP server, for the agent's MCP config: it lists the tools at once and starts the project's scratchpad daemon as the session opens when the project has a scratchpad, else on the first tool call. Needs the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/#from-an-agents-config-strata-mcp">MCP server</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata export &lt;notebook-dir&gt;</code></td>
