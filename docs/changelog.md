@@ -539,6 +539,18 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Starting a cell no longer installs into its environment.** A Python cell with no
+  warm process started through `uv run`, which syncs the environment first. A
+  `pyproject.toml` edited outside Strata (an editor, an agent, a `git pull`) was then
+  locked and installed by whichever cell next started cold: with
+  `notebook_env_backend = "shared"`, into the environment every notebook with that lock
+  links to, and in any notebook outside its lock on `uv.lock` and its environment log.
+  The harness now starts on the environment's interpreter, as a warm process, a
+  service-mode cell and a scratchpad in its project's environment already did, so such
+  an edit waits for the next sync (opening the notebook, or an environment sync) and
+  a cold cell no longer waits on uv or needs it on `PATH`. A cold cell's environment
+  variables are now a warm one's: uv no longer sets `VIRTUAL_ENV` and puts the
+  environment's `bin` first on `PATH` for it. (#1603)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the

@@ -3318,34 +3318,6 @@ class TestPythonInputs:
 
         assert (tmp_path / "out" / specs["a"]["file"]).read_text() == "bytes"
 
-    def test_the_harness_user_skips_uv(self, monkeypatch):
-        monkeypatch.setattr(python, "resolve_uv", lambda: "/bin/uv")
-
-        command = python.python_harness_command(
-            Path("harness.py"), Path("nb"), Path("m.json"), Path("venv/python"), object()
-        )
-
-        assert command == ["venv/python", "harness.py", "m.json"]
-
-    def test_uv_runs_in_the_notebook(self, monkeypatch):
-        monkeypatch.setattr(python, "resolve_uv", lambda: "/bin/uv")
-
-        command = python.python_harness_command(
-            Path("harness.py"), Path("nb"), Path("m.json"), Path("venv/python"), None
-        )
-
-        assert command == ["/bin/uv", "run", "--directory", "nb", "python", "harness.py", "m.json"]
-
-    def test_without_uv_there_is_no_command(self, monkeypatch):
-        monkeypatch.setattr(python, "resolve_uv", lambda: None)
-
-        assert (
-            python.python_harness_command(
-                Path("harness.py"), Path("nb"), Path("m.json"), Path("venv/python"), None
-            )
-            is None
-        )
-
     @staticmethod
     def _restore_host(state):
         version = SimpleNamespace(
@@ -4506,21 +4478,18 @@ class TestPythonHarness:
             python, "hand_over", lambda path, user: seen.handed.append((path, user))
         )
         monkeypatch.setattr(python, "identity_env", lambda env, user: {"env": env, "user": user})
-        monkeypatch.setattr(python, "uv_env", lambda env: {"uv": env})
         monkeypatch.setattr(python, "spawn_kwargs", lambda user: {"spawned_as": user})
         monkeypatch.setattr(python, "lifeline_handoff", lambda: ((), {"LIFE": "1"}))
         return seen
 
     @staticmethod
-    async def _run(
-        tmp_path, *, command=("harness",), run_token="tok", on_event=None, venv=Path("py")
-    ):
+    async def _run(tmp_path, *, run_token="tok", on_event=None, venv=Path("py")):
         return await python.run_harness(
             SimpleNamespace(
                 path=Path("notebook"),
                 environment_execution_block_message=lambda: TestPythonHarness.MESSAGE,
             ),
-            lambda *_args: None if command is None else list(command),
+            Path("harness.py"),
             lambda extra: {"extra": extra},
             tmp_path / "manifest.json",
             venv,
@@ -4537,9 +4506,10 @@ class TestPythonHarness:
         await self._run(tmp_path)
 
         cmd, kwargs = spawned.spawn
-        assert cmd == ("harness",)
+        # The interpreter itself: ``uv run`` would sync the environment before the cell.
+        assert cmd == ("py", "harness.py", str(tmp_path / "manifest.json"))
         assert spawned.handed == [(tmp_path, self.USER)]
-        assert kwargs["env"] == {"uv": {"env": {"extra": {"LIFE": "1"}}, "user": self.USER}}
+        assert kwargs["env"] == {"env": {"extra": {"LIFE": "1"}}, "user": self.USER}
         assert kwargs["spawned_as"] is self.USER
         assert kwargs["new_group"] is True
         assert kwargs["cwd"] == "notebook"
@@ -4580,13 +4550,6 @@ class TestPythonHarness:
         assert result["error"] == "not here"
         assert spawned.spawn is None
 
-    async def test_no_uv_runs_nothing_and_says_so(self, spawned, tmp_path):
-        result = await self._run(tmp_path, command=None)
-
-        assert result["success"] is False
-        assert result["error"] == python.UV_NOT_FOUND_MESSAGE
-        assert spawned.spawn is None
-
     async def test_a_process_that_cannot_start_leaves_no_pipe_open(
         self, spawned, tmp_path, monkeypatch
     ):
@@ -4616,7 +4579,7 @@ class TestPythonHarness:
 
         _cmd, kwargs = spawned.spawn
         write_fd = kwargs["pass_fds"][0]
-        extra = kwargs["env"]["uv"]["env"]["extra"]
+        extra = kwargs["env"]["env"]["extra"]
         assert extra[python.EVENTS_FD_ENV] == str(write_fd)
         assert spawned.relay == (self._on_event, spawned.proc)
         # Its own copy closed, or the relay would never see the harness exit.

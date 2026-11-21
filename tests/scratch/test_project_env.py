@@ -18,7 +18,6 @@ import pytest
 from strata import cli, scratch
 from strata.notebook import mcp_server
 from strata.notebook.annotation_validation import validate_cell_annotations
-from strata.notebook.cell_paths.python import python_harness_command
 from strata.notebook.env import (
     ATTACHED_IDENTITY,
     OVERLAY_DIR,
@@ -407,15 +406,6 @@ def test_the_record_chooses_the_backend(tmp_path):
     assert isinstance(get_backend(notebook), ProjectEnvBackend)
     # Runtime state: never the committed notebook.toml.
     assert "/p/bin/python" not in (notebook / "notebook.toml").read_text()
-
-
-def test_an_overlay_interpreter_starts_the_harness_itself(tmp_path):
-    overlay = venv_python(tmp_path / OVERLAY_DIR)
-    own = tmp_path / ".venv" / "bin" / "python"
-    direct = python_harness_command(Path("h.py"), tmp_path, Path("m.json"), overlay, None)
-    assert direct == [str(overlay), "h.py", "m.json"]
-    through_uv = python_harness_command(Path("h.py"), tmp_path, Path("m.json"), own, None)
-    assert through_uv is not None and through_uv[1:4] == ["run", "--directory", str(tmp_path)]
 
 
 # --- the session ---

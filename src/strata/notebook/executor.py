@@ -111,7 +111,6 @@ from strata.notebook.cell_paths.python import (
     LocalDispatchContext,
     PythonContext,
     dispatch_local,
-    python_harness_command,
     restore_manifest,
     run_harness,
     run_python_cell,
@@ -133,7 +132,6 @@ from strata.notebook.env import (
 from strata.notebook.execution_result import CellExecutionResult
 from strata.notebook.graph import analysis_with, mounts_of
 from strata.notebook.harness_user import (
-    HarnessUser,
     LocalExecutionRefused,
     UnsafeRunFile,
     hand_over,
@@ -4095,14 +4093,6 @@ class CellExecutor:
     # Harness helpers
     # ------------------------------------------------------------------
 
-    def _harness_command(
-        self, manifest_path: Path, venv_python: Path, harness_user: HarnessUser | None
-    ) -> list[str] | None:
-        """The cold Python harness's argv (see ``cell_paths/python.py``); a test replaces it."""
-        return python_harness_command(
-            self.harness_path, self.session.path, manifest_path, venv_python, harness_user
-        )
-
     async def _run_harness(
         self,
         manifest_path: Path,
@@ -4115,7 +4105,7 @@ class CellExecutor:
         """Run the Python harness (see ``cell_paths/python.py``)."""
         return await run_harness(
             self.session,
-            self._harness_command,
+            self.harness_path,
             self._harness_env,
             manifest_path,
             venv_python,

@@ -37,11 +37,9 @@ from strata.notebook.cell_paths.context import (
 from strata.notebook.cell_paths.context import no_interpreter_message as _no_interpreter_message
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.code_keys import code_key
-from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
-from strata.notebook.env import OVERLAY_DIR, moved_input
+from strata.notebook.env import moved_input
 from strata.notebook.execution_result import CellExecutionResult, hit_console
 from strata.notebook.harness_user import (
-    HarnessUser,
     LocalExecutionRefused,
     UnsafeRunFile,
     hand_over,
@@ -193,40 +191,6 @@ def _add_fetch_inputs(
 def _fenced_result(exc: RunFenced) -> dict[str, Any]:
     """A harness result for a run whose attempt lost its build mid-cell."""
     return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}
-
-
-def python_harness_command(
-    harness_path: Path,
-    notebook_path: Path,
-    manifest_path: Path,
-    venv_python: Path,
-    harness_user: HarnessUser | None,
-) -> list[str] | None:
-    """The argv that starts the cold Python harness; ``None`` without uv.
-
-    A separate method so a test can skip ``uv run`` without replacing the
-    spawn's environment, user and refusal logic.
-    """
-    if harness_user is not None:
-        # Straight to the venv interpreter: ``uv run`` wants a writable uv cache a separate
-        # user would need arranged, and the venv is already synced.
-        return [str(venv_python), str(harness_path), str(manifest_path)]
-    if venv_python.parent.parent == notebook_path / OVERLAY_DIR:
-        # A scratchpad in its project's environment: ``uv run`` would sync and use the
-        # scratchpad's own ``.venv`` instead.
-        return [str(venv_python), str(harness_path), str(manifest_path)]
-    uv = resolve_uv()
-    if uv is None:
-        return None
-    return [
-        uv,
-        "run",
-        "--directory",
-        str(notebook_path),
-        "python",
-        str(harness_path),
-        str(manifest_path),
-    ]
 
 
 def restore_manifest(
@@ -1152,7 +1116,7 @@ async def dispatch_local(
 
 async def run_harness(
     host: ExecutorHost,
-    harness_command: Callable[..., list[str] | None],
+    harness_path: Path,
     harness_env: Callable[[dict[str, str] | None], dict[str, str] | None],
     manifest_path: Path,
     venv_python: Path | None,
@@ -1161,7 +1125,10 @@ async def run_harness(
     run_token: str | None = None,
     on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
-    """Run the harness via uv, or as the harness user; no-op if ``venv_python`` is None.
+    """Run the harness on the notebook's interpreter; no-op if ``venv_python`` is None.
+
+    Never through ``uv run``, which syncs the environment first: an edit to
+    ``pyproject.toml`` would then install into an environment other notebooks share.
 
     A *run_token* goes to the harness on its stdin. With *on_event*, the harness
     gets a pipe for its event lines (``run_channel``), relayed there in order.
@@ -1178,17 +1145,7 @@ async def run_harness(
         harness_user = resolve_harness_user()
     except LocalExecutionRefused as exc:
         return _refused_result(exc)
-    cmd = harness_command(manifest_path, venv_python, harness_user)
-    if cmd is None:
-        # Otherwise every cell dies with a bare ``[Errno 2] ... 'uv'`` (common headless, where
-        # ~/.local/bin isn't on PATH). Mirrors the Rscript guard in _run_r_harness.
-        return {
-            "success": False,
-            "error": UV_NOT_FOUND_MESSAGE,
-            "stderr": "",
-            "stdout": "",
-            "variables": {},
-        }
+    cmd = [str(venv_python), str(harness_path), str(manifest_path)]
 
     # New process group so cancel can signal the whole descendant tree (DataLoader
     # workers, multiprocessing pools); ``proc.kill()`` alone leaks children.
@@ -1216,10 +1173,7 @@ async def run_harness(
                     stdin=asyncio.subprocess.PIPE if run_token is not None else None,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    # ``uv run`` must find the notebook's .venv, not the server's environment.
-                    env=uv_env(
-                        identity_env(harness_env({**lifeline_vars, **events_vars}), harness_user)
-                    ),
+                    env=identity_env(harness_env({**lifeline_vars, **events_vars}), harness_user),
                     pass_fds=(*lifeline_fds, *events_fds),
                     **spawn_kwargs(harness_user),
                     **subprocess_kwargs_for_new_group(),

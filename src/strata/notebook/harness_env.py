@@ -44,7 +44,7 @@ _ESSENTIAL_NAMES = frozenset(
     }
 )
 
-# ``uv run`` finds its cache and the notebook's interpreter through UV_*, Python
+# A cell that runs uv finds its cache and interpreters through UV_*, Python
 # start-up reads PYTHON*, and R and RStudio tools read R_* and RSTUDIO_*.
 _ESSENTIAL_PREFIXES = ("UV_", "LC_", "PYTHON", "VIRTUAL_ENV", "R_", "RSTUDIO_")
 
