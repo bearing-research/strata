@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
 
 import httpx
@@ -95,7 +96,8 @@ def _made(project) -> None:
 async def test_a_project_with_a_scratchpad_starts_its_daemon_as_the_session_opens(project):
     _made(project)
     async with _bridge(project) as client:
-        # No call yet: the session's opening started it.
+        # As an agent's session opens: the tool list, no call yet.
+        await client.list_tools()
         async with asyncio.timeout(120):
             while scratch.find_daemon(project.resolve()) is None:
                 await asyncio.sleep(0.05)
@@ -104,28 +106,64 @@ async def test_a_project_with_a_scratchpad_starts_its_daemon_as_the_session_open
     assert "setup_ms" not in first
 
 
-@pytest.mark.asyncio
-async def test_a_call_while_the_daemon_starts_waits_for_it(project, monkeypatch):
-    _made(project)
+def _counted(monkeypatch, *, release: threading.Event | None = None, fails: int = 0) -> list:
+    """Each ensure_daemon's progress sink, in order; the first *fails* raise, and every one
+    waits for *release* if given."""
     starts: list[object] = []
     ensure = scratch.ensure_daemon
 
     def counted(*args, **kwargs):
         starts.append(args[1])
+        if release is not None:
+            assert release.wait(60)
+        if len(starts) <= fails:
+            raise PermissionError("the lock")
         return ensure(*args, **kwargs)
 
     monkeypatch.setattr(scratch, "ensure_daemon", counted)
+    return starts
+
+
+@pytest.mark.asyncio
+async def test_a_call_while_the_daemon_starts_waits_for_it_and_hears_its_steps(
+    project, monkeypatch
+):
+    _made(project)
+    release = threading.Event()
+    starts = _counted(monkeypatch, release=release)
+    steps: list[str | None] = []
+
+    async def progress(done, total, message):
+        steps.append(message)
+
     async with _bridge(project) as client:
-        first = _value(await client.call_tool("run", {"source": "1 + 1"}))
+        await client.list_tools()
+        call = asyncio.create_task(
+            client.call_tool("run", {"source": "1 + 1"}, progress_callback=progress)
+        )
+        # The call is waiting for the start, not yet made, when it begins.
+        await asyncio.sleep(0.5)
+        assert not call.done()
+        release.set()
+        first = _value(await call)
     assert first["value"] == 2
-    # The opening's start (no progress callback) and no second one for the call.
-    assert starts == [None]
+    assert len(starts) == 1
+    assert list(first["setup_ms"]) == steps
+    assert "starting the scratchpad" in steps
+
+
+@pytest.mark.asyncio
+async def test_a_health_check_that_only_connects_starts_nothing(project, monkeypatch):
+    _made(project)
+    starts = _counted(monkeypatch)
+    async with _bridge(project):
+        await asyncio.sleep(0.2)
+    assert starts == []
 
 
 @pytest.mark.asyncio
 async def test_a_project_with_no_scratchpad_starts_nothing_until_a_call(project, monkeypatch):
-    starts: list[object] = []
-    monkeypatch.setattr(scratch, "ensure_daemon", lambda *args, **kwargs: starts.append(args))
+    starts = _counted(monkeypatch)
     async with _bridge(project) as client:
         await client.list_tools()
         await asyncio.sleep(0.2)
@@ -138,13 +176,16 @@ async def test_a_start_that_fails_as_the_session_opens_is_tried_again_by_the_cal
     project, monkeypatch
 ):
     _made(project)
-    monkeypatch.setattr(
-        scratch, "_server_command", lambda: [sys.executable, "-c", "raise SystemExit(3)"]
-    )
+    # Not a ScratchError: still the session's start alone fails, not the session.
+    starts = _counted(monkeypatch, fails=1)
     async with _bridge(project) as client:
-        result = await client.call_tool("run", {"source": "1"})
-    assert result.is_error
-    assert "exited while starting" in json.loads(result.content[0].text)["error"]
+        await client.list_tools()
+        async with asyncio.timeout(60):
+            while not starts:
+                await asyncio.sleep(0.05)
+        first = _value(await client.call_tool("run", {"source": "1 + 1"}))
+    assert first["value"] == 2
+    assert len(starts) == 2
 
 
 @pytest.mark.asyncio
@@ -169,6 +210,14 @@ async def test_a_session_that_ends_during_the_start_cancels_it(project, monkeypa
         await client.list_tools()
     await asyncio.wait_for(ended.wait(), 60)
     assert seen == [True]
+
+
+@pytest.mark.asyncio
+async def test_the_servers_own_error_leaves_its_lifespan_as_itself(project):
+    server = mcp_bridge.build_server(project)
+    with pytest.raises(LookupError, match="the server's"):
+        async with server.lifespan(server):
+            raise LookupError("the server's")
 
 
 def _refused(url: str) -> bool:

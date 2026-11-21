@@ -260,9 +260,10 @@ config starts as a command:
 ```
 
 It answers the handshake and the tool list itself. In a project that already has
-a scratchpad (`.strata-scratch/`), it starts the project's daemon in the
-background as the session opens, so the first call does not wait for it; a call
-made while it starts waits for that one. Elsewhere a session that never calls a
+a scratchpad (`.strata-scratch/`), the session's first tool list starts the
+project's daemon in the background, so the first call does not wait for it; a
+call made while it starts waits for that one, hearing its steps. A client that
+only connects, as a health check does, starts nothing. Elsewhere a session that never calls a
 tool starts nothing: the first tool call finds the project's daemon or starts it
 (creating `.strata-scratch/`). Every call runs there. The
 project is the one `strata mcp` starts in
