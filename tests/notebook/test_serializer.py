@@ -2298,30 +2298,28 @@ class TestPickledPreview:
 
         mixed = collections.Counter(a=1)
         mixed["b"] = "x"
-        numpy_counts = collections.Counter({"a": np.int64(1), "b": np.int64(3), "c": True})
 
         for value in (
             ordered,
             counts,
             lists,
             mixed,
-            numpy_counts,
             collections.Counter(),
             collections.OrderedDict(),
         ):
             assert serializer_module._object_preview(value) == repr(value)
 
-    def test_counts_that_will_not_compare_keep_their_order(self):
-        days = collections.Counter({"a": np.timedelta64(1, "D"), "b": 1.5})
-        units = collections.Counter({"a": np.timedelta64(1, "Y"), "b": np.timedelta64(1, "D")})
-        # Counter's own repr raises here (OverflowError is not the TypeError it catches).
-        huge = collections.Counter({"a": np.float64(1), "b": 10**400})
-
-        assert serializer_module._object_preview(days) == repr(days)
-        assert serializer_module._object_preview(units) == repr(units)
-        assert serializer_module._object_preview(huge).startswith(
-            "Counter({'a': np.float64(1.0), 'b': 1"
-        )
+    def test_counts_not_of_pythons_own_numbers_keep_their_order(self, recwarn):
+        # numpy's compare with errors (timedelta64s of two units, a float against an int
+        # past its range) or warnings; they are left in the order they were counted.
+        for counts in (
+            {"a": np.int64(1), "b": np.int64(3)},
+            {"a": np.timedelta64(1, "D"), "b": 1},
+            {"a": np.float64(1), "b": 10**400},
+        ):
+            preview = serializer_module._object_preview(collections.Counter(counts))
+            assert preview.startswith("Counter({'a': ")
+        assert not recwarn.list
 
     def test_a_lowered_digit_limit_names_the_int(self, monkeypatch):
         monkeypatch.setattr(sys, "get_int_max_str_digits", lambda: 640)

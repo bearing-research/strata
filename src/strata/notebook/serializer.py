@@ -1383,11 +1383,15 @@ def _object_preview(value: Any) -> str:
         collections.defaultdict,
     )
     # numpy's own number types, by identity: a subclass may name its module "numpy".
-    numpy_numbers: set[int] = set()
-    if numpy is not None:
-        numbers = (numpy.number, numpy.bool_)
-        found = getattr(numpy, "sctypeDict", {}).values()
-        numpy_numbers = {id(t) for t in found if issubclass(t, numbers)}
+    numpy_numbers = (
+        {
+            id(t)
+            for t in getattr(numpy, "sctypeDict", {}).values()
+            if issubclass(t, (numpy.number, numpy.bool_))
+        }
+        if numpy is not None
+        else set()
+    )
 
     def walk(x: Any, depth: int) -> None:
         kind = type(x)
@@ -1428,21 +1432,13 @@ def _object_preview(value: Any) -> str:
             else:
                 items("OrderedDict([", "])", pairs, depth + 1, "tuple")
         elif kind is collections.Counter:
-            # Most common first, as Counter prints itself, when its counts are plain numbers
-            # (sorting others would run their __lt__); else in its order, as its repr falls
-            # back to. nlargest, as most_common(n) does: no sort of all of it.
+            # Most common first, as Counter prints itself, when every count is a Python
+            # int, float or bool: those compare exactly, with no error, warning or __lt__
+            # of the cell's. Others (numpy's among them) keep their order. nlargest, as
+            # most_common(n) does: no sort of all of it.
             pairs: Iterable[Any] = dict.items(x)
-            if all(
-                one_of(type(count), (int, float, bool)) or id(type(count)) in numpy_numbers
-                for count in dict.values(x)
-            ):
-                try:
-                    pairs = heapq.nlargest(_PREVIEW_ITEMS + 1, pairs, key=operator.itemgetter(1))
-                except (TypeError, OverflowError):
-                    # Numbers that will not compare (a complex, timedelta64s of two units,
-                    # numpy's float with an int past its range): insertion order, as
-                    # Counter's repr falls back to.
-                    pairs = dict.items(x)
+            if all(one_of(type(count), (int, float, bool)) for count in dict.values(x)):
+                pairs = heapq.nlargest(_PREVIEW_ITEMS + 1, pairs, key=operator.itemgetter(1))
             items("Counter({", "})", pairs, depth + 1, "dict")
         elif kind is collections.defaultdict:
             factory = x.default_factory
