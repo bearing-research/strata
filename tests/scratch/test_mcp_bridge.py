@@ -244,11 +244,12 @@ async def test_a_call_after_a_failed_start_that_fails_too_says_where_to_look(pro
 @pytest.mark.asyncio
 async def test_a_session_that_ends_during_the_start_cancels_it(project, monkeypatch):
     _made(project)
-    ended = asyncio.Event()
+    started, ended = threading.Event(), asyncio.Event()
     seen: list[bool] = []
     loop = asyncio.get_running_loop()
 
     def waits(root, progress, cancel):
+        started.set()
         # As a start would: until the session's end sets the cancel (bounded, so a cancel
         # never set fails the test rather than leaving the thread spinning).
         deadline = time.monotonic() + 30
@@ -261,6 +262,8 @@ async def test_a_session_that_ends_during_the_start_cancels_it(project, monkeypa
     monkeypatch.setattr(scratch, "ensure_daemon", waits)
     async with _bridge(project) as client:
         await client.list_tools()
+        # Ended during the start, not before it began (then there is nothing to cancel).
+        assert await asyncio.to_thread(started.wait, 60)
     await asyncio.wait_for(ended.wait(), 60)
     assert seen == [True]
 
