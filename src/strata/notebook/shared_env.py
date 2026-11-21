@@ -185,6 +185,13 @@ class SharedEnvBackend:
         self.root.mkdir(parents=True, exist_ok=True)
         return interpreter, key, _key_lock(self.root, key)
 
+    def _venv_args(self, interpreter: Path, key: str) -> list[str]:
+        # Relocatable, so an archive of the directory works wherever it is unpacked: the
+        # venv ``uv sync`` makes itself writes this path into every console script.
+        # --clear: a build that failed halfway left the directory behind.
+        target = str(self.root / key)
+        return ["venv", "--relocatable", "--clear", "--python", str(interpreter), target]
+
     def _install_args(self, interpreter: Path) -> list[str]:
         # The key leaves the notebook's own project out, so the environment must too.
         return ["sync", "--frozen", "--no-install-project", "--python", str(interpreter)]
@@ -220,6 +227,15 @@ class SharedEnvBackend:
         results = [locked]
         with lock:
             if not self._is_complete(key):
+                created = _run_uv_command(
+                    self.notebook_dir,
+                    self._venv_args(interpreter, key),
+                    timeout=timeout,
+                    display_name="uv venv",
+                )
+                results.append(created)
+                if not created.success:
+                    return _combined(results)
                 installed = _run_uv_command(
                     self.notebook_dir,
                     self._install_args(interpreter),
@@ -259,6 +275,16 @@ class SharedEnvBackend:
         await asyncio.to_thread(lock.acquire)
         try:
             if not self._is_complete(key):
+                created = await run_uv_command_streaming(
+                    self.notebook_dir,
+                    self._venv_args(interpreter, key),
+                    timeout=timeout,
+                    display_name="uv venv",
+                    on_update=on_update,
+                )
+                results.append(created)
+                if not created.success:
+                    return _combined(results)
                 installed = await run_uv_command_streaming(
                     self.notebook_dir,
                     self._install_args(interpreter),

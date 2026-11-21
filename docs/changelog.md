@@ -539,6 +539,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A shared or worker environment's console scripts run wherever the directory is.**
+  `uv sync` made the environment itself, and such a venv writes its own path into every
+  console script, so a copy of the directory under another root (an archive of it,
+  unpacked on another worker) ran `python` and imported but failed each script with
+  "required file not found". Strata now creates the directory with
+  `uv venv --relocatable` before the sync, under `notebook_env_backend = "shared"` and
+  on a worker building a notebook's lock, so scripts find their interpreter beside
+  them. Environments already built stay as they are until their lock changes. (#1604)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the
