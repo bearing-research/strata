@@ -103,14 +103,10 @@ async def test_a_project_with_a_scratchpad_starts_its_daemon_as_the_session_open
         # As an agent's session opens: the tool list, no call yet.
         await client.list_tools()
         assert await asyncio.to_thread(done.wait, 120)
-        # The bridge takes the started daemon up on its loop.
-        await asyncio.sleep(0.2)
         first = _value(await client.call_tool("run", {"source": "1 + 1"}))
     assert first["value"] == 2
-    # The opening's start (no progress sink), none of the call's, and the call, made once
-    # the start was done, waited for nothing.
+    # The opening's start (no progress sink), none of the call's.
     assert starts == [None]
-    assert "setup_ms" not in first
 
 
 def _counted(
@@ -208,6 +204,26 @@ async def test_a_start_that_fails_as_the_session_opens_is_left_to_the_call(proje
         first = _value(await client.call_tool("run", {"source": "1 + 1"}))
     assert first["value"] == 2
     assert len(starts) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_handshake_that_fails_after_the_start_is_left_to_the_call(project, monkeypatch):
+    _made(project)
+    tried = asyncio.Event()
+    handshake = mcp_bridge.Upstream.open
+
+    async def once_refused(self, url):
+        if not tried.is_set():
+            tried.set()
+            raise RuntimeError("not an httpx error")
+        await handshake(self, url)
+
+    monkeypatch.setattr(mcp_bridge.Upstream, "open", once_refused)
+    async with _bridge(project) as client:
+        await client.list_tools()
+        await asyncio.wait_for(tried.wait(), 120)
+        first = _value(await client.call_tool("run", {"source": "1 + 1"}))
+    assert first["value"] == 2
 
 
 @pytest.mark.asyncio

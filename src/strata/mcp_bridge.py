@@ -200,18 +200,19 @@ def _failure(error: str, fix: str) -> types.CallToolResult:
 class _Opening:
     """The daemon's background start, which calls made meanwhile wait for."""
 
-    # Begun once a session: one that fails leaves the start to the first call.
+    # Begun once: one that fails leaves the start to the first call.
     begun: bool = False
     running: bool = False
     daemon: scratch.Daemon | None = None
-    # The running lifespan's: its task group, and the cancel its end sets (killing a
-    # daemon the start began and had not recorded).
+    # The lifespan's task group, and the cancel its end sets (killing a daemon the start
+    # began and had not recorded).
     group: anyio.abc.TaskGroup | None = None
     cancel: scratch.SetupCancel = field(default_factory=scratch.SetupCancel)
 
 
 def build_server(root: Path) -> Server:
-    """The server for the scratchpad of the project at *root*."""
+    """The server for the scratchpad of the project at *root*, for one session (as
+    ``strata mcp`` serves one): its client and its start are not made again."""
     upstream = Upstream()
     # One setup at a time: parallel first calls wait for one daemon, not race two.
     setting_up = anyio.Lock()
@@ -324,19 +325,19 @@ def build_server(root: Path) -> Server:
             finally:
                 # Under the lock: a call that sees it running waits for this start.
                 opening.running = False
-        with contextlib.suppress(httpx.HTTPError):
+        try:
             # Its handshake too; one that fails is made again by the call.
             await upstream.open(daemon.url)
+        except Exception as exc:
+            print(f"strata mcp: the scratchpad's handshake failed: {exc!r}", file=sys.stderr)
 
     @asynccontextmanager
     async def lifespan(server: Server) -> AsyncGenerator[None]:
-        nonlocal opening
         own: BaseException | None = None
         try:
             try:
                 async with anyio.create_task_group() as group:
-                    # A start of its own: none of an earlier run's state carries over.
-                    opening = _Opening(group=group)
+                    opening.group = group
                     try:
                         yield
                     finally:
