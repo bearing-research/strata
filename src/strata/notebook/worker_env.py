@@ -69,7 +69,8 @@ class PreparedEnvironment:
 
 def env_root() -> Path:
     configured = os.environ.get(ENV_ROOT_VAR)
-    return Path(configured) if configured else Path.home() / ".strata" / "worker-envs"
+    # Absolute: uv resolves the environment's path against the directory it runs in.
+    return Path(configured).resolve() if configured else Path.home() / ".strata" / "worker-envs"
 
 
 def _validated(spec: Any) -> dict[str, str]:
@@ -127,17 +128,18 @@ def _interpreter(python: str) -> tuple[Path, str]:
 def _install(spec: dict[str, str], interpreter: Path, env_dir: Path) -> None:
     """``uv sync`` the lock into *env_dir*, made relocatable first.
 
-    An archive of the directory then works under another worker's root: the venv
-    ``uv sync`` makes itself writes this path into every console script.
+    The directory then works wherever it is moved or copied: the venv ``uv sync``
+    makes itself writes this path into every console script.
     """
+    # What a failed build or a bad archive left, which uv would refuse.
+    shutil.rmtree(env_dir, ignore_errors=True)
     project = env_dir.with_name(env_dir.name + ".project")
     project.mkdir(parents=True, exist_ok=True)
     (project / "pyproject.toml").write_text(spec["pyproject"])
     (project / "uv.lock").write_text(spec["lockfile"])
     python = ["--python", str(interpreter)]
     steps = [
-        # --clear: a build that failed halfway left the directory behind.
-        ["venv", "--relocatable", "--clear", *python, str(env_dir)],
+        ["venv", "--relocatable", *python, str(env_dir)],
         ["sync", "--frozen", "--no-install-project", *python],
     ]
     for step in steps:

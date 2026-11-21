@@ -487,6 +487,25 @@ class TestTheWorkerSide:
         with pytest.raises(worker_env.WorkerEnvironmentError, match=f"{message}.*timed out"):
             step(tmp_path)
 
+    def test_a_sync_that_fails_after_the_venv_is_named_as_the_sync(self, tmp_path, monkeypatch):
+        def _run(args, **kwargs):
+            if args[1] == "sync":
+                raise subprocess.CalledProcessError(1, args, stderr="no such wheel")
+            return subprocess.CompletedProcess(args, 0)
+
+        monkeypatch.setattr(worker_env.subprocess, "run", _run)
+
+        with pytest.raises(worker_env.WorkerEnvironmentError, match="uv sync failed.*no such"):
+            worker_env._install(
+                {"pyproject": "", "lockfile": ""}, Path(sys.executable), tmp_path / "env"
+            )
+
+    def test_a_relative_root_is_read_against_the_workers_directory(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv(worker_env.ENV_ROOT_VAR, "envs")
+
+        assert worker_env.env_root() == tmp_path.resolve() / "envs"
+
     @pytest.mark.parametrize("language", ["python", "r"])
     def test_waiting_out_another_cells_build_is_an_environment_error(
         self, tmp_path, monkeypatch, language

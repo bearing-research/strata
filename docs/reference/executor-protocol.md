@@ -106,7 +106,7 @@ A request to a worker that advertises `locked_environments` carries the notebook
 The worker runs the cell's harness with the interpreter of that environment:
 
 - It keeps one environment per `key` and interpreter build under `STRATA_WORKER_ENV_ROOT` (default `~/.strata/worker-envs`). An environment already there is reused, so a second cell with the same lock installs nothing.
-- A missing one is fetched from `STRATA_WORKER_ENV_REGISTRY_URL/<key>/<interpreter>/<platform>` as a `.tar.gz` of the environment directory when that is set. A registry that answers `404` has none, and the worker builds the environment itself; any other failure fails the cell. Without a registry the worker builds it, with `uv sync --frozen` from the lock. The worker needs `uv` on its `PATH` for that.
+- A missing one is fetched from `STRATA_WORKER_ENV_REGISTRY_URL/<key>/<interpreter>/<platform>` as a `.tar.gz` of the environment directory when that is set. A registry that answers `404` has none, and the worker builds the environment itself; any other failure fails the cell. Without a registry the worker builds it: `uv venv --relocatable`, then `uv sync --frozen` from the lock into that directory, so its console scripts start the interpreter beside them and not a path on this worker. The worker needs `uv` on its `PATH` for that.
 - A lock whose key is not `key`, or that cannot be installed, fails the cell with the reason (`500`).
 
 The two last segments of a registry path name the interpreter the worker resolved for `python` (`uv python find --system <python>`), since an environment's contents depend on the build it was made with:
