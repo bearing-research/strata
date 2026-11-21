@@ -783,7 +783,7 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
     ``notebook.toml``, since it changes on every sync.
     """
     from strata.notebook.dependencies import list_dependencies
-    from strata.notebook.env import OVERLAY_DIR, attached_identity, compute_lockfile_hash
+    from strata.notebook.env import OVERLAY_DIR, compute_lockfile_hash, is_attached
     from strata.notebook.runtime_state import (
         EnvironmentRuntime,
         load_runtime_state,
@@ -796,7 +796,7 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
     requested_python_version = read_requested_python_minor(notebook_dir) or ""
     runtime_python_version = ""
     # A scratchpad in its project's environment runs through the overlay.
-    venv = OVERLAY_DIR if attached_identity(notebook_dir) is not None else ".venv"
+    venv = OVERLAY_DIR if is_attached(notebook_dir) else ".venv"
     venv_python = notebook_dir / venv / "bin" / "python"
     if venv_python.exists():
         runtime_python_version = read_venv_runtime_python_version(venv_python) or ""
