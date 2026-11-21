@@ -140,6 +140,19 @@ def attached_identity(notebook_dir: Path) -> bytes | None:
         return None
 
 
+def is_attached(notebook_dir: Path) -> bool:
+    """Whether *notebook_dir* runs in its project's environment: its identity says so, or
+    its record does when a failed probe left none (its cells still run in the overlay)."""
+    return attached_identity(notebook_dir) is not None or _recorded_attached(notebook_dir)
+
+
+def _recorded_attached(notebook_dir: Path) -> bool:
+    from strata.notebook.project_env import read_record
+
+    record = read_record(notebook_dir)
+    return record is not None and record.get("mode") == "attached"
+
+
 def compute_lockfile_hash(notebook_dir: Path) -> str:
     """SHA-256 over the notebook's ``uv.lock`` and ``renv.lock``.
 
@@ -151,7 +164,11 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
     ``uv.lock``. What a sync changed and what a publish attests; a cell's key folds the
     identity checked again (:func:`environment_hash`).
     """
-    return _lockfile_hash(notebook_dir, attached_identity(notebook_dir), None)
+    attached = attached_identity(notebook_dir)
+    if attached is None and _recorded_attached(notebook_dir):
+        # E unknown, as environment_hash has it unchecked; never the scratchpad's own lock.
+        attached = b""
+    return _lockfile_hash(notebook_dir, attached, None)
 
 
 def environment_hash(notebook_dir: Path, *, check: bool = True) -> str:
@@ -159,12 +176,12 @@ def environment_hash(notebook_dir: Path, *, check: bool = True) -> str:
     E checked to still hold (probed again if not), and an owned one's folded beside its
     ``uv.lock``. Checking may probe, so never on the event loop; without *check*, E as
     last found."""
-    from strata.notebook.project_env import current_identity, owned_identity, read_record
+    from strata.notebook.project_env import current_identity, owned_identity
 
+    # Read once: a probe may write it meanwhile.
     attached = attached_identity(notebook_dir)
-    record = read_record(notebook_dir)
-    if attached is not None or (record is not None and record.get("mode") == "attached"):
-        # Its record says so even when a failed probe left no identity: probed again.
+    if attached is not None or _recorded_attached(notebook_dir):
+        # Even when a failed probe left no identity: probed again.
         if check:
             return _lockfile_hash(notebook_dir, current_identity(notebook_dir), None)
         return _lockfile_hash(notebook_dir, attached or b"", None)
@@ -462,7 +479,7 @@ def local_packages(notebook_dir: Path, *, check: bool = True) -> LocalPackages:
     on the event loop run it in a thread, or pass ``check=False``.
     """
     lockfile_hash = environment_hash(notebook_dir, check=check)
-    if attached_identity(notebook_dir) is not None:
+    if is_attached(notebook_dir):
         # The identity covers what is installed; an editable's code, what runs read.
         return LocalPackages(notebook_dir, lockfile_hash)
     try:
@@ -584,7 +601,7 @@ def audit_scope(notebook_dir: Path) -> dict[str, Any]:
     ``unlocked_roots`` the folders their ``.pth`` files add. Empty without a lock: then
     nothing says what is locked. Kept until the lock or a site-packages folder changes.
     """
-    if attached_identity(notebook_dir) is not None:
+    if is_attached(notebook_dir):
         return _attached_audit_scope(notebook_dir)
     venv = notebook_dir / ".venv"
     site_dirs = sorted(venv.glob("lib/python*/site-packages")) + sorted(

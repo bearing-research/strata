@@ -537,6 +537,11 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A scratchpad whose environment probe failed is still keyed, audited and reported
+  as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
+  the local packages, the read audit's scope and the runtime metadata decided from the
+  probed identity alone, which a failed probe removes, and read the scratchpad's own
+  lock and `.venv`. All of them now ask one predicate. (#1601)
 - **A pickled value previews as Python prints it, not as its type name.** A list of
   tuples or a dict with int keys previewed as `<list object>`, so the scratchpad's `run`
   showed no answer and the agent ran the cell again to print it. Lists, tuples, dicts,

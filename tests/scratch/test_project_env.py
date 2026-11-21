@@ -1063,6 +1063,39 @@ def test_a_notebook_and_an_unbuilt_owned_scratchpad_key_on_their_lock_alone(tmp_
     assert environment_hash(moved) == unprobed
 
 
+def test_a_probe_that_left_no_identity_leaves_it_attached_everywhere(project):
+    """Its record still runs its cells in the overlay, so nothing reads the environment it
+    ran in before: its own `.venv`, its own lock and the local package it held."""
+    from strata.notebook.env import audit_scope, local_packages
+    from strata.notebook.project_env import ProjectEnv, write_record
+    from strata.notebook.runtime_state import load_runtime_state
+    from strata.notebook.writer import update_environment_metadata
+
+    notebook = _attached(project)
+    write_record(notebook, ProjectEnv(project, "attached", venv_python(project / ".venv"), ".venv"))
+    scope = audit_scope(notebook)
+    (project / "mylib" / "mylib").mkdir(parents=True)
+    (project / "mylib" / "mylib" / "__init__.py").write_text("")
+    (notebook / "uv.lock").write_text(
+        'version = 1\nrequires-python = ">=3.12"\n\n'
+        '[[package]]\nname = "scratch"\nversion = "0.1.0"\nsource = { virtual = "." }\n'
+        'dependencies = [{ name = "mylib" }]\n\n'
+        '[[package]]\nname = "mylib"\nversion = "0.1.0"\nsource = { editable = "../mylib" }\n'
+    )
+    (notebook / ".venv" / "bin").mkdir(parents=True)
+    (notebook / ".venv" / "bin" / "python").write_text("")
+    (notebook / ".venv" / "pyvenv.cfg").write_text("version_info = 9.9.9\n")
+    (notebook / OVERLAY_DIR / ATTACHED_IDENTITY).unlink()
+
+    assert compute_lockfile_hash(notebook) == environment_hash(notebook, check=False)
+    assert local_packages(notebook, check=False).key is None
+    assert audit_scope(notebook) == scope
+    update_environment_metadata(notebook)
+    environment = load_runtime_state(notebook).environment
+    assert environment.runtime_python_version != "9.9.9"
+    assert environment.lockfile_hash == compute_lockfile_hash(notebook)
+
+
 def test_the_lockfile_hash_never_probes_and_the_key_does(project, monkeypatch):
     """A sync's 'before' is E as last found (else it sees no change), and the event loop's
     staleness pass starts no probe."""
