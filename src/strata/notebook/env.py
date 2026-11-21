@@ -143,10 +143,12 @@ def attached_identity(notebook_dir: Path) -> bytes | None:
 def is_attached(notebook_dir: Path) -> bool:
     """Whether *notebook_dir* runs in its project's environment: its identity says so, or
     its record does when a failed probe left none (its cells still run in the overlay)."""
+    return attached_identity(notebook_dir) is not None or _recorded_attached(notebook_dir)
+
+
+def _recorded_attached(notebook_dir: Path) -> bool:
     from strata.notebook.project_env import read_record
 
-    if attached_identity(notebook_dir) is not None:
-        return True
     record = read_record(notebook_dir)
     return record is not None and record.get("mode") == "attached"
 
@@ -163,7 +165,7 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
     identity checked again (:func:`environment_hash`).
     """
     attached = attached_identity(notebook_dir)
-    if attached is None and is_attached(notebook_dir):
+    if attached is None and _recorded_attached(notebook_dir):
         # E unknown, as environment_hash has it unchecked; never the scratchpad's own lock.
         attached = b""
     return _lockfile_hash(notebook_dir, attached, None)
@@ -176,11 +178,13 @@ def environment_hash(notebook_dir: Path, *, check: bool = True) -> str:
     last found."""
     from strata.notebook.project_env import current_identity, owned_identity
 
-    if is_attached(notebook_dir):
+    # Read once: a probe may write it meanwhile.
+    attached = attached_identity(notebook_dir)
+    if attached is not None or _recorded_attached(notebook_dir):
         # Even when a failed probe left no identity: probed again.
         if check:
             return _lockfile_hash(notebook_dir, current_identity(notebook_dir), None)
-        return _lockfile_hash(notebook_dir, attached_identity(notebook_dir) or b"", None)
+        return _lockfile_hash(notebook_dir, attached or b"", None)
     return _lockfile_hash(notebook_dir, None, owned_identity(notebook_dir, check=check))
 
 
