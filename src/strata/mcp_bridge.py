@@ -325,6 +325,9 @@ def build_server(root: Path) -> Server:
             finally:
                 # Under the lock: a call that sees it running waits for this start.
                 opening.running = False
+        if found[0] is not daemon:
+            # A call replaced it meanwhile, and opened its own.
+            return
         try:
             # Its handshake too; one that fails is made again by the call.
             await upstream.open(daemon.url)

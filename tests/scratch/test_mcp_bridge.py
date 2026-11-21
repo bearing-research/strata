@@ -195,8 +195,6 @@ async def test_a_start_that_fails_as_the_session_opens_is_left_to_the_call(proje
     async with _bridge(project) as client:
         await client.list_tools()
         assert await asyncio.to_thread(done.wait, 60)
-        # The bridge takes the failure up on its loop.
-        await asyncio.sleep(0.2)
         # Once a session: a later tool list, the failed start over, does not start it again.
         await client.list_tools()
         await asyncio.sleep(0.2)
@@ -210,9 +208,11 @@ async def test_a_start_that_fails_as_the_session_opens_is_left_to_the_call(proje
 async def test_a_handshake_that_fails_after_the_start_is_left_to_the_call(project, monkeypatch):
     _made(project)
     tried = asyncio.Event()
+    handshakes: list[str] = []
     handshake = mcp_bridge.Upstream.open
 
     async def once_refused(self, url):
+        handshakes.append(url)
         if not tried.is_set():
             tried.set()
             raise RuntimeError("not an httpx error")
@@ -224,6 +224,8 @@ async def test_a_handshake_that_fails_after_the_start_is_left_to_the_call(projec
         await asyncio.wait_for(tried.wait(), 120)
         first = _value(await client.call_tool("run", {"source": "1 + 1"}))
     assert first["value"] == 2
+    # The start's, refused, then the call's own.
+    assert len(handshakes) == 2
 
 
 @pytest.mark.asyncio
