@@ -2246,3 +2246,39 @@ def test_an_image_is_shown_as_a_png_of_its_size(tmp_path):
     image = pytest.importorskip("PIL.Image").new("RGB", (7, 3))
     shown = serializer_module.serialize_display_value(image, tmp_path, 0)
     assert (shown["content_type"], shown["width"], shown["height"]) == ("image/png", 7, 3)
+
+
+class TestPickledPreview:
+    """A pickled value previews as its repr, bounded, where the repr says more than its type."""
+
+    def test_containers_json_cannot_hold_show_their_contents(self, tmp_path):
+        tuples = serialize_value([(1, 0.5), (2, 0.9)], tmp_path, "pairs")
+        int_keys = serialize_value({101: 2.5}, tmp_path, "by_id")
+
+        assert tuples["content_type"] == "pickle/object"
+        assert tuples["preview"] == "[(1, 0.5), (2, 0.9)]"
+        assert int_keys["preview"] == "{101: 2.5}"
+
+    def test_a_large_value_is_cut(self, tmp_path):
+        preview = serialize_value([(i, i) for i in range(10_000)], tmp_path, "big")["preview"]
+
+        assert preview.endswith(", ...]") and len(preview) < 400
+
+    def test_an_object_without_a_repr_of_its_own_shows_its_type(self, tmp_path):
+        payload = serialize_value(_Plain(), tmp_path, "plain")
+
+        assert payload["preview"] == "<_Plain object>"
+
+    def test_a_repr_that_raises_does_not_fail_the_value(self, tmp_path):
+        payload = serialize_value(_Raising(), tmp_path, "raising")
+
+        assert payload["file"] and payload["preview"].startswith("<_Raising instance at ")
+
+
+class _Plain:
+    pass
+
+
+class _Raising:
+    def __repr__(self) -> str:
+        raise RuntimeError("no repr")

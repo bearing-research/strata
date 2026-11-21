@@ -24,6 +24,7 @@ import logging
 import math
 import os
 import pickle
+import reprlib
 import struct
 import sys
 import tarfile
@@ -1277,6 +1278,31 @@ def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -
     }
 
 
+# A pickled value's preview: enough of its repr to read the answer from (a list of
+# tuples, a dict with int keys), as an agent's `run` shows it.
+_PREVIEW_REPR = reprlib.Repr(
+    maxlevel=4,
+    maxtuple=20,
+    maxlist=20,
+    maxarray=20,
+    maxdict=20,
+    maxset=20,
+    maxfrozenset=20,
+    maxdeque=20,
+    maxstring=200,
+    maxlong=100,
+    maxother=200,
+)
+
+
+def _object_preview(value: Any) -> str:
+    """*value*'s repr, bounded; its type alone when the repr says no more than that."""
+    if type(value).__repr__ is object.__repr__:
+        return f"<{type(value).__name__} object>"
+    # A __repr__ that raises is reprlib's to catch: `<Name instance at 0x...>`.
+    return _PREVIEW_REPR.repr(value)
+
+
 def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     # Raise rather than return a success-shape dict with file=None: the store
     # would think it was written. harness.py and pool_worker.py turn the
@@ -1294,7 +1320,7 @@ def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> Seria
         "bytes": filepath.stat().st_size,
         "codec": codec.name,
         "type": type(value).__name__,
-        "preview": f"<{type(value).__name__} object>",
+        "preview": _object_preview(value),
     }
 
 
