@@ -1336,7 +1336,11 @@ def _object_preview(value: Any) -> str:
         if room[0] < 0:
             raise _PreviewFull
 
-    def items(open_: str, close: str, entries: Iterable[Any], depth: int, pair: bool) -> None:
+    def items(
+        open_: str, close: str, entries: Iterable[Any], depth: int, pair: str | None = None
+    ) -> None:
+        """*entries* between *open_* and *close*; *pair* prints each as ``k: v`` ("dict")
+        or ``(k, v)`` ("tuple"), its key and value at *depth*."""
         put(open_)
         for index, entry in enumerate(entries):
             if index:
@@ -1344,12 +1348,14 @@ def _object_preview(value: Any) -> str:
             if index == _PREVIEW_ITEMS:
                 put("...")
                 break
-            if pair:
-                walk(entry[0], depth)
-                put(": ")
-                walk(entry[1], depth)
-            else:
+            if pair is None:
                 walk(entry, depth)
+                continue
+            put("(" if pair == "tuple" else "")
+            walk(entry[0], depth)
+            put(", " if pair == "tuple" else ": ")
+            walk(entry[1], depth)
+            put(")" if pair == "tuple" else "")
         put(close)
 
     def one_of(kind: type, types: tuple[type, ...]) -> bool:
@@ -1357,7 +1363,14 @@ def _object_preview(value: Any) -> str:
         return any(kind is t for t in types)
 
     def named(kind: type) -> bool:
-        return kind.__bases__ == (tuple,) and type(kind.__dict__.get("_fields")) is tuple
+        fields = kind.__dict__.get("_fields")
+        return (
+            kind.__bases__ == (tuple,)
+            and type(fields) is tuple
+            and all(type(field) is str for field in fields)
+        )
+
+    builtin_factories = (list, dict, set, frozenset, tuple, int, float, complex, str, bytes, bool)
 
     containers = (
         list,
@@ -1371,7 +1384,11 @@ def _object_preview(value: Any) -> str:
     )
     # numpy's own number types, by identity: a subclass may name its module "numpy".
     numpy_numbers = (
-        {id(t) for t in numpy.sctypeDict.values() if issubclass(t, (numpy.number, numpy.bool_))}
+        {
+            id(t)
+            for t in getattr(numpy, "sctypeDict", {}).values()
+            if issubclass(t, (numpy.number, numpy.bool_))
+        }
         if numpy is not None
         else set()
     )
@@ -1404,40 +1421,40 @@ def _object_preview(value: Any) -> str:
         elif depth >= _PREVIEW_DEPTH and (one_of(kind, containers) or named(kind)):
             put("...")
         elif kind is dict:
-            items("{", "}", dict.items(x), depth + 1, True)
+            items("{", "}", dict.items(x), depth + 1, "dict")
         elif (kind is collections.OrderedDict or kind is collections.Counter) and not x:
             put(f"{kind.__name__}()")
         elif kind is collections.OrderedDict:
             pairs = collections.OrderedDict.items(x)
             # A project's own environment may be 3.11, which prints a list of pairs.
             if sys.version_info >= (3, 12):  # noqa: UP036
-                items("OrderedDict({", "})", pairs, depth + 1, True)
+                items("OrderedDict({", "})", pairs, depth + 1, "dict")
             else:
-                items("OrderedDict([", "])", (tuple(pair) for pair in pairs), depth + 1, False)
+                items("OrderedDict([", "])", pairs, depth + 1, "tuple")
         elif kind is collections.Counter:
             # Most common first, as Counter prints itself, when its counts are plain numbers
             # (sorting others would run their __lt__); else in its order, as its repr falls
             # back to. nlargest, as most_common(n) does: no sort of all of it.
             pairs = dict.items(x)
-            if all(type(count) is int or type(count) is float for count in dict.values(x)):
+            if all(
+                one_of(type(count), (int, float, bool)) or id(type(count)) in numpy_numbers
+                for count in dict.values(x)
+            ):
                 pairs = heapq.nlargest(_PREVIEW_ITEMS + 1, pairs, key=operator.itemgetter(1))
-            items("Counter({", "})", pairs, depth + 1, True)
+            items("Counter({", "})", pairs, depth + 1, "dict")
         elif kind is collections.defaultdict:
             factory = x.default_factory
-            name = (
-                f"<class {factory.__qualname__!r}>"
-                if factory is not None
-                and type(factory) is type
-                and factory.__module__ == "builtins"
-                else "None"
-                if factory is None
-                else "<factory>"
-            )
-            items(f"defaultdict({name}, {{", "})", dict.items(x), depth + 1, True)
+            if factory is None:
+                name = "None"
+            elif one_of(factory, builtin_factories):
+                name = f"<class '{_TYPE_NAME.__get__(factory)}'>"
+            else:
+                name = "<factory>"
+            items(f"defaultdict({name}, {{", "})", dict.items(x), depth + 1, "dict")
         elif kind is list:
-            items("[", "]", x, depth + 1, False)
+            items("[", "]", x, depth + 1)
         elif kind is tuple:
-            items("(", ",)" if len(x) == 1 else ")", x, depth + 1, False)
+            items("(", ",)" if len(x) == 1 else ")", x, depth + 1)
         elif named(kind):
             # A named tuple: its fields by name.
             put(f"{kind.__name__}(")
@@ -1452,7 +1469,7 @@ def _object_preview(value: Any) -> str:
                 put(f"{kind.__name__}()")
             else:
                 name = "frozenset(" if kind is frozenset else ""
-                items(f"{name}{{", "})" if name else "}", x, depth + 1, False)
+                items(f"{name}{{", "})" if name else "}", x, depth + 1)
         else:
             put(f"<{kind.__name__} object>")
 

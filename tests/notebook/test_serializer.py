@@ -2298,12 +2298,14 @@ class TestPickledPreview:
 
         mixed = collections.Counter(a=1)
         mixed["b"] = "x"
+        numpy_counts = collections.Counter({"a": np.int64(1), "b": np.int64(3), "c": True})
 
         for value in (
             ordered,
             counts,
             lists,
             mixed,
+            numpy_counts,
             collections.Counter(),
             collections.OrderedDict(),
         ):
@@ -2383,6 +2385,30 @@ class TestPickledPreview:
         assert counted == "Counter({'a': <Ordered object>, 'b': <Ordered object>})"
         assert serializer_module._object_preview(Odder()) == "<Odder object>"
 
+        class Field(str):
+            def __format__(self, spec: str) -> str:
+                raise AssertionError("the preview formatted the cell's field name")
+
+            __str__ = __format__  # type: ignore[assignment]
+
+        class Pair(tuple):
+            _fields = (Field("x"),)
+
+        class Module:
+            def __eq__(self, other: object) -> bool:
+                raise AssertionError("the preview compared the cell's __module__")
+
+            __hash__ = object.__hash__
+
+        class Factory:
+            pass
+
+        Factory.__module__ = Module()  # type: ignore[assignment]
+
+        assert serializer_module._object_preview(Pair((1,))) == "<Pair object>"
+        made = serializer_module._object_preview(collections.defaultdict(Factory))
+        assert made == "defaultdict(<factory>, {})"
+
     def test_named_tuples_and_default_dicts_stop_at_the_depth(self):
         point = collections.namedtuple("P", "a")
         deep = point(1)
@@ -2390,6 +2416,10 @@ class TestPickledPreview:
             deep = point(deep)
 
         assert serializer_module._object_preview(deep).count("P(") == 6
+        nested = collections.defaultdict(list)
+        for _ in range(20):
+            nested = collections.defaultdict(list, {1: nested})
+        assert serializer_module._object_preview(nested).count("defaultdict(") == 6
 
     def test_a_function_shows_no_address(self):
         assert serializer_module._object_preview(lambda: 1) == "<function object>"
