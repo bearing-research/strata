@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import json
 import linecache
@@ -16,6 +17,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pytest
@@ -2249,7 +2251,7 @@ def test_an_image_is_shown_as_a_png_of_its_size(tmp_path):
 
 
 class TestPickledPreview:
-    """A pickled value previews as its repr, bounded, where the repr says more than its type."""
+    """A pickled value previews as Python prints it, built without the cell's code."""
 
     def test_containers_json_cannot_hold_show_their_contents(self, tmp_path):
         tuples = serialize_value([(1, 0.5), (2, 0.9)], tmp_path, "pairs")
@@ -2259,26 +2261,45 @@ class TestPickledPreview:
         assert tuples["preview"] == "[(1, 0.5), (2, 0.9)]"
         assert int_keys["preview"] == "{101: 2.5}"
 
-    def test_a_large_value_is_cut(self, tmp_path):
-        preview = serialize_value([(i, i) for i in range(10_000)], tmp_path, "big")["preview"]
+    def test_a_dict_keeps_its_order(self):
+        # A ranking, as `dict(sorted(..., key=...))` makes one.
+        assert serializer_module._object_preview({102: 0.9, 101: 0.5}) == "{102: 0.9, 101: 0.5}"
 
-        assert preview.endswith(", ...]") and len(preview) < 400
+    @pytest.mark.parametrize(
+        ("value", "preview"),
+        [
+            ((1,), "(1,)"),
+            (set(), "set()"),
+            (frozenset({3}), "frozenset({3})"),
+            (collections.Counter("aab"), "Counter({'a': 2, 'b': 1})"),
+            (collections.namedtuple("Point", "x y")(1, 2), "Point(x=1, y=2)"),
+            ([date(2026, 11, 20)], "[datetime.date(2026, 11, 20)]"),
+            ([np.float64(0.5)], "[np.float64(0.5)]"),
+            pytest.param(2**20_000, "<int of 20001 bits>", id="huge-int"),
+        ],
+    )
+    def test_the_standard_shapes(self, value, preview):
+        assert serializer_module._object_preview(value) == preview
 
-    def test_an_object_without_a_repr_of_its_own_shows_its_type(self, tmp_path):
-        payload = serialize_value(_Plain(), tmp_path, "plain")
+    def test_a_large_or_deep_value_is_cut_whole(self):
+        flat = serializer_module._object_preview([(i, i) for i in range(10_000)])
+        nested = serializer_module._object_preview([[[["x" * 300] * 20] * 20] * 20] * 20)
 
-        assert payload["preview"] == "<_Plain object>"
+        assert flat.endswith(", ...]")
+        assert nested.endswith("...") and len(nested) <= 1003
 
-    def test_a_repr_that_raises_does_not_fail_the_value(self, tmp_path):
-        payload = serialize_value(_Raising(), tmp_path, "raising")
+    def test_no_repr_of_the_cells_runs(self):
+        class Loud:
+            def __repr__(self) -> str:
+                raise AssertionError("the preview ran the cell's __repr__")
 
-        assert payload["file"] and payload["preview"].startswith("<_Raising instance at ")
+        class Listing(list):
+            def __repr__(self) -> str:
+                raise AssertionError("the preview ran the cell's __repr__")
 
+        assert serializer_module._object_preview(Loud()) == "<Loud object>"
+        assert serializer_module._object_preview([Loud()]) == "[<Loud object>]"
+        assert serializer_module._object_preview(Listing([1])) == "<Listing object>"
 
-class _Plain:
-    pass
-
-
-class _Raising:
-    def __repr__(self) -> str:
-        raise RuntimeError("no repr")
+    def test_a_function_shows_no_address(self):
+        assert serializer_module._object_preview(lambda: 1) == "<function object>"

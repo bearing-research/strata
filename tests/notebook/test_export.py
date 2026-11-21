@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from strata.notebook.export import ExportOptions, export_notebook
+from strata.notebook.export import ExportFormat, ExportOptions, export_notebook
 from strata.notebook.writer import (
     add_cell_to_notebook,
     create_notebook,
@@ -551,10 +551,10 @@ def test_export_swaps_oversized_image_for_size_note(tmp_path: Path) -> None:
     assert "too large to inline" in note.text
 
 
-def test_export_pickle_placeholder_includes_type_hint(tmp_path: Path) -> None:
+def test_export_shows_a_pickled_values_preview_as_text(tmp_path: Path) -> None:
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "c1")
-    write_cell(nb_dir, "c1", "obj = MyThing()\n")
+    write_cell(nb_dir, "c1", "pairs = [(1, 0.5), (2, 0.9)]\n")
 
     update_cell_display_outputs(
         nb_dir,
@@ -562,16 +562,19 @@ def test_export_pickle_placeholder_includes_type_hint(tmp_path: Path) -> None:
         [
             {
                 "content_type": "pickle/object",
-                "preview": "<MyThing object>",
+                "preview": "[(1, 0.5), (2, <MyThing object>)]",
                 "bytes": 0,
             }
         ],
     )
 
     rendered = export_notebook(nb_dir)
-    # Escaped like any raw HTML, so it renders as the text "<MyThing object>".
-    assert "&lt;MyThing object>" in rendered
-    assert "not rendered" in rendered.lower()
+    html = export_notebook(nb_dir, ExportOptions(output_format=ExportFormat.HTML))
+
+    assert "Output (pickled; its preview)" in rendered
+    assert "[(1, 0.5), (2, <MyThing object>)]" in rendered
+    # Escaped like any raw HTML, so it renders as the text.
+    assert "&lt;MyThing object&gt;" in html
 
 
 def test_export_html_format_returns_html_envelope(tmp_path: Path) -> None:

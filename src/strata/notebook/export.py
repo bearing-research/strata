@@ -597,12 +597,12 @@ def _render_display_output(
         return [CodeBlock(language="json", body=body, title="Output")]
 
     if ctype == "pickle/object":
-        # serializer.py stores a "<TypeName object>" hint in preview for
-        # pickled values; surface it so the reader knows what kind of
-        # opaque blob the cell produced.
+        # serializer.py previews a pickled value as Python prints it (bounded), or
+        # "<TypeName object>" for what it cannot print: the text, not the value.
         hint = output.preview if isinstance(output.preview, str) else None
         if hint:
-            return [NoteBlock(f"Pickled output ({hint}), not rendered in export.")]
+            body = _truncate_text(hint, max_bytes)
+            return [CodeBlock(language="text", body=body, title="Output (pickled; its preview)")]
         return [NoteBlock("Pickled output, not rendered in export.")]
 
     # Fallback: render the preview as text. Covers scalars (json content

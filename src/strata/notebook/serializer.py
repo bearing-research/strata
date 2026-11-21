@@ -24,7 +24,6 @@ import logging
 import math
 import os
 import pickle
-import reprlib
 import struct
 import sys
 import tarfile
@@ -1278,29 +1277,118 @@ def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -
     }
 
 
-# A pickled value's preview: enough of its repr to read the answer from (a list of
-# tuples, a dict with int keys), as an agent's `run` shows it.
-_PREVIEW_REPR = reprlib.Repr(
-    maxlevel=4,
-    maxtuple=20,
-    maxlist=20,
-    maxarray=20,
-    maxdict=20,
-    maxset=20,
-    maxfrozenset=20,
-    maxdeque=20,
-    maxstring=200,
-    maxlong=100,
-    maxother=200,
-)
+# A pickled value's preview: what Python would print for it, so an agent's `run` shows the
+# answer (a list of tuples, a dict with int keys). Built here, not by repr(): no code of
+# the cell's runs, and the size is bounded while it is built.
+_PREVIEW_CHARS = 1000
+_PREVIEW_ITEMS = 50
+_PREVIEW_DEPTH = 6
+# Bits past which an int is named, not printed (str() refuses past 4300 digits).
+_PREVIEW_INT_BITS = 10_000
+
+
+class _PreviewFull(Exception):
+    """The preview reached ``_PREVIEW_CHARS``."""
+
+
+def _preview_scalar_types() -> tuple[type, ...]:
+    """Types whose repr is the library's own C or stdlib code, cheap and exact."""
+    import datetime
+    import decimal
+    import fractions
+    import pathlib
+    import uuid
+
+    found: list[type] = [
+        datetime.date,
+        datetime.time,
+        datetime.timedelta,
+        decimal.Decimal,
+        fractions.Fraction,
+        uuid.UUID,
+        pathlib.PurePath,
+        range,
+    ]
+    numpy = sys.modules.get("numpy")
+    if numpy is not None:
+        found.append(numpy.generic)
+    return tuple(found)
 
 
 def _object_preview(value: Any) -> str:
-    """*value*'s repr, bounded; its type alone when the repr says no more than that."""
-    if type(value).__repr__ is object.__repr__:
-        return f"<{type(value).__name__} object>"
-    # A __repr__ that raises is reprlib's to catch: `<Name instance at 0x...>`.
-    return _PREVIEW_REPR.repr(value)
+    """*value* as Python prints it, for lists, tuples, dicts and sets of scalars (dicts
+    in insertion order), cut at ``_PREVIEW_CHARS`` with ``...``; ``<Name object>`` for
+    anything else, inside them too."""
+    out: list[str] = []
+    room = [_PREVIEW_CHARS]
+    scalars = _preview_scalar_types()
+
+    def put(text: str) -> None:
+        out.append(text[: max(room[0], 0)])
+        room[0] -= len(text)
+        if room[0] < 0:
+            raise _PreviewFull
+
+    def items(open_: str, close: str, entries: Iterable[Any], depth: int, pair: bool) -> None:
+        put(open_)
+        for index, entry in enumerate(entries):
+            if index:
+                put(", ")
+            if index == _PREVIEW_ITEMS:
+                put("...")
+                break
+            if pair:
+                walk(entry[0], depth)
+                put(": ")
+                walk(entry[1], depth)
+            else:
+                walk(entry, depth)
+        put(close)
+
+    def walk(x: Any, depth: int) -> None:
+        kind = type(x)
+        if x is None or kind in (bool, float, complex, str, bytes):
+            put(repr(x[: _PREVIEW_CHARS + 1] if kind in (str, bytes) else x))
+        elif kind is int:
+            put(
+                repr(x)
+                if x.bit_length() <= _PREVIEW_INT_BITS
+                else f"<int of {x.bit_length()} bits>"
+            )
+        elif isinstance(x, scalars):
+            put(repr(x))
+        elif depth >= _PREVIEW_DEPTH and isinstance(x, (list, tuple, dict, set, frozenset)):
+            put("...")
+        elif isinstance(x, dict):
+            # dict.items: a subclass's own items() is the cell's code.
+            name = "" if kind is dict else f"{kind.__name__}("
+            items(f"{name}{{", "})" if name else "}", dict.items(x), depth + 1, True)
+        elif kind is list:
+            items("[", "]", x, depth + 1, False)
+        elif kind is tuple:
+            items("(", ",)" if len(x) == 1 else ")", x, depth + 1, False)
+        elif isinstance(x, tuple) and isinstance(getattr(kind, "_fields", None), tuple):
+            # A named tuple: its fields by name.
+            fields = [f"{field}=" for field in kind._fields]
+            put(f"{kind.__name__}(")
+            for index, (field, entry) in enumerate(zip(fields, tuple.__iter__(x), strict=False)):
+                put((", " if index else "") + field)
+                walk(entry, depth + 1)
+            put(")")
+        elif kind in (set, frozenset):
+            if not x:
+                put(f"{kind.__name__}()")
+            else:
+                name = "frozenset(" if kind is frozenset else ""
+                items(f"{name}{{", "})" if name else "}", x, depth + 1, False)
+        else:
+            put(f"<{kind.__name__} object>")
+
+    try:
+        walk(value, 0)
+    except _PreviewFull:
+        return "".join(out) + "..."
+    return "".join(out)
 
 
 def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
