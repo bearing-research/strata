@@ -2311,6 +2311,18 @@ class TestPickledPreview:
         ):
             assert serializer_module._object_preview(value) == repr(value)
 
+    def test_counts_that_will_not_compare_keep_their_order(self):
+        days = collections.Counter({"a": np.timedelta64(1, "D"), "b": 1.5})
+        units = collections.Counter({"a": np.timedelta64(1, "Y"), "b": np.timedelta64(1, "D")})
+        # Counter's own repr raises here (OverflowError is not the TypeError it catches).
+        huge = collections.Counter({"a": np.float64(1), "b": 10**400})
+
+        assert serializer_module._object_preview(days) == repr(days)
+        assert serializer_module._object_preview(units) == repr(units)
+        assert serializer_module._object_preview(huge).startswith(
+            "Counter({'a': np.float64(1.0), 'b': 1"
+        )
+
     def test_a_lowered_digit_limit_names_the_int(self, monkeypatch):
         monkeypatch.setattr(sys, "get_int_max_str_digits", lambda: 640)
 

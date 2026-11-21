@@ -1383,15 +1383,11 @@ def _object_preview(value: Any) -> str:
         collections.defaultdict,
     )
     # numpy's own number types, by identity: a subclass may name its module "numpy".
-    numpy_numbers = (
-        {
-            id(t)
-            for t in getattr(numpy, "sctypeDict", {}).values()
-            if issubclass(t, (numpy.number, numpy.bool_))
-        }
-        if numpy is not None
-        else set()
-    )
+    numpy_numbers: set[int] = set()
+    if numpy is not None:
+        numbers = (numpy.number, numpy.bool_)
+        found = getattr(numpy, "sctypeDict", {}).values()
+        numpy_numbers = {id(t) for t in found if issubclass(t, numbers)}
 
     def walk(x: Any, depth: int) -> None:
         kind = type(x)
@@ -1435,12 +1431,18 @@ def _object_preview(value: Any) -> str:
             # Most common first, as Counter prints itself, when its counts are plain numbers
             # (sorting others would run their __lt__); else in its order, as its repr falls
             # back to. nlargest, as most_common(n) does: no sort of all of it.
-            pairs = dict.items(x)
+            pairs: Iterable[Any] = dict.items(x)
             if all(
                 one_of(type(count), (int, float, bool)) or id(type(count)) in numpy_numbers
                 for count in dict.values(x)
             ):
-                pairs = heapq.nlargest(_PREVIEW_ITEMS + 1, pairs, key=operator.itemgetter(1))
+                try:
+                    pairs = heapq.nlargest(_PREVIEW_ITEMS + 1, pairs, key=operator.itemgetter(1))
+                except (TypeError, OverflowError):
+                    # Numbers that will not compare (a complex, timedelta64s of two units,
+                    # numpy's float with an int past its range): insertion order, as
+                    # Counter's repr falls back to.
+                    pairs = dict.items(x)
             items("Counter({", "})", pairs, depth + 1, "dict")
         elif kind is collections.defaultdict:
             factory = x.default_factory
