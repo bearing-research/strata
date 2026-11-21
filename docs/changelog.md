@@ -196,6 +196,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   records nothing of what it read, so its key would miss an edited project file or
   module and could replay a stale result. (#1589)
 ### Changed
+- **The ledger is vestigo 0.7.0.** On SQLite a store keeps its connections open between
+  calls and reuses them, where every call opened one: a lookup on a store nobody else
+  had open took 0.7 ms and takes 5 µs. Finding a computation's open build reads an index
+  on its key and state (9.6 ms with 50000 open builds, now 0.006 ms), and checking which
+  checkpoints a build can drop is no longer quadratic in its checkpoints. Its migration
+  20 replaces an index: the first 0.7.0 process to open a store builds it, and a 0.6.0
+  process then refuses the store, so every process on it upgrades together. (#PR)
 - **A scratchpad's daemon starts as the session opens.** In a project that already has a
   scratchpad, `strata mcp` starts its daemon in the background when the agent's session
   lists its tools, so the first `run` no longer waits about 4 s for it; a call made
