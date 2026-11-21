@@ -76,6 +76,15 @@ async def test_run_adds_a_cell_and_returns_what_it_showed(scratch):
 
 
 @pytest.mark.asyncio
+async def test_a_value_json_cannot_hold_shows_its_repr(scratch):
+    """A list of tuples or a dict with int keys is pickled; its repr is the answer."""
+    sm, _ = scratch
+    out = await _scratch_run(sm, "sorted({101: 0.5, 102: 0.9}.items(), key=lambda kv: -kv[1])")
+
+    assert out["value"] == "[(102, 0.9), (101, 0.5)]"
+
+
+@pytest.mark.asyncio
 async def test_an_unchanged_cell_hits_and_fresh_runs_it_again(scratch):
     sm, _ = scratch
     first = await _scratch_run(sm, "x = 1\nprint('ran')\nx")

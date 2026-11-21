@@ -17,11 +17,13 @@ import base64
 import contextlib
 import contextvars
 import hashlib
+import heapq
 import io
 import json
 import linecache
 import logging
 import math
+import operator
 import os
 import pickle
 import struct
@@ -1277,6 +1279,205 @@ def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -
     }
 
 
+# A pickled value's preview: what Python would print for it, so an agent's `run` shows the
+# answer (a list of tuples, a dict with int keys). Built here, from exact types only, not
+# by repr(): no code of the cell's runs (a subclass, a metaclass, a __repr__), and the
+# size is bounded while it is built.
+_PREVIEW_CHARS = 1000
+_PREVIEW_ITEMS = 50
+_PREVIEW_DEPTH = 6
+# Bits past which an int is named, not printed.
+_PREVIEW_INT_BITS = 10_000
+
+
+_TYPE_NAME = type.__dict__["__name__"]
+
+
+class _PreviewFull(Exception):
+    """The preview reached ``_PREVIEW_CHARS``."""
+
+
+def _printable_int(n: int) -> bool:
+    """Whether ``repr(n)`` is short and allowed (``sys.set_int_max_str_digits``)."""
+    bits = n.bit_length()
+    limit = sys.get_int_max_str_digits()
+    # 0.302 digits a bit, rounded up: under the limit with room to spare.
+    return bits <= _PREVIEW_INT_BITS and (limit == 0 or bits * 0.302 + 1 < limit)
+
+
+def _object_preview(value: Any) -> str:
+    """*value* as Python prints it, for lists, tuples, dicts and sets of plain values,
+    cut at ``_PREVIEW_CHARS`` with ``...``; ``<Name object>`` for anything else, inside
+    them too."""
+    import collections
+    import datetime
+    import decimal
+    import pathlib
+    import uuid
+
+    numpy = sys.modules.get("numpy")
+    # Exact types whose repr is the standard library's own, short once their numbers are.
+    plain = (
+        datetime.date,
+        datetime.timedelta,
+        decimal.Decimal,
+        uuid.UUID,
+        pathlib.PurePosixPath,
+        pathlib.PureWindowsPath,
+        pathlib.PosixPath,
+        pathlib.WindowsPath,
+    )
+    out: list[str] = []
+    room = [_PREVIEW_CHARS]
+
+    def put(text: str) -> None:
+        out.append(text[: max(room[0], 0)])
+        room[0] -= len(text)
+        if room[0] < 0:
+            raise _PreviewFull
+
+    def items(
+        open_: str, close: str, entries: Iterable[Any], depth: int, pair: str | None = None
+    ) -> None:
+        """*entries* between *open_* and *close*; *pair* prints each as ``k: v`` ("dict")
+        or ``(k, v)`` ("tuple"), its key and value at *depth*."""
+        put(open_)
+        for index, entry in enumerate(entries):
+            if index:
+                put(", ")
+            if index == _PREVIEW_ITEMS:
+                put("...")
+                break
+            if pair is None:
+                walk(entry, depth)
+                continue
+            put("(" if pair == "tuple" else "")
+            walk(entry[0], depth)
+            put(", " if pair == "tuple" else ": ")
+            walk(entry[1], depth)
+            put(")" if pair == "tuple" else "")
+        put(close)
+
+    def one_of(kind: type, types: tuple[type, ...]) -> bool:
+        # By identity: `in` would compare with a metaclass's own __eq__.
+        return any(kind is t for t in types)
+
+    def named(kind: type) -> bool:
+        fields = kind.__dict__.get("_fields")
+        return (
+            kind.__bases__ == (tuple,)
+            and type(fields) is tuple
+            and all(type(field) is str for field in fields)
+        )
+
+    builtin_factories = (list, dict, set, frozenset, tuple, int, float, complex, str, bytes, bool)
+
+    containers = (
+        list,
+        tuple,
+        dict,
+        set,
+        frozenset,
+        collections.Counter,
+        collections.OrderedDict,
+        collections.defaultdict,
+    )
+    # numpy's own number types, by identity: a subclass may name its module "numpy".
+    numpy_numbers = (
+        {
+            id(t)
+            for t in getattr(numpy, "sctypeDict", {}).values()
+            if issubclass(t, (numpy.number, numpy.bool_))
+        }
+        if numpy is not None
+        else set()
+    )
+
+    def walk(x: Any, depth: int) -> None:
+        kind = type(x)
+        if type(kind) is not type:
+            # A metaclass of the cell's: even comparing the class could run its code.
+            # type's own descriptor: a metaclass property of that name is the cell's.
+            put(f"<{_TYPE_NAME.__get__(kind)} object>")
+        elif x is None or one_of(kind, (bool, float, complex)):
+            put(repr(x))
+        elif one_of(kind, (str, bytes)):
+            put(repr(x[: _PREVIEW_CHARS + 1]))
+        elif kind is int:
+            put(repr(x) if _printable_int(x) else f"<int of {x.bit_length()} bits>")
+        elif kind is range and all(_printable_int(n) for n in (x.start, x.stop, x.step)):
+            put(repr(x))
+        elif kind is datetime.datetime or kind is datetime.time:
+            # Its repr names its tzinfo by repr: only the standard library's.
+            zone = x.tzinfo
+            if zone is None or type(zone) is datetime.timezone:
+                put(repr(x))
+            else:
+                put(f"<{kind.__name__} object>")
+        elif one_of(kind, plain):
+            put(repr(x))
+        elif id(kind) in numpy_numbers:
+            put(repr(x))
+        elif depth >= _PREVIEW_DEPTH and (one_of(kind, containers) or named(kind)):
+            put("...")
+        elif kind is dict:
+            items("{", "}", dict.items(x), depth + 1, "dict")
+        elif (kind is collections.OrderedDict or kind is collections.Counter) and not x:
+            put(f"{kind.__name__}()")
+        elif kind is collections.OrderedDict:
+            pairs = collections.OrderedDict.items(x)
+            # A project's own environment may be 3.11, which prints a list of pairs.
+            if sys.version_info >= (3, 12):  # noqa: UP036
+                items("OrderedDict({", "})", pairs, depth + 1, "dict")
+            else:
+                items("OrderedDict([", "])", pairs, depth + 1, "tuple")
+        elif kind is collections.Counter:
+            # Most common first, as Counter prints itself, when every count is a Python
+            # int, float or bool: those compare exactly, with no error, warning or __lt__
+            # of the cell's. Others (numpy's among them) keep their order. nlargest, as
+            # most_common(n) does: no sort of all of it.
+            pairs: Iterable[Any] = dict.items(x)
+            if all(one_of(type(count), (int, float, bool)) for count in dict.values(x)):
+                pairs = heapq.nlargest(_PREVIEW_ITEMS + 1, pairs, key=operator.itemgetter(1))
+            items("Counter({", "})", pairs, depth + 1, "dict")
+        elif kind is collections.defaultdict:
+            factory = x.default_factory
+            if factory is None:
+                name = "None"
+            elif one_of(factory, builtin_factories):
+                name = f"<class '{_TYPE_NAME.__get__(factory)}'>"
+            else:
+                name = "<factory>"
+            items(f"defaultdict({name}, {{", "})", dict.items(x), depth + 1, "dict")
+        elif kind is list:
+            items("[", "]", x, depth + 1)
+        elif kind is tuple:
+            items("(", ",)" if len(x) == 1 else ")", x, depth + 1)
+        elif named(kind):
+            # A named tuple: its fields by name.
+            put(f"{kind.__name__}(")
+            for index, (field, entry) in enumerate(
+                zip(kind.__dict__["_fields"], tuple.__iter__(x), strict=False)
+            ):
+                put(f"{', ' if index else ''}{field}=")
+                walk(entry, depth + 1)
+            put(")")
+        elif kind is set or kind is frozenset:
+            if not x:
+                put(f"{kind.__name__}()")
+            else:
+                name = "frozenset(" if kind is frozenset else ""
+                items(f"{name}{{", "})" if name else "}", x, depth + 1)
+        else:
+            put(f"<{kind.__name__} object>")
+
+    try:
+        walk(value, 0)
+    except _PreviewFull:
+        return "".join(out) + "..."
+    return "".join(out)
+
+
 def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     # Raise rather than return a success-shape dict with file=None: the store
     # would think it was written. harness.py and pool_worker.py turn the
@@ -1294,7 +1495,7 @@ def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> Seria
         "bytes": filepath.stat().st_size,
         "codec": codec.name,
         "type": type(value).__name__,
-        "preview": f"<{type(value).__name__} object>",
+        "preview": _object_preview(value),
     }
 
 
