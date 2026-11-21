@@ -1278,12 +1278,13 @@ def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -
 
 
 # A pickled value's preview: what Python would print for it, so an agent's `run` shows the
-# answer (a list of tuples, a dict with int keys). Built here, not by repr(): no code of
-# the cell's runs, and the size is bounded while it is built.
+# answer (a list of tuples, a dict with int keys). Built here, from exact types only, not
+# by repr(): no code of the cell's runs (a subclass, a metaclass, a __repr__), and the
+# size is bounded while it is built.
 _PREVIEW_CHARS = 1000
 _PREVIEW_ITEMS = 50
 _PREVIEW_DEPTH = 6
-# Bits past which an int is named, not printed (str() refuses past 4300 digits).
+# Bits past which an int is named, not printed.
 _PREVIEW_INT_BITS = 10_000
 
 
@@ -1291,37 +1292,38 @@ class _PreviewFull(Exception):
     """The preview reached ``_PREVIEW_CHARS``."""
 
 
-def _preview_scalar_types() -> tuple[type, ...]:
-    """Types whose repr is the library's own C or stdlib code, cheap and exact."""
-    import datetime
-    import decimal
-    import fractions
-    import pathlib
-    import uuid
-
-    found: list[type] = [
-        datetime.date,
-        datetime.time,
-        datetime.timedelta,
-        decimal.Decimal,
-        fractions.Fraction,
-        uuid.UUID,
-        pathlib.PurePath,
-        range,
-    ]
-    numpy = sys.modules.get("numpy")
-    if numpy is not None:
-        found.append(numpy.generic)
-    return tuple(found)
+def _printable_int(n: int) -> bool:
+    """Whether ``repr(n)`` is short and allowed (``sys.set_int_max_str_digits``)."""
+    bits = n.bit_length()
+    limit = sys.get_int_max_str_digits()
+    # 0.302 digits a bit, rounded up: under the limit with room to spare.
+    return bits <= _PREVIEW_INT_BITS and (limit == 0 or bits * 0.302 + 1 < limit)
 
 
 def _object_preview(value: Any) -> str:
-    """*value* as Python prints it, for lists, tuples, dicts and sets of scalars (dicts
-    in insertion order), cut at ``_PREVIEW_CHARS`` with ``...``; ``<Name object>`` for
-    anything else, inside them too."""
+    """*value* as Python prints it, for lists, tuples, dicts and sets of plain values,
+    cut at ``_PREVIEW_CHARS`` with ``...``; ``<Name object>`` for anything else, inside
+    them too."""
+    import collections
+    import datetime
+    import decimal
+    import pathlib
+    import uuid
+
+    numpy = sys.modules.get("numpy")
+    # Exact types whose repr is the standard library's own, short once their numbers are.
+    plain = (
+        datetime.date,
+        datetime.timedelta,
+        decimal.Decimal,
+        uuid.UUID,
+        pathlib.PurePosixPath,
+        pathlib.PureWindowsPath,
+        pathlib.PosixPath,
+        pathlib.WindowsPath,
+    )
     out: list[str] = []
     room = [_PREVIEW_CHARS]
-    scalars = _preview_scalar_types()
 
     def put(text: str) -> None:
         out.append(text[: max(room[0], 0)])
@@ -1345,37 +1347,76 @@ def _object_preview(value: Any) -> str:
                 walk(entry, depth)
         put(close)
 
+    def one_of(kind: type, types: tuple[type, ...]) -> bool:
+        # By identity: `in` would compare with a metaclass's own __eq__.
+        return any(kind is t for t in types)
+
     def walk(x: Any, depth: int) -> None:
         kind = type(x)
-        if x is None or kind in (bool, float, complex, str, bytes):
-            put(repr(x[: _PREVIEW_CHARS + 1] if kind in (str, bytes) else x))
-        elif kind is int:
-            put(
-                repr(x)
-                if x.bit_length() <= _PREVIEW_INT_BITS
-                else f"<int of {x.bit_length()} bits>"
-            )
-        elif isinstance(x, scalars):
+        if type(kind) is not type:
+            # A metaclass of the cell's: even comparing the class could run its code.
+            put(f"<{type.__getattribute__(kind, '__name__')} object>")
+        elif x is None or one_of(kind, (bool, float, complex)):
             put(repr(x))
-        elif depth >= _PREVIEW_DEPTH and isinstance(x, (list, tuple, dict, set, frozenset)):
+        elif one_of(kind, (str, bytes)):
+            put(repr(x[: _PREVIEW_CHARS + 1]))
+        elif kind is int:
+            put(repr(x) if _printable_int(x) else f"<int of {x.bit_length()} bits>")
+        elif kind is range and all(_printable_int(n) for n in (x.start, x.stop, x.step)):
+            put(repr(x))
+        elif kind is datetime.datetime or kind is datetime.time:
+            # Its repr names its tzinfo by repr: only the standard library's.
+            zone = x.tzinfo
+            if zone is None or type(zone) is datetime.timezone:
+                put(repr(x))
+            else:
+                put(f"<{kind.__name__} object>")
+        elif one_of(kind, plain):
+            put(repr(x))
+        elif (
+            numpy is not None
+            and kind.__module__ == "numpy"
+            and issubclass(kind, (numpy.number, numpy.bool_))
+        ):
+            put(repr(x))
+        elif depth >= _PREVIEW_DEPTH and one_of(
+            kind,
+            (list, tuple, dict, set, frozenset, collections.Counter, collections.OrderedDict),
+        ):
             put("...")
-        elif isinstance(x, dict):
-            # dict.items: a subclass's own items() is the cell's code.
-            name = "" if kind is dict else f"{kind.__name__}("
-            items(f"{name}{{", "})" if name else "}", dict.items(x), depth + 1, True)
+        elif kind is dict:
+            items("{", "}", dict.items(x), depth + 1, True)
+        elif kind is collections.OrderedDict:
+            items("OrderedDict({", "})", collections.OrderedDict.items(x), depth + 1, True)
+        elif kind is collections.Counter:
+            # As Counter prints itself: most common first.
+            items("Counter({", "})", collections.Counter.most_common(x), depth + 1, True)
+        elif kind is collections.defaultdict:
+            factory = x.default_factory
+            name = (
+                f"<class {factory.__qualname__!r}>"
+                if factory is not None
+                and type(factory) is type
+                and factory.__module__ == "builtins"
+                else "None"
+                if factory is None
+                else "<factory>"
+            )
+            items(f"defaultdict({name}, {{", "})", dict.items(x), depth + 1, True)
         elif kind is list:
             items("[", "]", x, depth + 1, False)
         elif kind is tuple:
             items("(", ",)" if len(x) == 1 else ")", x, depth + 1, False)
-        elif isinstance(x, tuple) and isinstance(getattr(kind, "_fields", None), tuple):
+        elif kind.__bases__ == (tuple,) and isinstance(kind.__dict__.get("_fields"), tuple):
             # A named tuple: its fields by name.
-            fields = [f"{field}=" for field in kind._fields]
             put(f"{kind.__name__}(")
-            for index, (field, entry) in enumerate(zip(fields, tuple.__iter__(x), strict=False)):
-                put((", " if index else "") + field)
+            for index, (field, entry) in enumerate(
+                zip(kind._fields, tuple.__iter__(x), strict=False)
+            ):
+                put(f"{', ' if index else ''}{field}=")
                 walk(entry, depth + 1)
             put(")")
-        elif kind in (set, frozenset):
+        elif kind is set or kind is frozenset:
             if not x:
                 put(f"{kind.__name__}()")
             else:

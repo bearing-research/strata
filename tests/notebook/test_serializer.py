@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import datetime
+import fractions
 import json
 import linecache
 import logging
@@ -15,7 +17,7 @@ import tempfile
 import threading
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 import pandas as pd
@@ -2271,15 +2273,36 @@ class TestPickledPreview:
             ((1,), "(1,)"),
             (set(), "set()"),
             (frozenset({3}), "frozenset({3})"),
-            (collections.Counter("aab"), "Counter({'a': 2, 'b': 1})"),
             (collections.namedtuple("Point", "x y")(1, 2), "Point(x=1, y=2)"),
             ([date(2026, 11, 20)], "[datetime.date(2026, 11, 20)]"),
-            ([np.float64(0.5)], "[np.float64(0.5)]"),
+            ([Decimal("1.5")], "[Decimal('1.5')]"),
             pytest.param(2**20_000, "<int of 20001 bits>", id="huge-int"),
+            # numbers.Rational's ABCMeta: not printed, as any class with a metaclass of its own.
+            (fractions.Fraction(1, 3), "<Fraction object>"),
+            ([PurePosixPath("/a")], "[PurePosixPath('/a')]"),
+            pytest.param(range(2**20_000), "<range object>", id="huge-range"),
         ],
     )
     def test_the_standard_shapes(self, value, preview):
         assert serializer_module._object_preview(value) == preview
+
+    def test_numpy_numbers_print_as_numpy_prints_them(self):
+        assert serializer_module._object_preview([np.float64(0.5)]) == f"[{np.float64(0.5)!r}]"
+        assert serializer_module._object_preview(np.str_("x")) == "<str_ object>"
+
+    def test_the_standard_dicts_print_in_their_own_order(self):
+        ordered = collections.OrderedDict(a=1, b=2)
+        ordered.move_to_end("a")
+        counts = collections.Counter("abb")
+        lists = collections.defaultdict(list, {1: [2]})
+
+        for value in (ordered, counts, lists):
+            assert serializer_module._object_preview(value) == repr(value)
+
+    def test_a_lowered_digit_limit_names_the_int(self, monkeypatch):
+        monkeypatch.setattr(sys, "get_int_max_str_digits", lambda: 640)
+
+        assert serializer_module._object_preview(10**700) == "<int of 2326 bits>"
 
     def test_a_large_or_deep_value_is_cut_whole(self):
         flat = serializer_module._object_preview([(i, i) for i in range(10_000)])
@@ -2297,9 +2320,39 @@ class TestPickledPreview:
             def __repr__(self) -> str:
                 raise AssertionError("the preview ran the cell's __repr__")
 
+        class Day(date):
+            def __repr__(self) -> str:
+                raise AssertionError("the preview ran the cell's __repr__")
+
+        class Zone(datetime.tzinfo):
+            def __repr__(self) -> str:
+                raise AssertionError("the preview ran the cell's __repr__")
+
+        class Meta(type):
+            def __eq__(cls, other: object) -> bool:
+                raise AssertionError("the preview compared with the cell's metaclass")
+
+            __hash__ = type.__hash__
+
+            @property
+            def __module__(cls) -> str:  # type: ignore[override]
+                raise AssertionError("the preview read the cell's metaclass")
+
+        class Precise(np.float64):
+            def __repr__(self) -> str:
+                raise AssertionError("the preview ran the cell's __repr__")
+
+        class Odd(metaclass=Meta):
+            pass
+
         assert serializer_module._object_preview(Loud()) == "<Loud object>"
         assert serializer_module._object_preview([Loud()]) == "[<Loud object>]"
         assert serializer_module._object_preview(Listing([1])) == "<Listing object>"
+        assert serializer_module._object_preview(Day(2020, 1, 1)) == "<Day object>"
+        zoned = datetime.datetime(2020, 1, 1, tzinfo=Zone())
+        assert serializer_module._object_preview(zoned) == "<datetime object>"
+        assert serializer_module._object_preview([Odd()]) == "[<Odd object>]"
+        assert serializer_module._object_preview(Precise(0.5)) == "<Precise object>"
 
     def test_a_function_shows_no_address(self):
         assert serializer_module._object_preview(lambda: 1) == "<function object>"

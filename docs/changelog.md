@@ -536,11 +536,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ### Fixed
 - **A pickled value previews as Python prints it, not as its type name.** A list of
   tuples or a dict with int keys previewed as `<list object>`, so the scratchpad's `run`
-  showed no answer and the agent ran the cell again to print it. Lists, tuples, dicts (in
-  their order), sets, counters, named tuples and plain values (numbers, strings, dates,
-  decimals, numpy scalars) now print, cut at 1,000 characters; anything else shows as
-  `<Name object>`, so no `__repr__` of the cell's runs. The web UI, the TUI and export show
-  the same text. (#1599)
+  showed no answer and the agent ran the cell again to print it. Lists, tuples, dicts,
+  sets, the standard library's counters and ordered and default dicts, named tuples and
+  plain values (numbers, strings, dates, decimals, UUIDs, paths, numpy numbers) now print
+  as Python prints them, cut at 1,000 characters. Anything else, a subclass among them,
+  shows as `<Name object>`, so building the preview runs none of the cell's code. The web
+  UI, the TUI and export show the same text. (#1599)
 - **The scratchpad's inventory sees a project file edited under a running daemon.** A
   cell keyed on a module it imported, or a file it read, stayed `ready` in the
   `scratchpad` tool and `strata scratch show` after the file changed, until something
