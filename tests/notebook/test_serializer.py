@@ -2296,7 +2296,17 @@ class TestPickledPreview:
         counts = collections.Counter("abb")
         lists = collections.defaultdict(list, {1: [2]})
 
-        for value in (ordered, counts, lists):
+        mixed = collections.Counter(a=1)
+        mixed["b"] = "x"
+
+        for value in (
+            ordered,
+            counts,
+            lists,
+            mixed,
+            collections.Counter(),
+            collections.OrderedDict(),
+        ):
             assert serializer_module._object_preview(value) == repr(value)
 
     def test_a_lowered_digit_limit_names_the_int(self, monkeypatch):
@@ -2339,8 +2349,24 @@ class TestPickledPreview:
                 raise AssertionError("the preview read the cell's metaclass")
 
         class Precise(np.float64):
+            __module__ = "numpy"
+
             def __repr__(self) -> str:
                 raise AssertionError("the preview ran the cell's __repr__")
+
+        class Ordered:
+            def __lt__(self, other: object) -> bool:
+                raise AssertionError("the preview compared the cell's values")
+
+            __gt__ = __lt__
+
+        class Named(type):
+            @property
+            def __name__(cls) -> str:  # type: ignore[override]
+                raise AssertionError("the preview read the cell's metaclass")
+
+        class Odder(metaclass=Named):
+            pass
 
         class Odd(metaclass=Meta):
             pass
@@ -2353,6 +2379,17 @@ class TestPickledPreview:
         assert serializer_module._object_preview(zoned) == "<datetime object>"
         assert serializer_module._object_preview([Odd()]) == "[<Odd object>]"
         assert serializer_module._object_preview(Precise(0.5)) == "<Precise object>"
+        counted = serializer_module._object_preview(collections.Counter(a=Ordered(), b=Ordered()))
+        assert counted == "Counter({'a': <Ordered object>, 'b': <Ordered object>})"
+        assert serializer_module._object_preview(Odder()) == "<Odder object>"
+
+    def test_named_tuples_and_default_dicts_stop_at_the_depth(self):
+        point = collections.namedtuple("P", "a")
+        deep = point(1)
+        for _ in range(20):
+            deep = point(deep)
+
+        assert serializer_module._object_preview(deep).count("P(") == 6
 
     def test_a_function_shows_no_address(self):
         assert serializer_module._object_preview(lambda: 1) == "<function object>"

@@ -17,11 +17,13 @@ import base64
 import contextlib
 import contextvars
 import hashlib
+import heapq
 import io
 import json
 import linecache
 import logging
 import math
+import operator
 import os
 import pickle
 import struct
@@ -1288,6 +1290,9 @@ _PREVIEW_DEPTH = 6
 _PREVIEW_INT_BITS = 10_000
 
 
+_TYPE_NAME = type.__dict__["__name__"]
+
+
 class _PreviewFull(Exception):
     """The preview reached ``_PREVIEW_CHARS``."""
 
@@ -1351,11 +1356,32 @@ def _object_preview(value: Any) -> str:
         # By identity: `in` would compare with a metaclass's own __eq__.
         return any(kind is t for t in types)
 
+    def named(kind: type) -> bool:
+        return kind.__bases__ == (tuple,) and type(kind.__dict__.get("_fields")) is tuple
+
+    containers = (
+        list,
+        tuple,
+        dict,
+        set,
+        frozenset,
+        collections.Counter,
+        collections.OrderedDict,
+        collections.defaultdict,
+    )
+    # numpy's own number types, by identity: a subclass may name its module "numpy".
+    numpy_numbers = (
+        {id(t) for t in numpy.sctypeDict.values() if issubclass(t, (numpy.number, numpy.bool_))}
+        if numpy is not None
+        else set()
+    )
+
     def walk(x: Any, depth: int) -> None:
         kind = type(x)
         if type(kind) is not type:
             # A metaclass of the cell's: even comparing the class could run its code.
-            put(f"<{type.__getattribute__(kind, '__name__')} object>")
+            # type's own descriptor: a metaclass property of that name is the cell's.
+            put(f"<{_TYPE_NAME.__get__(kind)} object>")
         elif x is None or one_of(kind, (bool, float, complex)):
             put(repr(x))
         elif one_of(kind, (str, bytes)):
@@ -1373,24 +1399,29 @@ def _object_preview(value: Any) -> str:
                 put(f"<{kind.__name__} object>")
         elif one_of(kind, plain):
             put(repr(x))
-        elif (
-            numpy is not None
-            and kind.__module__ == "numpy"
-            and issubclass(kind, (numpy.number, numpy.bool_))
-        ):
+        elif id(kind) in numpy_numbers:
             put(repr(x))
-        elif depth >= _PREVIEW_DEPTH and one_of(
-            kind,
-            (list, tuple, dict, set, frozenset, collections.Counter, collections.OrderedDict),
-        ):
+        elif depth >= _PREVIEW_DEPTH and (one_of(kind, containers) or named(kind)):
             put("...")
         elif kind is dict:
             items("{", "}", dict.items(x), depth + 1, True)
+        elif (kind is collections.OrderedDict or kind is collections.Counter) and not x:
+            put(f"{kind.__name__}()")
         elif kind is collections.OrderedDict:
-            items("OrderedDict({", "})", collections.OrderedDict.items(x), depth + 1, True)
+            pairs = collections.OrderedDict.items(x)
+            # A project's own environment may be 3.11, which prints a list of pairs.
+            if sys.version_info >= (3, 12):  # noqa: UP036
+                items("OrderedDict({", "})", pairs, depth + 1, True)
+            else:
+                items("OrderedDict([", "])", (tuple(pair) for pair in pairs), depth + 1, False)
         elif kind is collections.Counter:
-            # As Counter prints itself: most common first.
-            items("Counter({", "})", collections.Counter.most_common(x), depth + 1, True)
+            # Most common first, as Counter prints itself, when its counts are plain numbers
+            # (sorting others would run their __lt__); else in its order, as its repr falls
+            # back to. nlargest, as most_common(n) does: no sort of all of it.
+            pairs = dict.items(x)
+            if all(type(count) is int or type(count) is float for count in dict.values(x)):
+                pairs = heapq.nlargest(_PREVIEW_ITEMS + 1, pairs, key=operator.itemgetter(1))
+            items("Counter({", "})", pairs, depth + 1, True)
         elif kind is collections.defaultdict:
             factory = x.default_factory
             name = (
@@ -1407,11 +1438,11 @@ def _object_preview(value: Any) -> str:
             items("[", "]", x, depth + 1, False)
         elif kind is tuple:
             items("(", ",)" if len(x) == 1 else ")", x, depth + 1, False)
-        elif kind.__bases__ == (tuple,) and isinstance(kind.__dict__.get("_fields"), tuple):
+        elif named(kind):
             # A named tuple: its fields by name.
             put(f"{kind.__name__}(")
             for index, (field, entry) in enumerate(
-                zip(kind._fields, tuple.__iter__(x), strict=False)
+                zip(kind.__dict__["_fields"], tuple.__iter__(x), strict=False)
             ):
                 put(f"{', ' if index else ''}{field}=")
                 walk(entry, depth + 1)
