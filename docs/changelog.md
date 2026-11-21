@@ -534,6 +534,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A pickled value previews as its repr, not its type name.** A list of tuples or a
+  dict with int keys previewed as `<list object>`, so the scratchpad's `run` showed no
+  answer and the agent ran the cell again to print it. The preview is now a bounded
+  repr (20 items, 4 levels, 200 characters a string), in the web UI, the TUI and export
+  too; a value whose class keeps the default repr still shows `<Name object>`. (#1599)
 - **The scratchpad's inventory sees a project file edited under a running daemon.** A
   cell keyed on a module it imported, or a file it read, stayed `ready` in the
   `scratchpad` tool and `strata scratch show` after the file changed, until something
