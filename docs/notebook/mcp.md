@@ -259,9 +259,12 @@ config starts as a command:
 {"mcpServers": {"strata": {"command": "strata", "args": ["mcp"]}}}
 ```
 
-It answers the handshake and the tool list itself, so a session that never calls
-a tool starts nothing. The first tool call finds the project's daemon or starts
-it (creating `.strata-scratch/` if needed), and every call runs there. The
+It answers the handshake and the tool list itself. In a project that already has
+a scratchpad (`.strata-scratch/`), it starts the project's daemon in the
+background as the session opens, so the first call does not wait for it; a call
+made while it starts waits for that one. Elsewhere a session that never calls a
+tool starts nothing: the first tool call finds the project's daemon or starts it
+(creating `.strata-scratch/`). Every call runs there. The
 project is the one `strata mcp` starts in
 ([A project's own daemon](#a-projects-own-daemon)). While the scratchpad is set
 up, each step is sent as MCP progress when the call asks for it, and the result

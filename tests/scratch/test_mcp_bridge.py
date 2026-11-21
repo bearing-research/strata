@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import sys
+import time
 
 import httpx
 import pytest
@@ -82,6 +83,92 @@ async def test_the_first_call_sets_the_scratchpad_up_and_says_so(project):
         held = _value(await client.call_tool("scratchpad", {"name": "x"}))
         assert "x = 41" in held["source"]
         assert "setup_ms" not in held
+
+
+def _made(project) -> None:
+    """A scratchpad made by an earlier session, its daemon since stopped."""
+    scratch.ensure_daemon(project)
+    assert scratch.stop_daemon(project)
+
+
+@pytest.mark.asyncio
+async def test_a_project_with_a_scratchpad_starts_its_daemon_as_the_session_opens(project):
+    _made(project)
+    async with _bridge(project) as client:
+        # No call yet: the session's opening started it.
+        async with asyncio.timeout(120):
+            while scratch.find_daemon(project.resolve()) is None:
+                await asyncio.sleep(0.05)
+        first = _value(await client.call_tool("run", {"source": "1 + 1"}))
+    assert first["value"] == 2
+    assert "setup_ms" not in first
+
+
+@pytest.mark.asyncio
+async def test_a_call_while_the_daemon_starts_waits_for_it(project, monkeypatch):
+    _made(project)
+    starts: list[object] = []
+    ensure = scratch.ensure_daemon
+
+    def counted(*args, **kwargs):
+        starts.append(args[1])
+        return ensure(*args, **kwargs)
+
+    monkeypatch.setattr(scratch, "ensure_daemon", counted)
+    async with _bridge(project) as client:
+        first = _value(await client.call_tool("run", {"source": "1 + 1"}))
+    assert first["value"] == 2
+    # The opening's start (no progress callback) and no second one for the call.
+    assert starts == [None]
+
+
+@pytest.mark.asyncio
+async def test_a_project_with_no_scratchpad_starts_nothing_until_a_call(project, monkeypatch):
+    starts: list[object] = []
+    monkeypatch.setattr(scratch, "ensure_daemon", lambda *args, **kwargs: starts.append(args))
+    async with _bridge(project) as client:
+        await client.list_tools()
+        await asyncio.sleep(0.2)
+    assert starts == []
+    assert not (project / ".strata-scratch").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_start_that_fails_as_the_session_opens_is_tried_again_by_the_call(
+    project, monkeypatch
+):
+    _made(project)
+    monkeypatch.setattr(
+        scratch, "_server_command", lambda: [sys.executable, "-c", "raise SystemExit(3)"]
+    )
+    async with _bridge(project) as client:
+        result = await client.call_tool("run", {"source": "1"})
+    assert result.is_error
+    assert "exited while starting" in json.loads(result.content[0].text)["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_session_that_ends_during_the_start_cancels_it(project, monkeypatch):
+    _made(project)
+    ended = asyncio.Event()
+    seen: list[bool] = []
+    loop = asyncio.get_running_loop()
+
+    def waits(root, progress, cancel):
+        # As a start would: until the session's end sets the cancel (bounded, so a cancel
+        # never set fails the test rather than leaving the thread spinning).
+        deadline = time.monotonic() + 30
+        while not cancel.is_set() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        seen.append(cancel.is_set())
+        loop.call_soon_threadsafe(ended.set)
+        raise scratch.ScratchError("cancelled")
+
+    monkeypatch.setattr(scratch, "ensure_daemon", waits)
+    async with _bridge(project) as client:
+        await client.list_tools()
+    await asyncio.wait_for(ended.wait(), 60)
+    assert seen == [True]
 
 
 def _refused(url: str) -> bool:

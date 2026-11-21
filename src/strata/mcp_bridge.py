@@ -1,11 +1,13 @@
 """``strata mcp``: a project's scratchpad as a stdio MCP server, for an agent's config.
 
 It answers ``initialize`` and ``tools/list`` itself, from the guidance and a copy of the
-daemon's tool list (``scratch_tools.json``), so a session that never calls a tool starts
-nothing. The first tool call finds or starts the project's daemon (``strata.scratch``),
-reporting each setup step as MCP progress, and every call is forwarded to the daemon's
-``/mcp/`` endpoint. A call that had to set the scratchpad up carries ``setup_ms``, and
-one served by another Strata version's daemon, busy so not replaced, carries ``note``.
+daemon's tool list (``scratch_tools.json``). In a project that has a scratchpad it starts
+the project's daemon (``strata.scratch``) in the background as the session opens, so the
+first call does not wait for it; elsewhere nothing starts until the first tool call, which
+finds or starts the daemon, reporting each setup step as MCP progress. Every call is
+forwarded to the daemon's ``/mcp/`` endpoint. A call that had to set the scratchpad up
+carries ``setup_ms``, and one served by another Strata version's daemon, busy so not
+replaced, carries ``note``.
 """
 
 from __future__ import annotations
@@ -264,10 +266,37 @@ def build_server(root: Path) -> Server:
             result = _with_fields(result, fields)
         return types.CallToolResult.model_validate(result)
 
+    async def prestart(cancel: scratch.SetupCancel) -> None:
+        """Start the daemon before the first call; a call meanwhile waits for it."""
+        async with setting_up:
+            try:
+                daemon = await anyio.to_thread.run_sync(
+                    scratch.ensure_daemon, root, None, cancel, abandon_on_cancel=True
+                )
+            except scratch.ScratchError as exc:
+                # The first call tries again, and says why it cannot.
+                print(f"strata mcp: the scratchpad did not start: {exc}", file=sys.stderr)
+                return
+            found[:] = [daemon]
+        with contextlib.suppress(httpx.HTTPError):
+            # Its handshake too; one that fails is made again by the call.
+            await upstream.open(daemon.url)
+
     @asynccontextmanager
     async def lifespan(server: Server) -> AsyncGenerator[None]:
+        # Set as the session ends: a daemon it started and had not recorded is killed.
+        cancel = scratch.SetupCancel()
         try:
-            yield
+            async with anyio.create_task_group() as group:
+                # Only where a scratchpad was made: elsewhere a session that never calls
+                # a tool creates nothing.
+                if (scratch.scratch_dir(root) / "notebook.toml").is_file():
+                    group.start_soon(prestart, cancel)
+                try:
+                    yield
+                finally:
+                    cancel.set()
+                    group.cancel_scope.cancel()
         finally:
             await upstream.aclose()
 
