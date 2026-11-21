@@ -1,11 +1,14 @@
 """``strata mcp``: a project's scratchpad as a stdio MCP server, for an agent's config.
 
 It answers ``initialize`` and ``tools/list`` itself, from the guidance and a copy of the
-daemon's tool list (``scratch_tools.json``), so a session that never calls a tool starts
-nothing. The first tool call finds or starts the project's daemon (``strata.scratch``),
-reporting each setup step as MCP progress, and every call is forwarded to the daemon's
-``/mcp/`` endpoint. A call that had to set the scratchpad up carries ``setup_ms``, and
-one served by another Strata version's daemon, busy so not replaced, carries ``note``.
+daemon's tool list (``scratch_tools.json``). In a project that has a scratchpad, the
+session's first tool list starts the project's daemon (``strata.scratch``) in the
+background, so the first call does not wait for it; elsewhere nothing starts until the
+first tool call, which finds or starts the daemon. A call that sets the scratchpad up
+hears each setup step as MCP progress, one that waits for the background start hears that
+it waits, and both carry ``setup_ms``. Every call is forwarded to the daemon's ``/mcp/``
+endpoint; one served by another Strata version's daemon, busy so not replaced, carries
+``note``.
 """
 
 from __future__ import annotations
@@ -17,12 +20,14 @@ import signal
 import sys
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from functools import cache
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
 import anyio
+import anyio.abc
 import anyio.from_thread
 import anyio.to_thread
 import httpx
@@ -191,15 +196,43 @@ def _failure(error: str, fix: str) -> types.CallToolResult:
     )
 
 
+@dataclass
+class _Opening:
+    """The daemon's background start, which calls made meanwhile wait for."""
+
+    # Begun once: one that fails leaves the start to the first call.
+    begun: bool = False
+    running: bool = False
+    daemon: scratch.Daemon | None = None
+    # The lifespan's task group, and the cancel its end sets (killing a daemon the start
+    # began and had not recorded).
+    group: anyio.abc.TaskGroup | None = None
+    cancel: scratch.SetupCancel = field(default_factory=scratch.SetupCancel)
+
+
 def build_server(root: Path) -> Server:
-    """The server for the scratchpad of the project at *root*."""
+    """The server for the scratchpad of the project at *root*, for one session (as
+    ``strata mcp`` serves one): its client and its start are not made again."""
     upstream = Upstream()
     # One setup at a time: parallel first calls wait for one daemon, not race two.
     setting_up = anyio.Lock()
 
+    opening = _Opening()
+
     async def list_tools(
         ctx: Any, params: types.PaginatedRequestParams | None
     ) -> types.ListToolsResult:
+        # An agent's session lists the tools as it opens, where a health check only
+        # connects. Only where a scratchpad was made: elsewhere a session that never
+        # calls a tool creates nothing.
+        if (
+            opening.group is not None
+            and not opening.begun
+            and not found
+            and (scratch.scratch_dir(root) / "notebook.toml").is_file()
+        ):
+            opening.begun = opening.running = True
+            opening.group.start_soon(prestart)
         return types.ListToolsResult.model_validate({"tools": listed_tools()})
 
     # The daemon forwarded to: found or started on the first call, and again only once
@@ -215,6 +248,12 @@ def build_server(root: Path) -> Server:
             anyio.from_thread.run(ctx.session.report_progress, next(steps), None, step)
 
         setup_ms: dict[str, int] = {}
+        # A background start is running: this call waits for it, and says so.
+        waits = opening.running
+        if waits:
+            await ctx.session.report_progress(
+                next(steps), None, "waiting for the scratchpad to start"
+            )
         async with setting_up:
             other = bool(found) and found[0] is not unreachable and found[0].version != current
             if not found or found[0] is unreachable or other:
@@ -227,6 +266,9 @@ def build_server(root: Path) -> Server:
                 else:
                     found[:] = [daemon]
                     setup_ms = daemon.setup_ms
+            elif waits and found[0] is opening.daemon:
+                # What the start it waited for took.
+                setup_ms = dict(found[0].setup_ms)
         await upstream.open(found[0].url)
         return setup_ms
 
@@ -264,10 +306,55 @@ def build_server(root: Path) -> Server:
             result = _with_fields(result, fields)
         return types.CallToolResult.model_validate(result)
 
+    async def prestart() -> None:
+        """Start the daemon before the first call; a call meanwhile waits for it."""
+        async with setting_up:
+            try:
+                if found:
+                    return
+                try:
+                    daemon = await anyio.to_thread.run_sync(
+                        scratch.ensure_daemon, root, None, opening.cancel, abandon_on_cancel=True
+                    )
+                except Exception as exc:
+                    # Never the session's end: the first call tries again, and says why.
+                    print(f"strata mcp: the scratchpad did not start: {exc!r}", file=sys.stderr)
+                    return
+                found[:] = [daemon]
+                opening.daemon = daemon
+            finally:
+                # Under the lock: a call that sees it running waits for this start.
+                opening.running = False
+        if found[0] is not daemon:
+            # A call replaced it meanwhile, and opened its own.
+            return
+        try:
+            # Its handshake too; one that fails is made again by the call.
+            await upstream.open(daemon.url)
+        except Exception as exc:
+            print(f"strata mcp: the scratchpad's handshake failed: {exc!r}", file=sys.stderr)
+
     @asynccontextmanager
     async def lifespan(server: Server) -> AsyncGenerator[None]:
+        own: BaseException | None = None
         try:
-            yield
+            try:
+                async with anyio.create_task_group() as group:
+                    opening.group = group
+                    try:
+                        yield
+                    finally:
+                        opening.group = None
+                        opening.cancel.set()
+                        group.cancel_scope.cancel()
+            except BaseExceptionGroup as error:
+                # The server's own error: the start raises none.
+                if len(error.exceptions) != 1:
+                    raise
+                own = error.exceptions[0]
+            if own is not None:
+                # Out of the handler, so its own cause and context stay as they were.
+                raise own
         finally:
             await upstream.aclose()
 

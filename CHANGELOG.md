@@ -194,6 +194,11 @@ exhaustive commit history.
   records nothing of what it read, so its key would miss an edited project file or
   module and could replay a stale result. (#1589)
 ### Changed
+- **A scratchpad's daemon starts as the session opens.** In a project that already has a
+  scratchpad, `strata mcp` starts its daemon in the background when the agent's session
+  lists its tools, so the first `run` no longer waits about 4 s for it; a call made
+  meanwhile waits for that start. A project with no scratchpad, or a client that only
+  connects, still starts nothing until a tool call. (#1600)
 - **A scratchpad's first call takes half the time.** Its daemon no longer
   loads the scan plane (Iceberg, Parquet, pandas) at start: a server started for a
   scratchpad builds its planner and cache on its first scan, and skips the warm-up and
