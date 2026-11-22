@@ -152,16 +152,18 @@ Median wall time of C over A, with its 95% bootstrap interval:
 
 These are one model (`claude-opus-5-5`, Claude Code 2.1.330) on one machine (an
 Apple silicon Mac), with three runs per task, and an interval that crosses 1 is no
-evidence of a saving. The holdout's plot row is a single task. The columns ran on
-different Strata commits. The tuning tasks ran on arm C's branch
-([#1598](https://github.com/bearing-research/strata/pull/1598)), before
-[#1599](https://github.com/bearing-research/strata/pull/1599), and their probing
-took 1.53 [1.30, 2.04] times A's there; 1.36 once #1599 showed a value's repr in its
-preview rather than its type's name, most of the rest being the 4 s or so the first
-`run` waited for the daemon. The table's tuning probing row is a rerun after
-[#1600](https://github.com/bearing-research/strata/pull/1600) started the daemon as
-the session opens. The holdout was not rerun: it ran at #1599, so its probing row
-still includes that wait.
+evidence of a saving. The holdout's plot row is a single task. The rows ran on
+different Strata commits:
+
+- **Tuning tasks but probing:** arm C's branch
+  ([#1598](https://github.com/bearing-research/strata/pull/1598)), before
+  [#1599](https://github.com/bearing-research/strata/pull/1599).
+- **Tuning probing:** a rerun after
+  [#1600](https://github.com/bearing-research/strata/pull/1600), which starts the
+  daemon as the session opens. On #1598's branch it took 1.53 [1.30, 2.04] times
+  A's: the first `run` waited about 4 s for the daemon, and a value's preview showed
+  only its type's name, which #1599 changed to its repr.
+- **Holdout:** one pass at #1599, so its probing row still includes that wait.
 
 ## Where it lives
 
