@@ -242,6 +242,7 @@ async def _run_cell(
     if session.notebook_state.get_cell(cell_id) is None:
         raise NotebookOpsError(f"no cell with id {cell_id!r}")
 
+    await session.sync_a_moved_lock()
     block_reason = session.environment_execution_block_message()
     if block_reason:
         raise ValueError(block_reason)
@@ -979,6 +980,7 @@ async def _scratch_run(
                 )
         # A project whose files or packages changed is synced first, as `uv run` would.
         await session.refresh_project_environment()
+        await session.sync_a_moved_lock()
         # Before the cell is added, so a refusal leaves nothing behind.
         block = session.environment_execution_block_message()
         if block:

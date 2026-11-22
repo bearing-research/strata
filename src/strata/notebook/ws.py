@@ -1158,6 +1158,7 @@ async def _handle_cell_execute(
         )
         return
 
+    await session.sync_a_moved_lock()
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
@@ -1299,6 +1300,7 @@ async def _handle_notebook_run_all(
         return
 
     requested_cell = runnable_cells[0]
+    await session.sync_a_moved_lock()
     busy_cell = await _reserve_execution_request(execution_state, requested_cell)
     if busy_cell is not None:
         await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, None)
@@ -1366,6 +1368,7 @@ async def _handle_notebook_rerun_all(
         return
 
     requested_cell = runnable_cells[0]
+    await session.sync_a_moved_lock()
     busy_cell = await _reserve_execution_request(execution_state, requested_cell)
     if busy_cell is not None:
         await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, None)
@@ -1441,6 +1444,7 @@ async def _handle_cell_execute_cascade(
         )
         return
 
+    await session.sync_a_moved_lock()
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
@@ -1520,6 +1524,7 @@ async def _handle_cell_execute_force(
         )
         return
 
+    await session.sync_a_moved_lock()
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
@@ -1587,6 +1592,7 @@ async def _handle_cell_execute_rerun(
         )
         return
 
+    await session.sync_a_moved_lock()
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
         await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
@@ -1699,6 +1705,7 @@ async def _handle_cell_run_tests(
         await _send_error_message(websocket, seq, "Cell tests are only supported for Python cells")
         return
     # Tests run the cell's code, so they wait for the environment too.
+    await session.sync_a_moved_lock()
     environment_block_reason = session.environment_execution_block_message()
     if environment_block_reason:
         await websocket.send_text(

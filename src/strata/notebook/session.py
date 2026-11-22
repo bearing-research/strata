@@ -301,6 +301,9 @@ class NotebookSession:
         self.dag_error: str | None = None
         self.backend: EnvironmentBackend = get_backend(self.path)
         self._project_refresh = asyncio.Lock()
+        self._lock_refresh = asyncio.Lock()
+        # The lock hash a run last asked a sync for: a sync that fails is not asked again.
+        self._lock_sync_asked: str | None = None
 
         from strata.notebook.artifact_integration import NotebookArtifactManager
 
@@ -2989,6 +2992,39 @@ class NotebookSession:
                 return
             if await asyncio.to_thread(self.backend.changed):
                 await self.sync_environment()
+
+    async def sync_a_moved_lock(self) -> None:
+        """Before a run: install a lock that moved since the environment was last synced
+        (a pull, a branch switch, ``uv lock`` in a terminal), as the Sync button would.
+
+        The cell's key reads the lock on disk, so a run in the environment as it was is
+        stored as the new lock's. Asked once per lock: when the sync fails the run goes
+        ahead in that environment, which publishing refuses
+        (:meth:`environment_attestation_error`).
+        """
+        from strata.notebook.project_env import ProjectEnvBackend
+
+        if isinstance(self.backend, ProjectEnvBackend):
+            return  # refresh_project_environment's, on what the project changed
+        async with self._lock_refresh:
+            moved = await asyncio.to_thread(self._moved_lock)
+            if moved is None or moved == self._lock_sync_asked:
+                return
+            try:
+                await self.environment_jobs.submit(action="sync")
+            except RuntimeError:
+                # A run or another environment change is under way; the next run asks.
+                return
+            self._lock_sync_asked = moved
+            # Shielded: a caller that goes away leaves the sync to finish, as the button's.
+            await asyncio.shield(self.environment_jobs.wait())
+
+    def _moved_lock(self) -> str | None:
+        """The lock's hash when it is not the one last installed, else ``None``. ``None``
+        too when no sync was recorded: an open's own sync sees to that."""
+        installed = self._read_persisted_environment_metadata().synced_lockfile_hash
+        current = compute_lockfile_hash(self.path)
+        return current if installed and installed != current else None
 
     def environment_attestation_error(self) -> str | None:
         """Why this environment cannot be published from, or ``None`` if it can.
