@@ -333,6 +333,8 @@ class PooledCellExecutor:
         Raises:
             TimeoutError: the cell exceeded ``timeout_seconds`` in the worker. This is
                 a real cell timeout, not a pool miss, so there is no cold re-run.
+            Exception: whatever handing the run directory over raised, as a cold run
+                would; the worker never got the manifest.
         """
         try:
             harness_user = resolve_harness_user()
@@ -343,11 +345,15 @@ class PooledCellExecutor:
         warm_proc = await pool.acquire()
         if warm_proc is None:
             return None
+        try:
+            # Outputs land beside the manifest, in a run dir private to the server.
+            hand_over(manifest_path.parent, harness_user)
+        except Exception:
+            # The run's error, as on a cold run; the pool keeps its slot.
+            await asyncio.shield(pool.release_and_replace(warm_proc))
+            raise
 
         try:
-            # Outputs land beside the manifest, in a run dir private to the server. Its sweep
-            # can raise: the worker is still released, and the cold run reports it.
-            hand_over(manifest_path.parent, harness_user)
             assert warm_proc.process.stdin is not None
             assert warm_proc.process.stdout is not None
             manifest_str = (str(manifest_path) + "\n").encode()

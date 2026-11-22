@@ -86,7 +86,8 @@ async def test_pool_timeout_raises_instead_of_cold_fallback(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_hand_over_that_raises_still_releases_the_worker(tmp_path, monkeypatch):
-    """Its sweep can fail (a /proc it cannot read): the pool keeps its slot."""
+    """Its sweep can fail (a /proc it cannot read): the run's error, and the pool keeps its
+    slot."""
 
     def refused(path, user):
         raise IndexError("a stat that does not parse")
@@ -94,11 +95,10 @@ async def test_a_hand_over_that_raises_still_releases_the_worker(tmp_path, monke
     monkeypatch.setattr("strata.notebook.pool.hand_over", refused)
     pool = _FakePool(None)
 
-    result = await PooledCellExecutor.execute_with_pool(
-        pool, tmp_path / "manifest.json", tmp_path, timeout_seconds=1
-    )
-
-    assert result is None  # the cold run hands over again, and reports it
+    with pytest.raises(IndexError):
+        await PooledCellExecutor.execute_with_pool(
+            pool, tmp_path / "manifest.json", tmp_path, timeout_seconds=1
+        )
     assert pool.replaced
 
 
