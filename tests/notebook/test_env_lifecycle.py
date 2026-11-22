@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 import tomli_w
 
+from strata._uv_runtime import resolve_uv
 from strata.notebook.dependencies import EnvironmentOperationLog, RequirementsImportResult
 from strata.notebook.env import compute_lockfile_hash
 from strata.notebook.python_versions import current_python_minor, format_requires_python
@@ -89,7 +90,7 @@ class TestUvSyncHelper:
             assert _uv_sync(tmp_path, python_version="3.12") is True
 
         command = mock_run.call_args.args[0]
-        assert command == ["uv", "sync", "--python", "3.12"]
+        assert command == [resolve_uv(), "sync", "--python", "3.12"]
 
     def test_returns_false_when_uv_missing(self, tmp_path: Path):
         with patch("strata.notebook.writer.subprocess.run", side_effect=FileNotFoundError):

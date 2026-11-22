@@ -7,10 +7,49 @@ reads the ``uv = <version>`` line uv writes into ``<sys.prefix>/pyvenv.cfg``.
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
+import sysconfig
 from pathlib import Path
 
+from uv import find_uv_bin
+
 _UV_MARKER_PREFIX = "uv = "
+
+
+def resolve_uv(*, users_project: bool = False) -> str | None:
+    """Locate ``uv``: ``STRATA_UV``, the uv package's binary, then the user's uv.
+
+    The package's binary (``find_uv_bin``: where an install of the ``uv`` wheel put
+    it) comes first so Strata runs the uv it was tested with. A project the user
+    manages (*users_project*) is the exception: their uv wrote its lock, and a
+    ``[tool.uv] required-version`` may pin it.
+    """
+    override = os.environ.get("STRATA_UV")
+    if override:
+        return override
+    if users_project and (found := _users_uv()):
+        return found
+    try:
+        return find_uv_bin()
+    except FileNotFoundError:
+        # The uv package is installed but not its binary where find_uv_bin looks.
+        return _users_uv()
+
+
+def _users_uv() -> str | None:
+    """uv on PATH, else in uv's installer dirs: non-login shells (``ssh host 'strata
+    run ...'``, cron) often lack ``~/.local/bin`` and ``~/.cargo/bin`` on PATH."""
+    found = shutil.which("uv")
+    if found:
+        return found
+    name = "uv" + (sysconfig.get_config_var("EXE") or "")
+    for base in ("~/.local/bin", "~/.cargo/bin"):
+        candidate = Path(base).expanduser() / name
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def is_uv_managed_runtime() -> bool:

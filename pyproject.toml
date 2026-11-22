@@ -56,6 +56,10 @@ dependencies = [
     "infisicalsdk>=1.0.16",
     "packaging>=24.0",
     "filelock>=3.24", # Cross-process locks; unlinking a held lock is race-free from 3.24
+    # The uv binary notebooks run (resolve_uv), whatever installed Strata. The floor is
+    # conda-forge's; the ceiling is the newest minor CI has run, since Strata reads
+    # uv's preview JSON output.
+    "uv>=0.12,<0.14",
 ]
 
 [project.optional-dependencies]

@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
+from strata._uv_runtime import resolve_uv
 from strata.notebook import output_dirs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver
@@ -1209,8 +1210,8 @@ def create_notebook_executor_app(
                     # An upstream ``# @output_dir`` folder arrives as a tar the harness unpacks.
                     "folder_inputs": True,
                     # Building the locked env is ``uv sync --frozen``, so probe for uv: claimed
-                    # unconditionally, a pip-installed image would fail every Python cell with 500.
-                    "locked_environments": shutil.which("uv") is not None,
+                    # without one (a broken install), every Python cell would fail with 500.
+                    "locked_environments": resolve_uv() is not None,
                     # R needs Rscript with jsonlite and arrow in its library.
                     "languages": ["python", "r"] if rscript else ["python"],
                     # Restoring an renv.lock needs renv, so probe for it as for uv.

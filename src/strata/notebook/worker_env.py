@@ -41,6 +41,7 @@ from typing import Any
 import filelock
 import httpx
 
+from strata._uv_runtime import resolve_uv
 from strata.notebook.env import renv_lock_key, uv_lock_key
 
 ENV_ROOT_VAR = "STRATA_WORKER_ENV_ROOT"
@@ -100,7 +101,7 @@ def _validated(spec: Any) -> dict[str, str]:
 
 def _interpreter(python: str) -> tuple[Path, str]:
     """The interpreter uv would use for *python* on this machine, and its build."""
-    uv = shutil.which("uv")
+    uv = resolve_uv()
     if uv is None:
         raise WorkerEnvironmentError("uv is not installed on this worker")
     args = [uv, "python", "find", "--system", *([python] if python else [])]
@@ -145,7 +146,7 @@ def _install(spec: dict[str, str], interpreter: Path, env_dir: Path) -> None:
     for step in steps:
         try:
             subprocess.run(
-                [shutil.which("uv") or "uv", *step],
+                [resolve_uv() or "uv", *step],
                 cwd=project,
                 env={
                     **{k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"},
