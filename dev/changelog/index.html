@@ -3887,6 +3887,16 @@ exhaustive commit history.</p>
   cached, and what the hook's budget leaves unchecked is said <code>as of</code> the digest's time.
   The hook runs on the standard library alone, and says nothing where there is no
   scratchpad. (#1595)</li>
+<li><strong>The Claude Code plugin is the scratchpad's MCP server and hooks; the skill is
+  retired.</strong> <code>plugins/strata-scratchpad</code> now bundles the <code>strata</code> MCP server
+  (<code>strata mcp</code>, loaded up front) and the session-start and prompt hooks, which name
+  the plugin's own <code>run</code> tool and run <code>strata-agent-hook</code>, a new console script
+  beside <code>strata</code> that imports nothing of the notebook. The <code>strata-scratchpad</code>
+  skill and the <code>/strata-scratchpad:scratch</code> command are gone from the plugin and
+  the package: the MCP instructions and the hooks replace them, and
+  <code>strata agent install</code> also writes the <code>CLAUDE.md</code> block and the permission,
+  which a plugin cannot. The eval's arm B keeps the skill as it shipped. The Agent
+  scratchpad guide is rewritten around <code>strata agent install</code>. (#1596)</li>
 <li><strong>A cell's checkpoints are listed in the notebook, and a branch starts from one there.</strong>
   A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
   store still holds, by run (running, interrupted, finished or failed, and which
