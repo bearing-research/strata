@@ -537,6 +537,15 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A lock that moved outside Strata is installed before the next run.** A cell's key
+  reads `uv.lock` on disk, but the cell ran in the environment as it was last synced.
+  After a `git pull`, a branch switch or `uv lock` in a terminal, a result computed
+  with the old packages was stored under the new lock's key and came back as a cache
+  hit once the environment was synced. A run from the notebook, the REST API, an agent
+  or the scratchpad now syncs first when the lock is not the one last installed: the
+  same `sync` job as the Environment panel's, which the run waits for. It is tried once
+  per lock, so when it fails the run goes ahead in the environment as it was and
+  publishing stays refused until a sync succeeds. (#1606)
 - **A shared or worker environment's console scripts run wherever the directory is.**
   `uv sync` made the environment itself, and such a venv writes its own path into every
   console script, so a directory moved or copied elsewhere ran `python` and imported
