@@ -202,9 +202,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   on its key and state (9.6 ms with 50000 open builds, now 0.006 ms), and checking which
   checkpoints a build can drop is no longer quadratic in its checkpoints. Its migration
   20 replaces an index: the first 0.7.0 process to open a store builds it, and a 0.6.0
-  process then refuses the store, so every process on it upgrades together. Stopping
-  the scratchpad's daemon now waits for its process to exit, not only for its port to
-  close, so a store opened next finds its files released. (#1602)
+  process then refuses the store, so every process on it upgrades together. (#1602)
 - **A scratchpad's daemon starts as the session opens.** In a project that already has a
   scratchpad, `strata mcp` starts its daemon in the background when the agent's session
   lists its tools, so the first `run` no longer waits about 4 s for it; a call made
@@ -559,6 +557,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   until their lock changes. A worker's relative `STRATA_WORKER_ENV_ROOT` is now read
   against the worker's directory, where uv built the environment in another place and
   every cell failed with "has no interpreter". (#1604)
+- **Stopping the scratchpad's daemon waits for its process to exit, not only its
+  port.** Its store keeps its files open until then, and on Windows a store opened
+  right after `strata scratch stop` or a restart failed with a disk I/O error. A
+  process still draining is given two seconds, then left to finish. (#1602)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the

@@ -318,6 +318,13 @@ def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
     assert scratch.find_daemon(project) is None
 
 
+def _stopping(monkeypatch, alive):
+    monkeypatch.setattr(scratch, "_healthy", lambda url: False)
+    monkeypatch.setattr(scratch, "_alive", alive)
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    scratch._stop(scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=12345))
+
+
 def test_a_stop_waits_for_the_process_not_only_its_port(monkeypatch):
     """Its port closes before it has let go of the store's files."""
     checks = iter([True, True, False])
@@ -327,14 +334,19 @@ def test_a_stop_waits_for_the_process_not_only_its_port(monkeypatch):
         seen.append(next(checks))
         return seen[-1]
 
-    monkeypatch.setattr(scratch, "_healthy", lambda url: False)
-    monkeypatch.setattr(scratch, "_alive", alive)
-    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
-    monkeypatch.setattr(scratch.time, "sleep", lambda seconds: None)
-
-    scratch._stop(scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=12345))
+    _stopping(monkeypatch, alive)
 
     assert seen == [True, True, False]
+
+
+def test_a_stop_leaves_a_process_still_draining_to_finish(monkeypatch):
+    """A long run's shutdown, or a zombie nobody reaps: the port is closed, so it stopped."""
+    monkeypatch.setattr(scratch, "_DYING_GRACE", 0.1)
+    seen: list[int] = []
+
+    _stopping(monkeypatch, lambda pid: (seen.append(pid), True)[1])
+
+    assert seen and set(seen) == {12345}
 
 
 def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):

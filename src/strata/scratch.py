@@ -622,9 +622,10 @@ def _stop(running: Daemon, timeout: float = 30.0) -> None:
     with contextlib.suppress(ProcessLookupError):
         os.kill(running.pid, signal.SIGTERM)
     deadline = time.monotonic() + timeout
-    # Until its process is gone, not only its port: it may still hold the store's files,
-    # which Windows does not let the next opener have.
-    while _healthy(running.url) or _alive(running.pid):
+    while _healthy(running.url):
         if time.monotonic() > deadline:
             raise ScratchError(f"the scratchpad's server (pid {running.pid}) did not stop")
         time.sleep(0.1)
+    # Its port closes before its process lets go of the store's files, which Windows does
+    # not give the next opener. A shutdown still draining, or a zombie, is left to finish.
+    _exits_within(running.pid, _DYING_GRACE)
