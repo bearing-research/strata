@@ -199,10 +199,11 @@ def _process_table(proc: str = "/proc") -> dict[int, tuple[int, int, int]]:
         if "NSsid" in fields:
             session = int(fields["NSsid"].split()[0])
         else:
-            # Kernels before 4.1 have none: stat's session is the same id.
+            # Kernels before 4.1, or without PID namespaces, have none: stat's session is
+            # the same id. One that does not parse fails the sweep: it cannot be skipped.
             try:
-                with open(f"{proc}/{name}/stat", "rb") as stat:
-                    session = int(stat.read().rpartition(b")")[2].split()[3])
+                with open(f"{proc}/{name}/stat", "rb") as stat_file:
+                    session = int(stat_file.read().rpartition(b")")[2].split()[3])
             except OSError:
                 continue  # exited while listed
         table[int(name)] = (int(fields["PPid"]), int(fields["Uid"].split()[0]), session)

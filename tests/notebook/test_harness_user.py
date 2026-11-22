@@ -728,7 +728,7 @@ def test_a_process_named_in_bytes_that_are_not_utf8_is_read(tmp_path):
 
 
 def test_a_status_without_nssid_takes_the_session_from_stat(tmp_path):
-    """Kernels before 4.1 print no NSsid."""
+    """Kernels before 4.1, or without PID namespaces, print no NSsid."""
     for pid in (10, 11):
         (tmp_path / str(pid)).mkdir()
         (tmp_path / str(pid) / "status").write_text(
@@ -739,3 +739,15 @@ def test_a_status_without_nssid_takes_the_session_from_stat(tmp_path):
     # 11 exited between the two reads.
 
     assert _process_table(str(tmp_path)) == {10: (1, 1000, 9)}
+
+
+def test_a_stat_that_does_not_parse_fails_the_sweep(tmp_path):
+    """Left out, a live leftover would go unswept, or a held run's chain would break."""
+    (tmp_path / "10").mkdir()
+    (tmp_path / "10" / "status").write_text(
+        "Name:\tpython\nState:\tS (sleeping)\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\n"
+    )
+    (tmp_path / "10" / "stat").write_bytes(b"10 (py) S")
+
+    with pytest.raises(IndexError):
+        _process_table(str(tmp_path))
