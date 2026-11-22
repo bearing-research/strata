@@ -785,6 +785,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **An OS timeout is the run's error, not its timeout.** Python raises the operating
+  system's ETIMEDOUT (a chown on a network filesystem, a store on NFS) as a timeout, which
+  a run took for its own deadline: the cell said it timed out after its limit, a loop
+  that its iteration had, a cold run that its harness left no result, and Run All ended
+  its batch as if the harness had died. It now fails with that error. (#1619)
 - **On Windows a server's cells end with it.** A server stopped there (`strata scratch
   stop` terminates it) or one that crashed left a running cell, and what it started,
   running on: Windows has neither the lifeline nor the process groups POSIX ends them
