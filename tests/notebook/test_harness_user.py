@@ -707,7 +707,8 @@ def test_the_process_table_is_read_from_proc_without_the_dead():
 
 
 def test_a_process_named_in_bytes_that_are_not_utf8_is_read(tmp_path):
-    """A cell can name its process anything (prctl): one such name must not stop the sweep."""
+    """A cell can name its process anything (prctl): one such name must not stop the sweep.
+    Dead tasks, Z or X, are left out of the table."""
 
     def status(pid: int, state: str, name: bytes = b"python") -> None:
         (tmp_path / str(pid)).mkdir()

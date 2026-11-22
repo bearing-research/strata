@@ -541,7 +541,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ### Fixed
 - **A process named in bytes that are not UTF-8 no longer fails every run as the
   harness user.** Before each such run, the sweep for what earlier cells left running
-  read every process's `/proc` status as UTF-8. A process can name itself anything,
+  decoded every process's `/proc` status strictly. A process can name itself anything,
   so one that a cell left running with such a name made each later run fail before
   it started. (#1605)
 - **A shared or worker environment's console scripts run wherever the directory is.**
