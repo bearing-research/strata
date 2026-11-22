@@ -105,13 +105,15 @@ def strata_command() -> tuple[str, str | None]:
             f"this strata runs from uv's cache ({real}), which uv cleans up; install it "
             "with `uv tool install 'strata-notebook[mcp]'` and run `strata agent install` again"
         )
-    # A uv tool's environment holds its receipt, wherever UV_TOOL_DIR put it.
-    in_tool = (environment / "uv-receipt.toml").exists()
-    if not in_tool and (environment / "pyvenv.cfg").exists():
+    # A uv tool's environment holds its receipt, wherever UV_TOOL_DIR put it; a pipx
+    # one its metadata. A conda environment has conda-meta where a venv has pyvenv.cfg.
+    in_tool = any((environment / f).exists() for f in ("uv-receipt.toml", "pipx_metadata.json"))
+    in_env = any((environment / f).exists() for f in ("pyvenv.cfg", "conda-meta"))
+    if not in_tool and in_env:
         return str(command), (
             f"the agent config runs {command}, in the environment {environment}: every "
             "project's agent uses it, so removing that environment breaks them all. "
-            "`uv tool install 'strata-notebook[mcp]'` is the lasting choice"
+            "`uv tool install 'strata-notebook[mcp]'` (or pipx) is the lasting choice"
         )
     return str(command), None
 

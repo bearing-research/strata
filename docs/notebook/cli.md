@@ -94,9 +94,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v8.1.0
       - name: Install Strata
-        # uv tool install creates a uv-managed env at
+        # uv tool install creates an env at
         # ~/.local/share/uv/tools/strata-notebook with the strata
-        # CLI on PATH - satisfies the runtime guard.
+        # CLI on PATH.
         run: uv tool install strata-notebook
       - name: Run notebook
         run: strata run ./notebooks/daily_report --format json

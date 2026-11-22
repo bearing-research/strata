@@ -23,7 +23,8 @@ same session updates. Captured from a real run, not a mock-up.*
 
 ## Try it
 
-You need [uv](https://docs.astral.sh/uv/) 0.8 or newer and
+You need [uv](https://docs.astral.sh/uv/) (or pipx, pip or conda; see
+[Install](https://bearingresearch.com/strata/latest/getting-started/installation/)) and
 [Claude Code](https://claude.com/claude-code) (or another MCP client).
 
 ```bash

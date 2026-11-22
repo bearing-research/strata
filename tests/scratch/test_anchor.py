@@ -118,7 +118,7 @@ def test_mcp_serves_the_project_it_is_run_in(repo, monkeypatch):
 
     served: list[Path] = []
     monkeypatch.setattr(strata.mcp_bridge, "mcp_main", lambda anchor: served.append(anchor) or 0)
-    monkeypatch.setattr("strata._uv_runtime.assert_uv_managed_runtime", lambda: None)
+    monkeypatch.setattr("strata._uv_runtime.assert_uv_available", lambda: None)
     monkeypatch.delenv("STRATA_SCRATCH_ROOT", raising=False)
     monkeypatch.chdir(repo / "services/api/src")
 

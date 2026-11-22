@@ -1,8 +1,8 @@
-"""Guard that Strata runs inside a uv-managed Python env.
+"""Find ``uv``, and refuse to start without one.
 
-Notebooks shell out to ``uv`` for per-notebook venvs, so we refuse to start
-elsewhere rather than fail later with a confusing subprocess error. Detection
-reads the ``uv = <version>`` line uv writes into ``<sys.prefix>/pyvenv.cfg``.
+Notebooks shell out to ``uv`` for per-notebook venvs, so a server or command
+with no uv to run would fail later with a confusing subprocess error. Any
+environment will do: uv is a dependency, so pip, pipx and conda installs bring it.
 """
 
 from __future__ import annotations
@@ -13,29 +13,41 @@ import sys
 import sysconfig
 from pathlib import Path
 
-from uv import find_uv_bin
-
-_UV_MARKER_PREFIX = "uv = "
+_UV_EXE = "uv" + (sysconfig.get_config_var("EXE") or "")
 
 
 def resolve_uv(*, users_project: bool = False) -> str | None:
-    """Locate ``uv``: ``STRATA_UV``, the uv package's binary, then the user's uv.
+    """Locate ``uv``: ``STRATA_UV``, the uv installed with Strata, then the user's uv.
 
-    The package's binary (``find_uv_bin``: where an install of the ``uv`` wheel put
-    it) comes first so Strata runs the uv it was tested with. A project the user
-    manages (*users_project*) is the exception: their uv wrote its lock, and a
-    ``[tool.uv] required-version`` may pin it.
+    The bundled uv comes first so Strata runs the uv it was tested with. A project
+    the user manages (*users_project*) is the exception: their uv wrote its lock,
+    and a ``[tool.uv] required-version`` may pin it. A ``STRATA_UV`` that names no
+    file is no uv: nothing else stands in for the one asked for.
     """
     override = os.environ.get("STRATA_UV")
     if override:
-        return override
+        return override if Path(override).is_file() else None
     if users_project and (found := _users_uv()):
         return found
+    return _bundled_uv() or _users_uv()
+
+
+def _bundled_uv() -> str | None:
+    """The binary of the ``uv`` dependency, wherever its install put it."""
+    try:
+        from uv import find_uv_bin
+    except ImportError:
+        # conda-forge's uv package is the binary alone: in the environment's scripts dir,
+        # or its Library/bin on Windows.
+        for directory in (sysconfig.get_path("scripts"), Path(sys.prefix) / "Library" / "bin"):
+            candidate = Path(directory) / _UV_EXE
+            if candidate.is_file():
+                return str(candidate)
+        return None
     try:
         return find_uv_bin()
     except FileNotFoundError:
-        # The uv package is installed but not its binary where find_uv_bin looks.
-        return _users_uv()
+        return None
 
 
 def _users_uv() -> str | None:
@@ -44,46 +56,28 @@ def _users_uv() -> str | None:
     found = shutil.which("uv")
     if found:
         return found
-    name = "uv" + (sysconfig.get_config_var("EXE") or "")
     for base in ("~/.local/bin", "~/.cargo/bin"):
-        candidate = Path(base).expanduser() / name
+        candidate = Path(base).expanduser() / _UV_EXE
         if candidate.is_file():
             return str(candidate)
     return None
 
 
-def is_uv_managed_runtime() -> bool:
-    """Return True if the current Python is a uv-created virtual env."""
-    cfg = Path(sys.prefix) / "pyvenv.cfg"
-    if not cfg.exists():
-        return False
-    for line in cfg.read_text().splitlines():
-        if line.strip().startswith(_UV_MARKER_PREFIX):
-            return True
-    return False
-
-
-def assert_uv_managed_runtime() -> None:
-    """Exit with status 1 if not launched from a uv-managed env."""
-    if is_uv_managed_runtime():
+def assert_uv_available() -> None:
+    """Exit with status 1 if no uv can be found."""
+    if resolve_uv() is not None:
         return
-    cfg = Path(sys.prefix) / "pyvenv.cfg"
-    if cfg.exists():
-        # A venv, but not one uv made: python -m venv, virtualenv, pip.
-        found = f"{cfg} has no `uv = ` line, so uv did not create this environment"
-    else:
-        # conda and a bare interpreter have no pyvenv.cfg to point at.
-        found = "not a virtual environment (conda or a system Python)"
+    override = os.environ.get("STRATA_UV")
+    if override:
+        print(f"error: STRATA_UV is {override}, which is not a file.", file=sys.stderr)
+        raise SystemExit(1)
     print(
-        "error: Strata runs only inside a uv-managed Python environment;\n"
-        "plain `pip install` is not supported.\n"
-        f"  Current Python: {sys.executable}\n"
-        f"  {found}\n\n"
-        "Install uv (https://docs.astral.sh/uv/), then either\n"
-        "  uv tool install strata-notebook && strata-notebook\n"
-        "(a released version, in its own env; conda and pip environments are\n"
-        "left as they are), or from a checkout\n"
-        "  uv sync && uv run strata-notebook",
+        "error: Strata needs uv, and none was found.\n"
+        "  The uv installed with Strata is missing, and no uv is on PATH or in\n"
+        "  ~/.local/bin or ~/.cargo/bin.\n"
+        f"  Current Python: {sys.executable}\n\n"
+        "Reinstall strata-notebook (its uv dependency brings the binary), or set\n"
+        "STRATA_UV to a uv binary (https://docs.astral.sh/uv/).",
         file=sys.stderr,
     )
     raise SystemExit(1)

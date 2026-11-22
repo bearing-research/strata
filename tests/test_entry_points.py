@@ -1,6 +1,6 @@
-"""The uv-only guard runs after argument parsing on both entry points.
+"""The uv guard runs after argument parsing on both entry points.
 
-Both print help from any Python; every real command is refused outside a uv-managed environment.
+Both print help without uv; every real command is refused when no uv can be found.
 """
 
 from __future__ import annotations
@@ -15,23 +15,23 @@ from strata import cli, server
 
 
 @pytest.fixture
-def outside_uv(tmp_path, monkeypatch):
-    """No pyvenv.cfg at all: the guard treats this as not uv-managed."""
-    monkeypatch.setattr("sys.prefix", str(tmp_path))
+def outside_uv(monkeypatch):
+    """No uv anywhere: not bundled, not on PATH, no STRATA_UV."""
+    monkeypatch.setattr("strata._uv_runtime.resolve_uv", lambda: None)
 
 
 @pytest.mark.parametrize("main", [cli.main, server.main], ids=["strata", "strata-notebook"])
-def test_help_prints_from_any_python(outside_uv, capsys, main):
+def test_help_prints_without_uv(outside_uv, capsys, main):
     with pytest.raises(SystemExit) as exc_info:
         main(["--help"])
 
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "usage:" in captured.out
-    assert "uv-managed" not in captured.err
+    assert "needs uv" not in captured.err
 
 
-def test_strata_without_a_command_prints_help_from_any_python(outside_uv, capsys):
+def test_strata_without_a_command_prints_help_without_uv(outside_uv, capsys):
     assert cli.main([]) == 0
     assert "usage:" in capsys.readouterr().out
 
@@ -41,7 +41,7 @@ def test_a_strata_command_is_refused_outside_uv(tmp_path, outside_uv, capsys):
         cli.main(["validate", str(tmp_path)])
 
     assert exc_info.value.code == 1
-    assert "uv-managed Python environment" in capsys.readouterr().err
+    assert "Strata needs uv" in capsys.readouterr().err
 
 
 def test_the_server_is_refused_outside_uv_before_it_starts(outside_uv, capsys, monkeypatch):
@@ -55,7 +55,7 @@ def test_the_server_is_refused_outside_uv_before_it_starts(outside_uv, capsys, m
         server.main(["--notebook-dir", "."])
 
     assert exc_info.value.code == 1
-    assert "uv-managed Python environment" in capsys.readouterr().err
+    assert "Strata needs uv" in capsys.readouterr().err
     # The refusal comes before the command line is applied to the environment.
     assert "STRATA_NOTEBOOK_STORAGE_DIR" not in os.environ
 

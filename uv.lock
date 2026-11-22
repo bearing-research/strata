@@ -4025,7 +4025,6 @@ dependencies = [
     { name = "fastapi" },
     { name = "filelock" },
     { name = "httpx" },
-    { name = "infisicalsdk" },
     { name = "jsonschema" },
     { name = "packaging" },
     { name = "pyarrow" },
@@ -4051,6 +4050,9 @@ azure = [
 gcs = [
     { name = "gcsfs" },
     { name = "google-cloud-storage" },
+]
+infisical = [
+    { name = "infisicalsdk" },
 ]
 mcp = [
     { name = "mcp" },
@@ -4163,7 +4165,7 @@ requires-dist = [
     { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
     { name = "grandalf", marker = "extra == 'tui'", specifier = ">=0.8" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "infisicalsdk", specifier = ">=1.0.16" },
+    { name = "infisicalsdk", marker = "extra == 'infisical'", specifier = ">=1.0.16" },
     { name = "jsonschema", specifier = ">=4.0.0" },
     { name = "matplotlib", marker = "extra == 'notebook'", specifier = ">=3.8.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.2.0" },
@@ -4196,7 +4198,7 @@ requires-dist = [
     { name = "vestigo", specifier = "==0.7.0" },
     { name = "websockets", specifier = ">=17.1" },
 ]
-provides-extras = ["otel", "azure", "s3", "gcs", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp"]
+provides-extras = ["otel", "azure", "s3", "gcs", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp", "infisical"]
 
 [package.metadata.requires-dev]
 dev = [

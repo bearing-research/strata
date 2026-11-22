@@ -82,7 +82,8 @@ class InfisicalProvider:
         except ImportError as exc:
             return SecretFetchResult.failure(
                 self.name,
-                f"infisicalsdk not installed ({exc}). Run `uv sync` and restart the server.",
+                f"infisicalsdk not installed ({exc}). Install Strata with the `infisical` "
+                'extra (`uv tool install "strata-notebook[infisical]"`) and restart the server.',
             )
 
         client = InfisicalSDKClient(host=host)
