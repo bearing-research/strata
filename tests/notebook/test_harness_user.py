@@ -719,7 +719,7 @@ def test_a_process_named_in_bytes_that_are_not_utf8_is_read(tmp_path):
         )
 
     status(10, "S (sleeping)", b"\xe2\x82")
-    status(11, "x (dead)")
+    status(11, "Z (zombie)")
     (tmp_path / "self").mkdir()
 
     assert _process_table(str(tmp_path)) == {10: (1, 1000, 10)}

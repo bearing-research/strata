@@ -194,9 +194,8 @@ def _process_table(proc: str = "/proc") -> dict[int, tuple[int, int, int]]:
                 fields = dict(line.split(":", 1) for line in status if ":" in line)
         except OSError:
             continue  # exited while listed
-        # Dead, waiting to be reaped; kernels 2.6.33 to 3.13 may show it as "x".
-        if fields["State"].split()[0] in ("Z", "X", "x"):
-            continue
+        if fields["State"].split()[0] in ("Z", "X"):
+            continue  # dead, waiting to be reaped
         table[int(name)] = (
             int(fields["PPid"]),
             int(fields["Uid"].split()[0]),
