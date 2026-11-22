@@ -53,7 +53,12 @@ uv tool install "strata-notebook[mcp]"
 strata agent install
 ```
 
-[Agent scratchpad →](https://bearingresearch.com/strata/latest/notebook/scratchpad/)
+Measured on a project whose loader takes 20 s, four questions in a row over its
+data took Claude Code 0.42 of the median time they took without it on the tasks
+the scratchpad was tuned on, and 0.67 on iteration tasks held out from tuning.
+The data was loaded once in 21 of 21 tuned iteration and plot trials, against 3
+of 21 without it (held out: 9 of 9, against 2 of 9).
+[What it saves →](https://bearingresearch.com/strata/latest/notebook/scratchpad/#what-it-saves)
 
 Other agents connect to the MCP endpoint at `/mcp`, or script the `strata` CLI,
 which returns JSON and stable exit codes.

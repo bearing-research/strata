@@ -7,9 +7,25 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## Unreleased
+## 0.12.0 - 2026-11-22
 
 ### Added
+
+- **Artifacts in a notebook lists that notebook's store.** The link opened the server's
+  store, which holds none of a notebook's results; its page now lists them by cell and
+  output, through `GET /v1/notebooks/{session_id}/store/artifacts` and `.../store/stats`.
+  The server's own list, linked from home and Logs, is called Server store. (#1418)
+- **A DAG you navigate.** Clicking a node (or Enter) highlights its ancestors and
+  descendants, dims the rest and scrolls to the cell; a toggle docks the graph in a
+  right-side panel, where it holds an 80% minimum scale and pans. (#1419, #1428)
+- **The app view says when each output was computed:** the run's time, what it took or
+  what the cache saved, and a link to its lineage, through
+  `GET /v1/notebooks/{id}/artifacts/{artifact_id}/v/{version}/lineage`. A
+  `strata export --app-view` snapshot carries the same line. (#1422)
+- **One vocabulary for a cell's state.** Cell headers, DAG nodes and the terminal viewer
+  show each state with a color, an icon and a label (`frontend/DESIGN.md`), never color
+  alone: cached has its own look, running is blue, a run at a worker reads dispatching,
+  and an annotation error reads blocked. (#1423)
 - **`strata agent install` wires the project scratchpad into Claude Code or Codex.** It
   writes the user-scope MCP entry (through `claude mcp add-json`, with `alwaysLoad`), the
   `mcp__strata__*` permission and a short block in `CLAUDE.md`, or Codex's
@@ -153,7 +169,6 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   writers make is the run's own, so reading it back is not reported. A folder's listing
   leaves out its `.` names, so a `.DS_Store` a tool drops is no stale hint. A file named
   in DuckDB SQL is still not seen. (#1516)
-
 - **A scratchpad cell is keyed on what its run read.** Editing a module a scratchpad cell
   imported, or a file it opened through the pinned `project` mount, left it returning
   what the old file gave. Each run now records the files it opened or listed, the code it
@@ -205,14 +220,188 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   and registering a worker or connecting one over SSH is refused: a run elsewhere
   records nothing of what it read, so its key would miss an edited project file or
   module and could replay a stale result. (#1589)
+- **A PyTorch cell saves through vestigo.torch.** `strata.checkpoint_files(step,
+  write)` publishes what `write` leaves in an empty folder as one checkpoint of
+  the run, each file its own version in vestigo's checkpoint layout, and
+  `strata.restore_files()` returns the folder the checkpoint a run continues
+  from (a resume or a branch) was written out to. `vestigo.torch.HostedRun(strata)`
+  saves and restores the model and optimizer through them, so
+  `vestigo.torch.Ledger.load` reads a cell's checkpoint outside Strata and a
+  cell restores one `Ledger.run` wrote. The taxi dogfood's train cell uses it;
+  run live, resume and branch end on the uninterrupted weights. Investigation
+  09's T3. (#1327)
+- **The ledger's URI scheme is a setting.** `vestigo` artifact and name
+  URIs carry a per-process scheme (`vestigo.uris.set_uri_scheme`, default
+  `vestigo`); Strata sets `strata` in its package init, so every persisted
+  URI is unchanged. The package, released from its own repository, names
+  nothing of Strata in messages, temp-file prefixes or test
+  gates. (#1301)
+- **Gate 1 on both backends, with the table leaf (ADR 002 E5).** Gate 1
+  runs on PostgreSQL too (`tests/notebook/test_local_runs_postgres.py`, the
+  integration workflow's Postgres step), and `NotebookSession` takes the
+  ledger's SQL dialect at construction. A cell's structural node gets a
+  `strata/table` leaf per table it read: the executor records a run's
+  `# @table` and DuckDB catalog reads when it computes provenance, SQL cells
+  record their lake reads, and every output the run stages carries them, so
+  the graph answers which cells read a table and at which snapshot. (#1300)
+- **A local cell run is an execution with checkpoints (ADR 002 E4b).** Every
+  locally run Python cell now gets a build and an attempt in the notebook's
+  ledger, its lease renewed by the server while the cell runs, and the
+  provenance hash as the build's `computation_key` so the computation finds
+  its build again. From the cell, `strata.checkpoint(**parts)` publishes an
+  accepted checkpoint release without blocking the cell, `strata.restore()`
+  returns the parts of the release the run continues from, and
+  `strata.head(name, sequence)` points a named head at a checkpoint; the
+  cell's stored outputs are the build's `final` release. A run that dies
+  after a checkpoint (a crash, a cancel, a server restart) resumes from its
+  latest checkpoint on the next normal run; a rerun starts fresh; `--init
+  RELEASE` on `strata cell run` (`?init=` on the execute route) branches a
+  new run from an accepted release under its own provenance key. The new
+  `# @stochastic` annotation keeps every run's outputs beside the cache and
+  never serves them. Prune collects checkpoint rows unless a head holds them
+  or they are the newest of an open build. Gate 1 (ADR 002 §8) runs in
+  `tests/notebook/test_local_runs.py` against the real harness and the warm
+  worker. (#1299)
+- **The ledger has releases (ADR 002 E4a).** A build is an execution, its
+  attempts the tries that may write its bytes, and a release the event that
+  makes a set of staged outputs current together: `vestigo.releases` adds
+  `build_releases`, `release_references` and `release_authorities` (schema
+  migration 14) with `release_id` and `computation_key` on versions and
+  `occurrence` and `attempt` on builds. A `building` build accepts any number
+  of `checkpoint` releases and stays building; its `final` release completes
+  it. Acceptance is fenced on the attempt's lease and write window, ordered by
+  sequence, and refused until every output's bytes are stored at the declared
+  size, which on object storage is the only commit point. A resume opens a new
+  attempt, fences the old one and abandons what it left unsettled; a retried
+  acceptance returns the original release. The typed operations of the E0
+  contract (`vestigo.operations`: `CheckBuildLease`, `AssertReferenceRevision`,
+  `AssignAuthority`, `AdvanceReference`, `InsertAuditEvent`) run inside the
+  acceptance transaction, in order, or not at all; a reference holds its
+  release's outputs as a retention root. `checkpoint_output_key` and
+  `run_output_key` derive the labelled output keys of §7.1. Gate 2 (ADR 002 §8)
+  runs in the package suite on SQLite and PostgreSQL, and `BuildLease.tla`
+  checks that only the lease holder's checkpoints are accepted. (#1298)
+- **The ledger holds a structural graph (ADR 002 E3).** `vestigo.graph` stores
+  content-addressed nodes (`nodes`, `node_inputs`, schema migration 13) under an
+  identity scope derived from the tenant, with the `CGN1`/`CGD1` encoders the
+  contract fixtures pin: `put_batch` writes a structure in one transaction,
+  batch entries may name earlier ones by index, and `ancestors`, `dependents`
+  and `topological_order` walk it with depth and size bounds on both backends.
+  A version names the node that produced it (`definition_id`, `definition=` on
+  `create_artifact`). Every cell output a notebook run stores now carries its
+  cell's definition: one `strata/cell` node per run, its payload the executor and the
+  defining params (what a run recorded about itself, such as its duration, is
+  left out), one edge per upstream variable under the variable's name, fetches
+  and datasets as leaves. Versions from before the graph get a
+  `strata/cell-reconstructed` node with positional `input` roles when the
+  upgraded store is first opened (`artifact/graph.py`; the per-store upgrade
+  steps now live in `artifact/upgrades.py`). (#1296)
+- **The ledger stands alone (ADR 002 E2).** `vestigo` imports nothing of
+  Strata: blob credentials arrive as `BlobSettings`, the Arrow validator
+  `verify_artifacts` runs is registered by Strata (`register_validator`), and
+  what a version holds or requires is recorded in two new tables.
+  `retention_roots` replaces `artifact_pins` (existing pins are converted by
+  schema migration 12 and the old table dropped; the pin routes are unchanged),
+  and `retention_edges` records what a version requires: an output folder's
+  manifest requires its files, declared when the manifest is stored and, for
+  folders stored before this release, when the upgraded store is first opened.
+  Garbage collection protects the closure of the roots over those edges
+  instead of reading manifests, and a folder whose files are gone reads as
+  missing (`requirements_met`). The package suite runs in CI in a venv with
+  only the ledger installed, and `ArtifactLifecycle.tla` models the roots and
+  edges (`Artifact_Retention.cfg`). (#1295)
+- **A strata-pool job names how long its machine stays warm.** `submit` and
+  `POST /v1/jobs` take `hold_seconds`; the machine that runs the job keeps it
+  as its cool-down until its next job, so a host can hold each tenant's
+  machines for as long as that tenant's next job is worth waiting for. (#1257)
+- **Read costs change with the credentials, while the server runs.**
+  `PUT /v1/admin/notebook-credentials` takes `notebook_credential_read_cost`
+  as a sixth setting, replaced with the others, and `GET` returns it, so a
+  source a host connects mid-session brings its egress rate and a costly first
+  read through it asks without a restart. The setting is required in every
+  body, as paths and writers are, so a body that leaves it out is refused with
+  `422` rather than clearing the rates. A rate that is not a number, or is
+  negative, NaN or infinite, is refused with `422`, and at startup.
+  (#1275, #1280)
+- **`.strata/writes/index.json`: the files each cell wrote through its `rw`
+  mounts.** For each cell, its last successful run's writes, one entry per
+  mount with each file's path, size and sha256, plus when it ran and the
+  principal it ran for, so a host lists what a source was written by without
+  reading each cell's `__mount__<name>` record. A failed run or sync-back
+  leaves the entry; a run that writes nothing, or deleting the cell, drops it.
+  (#1276)
+- **A cell's output folder over HTTP.**
+  `GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}` lists every
+  version of a `# @output_dir` folder, newest first, a failed run's marked
+  `failed`, each with its files' paths, sizes and sha256 digests;
+  `.../folders/{name}/v/{version}/files/{path}` streams one file with a
+  `Content-Digest`. A crash's checkpoints can be downloaded, and with
+  `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` set, prune keeps a failed
+  folder version until a later run stores a new successful version, and at
+  least as long as the successful version it follows; it goes in the pass
+  after that one does. A cache hit stores no new version, so it does not
+  release a failed one. (#1277, #1285)
+- **A DuckDB SQL cell reads a REST catalog that vends no credentials.** When a
+  catalog's properties set `header.X-Iceberg-Access-Delegation` to something
+  other than `vended-credentials` (empty, for a store without STS), DuckDB no
+  longer asks the catalog to vend, and reads the tables with the catalog's
+  `s3.*` keys (`s3.endpoint`, `s3.region` and `s3.path-style-access` too)
+  whatever form the warehouse takes. Without an `s3://` warehouse those keys
+  reach only the locations of the tables the query reads. (#1278)
+- **A promoted output folder reads back as a folder.** `# @dataset` naming a
+  `# @output_dir` folder in the registry binds the folder's `Path`, its files
+  copied into the notebook's store, rather than a path to its manifest; and a
+  published folder's `/p/{token}/archive.zip` holds its files under `folder/`,
+  each with its own digest that `/p/{token}/verify` recognises. (#1279)
+- **Each manifest input carries its size.** Every entry of a worker
+  manifest's `inputs`, on the notebook's signed transport and from
+  `GET /v1/builds/{build_id}/manifest`, carries `size_bytes`, the stored size
+  of that artifact version, so a dispatcher can weigh a cell's inputs before
+  it places the cell. An input whose size the store does not know, a version
+  still being written, leaves the field out. (#1287)
+- **One tenant's artifacts can be collected on that tenant's period.** A new
+  `artifacts:gc` scope opens `POST /v1/artifacts/gc` to a caller that is not
+  `admin:*`, and its sweep covers only its own tenant (the tenant header is
+  required): `max_bytes`, `deleted_count`, `deleted_bytes` and `store_bytes`
+  are measured over that tenant, and the tenantless rows every tenant shares
+  are left alone. `admin:*` still sweeps the whole store, and may name one
+  tenant with `tenant=` and add the tenantless rows with
+  `include_tenantless=true`, which anyone else is refused (`403`). A version
+  another tenant's name, pin, publication or build reaches is kept as before,
+  and the scheduled sweep still covers the whole store. (#1288)
+- **Request status, latency and storage errors in `/metrics/prometheus`.**
+  `strata_http_request_duration_seconds{route}` is a histogram of each
+  request's duration by route template, up to the response's last byte, so
+  a stream is timed to its end. `strata_object_store_errors_total{operation}`
+  counts the artifact store's S3, GCS and Azure calls that failed, by
+  `put`, `get`, `head`, `list` or `delete`, including the ones a caller
+  reports as absent or unknown; an object that is not there is not an
+  error. (#1289)
+- **strata-client reads an output folder from a server.**
+  `client.download_folder(artifact_id, version, dest)` rebuilds a promoted
+  `# @output_dir` folder's files in a new or empty directory over HTTP,
+  checking each file's size and sha256, and leaves nothing there when one
+  fails. `GET /v1/artifacts/{id}/v/{n}/files` lists a folder's files with the
+  artifact holding each, gated as `/data` is; a file the folder's tenant does
+  not hold is a `404`. `fetch` of a folder says to call `download_folder`
+  instead of failing to read Arrow. (#1291)
+
 ### Changed
-- **The ledger is vestigo 0.7.0.** On SQLite a store keeps its connections open between
+
+- **A removed cell's values are collected after 30 days unused.** Removing a cell
+  released nothing, so its outputs survived every sweep. The sweep run when a notebook
+  opens now takes every output of a cell no longer in `notebook.toml` once it has gone
+  unused for 30 days, values orphaned before the upgrade included; a name, alias, pin,
+  publication, running build, or a current value built from it still keeps it. (#1478)
+- **The ledger is vestigo 0.7.0, from PyPI.** It includes the vestigo entries
+  below. On SQLite a store keeps its connections open between
   calls and reuses them, where every call opened one: a lookup on a store nobody else
   had open took 0.7 ms and takes 5 µs. Finding a computation's open build reads an index
   on its key and state (9.6 ms with 50000 open builds, now 0.006 ms), and checking which
   checkpoints a build can drop is no longer quadratic in its checkpoints. Its migration
-  20 replaces an index: the first 0.7.0 process to open a store builds it, and a 0.6.0
-  process then refuses the store, so every process on it upgrades together. (#1602)
+  20 replaces an index: the first 0.12.0 process to open a store builds it, and an
+  earlier Strata then refuses the store, so every process on it upgrades together.
+  (#1602)
 - **A scratchpad's daemon starts as the session opens.** In a project that already has a
   scratchpad, `strata mcp` starts its daemon in the background when the agent's session
   lists its tools, so the first `run` no longer waits about 4 s for it; a call made
@@ -434,8 +623,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **The notebook's analysis runs on cellgraph.** Annotations, the names each
   cell defines and reads, the DAG and annotation validation now come from
   [cellgraph](https://github.com/bearing-research/cellgraph), a new runtime
-  dependency (`cellgraph>=0.3,<0.4`). The diagnostics, the DAG and every cell
-  key are the same as before. (#1358)
+  dependency (`cellgraph>=0.4,<0.5`). The diagnostics and the DAG are the same as
+  before; with cellgraph 0.4 every cell's key changes once (above). (#1358)
 - **Staleness is faster outside the server.** The CLI, the TUI and the MCP
   server read the config from disk, and a staleness pass read it twice for
   every cell. It is now read only for a cell with a mount, a table or SQL, so
@@ -488,26 +677,26 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   skipping it. Run All also skips a failed cell's dependents that would have
   run together in one batch, which before ran on the failed cell's last
   artifacts. No cache keys change. (#1343)
-- **The ledger is vestigo 0.6.0.** A run's final release is refused, and stores nothing,
+- **Included from vestigo 0.6.0.** A run's final release is refused, and stores nothing,
   when another writer made a newer value of one of its outputs current first, so a
   cell's outputs never come from two runs. It adds `ArtifactStore.stage_promotion`,
-  which Strata does not call yet. Its migrations 18 and 19 add indexes: the first
-  0.6.0 process to open a store builds them, and every process on that store
-  upgrades together. (#1551)
-- **The ledger is vestigo 0.5.0.** A sweep no longer deletes a cell value that a kept
+  which a cell's revert to earlier values now calls. Its migrations 18 and 19 add
+  indexes: the first 0.12.0 process to open a store builds them, and every process on
+  that store upgrades together. (#1551)
+- **Included from vestigo 0.5.0.** A sweep no longer deletes a cell value that a kept
   checkpoint was built from: before, a checkpoint the idle floor kept could lose its
   inputs in the same pass. Two processes opening one new SQLite store at once no
-  longer fail. It adds `vestigo.digests.FileDigests`, which Strata does not call yet.
+  longer fail. It adds `vestigo.digests.FileDigests`, which a mount's digest cache now uses.
   No migration. (#1480)
-- **The ledger is vestigo 0.4.0.** It adds `exclude_id_prefix` to `list_artifacts`
+- **Included from vestigo 0.4.0.** It adds `exclude_id_prefix` to `list_artifacts`
   and `stats`, and every store gets `build_attempts.fenced_at` on open. (#1476)
-- **The ledger is vestigo 0.3.1**, which adds `vestigo.torch.HostedRun` and
+- **Included from vestigo 0.3.1:** it adds `vestigo.torch.HostedRun` and
   `vestigo.checkpoint_files`. No migration. (#1327)
-- **The ledger is vestigo 0.3.0.** It adds the `vestigo.torch` adapter
+- **Included from vestigo 0.3.0.** It adds the `vestigo.torch` adapter
   (behind vestigo's `torch` extra, which Strata does not install) and a
   migration every store gets on open: `build_attempts.opened_at` and two
-  indexes. Nothing in Strata calls the new APIs yet. (#1325)
-- **The ledger is vestigo 0.2.1.** A build's dispatch is a column of the
+  indexes. (#1325)
+- **Included from vestigo 0.2.1.** A build's dispatch is a column of the
   ledger (`create_build(dispatch="external")` for the notebook's worker
   builds and local cell runs, which nothing in the transform runner picks
   up) instead of the `_dispatch_mode` mark in the build's params; an
@@ -537,13 +726,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (a pinned read, never loaded, keeps the URI alone). Both the `@table`
   and the SQL lake paths record it; the next rerun of such a cell gets a
   new leaf, old nodes stay. (#1320)
-- **The ledger installs from PyPI.** `vestigo` 0.1.0 is released from its
+- **The ledger installs from PyPI.** `vestigo` is released from its
   own repository, [bearing-research/vestigo](https://github.com/bearing-research/vestigo),
   and Strata pins it exactly from there; `packages/vestigo` leaves the tree
   with its CI job, its Postgres suite in the integration run and the release
   workflow's vestigo wheel. (#1319)
-- **The ledger's S3 and GCS backends run on their clouds' SDKs.** The
-  `vestigo` package is mirrored at its commit `2ba75df`: the S3 backend runs
+- **The ledger's S3 and GCS backends run on their clouds' SDKs.** In the
+  `vestigo` package the S3 backend runs
   on boto3 and the GCS backend on google-cloud-storage in place of PyArrow's
   filesystems, so the package has no required dependency and each extra
   brings its backend's SDK. One client per backend reads, writes and signs;
@@ -554,8 +743,48 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   reads and writes; `STRATA_GCS_DEFAULT_BUCKET_LOCATION` reaches only
   PyIceberg's catalog, as it always did; the package's suite runs every
   object-store backend against its emulator through Docker. (#1314)
+- **The ledger is its own package, vestigo.** The artifact store, build store,
+  SQL dialects, blob backends, provenance and artifact URIs now ship as
+  `vestigo`, which `strata-notebook` pins exactly and installs with it.
+  Imports of `strata.artifact.store`, `strata.artifact.blob_store`,
+  `strata.artifact.provenance`, `strata.artifact.uris`,
+  `strata.transforms.build_store`, `strata.sql_backend` and
+  `strata.file_modes` become `vestigo.<module>`, and
+  `strata.notebook.provenance.derive_subkey` is
+  `vestigo.provenance.derive_subkey`. The notebook worker registry's tables are
+  created by Strata (`strata.notebook.worker_store`) rather than by the store;
+  an existing database needs no action. (#1294)
+- **The team cache shares an output folder.** A cell's `# @output_dir` folder
+  was neither offered to nor served from the team cache, so a teammate always
+  ran it. A publish now offers each file the folder names, then its manifest
+  naming where each landed; a file the store already holds is not sent again.
+  A pull fetches every file, checks its sha256 and size against the manifest,
+  and lands the files under the notebook's own ids before the manifest, so the
+  folder rebuilds and downstream cells read it; a missing or altered file lands
+  nothing and the cell runs locally. (#1281)
+- **Upgrading from 0.10 or earlier: artifacts over a table rebuild once.**
+  Since 0.11 a table input's recorded version carries its reading fingerprint
+  (format version and name mapping) as well as its snapshot and schema, so
+  after the upgrade every named artifact over a table reports stale once, and
+  materializing a transform or scan over a table builds a new artifact rather
+  than reusing the old one. (#1220, #1260)
+- **`PUT /v1/admin/notebook-credentials` requires `notebook_credential_paths`
+  and `notebook_credential_writers` in every body.** Leaving one out used to
+  reset it, which lifted a restriction without anyone saying so; it is now
+  refused with `422` naming the field. Send `{}` for no path restrictions and
+  `null` for writers unset. (#1265)
+- **`strata_http_requests_total` is labelled by `method`, `route` and
+  `status`.** It was one number. `route` is the matched route's template
+  (`/v1/artifacts/{artifact_id}/v/{version}`), or `unmatched` for a request
+  answered before routing (a refused Host, auth, the rate limiter) or
+  matching no route; `status` is the class (`2xx`, `4xx`, `5xx`), and a
+  request that raised before answering counts as `5xx`. There is no tenant
+  label.
+  A query for the total sums the series: `sum(strata_http_requests_total)`.
+  (#1289)
 
 ### Fixed
+
 - **A lock that moved outside Strata is installed before the next run.** A cell's key
   reads `uv.lock` on disk, but the cell ran in the environment as it was last synced.
   After a `git pull`, a branch switch or `uv lock` in a terminal, a result computed
@@ -615,6 +844,22 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   all fail.** The same sweep read each process's session from the `NSsid` line of its
   `/proc` status, which those kernels do not print, and raised before every run. It
   now reads the session from `/proc/<pid>/stat` there. (#1605)
+- **A cell's test result shows without hovering.** It sat in the hover-only action
+  column; `tests 2/2` is now in the header, next to the state, and opens the Tests
+  panel. (#1441)
+- **A cell's `reads:` line lists what it reads from other cells:** the names on its
+  incoming DAG edges, not every free name, so the ambient `strata` client is not listed.
+  (#1416)
+- **The terminal viewer shows `cached` at any width.** The time column moves next to the
+  status glyph, before the label that clips. (#1417)
+- **A run that cannot save an output says why:** which output and the reason (it cannot
+  be serialized, or the run never set it), where it said to check the server logs, or
+  `store_outputs returned False` in Run All. (#1421)
+- **A cached badge keeps its saved time across a page reload.** (#1425)
+- **A short cell is as tall as its contents.** The hover-only action column took room;
+  it now floats over the gutter, and a collapsed cell has all its actions back. (#1429)
+- **A markdown cell shows no state.** It was green from the moment a notebook opened, as
+  if it had run. (#1430)
 - **A shared or worker environment's console scripts run wherever the directory is.**
   `uv sync` made the environment itself, and such a venv writes its own path into every
   console script, so a directory moved or copied elsewhere ran `python` and imported
@@ -735,9 +980,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
   A reset of the API key or stream ownership store closes the database it opened, and
   `strata apikey --dsn` closes its connection pool. A store given another owner's
-  database leaves it open. On vestigo 0.6.0 closing a SQLite store releases nothing. It
-  matters once vestigo keeps connections between calls: then an open database stops
-  Windows from deleting or moving the notebook. (#1563)
+  database leaves it open. On vestigo 0.7.0, which keeps a SQLite
+  store's connections between calls, closing releases them, so an open database no
+  longer stops Windows from deleting or moving the notebook. (#1563)
 - **A team-cache pull lands all of its values or none.** A pulled result was written one
   variable at a time, so a write failing partway left some of the teammate's values beside
   the cell's earlier ones. The values are now one release, current together; when the
@@ -948,7 +1193,6 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A `merge` on two key columns no longer kills the server.** `@write_table
   ... merge on=a,b` with about 2,000 rows or more crashed the process in Arrow.
   A merge now also refuses a null or missing key column before writing. (#1371)
-
 - **A stale cell says what really changed.** Change a file in a mounted folder
   and the cell no longer says its source changed: it says mount `data` changed.
   Each good run now saves the parts its key was built from, and the explanation
@@ -1049,7 +1293,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (seen restoring a generator's state from a checkpoint). It is copied when
   the buffer is read-only. (#1324)
 - **The ledger's audit fixes, and Strata's side of them.** The `vestigo`
-  package is mirrored at its commit `3c19164`, which fixes every finding of
+  package fixes every finding of
   the 2026-10-26 package audit: a deleted dedup canonical hands its bytes to
   every version reading through it and a rooted version is refused;
   `promote_version` carries retention edges, `minted`, `computation_key` and
@@ -1064,220 +1308,6 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `abandon`, records reconstructed definitions per tenant, and takes over
   the repair of embedded builds that bound inputs out of order from the
   ledger's migration 11 as a per-store upgrade step (#1302)
-
-### Added
-- **A PyTorch cell saves through vestigo.torch.** `strata.checkpoint_files(step,
-  write)` publishes what `write` leaves in an empty folder as one checkpoint of
-  the run, each file its own version in vestigo's checkpoint layout, and
-  `strata.restore_files()` returns the folder the checkpoint a run continues
-  from (a resume or a branch) was written out to. `vestigo.torch.HostedRun(strata)`
-  saves and restores the model and optimizer through them, so
-  `vestigo.torch.Ledger.load` reads a cell's checkpoint outside Strata and a
-  cell restores one `Ledger.run` wrote. The taxi dogfood's train cell uses it;
-  run live, resume and branch end on the uninterrupted weights. Investigation
-  09's T3. (#1327)
-
-- **The ledger's URI scheme is a setting.** `vestigo` artifact and name
-  URIs carry a per-process scheme (`vestigo.uris.set_uri_scheme`, default
-  `vestigo`); Strata sets `strata` in its package init, so every persisted
-  URI is unchanged. The package copy is mirrored from its own repository,
-  where it names nothing of Strata in messages, temp-file prefixes or test
-  gates. (#1301)
-- **Gate 1 on both backends, with the table leaf (ADR 002 E5).** Gate 1
-  runs on PostgreSQL too (`tests/notebook/test_local_runs_postgres.py`, the
-  integration workflow's Postgres step), and `NotebookSession` takes the
-  ledger's SQL dialect at construction. A cell's structural node gets a
-  `strata/table` leaf per table it read: the executor records a run's
-  `# @table` and DuckDB catalog reads when it computes provenance, SQL cells
-  record their lake reads, and every output the run stages carries them, so
-  the graph answers which cells read a table and at which snapshot. (#1300)
-- **A local cell run is an execution with checkpoints (ADR 002 E4b).** Every
-  locally run Python cell now gets a build and an attempt in the notebook's
-  ledger, its lease renewed by the server while the cell runs, and the
-  provenance hash as the build's `computation_key` so the computation finds
-  its build again. From the cell, `strata.checkpoint(**parts)` publishes an
-  accepted checkpoint release without blocking the cell, `strata.restore()`
-  returns the parts of the release the run continues from, and
-  `strata.head(name, sequence)` points a named head at a checkpoint; the
-  cell's stored outputs are the build's `final` release. A run that dies
-  after a checkpoint (a crash, a cancel, a server restart) resumes from its
-  latest checkpoint on the next normal run; a rerun starts fresh; `--init
-  RELEASE` on `strata cell run` (`?init=` on the execute route) branches a
-  new run from an accepted release under its own provenance key. The new
-  `# @stochastic` annotation keeps every run's outputs beside the cache and
-  never serves them. Prune collects checkpoint rows unless a head holds them
-  or they are the newest of an open build. Gate 1 (ADR 002 §8) runs in
-  `tests/notebook/test_local_runs.py` against the real harness and the warm
-  worker. (#1299)
-- **The ledger has releases (ADR 002 E4a).** A build is an execution, its
-  attempts the tries that may write its bytes, and a release the event that
-  makes a set of staged outputs current together: `vestigo.releases` adds
-  `build_releases`, `release_references` and `release_authorities` (schema
-  migration 14) with `release_id` and `computation_key` on versions and
-  `occurrence` and `attempt` on builds. A `building` build accepts any number
-  of `checkpoint` releases and stays building; its `final` release completes
-  it. Acceptance is fenced on the attempt's lease and write window, ordered by
-  sequence, and refused until every output's bytes are stored at the declared
-  size, which on object storage is the only commit point. A resume opens a new
-  attempt, fences the old one and abandons what it left unsettled; a retried
-  acceptance returns the original release. The typed operations of the E0
-  contract (`vestigo.operations`: `CheckBuildLease`, `AssertReferenceRevision`,
-  `AssignAuthority`, `AdvanceReference`, `InsertAuditEvent`) run inside the
-  acceptance transaction, in order, or not at all; a reference holds its
-  release's outputs as a retention root. `checkpoint_output_key` and
-  `run_output_key` derive the labelled output keys of §7.1. Gate 2 (ADR 002 §8)
-  runs in the package suite on SQLite and PostgreSQL, and `BuildLease.tla`
-  checks that only the lease holder's checkpoints are accepted. (#1298)
-- **The ledger holds a structural graph (ADR 002 E3).** `vestigo.graph` stores
-  content-addressed nodes (`nodes`, `node_inputs`, schema migration 13) under an
-  identity scope derived from the tenant, with the `CGN1`/`CGD1` encoders the
-  contract fixtures pin: `put_batch` writes a structure in one transaction,
-  batch entries may name earlier ones by index, and `ancestors`, `dependents`
-  and `topological_order` walk it with depth and size bounds on both backends.
-  A version names the node that produced it (`definition_id`, `definition=` on
-  `create_artifact`). Every cell output a notebook run stores now carries its
-  cell's definition: one `strata/cell` node per run, its payload the executor and the
-  defining params (what a run recorded about itself, such as its duration, is
-  left out), one edge per upstream variable under the variable's name, fetches
-  and datasets as leaves. Versions from before the graph get a
-  `strata/cell-reconstructed` node with positional `input` roles when the
-  upgraded store is first opened (`artifact/graph.py`; the per-store upgrade
-  steps now live in `artifact/upgrades.py`). (#1296)
-- **The ledger stands alone (ADR 002 E2).** `vestigo` imports nothing of
-  Strata: blob credentials arrive as `BlobSettings`, the Arrow validator
-  `verify_artifacts` runs is registered by Strata (`register_validator`), and
-  what a version holds or requires is recorded in two new tables.
-  `retention_roots` replaces `artifact_pins` (existing pins are converted by
-  schema migration 12 and the old table dropped; the pin routes are unchanged),
-  and `retention_edges` records what a version requires: an output folder's
-  manifest requires its files, declared when the manifest is stored and, for
-  folders stored before this release, when the upgraded store is first opened.
-  Garbage collection protects the closure of the roots over those edges
-  instead of reading manifests, and a folder whose files are gone reads as
-  missing (`requirements_met`). The package suite runs in CI in a venv with
-  only the ledger installed, and `ArtifactLifecycle.tla` models the roots and
-  edges (`Artifact_Retention.cfg`). (#1295)
-- **A strata-pool job names how long its machine stays warm.** `submit` and
-  `POST /v1/jobs` take `hold_seconds`; the machine that runs the job keeps it
-  as its cool-down until its next job, so a host can hold each tenant's
-  machines for as long as that tenant's next job is worth waiting for. (#1257)
-- **Read costs change with the credentials, while the server runs.**
-  `PUT /v1/admin/notebook-credentials` takes `notebook_credential_read_cost`
-  as a sixth setting, replaced with the others, and `GET` returns it, so a
-  source a host connects mid-session brings its egress rate and a costly first
-  read through it asks without a restart. The setting is required in every
-  body, as paths and writers are, so a body that leaves it out is refused with
-  `422` rather than clearing the rates. A rate that is not a number, or is
-  negative, NaN or infinite, is refused with `422`, and at startup.
-  (#1275, #1280)
-- **`.strata/writes/index.json`: the files each cell wrote through its `rw`
-  mounts.** For each cell, its last successful run's writes, one entry per
-  mount with each file's path, size and sha256, plus when it ran and the
-  principal it ran for, so a host lists what a source was written by without
-  reading each cell's `__mount__<name>` record. A failed run or sync-back
-  leaves the entry; a run that writes nothing, or deleting the cell, drops it.
-  (#1276)
-- **A cell's output folder over HTTP.**
-  `GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}` lists every
-  version of a `# @output_dir` folder, newest first, a failed run's marked
-  `failed`, each with its files' paths, sizes and sha256 digests;
-  `.../folders/{name}/v/{version}/files/{path}` streams one file with a
-  `Content-Digest`. A crash's checkpoints can be downloaded, and with
-  `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` set, prune keeps a failed
-  folder version until a later run stores a new successful version, and at
-  least as long as the successful version it follows; it goes in the pass
-  after that one does. A cache hit stores no new version, so it does not
-  release a failed one. (#1277, #1285)
-- **A DuckDB SQL cell reads a REST catalog that vends no credentials.** When a
-  catalog's properties set `header.X-Iceberg-Access-Delegation` to something
-  other than `vended-credentials` (empty, for a store without STS), DuckDB no
-  longer asks the catalog to vend, and reads the tables with the catalog's
-  `s3.*` keys (`s3.endpoint`, `s3.region` and `s3.path-style-access` too)
-  whatever form the warehouse takes. Without an `s3://` warehouse those keys
-  reach only the locations of the tables the query reads. (#1278)
-- **A promoted output folder reads back as a folder.** `# @dataset` naming a
-  `# @output_dir` folder in the registry binds the folder's `Path`, its files
-  copied into the notebook's store, rather than a path to its manifest; and a
-  published folder's `/p/{token}/archive.zip` holds its files under `folder/`,
-  each with its own digest that `/p/{token}/verify` recognises. (#1279)
-- **Each manifest input carries its size.** Every entry of a worker
-  manifest's `inputs`, on the notebook's signed transport and from
-  `GET /v1/builds/{build_id}/manifest`, carries `size_bytes`, the stored size
-  of that artifact version, so a dispatcher can weigh a cell's inputs before
-  it places the cell. An input whose size the store does not know, a version
-  still being written, leaves the field out. (#1287)
-- **One tenant's artifacts can be collected on that tenant's period.** A new
-  `artifacts:gc` scope opens `POST /v1/artifacts/gc` to a caller that is not
-  `admin:*`, and its sweep covers only its own tenant (the tenant header is
-  required): `max_bytes`, `deleted_count`, `deleted_bytes` and `store_bytes`
-  are measured over that tenant, and the tenantless rows every tenant shares
-  are left alone. `admin:*` still sweeps the whole store, and may name one
-  tenant with `tenant=` and add the tenantless rows with
-  `include_tenantless=true`, which anyone else is refused (`403`). A version
-  another tenant's name, pin, publication or build reaches is kept as before,
-  and the scheduled sweep still covers the whole store. (#1288)
-- **Request status, latency and storage errors in `/metrics/prometheus`.**
-  `strata_http_request_duration_seconds{route}` is a histogram of each
-  request's duration by route template, up to the response's last byte, so
-  a stream is timed to its end. `strata_object_store_errors_total{operation}`
-  counts the artifact store's S3, GCS and Azure calls that failed, by
-  `put`, `get`, `head`, `list` or `delete`, including the ones a caller
-  reports as absent or unknown; an object that is not there is not an
-  error. (#1289)
-- **strata-client reads an output folder from a server.**
-  `client.download_folder(artifact_id, version, dest)` rebuilds a promoted
-  `# @output_dir` folder's files in a new or empty directory over HTTP,
-  checking each file's size and sha256, and leaves nothing there when one
-  fails. `GET /v1/artifacts/{id}/v/{n}/files` lists a folder's files with the
-  artifact holding each, gated as `/data` is; a file the folder's tenant does
-  not hold is a `404`. `fetch` of a folder says to call `download_folder`
-  instead of failing to read Arrow. (#1291)
-
-### Changed
-
-- **The ledger is its own package, vestigo.** The artifact store, build store,
-  SQL dialects, blob backends, provenance and artifact URIs now ship as
-  `vestigo`, which `strata-notebook` pins exactly and installs with it.
-  Imports of `strata.artifact.store`, `strata.artifact.blob_store`,
-  `strata.artifact.provenance`, `strata.artifact.uris`,
-  `strata.transforms.build_store`, `strata.sql_backend` and
-  `strata.file_modes` become `vestigo.<module>`, and
-  `strata.notebook.provenance.derive_subkey` is
-  `vestigo.provenance.derive_subkey`. The notebook worker registry's tables are
-  created by Strata (`strata.notebook.worker_store`) rather than by the store;
-  an existing database needs no action. (#1294)
-
-- **The team cache shares an output folder.** A cell's `# @output_dir` folder
-  was neither offered to nor served from the team cache, so a teammate always
-  ran it. A publish now offers each file the folder names, then its manifest
-  naming where each landed; a file the store already holds is not sent again.
-  A pull fetches every file, checks its sha256 and size against the manifest,
-  and lands the files under the notebook's own ids before the manifest, so the
-  folder rebuilds and downstream cells read it; a missing or altered file lands
-  nothing and the cell runs locally. (#1281)
-- **Upgrading from 0.10 or earlier: artifacts over a table rebuild once.**
-  Since 0.11 a table input's recorded version carries its reading fingerprint
-  (format version and name mapping) as well as its snapshot and schema, so
-  after the upgrade every named artifact over a table reports stale once, and
-  materializing a transform or scan over a table builds a new artifact rather
-  than reusing the old one. (#1260)
-- **`PUT /v1/admin/notebook-credentials` requires `notebook_credential_paths`
-  and `notebook_credential_writers` in every body.** Leaving one out used to
-  reset it, which lifted a restriction without anyone saying so; it is now
-  refused with `422` naming the field. Send `{}` for no path restrictions and
-  `null` for writers unset. (#1265)
-- **`strata_http_requests_total` is labelled by `method`, `route` and
-  `status`.** It was one number. `route` is the matched route's template
-  (`/v1/artifacts/{artifact_id}/v/{version}`), or `unmatched` for a request
-  answered before routing (a refused Host, auth, the rate limiter) or
-  matching no route; `status` is the class (`2xx`, `4xx`, `5xx`), and a
-  request that raised before answering counts as `5xx`. There is no tenant
-  label.
-  A query for the total sums the series: `sum(strata_http_requests_total)`.
-  (#1289)
-
-### Fixed
-
 - **An R cell can call a function from another cell.** `y <- f(2)` did not count as reading `f`, so
   the cell failed with "could not find function", and passing `f` by name failed the defining cell
   with "failed to store output artifacts". Functions are now stored, with only what they name from
