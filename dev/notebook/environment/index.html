@@ -3396,6 +3396,7 @@ and <code>cloudpickle</code> (which every Python cell needs) stay unless the fil
 <li>Cells that ran read <strong>stale · environment changed</strong>, since their provenance no longer matches, and the cells below them read <strong>stale · upstream changed</strong></li>
 <li>Re-running any cell recomputes with the new environment</li>
 </ol>
+<p>A lock that changes outside Strata (a <code>git pull</code>, a branch switch, <code>uv lock</code> in a terminal) does the same to the hash, with nothing installed yet. The next run of a cell syncs first, as a <code>sync</code> job you can watch in the Environment panel, so the cell runs in the environment its hash names. That sync is tried once per lock: if it fails, the run goes ahead in the environment as it was, a notice says so, and publishing to a team store stays refused until a sync succeeds. A dependency edited in <code>pyproject.toml</code> without locking changes no hash, and waits for the next sync.</p>
 <div class="admonition info">
 <p class="admonition-title">Switching back</p>
 <p>If you remove a package and then re-add it (returning to the same <code>uv.lock</code>), the original provenance hashes match again and cells get <strong>cache hits</strong>. This is free by construction, no special logic needed.</p>

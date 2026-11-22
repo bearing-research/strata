@@ -4415,6 +4415,15 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A lock that moved outside Strata is installed before the next run.</strong> A cell's key
+  reads <code>uv.lock</code> on disk, but the cell ran in the environment as it was last synced.
+  After a <code>git pull</code>, a branch switch or <code>uv lock</code> in a terminal, a result computed
+  with the old packages was stored under the new lock's key and came back as a cache
+  hit once the environment was synced. A run from the notebook, the REST API, an agent
+  or the scratchpad now syncs first when the lock is not the one last installed: the
+  same <code>sync</code> job as the Environment panel's, which the run waits for. It is tried once
+  per lock, so when it fails the run goes ahead in the environment as it was and
+  publishing stays refused until a sync succeeds. (#1606)</li>
 <li><strong>Starting a cell no longer installs into its environment.</strong> A Python cell with no
   warm process started through <code>uv run</code>, which syncs the environment first. A
   <code>pyproject.toml</code> edited outside Strata (an editor, an agent, a <code>git pull</code>) was then

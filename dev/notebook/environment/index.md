@@ -100,6 +100,8 @@ When you install or remove a package:
 3. Cells that ran read **stale · environment changed**, since their provenance no longer matches, and the cells below them read **stale · upstream changed**
 4. Re-running any cell recomputes with the new environment
 
+A lock that changes outside Strata (a `git pull`, a branch switch, `uv lock` in a terminal) does the same to the hash, with nothing installed yet. The next run of a cell syncs first, as a `sync` job you can watch in the Environment panel, so the cell runs in the environment its hash names. That sync is tried once per lock: if it fails, the run goes ahead in the environment as it was, a notice says so, and publishing to a team store stays refused until a sync succeeds. A dependency edited in `pyproject.toml` without locking changes no hash, and waits for the next sync.
+
 !!! info "Switching back"
     If you remove a package and then re-add it (returning to the same `uv.lock`), the original provenance hashes match again and cells get **cache hits**. This is free by construction, no special logic needed.
 
