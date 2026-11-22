@@ -153,16 +153,15 @@ Median wall time of C over A, with its 95% bootstrap interval:
 These are one model (`claude-opus-5-5`, Claude Code 2.1.330) on one machine (an
 Apple silicon Mac), with three runs per task, and an interval that crosses 1 is no
 evidence of a saving. The holdout's plot row is a single task. The columns ran on
-different Strata commits: the tuning tasks on the branch of arm C
+different Strata commits. The tuning tasks ran on arm C's branch
 ([#1598](https://github.com/bearing-research/strata/pull/1598)), before
-[#1599](https://github.com/bearing-research/strata/pull/1599), but for their probing
-row; the holdout once, at #1599, so its probing row still includes the daemon's
-start. On the tuning tasks, probing first took 1.53 [1.30, 2.04] times A's, and
-1.36 once #1599 showed a value's repr in its preview rather than its type's name;
-most of the rest was the 4 s or so the first `run` waited for the daemon. The
-table's tuning probing row is a rerun after
+[#1599](https://github.com/bearing-research/strata/pull/1599), except their probing
+row, which was rerun after
 [#1600](https://github.com/bearing-research/strata/pull/1600) started the daemon as
-the session opens.
+the session opens. There, probing first took 1.53 [1.30, 2.04] times A's, and 1.36
+once #1599 showed a value's repr in its preview rather than its type's name; most of
+the rest was the 4 s or so the first `run` waited for the daemon. The holdout ran
+once, at #1599, so its probing row still includes that wait.
 
 ## Where it lives
 

@@ -56,7 +56,7 @@ class TestTheBank:
 
         assert not re.search(r"notebook|scratch|\bcell|strata", prompts, re.I)
 
-    def test_the_holdout_is_the_seeded_third_of_each_kind(self):
+    def test_the_holdout_is_the_seeded_draw(self):
         assert bank.HOLDOUT == bank.seeded_holdout()
         assert bank.seeded_holdout(bank.HOLDOUT_SEED + 1) != bank.HOLDOUT
         kinds = Counter(bank.TASKS_BY_ID[i].kind for i in bank.HOLDOUT)
