@@ -86,7 +86,8 @@ async def test_a_worker_checked_while_the_pool_drains_is_not_handed_out(tmp_path
 @pytest.mark.parametrize("ending", ["raised", "cancelled"])
 async def test_a_worker_whose_check_did_not_finish_is_replaced(tmp_path, monkeypatch, ending):
     """Off the queue when the check raises or the run is cancelled during it: kept, it
-    would run on outside the pool, which would stay one worker short."""
+    would run on outside the pool, which would stay one worker short. Unchecked, it runs
+    nothing: the cell goes to the cold path."""
     import threading
 
     from strata.notebook.pool import WarmProcess, WarmProcessPool
@@ -112,8 +113,7 @@ async def test_a_worker_whose_check_did_not_finish_is_replaced(tmp_path, monkeyp
     await pool._available.put(WarmProcess(process=process, created_at=0.0, ready=True))
 
     if ending == "raised":
-        with pytest.raises(OSError, match="unreadable"):
-            await pool.acquire()
+        assert await pool.acquire() is None
     else:
         claim = asyncio.create_task(pool.acquire())
         await asyncio.to_thread(entered.wait, 30)
@@ -125,6 +125,37 @@ async def test_a_worker_whose_check_did_not_finish_is_replaced(tmp_path, monkeyp
 
     assert process.returncode is not None
     assert spawned == [1]
+
+
+@pytest.mark.asyncio
+async def test_a_discard_a_cancel_interrupts_still_finishes(tmp_path):
+    """A worker whose base image no longer holds is released even when the run is
+    cancelled while that happens: cut short, it would run on, and no replacement come."""
+    from strata.notebook.pool import WarmProcess, WarmProcessPool
+
+    pool = WarmProcessPool(tmp_path, base_image=lambda: None, base_image_holds=lambda s: False)
+    started, release = asyncio.Event(), asyncio.Event()
+    released: list[WarmProcess] = []
+
+    async def release_and_replace(warm_proc):
+        started.set()
+        await release.wait()
+        released.append(warm_proc)
+
+    pool.release_and_replace = release_and_replace  # type: ignore[method-assign]
+    pool._started = True
+    worker = WarmProcess(process=None, created_at=0.0, ready=True)  # type: ignore[arg-type]
+    await pool._available.put(worker)
+
+    claim = asyncio.create_task(pool.acquire())
+    await started.wait()
+    claim.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await claim
+    release.set()
+    await asyncio.sleep(0)
+
+    assert released == [worker]
 
 
 @pytest.mark.asyncio

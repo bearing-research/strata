@@ -219,22 +219,28 @@ class WarmProcessPool:
                 return None
             if self.base_image_holds is None:
                 return warm_proc
+            # Off the queue, a worker is handed out or released, a cancel included: kept,
+            # it would run on outside the pool, which would stay one short.
             try:
                 holds = await asyncio.to_thread(self.base_image_holds, warm_proc.stamp)
+            except Exception:
+                # Unchecked, it runs nothing; the cold path needs no check.
+                logger.exception("Discarding a warm worker whose base image could not be checked")
+                await asyncio.shield(self.release_and_replace(warm_proc))
+                continue
             except BaseException:
-                # Off the queue and handed to no one: it would run on, and the pool stay one short.
                 await asyncio.shield(self.release_and_replace(warm_proc))
                 raise
             if not self._started:
                 # Drained while it was checked, off the queue where the drain looked.
-                await terminate_subprocess_tree(warm_proc.process)
+                await asyncio.shield(terminate_subprocess_tree(warm_proc.process))
                 return None
             if holds:
                 return warm_proc
             # Its preloaded modules predate the environment, or a project file now
             # shadows one of them: what it runs would not be what the key says.
             logger.info("Discarding a warm worker whose base image no longer holds")
-            await self.release_and_replace(warm_proc)
+            await asyncio.shield(self.release_and_replace(warm_proc))
 
     async def release_and_replace(self, process: WarmProcess) -> None:
         """Kill a used process and spawn a replacement in the background."""
