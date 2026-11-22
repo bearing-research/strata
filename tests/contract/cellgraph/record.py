@@ -28,7 +28,6 @@ import io
 import itertools
 import json
 import os
-import shlex
 import shutil
 import sys
 import threading
@@ -37,6 +36,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest import mock
+
+from tests.shim_helpers import write_interpreter_shim
 
 HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE / "scenarios"
@@ -79,8 +80,7 @@ def _prepared_venv(notebook_dir: Path) -> None:
     """A ``.venv`` whose interpreter is this one, as ``--no-sync`` takes it."""
     python = notebook_dir / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True, exist_ok=True)
-    python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
-    python.chmod(0o755)
+    write_interpreter_shim(python)
 
 
 class _Counter:
@@ -225,18 +225,12 @@ def _recording(scenario: str, notebook_dir: Path, registry: Path) -> Iterator[_S
     )
 
     from strata.notebook import cli, prompt_executor
-    from strata.notebook.executor import CellExecutor
     from strata.notebook.sql import cell_executor as sql_cell_executor
-
-    def _harness_command(self, manifest_path: Path, venv_python: Path, harness_user):
-        # As the harness tests start it: this interpreter, not ``uv run``.
-        return [str(venv_python), str(self.harness_path), str(manifest_path)]
 
     patches = [
         mock.patch("strata.notebook.nonce.unresolved_nonce", counter.nonce),
         mock.patch("strata.notebook.nonce.is_unresolved", counter.is_unresolved),
         mock.patch("pyiceberg.table.metadata._generate_snapshot_id", counter.snapshot_id),
-        mock.patch.object(CellExecutor, "_harness_command", _harness_command),
         mock.patch.object(
             sql_cell_executor,
             "compute_sql_provenance_hash",

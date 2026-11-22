@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from strata.notebook.harness_env import harness_env
+from strata.notebook.harness_env import harness_env, in_environment
 
 
 @pytest.fixture(autouse=True)
@@ -181,12 +181,59 @@ class TestConfig:
         assert StrataConfig().notebook_harness_env_allowlist == []
 
 
+class TestInItsEnvironment:
+    """A cell's ``python``, ``uv pip`` and console scripts are the notebook's."""
+
+    @staticmethod
+    def _venv(tmp_path):
+        (tmp_path / "env" / "bin").mkdir(parents=True)
+        (tmp_path / "env" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        return tmp_path / "env" / "bin" / "python"
+
+    def test_the_environment_is_named_and_its_scripts_come_first(self, tmp_path):
+        env = in_environment({"PATH": "/usr/bin", "KEPT": "1"}, self._venv(tmp_path))
+
+        assert env == {
+            "PATH": f"{tmp_path / 'env' / 'bin'}{os.pathsep}/usr/bin",
+            "VIRTUAL_ENV": str(tmp_path / "env"),
+            "KEPT": "1",
+        }
+
+    def test_the_servers_own_environment_does_not_reach_the_cell(self, tmp_path):
+        """A server started by ``uv run`` has a ``VIRTUAL_ENV`` of its own."""
+        server = {
+            "PATH": "/usr/bin",
+            "VIRTUAL_ENV": "/server/venv",
+            "UV_PROJECT_ENVIRONMENT": "/server/env",
+            "UV_PYTHON": "3.99",
+        }
+
+        env = in_environment(server, self._venv(tmp_path))
+
+        assert env["VIRTUAL_ENV"] == str(tmp_path / "env")
+        assert "UV_PROJECT_ENVIRONMENT" not in env and "UV_PYTHON" not in env
+        assert server["VIRTUAL_ENV"] == "/server/venv", "the caller's mapping was changed"
+
+    def test_an_inherited_environment_is_the_servers_with_the_environment_active(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("PATH", "/usr/bin")
+
+        env = in_environment(None, self._venv(tmp_path))
+
+        assert env["PATH"] == f"{tmp_path / 'env' / 'bin'}{os.pathsep}/usr/bin"
+        assert env["HF_TOKEN"] == "hf_x"
+
+    def test_an_interpreter_in_no_environment_changes_nothing(self):
+        assert in_environment(None, "python") is None
+        assert in_environment({"PATH": "/usr/bin"}, "/usr/bin/python3") == {"PATH": "/usr/bin"}
+
+
 class TestEverySpawnApplied:
     """The filter is worth what the spawn sites apply it to.
 
-    The cold Python harness is covered in ``tests/test_harness_isolation.py`` because this
-    conftest replaces ``_run_harness``; the other spawns are checked by capturing what they
-    hand to the OS.
+    The cold Python harness is covered in ``tests/test_harness_isolation.py``, through a
+    real spawn; the other spawns are checked by capturing what they hand to the OS.
     """
 
     def _capture(self, monkeypatch, module):
@@ -231,6 +278,23 @@ class TestEverySpawnApplied:
 
         inherited = {k: v for k, v in seen["env"].items() if k != LIFELINE_FD_ENV}
         assert inherited == dict(os.environ)
+
+    def test_the_warm_pool_worker_starts_in_the_notebooks_environment(self, tmp_path, monkeypatch):
+        import asyncio as _asyncio
+
+        from strata.notebook import pool as pool_module
+
+        monkeypatch.setenv("VIRTUAL_ENV", "/server/venv")
+        seen = self._capture(monkeypatch, pool_module)
+        (tmp_path / "env" / "bin").mkdir(parents=True)
+        (tmp_path / "env" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+
+        warm = pool_module.WarmProcessPool(
+            tmp_path, pool_size=1, python_executable=tmp_path / "env" / "bin" / "python"
+        )
+        _asyncio.run(warm._spawn_warm_process())
+
+        assert seen["env"]["VIRTUAL_ENV"] == str(tmp_path / "env")
 
     def test_the_r_harness_is_filtered(self, monkeypatch):
         """R cells are cell code like any other."""

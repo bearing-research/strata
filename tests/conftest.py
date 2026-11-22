@@ -8,7 +8,6 @@ import asyncio
 import gc
 import io
 import os
-import shlex
 import socket
 import sys
 import threading
@@ -44,6 +43,7 @@ from strata_client.client import StrataClient
 
 from strata.config import StrataConfig
 from strata.fast_io import register_arrow_validator
+from tests.shim_helpers import write_interpreter_shim
 
 # The server and the CLI register it at startup; tests verify stores directly.
 register_arrow_validator()
@@ -62,11 +62,7 @@ def prepared_venv(notebook_dir: Path) -> None:
     python = notebook_dir / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True, exist_ok=True)
     if not python.exists():
-        # A wrapper, not a symlink: Python started through a symlink looks
-        # for pyvenv.cfg beside the symlink, finds none, and comes up as the
-        # base interpreter without this venv's packages.
-        python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
-        python.chmod(0o755)
+        write_interpreter_shim(python)
 
 
 def _collect_everything() -> None:
@@ -112,24 +108,6 @@ def _collect_after_each_test(_collect_after_some_modules):
     yield
     gc.collect()
     gc.freeze()
-
-
-@pytest.fixture(autouse=True)
-def _harness_without_uv_run(monkeypatch, request):
-    """Start the cell harness with the notebook's interpreter instead of ``uv run``.
-
-    ``uv run`` syncs the notebook first, and through a ``prepared_venv`` interpreter that
-    sync installs the notebook's dependencies into this test environment. Only the command
-    differs; the spawn around it (environment, OS user, service-mode refusal) stays
-    production's.
-    """
-    if request.node.get_closest_marker("integration"):
-        return
-
-    def _direct(self, manifest_path: Path, venv_python: Path, harness_user):
-        return [str(venv_python), str(self.harness_path), str(manifest_path)]
-
-    monkeypatch.setattr("strata.notebook.executor.CellExecutor._harness_command", _direct)
 
 
 _INSTALLED = pytest.StashKey[set[str]]()

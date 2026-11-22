@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 
 import strata.notebook
-from strata.notebook.dependencies import resolve_uv
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="no lifeline on Windows")
 
@@ -44,14 +43,9 @@ manifest.write_text(json.dumps({"source": source, "output_dir": str(run)}))
 """
 
 _PARENTS = {
-    # A cold cell under ``uv run``: the harness's parent is uv, not the killed process.
-    "cold_harness_under_uv": """
+    "cold_harness": """
 from strata.notebook.executor import CellExecutor
 
-uv = sys.argv[3]
-CellExecutor._harness_command = lambda self, m, v, u: [
-    uv, "run", "--no-project", "--python", sys.executable, "python", str(self.harness_path), str(m)
-]
 executor = CellExecutor.__new__(CellExecutor)
 executor.harness_path = harness
 executor.session = SimpleNamespace(path=work)
@@ -144,13 +138,6 @@ def _assert_dies_with(parent: subprocess.Popen, pid_file: Path, what: str) -> No
 
 @pytest.mark.parametrize("path", sorted(_PARENTS))
 def test_the_harness_dies_with_its_spawner(tmp_path: Path, path: str) -> None:
-    extra: list[str] = []
-    if path == "cold_harness_under_uv":
-        uv = resolve_uv()
-        if uv is None:
-            pytest.skip("uv is not installed")
-        extra = [uv]
-
     pid_file = tmp_path / "harness.pid"
     (tmp_path / "cell.py").write_text(
         textwrap.dedent(f"""
@@ -162,7 +149,7 @@ def test_the_harness_dies_with_its_spawner(tmp_path: Path, path: str) -> None:
         """)
     )
     with subprocess.Popen(
-        [sys.executable, "-c", _PRELUDE + _PARENTS[path], str(tmp_path), str(_HARNESS), *extra],
+        [sys.executable, "-c", _PRELUDE + _PARENTS[path], str(tmp_path), str(_HARNESS)],
         cwd=tmp_path,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,

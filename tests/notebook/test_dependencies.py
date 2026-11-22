@@ -1446,8 +1446,8 @@ class TestUvCommandsIgnoreTheServersEnvironment:
     """uv commands for a notebook drop the server's UV_PROJECT_ENVIRONMENT, VIRTUAL_ENV
     and UV_PYTHON.
 
-    A server started with them (``uv run`` sets VIRTUAL_ENV) would otherwise make uv sync,
-    add to and run in that environment instead of the notebook's ``.venv``, or on an
+    A server started with them (``uv run`` sets VIRTUAL_ENV) would otherwise make uv sync
+    and add to that environment instead of the notebook's ``.venv``, or on an
     interpreter other than the one the notebook's requires-python names.
     """
 
@@ -1520,17 +1520,6 @@ class TestUvCommandsIgnoreTheServersEnvironment:
         _check_resolvable(tmp_path, ImportResult(notebook_dir=tmp_path))
         self._assert_notebook_environment(recorded())
 
-    async def test_the_uv_run_that_starts_a_cell(self, tmp_path, recorded):
-        executor = CellExecutor.__new__(CellExecutor)
-        executor.harness_path = tmp_path / "harness.py"
-        executor.session = SimpleNamespace(path=tmp_path)  # type: ignore[assignment]
-        manifest = tmp_path / "run" / "manifest.json"
-        manifest.parent.mkdir()
-        manifest.write_text("{}")
-
-        await executor._run_harness(manifest, tmp_path / ".venv" / "bin" / "python", 30.0)
-        self._assert_notebook_environment(recorded())
-
 
 # Service mode installs wheels only
 
@@ -1573,18 +1562,6 @@ class TestServiceModeInstallsWheelsOnly:
 
         self._server_in("service", monkeypatch)
         _run_uv_command(tmp_path, ["sync"], timeout=30, display_name="uv sync")
-        assert recorded()["UV_NO_BUILD"] == "1"
-
-    async def test_the_uv_run_that_starts_a_cell(self, tmp_path, recorded, monkeypatch):
-        self._server_in("service", monkeypatch)
-        executor = CellExecutor.__new__(CellExecutor)
-        executor.harness_path = tmp_path / "harness.py"
-        executor.session = SimpleNamespace(path=tmp_path)  # type: ignore[assignment]
-        manifest = tmp_path / "run" / "manifest.json"
-        manifest.parent.mkdir()
-        manifest.write_text("{}")
-
-        await executor._run_harness(manifest, tmp_path / ".venv" / "bin" / "python", 30.0)
         assert recorded()["UV_NO_BUILD"] == "1"
 
     def test_personal_mode_still_builds(self, tmp_path, recorded, monkeypatch):

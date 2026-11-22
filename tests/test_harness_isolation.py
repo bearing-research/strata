@@ -1,6 +1,5 @@
 """What a cell actually sees, driven through a real harness spawn.
 
-Lives outside ``tests/notebook/``, whose conftest skips ``uv run``, so the shipping command runs.
 The harness-user check needs root and a second OS user, named by ``STRATA_TEST_HARNESS_USER``.
 """
 
@@ -87,6 +86,28 @@ def test_index_credentials_do_not_reach_a_cell(tmp_path, capsys, monkeypatch):
     assert "HF_TOKEN hf_x" in stdout
 
 
+def test_a_cell_runs_in_its_notebooks_environment_not_the_servers(tmp_path, capsys, monkeypatch):
+    """A server started by ``uv run`` has a ``VIRTUAL_ENV`` and a ``PATH`` of its own."""
+    monkeypatch.setenv("VIRTUAL_ENV", "/server/venv")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/server/env")
+    nb = _notebook(tmp_path)
+    (nb / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    write_cell(
+        nb,
+        "peek",
+        "import os\n"
+        "print('VIRTUAL_ENV', os.environ.get('VIRTUAL_ENV'))\n"
+        "print('UV_PROJECT_ENVIRONMENT', os.environ.get('UV_PROJECT_ENVIRONMENT', '<absent>'))\n"
+        "print('PATH', os.environ['PATH'].split(os.pathsep)[0])\n",
+    )
+
+    stdout = _run(nb, capsys)
+
+    assert f"VIRTUAL_ENV {nb / '.venv'}" in stdout
+    assert "UV_PROJECT_ENVIRONMENT <absent>" in stdout
+    assert f"PATH {nb / '.venv' / 'bin'}" in stdout
+
+
 _HARNESS_USER = os.environ.get("STRATA_TEST_HARNESS_USER")
 
 
@@ -118,7 +139,7 @@ def test_a_cell_run_as_the_harness_user_cannot_read_the_servers_environment(tmp_
     )
     write_cell(nb, "peek", source)
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(
@@ -200,7 +221,7 @@ def test_a_cell_run_as_the_harness_user_writes_through_a_read_write_mount(tmp_pa
     )
     write_cell(nb, "w", source)
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(
@@ -261,7 +282,7 @@ def test_a_cell_run_as_the_harness_user_writes_in_its_work_directory(tmp_path, m
     add_cell_to_notebook(nb, "a", "w", language="python")
     write_cell(nb, "a", attempts)
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(
@@ -308,7 +329,7 @@ def test_a_cell_run_as_the_harness_user_scans_a_table_through_its_server(tmp_pat
     add_cell_to_notebook(nb, "scan", None, language="python")
     write_cell(nb, "scan", source)
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     config = StrataConfig(
         host="127.0.0.1",
         port=find_free_port(),
@@ -371,7 +392,7 @@ def test_a_process_a_cell_leaves_running_is_stopped_before_the_next_run(tmp_path
     write_cell(nb, "leave", leave)
     add_cell_to_notebook(nb, "look", "leave", language="python")
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(

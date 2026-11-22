@@ -1,22 +1,30 @@
 # strata-scratchpad (Claude Code plugin)
 
-Makes a coding agent reach for a **persistent, cached [Strata](https://github.com/bearing-research/strata)
-notebook** as its scratchpad (quick computations, data exploration, sanity
-checks) instead of throwaway `python -c` / temp scripts. Work persists, is
-watchable in a live terminal viewer, and unchanged runs are instant.
+The [Strata](https://github.com/bearing-research/strata) scratchpad for Claude Code:
+a persistent, cached Python session in your project's environment, used instead of
+`python -c` and temp scripts. A value the agent computed earlier is still there, and
+comes back instantly while nothing it depends on has changed.
 
 ## What's in it
 
-- **`strata-scratchpad` skill**, model-invoked: when the agent is about to run
-  ad-hoc Python, it uses a notebook cell (`strata cell add … --run`) instead.
-- **`/strata-scratchpad:scratch` command**, human-invoked: explicitly set up a
-  scratchpad in the current project and switch the agent to it.
+- **The `strata` MCP server** (`strata mcp`, loaded up front): the `run` and
+  `scratchpad` tools, over one daemon per project, which the first call starts.
+- **Two hooks**, at session start and on each prompt: what the project's scratchpad
+  already holds, each cell checked against the files it read (`cached`, `stale`, or
+  `as of` the last pass). They run `strata-agent-hook`, installed beside `strata`,
+  and say nothing in a project with no scratchpad.
 
 ## Prerequisites
 
-The `strata` CLI must be installed and on `PATH`, version with `strata cell add --run`
-(the one-call add-and-run primitive). `uv tool install "strata-notebook[mcp,tui]"`
-installs it with what `strata agent` needs.
+The `strata` CLI, 0.12 or later, on the `PATH` Claude Code starts with:
+
+```
+uv tool install "strata-notebook[mcp]"
+```
+
+Claude Code started from a GUI or an IDE may not have uv's tool directory
+(`~/.local/bin`) on its `PATH`; `strata agent install`, which writes the server by its
+absolute path, avoids that.
 
 ## Install
 
@@ -25,9 +33,10 @@ installs it with what `strata agent` needs.
 /plugin install strata-scratchpad@strata
 ```
 
-Once installed the skill is auto-discovered in any project. A human can watch the
-agent's scratchpad live with `strata agent ./scratch`, which starts a server
-scoped to the project; plain `strata watch ./scratch` only works against a server
-whose `STRATA_NOTEBOOK_STORAGE_DIR` covers the project.
+A plugin cannot write a permission, so each `run` asks until you allow
+`mcp__plugin_strata-scratchpad_strata__*`, nor the `CLAUDE.md` block that tells
+subagents about the scratchpad. `strata agent install` writes the same server and
+hooks with both. Use one or the other: with both, each prompt gets two blocks naming
+two servers.
 
-See [Driving a notebook with a coding agent](https://bearingresearch.com/strata/latest/notebook/agent/).
+See [Agent scratchpad](https://bearingresearch.com/strata/latest/notebook/scratchpad/).

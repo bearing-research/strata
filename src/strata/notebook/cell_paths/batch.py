@@ -27,6 +27,7 @@ from strata.notebook.cell_paths.context import no_interpreter_message as _no_int
 from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.env import moved_input
 from strata.notebook.execution_result import hit_console
+from strata.notebook.harness_env import in_environment
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
     UnsafeRunFile,
@@ -211,16 +212,19 @@ async def run_batch(
                 manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
                 lifeline_fds, lifeline_vars = lifeline_handoff()
-                env = identity_env(
-                    context.harness_env(
-                        {
-                            "STRATA_BATCH_FRAME_FD": str(frame_w),
-                            "STRATA_BATCH_RESP_FD": str(resp_r),
-                            "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
-                            **lifeline_vars,
-                        }
+                env = in_environment(
+                    identity_env(
+                        context.harness_env(
+                            {
+                                "STRATA_BATCH_FRAME_FD": str(frame_w),
+                                "STRATA_BATCH_RESP_FD": str(resp_r),
+                                "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
+                                **lifeline_vars,
+                            }
+                        ),
+                        harness_user,
                     ),
-                    harness_user,
+                    venv_python,
                 )
                 hand_over(batch_tmpdir, harness_user)
 

@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -92,12 +93,18 @@ def test_two_clients_at_once_share_one_daemon(project):
     assert seen[0] == seen[1]
 
 
+def _started(daemon: scratch.Daemon) -> bool:
+    """Whether this call started *daemon*, not found it running. Its pid does not say:
+    Windows gives a new process the pid of one that just died."""
+    return "starting the scratchpad" in daemon.setup_ms
+
+
 def test_a_daemon_that_died_is_replaced(project):
     first = scratch.ensure_daemon(project)
     os.kill(first.pid, 9)
 
     second = scratch.ensure_daemon(project)
-    assert second.pid != first.pid
+    assert _started(second)
     # The scratchpad was there already; only the server started again.
     assert "creating the scratchpad" not in second.setup_ms
 
@@ -160,7 +167,7 @@ def test_a_daemon_another_version_started_is_replaced(project):
     record_path.write_text(json.dumps(record))
 
     second = scratch.ensure_daemon(project)
-    assert second.pid != first.pid
+    assert _started(second)
     # Stopped, not left beside the new one: one session writes the directory.
     assert not scratch._healthy(first.url)
     assert json.loads(record_path.read_text())["version"] == second.version != "0.0.0"
@@ -193,7 +200,7 @@ def test_a_busy_daemon_another_version_started_is_kept_until_idle(project):
         assert time.monotonic() < deadline, "a request that ended is still busy"
         time.sleep(0.05)
     replaced = scratch.ensure_daemon(project)
-    assert replaced.pid != first.pid
+    assert _started(replaced)
     assert not scratch._healthy(first.url)
 
 
@@ -241,6 +248,114 @@ def test_the_daemon_keeps_the_personal_caches_and_none_of_the_callers_config(tmp
     scratch._spawn(anchor, 1)
     assert seen["env"]["STRATA_NOTEBOOK_MOUNT_CACHE_DIR"] == str(tmp_path / "mine")
     assert seen["env"]["UV_LINK_MODE"] == "copy"
+
+
+def test_the_pid_kept_for_a_daemon_is_the_servers_own(tmp_path, monkeypatch):
+    """A Windows venv's python.exe is a launcher: its pid is not the server's, which
+    outlives a kill of it for a moment, still holding its stores' files."""
+    anchor = tmp_path / "project"
+    (anchor / ".strata-scratch" / ".strata").mkdir(parents=True)
+    # What it prints goes to its log.
+    server = (
+        "import os, sys, time\n"
+        "print(os.getpid(), sys.prefix, sep='|', flush=True)\n"
+        "time.sleep(120)\n"
+    )
+    monkeypatch.setattr(scratch, "_server_command", lambda: [sys.executable, "-c", server])
+
+    pid = scratch._spawn(anchor, 1)
+    try:
+        log = scratch._log_path(anchor)
+        deadline = time.monotonic() + 60
+        while not (said := log.read_text()).endswith("\n"):
+            assert time.monotonic() < deadline, "the server did not start"
+            time.sleep(0.01)
+        own, prefix = said.strip().split("|")
+
+        assert int(own) == pid
+        # Still this environment's interpreter.
+        assert prefix == sys.prefix
+    finally:
+        scratch._kill(pid)
+
+
+@pytest.mark.parametrize(
+    ("platform", "command", "base", "started"),
+    [
+        ("win32", ["venv/python.exe", "-m", "strata"], "base/python.exe", "base/python.exe"),
+        # No venv: the interpreter is the process already.
+        ("win32", ["venv/python.exe", "-m", "strata"], "venv/python.exe", "venv/python.exe"),
+        # Another program is started as it is.
+        ("win32", ["other.exe", "-m", "strata"], "base/python.exe", "other.exe"),
+        ("linux", ["venv/python.exe", "-m", "strata"], "base/python.exe", "venv/python.exe"),
+    ],
+)
+def test_only_a_windows_venvs_interpreter_is_started_as_its_base(
+    monkeypatch, platform, command, base, started
+):
+    monkeypatch.setattr(scratch.sys, "platform", platform)
+    monkeypatch.setattr(scratch.sys, "executable", "venv/python.exe")
+    monkeypatch.setattr(scratch.sys, "_base_executable", base)
+
+    argv, venv = scratch._as_itself(command)
+
+    assert argv == [started, "-m", "strata"]
+    assert venv == ("venv/python.exe" if started != command[0] else "")
+
+
+_HOLDS_A_STORE = """
+import os, sqlite3, sys, time
+held = [sqlite3.connect(sys.argv[1]) for _ in range(3)]
+held[0].execute("PRAGMA journal_mode=WAL")
+held[0].execute("create table if not exists t(a)")
+held[0].commit()
+for conn in held[1:]:
+    conn.execute("select count(*) from t").fetchall()
+# The more it holds, the longer its exit takes.
+ballast = bytearray(200 << 20)
+print(os.getpid(), flush=True)
+time.sleep(120)
+"""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="its exit code is set before its files close")
+def test_a_killed_process_no_longer_alive_has_let_go_of_its_files(tmp_path):
+    """Opening its store in that moment was a disk I/O error."""
+    import sqlite3
+
+    for index in range(15):
+        store = tmp_path / f"{index}.sqlite"
+        with subprocess.Popen(
+            [sys.executable, "-c", _HOLDS_A_STORE, str(store)], stdout=subprocess.PIPE, text=True
+        ) as holder:
+            # Its own pid: the one started may be a launcher's.
+            pid = int(holder.stdout.readline())
+            os.kill(pid, signal.SIGTERM)
+            deadline = time.monotonic() + 60
+            while scratch._alive(pid):
+                assert time.monotonic() < deadline, "the process did not exit"
+
+            with contextlib.closing(sqlite3.connect(store)) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                assert conn.execute("select count(*) from t").fetchall() == [(0,)]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows reuses a pid at once")
+def test_a_process_that_took_a_dead_daemons_pid_is_not_killed(monkeypatch):
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        # As a daemon that had the pid before this process did.
+        monkeypatch.setitem(scratch._created, other.pid, 1)
+        scratch._kill(other.pid)
+        with pytest.raises(subprocess.TimeoutExpired):
+            other.wait(2)
+
+        scratch._note(other.pid)
+        scratch._kill(other.pid)
+        assert other.wait(30) == signal.SIGTERM
+    finally:
+        other.kill()
+        other.wait()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="os.kill(pid, 0) is POSIX's probe")
@@ -316,6 +431,92 @@ def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
     monkeypatch.setattr(scratch.httpx, "get", reset)
     monkeypatch.setattr(scratch, "_alive", lambda pid: next(checks))
     assert scratch.find_daemon(project) is None
+
+
+def _stopping(monkeypatch, alive, timeout: float = 30.0) -> None:
+    monkeypatch.setattr(scratch, "_healthy", lambda url: False)
+    monkeypatch.setattr(scratch, "_alive", alive)
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    daemon = scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=12345)
+    scratch._stop(daemon, timeout)
+
+
+def test_a_stop_waits_for_the_process_not_only_its_port(monkeypatch):
+    """Its port closes before it has closed its sessions and let go of their stores."""
+    checks = iter([True, True, False])
+    seen: list[bool] = []
+
+    def alive(pid):
+        seen.append(next(checks))
+        return seen[-1]
+
+    _stopping(monkeypatch, alive)
+
+    assert seen == [True, True, False]
+
+
+def test_a_process_that_outlasts_the_stop_is_an_error(monkeypatch):
+    with pytest.raises(scratch.ScratchError, match="did not stop"):
+        _stopping(monkeypatch, lambda pid: True, timeout=0.1)
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not Path("/proc/self/stat").exists(),
+    reason="a zombie is read from /proc",
+)
+def test_a_zombie_is_not_alive():
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    stat = Path(f"/proc/{child.pid}/stat")
+    try:
+        # Exited, not reaped: os.kill(pid, 0) still finds it.
+        deadline = time.monotonic() + 60
+        while stat.read_bytes().rpartition(b")")[2].split()[0] != b"Z":
+            assert time.monotonic() < deadline, "the child did not exit"
+            time.sleep(0.01)
+        os.kill(child.pid, 0)
+        assert not scratch._alive(child.pid)
+    finally:
+        child.wait()
+
+
+class _Proc:
+    """``Path`` as ``_alive`` sees it: what a read of a process's stat gives."""
+
+    stat: bytes | Exception = b""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def read_bytes(self) -> bytes:
+        if isinstance(self.stat, Exception):
+            raise self.stat
+        return self.stat
+
+
+@pytest.mark.parametrize(
+    ("stat", "alive"),
+    [
+        # What /proc cannot show leaves os.kill's answer: reaped meanwhile, hidden, absent.
+        (ProcessLookupError("reaped"), True),
+        (FileNotFoundError("hidepid=2, or no /proc"), True),
+        (PermissionError("hidepid=1"), True),
+        (OSError("a sandbox's /proc"), True),
+        (b"", True),
+        (b"1 (a) b) S 0", True),
+        (b"1 (\xe2\x82) S 0", True),
+        (b"1 (\xe2\x82) Z 0", False),
+        (b"1 (py) Z 0", False),
+        (b"1 (py) X 0", False),
+        (b"1 (py) x 0", False),
+    ],
+)
+def test_a_linux_process_is_alive_unless_its_stat_shows_it_dead(monkeypatch, stat, alive):
+    monkeypatch.setattr(scratch.sys, "platform", "linux")
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(_Proc, "stat", stat)
+    monkeypatch.setattr(scratch, "Path", _Proc)
+
+    assert scratch._alive(12345) is alive
 
 
 def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):

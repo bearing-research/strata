@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import shlex
-import sys
 from pathlib import Path
 
 import pytest
@@ -17,6 +15,7 @@ from strata.notebook.env import (
 from strata.notebook.executor import CellExecutor
 from strata.notebook.session import SessionManager
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+from tests.shim_helpers import write_interpreter_shim
 
 LIB_SOURCE = 'def hello() -> str:\n    return "{}"\n'
 
@@ -192,11 +191,8 @@ def _notebook_over(tmp_path: Path, lib: Path, source: str):
     # The interpreter imports the package from its source, as an editable install does. It
     # is the suite's own shim, not a real interpreter a write would truncate.
     venv_python = nb_dir / ".venv" / "bin" / "python"
-    assert not venv_python.is_symlink() and venv_python.read_text().startswith("#!/bin/sh")
-    venv_python.write_text(
-        f"#!/bin/sh\nPYTHONPATH={shlex.quote(str(lib / 'src'))} "
-        f'exec {shlex.quote(sys.executable)} "$@"\n'
-    )
+    assert not venv_python.is_symlink() and venv_python.read_text().startswith("#!")
+    write_interpreter_shim(venv_python, {"PYTHONPATH": str(lib / "src")})
     add_cell_to_notebook(nb_dir, "c1")
     write_cell(nb_dir, "c1", source)
     add_cell_to_notebook(nb_dir, "c2", after_cell_id="c1")

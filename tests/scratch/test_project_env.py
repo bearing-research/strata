@@ -18,7 +18,6 @@ import pytest
 from strata import cli, scratch
 from strata.notebook import mcp_server
 from strata.notebook.annotation_validation import validate_cell_annotations
-from strata.notebook.cell_paths.python import python_harness_command
 from strata.notebook.env import (
     ATTACHED_IDENTITY,
     OVERLAY_DIR,
@@ -40,6 +39,7 @@ from strata.notebook.project_env import (
 from strata.notebook.session import SessionManager
 from strata.notebook.writer import _notebook_runtime_specifiers, create_notebook
 from strata.scratch import SCRATCH_DIR
+from tests.shim_helpers import write_interpreter_shim
 
 _PYPROJECT = """\
 [project]
@@ -407,15 +407,6 @@ def test_the_record_chooses_the_backend(tmp_path):
     assert isinstance(get_backend(notebook), ProjectEnvBackend)
     # Runtime state: never the committed notebook.toml.
     assert "/p/bin/python" not in (notebook / "notebook.toml").read_text()
-
-
-def test_an_overlay_interpreter_starts_the_harness_itself(tmp_path):
-    overlay = venv_python(tmp_path / OVERLAY_DIR)
-    own = tmp_path / ".venv" / "bin" / "python"
-    direct = python_harness_command(Path("h.py"), tmp_path, Path("m.json"), overlay, None)
-    assert direct == [str(overlay), "h.py", "m.json"]
-    through_uv = python_harness_command(Path("h.py"), tmp_path, Path("m.json"), own, None)
-    assert through_uv is not None and through_uv[1:4] == ["run", "--directory", str(tmp_path)]
 
 
 # --- the session ---
@@ -1010,8 +1001,7 @@ def _owned(anchor: Path) -> Path:
     python.parent.mkdir(parents=True)
     if os.name == "nt":
         pytest.skip("a wrapper script is no Windows interpreter")
-    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
-    python.chmod(0o755)
+    write_interpreter_shim(python)
     write_record(notebook, ProjectEnv(anchor, "owned", None, "no project environment"))
     return notebook
 

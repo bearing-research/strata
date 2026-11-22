@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.notebook.harness_env import configured_allowlist, harness_env
+from strata.notebook.harness_env import configured_allowlist, harness_env, in_environment
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
     hand_over,
@@ -146,6 +146,9 @@ class WarmProcessPool:
             # skipping it would expose server secrets to most cells.
             allowlist = configured_allowlist()
             lifeline_fds, lifeline_vars = lifeline_handoff()
+            env = identity_env(harness_env(allowlist, lifeline_vars), harness_user)
+            if self.worker_command is None:
+                env = in_environment(env, self.python_executable)
             spawn = asyncio.create_task(
                 asyncio.create_subprocess_exec(
                     *command,
@@ -156,7 +159,7 @@ class WarmProcessPool:
                     stderr=asyncio.subprocess.DEVNULL,
                     cwd=str(self.notebook_dir),
                     limit=SUBPROCESS_LINE_LIMIT,
-                    env=identity_env(harness_env(allowlist, lifeline_vars), harness_user),
+                    env=env,
                     pass_fds=lifeline_fds,
                     **spawn_kwargs(harness_user),
                     **subprocess_kwargs_for_new_group(),
@@ -333,6 +336,11 @@ class PooledCellExecutor:
         Raises:
             TimeoutError: the cell exceeded ``timeout_seconds`` in the worker. This is
                 a real cell timeout, not a pool miss, so there is no cold re-run.
+            RunFenced: the run's attempt lost the build; the worker is killed, and a cold run
+                would run the cell twice.
+            BaseException: whatever handing the run directory over raised, an interrupt
+                included, as a cold run would; the worker it took is recycled (killed
+                and replaced).
         """
         try:
             harness_user = resolve_harness_user()
@@ -343,8 +351,15 @@ class PooledCellExecutor:
         warm_proc = await pool.acquire()
         if warm_proc is None:
             return None
-        # Outputs land beside the manifest, in a run dir private to the server.
-        hand_over(manifest_path.parent, harness_user)
+        try:
+            # Outputs land beside the manifest, in a run dir private to the server; its sweep
+            # runs just before the worker is handed the manifest.
+            hand_over(manifest_path.parent, harness_user)
+        except BaseException:
+            # The run's error, as on a cold run, an interrupt included: the worker got
+            # nothing, and the pool keeps its slot.
+            await asyncio.shield(pool.release_and_replace(warm_proc))
+            raise
 
         try:
             assert warm_proc.process.stdin is not None

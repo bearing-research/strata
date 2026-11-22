@@ -39,10 +39,12 @@ _DYING_GRACE = 2.0
 # on a cold uv cache.
 _SETUP_TIMEOUT = 600.0
 # Windows: OpenProcess access, the error a live process of another user gives, and
-# GetExitCodeProcess's "not exited".
+# WaitForSingleObject's "signaled".
+_PROCESS_TERMINATE = 0x0001
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_SYNCHRONIZE = 0x00100000
 _ERROR_ACCESS_DENIED = 5
-_STILL_ACTIVE = 259
+_WAIT_OBJECT_0 = 0
 
 
 class ScratchError(RuntimeError):
@@ -229,10 +231,13 @@ def _scaffold(anchor: Path) -> None:
 # Started by a launcher that exits at once, so the daemon is nobody's child: no client
 # has to reap it, and it outlives the client that started it.
 _LAUNCH = """\
-import subprocess, sys
-with open(sys.argv[1], "wb") as log:
+import os, subprocess, sys
+log, venv, *command = sys.argv[1:]
+# Set here, at the last hop: an interpreter takes it out of its own environment.
+env = {**os.environ, "__PYVENV_LAUNCHER__": venv} if venv else None
+with open(log, "wb") as out:
     proc = subprocess.Popen(
-        sys.argv[2:], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        command, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
         start_new_session=True,
     )
 print(proc.pid)
@@ -241,6 +246,27 @@ print(proc.pid)
 
 def _server_command() -> list[str]:
     return [sys.executable, "-m", "strata"]
+
+
+def _as_itself(command: list[str]) -> tuple[list[str], str]:
+    """*command* as the process started runs it, and the venv launcher it stands in for
+    (``__PYVENV_LAUNCHER__``), if any.
+
+    A venv's ``python.exe`` on Windows is a launcher, and the interpreter its child: a kill
+    or a wait on the pid started is then not one on the server, which holds its stores'
+    files a moment longer. The base interpreter told which venv it is in, as multiprocessing
+    starts its workers there, is the server itself.
+    """
+    # Not in typeshed; every CPython since 3.8 has it.
+    base = getattr(sys, "_base_executable", sys.executable)
+    same = os.path.normcase
+    if (
+        sys.platform != "win32"
+        or same(command[0]) != same(sys.executable)
+        or same(base) == same(sys.executable)
+    ):
+        return command, ""
+    return [base, *command[1:]], sys.executable
 
 
 def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
@@ -272,10 +298,11 @@ def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
         "STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS": "0",
         **({"STRATA_SCRATCH_PYTHON": python} if python is not None else {}),
     }
+    command, venv = _as_itself(_server_command())
     try:
         log = private_file(_log_path(anchor))
         launched = subprocess.run(
-            [sys.executable, "-I", "-c", _LAUNCH, str(log), *_server_command()],
+            [sys.executable, "-I", "-c", _LAUNCH, str(log), venv, *command],
             env=env,
             # Its [tool.strata] is then the scratchpad's (none), not whichever
             # pyproject.toml sits above where the first client ran.
@@ -284,7 +311,9 @@ def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
             text=True,
             check=True,
         )
-        return int(launched.stdout)
+        pid = int(launched.stdout)
+        _note(pid)
+        return pid
     except subprocess.CalledProcessError as exc:
         raise ScratchError(f"the scratchpad's server could not be launched: {exc.stderr}") from exc
     except (OSError, ValueError) as exc:
@@ -293,18 +322,16 @@ def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
 
 def _alive(pid: int) -> bool:
     if sys.platform == "win32":
-        # os.kill(pid, 0) would terminate it there: ask for its exit code instead.
+        # os.kill(pid, 0) would terminate it there. Its handle is signaled once it has let
+        # go of its files; its exit code is set some milliseconds before that.
         import ctypes
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        handle = kernel32.OpenProcess(_SYNCHRONIZE, False, pid)
         if not handle:
             return ctypes.get_last_error() == _ERROR_ACCESS_DENIED
         try:
-            code = ctypes.c_ulong()
-            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return True
-            return code.value == _STILL_ACTIVE
+            return kernel32.WaitForSingleObject(handle, 0) != _WAIT_OBJECT_0
         finally:
             kernel32.CloseHandle(handle)
     try:
@@ -314,6 +341,15 @@ def _alive(pid: int) -> bool:
     except PermissionError:
         # Another user's process: it exists.
         return True
+    if sys.platform == "linux":
+        # A zombie has exited, though nobody reaped it (PID 1 in a container without init).
+        # What /proc does not show (hidden, gone, unreadable) leaves os.kill's answer.
+        with contextlib.suppress(OSError):
+            # Bytes: the name before ")" is whatever the process set.
+            fields = Path(f"/proc/{pid}/stat").read_bytes().rpartition(b")")[2].split()
+            # "X" is a task being reaped; kernels 2.6.33 to 3.13 may show it as "x".
+            if fields and fields[0] in (b"Z", b"X", b"x"):
+                return False
     return True
 
 
@@ -335,14 +371,65 @@ def _exits_within(pid: int, seconds: float) -> bool:
     return True
 
 
+# Windows gives a dead process's pid to the next one, and a kill by pid there ends
+# whichever holds it. A daemon ``_spawn`` started is known by when it was created too.
+_created: dict[int, int] = {}
+
+
+def _created_at(kernel32: Any, handle: int) -> int | None:
+    """When the process behind *handle* was created, in Windows's 100 ns ticks."""
+    import ctypes
+    from ctypes import wintypes
+
+    made, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+    if not kernel32.GetProcessTimes(
+        handle, ctypes.byref(made), ctypes.byref(exited), ctypes.byref(kernel), ctypes.byref(user)
+    ):
+        return None
+    return (made.dwHighDateTime << 32) | made.dwLowDateTime
+
+
+def _note(pid: int) -> None:
+    """Remember the daemon just started at *pid* as the process :func:`_kill` may end."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # Gone already: no process that takes the pid is it.
+        _created[pid] = 0
+        return
+    try:
+        _created[pid] = _created_at(kernel32, handle) or 0
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _kill(pid: int) -> None:
     """Kill the daemon and what it started: it leads its own session, so its group."""
-    # Gone already raises ProcessLookupError, or on Windows a plain OSError.
-    with contextlib.suppress(OSError):
-        if sys.platform == "win32":
-            os.kill(pid, signal.SIGTERM)
-        else:
+    if sys.platform != "win32":
+        # Gone already raises ProcessLookupError.
+        with contextlib.suppress(OSError):
             os.killpg(pid, signal.SIGKILL)
+        return
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(
+        _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+    )
+    if not handle:
+        return  # gone already
+    try:
+        # One handle for the check and the kill: the pid cannot change hands between.
+        noted = _created.get(pid)
+        if noted is None or _created_at(kernel32, handle) == noted:
+            # The exit code os.kill(pid, SIGTERM) leaves there.
+            kernel32.TerminateProcess(handle, int(signal.SIGTERM))
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _healthy(url: str) -> bool:
@@ -622,7 +709,9 @@ def _stop(running: Daemon, timeout: float = 30.0) -> None:
     with contextlib.suppress(ProcessLookupError):
         os.kill(running.pid, signal.SIGTERM)
     deadline = time.monotonic() + timeout
-    while _healthy(running.url):
+    # Until its process is gone, not only its port: on POSIX its shutdown still closes the
+    # sessions and their stores; on Windows, terminated, it holds their files until it exits.
+    while _healthy(running.url) or _alive(running.pid):
         if time.monotonic() > deadline:
             raise ScratchError(f"the scratchpad's server (pid {running.pid}) did not stop")
         time.sleep(0.1)
