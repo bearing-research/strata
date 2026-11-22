@@ -3794,6 +3794,7 @@ async def execute_cell(
     if init is not None and mode != "normal":
         raise HTTPException(status_code=400, detail="a branch (init) is a normal run")
 
+    await session.sync_a_moved_lock()
     environment_block_reason = session.environment_execution_block_message()
     if environment_block_reason:
         raise HTTPException(
@@ -3920,6 +3921,7 @@ async def run_cell_tests_endpoint(notebook_id: str, session: SessionDep, cell_id
     if not cell.test_source.strip():
         raise HTTPException(status_code=400, detail=f"Cell {cell_id} has no tests")
 
+    await session.sync_a_moved_lock()
     environment_block_reason = session.environment_execution_block_message()
     if environment_block_reason:
         raise HTTPException(
