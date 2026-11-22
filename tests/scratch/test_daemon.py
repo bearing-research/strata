@@ -250,6 +250,98 @@ def test_the_daemon_keeps_the_personal_caches_and_none_of_the_callers_config(tmp
     assert seen["env"]["UV_LINK_MODE"] == "copy"
 
 
+def test_the_pid_kept_for_a_daemon_is_the_servers_own(tmp_path, monkeypatch):
+    """A Windows venv's python.exe is a launcher: its pid is not the server's, which
+    outlives a kill of it for a moment, still holding its stores' files."""
+    anchor = tmp_path / "project"
+    (anchor / ".strata-scratch" / ".strata").mkdir(parents=True)
+    said = tmp_path / "said"
+    server = (
+        "import os, sys, time\n"
+        f"with open({str(said)!r} + '.tmp', 'w') as out:\n"
+        "    out.write(f'{os.getpid()}|{sys.prefix}')\n"
+        f"os.replace({str(said)!r} + '.tmp', {str(said)!r})\n"
+        "time.sleep(120)\n"
+    )
+    monkeypatch.setattr(scratch, "_server_command", lambda: [sys.executable, "-c", server])
+
+    pid = scratch._spawn(anchor, 1)
+    try:
+        deadline = time.monotonic() + 60
+        while not said.exists():
+            assert time.monotonic() < deadline, "the server did not start"
+            time.sleep(0.01)
+        own, prefix = said.read_text().split("|")
+
+        assert int(own) == pid
+        # Still this environment's interpreter.
+        assert prefix == sys.prefix
+    finally:
+        scratch._kill(pid)
+
+
+@pytest.mark.parametrize(
+    ("platform", "command", "base", "started"),
+    [
+        ("win32", ["venv/python.exe", "-m", "strata"], "base/python.exe", "base/python.exe"),
+        # No venv: the interpreter is the process already.
+        ("win32", ["venv/python.exe", "-m", "strata"], "venv/python.exe", "venv/python.exe"),
+        # Another program is started as it is.
+        ("win32", ["other.exe", "-m", "strata"], "base/python.exe", "other.exe"),
+        ("linux", ["venv/python.exe", "-m", "strata"], "base/python.exe", "venv/python.exe"),
+    ],
+)
+def test_only_a_windows_venvs_interpreter_is_started_as_its_base(
+    monkeypatch, platform, command, base, started
+):
+    monkeypatch.setattr(scratch.sys, "platform", platform)
+    monkeypatch.setattr(scratch.sys, "executable", "venv/python.exe")
+    monkeypatch.setattr(scratch.sys, "_base_executable", base)
+
+    argv, env = scratch._as_itself(command)
+
+    assert argv == [started, "-m", "strata"]
+    swapped = started != command[0]
+    assert env == ({"__PYVENV_LAUNCHER__": "venv/python.exe"} if swapped else {})
+
+
+_HOLDS_A_STORE = """
+import os, sqlite3, sys, time
+held = [sqlite3.connect(sys.argv[1]) for _ in range(3)]
+held[0].execute("PRAGMA journal_mode=WAL")
+held[0].execute("create table if not exists t(a)")
+held[0].commit()
+for conn in held[1:]:
+    conn.execute("select count(*) from t").fetchall()
+# The more it holds, the longer its exit takes.
+ballast = bytearray(200 << 20)
+print(os.getpid(), flush=True)
+time.sleep(120)
+"""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="its exit code is set before its files close")
+def test_a_killed_process_no_longer_alive_has_let_go_of_its_files(tmp_path):
+    """Opening its store in that moment was a disk I/O error."""
+    import sqlite3
+
+    for index in range(15):
+        store = tmp_path / f"{index}.sqlite"
+        with subprocess.Popen(
+            [sys.executable, "-c", _HOLDS_A_STORE, str(store)], stdout=subprocess.PIPE, text=True
+        ) as holder:
+            # Its own pid: the one started may be a launcher's.
+            pid = int(holder.stdout.readline())
+            os.kill(pid, signal.SIGTERM)
+            deadline = time.monotonic() + 60
+            while scratch._alive(pid):
+                assert time.monotonic() < deadline, "the process did not exit"
+
+            with contextlib.closing(sqlite3.connect(store)) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                assert conn.execute("select count(*) from t").fetchall() == [(0,)]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="only Windows reuses a pid at once")
 def test_a_process_that_took_a_dead_daemons_pid_is_not_killed(monkeypatch):
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
