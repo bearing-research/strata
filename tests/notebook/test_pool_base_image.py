@@ -109,8 +109,9 @@ async def test_a_worker_whose_check_did_not_finish_is_replaced(tmp_path, monkeyp
 
     monkeypatch.setattr(pool, "_spawn_warm_process", spawn)
     pool._started = True
-    process = await _sleeper()
+    process, behind = await _sleeper(), await _sleeper()
     await pool._available.put(WarmProcess(process=process, created_at=0.0, ready=True))
+    await pool._available.put(WarmProcess(process=behind, created_at=0.0, ready=True))
 
     if ending == "raised":
         assert await pool.acquire() is None
@@ -125,6 +126,9 @@ async def test_a_worker_whose_check_did_not_finish_is_replaced(tmp_path, monkeyp
 
     assert process.returncode is not None
     assert spawned == [1]
+    # Only the one checked: a check that keeps failing would fail every queued worker.
+    assert behind.returncode is None and pool._available.qsize() == 1
+    await pool.drain()
 
 
 @pytest.mark.asyncio

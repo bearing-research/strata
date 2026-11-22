@@ -224,10 +224,11 @@ class WarmProcessPool:
             try:
                 holds = await asyncio.to_thread(self.base_image_holds, warm_proc.stamp)
             except Exception:
-                # Unchecked, it runs nothing; the cold path needs no check.
+                # Unchecked, it runs nothing; the cold path needs no check. One discard per
+                # run: a check that keeps failing would fail every worker queued behind it.
                 logger.exception("Discarding a warm worker whose base image could not be checked")
                 await asyncio.shield(self.release_and_replace(warm_proc))
-                continue
+                return None
             except BaseException:
                 await asyncio.shield(self.release_and_replace(warm_proc))
                 raise
