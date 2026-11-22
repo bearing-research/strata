@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import shlex
 import shutil
 import subprocess
-import sys
 import threading
 from pathlib import Path
 
@@ -21,6 +19,7 @@ from tests.conftest import (
     wait_for_server,
 )
 from tests.notebook.pool_helpers import warm_again
+from tests.shim_helpers import write_interpreter_shim
 
 # R availability: central skip markers, so the skip wording and the arrow
 # package probe live in one place.
@@ -133,11 +132,7 @@ def _fake_uv_sync(
     venv_python = notebook_dir / ".venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True, exist_ok=True)
     if not venv_python.exists():
-        venv_python.write_text(
-            (f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n'),
-            encoding="utf-8",
-        )
-        venv_python.chmod(0o755)
+        write_interpreter_shim(venv_python)
 
     return True
 

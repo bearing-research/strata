@@ -39,6 +39,7 @@ from strata.notebook.project_env import (
 from strata.notebook.session import SessionManager
 from strata.notebook.writer import _notebook_runtime_specifiers, create_notebook
 from strata.scratch import SCRATCH_DIR
+from tests.shim_helpers import write_interpreter_shim
 
 _PYPROJECT = """\
 [project]
@@ -1000,8 +1001,7 @@ def _owned(anchor: Path) -> Path:
     python.parent.mkdir(parents=True)
     if os.name == "nt":
         pytest.skip("a wrapper script is no Windows interpreter")
-    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
-    python.chmod(0o755)
+    write_interpreter_shim(python)
     write_record(notebook, ProjectEnv(anchor, "owned", None, "no project environment"))
     return notebook
 

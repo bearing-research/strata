@@ -28,7 +28,6 @@ import io
 import itertools
 import json
 import os
-import shlex
 import shutil
 import sys
 import threading
@@ -37,6 +36,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest import mock
+
+from tests.shim_helpers import write_interpreter_shim
 
 HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE / "scenarios"
@@ -79,8 +80,7 @@ def _prepared_venv(notebook_dir: Path) -> None:
     """A ``.venv`` whose interpreter is this one, as ``--no-sync`` takes it."""
     python = notebook_dir / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True, exist_ok=True)
-    python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
-    python.chmod(0o755)
+    write_interpreter_shim(python)
 
 
 class _Counter:
