@@ -196,11 +196,16 @@ def _process_table(proc: str = "/proc") -> dict[int, tuple[int, int, int]]:
             continue  # exited while listed
         if fields["State"].split()[0] in ("Z", "X"):
             continue  # dead, waiting to be reaped
-        table[int(name)] = (
-            int(fields["PPid"]),
-            int(fields["Uid"].split()[0]),
-            int(fields["NSsid"].split()[0]),
-        )
+        if "NSsid" in fields:
+            session = int(fields["NSsid"].split()[0])
+        else:
+            # Kernels before 4.1, and gVisor, have none: stat's session is the same id.
+            try:
+                with open(f"{proc}/{name}/stat", "rb") as stat:
+                    session = int(stat.read().rpartition(b")")[2].split()[3])
+            except OSError:
+                continue  # exited while listed
+        table[int(name)] = (int(fields["PPid"]), int(fields["Uid"].split()[0]), session)
     return table
 
 
