@@ -17,6 +17,13 @@
 (* tracked. Pressure from the other 1000 tenants is abstracted to an       *)
 (* Evict action that may fire at any time. The next admission then builds  *)
 (* a new limiter: a new generation here.                                  *)
+(*                                                                         *)
+(* Mirrors:                                                                *)
+(*   strata/adaptive_concurrency.py::ResizableLimiter.acquire              *)
+(*   strata/adaptive_concurrency.py::ResizableLimiter.release              *)
+(*   strata/streaming/qos.py::QoSAdmission.admit                           *)
+(*   strata/tenancy/registry.py::TenantRegistry.get_or_create_quotas       *)
+(*   strata/tenancy/registry.py::TenantRegistry.aggregate_limiter_usage    *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
 

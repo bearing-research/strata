@@ -1,0 +1,74 @@
+name: Formal
+
+# The TLA+ models and the property tests under formal/ (formal/README.md).
+# Models are checked on any change to formal/; the property tests run the real
+# code, so they also run on main after a source change, and weekly with a
+# larger budget. tests/test_formal_models.py (in the unit suite) keeps each
+# model's Mirrors: list pointing at code that exists.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'formal/**'
+      - 'src/**'
+      - 'uv.lock'
+      - '.github/workflows/formal.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'formal/**'
+      - '.github/workflows/formal.yml'
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  models:
+    name: TLA+ models
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          python-version: "3.13"
+          version: 'latest'
+          save-cache: false
+
+      # ubuntu-latest ships a JDK; run_models.py fetches the pinned TLC and
+      # checks every configuration ends as MODELS says (pass, or its violation).
+      - name: Check models
+        run: uv run --no-project python formal/run_models.py
+
+  properties:
+    name: Property tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PRUNING_EXAMPLES: ${{ github.event_name == 'schedule' && '30000' || '2000' }}
+      STALENESS_EXAMPLES: ${{ github.event_name == 'schedule' && '40' || '8' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          python-version: "3.13"
+          version: 'latest'
+          save-cache: false
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Property tests
+        run: uv run --with hypothesis pytest formal/ -v --timeout=0 -p no:randomly

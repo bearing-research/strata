@@ -22,6 +22,14 @@
 (* source and from its upstream's latest result, and that upstream is      *)
 (* ready too. Source versions only grow, so an edit never reverts to a     *)
 (* source that already has a cached result.                                *)
+(*                                                                         *)
+(* Mirrors:                                                                *)
+(*   strata/notebook/ws.py::_handle_cell_source_update                     *)
+(*   strata/notebook/ws.py::_refresh_and_broadcast_changed_staleness       *)
+(*   strata/notebook/session.py::NotebookSession.compute_staleness_async   *)
+(*   strata/notebook/session.py::NotebookSession._compute_staleness_locked *)
+(*   strata/notebook/session.py::NotebookSession._apply_staleness_map      *)
+(*   strata/notebook/executor.py::CellExecutor._load_input_blobs           *)
 (***************************************************************************)
 EXTENDS Naturals
 

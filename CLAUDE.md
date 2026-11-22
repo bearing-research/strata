@@ -240,6 +240,12 @@ wires up a `SqlCatalog` + sample table. The canonical fixture table is
 `test_db.events` (`id`, `value`, `name`, `timestamp`). Benchmarks live in
 `benchmarks/`.
 
+`formal/SYSTEMS.md` specifies the stateful systems (admission, streams,
+caches, staleness, local runs, …) and what checks each property: TLA+ models
+(`uv run python formal/run_models.py`), property tests under `formal/`, or
+regression tests. A change to code a model lists under `Mirrors:` should
+re-read that model.
+
 ---
 
 ## Strata Notebook
