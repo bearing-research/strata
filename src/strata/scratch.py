@@ -314,13 +314,13 @@ def _alive(pid: int) -> bool:
     except PermissionError:
         # Another user's process: it exists.
         return True
-    if sys.platform == "linux":
+    if sys.platform == "linux" and Path("/proc/self/stat").exists():
         # A zombie has exited, though nobody reaped it (PID 1 in a container without init).
         try:
-            stat = Path(f"/proc/{pid}/stat").read_text()
-        except FileNotFoundError:
+            fields = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
+        except (FileNotFoundError, ProcessLookupError):
             return False
-        return stat.rpartition(")")[2].split()[0] != "Z"
+        return bool(fields) and fields[0] not in ("Z", "X")
     return True
 
 
@@ -629,8 +629,8 @@ def _stop(running: Daemon, timeout: float = 30.0) -> None:
     with contextlib.suppress(ProcessLookupError):
         os.kill(running.pid, signal.SIGTERM)
     deadline = time.monotonic() + timeout
-    # Until its process is gone, not only its port: it still closes its sessions and their
-    # stores, and Windows gives the next opener no file it holds.
+    # Until its process is gone, not only its port: on POSIX its shutdown still closes the
+    # sessions and their stores; on Windows, terminated, it holds their files until it exits.
     while _healthy(running.url) or _alive(running.pid):
         if time.monotonic() > deadline:
             raise ScratchError(f"the scratchpad's server (pid {running.pid}) did not stop")

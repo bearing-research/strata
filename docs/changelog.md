@@ -567,10 +567,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   restart failed with a disk I/O error. (#1602)
 - **Stopping the scratchpad's daemon waits for its process to exit, not only its
   port.** `strata scratch stop`, `strata scratch rm` and a restart went on once the
-  port closed, while the process still closed its sessions and their stores: on
-  Windows a store opened right after failed with a disk I/O error. A process that has
-  not exited within the stop's 30 seconds is now an error, as a port still open was;
-  on Linux a zombie nobody reaps counts as exited. (#1602)
+  port closed, while the process could still hold the scratchpad's store: elsewhere
+  its shutdown still closes its sessions, and on Windows, where a stop terminates it,
+  its open files made a store opened right after fail with a disk I/O error. A
+  process that has not exited within the stop's 30 seconds is now an error, as a port
+  still open was; on Linux a zombie nobody reaps counts as exited. (#1602)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the

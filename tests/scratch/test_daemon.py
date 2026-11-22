@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -348,10 +349,14 @@ def test_a_process_that_outlasts_the_stop_is_an_error(monkeypatch):
 @pytest.mark.skipif(sys.platform != "linux", reason="a zombie is read from /proc")
 def test_a_zombie_is_not_alive():
     child = subprocess.Popen([sys.executable, "-c", "pass"])
+    stat = Path(f"/proc/{child.pid}/stat")
     try:
         # Exited, not reaped: os.kill(pid, 0) still finds it.
-        while open(f"/proc/{child.pid}/stat").read().rpartition(")")[2].split()[0] != "Z":
+        deadline = time.monotonic() + 60
+        while stat.read_text().rpartition(")")[2].split()[0] != "Z":
+            assert time.monotonic() < deadline, "the child did not exit"
             time.sleep(0.01)
+        os.kill(child.pid, 0)
         assert not scratch._alive(child.pid)
     finally:
         child.wait()
