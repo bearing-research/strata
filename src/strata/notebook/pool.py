@@ -341,6 +341,9 @@ class PooledCellExecutor:
             BaseException: whatever handing the run directory over raised, an interrupt
                 included, as a cold run would; the worker it took is recycled (killed
                 and replaced).
+            Exception: whatever failed once the worker had the manifest, *on_event*
+                included: the cell has started, so a cold run would run it twice. Only
+                the worker's protocol ending is a miss.
         """
         try:
             harness_user = resolve_harness_user()
@@ -361,6 +364,7 @@ class PooledCellExecutor:
             await asyncio.shield(pool.release_and_replace(warm_proc))
             raise
 
+        delivered = False
         try:
             assert warm_proc.process.stdin is not None
             assert warm_proc.process.stdout is not None
@@ -369,6 +373,7 @@ class PooledCellExecutor:
                 manifest_str += f"{run_token}\n".encode()
             warm_proc.process.stdin.write(manifest_str)
             await warm_proc.process.stdin.drain()
+            delivered = True
 
             deadline = asyncio.get_running_loop().time() + timeout_seconds
             while True:
@@ -428,6 +433,9 @@ class PooledCellExecutor:
                 await asyncio.shield(terminate_subprocess_tree(warm_proc.process))
             raise
         except Exception as e:
+            if delivered:
+                # The cell has started: a cold run would run it twice.
+                raise
             logger.error(f"Error executing with warm process: {e}")
             return None
         finally:

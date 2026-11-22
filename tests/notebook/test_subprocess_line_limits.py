@@ -173,6 +173,45 @@ async def test_a_torn_line_is_skipped_for_the_next(tmp_path, torn):
 
 
 @pytest.mark.asyncio
+async def test_an_event_that_fails_is_the_run_s_error_not_a_pool_miss(tmp_path):
+    """The worker has the cell by then: None would run it again cold."""
+
+    async def on_event(event):
+        raise OSError("the store is gone")
+
+    event = b'{"' + EVENT_KEY.encode() + b'": "head", "name": "best", "sequence": 1}'
+    pool = _FakePool(_lines(event + b'\n{"success": true}\n'))
+
+    with pytest.raises(OSError, match="the store is gone"):
+        await PooledCellExecutor.execute_with_pool(
+            pool, tmp_path / "manifest.json", tmp_path, on_event=on_event
+        )
+    assert pool.releases == 1  # the worker, still running the cell, was recycled
+
+
+@pytest.mark.asyncio
+async def test_a_worker_that_never_got_the_manifest_is_a_pool_miss(tmp_path):
+    class _ClosedStdin(_FakeStdin):
+        def write(self, data):
+            raise BrokenPipeError("the worker exited")
+
+    pool = _FakePool(_lines(b""))
+    process = _FakeProcess(_lines(b""))
+    process.stdin = _ClosedStdin()
+
+    async def acquire():
+        return SimpleNamespace(process=process)
+
+    pool.acquire = acquire
+
+    assert (
+        await PooledCellExecutor.execute_with_pool(pool, tmp_path / "manifest.json", tmp_path)
+        is None
+    )
+    assert pool.releases == 1
+
+
+@pytest.mark.asyncio
 async def test_a_line_a_child_wrote_is_dropped_never_the_result(tmp_path):
     """R's worker shares its fd 1 with the cell's children: their lines are dropped, as
     the cold path drops them, and none passes for the result."""
