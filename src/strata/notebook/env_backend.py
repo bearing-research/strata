@@ -110,8 +110,10 @@ class UvBackend:
         self.notebook_dir = Path(notebook_dir)
 
     def python_executable(self) -> Path:
-        """Return ``.venv/bin/python``, whether or not the venv exists yet."""
-        return self.notebook_dir / ".venv" / "bin" / "python"
+        """Return the venv's interpreter, whether or not the venv exists yet."""
+        from strata.notebook.project_env import venv_python
+
+        return venv_python(self.notebook_dir / ".venv")
 
     def sync(self, *, python_version: str | None, timeout: int) -> _UvCommandResult:
         from strata.notebook.dependencies import _run_uv_command

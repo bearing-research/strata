@@ -16,9 +16,11 @@ from types import SimpleNamespace
 import pytest
 
 from strata.notebook import shared_env
+from strata.notebook.cell_paths.python import run_harness
 from strata.notebook.dependencies import EnvironmentOperationLog, _UvCommandResult
 from strata.notebook.env import uv_lock_key
 from strata.notebook.env_backend import UvBackend, get_backend
+from strata.notebook.harness_env import harness_env
 from strata.notebook.shared_env import COMPLETE_MARKER, SharedEnvBackend, collect
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the link is a symlink")
@@ -309,6 +311,37 @@ def test_the_shared_environment_does_not_install_a_notebook_s_own_project(tmp_pa
     )
     assert get_backend(plain).sync(python_version=None, timeout=180).success
     assert _linked(plain) == _linked(packaged)
+
+
+async def test_starting_a_cell_installs_nothing_into_the_shared_environment(tmp_path, shared):
+    """A ``pyproject.toml`` edited outside the backend (an editor, a pull) waits for a sync."""
+    package = _package(tmp_path)
+    notebook = _notebook(tmp_path, "alpha")
+    synced = await asyncio.to_thread(get_backend(notebook).sync, python_version=None, timeout=180)
+    assert synced.success, synced.error
+    environment = _linked(notebook)
+    pyproject = notebook / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text().replace(
+            "dependencies = []", f'dependencies = ["tinydep @ {package.as_uri()}"]'
+        )
+    )
+    harness = tmp_path / "harness.py"
+    harness.write_text("import pathlib, sys\npathlib.Path(sys.argv[1]).with_name('ran').touch()\n")
+    run = tmp_path / "run"
+    run.mkdir()
+
+    await run_harness(
+        SimpleNamespace(path=notebook),
+        harness,
+        lambda extra: harness_env(None, extra),
+        run / "manifest.json",
+        notebook / ".venv" / "bin" / "python",
+        120.0,
+    )
+
+    assert (run / "ran").exists(), "the harness never started"
+    assert not _has_tinydep(environment), "starting a cell installed into a shared environment"
 
 
 def test_a_shared_environment_moved_elsewhere_runs_its_console_scripts(tmp_path, shared):

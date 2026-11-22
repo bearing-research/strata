@@ -110,24 +110,6 @@ def _collect_after_each_test(_collect_after_some_modules):
     gc.freeze()
 
 
-@pytest.fixture(autouse=True)
-def _harness_without_uv_run(monkeypatch, request):
-    """Start the cell harness with the notebook's interpreter instead of ``uv run``.
-
-    ``uv run`` syncs the notebook first, and through a ``prepared_venv`` interpreter that
-    sync installs the notebook's dependencies into this test environment. Only the command
-    differs; the spawn around it (environment, OS user, service-mode refusal) stays
-    production's.
-    """
-    if request.node.get_closest_marker("integration"):
-        return
-
-    def _direct(self, manifest_path: Path, venv_python: Path, harness_user):
-        return [str(venv_python), str(self.harness_path), str(manifest_path)]
-
-    monkeypatch.setattr("strata.notebook.executor.CellExecutor._harness_command", _direct)
-
-
 _INSTALLED = pytest.StashKey[set[str]]()
 
 

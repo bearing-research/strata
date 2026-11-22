@@ -2,8 +2,7 @@
 
 The spawner keeps the only write end of a pipe and the child inherits the read end
 (``pass_fds``), so the child reads EOF exactly when every copy of the write end is
-gone: the spawner exited or was killed. ``getppid`` cannot tell, because a cold
-harness's parent is ``uv run``, not the server.
+gone: the spawner exited or was killed.
 
 Stdlib only: the harness and the pool worker load it by path from the notebook venv.
 """

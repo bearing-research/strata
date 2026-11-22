@@ -554,6 +554,25 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **Starting a cell no longer installs into its environment.** A Python cell with no
+  warm process started through `uv run`, which syncs the environment first. A
+  `pyproject.toml` edited outside Strata (an editor, an agent, a `git pull`) was then
+  locked and installed by whichever cell next started cold: with
+  `notebook_env_backend = "shared"`, into the environment every notebook with that lock
+  links to, and in any notebook outside its lock on `uv.lock` and its environment log.
+  The harness now starts on the environment's interpreter, as a warm process, a
+  service-mode cell and a scratchpad in its project's environment already did, so such
+  an edit waits for the next environment sync, and a cold cell no longer waits on uv or
+  needs it on `PATH`. Until that sync, a cold cell runs in the environment as it was
+  last synced, as a warm one always has, and publishing stays refused while `uv.lock`
+  and the installed environment differ. A cold cell whose environment was deleted says
+  to sync it, where `uv run` rebuilt it unasked. (#1603)
+- **Every local Python cell runs with its environment active.** `VIRTUAL_ENV` names the
+  notebook's environment and its `bin` leads `PATH`, so the `python`, the `uv pip` and
+  the console scripts a cell starts are the notebook's. Only a cold cell had that, from
+  `uv run`; a warm one and a Run All got the server's `VIRTUAL_ENV` and `PATH`, which
+  for a server started with `uv run` are Strata's own. The server's
+  `UV_PROJECT_ENVIRONMENT` and `UV_PYTHON` no longer reach a cell. (#1603)
 - **On Windows a process that missed the Ctrl-Break is sent it again.** Strata stops a
   cell or warm process there with a console Ctrl-Break, waits two seconds, then kills
   it. A venv's `python.exe` is a launcher that leaves console events to the interpreter

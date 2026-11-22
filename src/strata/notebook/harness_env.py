@@ -10,6 +10,7 @@ headers, worker tokens) pass only when listed exactly, never by prefix.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from strata.notebook.writer import _is_sensitive_env_key
 
@@ -44,7 +45,7 @@ _ESSENTIAL_NAMES = frozenset(
     }
 )
 
-# ``uv run`` finds its cache and the notebook's interpreter through UV_*, Python
+# A cell that runs uv finds its cache and interpreters through UV_*, Python
 # start-up reads PYTHON*, and R and RStudio tools read R_* and RSTUDIO_*.
 _ESSENTIAL_PREFIXES = ("UV_", "LC_", "PYTHON", "VIRTUAL_ENV", "R_", "RSTUDIO_")
 
@@ -95,6 +96,28 @@ def harness_env(allowlist: list[str] | None, extra: dict[str, str] | None = None
     kept = {name: value for name, value in os.environ.items() if _allowed(name, allowlist)}
     kept.update(extra or {})
     return kept
+
+
+# The server's own choice of environment and interpreter for uv, never a cell's.
+_SERVER_UV_NAMES = ("UV_PROJECT_ENVIRONMENT", "UV_PYTHON")
+
+
+def in_environment(env: dict[str, str] | None, python: str | Path) -> dict[str, str] | None:
+    """*env* with *python*'s virtual environment active, as ``activate`` leaves a shell.
+
+    ``VIRTUAL_ENV`` names it and its scripts lead ``PATH``, so the ``python``, the
+    ``uv pip`` and the console scripts a cell starts are the notebook's, not the
+    server's. Unchanged for an interpreter in no environment (``python`` from PATH).
+    """
+    scripts = Path(python).parent
+    if not (scripts.parent / "pyvenv.cfg").is_file():
+        return env
+    active = dict(os.environ if env is None else env)
+    for name in _SERVER_UV_NAMES:
+        active.pop(name, None)
+    active["VIRTUAL_ENV"] = str(scripts.parent)
+    active["PATH"] = os.pathsep.join(filter(None, [str(scripts), active.get("PATH", "")]))
+    return active
 
 
 def configured_allowlist() -> list[str]:
