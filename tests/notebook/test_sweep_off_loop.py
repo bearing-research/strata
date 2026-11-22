@@ -67,8 +67,17 @@ def test_no_coroutine_sweeps_or_hands_over_on_the_loop():
         for call in _calls(fn)
         if _called(call.func) in SWEEPS
     ]
+    # Handed to a thread without in_thread, which a cancel does not wait for.
+    abandoned = [
+        f"{path.relative_to(SRC)}:{call.lineno}"
+        for path, call in nodes
+        if isinstance(call, ast.Call)
+        and _called(call.func) in ("to_thread", "run_sync", "run_in_executor")
+        and any(_called(arg) in SWEEPS for arg in call.args)
+    ]
 
     assert on_loop == []
+    assert abandoned == []
 
 
 def test_the_check_sees_a_call_on_the_loop():
@@ -93,9 +102,38 @@ async def test_a_cancelled_run_waits_for_its_thread():
     run = asyncio.create_task(in_thread(walk))
     await asyncio.to_thread(entered.wait, 30)
     run.cancel()
-    # Released only from outside the loop: the cancel, if it got through, has landed.
-    threading.Timer(0.1, release.set).start()
+    # Released from outside the loop, late enough that a cancel let through has landed.
+    threading.Timer(1.0, release.set).start()
     with pytest.raises(asyncio.CancelledError):
         await run
 
     assert finished == [True]
+
+
+@pytest.mark.asyncio
+async def test_a_second_cancel_waits_for_the_thread_too():
+    entered, release = threading.Event(), threading.Event()
+    finished: list[bool] = []
+
+    def walk() -> None:
+        entered.set()
+        release.wait(30)
+        finished.append(True)
+
+    run = asyncio.create_task(in_thread(walk))
+    await asyncio.to_thread(entered.wait, 30)
+    run.cancel()
+    await asyncio.sleep(0)
+    run.cancel()
+    threading.Timer(1.0, release.set).start()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    assert finished == [True]
+
+
+def test_the_check_sees_a_sweep_handed_to_a_bare_thread():
+    tree = ast.parse("async def run(path, user):\n    await asyncio.to_thread(hand_over, path)\n")
+    (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and n.args]
+
+    assert _called(call.func) == "to_thread" and _called(call.args[0]) == "hand_over"

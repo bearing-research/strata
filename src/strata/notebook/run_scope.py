@@ -83,13 +83,18 @@ class RunScope:
 async def in_thread[T](func: Callable[..., T], /, *args: Any) -> T:
     """``func(*args)`` in a worker thread, off the event loop.
 
-    A cancel is raised once *func* has returned, as when it ran on the loop, so the
-    caller's cleanup (removing the directory it walks, say) never runs beside it.
+    A cancel, and any that follow it (an anyio scope cancels on every tick), is raised
+    once *func* has returned, as when it ran on the loop, so the caller's cleanup
+    (removing the directory it walks, say) never runs beside it.
     ``anyio.to_thread.run_sync`` alone lets an asyncio cancel through at once.
     """
     call = asyncio.ensure_future(anyio.to_thread.run_sync(func, *args))
-    try:
-        return await asyncio.shield(call)
-    except asyncio.CancelledError:
-        await asyncio.wait([call])
-        raise
+    cancel: asyncio.CancelledError | None = None
+    while not call.done():
+        try:
+            await asyncio.shield(call)
+        except asyncio.CancelledError as exc:
+            cancel = exc
+    if cancel is not None:
+        raise cancel
+    return call.result()
