@@ -16,8 +16,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import anyio.to_thread
-
 from strata.notebook.cell_paths.context import (
     _ARTIFACT_EXT_BY_CONTENT_TYPE,
     STORE_FAILED,
@@ -50,7 +48,7 @@ from strata.notebook.process_tree import (
 )
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.read_audit import ReadFinding
-from strata.notebook.run_scope import RunScope
+from strata.notebook.run_scope import RunScope, in_thread
 from strata.notebook.table_writes import TableWriteError
 from strata.notebook.team_store import TeamPull
 
@@ -208,7 +206,7 @@ async def run_batch(
                 manifest = {
                     "cells": cell_specs,
                     "upstream_inputs": upstream_inputs,
-                    **context.harness_fields(),
+                    **await in_thread(context.harness_fields),
                 }
                 manifest["run_token_on_stdin"] = True
                 manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -228,7 +226,7 @@ async def run_batch(
                     ),
                     venv_python,
                 )
-                await anyio.to_thread.run_sync(hand_over, batch_tmpdir, harness_user)
+                await in_thread(hand_over, batch_tmpdir, harness_user)
 
                 # New process group so a timeout SIGKILL reaches every descendant. Mirrors
                 # _run_harness.

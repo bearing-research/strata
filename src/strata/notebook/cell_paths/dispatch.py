@@ -43,6 +43,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
+from strata.notebook.run_scope import in_thread
 from strata.notebook.serializer import ContentType
 from strata.notebook.workers import (
     SIGNED_TRANSPORTS,
@@ -291,7 +292,7 @@ async def dispatch_embedded(
     if resolved_mounts is None:
         resolved_mounts = await context.prepare_mounts(mount_specs, cell_id)
     with context.run_token(timeout_seconds) as run_token:
-        manifest_path = await anyio.to_thread.run_sync(
+        manifest_path = await in_thread(
             functools.partial(
                 context.write_manifest,
                 source,

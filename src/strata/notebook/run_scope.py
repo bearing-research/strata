@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from types import TracebackType
 from typing import Any
+
+import anyio.to_thread
 
 from strata.notebook import process_tree
 
@@ -76,3 +78,18 @@ class RunScope:
                 task.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def in_thread[T](func: Callable[..., T], /, *args: Any) -> T:
+    """``func(*args)`` in a worker thread, off the event loop.
+
+    A cancel is raised once *func* has returned, as when it ran on the loop, so the
+    caller's cleanup (removing the directory it walks, say) never runs beside it.
+    ``anyio.to_thread.run_sync`` alone lets an asyncio cancel through at once.
+    """
+    call = asyncio.ensure_future(anyio.to_thread.run_sync(func, *args))
+    try:
+        return await asyncio.shield(call)
+    except asyncio.CancelledError:
+        await asyncio.wait([call])
+        raise
