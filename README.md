@@ -44,13 +44,13 @@ You keep the result.
 [Use a coding agent →](https://bearingresearch.com/strata/latest/notebook/agent/)
 
 **The notebook is a scratchpad.** An agent working on something else runs its
-throwaway Python in a cached cell instead of `python -c`, so the snippet from
-ten turns ago is still there. Install the plugin once, in any Claude Code
-session:
+throwaway Python in a cached cell instead of `python -c`, so the value from
+ten turns ago is still there, in your project's environment. Wire it into
+Claude Code or Codex once:
 
-```
-/plugin marketplace add bearing-research/strata
-/plugin install strata-scratchpad@strata
+```bash
+uv tool install "strata-notebook[mcp]"
+strata agent install
 ```
 
 [Agent scratchpad →](https://bearingresearch.com/strata/latest/notebook/scratchpad/)

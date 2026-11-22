@@ -16,7 +16,8 @@ on its own (design note `design-agent-uptake.md`, section 5).
   (either tool is fine) and must-not (edits and file reads, where using the
   scratchpad is a false positive). Each turn's answer is computed from the
   workspace: a number or word in the reply, or a check of the files left behind.
-  `HOLDOUT` is the seeded third of each kind that tuning never sees.
+  `HOLDOUT` is a seeded draw of 10 of the 29, `HOLDOUT_COUNTS` per kind, that tuning
+  never sees.
 
 ```python
 from evals.agent_notebook.uptake import tasks, workspace
@@ -45,7 +46,7 @@ about Strata. `run` refuses such an `--out`; use one under `/tmp`.
 | Arm | Setup |
 | --- | --- |
 | A, control | every `strata*` command on `PATH` answers "command not found"; a `PreToolUse` hook denies any Bash command that runs one or imports `strata` |
-| B, today | the shipped `strata-scratchpad` skill in the config dir; this checkout's `strata` on `PATH` |
+| B, today | the `strata-scratchpad` skill as it shipped before P4 retired it (`arm_b/`), in the config dir; this checkout's `strata` on `PATH` |
 | Cp, the design's C' | a Strata server of the trial's own (`STRATA_MCP_PROFILE=scratchpad`, every store under the trial folder) with one notebook open, whose environment has the project installed editable; a user-scope HTTP MCP entry for it, `alwaysLoad: true`, written with `claude mcp add-json` |
 | Cpp, C' as a user sets it up | a user-scope stdio MCP entry running `strata mcp --root <project>`, `alwaysLoad: true`: the first tool call starts the project's daemon and its `.strata-scratch/`, nothing warmed beforehand; a HOME of the trial's own (on uv's real caches), so each trial is a first use of Strata, with matplotlib's font list built in it beforehand, as in Cp. Until P3, its cells cannot import the project |
 | C, what ships | `strata agent install --target claude --yes` run in the project, into the trial's config dir: the user-scope stdio entry `strata mcp` (`alwaysLoad: true`), the `mcp__strata__*` permission, the SessionStart and UserPromptSubmit hooks, the `CLAUDE.md` block; this checkout's `strata` on `PATH`. A HOME of the trial's own, as in Cpp, for the agent too, so the install's record and the daemon's registry are the trial's. Before the clock, as a returning user has it: `strata scratch start` (the scratchpad created, its environment synced: 28.6 s on a first trial, once per project), the cells' imports loaded once in its environment, as in Cp, then `strata scratch stop`, so the agent's first call starts the daemon |

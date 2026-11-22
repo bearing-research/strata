@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -340,6 +341,92 @@ def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
     monkeypatch.setattr(scratch.httpx, "get", reset)
     monkeypatch.setattr(scratch, "_alive", lambda pid: next(checks))
     assert scratch.find_daemon(project) is None
+
+
+def _stopping(monkeypatch, alive, timeout: float = 30.0) -> None:
+    monkeypatch.setattr(scratch, "_healthy", lambda url: False)
+    monkeypatch.setattr(scratch, "_alive", alive)
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    daemon = scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=12345)
+    scratch._stop(daemon, timeout)
+
+
+def test_a_stop_waits_for_the_process_not_only_its_port(monkeypatch):
+    """Its port closes before it has closed its sessions and let go of their stores."""
+    checks = iter([True, True, False])
+    seen: list[bool] = []
+
+    def alive(pid):
+        seen.append(next(checks))
+        return seen[-1]
+
+    _stopping(monkeypatch, alive)
+
+    assert seen == [True, True, False]
+
+
+def test_a_process_that_outlasts_the_stop_is_an_error(monkeypatch):
+    with pytest.raises(scratch.ScratchError, match="did not stop"):
+        _stopping(monkeypatch, lambda pid: True, timeout=0.1)
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not Path("/proc/self/stat").exists(),
+    reason="a zombie is read from /proc",
+)
+def test_a_zombie_is_not_alive():
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    stat = Path(f"/proc/{child.pid}/stat")
+    try:
+        # Exited, not reaped: os.kill(pid, 0) still finds it.
+        deadline = time.monotonic() + 60
+        while stat.read_bytes().rpartition(b")")[2].split()[0] != b"Z":
+            assert time.monotonic() < deadline, "the child did not exit"
+            time.sleep(0.01)
+        os.kill(child.pid, 0)
+        assert not scratch._alive(child.pid)
+    finally:
+        child.wait()
+
+
+class _Proc:
+    """``Path`` as ``_alive`` sees it: what a read of a process's stat gives."""
+
+    stat: bytes | Exception = b""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def read_bytes(self) -> bytes:
+        if isinstance(self.stat, Exception):
+            raise self.stat
+        return self.stat
+
+
+@pytest.mark.parametrize(
+    ("stat", "alive"),
+    [
+        # What /proc cannot show leaves os.kill's answer: reaped meanwhile, hidden, absent.
+        (ProcessLookupError("reaped"), True),
+        (FileNotFoundError("hidepid=2, or no /proc"), True),
+        (PermissionError("hidepid=1"), True),
+        (OSError("a sandbox's /proc"), True),
+        (b"", True),
+        (b"1 (a) b) S 0", True),
+        (b"1 (\xe2\x82) S 0", True),
+        (b"1 (\xe2\x82) Z 0", False),
+        (b"1 (py) Z 0", False),
+        (b"1 (py) X 0", False),
+        (b"1 (py) x 0", False),
+    ],
+)
+def test_a_linux_process_is_alive_unless_its_stat_shows_it_dead(monkeypatch, stat, alive):
+    monkeypatch.setattr(scratch.sys, "platform", "linux")
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(_Proc, "stat", stat)
+    monkeypatch.setattr(scratch, "Path", _Proc)
+
+    assert scratch._alive(12345) is alive
 
 
 def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):

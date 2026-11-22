@@ -317,6 +317,15 @@ def _alive(pid: int) -> bool:
     except PermissionError:
         # Another user's process: it exists.
         return True
+    if sys.platform == "linux":
+        # A zombie has exited, though nobody reaped it (PID 1 in a container without init).
+        # What /proc does not show (hidden, gone, unreadable) leaves os.kill's answer.
+        with contextlib.suppress(OSError):
+            # Bytes: the name before ")" is whatever the process set.
+            fields = Path(f"/proc/{pid}/stat").read_bytes().rpartition(b")")[2].split()
+            # "X" is a task being reaped; kernels 2.6.33 to 3.13 may show it as "x".
+            if fields and fields[0] in (b"Z", b"X", b"x"):
+                return False
     return True
 
 
@@ -676,7 +685,9 @@ def _stop(running: Daemon, timeout: float = 30.0) -> None:
     with contextlib.suppress(ProcessLookupError):
         os.kill(running.pid, signal.SIGTERM)
     deadline = time.monotonic() + timeout
-    while _healthy(running.url):
+    # Until its process is gone, not only its port: on POSIX its shutdown still closes the
+    # sessions and their stores; on Windows, terminated, it holds their files until it exits.
+    while _healthy(running.url) or _alive(running.pid):
         if time.monotonic() > deadline:
             raise ScratchError(f"the scratchpad's server (pid {running.pid}) did not stop")
         time.sleep(0.1)
