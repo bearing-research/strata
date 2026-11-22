@@ -31,8 +31,9 @@ by its path, so it must outlive the shell you ran it from.
 ### 2. Wire it into the agent
 
 ```bash
-strata agent install                    # Claude Code and Codex, whichever are installed
+strata agent install                    # every agent whose CLI is on PATH; asks first
 strata agent install --target claude    # or just one
+strata agent install --yes              # without asking, as from a script
 ```
 
 For Claude Code this writes the user-scope `strata` MCP server, the
