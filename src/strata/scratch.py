@@ -626,6 +626,7 @@ def _stop(running: Daemon, timeout: float = 30.0) -> None:
         if time.monotonic() > deadline:
             raise ScratchError(f"the scratchpad's server (pid {running.pid}) did not stop")
         time.sleep(0.1)
-    # Its port closes before its process lets go of the store's files, which Windows does
-    # not give the next opener. A shutdown still draining, or a zombie, is left to finish.
-    _exits_within(running.pid, _DYING_GRACE)
+    if sys.platform == "win32":
+        # Terminated, not drained: its port closes before its process lets go of the
+        # store's files, which Windows does not give the next opener until then.
+        _exits_within(running.pid, max(deadline - time.monotonic(), 0.0))

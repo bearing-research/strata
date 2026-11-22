@@ -561,6 +561,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   port.** Its store keeps its files open until then, and on Windows a store opened
   right after `strata scratch stop` or a restart failed with a disk I/O error. A
   process still draining is given two seconds, then left to finish. (#1602)
+- **On Windows, stopping the scratchpad's daemon waits for its process to exit, not
+  only its port.** Stopping terminates it there, and its store holds its files open
+  until the process is gone: a store opened right after `strata scratch stop` or a
+  restart failed with a disk I/O error. (#1602)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the

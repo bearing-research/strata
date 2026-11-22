@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+import types
 
 import httpx
 import pytest
@@ -318,14 +319,16 @@ def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
     assert scratch.find_daemon(project) is None
 
 
-def _stopping(monkeypatch, alive):
+def _stopping(monkeypatch, platform: str, alive, timeout: float = 30.0) -> None:
+    monkeypatch.setattr(scratch, "sys", types.SimpleNamespace(platform=platform))
     monkeypatch.setattr(scratch, "_healthy", lambda url: False)
     monkeypatch.setattr(scratch, "_alive", alive)
     monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
-    scratch._stop(scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=12345))
+    daemon = scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=12345)
+    scratch._stop(daemon, timeout)
 
 
-def test_a_stop_waits_for_the_process_not_only_its_port(monkeypatch):
+def test_a_stop_on_windows_waits_for_the_process_not_only_its_port(monkeypatch):
     """Its port closes before it has let go of the store's files."""
     checks = iter([True, True, False])
     seen: list[bool] = []
@@ -334,19 +337,26 @@ def test_a_stop_waits_for_the_process_not_only_its_port(monkeypatch):
         seen.append(next(checks))
         return seen[-1]
 
-    _stopping(monkeypatch, alive)
+    _stopping(monkeypatch, "win32", alive)
 
     assert seen == [True, True, False]
 
 
-def test_a_stop_leaves_a_process_still_draining_to_finish(monkeypatch):
-    """A long run's shutdown, or a zombie nobody reaps: the port is closed, so it stopped."""
-    monkeypatch.setattr(scratch, "_DYING_GRACE", 0.1)
+def test_a_stop_on_windows_that_outlasts_its_timeout_returns(monkeypatch):
     seen: list[int] = []
 
-    _stopping(monkeypatch, lambda pid: (seen.append(pid), True)[1])
+    _stopping(monkeypatch, "win32", lambda pid: (seen.append(pid), True)[1], timeout=0.1)
 
     assert seen and set(seen) == {12345}
+
+
+def test_a_stop_elsewhere_ends_with_its_port(monkeypatch):
+    """A drain, or a zombie nobody reaps, holds no file a next opener needs there."""
+    seen: list[int] = []
+
+    _stopping(monkeypatch, "linux", lambda pid: (seen.append(pid), True)[1])
+
+    assert seen == []
 
 
 def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):
