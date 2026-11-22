@@ -182,19 +182,21 @@ def leftover_processes(
     ]
 
 
-def _process_table() -> dict[int, tuple[int, int, int]]:
+def _process_table(proc: str = "/proc") -> dict[int, tuple[int, int, int]]:
     """Every live process's (parent, real uid, session), from ``/proc``."""
     table: dict[int, tuple[int, int, int]] = {}
-    for name in os.listdir("/proc"):
+    for name in os.listdir(proc):
         if not name.isdigit():
             continue
         try:
-            with open(f"/proc/{name}/status") as status:
+            # Its Name is whatever the process set, not always UTF-8.
+            with open(f"{proc}/{name}/status", encoding="utf-8", errors="replace") as status:
                 fields = dict(line.split(":", 1) for line in status if ":" in line)
         except OSError:
             continue  # exited while listed
-        if fields["State"].split()[0] in ("Z", "X"):
-            continue  # dead, waiting to be reaped
+        # Dead, waiting to be reaped; kernels 2.6.33 to 3.13 may show it as "x".
+        if fields["State"].split()[0] in ("Z", "X", "x"):
+            continue
         table[int(name)] = (
             int(fields["PPid"]),
             int(fields["Uid"].split()[0]),

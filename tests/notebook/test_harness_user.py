@@ -704,3 +704,22 @@ def test_the_process_table_is_read_from_proc_without_the_dead():
         assert child.pid not in table
     finally:
         child.wait()
+
+
+def test_a_process_named_in_bytes_that_are_not_utf8_is_read(tmp_path):
+    """A cell can name its process anything (prctl): one such name must not stop the sweep."""
+
+    def status(pid: int, state: str, name: bytes = b"python") -> None:
+        (tmp_path / str(pid)).mkdir()
+        (tmp_path / str(pid) / "status").write_bytes(
+            b"Name:\t"
+            + name
+            + b"\n"
+            + f"State:\t{state}\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\nNSsid:\t{pid}\n".encode()
+        )
+
+    status(10, "S (sleeping)", b"\xe2\x82")
+    status(11, "x (dead)")
+    (tmp_path / "self").mkdir()
+
+    assert _process_table(str(tmp_path)) == {10: (1, 1000, 10)}
