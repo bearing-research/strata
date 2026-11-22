@@ -4606,6 +4606,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A warm cell whose head the server could not record runs once.</strong> When applying a
+  cell's <code>strata.head</code> failed, the warm worker's error was taken for a missing worker, so
+  the cell ran again cold, its side effects with it. The run now stops and fails with
+  that error, warm or cold. A checkpoint the server cannot begin is skipped, as one it
+  cannot stage already was. (#1613)</li>
 <li><strong>A lock that moved outside Strata is installed before the next run.</strong> A cell's key
   reads <code>uv.lock</code> on disk, but the cell ran in the environment as it was last synced.
   After a <code>git pull</code>, a branch switch or <code>uv lock</code> in a terminal, a result computed
