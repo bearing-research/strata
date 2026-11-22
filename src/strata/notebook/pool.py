@@ -343,10 +343,11 @@ class PooledCellExecutor:
         warm_proc = await pool.acquire()
         if warm_proc is None:
             return None
-        # Outputs land beside the manifest, in a run dir private to the server.
-        hand_over(manifest_path.parent, harness_user)
 
         try:
+            # Outputs land beside the manifest, in a run dir private to the server. Its sweep
+            # can raise: the worker is still released, and the cold run reports it.
+            hand_over(manifest_path.parent, harness_user)
             assert warm_proc.process.stdin is not None
             assert warm_proc.process.stdout is not None
             manifest_str = (str(manifest_path) + "\n").encode()
