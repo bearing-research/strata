@@ -314,17 +314,14 @@ def _alive(pid: int) -> bool:
     except PermissionError:
         # Another user's process: it exists.
         return True
-    if sys.platform == "linux" and Path("/proc/self/stat").exists():
+    if sys.platform == "linux":
         # A zombie has exited, though nobody reaped it (PID 1 in a container without init).
-        try:
+        # What /proc does not show (hidden, gone, unreadable) leaves os.kill's answer.
+        with contextlib.suppress(OSError):
             fields = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
-        except (FileNotFoundError, ProcessLookupError):
-            return False
-        except PermissionError:
-            # hidepid: os.kill found it, its entry is not ours to read.
-            return True
-        # Kernels 2.6.33 to 3.13 show a task being reaped as "x", others as "X".
-        return bool(fields) and fields[0] not in ("Z", "X", "x")
+            # "X" is a task being reaped; kernels 2.6.33 to 3.13 may show it as "x".
+            if fields and fields[0] in ("Z", "X", "x"):
+                return False
     return True
 
 

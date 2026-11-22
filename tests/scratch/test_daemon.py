@@ -366,16 +366,12 @@ def test_a_zombie_is_not_alive():
 
 
 class _Proc:
-    """``Path`` as ``_alive`` sees it: ``/proc`` there or not, and what a stat read gives."""
+    """``Path`` as ``_alive`` sees it: what a read of a process's stat gives."""
 
-    mounted = True
-    stat: str | Exception = ProcessLookupError("reaped")
+    stat: str | Exception = ""
 
     def __init__(self, path: str) -> None:
         self.path = path
-
-    def exists(self) -> bool:
-        return self.mounted
 
     def read_text(self) -> str:
         if isinstance(self.stat, Exception):
@@ -386,31 +382,25 @@ class _Proc:
 @pytest.mark.parametrize(
     ("stat", "alive"),
     [
-        (ProcessLookupError("reaped"), False),
-        (PermissionError("hidepid"), True),
-        ("", False),
+        # What /proc cannot show leaves os.kill's answer: reaped meanwhile, hidden, absent.
+        (ProcessLookupError("reaped"), True),
+        (FileNotFoundError("hidepid=2, or no /proc"), True),
+        (PermissionError("hidepid=1"), True),
+        (OSError("a sandbox's /proc"), True),
+        ("", True),
         ("1 (a) b) S 0", True),
         ("1 (py) Z 0", False),
         ("1 (py) X 0", False),
         ("1 (py) x 0", False),
     ],
 )
-def test_a_linux_process_is_alive_as_its_stat_says(monkeypatch, stat, alive):
+def test_a_linux_process_is_alive_unless_its_stat_shows_it_dead(monkeypatch, stat, alive):
     monkeypatch.setattr(scratch.sys, "platform", "linux")
     monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
     monkeypatch.setattr(_Proc, "stat", stat)
     monkeypatch.setattr(scratch, "Path", _Proc)
 
     assert scratch._alive(12345) is alive
-
-
-def test_without_proc_a_process_os_kill_finds_is_alive(monkeypatch):
-    monkeypatch.setattr(scratch.sys, "platform", "linux")
-    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
-    monkeypatch.setattr(_Proc, "mounted", False)
-    monkeypatch.setattr(scratch, "Path", _Proc)
-
-    assert scratch._alive(12345)
 
 
 def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):
