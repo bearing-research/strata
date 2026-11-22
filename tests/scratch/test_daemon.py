@@ -366,9 +366,10 @@ def test_a_zombie_is_not_alive():
 
 
 class _Proc:
-    """``Path`` as ``_alive`` sees it: ``/proc`` there or not, a stat read that fails."""
+    """``Path`` as ``_alive`` sees it: ``/proc`` there or not, and what a stat read gives."""
 
     mounted = True
+    stat: str | Exception = ProcessLookupError("reaped")
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -377,15 +378,30 @@ class _Proc:
         return self.mounted
 
     def read_text(self) -> str:
-        raise ProcessLookupError(self.path)
+        if isinstance(self.stat, Exception):
+            raise self.stat
+        return self.stat
 
 
-def test_a_process_reaped_as_its_stat_is_read_is_gone(monkeypatch):
+@pytest.mark.parametrize(
+    ("stat", "alive"),
+    [
+        (ProcessLookupError("reaped"), False),
+        (PermissionError("hidepid"), True),
+        ("", False),
+        ("1 (a) b) S 0", True),
+        ("1 (py) Z 0", False),
+        ("1 (py) X 0", False),
+        ("1 (py) x 0", False),
+    ],
+)
+def test_a_linux_process_is_alive_as_its_stat_says(monkeypatch, stat, alive):
     monkeypatch.setattr(scratch.sys, "platform", "linux")
     monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(_Proc, "stat", stat)
     monkeypatch.setattr(scratch, "Path", _Proc)
 
-    assert not scratch._alive(12345)
+    assert scratch._alive(12345) is alive
 
 
 def test_without_proc_a_process_os_kill_finds_is_alive(monkeypatch):

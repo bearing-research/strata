@@ -320,7 +320,10 @@ def _alive(pid: int) -> bool:
             fields = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
         except (FileNotFoundError, ProcessLookupError):
             return False
-        # "x" is how kernels before 3.14 show a task being reaped.
+        except PermissionError:
+            # hidepid: os.kill found it, its entry is not ours to read.
+            return True
+        # Kernels 2.6.33 to 3.13 show a task being reaped as "x", others as "X".
         return bool(fields) and fields[0] not in ("Z", "X", "x")
     return True
 
