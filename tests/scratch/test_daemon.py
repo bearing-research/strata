@@ -255,23 +255,22 @@ def test_the_pid_kept_for_a_daemon_is_the_servers_own(tmp_path, monkeypatch):
     outlives a kill of it for a moment, still holding its stores' files."""
     anchor = tmp_path / "project"
     (anchor / ".strata-scratch" / ".strata").mkdir(parents=True)
-    said = tmp_path / "said"
+    # What it prints goes to its log.
     server = (
         "import os, sys, time\n"
-        f"with open({str(said)!r} + '.tmp', 'w') as out:\n"
-        "    out.write(f'{os.getpid()}|{sys.prefix}')\n"
-        f"os.replace({str(said)!r} + '.tmp', {str(said)!r})\n"
+        "print(os.getpid(), sys.prefix, sep='|', flush=True)\n"
         "time.sleep(120)\n"
     )
     monkeypatch.setattr(scratch, "_server_command", lambda: [sys.executable, "-c", server])
 
     pid = scratch._spawn(anchor, 1)
     try:
+        log = scratch._log_path(anchor)
         deadline = time.monotonic() + 60
-        while not said.exists():
+        while not (said := log.read_text()).endswith("\n"):
             assert time.monotonic() < deadline, "the server did not start"
             time.sleep(0.01)
-        own, prefix = said.read_text().split("|")
+        own, prefix = said.strip().split("|")
 
         assert int(own) == pid
         # Still this environment's interpreter.
