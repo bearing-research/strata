@@ -200,7 +200,9 @@ exhaustive commit history.
   on its key and state (9.6 ms with 50000 open builds, now 0.006 ms), and checking which
   checkpoints a build can drop is no longer quadratic in its checkpoints. Its migration
   20 replaces an index: the first 0.7.0 process to open a store builds it, and a 0.6.0
-  process then refuses the store, so every process on it upgrades together. (#1602)
+  process then refuses the store, so every process on it upgrades together. Stopping
+  the scratchpad's daemon now waits for its process to exit, not only for its port to
+  close, so a store opened next finds its files released. (#1602)
 - **A scratchpad's daemon starts as the session opens.** In a project that already has a
   scratchpad, `strata mcp` starts its daemon in the background when the agent's session
   lists its tools, so the first `run` no longer waits about 4 s for it; a call made

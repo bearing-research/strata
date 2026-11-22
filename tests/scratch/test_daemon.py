@@ -318,6 +318,25 @@ def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
     assert scratch.find_daemon(project) is None
 
 
+def test_a_stop_waits_for_the_process_not_only_its_port(monkeypatch):
+    """Its port closes before it has let go of the store's files."""
+    checks = iter([True, True, False])
+    seen: list[bool] = []
+
+    def alive(pid):
+        seen.append(next(checks))
+        return seen[-1]
+
+    monkeypatch.setattr(scratch, "_healthy", lambda url: False)
+    monkeypatch.setattr(scratch, "_alive", alive)
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(scratch.time, "sleep", lambda seconds: None)
+
+    scratch._stop(scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=12345))
+
+    assert seen == [True, True, False]
+
+
 def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):
     """Its record came along, but that daemon holds the original, not the copy."""
     _served(project, anchor=str(tmp_path / "original"))
