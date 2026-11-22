@@ -219,7 +219,12 @@ class WarmProcessPool:
                 return None
             if self.base_image_holds is None:
                 return warm_proc
-            holds = await asyncio.to_thread(self.base_image_holds, warm_proc.stamp)
+            try:
+                holds = await asyncio.to_thread(self.base_image_holds, warm_proc.stamp)
+            except BaseException:
+                # Off the queue and handed to no one: it would run on, and the pool stay one short.
+                await asyncio.shield(self.release_and_replace(warm_proc))
+                raise
             if not self._started:
                 # Drained while it was checked, off the queue where the drain looked.
                 await terminate_subprocess_tree(warm_proc.process)

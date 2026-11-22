@@ -83,6 +83,51 @@ async def test_a_worker_checked_while_the_pool_drains_is_not_handed_out(tmp_path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["raised", "cancelled"])
+async def test_a_worker_whose_check_did_not_finish_is_replaced(tmp_path, monkeypatch, ending):
+    """Off the queue when the check raises or the run is cancelled during it: kept, it
+    would run on outside the pool, which would stay one worker short."""
+    import threading
+
+    from strata.notebook.pool import WarmProcess, WarmProcessPool
+
+    entered, release = threading.Event(), threading.Event()
+
+    def check(stamp):
+        if ending == "raised":
+            raise OSError("the environment record is unreadable")
+        entered.set()
+        release.wait(30)
+        return True
+
+    pool = WarmProcessPool(tmp_path, base_image=lambda: None, base_image_holds=check)
+    spawned: list[int] = []
+
+    async def spawn() -> None:
+        spawned.append(1)
+
+    monkeypatch.setattr(pool, "_spawn_warm_process", spawn)
+    pool._started = True
+    process = await _sleeper()
+    await pool._available.put(WarmProcess(process=process, created_at=0.0, ready=True))
+
+    if ending == "raised":
+        with pytest.raises(OSError, match="unreadable"):
+            await pool.acquire()
+    else:
+        claim = asyncio.create_task(pool.acquire())
+        await asyncio.to_thread(entered.wait, 30)
+        claim.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await claim
+    await asyncio.gather(*pool._background_tasks)
+
+    assert process.returncode is not None
+    assert spawned == [1]
+
+
+@pytest.mark.asyncio
 async def test_a_drained_pool_spawns_no_replacement(tmp_path, monkeypatch):
     from strata.notebook.pool import WarmProcess, WarmProcessPool
 
