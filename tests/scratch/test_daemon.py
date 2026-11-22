@@ -356,7 +356,7 @@ def test_a_zombie_is_not_alive():
     try:
         # Exited, not reaped: os.kill(pid, 0) still finds it.
         deadline = time.monotonic() + 60
-        while stat.read_text().rpartition(")")[2].split()[0] != "Z":
+        while stat.read_bytes().rpartition(b")")[2].split()[0] != b"Z":
             assert time.monotonic() < deadline, "the child did not exit"
             time.sleep(0.01)
         os.kill(child.pid, 0)
