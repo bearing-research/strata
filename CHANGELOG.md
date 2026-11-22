@@ -575,7 +575,7 @@ exhaustive commit history.
   the launcher's: `strata scratch stop`, `rm` or a restart went on while the server
   still held its stores, and the next opener got `disk I/O error`. The server is now
   started as the process itself. A killed process also reported its exit code some
-  milliseconds before its files closed; a stop now waits on the process handle. (#NNNN)
+  milliseconds before its files closed; a stop now waits on the process handle. (#1612)
 - **A process named in bytes that are not UTF-8 no longer fails every run as the
   harness user.** Before each such run, the sweep for what earlier cells left running
   decoded every process's `/proc` status strictly. A process can name itself anything,
