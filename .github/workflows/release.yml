@@ -321,9 +321,8 @@ jobs:
           WHEEL=$(ls dist/strata_notebook-*-py3-none-any.whl | head -1)
           echo "::notice::Testing wheel ${WHEEL}"
 
-          # Strata's runtime guard requires a uv-managed venv (the `uv =`
-          # marker in pyvenv.cfg). The ledger (vestigo) resolves from PyPI,
-          # where its own repository released it.
+          # The other installers are install-matrix's. The ledger (vestigo)
+          # resolves from PyPI, where its own repository released it.
           uv venv /tmp/strata-smoke
           VIRTUAL_ENV=/tmp/strata-smoke uv pip install \
             --index https://pypi.org/simple/ "${WHEEL}"
@@ -381,12 +380,23 @@ jobs:
           wait "${SERVER_PID}" 2>/dev/null || true
           echo "::notice::wheel smoke test passed"
 
+  # The wheel installed with uv tool, pipx, pip in a venv and pip in a conda
+  # environment, each running a notebook with no uv on PATH.
+  install-matrix:
+    name: Install matrix
+    needs: [wheel]
+    uses: ./.github/workflows/install-matrix.yml
+    with:
+      wheel-artifact: dist-notebook
+      # The tagged source, as the wheel job builds, so the smoke script matches the wheel.
+      ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
+
   # --- TestPyPI publish (auto on tag) --------------------------------
   testpypi:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [wheel, client-wheel, pool-wheel, wheel-test]
+    needs: [wheel, client-wheel, pool-wheel, wheel-test, install-matrix]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/strata-notebook

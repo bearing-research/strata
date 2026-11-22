@@ -582,3 +582,9 @@ jobs:
           if [ -f /tmp/strata-ci.pid ]; then
             kill "$(cat /tmp/strata-ci.pid)" || true
           fi
+
+  # strata-notebook installed with uv tool, pipx, pip in a venv and pip in a conda
+  # environment, each running a notebook with no uv on PATH.
+  install-matrix:
+    name: Install matrix
+    uses: ./.github/workflows/install-matrix.yml
