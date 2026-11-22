@@ -92,12 +92,18 @@ def test_two_clients_at_once_share_one_daemon(project):
     assert seen[0] == seen[1]
 
 
+def _started(daemon: scratch.Daemon) -> bool:
+    """Whether this call started *daemon*, not found it running. Its pid does not say:
+    Windows gives a new process the pid of one that just died."""
+    return "starting the scratchpad" in daemon.setup_ms
+
+
 def test_a_daemon_that_died_is_replaced(project):
     first = scratch.ensure_daemon(project)
     os.kill(first.pid, 9)
 
     second = scratch.ensure_daemon(project)
-    assert second.pid != first.pid
+    assert _started(second)
     # The scratchpad was there already; only the server started again.
     assert "creating the scratchpad" not in second.setup_ms
 
@@ -160,7 +166,7 @@ def test_a_daemon_another_version_started_is_replaced(project):
     record_path.write_text(json.dumps(record))
 
     second = scratch.ensure_daemon(project)
-    assert second.pid != first.pid
+    assert _started(second)
     # Stopped, not left beside the new one: one session writes the directory.
     assert not scratch._healthy(first.url)
     assert json.loads(record_path.read_text())["version"] == second.version != "0.0.0"
@@ -193,7 +199,7 @@ def test_a_busy_daemon_another_version_started_is_kept_until_idle(project):
         assert time.monotonic() < deadline, "a request that ended is still busy"
         time.sleep(0.05)
     replaced = scratch.ensure_daemon(project)
-    assert replaced.pid != first.pid
+    assert _started(replaced)
     assert not scratch._healthy(first.url)
 
 
@@ -241,6 +247,24 @@ def test_the_daemon_keeps_the_personal_caches_and_none_of_the_callers_config(tmp
     scratch._spawn(anchor, 1)
     assert seen["env"]["STRATA_NOTEBOOK_MOUNT_CACHE_DIR"] == str(tmp_path / "mine")
     assert seen["env"]["UV_LINK_MODE"] == "copy"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows reuses a pid at once")
+def test_a_process_that_took_a_dead_daemons_pid_is_not_killed(monkeypatch):
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        # As a daemon that had the pid before this process did.
+        monkeypatch.setitem(scratch._created, other.pid, 1)
+        scratch._kill(other.pid)
+        with pytest.raises(subprocess.TimeoutExpired):
+            other.wait(2)
+
+        scratch._note(other.pid)
+        scratch._kill(other.pid)
+        assert other.wait(30) == signal.SIGTERM
+    finally:
+        other.kill()
+        other.wait()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="os.kill(pid, 0) is POSIX's probe")
