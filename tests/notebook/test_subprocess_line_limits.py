@@ -57,14 +57,12 @@ class _FakePool:
     def __init__(self, stdout, returncode=0):
         self._stdout = stdout
         self._returncode = returncode
-        self.replaced = False
         self.releases = 0
 
     async def acquire(self):
         return SimpleNamespace(process=_FakeProcess(self._stdout, self._returncode))
 
     async def release_and_replace(self, warm_proc):
-        self.replaced = True
         self.releases += 1
 
 
@@ -83,7 +81,7 @@ async def test_pool_timeout_raises_instead_of_cold_fallback(tmp_path):
         await PooledCellExecutor.execute_with_pool(
             pool, tmp_path / "manifest.json", tmp_path, timeout_seconds=0.05
         )
-    assert pool.replaced  # the hung worker was still recycled
+    assert pool.releases == 1  # the hung worker was still recycled
 
 
 @pytest.mark.asyncio

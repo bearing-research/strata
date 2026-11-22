@@ -333,8 +333,11 @@ class PooledCellExecutor:
         Raises:
             TimeoutError: the cell exceeded ``timeout_seconds`` in the worker. This is
                 a real cell timeout, not a pool miss, so there is no cold re-run.
+            RunFenced: the run's attempt lost the build; the worker is killed, and a cold run
+                would run the cell twice.
             BaseException: whatever handing the run directory over raised, an interrupt
-                included, as a cold run would; the worker it took is released.
+                included, as a cold run would; the worker it took is recycled (killed
+                and replaced).
         """
         try:
             harness_user = resolve_harness_user()
