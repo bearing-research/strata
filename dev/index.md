@@ -34,6 +34,15 @@ session updates. Captured from a real run, not a mock-up.*
 
     [Terminal viewer →](https://bearingresearch.com/strata/dev/notebook/tui/)
 
+-   **Agent scratchpad**
+
+    ---
+
+    An agent working on something else runs its Python in a cached session, so a
+    slow load is done once.
+
+    [Agent scratchpad →](https://bearingresearch.com/strata/dev/notebook/scratchpad/)
+
 </div>
 
 ## Install
@@ -61,7 +70,7 @@ session updates. Captured from a real run, not a mock-up.*
 
     ```bash
     docker run --rm -p 127.0.0.1:8765:8765 -v strata_state:/home/strata/.strata \
-      ghcr.io/bearing-research/strata:0.11.0
+      ghcr.io/bearing-research/strata:0.12.0
     ```
 
 === "From source"
