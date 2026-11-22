@@ -194,6 +194,13 @@ exhaustive commit history.
   records nothing of what it read, so its key would miss an edited project file or
   module and could replay a stale result. (#1589)
 ### Changed
+- **The ledger is vestigo 0.7.0.** On SQLite a store keeps its connections open between
+  calls and reuses them, where every call opened one: a lookup on a store nobody else
+  had open took 0.7 ms and takes 5 µs. Finding a computation's open build reads an index
+  on its key and state (9.6 ms with 50000 open builds, now 0.006 ms), and checking which
+  checkpoints a build can drop is no longer quadratic in its checkpoints. Its migration
+  20 replaces an index: the first 0.7.0 process to open a store builds it, and a 0.6.0
+  process then refuses the store, so every process on it upgrades together. (#1602)
 - **A scratchpad's daemon starts as the session opens.** In a project that already has a
   scratchpad, `strata mcp` starts its daemon in the background when the agent's session
   lists its tools, so the first `run` no longer waits about 4 s for it; a call made
@@ -548,6 +555,14 @@ exhaustive commit history.
   until their lock changes. A worker's relative `STRATA_WORKER_ENV_ROOT` is now read
   against the worker's directory, where uv built the environment in another place and
   every cell failed with "has no interpreter". (#1604)
+- **Stopping the scratchpad's daemon waits for its process to exit, not only its
+  port.** `strata scratch stop`, `strata scratch rm` and a restart went on once the
+  port closed, while the process could still hold the scratchpad's store: elsewhere
+  its shutdown still closes its sessions, and on Windows, where a stop terminates it,
+  its open files made a store opened right after fail with a disk I/O error. A
+  process that has not exited within the stop's 30 seconds is now an error, as a port
+  still open was; on Linux a zombie nobody reaps counts as exited, read from `/proc`.
+  (#1602)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the
