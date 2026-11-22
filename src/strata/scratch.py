@@ -39,11 +39,12 @@ _DYING_GRACE = 2.0
 # on a cold uv cache.
 _SETUP_TIMEOUT = 600.0
 # Windows: OpenProcess access, the error a live process of another user gives, and
-# GetExitCodeProcess's "not exited".
+# WaitForSingleObject's "signaled".
 _PROCESS_TERMINATE = 0x0001
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_SYNCHRONIZE = 0x00100000
 _ERROR_ACCESS_DENIED = 5
-_STILL_ACTIVE = 259
+_WAIT_OBJECT_0 = 0
 
 
 class ScratchError(RuntimeError):
@@ -230,10 +231,13 @@ def _scaffold(anchor: Path) -> None:
 # Started by a launcher that exits at once, so the daemon is nobody's child: no client
 # has to reap it, and it outlives the client that started it.
 _LAUNCH = """\
-import subprocess, sys
-with open(sys.argv[1], "wb") as log:
+import os, subprocess, sys
+log, venv, *command = sys.argv[1:]
+# Set here, at the last hop: an interpreter takes it out of its own environment.
+env = {**os.environ, "__PYVENV_LAUNCHER__": venv} if venv else None
+with open(log, "wb") as out:
     proc = subprocess.Popen(
-        sys.argv[2:], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        command, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
         start_new_session=True,
     )
 print(proc.pid)
@@ -242,6 +246,27 @@ print(proc.pid)
 
 def _server_command() -> list[str]:
     return [sys.executable, "-m", "strata"]
+
+
+def _as_itself(command: list[str]) -> tuple[list[str], str]:
+    """*command* as the process started runs it, and the venv launcher it stands in for
+    (``__PYVENV_LAUNCHER__``), if any.
+
+    A venv's ``python.exe`` on Windows is a launcher, and the interpreter its child: a kill
+    or a wait on the pid started is then not one on the server, which holds its stores'
+    files a moment longer. The base interpreter told which venv it is in, as multiprocessing
+    starts its workers there, is the server itself.
+    """
+    # Not in typeshed; every CPython since 3.8 has it.
+    base = getattr(sys, "_base_executable", sys.executable)
+    same = os.path.normcase
+    if (
+        sys.platform != "win32"
+        or same(command[0]) != same(sys.executable)
+        or same(base) == same(sys.executable)
+    ):
+        return command, ""
+    return [base, *command[1:]], sys.executable
 
 
 def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
@@ -273,10 +298,11 @@ def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
         "STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS": "0",
         **({"STRATA_SCRATCH_PYTHON": python} if python is not None else {}),
     }
+    command, venv = _as_itself(_server_command())
     try:
         log = private_file(_log_path(anchor))
         launched = subprocess.run(
-            [sys.executable, "-I", "-c", _LAUNCH, str(log), *_server_command()],
+            [sys.executable, "-I", "-c", _LAUNCH, str(log), venv, *command],
             env=env,
             # Its [tool.strata] is then the scratchpad's (none), not whichever
             # pyproject.toml sits above where the first client ran.
@@ -296,18 +322,16 @@ def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
 
 def _alive(pid: int) -> bool:
     if sys.platform == "win32":
-        # os.kill(pid, 0) would terminate it there: ask for its exit code instead.
+        # os.kill(pid, 0) would terminate it there. Its handle is signaled once it has let
+        # go of its files; its exit code is set some milliseconds before that.
         import ctypes
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        handle = kernel32.OpenProcess(_SYNCHRONIZE, False, pid)
         if not handle:
             return ctypes.get_last_error() == _ERROR_ACCESS_DENIED
         try:
-            code = ctypes.c_ulong()
-            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return True
-            return code.value == _STILL_ACTIVE
+            return kernel32.WaitForSingleObject(handle, 0) != _WAIT_OBJECT_0
         finally:
             kernel32.CloseHandle(handle)
     try:
