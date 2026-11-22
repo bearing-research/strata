@@ -563,6 +563,12 @@ exhaustive commit history.
   only its port.** Stopping terminates it there, and its store holds its files open
   until the process is gone: a store opened right after `strata scratch stop` or a
   restart failed with a disk I/O error. (#1602)
+- **Stopping the scratchpad's daemon waits for its process to exit, not only its
+  port.** `strata scratch stop`, `strata scratch rm` and a restart went on once the
+  port closed, while the process still closed its sessions and their stores: on
+  Windows a store opened right after failed with a disk I/O error. A process that has
+  not exited within the stop's 30 seconds is now an error, as a port still open was;
+  on Linux a zombie nobody reaps counts as exited. (#1602)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the

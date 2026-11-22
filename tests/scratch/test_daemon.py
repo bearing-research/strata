@@ -13,7 +13,6 @@ import socket
 import subprocess
 import sys
 import time
-import types
 
 import httpx
 import pytest
@@ -319,8 +318,7 @@ def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
     assert scratch.find_daemon(project) is None
 
 
-def _stopping(monkeypatch, platform: str, alive, timeout: float = 30.0) -> None:
-    monkeypatch.setattr(scratch, "sys", types.SimpleNamespace(platform=platform))
+def _stopping(monkeypatch, alive, timeout: float = 30.0) -> None:
     monkeypatch.setattr(scratch, "_healthy", lambda url: False)
     monkeypatch.setattr(scratch, "_alive", alive)
     monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
@@ -328,8 +326,8 @@ def _stopping(monkeypatch, platform: str, alive, timeout: float = 30.0) -> None:
     scratch._stop(daemon, timeout)
 
 
-def test_a_stop_on_windows_waits_for_the_process_not_only_its_port(monkeypatch):
-    """Its port closes before it has let go of the store's files."""
+def test_a_stop_waits_for_the_process_not_only_its_port(monkeypatch):
+    """Its port closes before it has closed its sessions and let go of their stores."""
     checks = iter([True, True, False])
     seen: list[bool] = []
 
@@ -337,26 +335,26 @@ def test_a_stop_on_windows_waits_for_the_process_not_only_its_port(monkeypatch):
         seen.append(next(checks))
         return seen[-1]
 
-    _stopping(monkeypatch, "win32", alive)
+    _stopping(monkeypatch, alive)
 
     assert seen == [True, True, False]
 
 
-def test_a_stop_on_windows_that_outlasts_its_timeout_returns(monkeypatch):
-    seen: list[int] = []
-
-    _stopping(monkeypatch, "win32", lambda pid: (seen.append(pid), True)[1], timeout=0.1)
-
-    assert seen and set(seen) == {12345}
+def test_a_process_that_outlasts_the_stop_is_an_error(monkeypatch):
+    with pytest.raises(scratch.ScratchError, match="did not stop"):
+        _stopping(monkeypatch, lambda pid: True, timeout=0.1)
 
 
-def test_a_stop_elsewhere_ends_with_its_port(monkeypatch):
-    """A drain, or a zombie nobody reaps, holds no file a next opener needs there."""
-    seen: list[int] = []
-
-    _stopping(monkeypatch, "linux", lambda pid: (seen.append(pid), True)[1])
-
-    assert seen == []
+@pytest.mark.skipif(sys.platform != "linux", reason="a zombie is read from /proc")
+def test_a_zombie_is_not_alive():
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        # Exited, not reaped: os.kill(pid, 0) still finds it.
+        while open(f"/proc/{child.pid}/stat").read().rpartition(")")[2].split()[0] != "Z":
+            time.sleep(0.01)
+        assert not scratch._alive(child.pid)
+    finally:
+        child.wait()
 
 
 def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):
