@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 
 import httpx
+import pytest
 from vestigo.provenance import TransformSpec
 
 from strata.notebook.remote_bundle import SCHEMA_VERSION, unpack_notebook_output_bundle
@@ -75,6 +76,43 @@ def test_remote_executor_executes_simple_cell_via_notebook_endpoint(
     assert unpacked["success"] is True
     assert unpacked["variables"]["x"]["preview"] == 2
     assert (tmp_path / "unpacked" / "x.json").exists()
+
+
+@pytest.mark.parametrize("deadline", [True, False], ids=["deadline", "etimedout"])
+def test_only_a_deadline_is_a_timeout_on_a_worker(notebook_executor_server, monkeypatch, deadline):
+    """Python raises the OS's ETIMEDOUT (a mount on NFS) as TimeoutError: on a worker as
+    here, that is the run's error, not the cell's time running out."""
+    import errno
+
+    from strata.notebook import remote_executor
+
+    async def harness(*_args, **_kwargs):
+        if deadline:
+            raise TimeoutError()
+        raise OSError(errno.ETIMEDOUT, "Operation timed out")
+
+    monkeypatch.setattr(remote_executor, "_run_harness", harness)
+    metadata = {
+        "protocol_version": NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
+        "source": "x = 1",
+        "timeout_seconds": 10.0,
+        "inputs": {},
+        "mounts": [],
+        "env": {},
+    }
+
+    response = httpx.post(
+        notebook_executor_server["notebook_execute_url"],
+        files={"metadata": ("metadata.json", json.dumps(metadata).encode(), "application/json")},
+        timeout=10.0,
+    )
+
+    if deadline:
+        assert response.status_code == 408
+        assert "timed out" in response.json()["error"]
+    else:
+        assert response.status_code == 500
+        assert "Operation timed out" in response.json()["error"]
 
 
 def test_remote_executor_executes_simple_cell_via_executor_v1(
