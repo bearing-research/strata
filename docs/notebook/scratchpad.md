@@ -163,8 +163,8 @@ different Strata commits:
   daemon as the session opens. On #1598's branch it took 1.53 [1.30, 2.04] times
   A's: the first `run` waited about 4 s for the daemon, and a value's preview showed
   only its type's name, which #1599 changed to its repr.
-- **Holdout:** not rerun; it ran at #1599, so its probing row still includes the
-  4 s daemon wait.
+- **Holdout:** not rerun after #1600; it ran at #1599, so its probing row still
+  includes the daemon wait of about 4 s.
 
 ## Where it lives
 
