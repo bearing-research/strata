@@ -3250,6 +3250,42 @@ class TestRunBatch:
         assert events == [failed]
         assert harness.terminated
 
+    async def test_a_cell_whose_failure_cannot_be_reported_still_fails(
+        self, tmp_path, harness, monkeypatch
+    ):
+        """The callback that failed may be the one reporting it: the batch still returns."""
+
+        async def serving(*_args, watchdog_state, **_kwargs):
+            watchdog_state["active_cell_id"] = "c"
+            raise OSError(errno.ETIMEDOUT, "Operation timed out")
+
+        async def on_cell_event(_result):
+            raise OSError(errno.ETIMEDOUT, "Operation timed out")
+
+        monkeypatch.setattr(batch, "batch_service_loop", serving)
+
+        ran, _ = await self._run(tmp_path, on_cell_event=on_cell_event)
+
+        assert (ran.end_reason, ran.failed_cell_id) == ("cell_error", "c")
+        assert ran.cell_results[0].status == "cell_error"
+
+    async def test_a_cell_already_recorded_keeps_its_result(self, tmp_path, harness, monkeypatch):
+        """Its outputs may be stored: failing it would block what reads them."""
+
+        async def serving(
+            _host, _context, _reader, _send, cell_results, *_args, watchdog_state, **_kw
+        ):
+            watchdog_state["active_cell_id"] = "c"
+            cell_results["c"] = batch.BatchCellResult(cell_id="c", status="ok")
+            raise BrokenPipeError(32, "Broken pipe")
+
+        monkeypatch.setattr(batch, "batch_service_loop", serving)
+
+        ran, _ = await self._run(tmp_path)
+
+        assert (ran.end_reason, ran.failed_cell_id) == ("subprocess_died", None)
+        assert [r.status for r in ran.cell_results] == ["ok"]
+
     async def test_serving_that_raised_between_cells_ends_as_a_died_harness(
         self, tmp_path, harness, monkeypatch
     ):

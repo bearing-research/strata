@@ -156,13 +156,18 @@ async def _served_with_an_error(
     logger.exception("Serving a batch failed; stopping its harness")
     await terminate_subprocess_tree(proc)
     cell_id = watchdog_state["active_cell_id"]
-    if cell_id is None:
-        # Between cells: none ran, so the batch ends as a harness that died.
+    if cell_id is None or cell_results[cell_id].status != "not_run":
+        # Between cells, or after the cell's result was recorded (its outputs may be
+        # stored): the batch ends as a harness that died.
         return "subprocess_died", None
     failed = BatchCellResult(cell_id=cell_id, status="cell_error", error=f"Execution failed: {exc}")
     cell_results[cell_id] = failed
     if on_cell_event is not None:
-        await on_cell_event(failed)
+        try:
+            await on_cell_event(failed)
+        except Exception:
+            # What failed may be this callback; the batch's result still says it.
+            logger.exception("Could not report cell %s failed", cell_id)
     return "cell_error", cell_id
 
 
