@@ -155,13 +155,13 @@ Apple silicon Mac), with three runs per task, and an interval that crosses 1 is 
 evidence of a saving. The holdout's plot row is a single task. The columns ran on
 different Strata commits. The tuning tasks ran on arm C's branch
 ([#1598](https://github.com/bearing-research/strata/pull/1598)), before
-[#1599](https://github.com/bearing-research/strata/pull/1599), except their probing
-row, which was rerun after
+[#1599](https://github.com/bearing-research/strata/pull/1599), and their probing
+took 1.53 [1.30, 2.04] times A's there; 1.36 once #1599 showed a value's repr in its
+preview rather than its type's name, most of the rest being the 4 s or so the first
+`run` waited for the daemon. The table's tuning probing row is a rerun after
 [#1600](https://github.com/bearing-research/strata/pull/1600) started the daemon as
-the session opens. There, probing first took 1.53 [1.30, 2.04] times A's, and 1.36
-once #1599 showed a value's repr in its preview rather than its type's name; most of
-the rest was the 4 s or so the first `run` waited for the daemon. The holdout ran
-once, at #1599, so its probing row still includes that wait.
+the session opens. The holdout was not rerun: it ran at #1599, so its probing row
+still includes that wait.
 
 ## Where it lives
 
