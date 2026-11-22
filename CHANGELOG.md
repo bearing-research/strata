@@ -554,6 +554,11 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **On Windows a scratchpad daemon is killed only as the process it was started as.**
+  Windows gives a dead process's pid to the next one, and a kill by pid ends whichever
+  holds it. A setup that failed killed its daemon by pid after the daemon had exited,
+  which could end an unrelated process. The daemon is now noted with its creation time,
+  and the kill checks it on the handle it kills through. (#1608)
 - **A process named in bytes that are not UTF-8 no longer fails every run as the
   harness user.** Before each such run, the sweep for what earlier cells left running
   decoded every process's `/proc` status strictly. A process can name itself anything,
