@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "strata-agent-hook session-start mcp__plugin_strata-scratchpad_strata__run || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "strata-agent-hook prompt mcp__plugin_strata-scratchpad_strata__run || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

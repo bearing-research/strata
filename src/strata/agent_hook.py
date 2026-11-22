@@ -3,9 +3,11 @@
 Claude Code runs it at session start (``session-start``) and on each prompt
 (``prompt``, only the cells the prompt names), with the hook's JSON on stdin. It reads
 the digest the daemon wrote (``.strata-scratch/.strata/digest.json``) and prints a short
-block for the agent. It never starts the daemon nor opens a session, and runs by path on
-the standard library alone (``python -I agent_hook.py``): ``strata.notebook`` takes half
-a second to import, and this runs before every prompt.
+block for the agent. It never starts the daemon nor opens a session, and never imports
+``strata.notebook``, which takes half a second, as this runs before every prompt. It runs
+two ways: by path on the standard library alone (``python -I agent_hook.py``, as
+``strata agent install`` writes it), and as ``strata-agent-hook`` for the plugin, which
+loads the package root (``strata/__init__.py``) too.
 
 The digest is last-known state, so each cell's recorded reads are observed again first:
 ``cached`` means checked just now. A path that changed makes its cell stale, and every
@@ -310,6 +312,12 @@ def main(argv: list[str]) -> int:
         return 0
     sys.stdout.write(block)
     return 0
+
+
+def run() -> int:
+    """``strata-agent-hook``, the plugin's: on strata's own interpreter, wherever
+    ``strata`` is on PATH, and importing nothing of Strata's but its root."""
+    return main(sys.argv)
 
 
 if __name__ == "__main__":

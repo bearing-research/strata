@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,10 @@ def project(tmp_path, monkeypatch):
     yield root
     # Every one this test started, not only the one server.json names.
     for pid in started:
-        # Gone already: ProcessLookupError, or on Windows a plain OSError.
+        if sys.platform == "win32":
+            # Not os.kill: one that exited has given its pid to another process by now.
+            scratch._kill(pid)
+            continue
+        # Gone already: ProcessLookupError.
         with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGTERM)
