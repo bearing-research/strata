@@ -554,6 +554,15 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A process named in bytes that are not UTF-8 no longer fails every run as the
+  harness user.** Before each such run, the sweep for what earlier cells left running
+  decoded every process's `/proc` status strictly. A process can name itself anything,
+  so one that a cell left running with such a name made each later run fail before
+  it started. (#1605)
+- **On Linux before 4.1, or without PID namespaces, runs as the harness user no longer
+  all fail.** The same sweep read each process's session from the `NSsid` line of its
+  `/proc` status, which those kernels do not print, and raised before every run. It
+  now reads the session from `/proc/<pid>/stat` there. (#1605)
 - **A shared or worker environment's console scripts run wherever the directory is.**
   `uv sync` made the environment itself, and such a venv writes its own path into every
   console script, so a directory moved or copied elsewhere ran `python` and imported

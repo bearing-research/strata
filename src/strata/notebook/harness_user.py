@@ -182,24 +182,31 @@ def leftover_processes(
     ]
 
 
-def _process_table() -> dict[int, tuple[int, int, int]]:
+def _process_table(proc: str = "/proc") -> dict[int, tuple[int, int, int]]:
     """Every live process's (parent, real uid, session), from ``/proc``."""
     table: dict[int, tuple[int, int, int]] = {}
-    for name in os.listdir("/proc"):
+    for name in os.listdir(proc):
         if not name.isdigit():
             continue
         try:
-            with open(f"/proc/{name}/status") as status:
+            # Its Name is whatever the process set, not always UTF-8.
+            with open(f"{proc}/{name}/status", encoding="utf-8", errors="replace") as status:
                 fields = dict(line.split(":", 1) for line in status if ":" in line)
         except OSError:
             continue  # exited while listed
         if fields["State"].split()[0] in ("Z", "X"):
             continue  # dead, waiting to be reaped
-        table[int(name)] = (
-            int(fields["PPid"]),
-            int(fields["Uid"].split()[0]),
-            int(fields["NSsid"].split()[0]),
-        )
+        if "NSsid" in fields:
+            session = int(fields["NSsid"].split()[0])
+        else:
+            # Kernels before 4.1, or without PID namespaces, have none: stat's session is
+            # the same id. One that does not parse fails the sweep: it cannot be skipped.
+            try:
+                with open(f"{proc}/{name}/stat", "rb") as stat_file:
+                    session = int(stat_file.read().rpartition(b")")[2].split()[3])
+            except OSError:
+                continue  # exited while listed
+        table[int(name)] = (int(fields["PPid"]), int(fields["Uid"].split()[0]), session)
     return table
 
 
