@@ -57,6 +57,16 @@ def _calls(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Call]:
     return [node for node in _own_nodes(fn) if isinstance(node, ast.Call)]
 
 
+def _hands_a_sweep_to_a_thread(call: ast.Call) -> bool:
+    """Without in_thread, which a cancel does not wait for: named, or inside a partial or
+    a lambda."""
+    return _called(call.func) in OFFLOADS and any(
+        isinstance(node, (ast.Name, ast.Attribute)) and _called(node) in SWEEPS
+        for arg in call.args
+        for node in ast.walk(arg)
+    )
+
+
 def test_no_coroutine_sweeps_or_hands_over_on_the_loop():
     trees = {
         path: ast.parse(path.read_text(encoding="utf-8")) for path in sorted(SRC.rglob("*.py"))
@@ -69,18 +79,10 @@ def test_no_coroutine_sweeps_or_hands_over_on_the_loop():
         for call in _calls(fn)
         if _called(call.func) in SWEEPS
     ]
-    # Handed to a thread without in_thread, which a cancel does not wait for: named,
-    # or inside a partial or a lambda.
     abandoned = [
         f"{path.relative_to(SRC)}:{call.lineno}"
         for path, call in nodes
-        if isinstance(call, ast.Call)
-        and _called(call.func) in OFFLOADS
-        and any(
-            isinstance(node, (ast.Name, ast.Attribute)) and _called(node) in SWEEPS
-            for arg in call.args
-            for node in ast.walk(arg)
-        )
+        if isinstance(call, ast.Call) and _hands_a_sweep_to_a_thread(call)
     ]
 
     assert on_loop == []
@@ -159,9 +161,10 @@ async def test_a_cancel_is_raised_whatever_the_thread_raised():
 
 @pytest.mark.asyncio
 async def test_a_cancel_from_an_anyio_scope_waits_for_the_thread():
+    """It waits; that it does not spin meanwhile (the shield scope) is not pinned here."""
     import anyio
 
-    entered, release = threading.Event(), threading.Event()
+    release = threading.Event()
     finished: list[bool] = []
 
     def walk() -> None:
@@ -189,8 +192,4 @@ def test_the_check_sees_a_sweep_handed_to_a_bare_thread(offload):
     tree = ast.parse(f"async def run(path, user):\n    await {offload}\n")
     (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and _called(n.func) in OFFLOADS]
 
-    assert any(
-        isinstance(n, (ast.Name, ast.Attribute)) and _called(n) in SWEEPS
-        for arg in call.args
-        for n in ast.walk(arg)
-    )
+    assert _hands_a_sweep_to_a_thread(call)
