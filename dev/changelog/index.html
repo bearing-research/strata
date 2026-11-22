@@ -4398,6 +4398,17 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A shared or worker environment's console scripts run wherever the directory is.</strong>
+  <code>uv sync</code> made the environment itself, and such a venv writes its own path into every
+  console script, so a directory moved or copied elsewhere ran <code>python</code> and imported
+  but failed each script with "required file not found". Strata now creates the
+  directory with <code>uv venv --relocatable</code> before the sync, under
+  <code>notebook_env_backend = "shared"</code> and on a worker building a notebook's lock, so a
+  script starts the interpreter beside it. It finds that with <code>realpath</code>, which
+  coreutils and macOS 13 and later have. Environments already built stay as they are
+  until their lock changes. A worker's relative <code>STRATA_WORKER_ENV_ROOT</code> is now read
+  against the worker's directory, where uv built the environment in another place and
+  every cell failed with "has no interpreter". (#1604)</li>
 <li><strong>A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.</strong> Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the
