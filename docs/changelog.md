@@ -785,6 +785,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A warm cell whose checkpoint or head the server could not record runs once.** The
+  warm worker's error was taken for a missing worker, so the cell ran again cold, its
+  side effects with it. The run now fails with that error, as a cold run does. (#1613)
 - **A lock that moved outside Strata is installed before the next run.** A cell's key
   reads `uv.lock` on disk, but the cell ran in the environment as it was last synced.
   After a `git pull`, a branch switch or `uv lock` in a terminal, a result computed
