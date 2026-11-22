@@ -37,7 +37,7 @@ FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab
 # ``--build-arg STRATA_VERSION=<server version>`` or install a wheel.
 #
 # ``uv`` is required too: a notebook with a uv.lock (every ``strata new``
-# notebook) runs in a locked environment built by ``uv sync --frozen``
+# notebook) runs in a locked environment built by ``uv venv`` and ``uv sync --frozen``
 # (worker_env.py). Without uv the worker reports
 # ``locked_environments: false`` and cells run in this image, ignoring the
 # notebook's pins.

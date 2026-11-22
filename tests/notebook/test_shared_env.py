@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -42,8 +43,11 @@ def _package(parent: Path) -> Path:
     """A local package, so adding a dependency needs no index."""
     package = parent / "tinydep"
     (package / "tinydep").mkdir(parents=True)
-    (package / "tinydep" / "__init__.py").write_text("")
-    (package / "pyproject.toml").write_text('[project]\nname = "tinydep"\nversion = "0.1.0"\n')
+    (package / "tinydep" / "__init__.py").write_text("def main():\n    print('tinydep ran')\n")
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "tinydep"\nversion = "0.1.0"\n'
+        '[project.scripts]\ntinydep = "tinydep:main"\n'
+    )
     return package
 
 
@@ -338,6 +342,19 @@ async def test_starting_a_cell_installs_nothing_into_the_shared_environment(tmp_
 
     assert (run / "ran").exists(), "the harness never started"
     assert not _has_tinydep(environment), "starting a cell installed into a shared environment"
+
+
+def test_a_shared_environment_moved_elsewhere_runs_its_console_scripts(tmp_path, shared):
+    """As an archive of the directory is, unpacked where the path it was built at is not."""
+    notebook = _notebook(tmp_path, "alpha")
+    assert get_backend(notebook).add(str(_package(tmp_path)), timeout=180).success
+    moved = tmp_path / "elsewhere" / "environment"
+    moved.parent.mkdir()
+    shutil.move(_linked(notebook), moved)
+
+    ran = subprocess.run([str(moved / "bin" / "tinydep")], capture_output=True, text=True)
+
+    assert ran.stdout.strip() == "tinydep ran", ran.stderr
 
 
 class TestTheSweepOnlyTakesWhatItBuilt:
