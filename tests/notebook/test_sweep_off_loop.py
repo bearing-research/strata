@@ -29,6 +29,8 @@ SWEEPS = {
     "harness_fields",
 }
 
+OFFLOADS = ("to_thread", "run_sync", "run_in_executor")
+
 
 def _called(func: ast.expr) -> str | None:
     """The called name without its leading underscores: ``self._harness_fields`` is
@@ -67,13 +69,18 @@ def test_no_coroutine_sweeps_or_hands_over_on_the_loop():
         for call in _calls(fn)
         if _called(call.func) in SWEEPS
     ]
-    # Handed to a thread without in_thread, which a cancel does not wait for.
+    # Handed to a thread without in_thread, which a cancel does not wait for: named,
+    # or inside a partial or a lambda.
     abandoned = [
         f"{path.relative_to(SRC)}:{call.lineno}"
         for path, call in nodes
         if isinstance(call, ast.Call)
-        and _called(call.func) in ("to_thread", "run_sync", "run_in_executor")
-        and any(_called(arg) in SWEEPS for arg in call.args)
+        and _called(call.func) in OFFLOADS
+        and any(
+            isinstance(node, (ast.Name, ast.Attribute)) and _called(node) in SWEEPS
+            for arg in call.args
+            for node in ast.walk(arg)
+        )
     ]
 
     assert on_loop == []
@@ -132,8 +139,58 @@ async def test_a_second_cancel_waits_for_the_thread_too():
     assert finished == [True]
 
 
-def test_the_check_sees_a_sweep_handed_to_a_bare_thread():
-    tree = ast.parse("async def run(path, user):\n    await asyncio.to_thread(hand_over, path)\n")
-    (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and n.args]
+@pytest.mark.asyncio
+async def test_a_cancel_is_raised_whatever_the_thread_raised():
+    entered, release = threading.Event(), threading.Event()
 
-    assert _called(call.func) == "to_thread" and _called(call.args[0]) == "hand_over"
+    def walk() -> None:
+        entered.set()
+        release.wait(30)
+        raise OSError("work/ is a link")
+
+    run = asyncio.create_task(in_thread(walk))
+    await asyncio.to_thread(entered.wait, 30)
+    run.cancel()
+    threading.Timer(1.0, release.set).start()
+
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_from_an_anyio_scope_waits_for_the_thread():
+    import anyio
+
+    entered, release = threading.Event(), threading.Event()
+    finished: list[bool] = []
+
+    def walk() -> None:
+        entered.set()
+        release.wait(30)
+        finished.append(True)
+
+    with anyio.CancelScope() as scope:
+        threading.Timer(1.0, release.set).start()
+        scope.cancel()
+        await in_thread(walk)
+
+    assert finished == [True]
+
+
+@pytest.mark.parametrize(
+    "offload",
+    [
+        "asyncio.to_thread(hand_over, path)",
+        "anyio.to_thread.run_sync(functools.partial(context.write_manifest, path))",
+        "anyio.to_thread.run_sync(lambda: hand_over(path, user))",
+    ],
+)
+def test_the_check_sees_a_sweep_handed_to_a_bare_thread(offload):
+    tree = ast.parse(f"async def run(path, user):\n    await {offload}\n")
+    (call,) = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and _called(n.func) in OFFLOADS]
+
+    assert any(
+        isinstance(n, (ast.Name, ast.Attribute)) and _called(n) in SWEEPS
+        for arg in call.args
+        for n in ast.walk(arg)
+    )
