@@ -2427,6 +2427,15 @@ def _batch_art(artifact_id="art", version=3, content_type="json/object"):
     return SimpleNamespace(id=artifact_id, version=version, params={"content_type": content_type})
 
 
+def _venv(directory: Path) -> Path:
+    """The interpreter path of a directory that is a virtual environment."""
+    (directory / "bin").mkdir(parents=True)
+    (directory / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    python = directory / "bin" / "python"
+    python.touch()
+    return python
+
+
 def _batch_fakes(tmp_path, *, consumed=(), displays=(), console=None, wired=("x",), **overrides):
     """A host and a context with nothing behind them, and a record of what they were asked."""
     seen = SimpleNamespace(
@@ -3183,6 +3192,15 @@ class TestRunBatch:
         assert kwargs["spawned_as"] is self.USER
         assert seen.tokens == [9.0]
         assert harness.sent == [b"token\n"]
+
+    async def test_it_starts_in_the_notebooks_environment(self, tmp_path, harness):
+        host, _, _ = _batch_fakes(tmp_path)
+        host.venv_python = _venv(tmp_path / "env")
+
+        await self._run(tmp_path, host=host)
+
+        ((_cmd, kwargs),) = harness.spawned
+        assert kwargs["env"]["VIRTUAL_ENV"] == str(tmp_path / "env")
 
     async def test_the_batch_directory_is_removed_after(self, tmp_path, harness):
         await self._run(tmp_path)
@@ -4513,6 +4531,20 @@ class TestPythonHarness:
         assert kwargs["spawned_as"] is self.USER
         assert kwargs["new_group"] is True
         assert kwargs["cwd"] == "notebook"
+
+    async def test_it_starts_in_the_notebooks_environment(self, spawned, tmp_path):
+        await self._run(tmp_path, venv=_venv(tmp_path / "env"))
+
+        assert spawned.spawn[1]["env"]["VIRTUAL_ENV"] == str(tmp_path / "env")
+
+    async def test_an_interpreter_that_is_gone_runs_nothing_and_says_so(self, spawned, tmp_path):
+        gone = tmp_path / ".venv" / "bin" / "python"
+
+        result = await self._run(tmp_path, venv=gone)
+
+        assert result["success"] is False
+        assert str(gone) in result["error"] and "Sync the environment" in result["error"]
+        assert spawned.spawn is None
 
     async def test_the_token_goes_on_its_stdin(self, spawned, tmp_path):
         await self._run(tmp_path, run_token="tok")

@@ -1,6 +1,5 @@
 """What a cell actually sees, driven through a real harness spawn.
 
-Lives outside ``tests/notebook/``, whose conftest skips ``uv run``, so the shipping command runs.
 The harness-user check needs root and a second OS user, named by ``STRATA_TEST_HARNESS_USER``.
 """
 
@@ -85,6 +84,28 @@ def test_index_credentials_do_not_reach_a_cell(tmp_path, capsys, monkeypatch):
     assert "UV_PUBLISH_TOKEN <absent>" in stdout
     assert "UV_NO_PROGRESS 1" in stdout
     assert "HF_TOKEN hf_x" in stdout
+
+
+def test_a_cell_runs_in_its_notebooks_environment_not_the_servers(tmp_path, capsys, monkeypatch):
+    """A server started by ``uv run`` has a ``VIRTUAL_ENV`` and a ``PATH`` of its own."""
+    monkeypatch.setenv("VIRTUAL_ENV", "/server/venv")
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/server/env")
+    nb = _notebook(tmp_path)
+    (nb / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    write_cell(
+        nb,
+        "peek",
+        "import os\n"
+        "print('VIRTUAL_ENV', os.environ.get('VIRTUAL_ENV'))\n"
+        "print('UV_PROJECT_ENVIRONMENT', os.environ.get('UV_PROJECT_ENVIRONMENT', '<absent>'))\n"
+        "print('PATH', os.environ['PATH'].split(os.pathsep)[0])\n",
+    )
+
+    stdout = _run(nb, capsys)
+
+    assert f"VIRTUAL_ENV {nb / '.venv'}" in stdout
+    assert "UV_PROJECT_ENVIRONMENT <absent>" in stdout
+    assert f"PATH {nb / '.venv' / 'bin'}" in stdout
 
 
 _HARNESS_USER = os.environ.get("STRATA_TEST_HARNESS_USER")

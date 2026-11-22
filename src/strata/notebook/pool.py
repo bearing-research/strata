@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.notebook.harness_env import configured_allowlist, harness_env
+from strata.notebook.harness_env import configured_allowlist, harness_env, in_environment
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
     hand_over,
@@ -146,6 +146,9 @@ class WarmProcessPool:
             # skipping it would expose server secrets to most cells.
             allowlist = configured_allowlist()
             lifeline_fds, lifeline_vars = lifeline_handoff()
+            env = identity_env(harness_env(allowlist, lifeline_vars), harness_user)
+            if self.worker_command is None:
+                env = in_environment(env, self.python_executable)
             spawn = asyncio.create_task(
                 asyncio.create_subprocess_exec(
                     *command,
@@ -156,7 +159,7 @@ class WarmProcessPool:
                     stderr=asyncio.subprocess.DEVNULL,
                     cwd=str(self.notebook_dir),
                     limit=SUBPROCESS_LINE_LIMIT,
-                    env=identity_env(harness_env(allowlist, lifeline_vars), harness_user),
+                    env=env,
                     pass_fds=lifeline_fds,
                     **spawn_kwargs(harness_user),
                     **subprocess_kwargs_for_new_group(),

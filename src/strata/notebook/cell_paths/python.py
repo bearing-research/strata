@@ -39,6 +39,7 @@ from strata.notebook.cell_paths.module_export import write_module_export_outputs
 from strata.notebook.code_keys import code_key
 from strata.notebook.env import moved_input
 from strata.notebook.execution_result import CellExecutionResult, hit_console
+from strata.notebook.harness_env import in_environment
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
     UnsafeRunFile,
@@ -1145,6 +1146,18 @@ async def run_harness(
         harness_user = resolve_harness_user()
     except LocalExecutionRefused as exc:
         return _refused_result(exc)
+    if venv_python.is_absolute() and not venv_python.exists():
+        # ``uv run`` rebuilt a deleted environment unasked; a bare ENOENT says nothing.
+        return {
+            "success": False,
+            "error": (
+                f"Notebook environment is not ready: its interpreter {venv_python} is gone. "
+                "Sync the environment, then run the cell again."
+            ),
+            "stderr": "",
+            "stdout": "",
+            "variables": {},
+        }
     cmd = [str(venv_python), str(harness_path), str(manifest_path)]
 
     # New process group so cancel can signal the whole descendant tree (DataLoader
@@ -1173,7 +1186,10 @@ async def run_harness(
                     stdin=asyncio.subprocess.PIPE if run_token is not None else None,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=identity_env(harness_env({**lifeline_vars, **events_vars}), harness_user),
+                    env=in_environment(
+                        identity_env(harness_env({**lifeline_vars, **events_vars}), harness_user),
+                        venv_python,
+                    ),
                     pass_fds=(*lifeline_fds, *events_fds),
                     **spawn_kwargs(harness_user),
                     **subprocess_kwargs_for_new_group(),

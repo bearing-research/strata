@@ -545,10 +545,17 @@ exhaustive commit history.
   links to, and in any notebook outside its lock on `uv.lock` and its environment log.
   The harness now starts on the environment's interpreter, as a warm process, a
   service-mode cell and a scratchpad in its project's environment already did, so such
-  an edit waits for the next sync (opening the notebook, or an environment sync) and
-  a cold cell no longer waits on uv or needs it on `PATH`. A cold cell's environment
-  variables are now a warm one's: uv no longer sets `VIRTUAL_ENV` and puts the
-  environment's `bin` first on `PATH` for it. (#1603)
+  an edit waits for the next environment sync, and a cold cell no longer waits on uv or
+  needs it on `PATH`. Until that sync, a cold cell runs in the environment as it was
+  last synced, as a warm one always has, and publishing stays refused while `uv.lock`
+  and the installed environment differ. A cold cell whose environment was deleted says
+  to sync it, where `uv run` rebuilt it unasked. (#1603)
+- **Every local Python cell runs with its environment active.** `VIRTUAL_ENV` names the
+  notebook's environment and its `bin` leads `PATH`, so the `python`, the `uv pip` and
+  the console scripts a cell starts are the notebook's. Only a cold cell had that, from
+  `uv run`; a warm one and a Run All got the server's `VIRTUAL_ENV` and `PATH`, which
+  for a server started with `uv run` are Strata's own. The server's
+  `UV_PROJECT_ENVIRONMENT` and `UV_PYTHON` no longer reach a cell. (#1603)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the
