@@ -1,194 +1,99 @@
 # Formal verification: handoff
 
-Written for the next agent (or person) to pick up this work cold. The
-findings themselves, with traces and proposed fixes, are in
-[`README.md`](README.md). This file covers the state of the work, how to
-run it, the conventions, what went wrong along the way, and what to do
-next.
+For the next agent (or person) picking this up cold. What the systems must
+do and what checks it is in [`SYSTEMS.md`](SYSTEMS.md); how to run things is
+in [`README.md`](README.md).
 
 ## State
 
-- **Branch:** merged to `main` in #867. Fixes land as separate PRs.
-- **Findings:** 12, all reproduced against the real code. The status table below marks which are fixed.
-  See the status table below.
-- **Property tests:** two, both passing; the pruning one no longer excludes finding 3.
-
-## Running everything
-
-```bash
-uv sync --all-extras                       # as CLAUDE.md says
-
-# Replays: one pytest per finding, each PASSES while its bug exists
-uv run pytest formal/ -v                   # ~15 s; property tests skip without
-                                           # Hypothesis
-
-# Property tests (Hypothesis is not a project dependency)
-uv run --with hypothesis pytest formal/test_pruning_properties.py formal/test_staleness_properties.py
-PRUNING_EXAMPLES=60000 uv run --with hypothesis pytest formal/test_pruning_properties.py --timeout=0
-STALENESS_EXAMPLES=40 uv run --with hypothesis pytest formal/test_staleness_properties.py --timeout=0
-
-# Model checking (Java is preinstalled in the cloud container)
-curl -sSLO https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
-cd formal/tla
-java -cp ../../tla2tools.jar tlc2.TLC -deadlock -workers 1 -config <Config>.cfg <Spec>.tla
-```
-
-`formal/` is outside `testpaths`, so the normal `uv run pytest` never runs
-any of this, and CI doesn't either.
+- **2026-09:** the first investigation found twelve bugs, all fixed
+  (#868-#879); [`FINDINGS.md`](FINDINGS.md) has them.
+- **2026-11-22:** a review against `main` (667 commits later) found the two
+  Strata models still finding their bugs and their patched configurations
+  passing, but nothing ran them, and much of the system had no
+  specification. It added `SYSTEMS.md`, `run_models.py`, the `Formal`
+  workflow and the `Mirrors:` drift test, and listed the open properties
+  below. Each lead in `SYSTEMS.md` is unconfirmed until replayed.
 
 ## Conventions
 
-- **One model per mechanism, one config per finding.** Each spec has a
-  `Patched` (or similar) constant: `FALSE` models the code as it is,
-  `TRUE` models the proposed fix. A `*_Patched.cfg` must check
-  exhaustively with no violation. The comment on each action names the
-  Python function it mirrors; keep that true when the code moves.
-- **Every violation gets a replay** against the real code in
-  `formal/test_*_counterexamples.py`. The replay **asserts the buggy
-  outcome**, so it passes while the bug exists. When a fix lands, invert
-  the assertion and move the test into `tests/` as a regression test.
-- **Replays reuse the suite's fixtures** by importing them from `tests/`
-  (autouse ones included, e.g. `fast_notebook_env` for notebook tests),
-  with `# ruff: noqa: F811` at the top of the module.
+- **One model per mechanism, one configuration per finding.** A spec keeps
+  a `Patched` (or similar) constant: `FALSE` models the code before a fix,
+  `TRUE` the code after. Pin every configuration's outcome in
+  `run_models.py`, and list the code each action mirrors under `Mirrors:`.
+- **An action is one atomic step of the code**: a database transaction, or
+  a stretch of a coroutine between awaits. Splitting a Python operation into
+  the steps it really takes is where the bugs are (findings 1, 5 and 9 all
+  came from a step the code thought was one).
+- **Every violation gets a replay** against the real code, asserting the
+  buggy outcome, before it counts or is rated. The fix inverts it into a
+  regression test under `tests/` and marks the property's row in
+  `SYSTEMS.md`.
 - **Property-test oracles must not share Strata's logic.** Pruning uses
-  exact Python comparisons, and staleness evaluates the current sources
-  from scratch.
-- **Severity** is a judgment call: how likely the trigger is, and whether
-  the result is silent wrong data (high) or a visible failure or a wrong
-  label (lower).
+  exact Python comparisons; staleness evaluates the sources from scratch.
+- **Severity:** silent wrong data is high; a leaked resource, a wrong label
+  or a visible failure is lower. Replay before rating: a model can overstate
+  impact (finding 11 looked like wrong results; only the status was wrong).
 
 ## Gotchas (each cost time once)
 
-- TLC `.cfg` files can't hold function or record literals. Put structure
-  such as the cell chain in `Staleness.tla` in the spec as definitions.
+- TLC `.cfg` files can't hold function or record literals; put structure in
+  the spec as definitions.
 - With `-workers auto`, TLC traces aren't always the shortest. Use
-  `-workers 1` to get a trace worth quoting.
-- A model can overstate impact. Finding 11 looked like wrong results in
-  TLC, but the replay showed the executor re-checks provenance, so only
-  the reported status is wrong. Always replay before rating severity.
+  `-workers 1` for a trace worth quoting.
 - Hypothesis with plain `st.floats()` / `st.integers()` almost never
-  produces equal values or NaN next to a number. Mix in a small pool of
-  boundary values; `test_pruning_properties.py` shows how. Without it the
-  known NaN bug went unfound in 3,000 examples.
-- The suite sets a 180 s per-test timeout (`pytest-timeout`, thread
-  method). Long property runs need `--timeout=0` or
-  `@pytest.mark.timeout(...)`.
-- Only variables that some other cell reads are stored as artifacts, so a
-  leaf cell's value has no artifact. The staleness property adds a sink
-  cell for that reason.
+  produces equal values or NaN next to a number. Mix in a pool of boundary
+  values, as `test_pruning_properties.py` does.
+- The suite's 180 s per-test timeout applies to `formal/` too; long runs
+  need `--timeout=0`.
+- Only variables some other cell reads are stored, so a leaf's value has no
+  artifact; the staleness property adds a sink cell for that reason.
 - pyiceberg's `SqlCatalog` scopes tables by catalog name. Strata builds
   warehouse catalogs as `SqlCatalog("strata")`; match it in fixtures.
-- Postgres-backed tests (`tests/test_artifact_store_postgres.py`) start a
-  container through Docker and skip when the daemon isn't reachable.
-- CPython 3.13+ fixed a lost-wakeup in `asyncio.Condition`, and the
-  project still supports 3.12. Check concurrency findings on both.
-
-## Findings status
-
-Numbers match `README.md`. A fixed finding keeps its row, and its Replay
-column points at the regression test that replaced the replay.
-
-| # | Finding | Replay | Proposed fix (verified in the model where marked) | Smallest first step |
-| --- | --- | --- | --- | --- |
-| 1 | GC deletes a notebook's current value during a rebuild | `tests/test_artifact_store.py::TestGcSparesCurrentValues` | GC also protects the latest ready/superseded version ✓ | **Fixed** |
-| 2 | Promoting one notebook's output strands another's | `tests/test_artifact_store.py::TestTwoIdsOneComputation` | `get_latest_version` accepts `superseded` ✓ | **Fixed** (callers audited) |
-| 3 | `!=` pruning drops NaN rows | `tests/test_filters.py::TestPruningKeepsNaNRows` | Don't prune `!=` on float columns | **Fixed** |
-| 4 | Projection fingerprint not injective | `tests/test_smoke.py::TestCacheKey` | Hash `json.dumps(columns)` | **Fixed** |
-| 5 | Stale runner publishes; winner rewrites a ready artifact | `tests/test_build_runner.py::TestOnlyTheLeaseHolderPublishes` | Per-attempt blob keys + one fenced promote ✓ | **Fixed** |
-| 6 | Stale runner fails the build that replaced it | `tests/test_build_runner.py::TestALeaseDecidesWhoMayFail` | Fence `fail_build` / `fail_artifact` on the lease ✓ | **Fixed** |
-| 7 | Old manifest's upload URL still writes | `tests/test_pull_model.py::TestARetiredManifestCannotWriteTheOutput` | Per-attempt blob keys ✓ | **Fixed** |
-| 8 | Lost wakeup on Python 3.12 | `tests/test_adaptive_concurrency.py` (teeth on 3.12) | Re-notify on cancel in `ResizableLimiter.acquire` ✓ | **Fixed** |
-| 9 | Evicted limiter lets a tenant exceed its quota | `tests/test_multitenancy.py::TestEvictionSparesBusyTenants` | Evict only idle limiters ✓ | **Fixed** |
-| 10 | Shutdown drain misses evicted limiters' streams | Same as 9 | Same as 9 ✓ | **Fixed** |
-| 11 | Mid-run upstream edit leaves the downstream READY | `tests/notebook/test_e2e_staleness.py::TestAnEditDuringARun` | Keep the walk's verdict; leave running cells alone ✓ | **Fixed** |
-| 12 | Deny rule sidestepped by another address form | `tests/test_auth.py::TestADenyOnOneAddressCoversTheTable` | Deny rules checked against every alias of the table | **Fixed** |
-
-Suggested fix order, cheapest and safest first: 6, 8, 3, 12 (docs), 1,
-9/10, 11, 2, 4, then 5/7.
+- CPython 3.13+ fixed a lost wakeup in `asyncio.Condition`, and 3.12 is
+  supported. Check concurrency findings on both.
+- Pytest temp dirs from repeated property runs fill the disk; pass
+  `--basetemp` in a scratch directory and delete it after.
 
 ## Already checked; don't redo
 
-- Interactive vs bulk starvation: impossible by construction, since the
-  tiers use separate limiters.
-- The deny-first loop in `AclEvaluator.authorize` is correct as written.
-  The weakness is naming (finding 12).
-- `derive_subkey` label collisions: none possible as used.
-- `CacheKey.to_hex` `|` separator: not collidable with real file paths.
-- Signed URLs sign `json.dumps(data, sort_keys=True)`, which is canonical.
-- Row-group pruning for float64, int64, string, timestamp and decimal:
-  60,000 random examples; only finding 3, now fixed.
-- Sequential edits and runs on a diamond of plain Python cells: 40 random
-  sequences, all consistent.
+- Interactive vs bulk starvation: impossible by construction (ADM-4).
+- The deny-first loop in `AclEvaluator.authorize` (ACL-1).
+- `derive_subkey` labels, the `to_hex` separator, signed-URL encoding
+  (PROV-1, PROV-2, PROV-4).
+- Row-group pruning for five types: 60,000 examples (PR-1).
+- Sequential edits and runs on a diamond of Python cells (NB-3).
 
-## Next verifications, in priority order
+## Plan for the open properties
 
-Each item says what to prove, where, and how to start. "Lead" marks a
-suspicion from reading code that hasn't been confirmed.
+In order of consequence over effort. Each step is one PR: the model or
+property, the replays of what it finds, then a PR per fix.
 
-1. **Artifact store, non-atomic steps (lead).** `ArtifactLifecycle.tla` (in
-   the vestigo repository's `formal/tla/` since ADR 002)
-   treats each store method as one atomic step, which the code doesn't
-   guarantee:
-   - `finalize_artifact` calls `begin_write` on neither backend. It reads
-     its row, calls `find_by_provenance` on a *second* connection, then
-     updates, so the check and the act are separate. The partial unique
-     index is the only backstop.
-   - On SQLite, the single-writer lock narrows the window. On Postgres,
-     `begin_write` is a keyed advisory lock taken only by
-     `create_artifact` and `force_finalize_canonical`, and the rest runs
-     under READ COMMITTED.
-   - Split `Finalize` and `ForcePromote` into their real read and write
-     steps, with locks only where the code takes them, and re-check the
-     same three invariants on both backends.
-   - Replay any violation with threads on SQLite, and with
-     `tests/test_artifact_store_postgres.py`'s Docker fixture on Postgres.
-2. **Notebook staleness, wider and concurrent.** Extend
-   `test_staleness_properties.py` with more cell kinds: leaf-only cells,
-   `@nocache`, `@loop max_iter= carry=`, a failing cell, prompt and SQL
-   cells (which use alternate cache schemes), and `# @per_variant`.
-   Finding 11 shows the bugs are in the overlaps. To generate overlapping
-   steps, drive the handlers directly with `FakeNotebookWebSocket`
-   (`tests/notebook/e2e_fixtures.py`) so an edit can land while a run is
-   awaiting. Oracle: evaluate the sources from scratch, as now.
-3. **Run-all batching equals single-cell runs.** CLAUDE.md names
-   `CellExecutor.execute_batch` as the deliberate exception to "the
-   artifact store is the sole source of truth". Write a differential
-   property test: for random notebooks, `notebook_run_all` must leave the
-   same stored values and statuses as running each cell in order.
-4. **ACL naming across URI forms.** Generalize finding 12 into a property
-   test. For each catalog shape (local warehouse, `catalog_properties`
-   SQL catalog, named catalog, S3 warehouse), every URI form that
-   `PyIcebergCatalog.load_table` resolves to the same `metadata_location`
-   must be refused by a deny written for any one of those forms. The
-   finding 12 fix covers the SQL-catalog shape by construction; this
-   would check the others.
-5. **Iceberg manifest pruning.** `test_pruning_properties.py` covers
-   Parquet row groups only. File-level skipping uses Iceberg manifest
-   bounds, which have their own NaN counts and string truncation. Build
-   real Iceberg tables with `temp_warehouse`-style fixtures and check that
-   the scan with filters equals the scan without filters, filtered in
-   Python.
-6. **Disk cache eviction vs concurrent readers (lead).** `cache/disk.py`
-   evicts to a size limit while readers read cache files whole. A small
-   TLA+ model of write (temp file + rename), evict (unlink) and read
-   (open, then read) would settle whether a
-   reader can see a partial or deleted file. Replay any violation with
-   threads.
-7. **Stream lifecycle.** `QoSAdmission._release`'s docstring says
-   `GET /v1/streams/{id}` has no already-consumed guard, so two handlers
-   can serve one stream. Model create, attach, stream, disconnect,
-   cleanup and QoS release. Invariants: each admission is released
-   exactly once, and a stream's bytes are sent at most once per attach.
-8. **Per-client semaphore eviction.** `QoSAdmission._get_client_semaphore`
-   LRU-evicts semaphores still in use, the same pattern as finding 9.
-   Test it the way `tests/test_multitenancy.py::TestEvictionSparesBusyTenants`
-   does for tenants (10,000 entries).
-9. **`transform_spec.to_json` canonical form.** A property test that
-   equal specs always serialize to the same bytes (key order, float
-   formatting, tagged filter values) and that different specs differ.
-   Core provenance and dedup rest on it.
-10. **CI.** Once fixes land, run the `*_Patched.cfg` configs and the
-    replays, inverted into `tests/`, in CI. All the patched configs
-    except `Artifact_Patched` (about 2 minutes) finish in seconds.
-    `Artifact_Patched` with `MaxVer = 2` takes about 2 seconds and still
-    catches findings 1 and 2.
+1. **Local runs** (SYSTEMS 10: LR-2 to LR-5). A `LocalRun.tla` with two
+   attempts in one process and a second process: `open` split into its
+   transactions, renewal, checkpoint, head, close, cancel at each await.
+   Invariants: one live attempt per build; only the lease's attempt renews
+   or ends it; a resumed attempt can release; a cell runs at most once per
+   request. LR-3 may need an attempt-scoped renewal in vestigo; check
+   vestigo first.
+2. **Staleness, current code** (SYSTEMS 8 and 9: NB-1, NB-2, BAT-2). Rework
+   `Staleness.tla` to the key rule, inline upstream runs, Run All batches
+   and REST/MCP edits. Replays drive the handlers with
+   `FakeNotebookWebSocket` (`tests/notebook/e2e_fixtures.py`) so an edit
+   lands while a run awaits.
+3. **Row-group cache soundness** (SYSTEMS 3 and 4: CK-1, MD-1, MD-2, PR-2).
+   A stateful Hypothesis test over a real Iceberg table: appends, deletes
+   (positional and equality), overwrites, schema evolution, `add_files`, drop
+   and recreate at the same location, with scans in between through one
+   long-lived planner and cache. Oracle: the same scan with every cache
+   cleared, and the rows read straight from pyiceberg. Filtered scans also
+   cover PR-2.
+4. **Streams** (SYSTEMS 1 and 2: ADM-5, ADM-6, STR-1, STR-2). A
+   `Streams.tla` of materialize, GET, admit, release (with its lock as a
+   step), cleanup and expiry, with two GETs and two materialize misses.
+5. **Run All equals single-cell runs** (BAT-1). A differential property:
+   random notebooks run with `notebook_run_all` and cell by cell must leave
+   the same stored values and statuses.
+6. **Encodings and naming** (PROV-3, ACL-2 beyond the SQL-catalog shape).
+   Property tests: transform specs round-trip canonically; for each catalog
+   shape, every URI form that loads one table is refused by a deny on any.
