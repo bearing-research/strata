@@ -141,6 +141,31 @@ def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecuti
     )
 
 
+async def _served_with_an_error(
+    proc: Any,
+    exc: Exception,
+    cell_results: dict[str, BatchCellResult],
+    watchdog_state: dict[str, Any],
+    on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None,
+) -> tuple[str, str | None]:
+    """Stop a batch whose serving raised, and fail the cell it was on with *exc*.
+
+    Returned as a failed batch, so Run All's policy runs the cells after it; raised, it
+    would leave that cell running and end Run All.
+    """
+    logger.exception("Serving a batch failed; stopping its harness")
+    await terminate_subprocess_tree(proc)
+    cell_id = watchdog_state["active_cell_id"]
+    if cell_id is None:
+        # Between cells: none ran, so the batch ends as a harness that died.
+        return "subprocess_died", None
+    failed = BatchCellResult(cell_id=cell_id, status="cell_error", error=f"Execution failed: {exc}")
+    cell_results[cell_id] = failed
+    if on_cell_event is not None:
+        await on_cell_event(failed)
+    return "cell_error", cell_id
+
+
 async def run_batch(
     host: ExecutorHost,
     context: BatchContext,
@@ -320,13 +345,18 @@ async def run_batch(
                         timeout=batch_timeout_seconds,
                     )
                     completed = end_reason == "complete"
-                except TimeoutError as exc:
-                    if not is_a_deadline(exc):
-                        raise  # the OS's, from serving a cell: an error, as any other
-                    # SIGTERM the whole tree; proc.kill() alone would leak user-spawned children.
-                    await terminate_subprocess_tree(proc)
-                    end_reason = "subprocess_died"
+                except Exception as exc:
                     completed = False
+                    if isinstance(exc, TimeoutError) and is_a_deadline(exc):
+                        # SIGTERM the whole tree; proc.kill() alone would leak user-spawned
+                        # children.
+                        await terminate_subprocess_tree(proc)
+                        end_reason = "subprocess_died"
+                    else:
+                        # The OS's ETIMEDOUT (a store on NFS) among them.
+                        end_reason, failed_cell_id = await _served_with_an_error(
+                            proc, exc, cell_results, watchdog_state, on_cell_event
+                        )
                 finally:
                     # Close the response fd so a still-live harness sees EOF.
                     try:

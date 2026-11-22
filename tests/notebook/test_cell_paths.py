@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import errno
 import hashlib
 import json
 import os
@@ -1019,8 +1020,6 @@ class TestLoop:
     @pytest.mark.parametrize("os_error", [False, True], ids=["deadline", "etimedout"])
     async def test_only_a_deadline_is_an_iteration_timeout(self, tmp_path, monkeypatch, os_error):
         """Python raises the OS's ETIMEDOUT (a network filesystem's chown) as TimeoutError."""
-        import errno
-
         self._reach_the_harness(monkeypatch)
 
         async def harness(*_args, **_kwargs):
@@ -2257,6 +2256,12 @@ class TestR:
         [
             pytest.param(TimeoutError(), "timed out after 7.0", id="timeout"),
             pytest.param(RuntimeError("boom"), "R execution failed: boom", id="other"),
+            # Python raises the OS's ETIMEDOUT as TimeoutError: not the cell's deadline.
+            pytest.param(
+                OSError(errno.ETIMEDOUT, "Operation timed out"),
+                f"R execution failed: [Errno {errno.ETIMEDOUT}] Operation timed out",
+                id="etimedout",
+            ),
         ],
     )
     @pytest.mark.parametrize("uploaded", [True, False])
@@ -3215,23 +3220,53 @@ class TestRunBatch:
         assert seen.tokens == [9.0]
         assert harness.sent == [b"token\n"]
 
-    async def test_the_os_timing_out_while_serving_is_an_error_not_the_batch_timeout(
+    @pytest.mark.parametrize("raised", ["etimedout", "other"])
+    async def test_a_cell_whose_serving_raised_fails_with_that_error(
+        self, tmp_path, harness, monkeypatch, raised
+    ):
+        """Python raises the OS's ETIMEDOUT (a store on NFS) as TimeoutError: it is not the
+        batch's deadline. Raised out of the batch, it would leave the cell running and end
+        Run All; as the cell's error, Run All goes on to the cells after it."""
+
+        async def serving(*_args, watchdog_state, **_kwargs):
+            watchdog_state["active_cell_id"] = "c"
+            if raised == "etimedout":
+                raise OSError(errno.ETIMEDOUT, "Operation timed out")
+            raise RuntimeError("could not store it")
+
+        monkeypatch.setattr(batch, "batch_service_loop", serving)
+        events = []
+
+        async def on_cell_event(result):
+            events.append(result)
+
+        ran, _ = await self._run(tmp_path, on_cell_event=on_cell_event)
+
+        assert (ran.completed, ran.end_reason, ran.failed_cell_id) == (False, "cell_error", "c")
+        (failed,) = ran.cell_results
+        assert failed.status == "cell_error"
+        message = "Operation timed out" if raised == "etimedout" else "could not store it"
+        assert failed.error.startswith("Execution failed: ") and message in failed.error
+        assert events == [failed]
+        assert harness.terminated
+
+    async def test_serving_that_raised_between_cells_ends_as_a_died_harness(
         self, tmp_path, harness, monkeypatch
     ):
-        """Python raises the OS's ETIMEDOUT (spilling to a store on a network filesystem)
-        as TimeoutError: the batch's own deadline is not what ended it."""
-        import errno
-
         async def serving(*_args, **_kwargs):
-            raise OSError(errno.ETIMEDOUT, "Operation timed out")
+            raise RuntimeError("could not read a frame")
 
         monkeypatch.setattr(batch, "batch_service_loop", serving)
 
-        with pytest.raises(TimeoutError) as raised:
-            await self._run(tmp_path)
+        ran, _ = await self._run(tmp_path)
 
-        assert raised.value.errno == errno.ETIMEDOUT
-        assert harness.terminated  # the harness is still stopped, by the run's scope
+        assert (ran.completed, ran.end_reason, ran.failed_cell_id) == (
+            False,
+            "subprocess_died",
+            None,
+        )
+        assert [r.status for r in ran.cell_results] == ["not_run"]
+        assert harness.terminated
 
     async def test_it_starts_in_the_notebooks_environment(self, tmp_path, harness):
         host, _, _ = _batch_fakes(tmp_path)
@@ -3270,7 +3305,8 @@ class TestRunBatch:
     async def test_a_failing_callback_ends_the_process_tree_before_the_files_go(
         self, tmp_path, harness, monkeypatch
     ):
-        """Not only a cancel or a timeout: any exception stops the harness first."""
+        """Not only a cancel or a timeout: any exception stops the harness first, and the
+        batch ends failed for Run All's policy to go on from."""
         harness.frames = [_frame("cell_start", cell_id="c")]
         harness.hangs = True
         tmpdir_at_stop = []
@@ -3284,10 +3320,10 @@ class TestRunBatch:
             tmpdir_at_stop.append(harness.tmpdir.exists())
             await terminate(proc)
 
-        monkeypatch.setattr("strata.notebook.process_tree.terminate_subprocess_tree", recording)
-        with pytest.raises(RuntimeError, match="broadcast failed"):
-            await self._run(tmp_path, on_cell_start=on_cell_start)
+        monkeypatch.setattr(batch, "terminate_subprocess_tree", recording)
+        ran, _ = await self._run(tmp_path, on_cell_start=on_cell_start)
 
+        assert (ran.completed, ran.end_reason) == (False, "subprocess_died")
         assert harness.terminated == [harness.proc]
         assert tmpdir_at_stop == [True]
         assert not harness.tmpdir.exists()
@@ -4283,6 +4319,12 @@ class TestPython:
         [
             pytest.param(TimeoutError(), "timed out after 7.0", id="timeout"),
             pytest.param(ValueError("bad"), "Execution failed: bad", id="other"),
+            # Python raises the OS's ETIMEDOUT as TimeoutError: not the cell's deadline.
+            pytest.param(
+                OSError(errno.ETIMEDOUT, "Operation timed out"),
+                f"Execution failed: [Errno {errno.ETIMEDOUT}] Operation timed out",
+                id="etimedout",
+            ),
         ],
     )
     @pytest.mark.parametrize("uploaded", [True, False])

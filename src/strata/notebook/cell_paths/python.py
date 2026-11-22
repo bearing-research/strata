@@ -998,26 +998,6 @@ async def run_python_cell(
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, error_result)
         return error_result
-    except TimeoutError as e:
-        duration_ms = (time.time() - start_time) * 1000
-        if provenance_hash is not None and context.received_output_files.get(cell_id):
-            # No result came back, so what the worker uploaded is all there is.
-            context.keep_failed_output_dirs(
-                cell_id, source, None, provenance_hash, env_hash, variant=fanout_variant
-            )
-        timeout_result = CellExecutionResult(
-            cell_id=cell_id,
-            success=False,
-            duration_ms=duration_ms,
-            error=(
-                context.timeout_message(cell_id, timeout_seconds)
-                if is_a_deadline(e)
-                else f"Execution failed: {e}"
-            ),
-        ).apply_remote_metadata(**remote_metadata)
-        host.persist_display_outputs(cell_id, None)
-        host.apply_execution_result_metadata(cell_id, timeout_result)
-        return timeout_result
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         if provenance_hash is not None and context.received_output_files.get(cell_id):
@@ -1025,6 +1005,16 @@ async def run_python_cell(
             context.keep_failed_output_dirs(
                 cell_id, source, None, provenance_hash, env_hash, variant=fanout_variant
             )
+        if isinstance(e, TimeoutError) and is_a_deadline(e):
+            timeout_result = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                duration_ms=duration_ms,
+                error=context.timeout_message(cell_id, timeout_seconds),
+            ).apply_remote_metadata(**remote_metadata)
+            host.persist_display_outputs(cell_id, None)
+            host.apply_execution_result_metadata(cell_id, timeout_result)
+            return timeout_result
         # A step after the run failed: what the run printed still stands.
         error_result = CellExecutionResult(
             cell_id=cell_id,
