@@ -168,7 +168,6 @@ async def test_a_cancel_from_an_anyio_scope_waits_for_the_thread():
     finished: list[bool] = []
 
     def walk() -> None:
-        entered.set()
         release.wait(30)
         finished.append(True)
 

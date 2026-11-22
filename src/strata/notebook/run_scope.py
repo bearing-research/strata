@@ -103,6 +103,6 @@ async def in_thread[T](func: Callable[..., T], /, *args: Any) -> T:
         # What the caller gets is the cancel; the call's own failure is only logged.
         failed = call.exception()
         if failed is not None:
-            logger.info("A cancelled run's %s also failed", func.__name__, exc_info=failed)
+            logger.info("A cancelled run's %r also failed", func, exc_info=failed)
         raise cancel
     return call.result()
