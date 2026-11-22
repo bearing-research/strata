@@ -29,6 +29,16 @@ exhaustive commit history.
   cached, and what the hook's budget leaves unchecked is said `as of` the digest's time.
   The hook runs on the standard library alone, and says nothing where there is no
   scratchpad. (#1595)
+- **The Claude Code plugin is the scratchpad's MCP server and hooks; the skill is
+  retired.** `plugins/strata-scratchpad` now bundles the `strata` MCP server
+  (`strata mcp`, loaded up front) and the session-start and prompt hooks, which name
+  the plugin's own `run` tool and run `strata-agent-hook`, a new console script
+  beside `strata` that imports nothing of the notebook. The `strata-scratchpad`
+  skill and the `/strata-scratchpad:scratch` command are gone from the plugin and
+  the package: the MCP instructions and the hooks replace them, and
+  `strata agent install` also writes the `CLAUDE.md` block and the permission,
+  which a plugin cannot. The eval's arm B keeps the skill as it shipped. The Agent
+  scratchpad guide is rewritten around `strata agent install`. (#1596)
 - **A cell's checkpoints are listed in the notebook, and a branch starts from one there.**
   A Python cell's header has a Checkpoints button. Its panel lists the checkpoints the
   store still holds, by run (running, interrupted, finished or failed, and which
@@ -194,6 +204,13 @@ exhaustive commit history.
   records nothing of what it read, so its key would miss an edited project file or
   module and could replay a stale result. (#1589)
 ### Changed
+- **The ledger is vestigo 0.7.0.** On SQLite a store keeps its connections open between
+  calls and reuses them, where every call opened one: a lookup on a store nobody else
+  had open took 0.7 ms and takes 5 µs. Finding a computation's open build reads an index
+  on its key and state (9.6 ms with 50000 open builds, now 0.006 ms), and checking which
+  checkpoints a build can drop is no longer quadratic in its checkpoints. Its migration
+  20 replaces an index: the first 0.7.0 process to open a store builds it, and a 0.6.0
+  process then refuses the store, so every process on it upgrades together. (#1602)
 - **A scratchpad's daemon starts as the session opens.** In a project that already has a
   scratchpad, `strata mcp` starts its daemon in the background when the agent's session
   lists its tools, so the first `run` no longer waits about 4 s for it; a call made
@@ -548,6 +565,20 @@ exhaustive commit history.
   holds its pipes: a descendant that outlived it, on Windows a venv launcher's
   interpreter for a moment. Strata then left the pipes to close when the other ends did.
   It now closes its own ends once the process is reaped. (#1607)
+- **On Windows a scratchpad daemon is killed only as the process it was started as.**
+  Windows gives a dead process's pid to the next one, and a kill by pid ends whichever
+  holds it. A setup that failed killed its daemon by pid after the daemon had exited,
+  which could end an unrelated process. The daemon is now noted with its creation time,
+  and the kill checks it on the handle it kills through. (#1608)
+- **A process named in bytes that are not UTF-8 no longer fails every run as the
+  harness user.** Before each such run, the sweep for what earlier cells left running
+  decoded every process's `/proc` status strictly. A process can name itself anything,
+  so one that a cell left running with such a name made each later run fail before
+  it started. (#1605)
+- **On Linux before 4.1, or without PID namespaces, runs as the harness user no longer
+  all fail.** The same sweep read each process's session from the `NSsid` line of its
+  `/proc` status, which those kernels do not print, and raised before every run. It
+  now reads the session from `/proc/<pid>/stat` there. (#1605)
 - **A shared or worker environment's console scripts run wherever the directory is.**
   `uv sync` made the environment itself, and such a venv writes its own path into every
   console script, so a directory moved or copied elsewhere ran `python` and imported
@@ -559,6 +590,14 @@ exhaustive commit history.
   until their lock changes. A worker's relative `STRATA_WORKER_ENV_ROOT` is now read
   against the worker's directory, where uv built the environment in another place and
   every cell failed with "has no interpreter". (#1604)
+- **Stopping the scratchpad's daemon waits for its process to exit, not only its
+  port.** `strata scratch stop`, `strata scratch rm` and a restart went on once the
+  port closed, while the process could still hold the scratchpad's store: elsewhere
+  its shutdown still closes its sessions, and on Windows, where a stop terminates it,
+  its open files made a store opened right after fail with a disk I/O error. A
+  process that has not exited within the stop's 30 seconds is now an error, as a port
+  still open was; on Linux a zombie nobody reaps counts as exited, read from `/proc`.
+  (#1602)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the

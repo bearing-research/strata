@@ -701,7 +701,7 @@ MUST_NOT_TASKS = (
 TASKS = ITERATION_TASKS + PROBING_TASKS + PLOT_TASKS + NEUTRAL_TASKS + MUST_NOT_TASKS
 TASKS_BY_ID = {task.id: task for task in TASKS}
 
-# One third of each kind, never seen by tuning (§5). Committed before any arm-C run; a
+# About a third of each kind, never seen by tuning (§5). Committed before any arm-C run; a
 # test checks it is the seeded split below.
 HOLDOUT_SEED = 20261112
 HOLDOUT_COUNTS = {ITERATION: 2, PROBING: 2, PLOT: 1, NEUTRAL: 2, MUST_NOT: 3}
