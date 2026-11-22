@@ -185,6 +185,13 @@ class SharedEnvBackend:
         self.root.mkdir(parents=True, exist_ok=True)
         return interpreter, key, _key_lock(self.root, key)
 
+    def _venv_args(self, interpreter: Path, key: str) -> list[str]:
+        # Relocatable, so the directory works wherever it is moved or copied: the venv
+        # ``uv sync`` makes itself writes this path into every console script.
+        # --quiet: uv's "Activate with" hint names an environment nobody may change.
+        target = str(self.root / key)
+        return ["venv", "--quiet", "--relocatable", "--python", str(interpreter), target]
+
     def _install_args(self, interpreter: Path) -> list[str]:
         # The key leaves the notebook's own project out, so the environment must too.
         return ["sync", "--frozen", "--no-install-project", "--python", str(interpreter)]
@@ -220,6 +227,17 @@ class SharedEnvBackend:
         results = [locked]
         with lock:
             if not self._is_complete(key):
+                # What a build that failed halfway left, which uv would refuse.
+                shutil.rmtree(self.root / key, ignore_errors=True)
+                created = _run_uv_command(
+                    self.notebook_dir,
+                    self._venv_args(interpreter, key),
+                    timeout=timeout,
+                    display_name="uv venv",
+                )
+                results.append(created)
+                if not created.success:
+                    return _combined(results)
                 installed = _run_uv_command(
                     self.notebook_dir,
                     self._install_args(interpreter),
@@ -259,6 +277,18 @@ class SharedEnvBackend:
         await asyncio.to_thread(lock.acquire)
         try:
             if not self._is_complete(key):
+                # What a build that failed halfway left, which uv would refuse.
+                await asyncio.to_thread(shutil.rmtree, self.root / key, ignore_errors=True)
+                created = await run_uv_command_streaming(
+                    self.notebook_dir,
+                    self._venv_args(interpreter, key),
+                    timeout=timeout,
+                    display_name="uv venv",
+                    on_update=on_update,
+                )
+                results.append(created)
+                if not created.success:
+                    return _combined(results)
                 installed = await run_uv_command_streaming(
                     self.notebook_dir,
                     self._install_args(interpreter),

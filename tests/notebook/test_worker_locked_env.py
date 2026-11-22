@@ -30,8 +30,13 @@ def _notebook(tmp_path: Path) -> Path:
 
     package = tmp_path / "tinydep"
     (package / "tinydep").mkdir(parents=True)
-    (package / "tinydep" / "__init__.py").write_text("ANSWER = 42\n")
-    (package / "pyproject.toml").write_text('[project]\nname = "tinydep"\nversion = "0.1.0"\n')
+    (package / "tinydep" / "__init__.py").write_text(
+        "ANSWER = 42\n\n\ndef main():\n    print(ANSWER)\n"
+    )
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "tinydep"\nversion = "0.1.0"\n'
+        '[project.scripts]\ntinydep = "tinydep:main"\n'
+    )
     nb = create_notebook(tmp_path, "locked", initialize_environment=False)
     pyproject = tomllib.loads((nb / "pyproject.toml").read_text())
     pyproject["project"]["dependencies"].append("tinydep")
@@ -385,6 +390,29 @@ class TestTheWorkerSide:
         )
         assert answer.stdout.strip() == "42"
 
+    async def test_a_built_environment_moved_to_another_root_runs_its_console_scripts(
+        self, tmp_path, monkeypatch
+    ):
+        """As an archive of the directory is, unpacked on a worker with another root."""
+        nb = _notebook(tmp_path)
+        lock = (nb / "uv.lock").read_text()
+        spec = {
+            "key": uv_lock_key(lock),
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+            "lockfile": lock,
+            "pyproject": (nb / "pyproject.toml").read_text(),
+        }
+        monkeypatch.setenv(worker_env.ENV_ROOT_VAR, str(tmp_path / "envs"))
+        monkeypatch.delenv(worker_env.REGISTRY_VAR, raising=False)
+
+        prepared = await worker_env.ensure_environment(spec)
+        moved = tmp_path / "another-root" / "environment"
+        moved.parent.mkdir()
+        shutil.move(prepared.python.parent.parent, moved)
+        ran = subprocess.run([str(moved / "bin" / "tinydep")], capture_output=True, text=True)
+
+        assert ran.stdout.strip() == "42", ran.stderr
+
     async def test_a_failing_registry_is_an_error_not_a_build(self, tmp_path, monkeypatch):
         server, served = self._registry(500)
         monkeypatch.setenv(worker_env.ENV_ROOT_VAR, str(tmp_path / "envs"))
@@ -442,7 +470,7 @@ class TestTheWorkerSide:
                 lambda tmp: worker_env._install(
                     {"pyproject": "", "lockfile": ""}, Path(sys.executable), tmp / "env"
                 ),
-                "uv sync",
+                "uv venv",
             ),
             (lambda tmp: worker_env._r_build("Rscript"), "R its version"),
             (lambda tmp: worker_env._restore_r("Rscript", "{}", tmp / "lib"), "renv::restore"),
@@ -458,6 +486,25 @@ class TestTheWorkerSide:
 
         with pytest.raises(worker_env.WorkerEnvironmentError, match=f"{message}.*timed out"):
             step(tmp_path)
+
+    def test_a_sync_that_fails_after_the_venv_is_named_as_the_sync(self, tmp_path, monkeypatch):
+        def _run(args, **kwargs):
+            if args[1] == "sync":
+                raise subprocess.CalledProcessError(1, args, stderr="no such wheel")
+            return subprocess.CompletedProcess(args, 0)
+
+        monkeypatch.setattr(worker_env.subprocess, "run", _run)
+
+        with pytest.raises(worker_env.WorkerEnvironmentError, match="uv sync failed.*no such"):
+            worker_env._install(
+                {"pyproject": "", "lockfile": ""}, Path(sys.executable), tmp_path / "env"
+            )
+
+    def test_a_relative_root_is_read_against_the_workers_directory(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv(worker_env.ENV_ROOT_VAR, "envs")
+
+        assert worker_env.env_root() == tmp_path.resolve() / "envs"
 
     @pytest.mark.parametrize("language", ["python", "r"])
     def test_waiting_out_another_cells_build_is_an_environment_error(

@@ -537,6 +537,17 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A shared or worker environment's console scripts run wherever the directory is.**
+  `uv sync` made the environment itself, and such a venv writes its own path into every
+  console script, so a directory moved or copied elsewhere ran `python` and imported
+  but failed each script with "required file not found". Strata now creates the
+  directory with `uv venv --relocatable` before the sync, under
+  `notebook_env_backend = "shared"` and on a worker building a notebook's lock, so a
+  script starts the interpreter beside it. It finds that with `realpath`, which
+  coreutils and macOS 13 and later have. Environments already built stay as they are
+  until their lock changes. A worker's relative `STRATA_WORKER_ENV_ROOT` is now read
+  against the worker's directory, where uv built the environment in another place and
+  every cell failed with "has no interpreter". (#1604)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the

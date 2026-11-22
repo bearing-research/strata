@@ -69,7 +69,8 @@ class PreparedEnvironment:
 
 def env_root() -> Path:
     configured = os.environ.get(ENV_ROOT_VAR)
-    return Path(configured) if configured else Path.home() / ".strata" / "worker-envs"
+    # Absolute: uv resolves the environment's path against the directory it runs in.
+    return Path(configured).resolve() if configured else Path.home() / ".strata" / "worker-envs"
 
 
 def _validated(spec: Any) -> dict[str, str]:
@@ -125,39 +126,44 @@ def _interpreter(python: str) -> tuple[Path, str]:
 
 
 def _install(spec: dict[str, str], interpreter: Path, env_dir: Path) -> None:
-    """``uv sync`` the lock into *env_dir*."""
+    """``uv sync`` the lock into *env_dir*, made relocatable first.
+
+    The directory then works wherever it is moved or copied: the venv ``uv sync``
+    makes itself writes this path into every console script.
+    """
+    # What a failed build or a bad archive left, which uv would refuse.
+    shutil.rmtree(env_dir, ignore_errors=True)
     project = env_dir.with_name(env_dir.name + ".project")
     project.mkdir(parents=True, exist_ok=True)
     (project / "pyproject.toml").write_text(spec["pyproject"])
     (project / "uv.lock").write_text(spec["lockfile"])
-    try:
-        subprocess.run(
-            [
-                shutil.which("uv") or "uv",
-                "sync",
-                "--frozen",
-                "--no-install-project",
-                "--python",
-                str(interpreter),
-            ],
-            cwd=project,
-            env={
-                **{k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"},
-                "UV_PROJECT_ENVIRONMENT": str(env_dir),
-            },
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=INSTALL_TIMEOUT_SECONDS,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise WorkerEnvironmentError(
-            f"uv sync failed on this worker: {exc.stderr.strip()}"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise WorkerEnvironmentError(
-            f"uv sync on this worker timed out after {exc.timeout:g}s"
-        ) from exc
+    python = ["--python", str(interpreter)]
+    steps = [
+        ["venv", "--relocatable", *python, str(env_dir)],
+        ["sync", "--frozen", "--no-install-project", *python],
+    ]
+    for step in steps:
+        try:
+            subprocess.run(
+                [shutil.which("uv") or "uv", *step],
+                cwd=project,
+                env={
+                    **{k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"},
+                    "UV_PROJECT_ENVIRONMENT": str(env_dir),
+                },
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=INSTALL_TIMEOUT_SECONDS,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise WorkerEnvironmentError(
+                f"uv {step[0]} failed on this worker: {exc.stderr.strip()}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise WorkerEnvironmentError(
+                f"uv {step[0]} on this worker timed out after {exc.timeout:g}s"
+            ) from exc
 
 
 def _fetch(url: str, env_dir: Path) -> bool:
