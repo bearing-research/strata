@@ -31,8 +31,9 @@ by its path, so it must outlive the shell you ran it from.
 ### 2. Wire it into the agent
 
 ```bash
-strata agent install            # Claude Code and Codex, whichever are installed
-strata agent install claude     # or just one
+strata agent install                    # every agent whose CLI is on PATH; asks first
+strata agent install --target claude    # or just one
+strata agent install --yes              # without asking, as from a script
 ```
 
 For Claude Code this writes the user-scope `strata` MCP server, the
@@ -113,6 +114,58 @@ Two things the key cannot see:
 
 How the read set is recorded and checked is in
 [A project's own daemon](mcp.md#a-projects-own-daemon).
+
+## What it saves
+
+Measured with the
+[uptake eval](https://github.com/bearing-research/strata/tree/main/evals/agent_notebook/uptake):
+headless Claude Code on a small uv project whose questions read 1M order events
+through the project's own loader. That loader stands in for a warehouse export and
+takes 20 s every time it runs (`HARBOR_LOAD_SECONDS`), so what is measured is a slow
+load that a session keeps needing. Each trial is a fresh copy of the project and a
+config of its own. Arm A cannot reach Strata at all, and arm C is set up by
+`strata agent install`, with the scratchpad created beforehand as a returning
+user's would be. The 29 tasks come in five kinds, each run three times per arm; 10
+of them, the holdout, drawn by a fixed seed before any arm C run, were never looked
+at while the guidance and the tools were tuned.
+
+Median wall time of C over A, with its 95% bootstrap interval:
+
+| Kind | What the agent does | Tuning tasks | Holdout |
+| --- | --- | --- | --- |
+| Iteration | four questions in a row over the same data | 0.42 [0.38, 0.55] | 0.67 [0.53, 0.84] |
+| Plot | a chart from the data | 0.54 [0.41, 0.58] | 0.85 [0.61, 1.10] |
+| Probing | calls project code with varied arguments | 1.04 [0.83, 1.12] | 1.01 [0.88, 1.60] |
+| Neutral | either tool does | 0.99 [0.61, 2.32] | 1.01 [0.80, 1.42] |
+| Must-not | edits and file reads, no Python to run | 1.13 [0.75, 1.56] | 1.04 [0.58, 1.58] |
+
+- **The data is loaded once.** In iteration and plot trials, the loader ran once in
+  the whole trial in 21 of 21 of C's (holdout: 9 of 9), and in 3 of 21 of A's
+  (2 of 9): A loaded the events again, where C used the value already in the
+  scratchpad. On the tuning tasks an iteration trial's median took A 130 s and C
+  55 s (holdout: 92 s and 62 s). Most of that is the loads not repeated, so a load
+  that takes a second would save far less; only the 20 s load was measured.
+- **It answers as often.** Every trial in both arms completed: 57 of 57 per arm on
+  the tuning tasks, 30 of 30 on the holdout.
+- **It stays out of the way.** On must-not tasks C used the scratchpad in 1 of 15
+  trials (holdout: 0 of 9), and those tasks took about as long as in A.
+- **It costs the same.** $7.86 for C's 57 tuning trials against $8.01 for A's.
+
+These are one model (`claude-opus-5-5`, Claude Code 2.1.330) on one machine (an
+Apple silicon Mac), with three runs per task, and an interval that crosses 1 is no
+evidence of a saving. The holdout's plot row is a single task. The rows ran on
+different Strata commits:
+
+- **Tuning tasks except probing:** arm C's branch
+  ([#1598](https://github.com/bearing-research/strata/pull/1598)), before
+  [#1599](https://github.com/bearing-research/strata/pull/1599).
+- **Tuning probing:** a rerun after
+  [#1600](https://github.com/bearing-research/strata/pull/1600), which starts the
+  daemon as the session opens. On #1598's branch it took 1.53 [1.30, 2.04] times
+  A's: the first `run` waited about 4 s for the daemon, and a value's preview showed
+  only its type's name, which #1599 changed to its repr.
+- **Holdout:** not rerun after #1600; it ran at #1599, so its probing row still
+  includes the daemon wait of about 4 s.
 
 ## Where it lives
 
