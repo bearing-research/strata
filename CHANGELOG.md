@@ -537,6 +537,11 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **On Windows a scratchpad daemon is killed only as the process it was started as.**
+  Windows gives a dead process's pid to the next one, and a kill by pid ends whichever
+  holds it. A setup that failed killed its daemon by pid after the daemon had exited,
+  which could end an unrelated process. The daemon is now noted with its creation time,
+  and the kill checks it on the handle it kills through. (#1608)
 - **A shared or worker environment's console scripts run wherever the directory is.**
   `uv sync` made the environment itself, and such a venv writes its own path into every
   console script, so a directory moved or copied elsewhere ran `python` and imported
