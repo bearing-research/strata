@@ -545,6 +545,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   it starts, so one sent before that interpreter was up reached nothing: a warm worker
   stopped just after it started sat out the grace and was killed. The event is now sent
   again every quarter second while the process lives. (#1607)
+- **A stopped process's pipes are closed with it.** Since CPython's gh-119710 (3.13 and
+  3.14 patch releases) asyncio's `wait()` returns when the process exits, whoever still
+  holds its pipes: a descendant that outlived it, on Windows a venv launcher's
+  interpreter for a moment. Strata then left the pipes to close when the other ends did.
+  It now closes its own ends once the process is reaped. (#1607)
 - **A shared or worker environment's console scripts run wherever the directory is.**
   `uv sync` made the environment itself, and such a venv writes its own path into every
   console script, so a directory moved or copied elsewhere ran `python` and imported

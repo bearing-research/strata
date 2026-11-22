@@ -70,12 +70,35 @@ async def terminate_subprocess_tree(
     """SIGTERM, grace period, then SIGKILL the subprocess and its descendants.
 
     ``proc`` must have been spawned with :py:func:`subprocess_kwargs_for_new_group`,
-    or only the direct child is signalled. Returns once the process is reaped;
-    a process that exits mid-way (``ProcessLookupError``) counts as success.
+    or only the direct child is signalled. Returns once the process is reaped and
+    our ends of its pipes are closed; a process that exits mid-way
+    (``ProcessLookupError``) counts as success.
     """
     if proc.returncode is not None:
         return  # already exited cleanly
+    try:
+        await _reap(proc, grace_seconds)
+    finally:
+        if proc.returncode is not None:
+            await _close_pipes(proc)
 
+
+async def _close_pipes(proc: asyncio.subprocess.Process) -> None:
+    """Close our ends of a reaped process's pipes.
+
+    asyncio closes them once the other ends close, and a descendant that outlives the
+    process holds those open: on Windows a venv launcher's interpreter, for a moment. A
+    loop closed in that moment finds the transport unclosed.
+    """
+    # asyncio gives no public way to the transport.
+    transport = getattr(proc, "_transport", None)
+    if transport is not None:
+        transport.close()
+        # One turn of the loop: the pipe transports close in callbacks.
+        await asyncio.sleep(0)
+
+
+async def _reap(proc: asyncio.subprocess.Process, grace_seconds: float) -> None:
     pid = proc.pid
     if pid is None:
         try:

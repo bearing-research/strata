@@ -8,6 +8,7 @@ not tested here.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 import sys
@@ -94,6 +95,47 @@ async def test_sigkill_fallback_when_sigterm_ignored():
     # proven by the return code, not by timing the grace period.
     assert proc.returncode == -signal.SIGKILL
     assert not _is_alive(pid)
+
+
+# Prints "ready" once SIGTERM cannot end it, holding the stdout it inherited.
+_OUTLIVES_SIGTERM = (
+    "import signal, time\n"
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "print('ready', flush=True)\n"
+    "time.sleep(120)\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_descendant_that_lives_on_does_not_hold_the_pipes_open():
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import subprocess, sys, time\n"
+        f"child = subprocess.Popen([sys.executable, '-c', {_OUTLIVES_SIGTERM!r}])\n"
+        "print(child.pid, flush=True)\n"
+        "while True:\n"
+        "    time.sleep(0.1)\n",
+        stdout=asyncio.subprocess.PIPE,
+        **subprocess_kwargs_for_new_group(),
+    )
+    assert proc.stdout is not None
+    # The pid and the child's "ready", in either order.
+    lines = {await asyncio.wait_for(proc.stdout.readline(), timeout=30) for _ in range(2)}
+    assert b"ready\n" in lines
+    (child,) = (int(line) for line in lines - {b"ready\n"})
+    try:
+        # Since gh-119710 (3.13 and 3.14 patch releases) wait() returns at the exit, the
+        # child alive and holding the pipe; before, it waited for the pipes, so here for
+        # the grace and the SIGKILL that ends the child.
+        await terminate_subprocess_tree(proc, grace_seconds=5.0)
+
+        assert proc.returncode == -signal.SIGTERM
+        # No more comes, whoever holds the other end.
+        assert await asyncio.wait_for(proc.stdout.read(), timeout=10) == b""
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(child, signal.SIGKILL)
 
 
 @pytest.mark.asyncio
