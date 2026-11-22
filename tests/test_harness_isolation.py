@@ -139,7 +139,7 @@ def test_a_cell_run_as_the_harness_user_cannot_read_the_servers_environment(tmp_
     )
     write_cell(nb, "peek", source)
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(
@@ -221,7 +221,7 @@ def test_a_cell_run_as_the_harness_user_writes_through_a_read_write_mount(tmp_pa
     )
     write_cell(nb, "w", source)
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(
@@ -282,7 +282,7 @@ def test_a_cell_run_as_the_harness_user_writes_in_its_work_directory(tmp_path, m
     add_cell_to_notebook(nb, "a", "w", language="python")
     write_cell(nb, "a", attempts)
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(
@@ -329,7 +329,7 @@ def test_a_cell_run_as_the_harness_user_scans_a_table_through_its_server(tmp_pat
     add_cell_to_notebook(nb, "scan", None, language="python")
     write_cell(nb, "scan", source)
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     config = StrataConfig(
         host="127.0.0.1",
         port=find_free_port(),
@@ -392,7 +392,7 @@ def test_a_process_a_cell_leaves_running_is_stopped_before_the_next_run(tmp_path
     write_cell(nb, "leave", leave)
     add_cell_to_notebook(nb, "look", "leave", language="python")
     session = NotebookSession(parse_notebook(nb), nb)
-    session.venv_python = sys.executable
+    session.venv_python = Path(sys.executable)
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(
