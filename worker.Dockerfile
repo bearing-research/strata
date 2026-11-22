@@ -39,8 +39,8 @@ FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab
 # notebook) runs in a locked environment built by ``uv venv`` and ``uv sync --frozen``
 # (worker_env.py). Without uv the worker reports
 # ``locked_environments: false`` and cells run in this image, ignoring the
-# notebook's pins. 0.11.0 does not depend on uv, so it is named here; drop it
-# once STRATA_VERSION is a release that does.
+# notebook's pins. No release up to 0.12.0 depends on uv, so it is named here;
+# drop it once STRATA_VERSION is a release that does.
 ARG STRATA_VERSION=0.11.0
 RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" "uv==0.12.23"
 
