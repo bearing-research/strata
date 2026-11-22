@@ -15,6 +15,8 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio.to_thread
+
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
 
@@ -75,7 +77,9 @@ class InspectSession:
             "inputs": input_specs,
             "output_dir": str(self._manifest_dir),
             # Relative to the notebook's directory, where the REPL starts.
-            "work_dir": prepare_work_dir(session.path, harness_user).name,
+            "work_dir": (
+                await anyio.to_thread.run_sync(prepare_work_dir, session.path, harness_user)
+            ).name,
         }
         manifest_path = self._manifest_dir / "inspect_manifest.json"
         with open(manifest_path, "w") as f:
@@ -87,7 +91,7 @@ class InspectSession:
             str(manifest_path),
         ]
 
-        hand_over(self._manifest_dir, harness_user)
+        await anyio.to_thread.run_sync(hand_over, self._manifest_dir, harness_user)
         allowlist = configured_allowlist()
         self.process = await asyncio.create_subprocess_exec(
             *cmd,

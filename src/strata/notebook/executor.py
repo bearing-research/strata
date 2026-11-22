@@ -2154,7 +2154,7 @@ class CellExecutor:
                 # The cell writes the staging copy; sync_back reads it without following links.
                 let_through(self._mount_resolver.cache_dir, harness_user)
                 let_through(staging.parent, harness_user)
-                hand_over(staging, harness_user)
+                await anyio.to_thread.run_sync(hand_over, staging, harness_user)
         return resolved
 
     async def _resolve_fetches(

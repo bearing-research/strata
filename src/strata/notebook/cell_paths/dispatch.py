@@ -291,16 +291,19 @@ async def dispatch_embedded(
     if resolved_mounts is None:
         resolved_mounts = await context.prepare_mounts(mount_specs, cell_id)
     with context.run_token(timeout_seconds) as run_token:
-        manifest_path = context.write_manifest(
-            source,
-            input_specs,
-            output_dir,
-            runtime_env,
-            resolved_mounts,
-            mutation_defines=mutation_defines,
-            tables=tables,
-            cell_id=cell_id,
-            run_token=run_token,
+        manifest_path = await anyio.to_thread.run_sync(
+            functools.partial(
+                context.write_manifest,
+                source,
+                input_specs,
+                output_dir,
+                runtime_env,
+                resolved_mounts,
+                mutation_defines=mutation_defines,
+                tables=tables,
+                cell_id=cell_id,
+                run_token=run_token,
+            )
         )
         result = await context.run_harness(
             manifest_path, venv_path, timeout_seconds, run_token=run_token

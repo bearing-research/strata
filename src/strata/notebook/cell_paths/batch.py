@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio.to_thread
+
 from strata.notebook.cell_paths.context import (
     _ARTIFACT_EXT_BY_CONTENT_TYPE,
     STORE_FAILED,
@@ -226,7 +228,7 @@ async def run_batch(
                     ),
                     venv_python,
                 )
-                hand_over(batch_tmpdir, harness_user)
+                await anyio.to_thread.run_sync(hand_over, batch_tmpdir, harness_user)
 
                 # New process group so a timeout SIGKILL reaches every descendant. Mirrors
                 # _run_harness.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import shutil
@@ -397,12 +398,15 @@ async def run_r_cell(
                 # Keyed on the listing it reads, which the cache check's may predate.
                 prov = prov.over_mounts(resolved_mounts)
                 provenance_hash = prov.provenance_hash
-                manifest_path = context.write_manifest(
-                    source,
-                    input_specs,
-                    output_dir,
-                    runtime_env,
-                    resolved_mounts,
+                manifest_path = await anyio.to_thread.run_sync(
+                    functools.partial(
+                        context.write_manifest,
+                        source,
+                        input_specs,
+                        output_dir,
+                        runtime_env,
+                        resolved_mounts,
+                    )
                 )
 
                 # Warm R pool first (prepaid Rscript startup + renv activation), cold harness as
@@ -646,7 +650,7 @@ async def run_r_harness(
         terminate_subprocess_tree,
     )
 
-    hand_over(manifest_path.parent, harness_user)
+    await anyio.to_thread.run_sync(hand_over, manifest_path.parent, harness_user)
     lifeline_fds, lifeline_vars = lifeline_handoff()
     proc = await asyncio.create_subprocess_exec(
         *cmd,

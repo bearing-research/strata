@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio.to_thread
+
 from strata.notebook import output_dirs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import no_interpreter_message
@@ -167,7 +169,7 @@ async def run_cell_tests(
     try:
         harness_user = resolve_harness_user()
         # The cell runs where a run of it does, its notebook's work/.
-        prepare_work_dir(host.path, harness_user)
+        await anyio.to_thread.run_sync(prepare_work_dir, host.path, harness_user)
     except (LocalExecutionRefused, UnsafeRunFile) as exc:
         problem = str(exc)
     if problem is not None:
@@ -195,7 +197,7 @@ async def run_cell_tests(
         # itself: a process an earlier cell left running could plant links in it.
         let_through(Path(tmp), harness_user)
         for _, blob_dir, _ in runs:
-            hand_over(blob_dir, harness_user)
+            await anyio.to_thread.run_sync(hand_over, blob_dir, harness_user)
 
         def _run(index: int) -> dict[str, Any]:
             variant, blob_dir, input_specs = runs[index]

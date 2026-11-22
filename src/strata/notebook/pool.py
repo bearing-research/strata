@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio.to_thread
+
 from strata.notebook.harness_env import configured_allowlist, harness_env, in_environment
 from strata.notebook.harness_user import (
     LocalExecutionRefused,
@@ -372,7 +374,7 @@ class PooledCellExecutor:
         try:
             # Outputs land beside the manifest, in a run dir private to the server; its sweep
             # runs just before the worker is handed the manifest.
-            hand_over(manifest_path.parent, harness_user)
+            await anyio.to_thread.run_sync(hand_over, manifest_path.parent, harness_user)
         except BaseException:
             # The run's error, as on a cold run, an interrupt included: the worker got
             # nothing, and the pool keeps its slot.

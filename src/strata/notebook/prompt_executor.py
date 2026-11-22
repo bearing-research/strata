@@ -19,6 +19,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio.to_thread
 from vestigo.provenance import derive_subkey
 
 from strata.notebook.annotations import parse_annotations
@@ -743,7 +744,7 @@ async def _object_text(
     with tempfile.TemporaryDirectory(prefix="strata_prompt_object_") as directory:
         path = Path(directory) / "input.pickle"
         path.write_bytes(value.blob)
-        hand_over(Path(directory), harness_user)
+        await anyio.to_thread.run_sync(hand_over, Path(directory), harness_user)
         allowlist = configured_allowlist()
         # A fixed seed: a set prints in one order, so the rendered prompt and its cache
         # key do not change from run to run.
