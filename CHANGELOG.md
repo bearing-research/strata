@@ -786,8 +786,8 @@ exhaustive commit history.
 - **A scratchpad's warm worker is not lost when its check fails.** A worker is checked
   against the environment it was built on as it is taken from the pool. When that check
   raised, or the run was cancelled during it, the worker was neither handed out nor
-  stopped: it ran on outside the pool, which stayed one short. It is now stopped and
-  replaced. (#1616)
+  stopped: it ran on outside the pool, which stayed one short, and a check that raised
+  failed the cell. The worker is now stopped and replaced, and the cell runs cold. (#1616)
 - **A run no longer holds up the server while it hands its files to the harness user.**
   With a harness user, the sweep for processes earlier cells left running and the change
   of owner of the run's directory ran on the server's event loop, so every notebook and
