@@ -173,6 +173,84 @@ async def test_a_torn_line_is_skipped_for_the_next(tmp_path, torn):
 
 
 @pytest.mark.asyncio
+async def test_an_event_that_fails_is_the_run_s_error_not_a_pool_miss(tmp_path):
+    """The worker has the cell by then: None would run it again cold."""
+
+    async def on_event(event):
+        raise OSError("the store is gone")
+
+    event = b'{"' + EVENT_KEY.encode() + b'": "head", "name": "best", "sequence": 1}'
+    pool = _FakePool(_lines(event + b'\n{"success": true}\n'))
+
+    with pytest.raises(OSError, match="the store is gone"):
+        await PooledCellExecutor.execute_with_pool(
+            pool, tmp_path / "manifest.json", tmp_path, on_event=on_event
+        )
+    assert pool.releases == 1  # the worker, still running the cell, was recycled
+
+
+@pytest.mark.asyncio
+async def test_a_worker_that_never_got_the_manifest_is_a_pool_miss(tmp_path):
+    class _ClosedStdin(_FakeStdin):
+        async def drain(self):
+            # Where asyncio says it: write() only buffers.
+            raise ConnectionResetError("the worker exited")
+
+    pool = _FakePool(_lines(b""))
+    process = _FakeProcess(_lines(b""))
+    process.stdin = _ClosedStdin()
+
+    async def acquire():
+        return SimpleNamespace(process=process)
+
+    pool.acquire = acquire
+
+    assert (
+        await PooledCellExecutor.execute_with_pool(pool, tmp_path / "manifest.json", tmp_path)
+        is None
+    )
+    assert pool.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_a_line_past_the_limit_is_a_failed_cell_not_a_pool_miss(tmp_path):
+    class _Overrun:
+        async def readline(self):
+            raise ValueError("Separator is found, but chunk is longer than limit")
+
+    pool = _FakePool(_Overrun())
+
+    result = await PooledCellExecutor.execute_with_pool(pool, tmp_path / "manifest.json", tmp_path)
+
+    assert result is not None and result["success"] is False
+    assert "256 MiB" in result["error"]
+    assert pool.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_a_cold_run_whose_event_fails_is_stopped():
+    """As a warm worker is: a run that failed does not go on."""
+    from strata.notebook.local_runs import relay_events
+    from strata.notebook.process_tree import subprocess_kwargs_for_new_group
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", "import time; time.sleep(60)", **subprocess_kwargs_for_new_group()
+    )
+    read_fd, write_fd = os.pipe()
+    event = {EVENT_KEY: "head", "name": "best", "sequence": 1}
+    with os.fdopen(write_fd, "wb") as pipe:
+        pipe.write(json.dumps(event).encode() + b"\n")
+
+    async def on_event(payload):
+        raise OSError("the store is gone")
+
+    with pytest.raises(OSError, match="the store is gone"):
+        await relay_events(read_fd, on_event, proc)
+
+    assert proc.returncode is not None
+
+
+@pytest.mark.asyncio
 async def test_a_line_a_child_wrote_is_dropped_never_the_result(tmp_path):
     """R's worker shares its fd 1 with the cell's children: their lines are dropped, as
     the cold path drops them, and none passes for the result."""
