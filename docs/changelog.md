@@ -558,14 +558,6 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   against the worker's directory, where uv built the environment in another place and
   every cell failed with "has no interpreter". (#1604)
 - **Stopping the scratchpad's daemon waits for its process to exit, not only its
-  port.** Its store keeps its files open until then, and on Windows a store opened
-  right after `strata scratch stop` or a restart failed with a disk I/O error. A
-  process still draining is given two seconds, then left to finish. (#1602)
-- **On Windows, stopping the scratchpad's daemon waits for its process to exit, not
-  only its port.** Stopping terminates it there, and its store holds its files open
-  until the process is gone: a store opened right after `strata scratch stop` or a
-  restart failed with a disk I/O error. (#1602)
-- **Stopping the scratchpad's daemon waits for its process to exit, not only its
   port.** `strata scratch stop`, `strata scratch rm` and a restart went on once the
   port closed, while the process could still hold the scratchpad's store: elsewhere
   its shutdown still closes its sessions, and on Windows, where a stop terminates it,
