@@ -728,12 +728,15 @@ def test_a_process_named_in_bytes_that_are_not_utf8_is_read(tmp_path):
 
 
 def test_a_status_without_nssid_takes_the_session_from_stat(tmp_path):
-    """Kernels before 4.1, and gVisor, print no NSsid."""
-    (tmp_path / "10").mkdir()
-    (tmp_path / "10" / "status").write_text(
-        "Name:\tpython\nState:\tS (sleeping)\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\n"
-    )
+    """Kernels before 4.1 print no NSsid."""
+    for pid in (10, 11, 12):
+        (tmp_path / str(pid)).mkdir()
+        (tmp_path / str(pid) / "status").write_text(
+            "Name:\tpython\nState:\tS (sleeping)\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\n"
+        )
     # pid (comm) state ppid pgrp session ...; a ")" in the name is the process's own.
     (tmp_path / "10" / "stat").write_bytes(b"10 (a) b) S 1 7 9 0 -1")
+    # 11 exited between the two reads; 12's stat was cut short as it went.
+    (tmp_path / "12" / "stat").write_bytes(b"12 (py) Z")
 
     assert _process_table(str(tmp_path)) == {10: (1, 1000, 9)}

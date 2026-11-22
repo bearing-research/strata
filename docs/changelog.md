@@ -543,8 +543,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   harness user.** Before each such run, the sweep for what earlier cells left running
   decoded every process's `/proc` status strictly. A process can name itself anything,
   so one that a cell left running with such a name made each later run fail before
-  it started. Where a status has no `NSsid` line (kernels before 4.1, gVisor), every
-  such run failed the same way; the session now comes from `/proc/<pid>/stat`. (#1605)
+  it started. (#1605)
+- **On Linux before 4.1, runs as the harness user no longer all fail.** The same sweep
+  read each process's session from the `NSsid` line of its `/proc` status, which those
+  kernels do not print, and raised before every run. It now reads the session from
+  `/proc/<pid>/stat` there. (#1605)
 - **A shared or worker environment's console scripts run wherever the directory is.**
   `uv sync` made the environment itself, and such a venv writes its own path into every
   console script, so a directory moved or copied elsewhere ran `python` and imported
