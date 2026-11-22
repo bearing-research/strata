@@ -25,6 +25,8 @@ _PARENT = textwrap.dedent(
 def test_off_windows_it_does_nothing(monkeypatch):
     from strata.notebook import process_tree
 
+    # Another test's server may have made the job already: this one starts from none.
+    monkeypatch.setattr(process_tree, "_job", None)
     monkeypatch.setattr(process_tree.sys, "platform", "linux")
     process_tree.end_children_with_this_process()
 
@@ -41,20 +43,19 @@ def test_a_terminated_parent_takes_its_children_with_it(bound):
     kernel32.OpenProcess.restype = wintypes.HANDLE
     synchronize, terminate, wait_timeout = 0x00100000, 0x0001, 0x102
 
-    parent = subprocess.Popen(
+    with subprocess.Popen(
         [sys.executable, "-c", _PARENT, "bound" if bound else "unbound"],
         stdout=subprocess.PIPE,
         text=True,
-    )
-    try:
-        assert parent.stdout is not None
-        pid = int(parent.stdout.readline())
-        # Held from before the kill: the pid cannot be another process's when it is waited on.
-        child = kernel32.OpenProcess(synchronize | terminate, False, pid)
-        assert child, ctypes.get_last_error()
-    finally:
-        parent.kill()  # TerminateProcess, as os.kill(pid, SIGTERM) is here
-        parent.wait()
+    ) as parent:
+        try:
+            assert parent.stdout is not None
+            pid = int(parent.stdout.readline())
+            # Held from before the kill: the pid is not another process's when waited on.
+            child = kernel32.OpenProcess(synchronize | terminate, False, pid)
+            assert child, ctypes.get_last_error()
+        finally:
+            parent.kill()  # TerminateProcess, as os.kill(pid, SIGTERM) is here
     try:
         waited = kernel32.WaitForSingleObject(wintypes.HANDLE(child), 10_000 if bound else 1_000)
         if bound:

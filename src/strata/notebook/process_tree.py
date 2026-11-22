@@ -49,7 +49,9 @@ def end_children_with_this_process() -> None:
     and what it started running on. The server joins a job of its own that ends them as
     it closes: its handle is the only one, and the server's exit closes it. A process
     started with ``CREATE_BREAKAWAY_FROM_JOB`` leaves the job, as one a cell detaches on
-    POSIX (``setsid``) leaves the group. A no-op elsewhere, and once done.
+    POSIX (``setsid``) leaves the group; an application a cell opens (``webbrowser``,
+    ``os.startfile``) that was not already running does not, and ends with the server.
+    A no-op elsewhere, and once done.
     """
     global _job
     if sys.platform != "win32" or _job is not None:
