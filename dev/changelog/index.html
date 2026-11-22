@@ -4415,6 +4415,25 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Starting a cell no longer installs into its environment.</strong> A Python cell with no
+  warm process started through <code>uv run</code>, which syncs the environment first. A
+  <code>pyproject.toml</code> edited outside Strata (an editor, an agent, a <code>git pull</code>) was then
+  locked and installed by whichever cell next started cold: with
+  <code>notebook_env_backend = "shared"</code>, into the environment every notebook with that lock
+  links to, and in any notebook outside its lock on <code>uv.lock</code> and its environment log.
+  The harness now starts on the environment's interpreter, as a warm process, a
+  service-mode cell and a scratchpad in its project's environment already did, so such
+  an edit waits for the next environment sync, and a cold cell no longer waits on uv or
+  needs it on <code>PATH</code>. Until that sync, a cold cell runs in the environment as it was
+  last synced, as a warm one always has, and publishing stays refused while <code>uv.lock</code>
+  and the installed environment differ. A cold cell whose environment was deleted says
+  to sync it, where <code>uv run</code> rebuilt it unasked. (#1603)</li>
+<li><strong>Every local Python cell runs with its environment active.</strong> <code>VIRTUAL_ENV</code> names the
+  notebook's environment and its <code>bin</code> leads <code>PATH</code>, so the <code>python</code>, the <code>uv pip</code> and
+  the console scripts a cell starts are the notebook's. Only a cold cell had that, from
+  <code>uv run</code>; a warm one and a Run All got the server's <code>VIRTUAL_ENV</code> and <code>PATH</code>, which
+  for a server started with <code>uv run</code> are Strata's own. The server's
+  <code>UV_PROJECT_ENVIRONMENT</code> and <code>UV_PYTHON</code> no longer reach a cell. (#1603)</li>
 <li><strong>On Windows a process that missed the Ctrl-Break is sent it again.</strong> Strata stops a
   cell or warm process there with a console Ctrl-Break, waits two seconds, then kills
   it. A venv's <code>python.exe</code> is a launcher that leaves console events to the interpreter

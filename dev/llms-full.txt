@@ -15243,8 +15243,7 @@ opened on it, never by name, and leaves a symlink, or a file with another hard
 link, as it is. Also handed over is
 a remote `rw` mount's staging copy (which the server then uploads without
 following any link the cell left in it, so a link to a server file is skipped,
-not synced), the harness runs the venv's interpreter directly rather than
-through `uv run`, and the artifact store is never read by the cell. The server, in turn, never
+not synced), and the artifact store is never read by the cell. The server, in turn, never
 unpickles what a cell stored: prompt and SQL cells do not load a pickled value,
 and cell tests load their inputs in the test process.
 
@@ -15374,7 +15373,7 @@ sent only to those URLs; a notebook naming another host must bring its own key.
 Installing a notebook's Python packages runs as the server's user too, and building
 a package from a source distribution runs that package's build backend, code
 from wherever the package came from, with the server's environment. In service mode every `uv` command
-a notebook runs (`sync`, `add`, `lock`, the `uv run` that starts a cell)
+a notebook runs (`sync`, `add`, `lock`)
 installs wheels only: a dependency with no wheel for the notebook's Python
 fails to resolve, and uv's message says a wheel is required. Personal mode
 still builds from source.
