@@ -537,6 +537,12 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **On Windows a process that missed the Ctrl-Break is sent it again.** Strata stops a
+  cell or warm process there with a console Ctrl-Break, waits two seconds, then kills
+  it. A venv's `python.exe` is a launcher that leaves console events to the interpreter
+  it starts, so one sent before that interpreter was up reached nothing: a warm worker
+  stopped just after it started sat out the grace and was killed. The event is now sent
+  again every quarter second while the process lives. (#1607)
 - **A shared or worker environment's console scripts run wherever the directory is.**
   `uv sync` made the environment itself, and such a venv writes its own path into every
   console script, so a directory moved or copied elsewhere ran `python` and imported
