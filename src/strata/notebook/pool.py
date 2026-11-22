@@ -333,8 +333,8 @@ class PooledCellExecutor:
         Raises:
             TimeoutError: the cell exceeded ``timeout_seconds`` in the worker. This is
                 a real cell timeout, not a pool miss, so there is no cold re-run.
-            Exception: whatever handing the run directory over raised, as a cold run
-                would; the worker it took is released.
+            BaseException: whatever handing the run directory over raised, an interrupt
+                included, as a cold run would; the worker it took is released.
         """
         try:
             harness_user = resolve_harness_user()

@@ -58,12 +58,14 @@ class _FakePool:
         self._stdout = stdout
         self._returncode = returncode
         self.replaced = False
+        self.releases = 0
 
     async def acquire(self):
         return SimpleNamespace(process=_FakeProcess(self._stdout, self._returncode))
 
     async def release_and_replace(self, warm_proc):
         self.replaced = True
+        self.releases += 1
 
 
 @pytest.mark.asyncio
@@ -100,7 +102,7 @@ async def test_a_hand_over_that_raises_still_releases_the_worker(tmp_path, monke
         await PooledCellExecutor.execute_with_pool(
             pool, tmp_path / "manifest.json", tmp_path, timeout_seconds=1
         )
-    assert pool.replaced
+    assert pool.releases == 1
 
 
 @pytest.mark.asyncio
