@@ -192,8 +192,9 @@ async def test_an_event_that_fails_is_the_run_s_error_not_a_pool_miss(tmp_path):
 @pytest.mark.asyncio
 async def test_a_worker_that_never_got_the_manifest_is_a_pool_miss(tmp_path):
     class _ClosedStdin(_FakeStdin):
-        def write(self, data):
-            raise BrokenPipeError("the worker exited")
+        async def drain(self):
+            # Where asyncio says it: write() only buffers.
+            raise ConnectionResetError("the worker exited")
 
     pool = _FakePool(_lines(b""))
     process = _FakeProcess(_lines(b""))
@@ -209,6 +210,44 @@ async def test_a_worker_that_never_got_the_manifest_is_a_pool_miss(tmp_path):
         is None
     )
     assert pool.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_a_line_past_the_limit_is_a_failed_cell_not_a_pool_miss(tmp_path):
+    class _Overrun:
+        async def readline(self):
+            raise ValueError("Separator is found, but chunk is longer than limit")
+
+    pool = _FakePool(_Overrun())
+
+    result = await PooledCellExecutor.execute_with_pool(pool, tmp_path / "manifest.json", tmp_path)
+
+    assert result is not None and result["success"] is False
+    assert "256 MiB" in result["error"]
+    assert pool.releases == 1
+
+
+@pytest.mark.asyncio
+async def test_a_cold_run_whose_event_fails_is_stopped():
+    """As a warm worker is: a run that failed does not go on."""
+    from strata.notebook.local_runs import relay_events
+    from strata.notebook.process_tree import subprocess_kwargs_for_new_group
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", "import time; time.sleep(60)", **subprocess_kwargs_for_new_group()
+    )
+    read_fd, write_fd = os.pipe()
+    event = {EVENT_KEY: "head", "name": "best", "sequence": 1}
+    with os.fdopen(write_fd, "wb") as pipe:
+        pipe.write(json.dumps(event).encode() + b"\n")
+
+    async def on_event(payload):
+        raise OSError("the store is gone")
+
+    with pytest.raises(OSError, match="the store is gone"):
+        await relay_events(read_fd, on_event, proc)
+
+    assert proc.returncode is not None
 
 
 @pytest.mark.asyncio

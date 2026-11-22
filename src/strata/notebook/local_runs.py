@@ -418,7 +418,16 @@ class LocalRuns:
 
     def _checkpoint(self, run: LocalRun, payload: dict[str, Any], run_dir: Path) -> None:
         sequence = int(payload["sequence"])
-        release = self.releases.prepare(run.build_id, run.attempt, "checkpoint", sequence=sequence)
+        try:
+            release = self.releases.prepare(
+                run.build_id, run.attempt, "checkpoint", sequence=sequence
+            )
+        except ReleaseRejected:
+            raise
+        except Exception:
+            # As one that cannot be staged below: the cell goes on.
+            logger.exception("Checkpoint %d of cell %s was not begun", sequence, run.cell_id)
+            return
         staged: list[StagedVersion] = []
         try:
             if "files" in payload:
@@ -589,5 +598,10 @@ async def relay_events(
             except RunFenced as exc:
                 await terminate_subprocess_tree(proc)
                 return exc
+            except Exception:
+                # The run has failed: the cell is stopped, as a warm worker is.
+                logger.exception("A cold run's event failed; stopping the cell")
+                await terminate_subprocess_tree(proc)
+                raise
     finally:
         transport.close()

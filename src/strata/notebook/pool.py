@@ -300,6 +300,20 @@ async def _died_of_an_interrupt(process: Any) -> bool:
     return returncode in _INTERRUPT_EXITS
 
 
+def _oversized_result() -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": (
+            f"Pool worker error: its result line is over {SUBPROCESS_LINE_LIMIT >> 20} MiB, "
+            "mostly what the cell printed; print less of it"
+        ),
+        "variables": {},
+        "stdout": "",
+        "stderr": "",
+        "mutation_warnings": [],
+    }
+
+
 def _interrupted_result() -> dict[str, Any]:
     return {
         "success": False,
@@ -343,7 +357,8 @@ class PooledCellExecutor:
                 and replaced).
             Exception: whatever failed once the worker had the manifest, *on_event*
                 included: the cell has started, so a cold run would run it twice. Only
-                the worker's protocol ending is a miss.
+                the worker's protocol ending is a miss, and a line past the limit is a
+                failed cell.
         """
         try:
             harness_user = resolve_harness_user()
@@ -377,10 +392,14 @@ class PooledCellExecutor:
 
             deadline = asyncio.get_running_loop().time() + timeout_seconds
             while True:
-                result_json = await asyncio.wait_for(
-                    warm_proc.process.stdout.readline(),
-                    timeout=deadline - asyncio.get_running_loop().time(),
-                )
+                try:
+                    result_json = await asyncio.wait_for(
+                        warm_proc.process.stdout.readline(),
+                        timeout=deadline - asyncio.get_running_loop().time(),
+                    )
+                except ValueError:
+                    # Past the line limit. The cell ran, so not a miss.
+                    return _oversized_result()
                 if not result_json:
                     if await _died_of_an_interrupt(warm_proc.process):
                         # Wherever it landed (a torn line, the worker's own report): the
@@ -435,6 +454,7 @@ class PooledCellExecutor:
         except Exception as e:
             if delivered:
                 # The cell has started: a cold run would run it twice.
+                logger.exception("Warm run failed once its worker had the cell")
                 raise
             logger.error(f"Error executing with warm process: {e}")
             return None

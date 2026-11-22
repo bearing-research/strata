@@ -816,6 +816,28 @@ class TestCheckpointFiles:
         assert {r.state for r in releases.releases_of(run.build_id, "checkpoint")} == {"abandoned"}
         assert releases.latest_accepted(run.build_id) is None
 
+    def test_a_checkpoint_that_cannot_begin_is_skipped(self, tmp_path: Path, monkeypatch):
+        """As one that cannot be staged: a checkpoint is a convenience, the cell goes on."""
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        run = runs.open(
+            cell_id="train",
+            computation_key="parent",
+            variant=None,
+            input_versions={},
+            timeout_seconds=60,
+            resume=True,
+        )
+
+        def locked(*args, **kwargs):
+            raise OSError("database is locked")
+
+        monkeypatch.setattr(runs.releases, "prepare", locked)
+
+        runs.handle(run, {"event": "checkpoint", "sequence": 1, "parts": {}}, tmp_path)
+
+        assert runs.releases.latest_accepted(run.build_id) is None
+
 
 def test_a_child_the_cell_leaves_behind_does_not_hold_the_run_open(tmp_path: Path):
     """The harness keeps the event pipe from the cell's children, and the executor stops
