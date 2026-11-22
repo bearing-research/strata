@@ -556,6 +556,17 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **On Windows a process that missed the Ctrl-Break is sent it again.** Strata stops a
+  cell or warm process there with a console Ctrl-Break, waits two seconds, then kills
+  it. A venv's `python.exe` is a launcher that leaves console events to the interpreter
+  it starts, so one sent before that interpreter was up reached nothing: a warm worker
+  stopped just after it started sat out the grace and was killed. The event is now sent
+  again every quarter second while the process lives. (#1607)
+- **A stopped process's pipes are closed with it.** Since CPython's gh-119710 (3.13 and
+  3.14 patch releases) asyncio's `wait()` returns when the process exits, whoever still
+  holds its pipes: a descendant that outlived it, on Windows a venv launcher's
+  interpreter for a moment. Strata then left the pipes to close when the other ends did.
+  It now closes its own ends once the process is reaped. (#1607)
 - **On Windows a scratchpad daemon is killed only as the process it was started as.**
   Windows gives a dead process's pid to the next one, and a kill by pid ends whichever
   holds it. A setup that failed killed its daemon by pid after the daemon had exited,

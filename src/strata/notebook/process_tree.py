@@ -36,6 +36,32 @@ def subprocess_kwargs_for_new_group() -> dict[str, Any]:
     return {"start_new_session": True}
 
 
+# How often Windows is sent the Ctrl-Break again while the process lives.
+_CTRL_BREAK_EVERY = 0.25
+
+
+async def _exit(proc: asyncio.subprocess.Process) -> None:
+    """Wait for *proc* to exit; on Windows, send its group Ctrl-Break again meanwhile.
+
+    Once is not enough there: a venv's ``python.exe`` is a launcher that ignores the
+    event for the interpreter it starts, and one sent before that interpreter is up
+    reaches nothing.
+    """
+    if sys.platform != "win32":
+        await proc.wait()
+        return
+    while True:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=_CTRL_BREAK_EVERY)
+            return
+        except TimeoutError:
+            try:
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            except OSError:
+                # Exited as the wait gave up, or no console to send through: the wait says.
+                continue
+
+
 async def terminate_subprocess_tree(
     proc: asyncio.subprocess.Process,
     *,
@@ -44,12 +70,35 @@ async def terminate_subprocess_tree(
     """SIGTERM, grace period, then SIGKILL the subprocess and its descendants.
 
     ``proc`` must have been spawned with :py:func:`subprocess_kwargs_for_new_group`,
-    or only the direct child is signalled. Returns once the process is reaped;
-    a process that exits mid-way (``ProcessLookupError``) counts as success.
+    or only the direct child is signalled. Returns once the process is reaped and
+    our ends of its pipes are closed; a process that exits mid-way
+    (``ProcessLookupError``) counts as success.
     """
     if proc.returncode is not None:
         return  # already exited cleanly
+    try:
+        await _reap(proc, grace_seconds)
+    finally:
+        if proc.returncode is not None:
+            await _close_pipes(proc)
 
+
+async def _close_pipes(proc: asyncio.subprocess.Process) -> None:
+    """Close our ends of a reaped process's pipes.
+
+    asyncio closes them once the other ends close, and a descendant that outlives the
+    process holds those open: on Windows a venv launcher's interpreter, for a moment. A
+    loop closed in that moment finds the transport unclosed.
+    """
+    # asyncio gives no public way to the transport.
+    transport = getattr(proc, "_transport", None)
+    if transport is not None:
+        transport.close()
+        # One turn of the loop: the pipe transports close in callbacks.
+        await asyncio.sleep(0)
+
+
+async def _reap(proc: asyncio.subprocess.Process, grace_seconds: float) -> None:
     pid = proc.pid
     if pid is None:
         try:
@@ -76,7 +125,7 @@ async def terminate_subprocess_tree(
         )
 
     try:
-        await asyncio.wait_for(proc.wait(), timeout=grace_seconds)
+        await asyncio.wait_for(_exit(proc), timeout=grace_seconds)
         return  # graceful shutdown succeeded
     except TimeoutError:
         logger.info(
