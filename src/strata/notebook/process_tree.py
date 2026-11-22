@@ -36,6 +36,88 @@ def subprocess_kwargs_for_new_group() -> dict[str, Any]:
     return {"start_new_session": True}
 
 
+# Held for the process's life: when it closes, at exit however that comes, Windows ends
+# every process left in the job (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).
+_job: int | None = None
+
+
+def end_children_with_this_process() -> None:
+    """On Windows, end every process this one starts, and theirs, when it exits.
+
+    POSIX has the lifeline and the process group for that; Windows has neither, so a
+    server terminated (``strata scratch stop``, a crash) left a running cell's harness
+    and what it started running on. The server joins a job of its own that ends them as
+    it closes: its handle is the only one, and the server's exit closes it. A process
+    started with ``CREATE_BREAKAWAY_FROM_JOB`` leaves the job, as one a cell detaches on
+    POSIX (``setsid``) leaves the group. A no-op elsewhere, and once done.
+    """
+    global _job
+    if sys.platform != "win32" or _job is not None:
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    class _BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            (name, ctypes.c_uint64)
+            for name in ("Read", "Write", "Other", "ReadBytes", "WriteBytes", "OtherBytes")
+        ]
+
+    class _ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimits),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        logger.warning("No job for this process's children: error %d", ctypes.get_last_error())
+        return
+    limits = _ExtendedLimits()
+    limits.BasicLimitInformation.LimitFlags = _KILL_ON_JOB_CLOSE | _BREAKAWAY_OK
+    if not kernel32.SetInformationJobObject(
+        wintypes.HANDLE(job),
+        _EXTENDED_LIMIT_INFORMATION,
+        ctypes.byref(limits),
+        ctypes.sizeof(limits),
+    ) or not kernel32.AssignProcessToJobObject(
+        wintypes.HANDLE(job), wintypes.HANDLE(kernel32.GetCurrentProcess())
+    ):
+        # In a job that forbids it (Windows 7 nests none): its children outlive it, as before.
+        logger.warning(
+            "This process's children will outlive it: its job refused: error %d",
+            ctypes.get_last_error(),
+        )
+        kernel32.CloseHandle(wintypes.HANDLE(job))
+        return
+    _job = job
+
+
+_KILL_ON_JOB_CLOSE = 0x2000
+_BREAKAWAY_OK = 0x800
+_EXTENDED_LIMIT_INFORMATION = 9
+
+
 # How often Windows is sent the Ctrl-Break again while the process lives.
 _CTRL_BREAK_EVERY = 0.25
 
