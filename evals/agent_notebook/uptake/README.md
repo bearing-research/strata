@@ -16,7 +16,8 @@ on its own (design note `design-agent-uptake.md`, section 5).
   (either tool is fine) and must-not (edits and file reads, where using the
   scratchpad is a false positive). Each turn's answer is computed from the
   workspace: a number or word in the reply, or a check of the files left behind.
-  `HOLDOUT` is the seeded third of each kind that tuning never sees.
+  `HOLDOUT` is a seeded draw of 10 of the 29, `HOLDOUT_COUNTS` per kind, that tuning
+  never sees.
 
 ```python
 from evals.agent_notebook.uptake import tasks, workspace

@@ -125,8 +125,8 @@ load that a session keeps needing. Each trial is a fresh copy of the project and
 config of its own. Arm A cannot reach Strata at all, and arm C is set up by
 `strata agent install`, with the scratchpad created beforehand as a returning
 user's would be. The 29 tasks come in five kinds, each run three times per arm; 10
-of them, the holdout, were never looked at while the guidance and the tools were
-tuned.
+of them, the holdout, drawn by a fixed seed before any arm C run, were never looked
+at while the guidance and the tools were tuned.
 
 Median wall time of C over A, with its 95% bootstrap interval:
 
@@ -141,9 +141,9 @@ Median wall time of C over A, with its 95% bootstrap interval:
 - **The data is loaded once.** In iteration and plot trials, the loader ran once in
   the whole trial in 21 of 21 of C's (holdout: 9 of 9), and in 3 of 21 of A's
   (2 of 9): A loaded the events again, where C used the value already in the
-  scratchpad. An iteration trial's median took A 130 s and C 55 s. The saving is
-  the loads not repeated, so it scales with how slow the load is: one that takes a
-  second saves little.
+  scratchpad. On the tuning tasks an iteration trial's median took A 130 s and C
+  55 s (holdout: 92 s and 62 s). Most of that is the loads not repeated, so a load
+  that takes a second would save far less; only the 20 s load was measured.
 - **It answers as often.** Every trial in both arms completed: 57 of 57 per arm on
   the tuning tasks, 30 of 30 on the holdout.
 - **It stays out of the way.** On must-not tasks C used the scratchpad in 1 of 15
@@ -153,9 +153,11 @@ Median wall time of C over A, with its 95% bootstrap interval:
 These are one model (`claude-opus-5-5`, Claude Code 2.1.330) on one machine (an
 Apple silicon Mac), with three runs per task, and an interval that crosses 1 is no
 evidence of a saving. The holdout's plot row is a single task. The columns ran on
-different Strata commits: the tuning tasks on the arm C branch, before
-[#1599](https://github.com/bearing-research/strata/pull/1599), and the holdout once,
-at #1599. On the tuning tasks, probing first took 1.53 [1.30, 2.04] times A's, and
+different Strata commits: the tuning tasks on the branch of arm C
+([#1598](https://github.com/bearing-research/strata/pull/1598)), before
+[#1599](https://github.com/bearing-research/strata/pull/1599), but for their probing
+row; the holdout once, at #1599, so its probing row still includes the daemon's
+start. On the tuning tasks, probing first took 1.53 [1.30, 2.04] times A's, and
 1.36 once #1599 showed a value's repr in its preview rather than its type's name;
 most of the rest was the 4 s or so the first `run` waited for the daemon. The
 table's tuning probing row is a rerun after
