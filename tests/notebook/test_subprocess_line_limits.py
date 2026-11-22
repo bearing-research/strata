@@ -3,7 +3,7 @@
 asyncio's StreamReader raises ValueError past 64 KiB, but harness frames and warm-pool result lines
 embed stdout captures and base64 displays. Readers need a far larger limit, and must fail the run
 cleanly when even that is exceeded. Also: a warm-pool cell timeout raises TimeoutError instead of a
-cold re-execution.
+cold re-execution, and a warm run whose hand-over raises still releases its worker.
 """
 
 from __future__ import annotations
@@ -85,27 +85,22 @@ async def test_pool_timeout_raises_instead_of_cold_fallback(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_hand_over_that_raises_takes_no_worker(tmp_path, monkeypatch):
-    """Its sweep can fail (a /proc it cannot read): the run's error, and the pool keeps its
-    slot."""
+@pytest.mark.parametrize("error", [IndexError("a stat that does not parse"), KeyboardInterrupt()])
+async def test_a_hand_over_that_raises_still_releases_the_worker(tmp_path, monkeypatch, error):
+    """Its sweep can fail (a /proc it cannot read), or be interrupted: the run's error, and
+    the pool keeps its slot."""
 
     def refused(path, user):
-        raise IndexError("a stat that does not parse")
-
-    taken: list[bool] = []
-
-    class _Watched(_FakePool):
-        async def acquire(self):
-            taken.append(True)
-            return await super().acquire()
+        raise error
 
     monkeypatch.setattr("strata.notebook.pool.hand_over", refused)
+    pool = _FakePool(None)
 
-    with pytest.raises(IndexError):
+    with pytest.raises(type(error)):
         await PooledCellExecutor.execute_with_pool(
-            _Watched(None), tmp_path / "manifest.json", tmp_path, timeout_seconds=1
+            pool, tmp_path / "manifest.json", tmp_path, timeout_seconds=1
         )
-    assert taken == []
+    assert pool.replaced
 
 
 @pytest.mark.asyncio
