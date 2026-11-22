@@ -207,7 +207,8 @@ class WarmProcessPool:
             self._warming -= 1
 
     async def acquire(self) -> WarmProcess | None:
-        """Return a warm process, or None if the pool is empty or not started."""
+        """Return a warm process, or None: the pool is empty, not started or drained
+        meanwhile, or the worker checked could not be (the cell then runs cold)."""
         # A background spawn finishing just after drain() could otherwise be
         # handed out and then killed by the next invalidate cycle.
         if not self._started:
