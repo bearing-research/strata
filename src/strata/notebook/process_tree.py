@@ -36,6 +36,32 @@ def subprocess_kwargs_for_new_group() -> dict[str, Any]:
     return {"start_new_session": True}
 
 
+# How often Windows is sent the Ctrl-Break again while the process lives.
+_CTRL_BREAK_EVERY = 0.25
+
+
+async def _exit(proc: asyncio.subprocess.Process) -> None:
+    """Wait for *proc* to exit; on Windows, send its group Ctrl-Break again meanwhile.
+
+    Once is not enough there: a venv's ``python.exe`` is a launcher that ignores the
+    event for the interpreter it starts, and one sent before that interpreter is up
+    reaches nothing.
+    """
+    if sys.platform != "win32":
+        await proc.wait()
+        return
+    while True:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=_CTRL_BREAK_EVERY)
+            return
+        except TimeoutError:
+            try:
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            except OSError:
+                # Exited as the wait gave up, or no console to send through: the wait says.
+                continue
+
+
 async def terminate_subprocess_tree(
     proc: asyncio.subprocess.Process,
     *,
@@ -76,7 +102,7 @@ async def terminate_subprocess_tree(
         )
 
     try:
-        await asyncio.wait_for(proc.wait(), timeout=grace_seconds)
+        await asyncio.wait_for(_exit(proc), timeout=grace_seconds)
         return  # graceful shutdown succeeded
     except TimeoutError:
         logger.info(
