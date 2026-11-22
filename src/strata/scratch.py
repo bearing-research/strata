@@ -231,10 +231,13 @@ def _scaffold(anchor: Path) -> None:
 # Started by a launcher that exits at once, so the daemon is nobody's child: no client
 # has to reap it, and it outlives the client that started it.
 _LAUNCH = """\
-import subprocess, sys
-with open(sys.argv[1], "wb") as log:
+import os, subprocess, sys
+log, venv, *command = sys.argv[1:]
+# Set here, at the last hop: an interpreter takes it out of its own environment.
+env = {**os.environ, "__PYVENV_LAUNCHER__": venv} if venv else None
+with open(log, "wb") as out:
     proc = subprocess.Popen(
-        sys.argv[2:], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        command, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
         start_new_session=True,
     )
 print(proc.pid)
@@ -245,8 +248,9 @@ def _server_command() -> list[str]:
     return [sys.executable, "-m", "strata"]
 
 
-def _as_itself(command: list[str]) -> tuple[list[str], dict[str, str]]:
-    """*command* and the environment under which the process started is this interpreter.
+def _as_itself(command: list[str]) -> tuple[list[str], str]:
+    """*command* as the process started runs it, and the venv launcher it stands in for
+    (``__PYVENV_LAUNCHER__``), if any.
 
     A venv's ``python.exe`` on Windows is a launcher, and the interpreter its child: a kill
     or a wait on the pid started is then not one on the server, which holds its stores'
@@ -261,8 +265,8 @@ def _as_itself(command: list[str]) -> tuple[list[str], dict[str, str]]:
         or same(command[0]) != same(sys.executable)
         or same(base) == same(sys.executable)
     ):
-        return command, {}
-    return [base, *command[1:]], {"__PYVENV_LAUNCHER__": sys.executable}
+        return command, ""
+    return [base, *command[1:]], sys.executable
 
 
 def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
@@ -294,12 +298,11 @@ def _spawn(anchor: Path, port: int, python: str | None = None) -> int:
         "STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS": "0",
         **({"STRATA_SCRATCH_PYTHON": python} if python is not None else {}),
     }
-    command, as_venv = _as_itself(_server_command())
-    env.update(as_venv)
+    command, venv = _as_itself(_server_command())
     try:
         log = private_file(_log_path(anchor))
         launched = subprocess.run(
-            [sys.executable, "-I", "-c", _LAUNCH, str(log), *command],
+            [sys.executable, "-I", "-c", _LAUNCH, str(log), venv, *command],
             env=env,
             # Its [tool.strata] is then the scratchpad's (none), not whichever
             # pyproject.toml sits above where the first client ran.

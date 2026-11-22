@@ -298,11 +298,10 @@ def test_only_a_windows_venvs_interpreter_is_started_as_its_base(
     monkeypatch.setattr(scratch.sys, "executable", "venv/python.exe")
     monkeypatch.setattr(scratch.sys, "_base_executable", base)
 
-    argv, env = scratch._as_itself(command)
+    argv, venv = scratch._as_itself(command)
 
     assert argv == [started, "-m", "strata"]
-    swapped = started != command[0]
-    assert env == ({"__PYVENV_LAUNCHER__": "venv/python.exe"} if swapped else {})
+    assert venv == ("venv/python.exe" if started != command[0] else "")
 
 
 _HOLDS_A_STORE = """
