@@ -318,9 +318,10 @@ def _alive(pid: int) -> bool:
         # A zombie has exited, though nobody reaped it (PID 1 in a container without init).
         # What /proc does not show (hidden, gone, unreadable) leaves os.kill's answer.
         with contextlib.suppress(OSError):
-            fields = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
+            # Bytes: the name before ")" is whatever the process set.
+            fields = Path(f"/proc/{pid}/stat").read_bytes().rpartition(b")")[2].split()
             # "X" is a task being reaped; kernels 2.6.33 to 3.13 may show it as "x".
-            if fields and fields[0] in ("Z", "X", "x"):
+            if fields and fields[0] in (b"Z", b"X", b"x"):
                 return False
     return True
 

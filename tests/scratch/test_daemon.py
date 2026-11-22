@@ -368,12 +368,12 @@ def test_a_zombie_is_not_alive():
 class _Proc:
     """``Path`` as ``_alive`` sees it: what a read of a process's stat gives."""
 
-    stat: str | Exception = ""
+    stat: bytes | Exception = b""
 
     def __init__(self, path: str) -> None:
         self.path = path
 
-    def read_text(self) -> str:
+    def read_bytes(self) -> bytes:
         if isinstance(self.stat, Exception):
             raise self.stat
         return self.stat
@@ -387,11 +387,13 @@ class _Proc:
         (FileNotFoundError("hidepid=2, or no /proc"), True),
         (PermissionError("hidepid=1"), True),
         (OSError("a sandbox's /proc"), True),
-        ("", True),
-        ("1 (a) b) S 0", True),
-        ("1 (py) Z 0", False),
-        ("1 (py) X 0", False),
-        ("1 (py) x 0", False),
+        (b"", True),
+        (b"1 (a) b) S 0", True),
+        (b"1 (\xe2\x82) S 0", True),
+        (b"1 (\xe2\x82) Z 0", False),
+        (b"1 (py) Z 0", False),
+        (b"1 (py) X 0", False),
+        (b"1 (py) x 0", False),
     ],
 )
 def test_a_linux_process_is_alive_unless_its_stat_shows_it_dead(monkeypatch, stat, alive):
