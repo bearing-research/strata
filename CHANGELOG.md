@@ -569,7 +569,8 @@ exhaustive commit history.
   its shutdown still closes its sessions, and on Windows, where a stop terminates it,
   its open files made a store opened right after fail with a disk I/O error. A
   process that has not exited within the stop's 30 seconds is now an error, as a port
-  still open was; on Linux a zombie nobody reaps counts as exited. (#1602)
+  still open was; on Linux a zombie nobody reaps counts as exited, read from `/proc`.
+  (#1602)
 - **A scratchpad whose environment probe failed is still keyed, audited and reported
   as attached.** Its record keeps its cells in the project's overlay, but the lock hash,
   the local packages, the read audit's scope and the runtime metadata decided from the

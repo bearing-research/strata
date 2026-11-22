@@ -346,7 +346,10 @@ def test_a_process_that_outlasts_the_stop_is_an_error(monkeypatch):
         _stopping(monkeypatch, lambda pid: True, timeout=0.1)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="a zombie is read from /proc")
+@pytest.mark.skipif(
+    sys.platform != "linux" or not Path("/proc/self/stat").exists(),
+    reason="a zombie is read from /proc",
+)
 def test_a_zombie_is_not_alive():
     child = subprocess.Popen([sys.executable, "-c", "pass"])
     stat = Path(f"/proc/{child.pid}/stat")
@@ -360,6 +363,38 @@ def test_a_zombie_is_not_alive():
         assert not scratch._alive(child.pid)
     finally:
         child.wait()
+
+
+class _Proc:
+    """``Path`` as ``_alive`` sees it: ``/proc`` there or not, a stat read that fails."""
+
+    mounted = True
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def exists(self) -> bool:
+        return self.mounted
+
+    def read_text(self) -> str:
+        raise ProcessLookupError(self.path)
+
+
+def test_a_process_reaped_as_its_stat_is_read_is_gone(monkeypatch):
+    monkeypatch.setattr(scratch.sys, "platform", "linux")
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(scratch, "Path", _Proc)
+
+    assert not scratch._alive(12345)
+
+
+def test_without_proc_a_process_os_kill_finds_is_alive(monkeypatch):
+    monkeypatch.setattr(scratch.sys, "platform", "linux")
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(_Proc, "mounted", False)
+    monkeypatch.setattr(scratch, "Path", _Proc)
+
+    assert scratch._alive(12345)
 
 
 def test_a_copy_of_a_served_directory_is_not_served(project, tmp_path, monkeypatch):

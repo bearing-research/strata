@@ -320,7 +320,8 @@ def _alive(pid: int) -> bool:
             fields = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
         except (FileNotFoundError, ProcessLookupError):
             return False
-        return bool(fields) and fields[0] not in ("Z", "X")
+        # "x" is how kernels before 3.14 show a task being reaped.
+        return bool(fields) and fields[0] not in ("Z", "X", "x")
     return True
 
 
