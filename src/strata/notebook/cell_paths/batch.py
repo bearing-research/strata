@@ -43,6 +43,7 @@ from strata.notebook.models import CellOutput
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
+    is_a_deadline,
     subprocess_kwargs_for_new_group,
     terminate_subprocess_tree,
 )
@@ -319,7 +320,9 @@ async def run_batch(
                         timeout=batch_timeout_seconds,
                     )
                     completed = end_reason == "complete"
-                except TimeoutError:
+                except TimeoutError as exc:
+                    if not is_a_deadline(exc):
+                        raise  # the OS's, from serving a cell: an error, as any other
                     # SIGTERM the whole tree; proc.kill() alone would leak user-spawned children.
                     await terminate_subprocess_tree(proc)
                     end_reason = "subprocess_died"

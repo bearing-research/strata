@@ -1016,6 +1016,28 @@ class TestLoop:
         assert result.execution_method == "loop"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("os_error", [False, True], ids=["deadline", "etimedout"])
+    async def test_only_a_deadline_is_an_iteration_timeout(self, tmp_path, monkeypatch, os_error):
+        """Python raises the OS's ETIMEDOUT (a network filesystem's chown) as TimeoutError."""
+        import errno
+
+        self._reach_the_harness(monkeypatch)
+
+        async def harness(*_args, **_kwargs):
+            if os_error:
+                raise OSError(errno.ETIMEDOUT, "Operation timed out", "work")
+            raise TimeoutError()
+
+        result = await self._run(tmp_path, self._context(run_harness=harness))
+
+        assert result.success is False
+        if os_error:
+            assert result.error.startswith("Loop cell iter 0 failed: ")
+            assert "Operation timed out" in result.error
+        else:
+            assert "per-iteration timeout" in result.error
+
+    @pytest.mark.asyncio
     async def test_a_refused_table_write_runs_nothing(self, tmp_path):
         async def not_run(*_args, **_kwargs):
             pytest.fail("a refused write runs no iteration")
@@ -3192,6 +3214,24 @@ class TestRunBatch:
         assert kwargs["spawned_as"] is self.USER
         assert seen.tokens == [9.0]
         assert harness.sent == [b"token\n"]
+
+    async def test_the_os_timing_out_while_serving_is_an_error_not_the_batch_timeout(
+        self, tmp_path, harness, monkeypatch
+    ):
+        """Python raises the OS's ETIMEDOUT (spilling to a store on a network filesystem)
+        as TimeoutError: the batch's own deadline is not what ended it."""
+        import errno
+
+        async def serving(*_args, **_kwargs):
+            raise OSError(errno.ETIMEDOUT, "Operation timed out")
+
+        monkeypatch.setattr(batch, "batch_service_loop", serving)
+
+        with pytest.raises(TimeoutError) as raised:
+            await self._run(tmp_path)
+
+        assert raised.value.errno == errno.ETIMEDOUT
+        assert harness.terminated  # the harness is still stopped, by the run's scope
 
     async def test_it_starts_in_the_notebooks_environment(self, tmp_path, harness):
         host, _, _ = _batch_fakes(tmp_path)

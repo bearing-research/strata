@@ -68,6 +68,7 @@ from strata.notebook.mounts import (
     moved_line,
     moved_parts,
 )
+from strata.notebook.process_tree import is_a_deadline
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.read_audit import UNDECLARED_IMPORT, UNDECLARED_LISTING, UNDECLARED_READ
 from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
@@ -997,7 +998,7 @@ async def run_python_cell(
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, error_result)
         return error_result
-    except TimeoutError:
+    except TimeoutError as e:
         duration_ms = (time.time() - start_time) * 1000
         if provenance_hash is not None and context.received_output_files.get(cell_id):
             # No result came back, so what the worker uploaded is all there is.
@@ -1008,7 +1009,11 @@ async def run_python_cell(
             cell_id=cell_id,
             success=False,
             duration_ms=duration_ms,
-            error=context.timeout_message(cell_id, timeout_seconds),
+            error=(
+                context.timeout_message(cell_id, timeout_seconds)
+                if is_a_deadline(e)
+                else f"Execution failed: {e}"
+            ),
         ).apply_remote_metadata(**remote_metadata)
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, timeout_result)
@@ -1227,7 +1232,9 @@ async def run_harness(
         if relay is not None:
             try:
                 fenced = await asyncio.wait_for(relay, timeout=EVENTS_DRAIN_SECONDS)
-            except TimeoutError:
+            except TimeoutError as exc:
+                if not is_a_deadline(exc):
+                    raise  # the relay's own failure, which stopped the run
                 logger.warning(
                     "Event pipe of cell run pid=%s still open after exit; stopped reading",
                     proc.pid,

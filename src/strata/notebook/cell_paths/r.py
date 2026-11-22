@@ -40,6 +40,7 @@ from strata.notebook.harness_user import (
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.models import MountMode, MountSpec, WorkerBackendType
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
+from strata.notebook.process_tree import is_a_deadline
 from strata.notebook.run_scope import in_thread
 from strata.notebook.table_writes import TableWriteError
 from strata.notebook.team_store import TeamPull
@@ -581,7 +582,7 @@ async def run_r_cell(
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, error_result)
         return error_result
-    except TimeoutError:
+    except TimeoutError as e:
         duration_ms = (time.time() - start_time) * 1000
         if context.received_output_files.get(cell_id):
             # No result came back, so what the worker uploaded is all there is.
@@ -590,7 +591,11 @@ async def run_r_cell(
             cell_id=cell_id,
             success=False,
             duration_ms=duration_ms,
-            error=context.timeout_message(cell_id, timeout_seconds),
+            error=(
+                context.timeout_message(cell_id, timeout_seconds)
+                if is_a_deadline(e)
+                else f"R execution failed: {e}"
+            ),
         ).apply_remote_metadata(**remote_metadata)
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, timeout_result)

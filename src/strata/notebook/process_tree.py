@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 SUBPROCESS_LINE_LIMIT = 256 * 1024 * 1024
 
 
+def is_a_deadline(exc: TimeoutError) -> bool:
+    """Whether *exc* is a deadline's (``asyncio.wait_for``, ``asyncio.timeout``): Python
+    raises the OS's ETIMEDOUT as TimeoutError too, from a network filesystem's chown, say,
+    and that is a failure to report, not the cell's time running out."""
+    return exc.errno is None
+
+
 def subprocess_kwargs_for_new_group() -> dict[str, Any]:
     """Spawn kwargs that put the child into its own process group.
 

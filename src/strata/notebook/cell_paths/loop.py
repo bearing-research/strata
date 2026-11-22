@@ -31,6 +31,7 @@ from strata.notebook.harness_user import (
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import CellLanguage, MountSpec, TableWriteSpec
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
+from strata.notebook.process_tree import is_a_deadline
 from strata.notebook.read_audit import ReadFinding, merge
 from strata.notebook.run_scope import in_thread
 from strata.notebook.table_writes import StagedOutput, TableWriteError
@@ -509,7 +510,7 @@ async def _run_loop(
                     result = await context.run_harness(
                         manifest_path, venv_path, timeout_seconds, run_token=run_token
                     )
-                except TimeoutError:
+                except TimeoutError as exc:
                     keep_failed()
                     duration_ms = (time.time() - start_time) * 1000
                     return CellExecutionResult(
@@ -518,6 +519,8 @@ async def _run_loop(
                         error=(
                             f"Loop cell iter {k} timed out after "
                             f"{timeout_seconds}s (per-iteration timeout)."
+                            if is_a_deadline(exc)
+                            else f"Loop cell iter {k} failed: {exc}"
                         ),
                         stdout="".join(combined_stdout),
                         stderr="".join(combined_stderr),
