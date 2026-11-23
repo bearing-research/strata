@@ -792,6 +792,11 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A failed change of a notebook's Python puts back the pyproject it had.** When the
+  new interpreter could not be installed, the rollback restored `requires-python` only if
+  it pinned one minor (`==3.12.*`); a hand-written range such as `>=3.12` was left as the
+  failed minor, with the venv already deleted. The spec is now put back as written and
+  the environment synced again. (#1648)
 - **A stale cell keeps its outputs after a reopen.** A cell whose current key finds
   nothing stored (an input changed, its source was edited, an upstream went stale, it has
   a read-write mount, or a mount's credential is missing) reopened pointing at nothing,
