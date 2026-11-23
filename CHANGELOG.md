@@ -795,7 +795,7 @@ exhaustive commit history.
 - **A rerun no longer fails a run another process has just resumed.** With two processes
   on one notebook's store, a rerun of a cell whose interrupted run another process resumed
   a moment earlier failed that build and killed its run. The rerun is now refused, as it
-  would be on one process (PRNUM).
+  would be on one process (#1653).
 - **A deny rule refuses a table under every spelling of its name.** Rules matched the
   name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
   served `lake:FINANCE.ledger` past a deny on `*:finance.*`. Deny rules now match in any
