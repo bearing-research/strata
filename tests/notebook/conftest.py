@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import threading
 from pathlib import Path
 
@@ -20,59 +18,6 @@ from tests.conftest import (
 )
 from tests.notebook.pool_helpers import warm_again
 from tests.shim_helpers import write_interpreter_shim
-
-# R availability: central skip markers, so the skip wording and the arrow
-# package probe live in one place.
-
-
-def _r_package_available(package: str) -> bool:
-    """Whether Rscript is on PATH and can load ``package``; probed once at import.
-
-    The 30s timeout only bites on a stale RPROFILE doing network I/O, which should skip
-    rather than block CI.
-    """
-    if shutil.which("Rscript") is None:
-        return False
-    try:
-        proc = subprocess.run(
-            [
-                "Rscript",
-                "-e",
-                f'q(status = if (requireNamespace("{package}", quietly = TRUE)) 0 else 1)',
-            ],
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-    return proc.returncode == 0
-
-
-_RSCRIPT_AVAILABLE = shutil.which("Rscript") is not None
-_R_ARROW_AVAILABLE = _r_package_available("arrow")
-_R_GGPLOT2_AVAILABLE = _r_package_available("ggplot2")
-
-skip_if_no_r = pytest.mark.skipif(
-    not _RSCRIPT_AVAILABLE,
-    reason="Rscript not on PATH; install R (https://cran.r-project.org/) to run",
-)
-
-skip_if_no_r_arrow = pytest.mark.skipif(
-    not _R_ARROW_AVAILABLE,
-    reason=(
-        "R 'arrow' package not loadable; install with "
-        "`install.packages('arrow')` to run cross-language tests"
-    ),
-)
-
-skip_if_no_r_ggplot2 = pytest.mark.skipif(
-    not _R_GGPLOT2_AVAILABLE,
-    reason=(
-        "R 'ggplot2' package not loadable; install with "
-        "`install.packages('ggplot2')` to run the ggplot display test"
-    ),
-)
 
 
 def _check_notebook_extra() -> None:
@@ -390,7 +335,7 @@ def r_notebook(tmp_path: Path):
 
     ``make(cells=[(cell_id, after_id, source, language), ...])`` returns
     ``(notebook_dir, NotebookSession)``. Session init spawns ``Rscript`` for R cells, so
-    callers must guard with ``skip_if_no_r``. Uses the system R library, not renv.
+    callers must be marked ``pytest.mark.r``. Uses the system R library, not renv.
     """
     from strata.notebook.models import CellLanguage
     from strata.notebook.parser import parse_notebook

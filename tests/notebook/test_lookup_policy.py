@@ -21,7 +21,6 @@ from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
-from tests.notebook.conftest import skip_if_no_r
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX cell execution")
 
@@ -29,7 +28,7 @@ PYTHON = ("python", "value = 1\n", "value = 2\n", "seen = value + 1\n")
 R = ("r", "value <- 1\n", "value <- 2\n", "seen <- value + 1\n")
 LANGUAGES = [
     pytest.param(*PYTHON, id="python"),
-    pytest.param(*R, id="r", marks=skip_if_no_r),
+    pytest.param(*R, id="r", marks=pytest.mark.r),
 ]
 
 
@@ -208,7 +207,7 @@ class TestPythonLeaves:
         assert [d["markdown_text"] for d in result.display_outputs] == ["one"]
 
 
-@skip_if_no_r
+@pytest.mark.r
 class TestRLeaves:
     async def test_a_console_only_leaf_is_not_cached(self, tmp_path):
         session = _session(tmp_path, ("c", "r", 'cat("one\\n")\n'))

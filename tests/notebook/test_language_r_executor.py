@@ -17,7 +17,6 @@ from strata.notebook.languages.r.executor import _RExecutor
 from strata.notebook.models import CellLanguage
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
-from tests.notebook.conftest import skip_if_no_r as rscript_available
 
 
 def _make_r_notebook(tmp_path: Path, *, cells: list[tuple[str, str | None, str]]):
@@ -135,7 +134,7 @@ class TestRunRHarnessMissingRscript:
 # Integration: real Rscript
 
 
-@rscript_available
+@pytest.mark.r
 class TestExecuteSimpleRCell:
     @pytest.mark.asyncio
     async def test_simple_assignment_emits_json_artifact(self, tmp_path):
@@ -185,7 +184,7 @@ class TestExecuteSimpleRCell:
         assert "kaboom" in (result.error or "")
 
 
-@rscript_available
+@pytest.mark.r
 class TestHarnessVariableSelection:
     """The harness emits rebinds and mutations, not just brand-new names.
 

@@ -325,7 +325,7 @@ jobs:
     timeout-minutes: ${{ github.event_name == 'push' && 45 || 15 }}
     env:
       E2E_TEST_ARGS: >-
-        tests/test_e2e_artifacts.py tests/test_lineage.py tests/test_executor_protocol.py
+        tests/test_e2e_artifacts.py tests/test_lineage.py
         -v --tb=short
 
     steps:
@@ -395,15 +395,11 @@ jobs:
           - os: ubuntu-latest
             r: oldrel-1
 
+    # Every test marked ``r``, wherever it lives: a list of files left out the R
+    # tests in other files, which then skipped in every job.
     env:
       R_TEST_ARGS: >-
-        tests/notebook/test_r_cells.py
-        tests/notebook/test_language_r_executor.py
-        tests/notebook/test_language_r_analyzer.py
-        tests/notebook/test_shared_renv.py
-        tests/notebook/test_r_workers.py
-        tests/contract/cellgraph/test_cellgraph_r_directives_trace.py
-        tests/contract/cellgraph/test_diagnostics_oracle.py
+        tests/ -m r
         -v --tb=short
 
     steps:
@@ -432,19 +428,20 @@ jobs:
       # Direct install: setup-r-dependencies wants a DESCRIPTION or renv.lock
       # at the project root, which Strata does not have. jsonlite is the
       # harness's manifest codec, arrow serializes data.frames in the
-      # cross-language tests, and renv pre-installed keeps the real-restore
-      # test from bootstrap-downloading it mid-test.
-      - name: Install R 'jsonlite' + 'arrow' + 'renv' packages
+      # cross-language tests, renv pre-installed keeps the real-restore
+      # test from bootstrap-downloading it mid-test, and ggplot2 is the plot
+      # display test's.
+      - name: Install R 'jsonlite' + 'arrow' + 'renv' + 'ggplot2' packages
         shell: Rscript {0}
         run: |
-          install.packages(c("jsonlite", "arrow", "renv"))
-          for (pkg in c("jsonlite", "arrow", "renv")) {
+          install.packages(c("jsonlite", "arrow", "renv", "ggplot2"))
+          for (pkg in c("jsonlite", "arrow", "renv", "ggplot2")) {
             if (!requireNamespace(pkg, quietly = TRUE)) {
               stop(sprintf("'%s' install reported success but namespace is not loadable", pkg))
             }
           }
 
-      # Only the R-marked tier the unit-tests matrix skips for lack of Rscript.
+      # Only the R tier the unit-tests matrix skips for lack of Rscript.
       # The R version is recorded with the evidence and checked, so a newer R
       # than the recording's runs everything.
       - name: The R version, for diffcone

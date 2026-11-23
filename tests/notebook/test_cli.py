@@ -13,7 +13,6 @@ import pytest
 from strata.notebook.cli import _sync_environment, run_main
 from strata.notebook.executor import CellExecutionResult
 from tests.conftest import prepared_venv
-from tests.notebook.conftest import skip_if_no_r
 
 
 def _build_notebook(
@@ -465,7 +464,7 @@ class TestRCellsHeadless:
     Real Rscript harness, no mock; gated on Rscript being present.
     """
 
-    @skip_if_no_r
+    @pytest.mark.r
     def test_r_cell_runs_not_skipped(self, tmp_path, capsys):
         notebook_dir = _build_notebook(
             tmp_path,
@@ -482,7 +481,7 @@ class TestRCellsHeadless:
         assert c1["status"] == "ok", c1
         assert "unsupported language" not in (c1.get("reason") or "")
 
-    @skip_if_no_r
+    @pytest.mark.r
     def test_r_cell_failure_returns_1_and_skips_downstream(self, tmp_path, capsys):
         """A genuine R error fails the cell (not a silent skip) and the
         downstream R cell is skipped as upstream-failed."""

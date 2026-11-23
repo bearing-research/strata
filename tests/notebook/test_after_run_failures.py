@@ -32,7 +32,6 @@ from strata.notebook.mounts import MountResolver
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
-from tests.notebook.conftest import skip_if_no_r
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX cell execution")
 
@@ -40,7 +39,7 @@ PYTHON = ("python", 'value = 1\ndisplay(Markdown("d"))\n', "seen = value\n", "")
 R = ("r", "value <- 1\n", "seen <- value\n", "R ")
 LANGUAGES = [
     pytest.param(*PYTHON, id="python"),
-    pytest.param(*R, id="r", marks=skip_if_no_r),
+    pytest.param(*R, id="r", marks=pytest.mark.r),
 ]
 STEPS = (
     "_stage_run_records",
@@ -283,7 +282,7 @@ class TestPythonAndR:
         assert result.error == "a link"
         assert "_push_to_team_store" not in steps
 
-    @skip_if_no_r
+    @pytest.mark.r
     async def test_an_r_display_failure_fails_a_cell_whose_outputs_stay(
         self, tmp_path, monkeypatch, steps
     ):
@@ -336,7 +335,7 @@ class TestPythonAndR:
         ("language", "assign"),
         [
             pytest.param("python", "x = 1\n", id="python"),
-            pytest.param("r", "x <- 1\n", id="r", marks=skip_if_no_r),
+            pytest.param("r", "x <- 1\n", id="r", marks=pytest.mark.r),
         ],
     )
     async def test_a_mount_that_cannot_sync_back_fails_the_cell(
@@ -366,7 +365,7 @@ class TestOnAWorker:
         ("language", "source"),
         [
             pytest.param("python", "x = 1\n", id="python"),
-            pytest.param("r", "x <- 1\n", id="r", marks=skip_if_no_r),
+            pytest.param("r", "x <- 1\n", id="r", marks=pytest.mark.r),
         ],
     )
     async def test_a_false_store_names_its_worker(
@@ -761,7 +760,7 @@ class TestARefusedRun:
         ("language", "shows", "edited"),
         [
             pytest.param("python", 'display(Markdown("d"))\n', 'display(Markdown("e"))\n', id="py"),
-            pytest.param("r", "plot(1)\n", "plot(2)\n", id="r", marks=skip_if_no_r),
+            pytest.param("r", "plot(1)\n", "plot(2)\n", id="r", marks=pytest.mark.r),
         ],
     )
     async def test_it_takes_the_old_displays_down_and_its_error_outlives_the_session(

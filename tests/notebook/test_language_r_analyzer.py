@@ -24,7 +24,6 @@ from strata.notebook.languages.r.analyzer import (
 )
 from strata.notebook.models import CellLanguage, CellState
 from strata.notebook.vocabulary import RAnalyzer
-from tests.notebook.conftest import skip_if_no_r as _skip_no_rscript
 
 
 @pytest.fixture(autouse=True)
@@ -174,7 +173,7 @@ class TestCaching:
 # Integration tests: real Rscript
 
 
-@_skip_no_rscript
+@pytest.mark.r
 class TestIntegrationRealRscript:
     """End-to-end against a real R install; skipped when ``Rscript`` is not on PATH."""
 

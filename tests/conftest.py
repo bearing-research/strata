@@ -5,10 +5,13 @@ base fixtures (temp_warehouse, strata_config, server_with_client).
 """
 
 import asyncio
+import functools
 import gc
 import io
 import os
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -108,6 +111,47 @@ def _collect_after_each_test(_collect_after_some_modules):
     yield
     gc.collect()
     gc.freeze()
+
+
+@functools.cache
+def _r_missing(packages: tuple[str, ...]) -> str | None:
+    """Why an R test cannot run here, or None. Probed once per package set.
+
+    The 30s timeout only bites on a stale RPROFILE doing network I/O, which should skip
+    rather than block CI.
+    """
+    rscript = shutil.which("Rscript")
+    if rscript is None:
+        return "Rscript not on PATH; install R (https://cran.r-project.org/) to run"
+    for package in packages:
+        try:
+            proc = subprocess.run(
+                [
+                    rscript,
+                    "-e",
+                    f'q(status = if (requireNamespace("{package}", quietly = TRUE)) 0 else 1)',
+                ],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return f"R '{package}' package could not be probed"
+        if proc.returncode != 0:
+            return (
+                f"R '{package}' package not loadable; install with `install.packages('{package}')`"
+            )
+    return None
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip an ``r``-marked test without R or the packages it names (CI's R job runs ``-m r``)."""
+    for item in items:
+        for mark in item.iter_markers("r"):
+            reason = _r_missing(tuple(mark.kwargs.get("packages", ())))
+            if reason is not None:
+                item.add_marker(pytest.mark.skip(reason=reason))
+                break
 
 
 _INSTALLED = pytest.StashKey[set[str]]()

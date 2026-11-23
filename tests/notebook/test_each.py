@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
 import zipfile
 from dataclasses import replace
@@ -1192,7 +1191,7 @@ class TestOtherSurfaces:
             pytest.param(
                 "r",
                 "x <- length(out)\n",
-                marks=pytest.mark.skipif(shutil.which("Rscript") is None, reason="needs R"),
+                marks=pytest.mark.r,
             ),
         ],
     )

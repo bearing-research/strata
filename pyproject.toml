@@ -283,6 +283,7 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests requiring external services",
+    "r(packages): needs Rscript (and these R packages); skipped without them, run by CI's R job",
     "warm_pool: marks tests that require live warm worker startup",
     "locked_environments: lets remote workers build the notebook's locked environment",
 ]
