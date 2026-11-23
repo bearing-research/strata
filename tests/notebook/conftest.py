@@ -17,6 +17,7 @@ from tests.conftest import (
     wait_for_server,
 )
 from tests.notebook.pool_helpers import warm_again
+from tests.server_helpers import stop_strata_server
 from tests.shim_helpers import write_interpreter_shim
 
 
@@ -265,15 +266,12 @@ def notebook_build_server(tmp_path: Path):
             "build_store": get_build_store(artifact_dir / "artifacts.sqlite"),
         }
     finally:
-        server.should_exit = True
-        # Wait out the lifespan shutdown: it ends by clearing the module's _state,
-        # so one still running would clear the next test's server.
-        thread.join(timeout=15.0)
-        server_module._state = None
-        reset_artifact_store()
-        reset_build_store()
-        if thread.is_alive():
-            raise RuntimeError(f"Strata server on port {port} still shutting down after 15 s")
+        try:
+            stop_strata_server(server, thread, port)
+        finally:
+            server_module._state = None
+            reset_artifact_store()
+            reset_build_store()
 
 
 @pytest.fixture
@@ -323,15 +321,12 @@ def notebook_personal_server(tmp_path: Path):
             "build_store": get_build_store(artifact_dir / "artifacts.sqlite"),
         }
     finally:
-        server.should_exit = True
-        # Wait out the lifespan shutdown: it ends by clearing the module's _state,
-        # so one still running would clear the next test's server.
-        thread.join(timeout=15.0)
-        server_module._state = None
-        reset_artifact_store()
-        reset_build_store()
-        if thread.is_alive():
-            raise RuntimeError(f"Strata server on port {port} still shutting down after 15 s")
+        try:
+            stop_strata_server(server, thread, port)
+        finally:
+            server_module._state = None
+            reset_artifact_store()
+            reset_build_store()
 
 
 # R-enabled notebook factory
