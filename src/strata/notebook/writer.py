@@ -1023,9 +1023,10 @@ def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
 
 @refuses_while_held
 def restore_requires_python(notebook_dir: Path, spec: str) -> None:
-    """Put back a ``requires-python`` spec :func:`update_requires_python` returned, as written.
+    """Put back a ``requires-python`` spec :func:`update_requires_python` returned.
 
-    Only that line changes, so an edit made to the file meanwhile stays.
+    Only that line changes (rewritten as ``requires-python = "<spec>"``), so an edit
+    made to the rest of the file meanwhile stays.
     """
     _replace_requires_python(notebook_dir, spec)
 

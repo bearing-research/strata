@@ -553,13 +553,15 @@ class EnvironmentJobs:
     ) -> list[str]:
         """Change ``requires-python`` and rebuild the venv on the new minor.
 
-        If ``uv sync`` fails, restores the previous ``requires-python`` and re-syncs.
-        If that also fails it is logged and the job reports the first failure; the
-        notebook may be left with no venv, and uv.lock as the failed sync left it.
+        If ``uv sync`` fails, restores the previous ``requires-python`` spec and re-syncs,
+        all under the notebook lock; uv picks the interpreter for that spec as any sync of
+        it would. If the rollback fails too, it is logged and the job reports the first
+        failure; the notebook may be left with no venv, and uv.lock as the failed sync
+        left it.
         """
         from strata.notebook.writer import restore_requires_python, update_requires_python
 
-        # The spec as written, not its minor: a hand-written ">=3.12" has none.
+        # The spec, not its minor: a hand-written ">=3.12" has none.
         old_spec = await asyncio.to_thread(update_requires_python, self.host.path, new_minor)
 
         # Otherwise uv sync reports an "interpreter mismatch" and refuses.
@@ -568,42 +570,41 @@ class EnvironmentJobs:
             await asyncio.to_thread(shutil.rmtree, venv_dir, ignore_errors=True)
 
         old_lockfile_hash = compute_lockfile_hash(self.host.path)
+        on_update = lambda stream, text, truncated: self._update_stream(  # noqa: E731
+            job,
+            stream=stream,
+            text=text,
+            truncated=truncated,
+        )
         lock = _get_notebook_lock(self.host.path)
         await asyncio.to_thread(lock.acquire)
         try:
-            on_update = lambda stream, text, truncated: self._update_stream(  # noqa: E731
-                job,
-                stream=stream,
-                text=text,
-                truncated=truncated,
-            )
             result = await self.host.backend.sync_streaming(
                 python_version=None,
                 timeout=180,
                 on_update=on_update,
             )
-        finally:
-            lock.release()
-
-        self._apply_operation_log(job, result.operation_log)
-        if not result.success:
-            # Rollback: restore the previous requires-python and re-sync, under the lock
-            # the first sync held.
-            try:
-                await asyncio.to_thread(restore_requires_python, self.host.path, old_spec)
-                await asyncio.to_thread(lock.acquire)
+            self._apply_operation_log(job, result.operation_log)
+            if not result.success:
                 try:
+                    await asyncio.to_thread(restore_requires_python, self.host.path, old_spec)
                     rollback = await self.host.backend.sync_streaming(
                         python_version=None,
                         timeout=180,
                         on_update=on_update,
                     )
-                finally:
-                    lock.release()
-                self._apply_operation_log(job, rollback.operation_log)
-            except Exception:
-                logger.exception("Failed to rollback python-version change for %s", self.host.path)
-            raise RuntimeError(result.error or f"uv sync failed for Python {new_minor}")
+                    self._apply_operation_log(job, rollback.operation_log)
+                    if not rollback.success:
+                        logger.warning(
+                            "Rollback sync failed for %s: %s", self.host.path, rollback.error
+                        )
+                except Exception:
+                    logger.exception(
+                        "Failed to rollback python-version change for %s", self.host.path
+                    )
+                raise RuntimeError(result.error or f"uv sync failed for Python {new_minor}")
+        finally:
+            lock.release()
 
         job.lockfile_changed = compute_lockfile_hash(self.host.path) != old_lockfile_hash
         return await self._finalize(

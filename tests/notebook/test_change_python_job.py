@@ -121,3 +121,27 @@ async def test_an_edit_made_during_the_sync_survives_the_rollback(session):
     text = (session.path / "pyproject.toml").read_text()
     assert "[tool.mine]\nkept = true" in text
     assert read_requested_python_minor(session.path) == "3.12"
+
+
+async def test_a_rollback_sync_that_fails_is_logged(session, caplog):
+    uv = _Uv(session.path, ["no interpreter for 3.99", "resolution failed"])
+
+    with caplog.at_level("WARNING", logger="strata.notebook.environment_jobs"):
+        job = await _change(session, uv, "3.99")
+
+    assert (job.status, job.error) == ("failed", "no interpreter for 3.99")
+    assert any(
+        "Rollback sync failed" in r.message and "resolution failed" in r.message
+        for r in caplog.records
+    )
+
+
+@pytest.mark.parametrize("outcomes", [["ok"], ["no interpreter for 3.99", "raise"]])
+async def test_the_notebook_lock_is_free_after_the_job(session, outcomes):
+    from strata.notebook.environment_jobs import _get_notebook_lock
+
+    await _change(session, _Uv(session.path, list(outcomes)), "3.99")
+
+    lock = _get_notebook_lock(session.path)
+    assert lock.acquire(blocking=False), "a later uv operation would wait forever"
+    lock.release()
