@@ -63,3 +63,16 @@ def test_a_container_that_cannot_start_fails_where_containers_are_required(monke
         start_container_or_skip(container, label="MinIO")
     assert out.type is pytest.fail.Exception
     assert container.stopped
+
+
+def test_a_stop_that_fails_too_is_in_the_reason(monkeypatch):
+    monkeypatch.delenv(REQUIRE_CONTAINERS_ENV, raising=False)
+    container = _Unpullable()
+
+    def stop():
+        raise RuntimeError("no such container")
+
+    container.stop = stop
+
+    with pytest.raises(pytest.skip.Exception, match="No such image; stopping it failed too: no"):
+        start_container_or_skip(container, label="MinIO")

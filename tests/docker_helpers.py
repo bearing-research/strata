@@ -59,11 +59,12 @@ def start_container_or_skip(container, *, label: str):
     try:
         container.start()
     except Exception as exc:
+        also = ""
         try:
             container.stop()
-        except Exception:
-            pass
+        except Exception as stop_exc:
+            also = f"; stopping it failed too: {stop_exc}"
         backend_unavailable(
-            f"{label} container unavailable (Docker image pull/start failed): {exc}"
+            f"{label} container unavailable (Docker image pull/start failed): {exc}{also}"
         )
     return container
