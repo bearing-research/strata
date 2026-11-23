@@ -450,6 +450,17 @@ jobs:
         shell: bash
         run: echo "R_VERSION=$(Rscript -e 'cat(R.version.string)')" >> "$GITHUB_ENV"
 
+      # TEMPORARY (#1637): re-record the R trace, which needs Rscript; removed next commit.
+      - name: Re-record the R directives trace
+        if: matrix.os == 'ubuntu-latest' && matrix.r == 'release'
+        run: uv run python -m tests.contract.cellgraph.record --update r_directives
+      - name: Upload the re-recorded R trace
+        if: matrix.os == 'ubuntu-latest' && matrix.r == 'release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: r-directives-trace
+          path: tests/contract/cellgraph/traces/r_directives.json
+
       - name: Run R tests and record (diffcone, main)
         id: record
         if: github.event_name == 'push'
