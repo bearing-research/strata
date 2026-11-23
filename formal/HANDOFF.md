@@ -43,6 +43,9 @@ in [`README.md`](README.md).
   transform specs and ACL-2 against an oracle of which URIs load one table. It found
   finding 22 (a deny matched one spelling of a name, and Glue and Hive resolve names
   case-insensitively); fixed. The `scan@v1` identity hash is a lead (PROV-3).
+- **Phase 7 (replays):** four leads replayed against the real code. LR-4, BAT-2 and
+  CK-4 held (findings 23, 24 and 25), all fixed; MD-1's short read did not (both S3
+  readers raise on a truncated body).
 
 ## Conventions
 
@@ -96,26 +99,18 @@ in [`README.md`](README.md).
 ## Plan for the open properties
 
 In order of consequence over effort. Each step is one PR: the model or
-property, the replays of what it finds, then a PR per fix.
+property, the replays of what it finds, then the fixes.
 
-1. **Local runs** (SYSTEMS 10). Done for the lease (LR-3, LR-6). Open: LR-2,
-   two processes opening one computation (extend `LocalRun.tla` with `open`
-   split into its transactions, and two fresh opens); LR-4, the checkpoint
-   sequence after an abandoned release (a replay is enough).
-2. **Staleness** (SYSTEMS 8 and 9). Done for NB-1 and NB-2. Open: BAT-2 (a
-   batched `@nocache` producer run again by a later single-cell consumer; a
-   replay through `_execute_run_all` is enough), and content-key readiness and
-   uncached leaves in the model (see SYSTEMS 8, what the model leaves out).
-3. **Row-group cache soundness** (SYSTEMS 3 and 4). Done for CK-1, MD-2 and
-   PR-2 on integer columns. Open: MD-1 (a catalog that writes `vN.metadata.json`,
-   dropped with purge and recreated), CK-4 (`clear()` racing a `put`), and string
-   and NaN manifest bounds for PR-2.
-4. **Streams** (SYSTEMS 1 and 2). Done for ADM-5, ADM-6, STR-1 and STR-2.
-   Open: the passthrough path (no artifact store) and multi-node ownership are
-   outside `Streams.tla`.
-5. **Run All equals single-cell runs** (BAT-1). Done for Python cells over ints
-   and lists. Open: module state, `@nocache` (BAT-2), workers and loops in the
-   generator.
-6. **Encodings and naming** (PROV-3, ACL-2). Done for transform specs, the SQL
-   catalog shape and spellings. Open: the `scan@v1` identity hash (encoding its
+1. **Pruning over strings and NaN** (PR-2). Extend `test_cache_soundness_properties.py`
+   with string columns (Iceberg truncates their manifest bounds) and float columns
+   with NaN counts: the one place pruning can still drop rows unseen.
+2. **Two processes on one store** (LR-2, EACH-2). Extend `LocalRun.tla` with `open`
+   split into its transactions and two processes; replay on SQLite and Postgres.
+   EACH-2's guard against collecting during a run is a process-local counter.
+3. **A wider Run All property** (BAT-1). Module state, `@nocache`, `@loop` cells and
+   worker routing in the generator.
+4. **Smaller open items.** MD-1 (a catalog that writes `vN.metadata.json`, dropped
+   with purge and recreated); LR-3 (the close path checked against the process, not
+   the attempt); the passthrough stream path and multi-node ownership (outside
+   `Streams.tla`); the `scan@v1` identity hash (PROV-3, a decision: encoding its
    fields as JSON re-keys every stored scan once).

@@ -792,6 +792,18 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A resumed run keeps its first checkpoint.** A run that died while a checkpoint was
+  being written, or whose checkpoint failed to write, numbered its next attempt's
+  checkpoints from the one it resumed, so the first collided with the abandoned one and
+  was skipped; a run dying there again never got past it. It now numbers past every
+  checkpoint the build has. (#PRNUM)
+- **Run All runs a `@nocache` cell once.** A cell run on its own after a batch (a worker,
+  an explicit timeout) ran a batched `@nocache` cell it reads again, repeating its side
+  effects and reading a different value than the batch did. (#PRNUM)
+- **A row group the cache cannot keep is still returned.** A full disk, or a cache clear
+  during the write, failed the scan that had just read it. A write that fails halfway no
+  longer leaves an entry without its metadata, or one the cache's size still counts.
+  (#PRNUM)
 - **A deny rule refuses a table under every spelling of its name.** Rules matched the
   name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
   served `lake:FINANCE.ledger` past a deny on `*:finance.*`. Deny rules now match in any

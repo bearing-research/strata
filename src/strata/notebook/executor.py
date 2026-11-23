@@ -625,9 +625,11 @@ class CellExecutor:
         as each ``BatchCellResult`` is recorded, so frames stream in real time;
         ``on_cell_start`` is awaited with a cell's id as the harness starts it.
         ``provenance`` is each cell's, as the caller resolved it to pin the spec's
-        inputs; a cell without one is resolved at its cache check.
+        inputs; a cell without one is resolved at its cache check. Inside a run
+        (:meth:`one_run`) each cell the batch ran counts as executed, so a later
+        single-cell consumer does not run a ``# @nocache`` producer again.
         """
-        return await self._run_batch(
+        result = await self._run_batch(
             cell_specs,
             use_cache=use_cache,
             batch_timeout_seconds=batch_timeout_seconds,
@@ -636,6 +638,29 @@ class CellExecutor:
             on_cell_start=on_cell_start,
             provenance=provenance,
         )
+        if self._run_scope is not None:
+            # As _execute_cell: only a success is kept, so a failed cell runs again on request.
+            for ran in result.cell_results:
+                if ran.status not in ("ok", "cache_hit"):
+                    continue
+                self._run_scope.setdefault(
+                    ran.cell_id,
+                    CellExecutionResult(
+                        cell_id=ran.cell_id,
+                        success=True,
+                        stdout=ran.stdout,
+                        stderr=ran.stderr,
+                        outputs=ran.outputs,
+                        display_outputs=ran.display_outputs,
+                        display_output=ran.display_outputs[-1] if ran.display_outputs else None,
+                        duration_ms=ran.duration_ms or 0,
+                        cache_hit=ran.cache_hit,
+                        execution_method="cached" if ran.cache_hit else "cold",
+                        mutation_warnings=ran.mutation_warnings,
+                        read_audit=ran.read_audit,
+                    ),
+                )
+        return result
 
     @contextmanager
     def one_run(self) -> Generator[None]:

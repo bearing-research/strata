@@ -596,6 +596,55 @@ result = 42
 """
 
 
+class TestAResumeAfterAnUnfinishedCheckpoint:
+    def test_the_resumed_run_releases_a_checkpoint_for_every_epoch(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """A checkpoint the dead attempt began holds its sequence; the resume numbers past it.
+
+        It numbered from the restored release, so its first checkpoint collided with the
+        abandoned row and was dropped, and a run dying there again never got past it (LR-4).
+        """
+        session, executor = _notebook(tmp_path)
+        source = session.notebook_state.get_cell("train").source
+        _, _, releases = _ledger(session)
+        accept = releases.accept
+
+        def second_fails_once(release_id, staged):
+            if releases.get(release_id).sequence == 2 and not (tmp_path / "failed").exists():
+                (tmp_path / "failed").write_text("1")
+                raise OSError("disk full")
+            return accept(release_id, staged)
+
+        monkeypatch.setattr(releases, "accept", second_fails_once)
+        crashed = _run(executor, "train", source)
+        assert crashed.success is False
+        (build,) = _only_build(session, "train")
+        assert [
+            (r.sequence, r.state) for r in releases.releases_of(build.build_id, "checkpoint")
+        ] == [
+            (1, "accepted"),
+            (2, "abandoned"),
+        ]
+
+        resumed = _run(executor, "train", source)
+
+        assert resumed.success is True, resumed.error
+        accepted = [
+            releases.bundle(r.release_id)
+            for r in releases.releases_of(build.build_id, "checkpoint")
+            if r.state == "accepted" and r.attempt != build.attempt
+        ]
+        store = session.get_artifact_manager().artifact_store
+        epochs = [
+            json.loads(store.read_blob(v.id, v.version))["epoch"]
+            for bundle in accepted
+            for v in bundle.outputs
+            if "_var_metrics@ckpt=" in v.id
+        ]
+        assert epochs == [1, 2, 3]
+
+
 class TestALapsedLeaseWithNoRival:
     """A lease lapses with nothing wrong (a laptop asleep, a blocked loop): the run goes on.
 
