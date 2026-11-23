@@ -256,3 +256,29 @@ async def test_a_cancelled_read_leaves_no_process(tmp_path):
 
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+def test_the_harness_line_is_written_before_exit(tmp_path):
+    """A process that ends without finalizing (here os._exit) still returns its line.
+
+    The harness writes to the original stdout, which exit does not flush; kept alive past
+    finalization, as coverage does on Python 3.13, the line was lost and the object unread.
+    """
+    import pickle
+    import subprocess
+
+    from strata.notebook import prompt_executor
+
+    value = tmp_path / "input.pickle"
+    value.write_bytes(pickle.dumps("hello"))
+    harness = str(prompt_executor._OBJECT_TEXT_HARNESS)
+    code = (
+        "import os, runpy, sys\n"
+        f"sys.argv = [{harness!r}, 'pickle/object', {str(value)!r}, '100']\n"
+        f"runpy.run_path({harness!r}, run_name='__main__')\n"
+        "os._exit(0)\n"
+    )
+
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+
+    assert out.stdout == '{"type": "str", "text": "hello"}'
