@@ -190,6 +190,7 @@ from strata.notebook.read_confirm import (
     input_fingerprint,
 )
 from strata.notebook.read_confirm import asks as read_confirm_asks
+from strata.notebook.run_scope import in_thread
 from strata.notebook.table_writes import (
     StagedOutput,
     TableWriteError,
@@ -2154,7 +2155,7 @@ class CellExecutor:
                 # The cell writes the staging copy; sync_back reads it without following links.
                 let_through(self._mount_resolver.cache_dir, harness_user)
                 let_through(staging.parent, harness_user)
-                hand_over(staging, harness_user)
+                await in_thread(hand_over, staging, harness_user)
         return resolved
 
     async def _resolve_fetches(

@@ -32,6 +32,7 @@ from strata.notebook.process_tree import (
     terminate_subprocess_tree,
 )
 from strata.notebook.run_channel import is_event_line
+from strata.notebook.run_scope import in_thread
 
 if TYPE_CHECKING:
     import asyncio.subprocess
@@ -372,7 +373,7 @@ class PooledCellExecutor:
         try:
             # Outputs land beside the manifest, in a run dir private to the server; its sweep
             # runs just before the worker is handed the manifest.
-            hand_over(manifest_path.parent, harness_user)
+            await in_thread(hand_over, manifest_path.parent, harness_user)
         except BaseException:
             # The run's error, as on a cold run, an interrupt included: the worker got
             # nothing, and the pool keeps its slot.

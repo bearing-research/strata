@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import tempfile
@@ -31,6 +32,7 @@ from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import CellLanguage, MountSpec, TableWriteSpec
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
 from strata.notebook.read_audit import ReadFinding, merge
+from strata.notebook.run_scope import in_thread
 from strata.notebook.table_writes import StagedOutput, TableWriteError
 
 if TYPE_CHECKING:
@@ -438,7 +440,7 @@ async def _run_loop(
             harness_user = resolve_harness_user()
         except LocalExecutionRefused:
             harness_user = None  # the run is refused where the cell would start
-        hand_over(folders, harness_user)
+        await in_thread(hand_over, folders, harness_user)
         folder_seen = {name: {} for name in folder_names}
 
     def keep_failed() -> None:
@@ -485,18 +487,21 @@ async def _run_loop(
                 else {"iteration": k}
             )
             with context.run_token(timeout_seconds) as run_token:
-                manifest_path = context.write_manifest(
-                    source,
-                    input_specs,
-                    output_dir,
-                    runtime_env,
-                    resolved_mounts,
-                    mutation_defines=mutation_defines,
-                    loop_config=loop_config,
-                    tables=loop_tables,
-                    cell_id=cell_id,
-                    folder_mounts=folder_mounts,
-                    run_token=run_token,
+                manifest_path = await in_thread(
+                    functools.partial(
+                        context.write_manifest,
+                        source,
+                        input_specs,
+                        output_dir,
+                        runtime_env,
+                        resolved_mounts,
+                        mutation_defines=mutation_defines,
+                        loop_config=loop_config,
+                        tables=loop_tables,
+                        cell_id=cell_id,
+                        folder_mounts=folder_mounts,
+                        run_token=run_token,
+                    )
                 )
 
                 venv_path = host.venv_python

@@ -35,6 +35,7 @@ from strata.notebook.models import (
     MountSpec,
 )
 from strata.notebook.mounts import resolve_cell_mounts
+from strata.notebook.run_scope import in_thread
 
 if TYPE_CHECKING:
     from strata.notebook.executor import _CellProvenance
@@ -167,7 +168,7 @@ async def run_cell_tests(
     try:
         harness_user = resolve_harness_user()
         # The cell runs where a run of it does, its notebook's work/.
-        prepare_work_dir(host.path, harness_user)
+        await in_thread(prepare_work_dir, host.path, harness_user)
     except (LocalExecutionRefused, UnsafeRunFile) as exc:
         problem = str(exc)
     if problem is not None:
@@ -195,7 +196,7 @@ async def run_cell_tests(
         # itself: a process an earlier cell left running could plant links in it.
         let_through(Path(tmp), harness_user)
         for _, blob_dir, _ in runs:
-            hand_over(blob_dir, harness_user)
+            await in_thread(hand_over, blob_dir, harness_user)
 
         def _run(index: int) -> dict[str, Any]:
             variant, blob_dir, input_specs = runs[index]

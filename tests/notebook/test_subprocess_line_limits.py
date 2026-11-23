@@ -85,21 +85,37 @@ async def test_pool_timeout_raises_instead_of_cold_fallback(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("error", [IndexError("a stat that does not parse"), KeyboardInterrupt()])
-async def test_a_hand_over_that_raises_still_releases_the_worker(tmp_path, monkeypatch, error):
-    """Its sweep can fail (a /proc it cannot read), or be interrupted: the run's error, and
-    the pool keeps its slot."""
+@pytest.mark.parametrize("ending", ["raised", "cancelled"])
+async def test_a_hand_over_that_raises_still_releases_the_worker(tmp_path, monkeypatch, ending):
+    """Its sweep can fail (a /proc it cannot read), or the run be cancelled (Ctrl-C) while
+    it runs: the run's error, and the pool keeps its slot."""
+    import threading
 
-    def refused(path, user):
-        raise error
+    entered, release = threading.Event(), threading.Event()
 
-    monkeypatch.setattr("strata.notebook.pool.hand_over", refused)
+    def handing_over(path, user):
+        if ending == "raised":
+            raise IndexError("a stat that does not parse")
+        entered.set()
+        release.wait(30)
+
+    monkeypatch.setattr("strata.notebook.pool.hand_over", handing_over)
     pool = _FakePool(None)
-
-    with pytest.raises(type(error)):
-        await PooledCellExecutor.execute_with_pool(
+    run = asyncio.create_task(
+        PooledCellExecutor.execute_with_pool(
             pool, tmp_path / "manifest.json", tmp_path, timeout_seconds=1
         )
+    )
+
+    if ending == "raised":
+        with pytest.raises(IndexError):
+            await run
+    else:
+        await asyncio.to_thread(entered.wait, 30)
+        run.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await run
     assert pool.releases == 1
 
 

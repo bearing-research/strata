@@ -53,6 +53,7 @@ class InspectSession:
             resolve_harness_user,
             spawn_kwargs,
         )
+        from strata.notebook.run_scope import in_thread
 
         # An inspect process evaluates whatever is typed into it, so it runs as cell code.
         try:
@@ -75,7 +76,7 @@ class InspectSession:
             "inputs": input_specs,
             "output_dir": str(self._manifest_dir),
             # Relative to the notebook's directory, where the REPL starts.
-            "work_dir": prepare_work_dir(session.path, harness_user).name,
+            "work_dir": (await in_thread(prepare_work_dir, session.path, harness_user)).name,
         }
         manifest_path = self._manifest_dir / "inspect_manifest.json"
         with open(manifest_path, "w") as f:
@@ -87,7 +88,7 @@ class InspectSession:
             str(manifest_path),
         ]
 
-        hand_over(self._manifest_dir, harness_user)
+        await in_thread(hand_over, self._manifest_dir, harness_user)
         allowlist = configured_allowlist()
         self.process = await asyncio.create_subprocess_exec(
             *cmd,

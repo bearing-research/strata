@@ -71,7 +71,7 @@ from strata.notebook.mounts import (
 from strata.notebook.provenance import safe_filename_stem
 from strata.notebook.read_audit import UNDECLARED_IMPORT, UNDECLARED_LISTING, UNDECLARED_READ
 from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
-from strata.notebook.run_scope import RunScope
+from strata.notebook.run_scope import RunScope, in_thread
 from strata.notebook.serializer import ContentType
 from strata.notebook.table_writes import TableWriteError
 from strata.notebook.team_store import TeamPull
@@ -1061,17 +1061,20 @@ async def dispatch_local(
         context.local_runs().event_handler(local_run, output_dir) if local_run is not None else None
     )
     with context.run_token(timeout_seconds) as run_token:
-        manifest_path = context.write_manifest(
-            source,
-            input_specs,
-            output_dir,
-            runtime_env,
-            resolved_mounts,
-            mutation_defines=mutation_defines,
-            tables=tables,
-            cell_id=cell_id,
-            run_token=run_token,
-            restore=restore,
+        manifest_path = await in_thread(
+            functools.partial(
+                context.write_manifest,
+                source,
+                input_specs,
+                output_dir,
+                runtime_env,
+                resolved_mounts,
+                mutation_defines=mutation_defines,
+                tables=tables,
+                cell_id=cell_id,
+                run_token=run_token,
+                restore=restore,
+            )
         )
 
         # Without an interpreter nothing runs, not even in a pre-started warm process:
@@ -1165,7 +1168,7 @@ async def run_harness(
 
     from strata.notebook.process_tree import subprocess_kwargs_for_new_group
 
-    hand_over(manifest_path.parent, harness_user)
+    await in_thread(hand_over, manifest_path.parent, harness_user)
     lifeline_fds, lifeline_vars = lifeline_handoff()
     # The event pipe: the harness inherits the write end and keeps it from its
     # children, so EOF on the read end is the harness exiting. None on Windows,

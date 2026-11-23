@@ -43,6 +43,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
+from strata.notebook.run_scope import in_thread
 from strata.notebook.serializer import ContentType
 from strata.notebook.workers import (
     SIGNED_TRANSPORTS,
@@ -291,16 +292,19 @@ async def dispatch_embedded(
     if resolved_mounts is None:
         resolved_mounts = await context.prepare_mounts(mount_specs, cell_id)
     with context.run_token(timeout_seconds) as run_token:
-        manifest_path = context.write_manifest(
-            source,
-            input_specs,
-            output_dir,
-            runtime_env,
-            resolved_mounts,
-            mutation_defines=mutation_defines,
-            tables=tables,
-            cell_id=cell_id,
-            run_token=run_token,
+        manifest_path = await in_thread(
+            functools.partial(
+                context.write_manifest,
+                source,
+                input_specs,
+                output_dir,
+                runtime_env,
+                resolved_mounts,
+                mutation_defines=mutation_defines,
+                tables=tables,
+                cell_id=cell_id,
+                run_token=run_token,
+            )
         )
         result = await context.run_harness(
             manifest_path, venv_path, timeout_seconds, run_token=run_token

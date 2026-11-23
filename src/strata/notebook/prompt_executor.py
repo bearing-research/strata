@@ -725,6 +725,7 @@ async def _object_text(
         subprocess_kwargs_for_new_group,
         terminate_subprocess_tree,
     )
+    from strata.notebook.run_scope import in_thread
 
     convert = f"Convert `{name}` to text, a dict or a table in the cell that produces it."
     if value.ref is not None and value.ref in _OBJECT_TEXTS:
@@ -743,7 +744,7 @@ async def _object_text(
     with tempfile.TemporaryDirectory(prefix="strata_prompt_object_") as directory:
         path = Path(directory) / "input.pickle"
         path.write_bytes(value.blob)
-        hand_over(Path(directory), harness_user)
+        await in_thread(hand_over, Path(directory), harness_user)
         allowlist = configured_allowlist()
         # A fixed seed: a set prints in one order, so the rendered prompt and its cache
         # key do not change from run to run.

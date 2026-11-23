@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import shutil
@@ -39,6 +40,7 @@ from strata.notebook.harness_user import (
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.models import MountMode, MountSpec, WorkerBackendType
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
+from strata.notebook.run_scope import in_thread
 from strata.notebook.table_writes import TableWriteError
 from strata.notebook.team_store import TeamPull
 from strata.notebook.workers import is_http_executor_worker, resolve_worker_spec, worker_transport
@@ -397,12 +399,15 @@ async def run_r_cell(
                 # Keyed on the listing it reads, which the cache check's may predate.
                 prov = prov.over_mounts(resolved_mounts)
                 provenance_hash = prov.provenance_hash
-                manifest_path = context.write_manifest(
-                    source,
-                    input_specs,
-                    output_dir,
-                    runtime_env,
-                    resolved_mounts,
+                manifest_path = await in_thread(
+                    functools.partial(
+                        context.write_manifest,
+                        source,
+                        input_specs,
+                        output_dir,
+                        runtime_env,
+                        resolved_mounts,
+                    )
                 )
 
                 # Warm R pool first (prepaid Rscript startup + renv activation), cold harness as
@@ -646,7 +651,7 @@ async def run_r_harness(
         terminate_subprocess_tree,
     )
 
-    hand_over(manifest_path.parent, harness_user)
+    await in_thread(hand_over, manifest_path.parent, harness_user)
     lifeline_fds, lifeline_vars = lifeline_handoff()
     proc = await asyncio.create_subprocess_exec(
         *cmd,
