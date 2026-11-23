@@ -266,10 +266,14 @@ def notebook_build_server(tmp_path: Path):
         }
     finally:
         server.should_exit = True
-        thread.join(timeout=2.0)
+        # Wait out the lifespan shutdown: it ends by clearing the module's _state,
+        # so one still running would clear the next test's server.
+        thread.join(timeout=15.0)
         server_module._state = None
         reset_artifact_store()
         reset_build_store()
+        if thread.is_alive():
+            raise RuntimeError(f"Strata server on port {port} still shutting down after 15 s")
 
 
 @pytest.fixture
@@ -320,10 +324,14 @@ def notebook_personal_server(tmp_path: Path):
         }
     finally:
         server.should_exit = True
-        thread.join(timeout=2.0)
+        # Wait out the lifespan shutdown: it ends by clearing the module's _state,
+        # so one still running would clear the next test's server.
+        thread.join(timeout=15.0)
         server_module._state = None
         reset_artifact_store()
         reset_build_store()
+        if thread.is_alive():
+            raise RuntimeError(f"Strata server on port {port} still shutting down after 15 s")
 
 
 # R-enabled notebook factory

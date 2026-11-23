@@ -517,6 +517,10 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
         server_module._state = None
         reset_artifact_store()
         _reset_transform_singletons()
+        if server_thread.is_alive():
+            raise RuntimeError(
+                f"Strata server on port {config.port} still shutting down after 15 s"
+            )
 
 
 # For raw httpx calls to these servers: httpx's 5 s default read timeout is shorter
@@ -714,7 +718,11 @@ def server_with_client(temp_warehouse, tmp_path):
 
     client.close()
     server_instance.should_exit = True
-    server_thread.join(timeout=2.0)
+    # Wait out the lifespan shutdown, as run_server does: it ends by clearing the
+    # module's _state, so one still running would clear the next test's server.
+    server_thread.join(timeout=15.0)
+    if server_thread.is_alive():
+        raise RuntimeError(f"Strata server on port {port} still shutting down after 15 s")
 
 
 # The placeholder artifact ids the build-store tests build against, plus the
