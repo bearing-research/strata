@@ -22,7 +22,9 @@ def test_no_target_is_refused(tmp_path, capsys, monkeypatch):
 
     assert main(["migrate", "--artifact-dir", str(tmp_path)]) == 1
 
-    assert "No target. Pass --to-dsn or set STRATA_ARTIFACT_METADATA_DSN." in capsys.readouterr().out
+    assert (
+        "No target. Pass --to-dsn or set STRATA_ARTIFACT_METADATA_DSN." in capsys.readouterr().out
+    )
 
 
 def test_a_target_that_is_not_postgres_is_refused_before_connecting(tmp_path, capsys):
