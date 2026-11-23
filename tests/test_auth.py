@@ -5,6 +5,7 @@ ACL deny beats allow; scan ownership is enforced; hide_forbidden_as_not_found gi
 403.
 """
 
+import sys
 from concurrent.futures import Future
 
 import pytest
@@ -973,6 +974,83 @@ class TestADenyForEveryPrefixCoversEveryAddress:
                 assert refused.value.status_code in (403, 404), uri
         finally:
             set_principal(None)
+
+
+class TestADenyCoversEverySpellingOfTheName:
+    """A catalog that resolves names case-insensitively (Glue) loads ``DB.Events`` as
+    ``db.events``; a deny written for one spelling refused only that one (finding 22)."""
+
+    def test_a_deny_matches_any_case_and_an_allow_only_its_own(self):
+        alice = Principal(id="alice")
+
+        def ref(name: str) -> TableRef:
+            namespace, table = name.split(".")
+            return TableRef(catalog="lake", namespace=namespace, table=table)
+
+        denying = AclEvaluator(
+            AclConfig(default="allow", deny_rules=[AclRule(principal="*", tables=("lake:db.*",))])
+        )
+        assert not denying.authorize(alice, ref("DB.Secret"))
+        assert denying.authorize(alice, ref("other.Secret"))
+
+        allowing = AclEvaluator(
+            AclConfig(
+                default="deny", allow_rules=[AclRule(principal="*", tables=("lake:db.open",))]
+            )
+        )
+        assert allowing.authorize(alice, ref("db.open"))
+        assert not allowing.authorize(alice, ref("DB.Open"))
+
+    def test_a_principal_pattern_matches_its_own_case_on_every_platform(self):
+        # fnmatch.fnmatch folds case on Windows only.
+        evaluator = AclEvaluator(
+            AclConfig(default="deny", allow_rules=[AclRule(principal="bi", tables=("*:*.*",))])
+        )
+        table = TableRef(catalog="file", namespace="db", table="t")
+
+        assert evaluator.authorize(Principal(id="bi"), table)
+        assert not evaluator.authorize(Principal(id="BI"), table)
+
+    # pyiceberg's local FileIO cannot resolve a Windows warehouse path (see temp_warehouse).
+    @pytest.mark.skipif(sys.platform == "win32", reason="pyiceberg local FileIO on Windows")
+    def test_a_scan_of_another_spelling_is_refused(self, in_process_server, tmp_path):
+        import pyarrow as pa
+        from fastapi.testclient import TestClient
+
+        from strata.server import app
+        from tests.acl_catalog_helpers import LowercasingSqlCatalog
+        from tests.conftest import SERVICE_CALLER, service_auth
+
+        warehouse = tmp_path / "wh"
+        warehouse.mkdir()
+        props = {"uri": f"sqlite:///{tmp_path / 'lake.db'}", "warehouse": warehouse.as_uri()}
+        catalog = LowercasingSqlCatalog("lake", **props)
+        catalog.create_namespace("db")
+        catalog.create_table("db.events", pa.schema([("id", pa.int64())])).append(
+            pa.table({"id": [1, 2, 3]})
+        )
+        catalog.engine.dispose()
+        in_process_server(
+            deployment_mode="service",
+            **service_auth(),
+            catalogs={
+                "lake": {
+                    "py-catalog-impl": "tests.acl_catalog_helpers.LowercasingSqlCatalog",
+                    **props,
+                }
+            },
+            acl_config=AclConfig(
+                default="allow", deny_rules=[AclRule(principal="*", tables=("lake:db.events",))]
+            ),
+        )
+        client = TestClient(app, headers=SERVICE_CALLER)
+
+        for uri in ("lake:db.events", "lake:DB.EVENTS", "lake:Db.Events"):
+            response = client.post(
+                "/v1/materialize",
+                json={"inputs": [uri], "transform": {"executor": "scan@v1", "params": {}}},
+            )
+            assert response.status_code in (403, 404), (uri, response.text)
 
 
 class TestADenyOnOneAddressCoversTheTable:

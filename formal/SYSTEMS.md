@@ -127,7 +127,7 @@ comes from the form of the URI it was requested under.
 | ID | Property | Checked by |
 | --- | --- | --- |
 | ACL-1 | An explicit deny is never overridden by an allow. | construction: denies are evaluated first and return |
-| ACL-2 | A deny that matches one name of a table refuses every URI form that loads it. | test `tests/test_auth.py::TestADenyOnOneAddressCoversTheTable` for a SQL catalog shared by every warehouse URI (finding 12). none for other shapes: a named catalog over the same data is not detected. |
+| ACL-2 | A deny that matches one name of a table refuses every URI form that loads it. | property `test_encoding_properties.py`: a SQL catalog shared by every warehouse URI (finding 12) and every spelling of a name (finding 22), against an oracle of which URIs load one table; tests `tests/test_auth.py::TestADenyOnOneAddressCoversTheTable`, `TestADenyCoversEverySpellingOfTheName`. Not checked: a named catalog over the same data, which Strata cannot detect; the docs say to write deny rules with a `*:` prefix. |
 | ACL-3 | Cache contents are shared across principals; admission and retrieval are gated. | construction: the cache key has no principal; the gates are on the routes |
 
 ## 7. The ledger, as Strata uses it
@@ -245,5 +245,5 @@ it (`notebook/each.py`, `cell_paths/fanout.py`).
 | --- | --- | --- |
 | PROV-1 | `derive_subkey` labels cannot collide. | construction: variable names cannot contain `:` or `=` and `_` names are never stored; other labels carry their own prefixes |
 | PROV-2 | `CacheKey.to_hex`'s `\|` separator cannot be forged. | construction: a collision needs a file path starting with digits and `\|` |
-| PROV-3 | Equal transform specs serialize to the same bytes, and different ones differ. | none |
+| PROV-3 | Equal transform specs serialize to the same bytes, and different ones differ. | property `test_encoding_properties.py` (the canonical JSON reads back as the spec, with each value's type, whatever order `params` was built in). **Lead:** the `scan@v1` identity hash (`compute_identity_provenance`) joins its fields with no separator, so a table name and a column name carrying the field labels could in principle meet another scan's bytes; none was constructed. Its filter component is a 64-bit MD5 prefix. |
 | PROV-4 | Signed URLs sign a canonical encoding. | construction: `json.dumps(…, sort_keys=True)` |

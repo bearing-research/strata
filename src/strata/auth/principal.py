@@ -189,13 +189,19 @@ class AclEvaluator:
         rule: AclRule,
         principal: Principal,
         table_ref: TableRef,
+        *,
+        any_case: bool = False,
     ) -> bool:
-        """Return True if principal (or ``*``), tenant (if set) and any table pattern match."""
+        """Return True if principal (or ``*``), tenant (if set) and any table pattern match.
+
+        ``any_case`` matches the table in any case, for deny rules: a catalog that resolves
+        names case-insensitively (Glue) loads ``DB.Events`` as ``db.events``.
+        """
         from strata.config import AclRule  # noqa: F401 - for type checking
 
         # ``principal`` is a pattern; exact equality would let a deny rule like
         # ``svc-*`` silently fail open.
-        if not fnmatch.fnmatch(principal.id, rule.principal):
+        if not fnmatch.fnmatchcase(principal.id, rule.principal):
             return False
 
         if rule.tenant is not None and rule.tenant != principal.tenant:
@@ -203,7 +209,11 @@ class AclEvaluator:
 
         table_str = str(table_ref)
         for pattern in rule.tables:
-            if fnmatch.fnmatch(table_str, pattern):
+            # fnmatchcase: fnmatch folds case on Windows only, which made every rule
+            # case-insensitive there.
+            if any_case and fnmatch.fnmatchcase(table_str.casefold(), pattern.casefold()):
+                return True
+            if fnmatch.fnmatchcase(table_str, pattern):
                 return True
 
         return False
@@ -216,12 +226,16 @@ class AclEvaluator:
     ) -> bool:
         """Return whether ``principal`` may access ``table_ref`` (deny, then allow, then default).
 
-        A deny rule matching any of ``aliases`` refuses the table, so another address
-        cannot step around it; allow rules match only ``table_ref``, so an alias never grants.
+        A deny rule matching any of ``aliases``, in any case, refuses the table, so another
+        address or spelling cannot step around it; allow rules match only ``table_ref`` as
+        written, so neither an alias nor a spelling grants.
         """
         # Deny first: an explicit deny beats any allow.
         for rule in self.config.deny_rules:
-            if any(self._matches_rule(rule, principal, ref) for ref in (table_ref, *aliases)):
+            if any(
+                self._matches_rule(rule, principal, ref, any_case=True)
+                for ref in (table_ref, *aliases)
+            ):
                 return False
 
         for rule in self.config.allow_rules:

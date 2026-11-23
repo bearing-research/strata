@@ -426,6 +426,10 @@ deny on `s3:finance.*` refuses it under `file:`, `gs:` and `az:` too. Strata
 cannot tell that a named catalog holds the same data as a warehouse, which is
 what the `*` prefix is for.
 
+A deny rule matches a name in any case: a catalog such as Glue or Hive resolves
+`FINANCE.Ledger` to `finance.ledger`, so a deny on `*:finance.*` refuses both
+spellings. An allow rule matches the spelling it was written in.
+
 An allow rule matches only the name it was written for, even where a
 deny would cover the others: an address it misses falls through to
 `default`. **If you added a named catalog, or a GCS or Azure warehouse,

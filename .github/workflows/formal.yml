@@ -59,6 +59,7 @@ jobs:
       STALENESS_EXAMPLES: ${{ github.event_name == 'schedule' && '40' || '8' }}
       CACHE_SOUNDNESS_EXAMPLES: ${{ github.event_name == 'schedule' && '100' || '25' }}
       RUN_ALL_EXAMPLES: ${{ github.event_name == 'schedule' && '60' || '10' }}
+      ENCODING_EXAMPLES: ${{ github.event_name == 'schedule' && '5000' || '500' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 

@@ -39,6 +39,10 @@ in [`README.md`](README.md).
   statuses of cells skipped behind a failure) and confirmed the mutation lead as
   finding 21 (a batched cell read an input the cell before changed in place); all
   fixed.
+- **Phase 6 (encodings and naming):** `test_encoding_properties.py` checks PROV-3 for
+  transform specs and ACL-2 against an oracle of which URIs load one table. It found
+  finding 22 (a deny matched one spelling of a name, and Glue and Hive resolve names
+  case-insensitively); fixed. The `scan@v1` identity hash is a lead (PROV-3).
 
 ## Conventions
 
@@ -112,6 +116,6 @@ property, the replays of what it finds, then a PR per fix.
 5. **Run All equals single-cell runs** (BAT-1). Done for Python cells over ints
    and lists. Open: module state, `@nocache` (BAT-2), workers and loops in the
    generator.
-6. **Encodings and naming** (PROV-3, ACL-2 beyond the SQL-catalog shape).
-   Property tests: transform specs round-trip canonically; for each catalog
-   shape, every URI form that loads one table is refused by a deny on any.
+6. **Encodings and naming** (PROV-3, ACL-2). Done for transform specs, the SQL
+   catalog shape and spellings. Open: the `scan@v1` identity hash (encoding its
+   fields as JSON re-keys every stored scan once).
