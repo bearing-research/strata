@@ -132,7 +132,7 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | `401` | Service mode auth header missing or proxy-token mismatch |
 | `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode; also a browser write whose `Origin` the server does not allow. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
 | `404` | Notebook session not found (or another tenant's), a table its catalog does not have, a local warehouse directory that does not exist, a snapshot id the table does not have, or a hidden 403 (see above) |
-| `409` | Conflict - concurrent environment job, a cell already running in the notebook (execute, close, delete), a cell someone else is editing (`cell_locked`), or a quiesced notebook (`NOTEBOOK_QUIESCED`) |
+| `409` | Conflict - concurrent environment job, a cell already running in the notebook (execute, close, delete), an edit of the cell that is executing (`cell_busy`), a cell someone else is editing (`cell_locked`), or a quiesced notebook (`NOTEBOOK_QUIESCED`) |
 | `413` | Request body or scan response exceeded the configured byte cap (`STRATA_MAX_UPLOAD_BYTES` for artifact uploads, `STRATA_MAX_RESPONSE_BYTES` for scans) |
 | `422` | Pydantic validation error on the request body, or a table input Strata refuses to read (an unreadable delete file, too many pending equality deletes); the detail says which. A table the ACL denies is refused first, so its caller gets the `403`/`404` instead |
 | `429` | Rate limit exceeded - global, per-client, or per-tenant |
@@ -446,9 +446,12 @@ PUT /v1/notebooks/{session_id}/cells/{cell_id}
 }
 ```
 
-Returns updated cell, DAG, and all cells (with refreshed staleness). A cell
-someone else changed within `STRATA_NOTEBOOK_CELL_LOCK_SECONDS` is refused
-with **409** and `code: cell_locked`, naming the holder; `force: true` takes it
+Returns updated cell, DAG, and all cells (with refreshed staleness). The cell
+being executed, or the one a run was requested for (a cascade runs its
+upstreams first), is refused with **409** and `code: cell_busy`, as over the
+WebSocket: its run already has the source it stores under. A cell someone
+else changed within `STRATA_NOTEBOOK_CELL_LOCK_SECONDS` is refused with
+**409** and `code: cell_locked`, naming the holder; `force: true` takes it
 over. `author` is honored only without principal auth, where there is no
 authenticated caller to credit.
 

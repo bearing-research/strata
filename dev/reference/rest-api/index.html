@@ -5462,7 +5462,7 @@ store is a JSON <code>503</code> with <code>Retry-After</code>.</p>
 </tr>
 <tr>
 <td><code>409</code></td>
-<td>Conflict - concurrent environment job, a cell already running in the notebook (execute, close, delete), a cell someone else is editing (<code>cell_locked</code>), or a quiesced notebook (<code>NOTEBOOK_QUIESCED</code>)</td>
+<td>Conflict - concurrent environment job, a cell already running in the notebook (execute, close, delete), an edit of the cell that is executing (<code>cell_busy</code>), a cell someone else is editing (<code>cell_locked</code>), or a quiesced notebook (<code>NOTEBOOK_QUIESCED</code>)</td>
 </tr>
 <tr>
 <td><code>413</code></td>
@@ -5717,9 +5717,12 @@ a cell or an environment job.</p>
 <a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">  </span><span class="nt">"force"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
 <a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="p">}</span>
 </code></pre></div>
-<p>Returns updated cell, DAG, and all cells (with refreshed staleness). A cell
-someone else changed within <code>STRATA_NOTEBOOK_CELL_LOCK_SECONDS</code> is refused
-with <strong>409</strong> and <code>code: cell_locked</code>, naming the holder; <code>force: true</code> takes it
+<p>Returns updated cell, DAG, and all cells (with refreshed staleness). The cell
+being executed, or the one a run was requested for (a cascade runs its
+upstreams first), is refused with <strong>409</strong> and <code>code: cell_busy</code>, as over the
+WebSocket: its run already has the source it stores under. A cell someone
+else changed within <code>STRATA_NOTEBOOK_CELL_LOCK_SECONDS</code> is refused with
+<strong>409</strong> and <code>code: cell_locked</code>, naming the holder; <code>force: true</code> takes it
 over. <code>author</code> is honored only without principal auth, where there is no
 authenticated caller to credit.</p>
 <h3 id="delete-cell">Delete cell<a class="headerlink" href="#delete-cell" title="Permanent link">&para;</a></h3>
