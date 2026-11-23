@@ -1,18 +1,22 @@
-"""The TUI's REST client against a real server: the fields the spectator reads are there.
+"""The TUI against a real server: the fields and frames the spectator reads are there.
 
-The app tests replace the client with fakes shaped like the responses, so a route that
-renamed a field would pass them and break the TUI.
+The app tests replace the client and socket with fakes shaped like the responses, so a
+route or frame that renamed a field would pass them and break the TUI.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 
 import httpx
 import pytest
 import websockets
 
+from strata.notebook.tui.app import _single_table, _single_table_uri, _upgrade_refused
 from strata.notebook.tui.client import TuiClient, TuiClientError
+from strata.notebook.tui.viewmodel import NotebookViewModel
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
 
@@ -23,7 +27,8 @@ def opened(notebook_personal_server):
     storage.mkdir(parents=True, exist_ok=True)
     nb = create_notebook(storage / "nb", "Spectated", initialize_environment=False)
     add_cell_to_notebook(nb, "t", None)
-    write_cell(nb, "t", "import pyarrow as pa\ntable = pa.table({'n': [3, 1, 2]})\n")
+    # It displays the table it stores: a resync carries displays, not variables.
+    write_cell(nb, "t", "import pyarrow as pa\ntable = pa.table({'n': [3, 1, 2]})\ntable\n")
     add_cell_to_notebook(nb, "r", "t")
     write_cell(nb, "r", "rows = table.num_rows\n")
     return TuiClient(notebook_personal_server["base_url"]), nb
@@ -43,22 +48,50 @@ async def test_opening_by_path_gives_the_session_the_picker_lists(opened):
     assert (await client.open_notebook(str(nb)))["session_id"] == session_id
 
 
-async def test_the_websocket_url_is_one_the_server_accepts(opened):
-    client, nb = opened
-    session_id = (await client.open_notebook(str(nb)))["session_id"]
-
+async def _state_over_the_socket(client: TuiClient, session_id: str) -> NotebookViewModel:
+    """What the TUI does on connect: send its sync, apply the ``notebook_state`` reply."""
     async with websockets.connect(client.ws_url(session_id), max_size=None) as ws:
-        assert ws.protocol.state.name == "OPEN"
+        await ws.send(json.dumps({"type": "notebook_sync", "seq": 0, "payload": {}}))
+        while True:
+            message = json.loads(await asyncio.wait_for(ws.recv(), timeout=60))
+            if message["type"] == "notebook_state":
+                vm = NotebookViewModel()
+                vm.apply_notebook_state(message["payload"])
+                return vm
 
 
-async def test_a_page_of_a_table_output_is_what_the_viewer_renders(opened):
+async def test_the_socket_answers_the_tuis_sync_with_the_notebook(opened):
     client, nb = opened
     session_id = (await client.open_notebook(str(nb)))["session_id"]
-    base = client.server_url
-    run = httpx.post(f"{base}/v1/notebooks/{session_id}/cells/t/execute", timeout=120)
-    assert run.status_code == 200, run.text
-    state = httpx.get(f"{base}/v1/notebooks/sessions/{session_id}", timeout=30).json()
-    uri = next(c for c in state["cells"] if c["id"] == "t")["artifact_uris"]["table"]
+
+    vm = await _state_over_the_socket(client, session_id)
+
+    assert vm.cell_order == ["t", "r"]
+
+
+async def test_an_unknown_session_is_refused_the_way_the_tui_stops_on(opened):
+    client, _nb = opened
+
+    with pytest.raises(websockets.exceptions.InvalidStatus) as refused:
+        async with websockets.connect(client.ws_url("no-such-session")):
+            pass
+
+    # A 403, which the TUI reads as "gone" rather than reconnecting forever.
+    assert _upgrade_refused(refused.value)
+
+
+async def test_the_table_the_viewer_finds_pages_from_the_server(opened):
+    client, nb = opened
+    session_id = (await client.open_notebook(str(nb)))["session_id"]
+    async with httpx.AsyncClient(base_url=client.server_url, timeout=120) as http:
+        run = await http.post(f"/v1/notebooks/{session_id}/cells/t/execute")
+    assert run.status_code == 200 and run.json()["status"] == "ready", run.text
+
+    # The URI the viewer pages is the one on the cell's output, as the TUI reads it.
+    cell = (await _state_over_the_socket(client, session_id)).cells["t"]
+    table, uri = _single_table(cell), _single_table_uri(cell)
+    assert table is not None and uri is not None
+    assert table[0] == ["n"]
 
     page = await client.get_cell_data_page(session_id, "t", uri, limit=2, sort_by="n")
 
