@@ -1088,20 +1088,22 @@ def create_notebook_executor_app(
                         write.model_dump()
                         for write in await mount_resolver.sync_back(resolved_mounts)
                     ]
-            except TimeoutError:
-                shutil.rmtree(tmpdir, ignore_errors=True)
-                # Lazy: keeps the heavy executor module out of worker load on a rare path.
-                from strata.notebook.executor import cell_timeout_message
-
-                return JSONResponse(
-                    status_code=408,
-                    content={
-                        "success": False,
-                        "error": cell_timeout_message(timeout_seconds),
-                    },
-                )
             except Exception as exc:
                 shutil.rmtree(tmpdir, ignore_errors=True)
+                from strata.notebook.process_tree import is_a_deadline
+
+                # The OS's ETIMEDOUT (a mount on NFS) is a TimeoutError too, and an error.
+                if isinstance(exc, TimeoutError) and is_a_deadline(exc):
+                    # Lazy: keeps the heavy executor module out of worker load on a rare path.
+                    from strata.notebook.executor import cell_timeout_message
+
+                    return JSONResponse(
+                        status_code=408,
+                        content={
+                            "success": False,
+                            "error": cell_timeout_message(timeout_seconds),
+                        },
+                    )
                 return JSONResponse(
                     status_code=500,
                     content={"success": False, "error": str(exc)},

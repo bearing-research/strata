@@ -783,6 +783,14 @@ exhaustive commit history.
 
 ### Fixed
 
+- **An OS timeout is the run's error, not its timeout.** Python raises the operating
+  system's ETIMEDOUT (a chown on a network filesystem, a store on NFS) as a timeout, which
+  a run took for its own deadline, here or on a remote worker: the cell said it timed out
+  after its limit, a loop that its iteration had, a cold run that its harness left no
+  result, and Run All ended its batch as if the harness had died. It now fails with that
+  error. In Run All, an error while serving a batch fails the cell it was on, and the run
+  goes on with the cells after it; it used to end Run All with that cell still shown
+  running. (#1619)
 - **On Windows a server's cells end with it.** A server stopped there (`strata scratch
   stop` terminates it) or one that crashed left a running cell, and what it started,
   running on: Windows has neither the lifeline nor the process groups POSIX ends them

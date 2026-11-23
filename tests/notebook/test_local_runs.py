@@ -933,6 +933,26 @@ class TestCheckpointFiles:
         assert runs.releases.latest_accepted(run.build_id) is None
 
 
+def test_a_head_the_os_timed_out_is_the_run_s_error_not_its_timeout(tmp_path: Path, monkeypatch):
+    """The OS's ETIMEDOUT (a store on a network filesystem) is raised as TimeoutError: it
+    is neither the cell's time running out nor a harness that left no result."""
+    import errno
+
+    session, executor = _notebook(tmp_path, TRAIN.replace("epoch == 1", "epoch == 99"))
+
+    def timed_out(self, run, payload):
+        raise OSError(errno.ETIMEDOUT, "Operation timed out")
+
+    monkeypatch.setattr(LocalRuns, "_head", timed_out)
+    _run(executor, "features", session.notebook_state.get_cell("features").source)
+
+    result = _run(executor, "train", session.notebook_state.get_cell("train").source)
+
+    assert result.success is False
+    assert result.error.startswith("Execution failed: "), result.error
+    assert "Operation timed out" in result.error
+
+
 def test_a_child_the_cell_leaves_behind_does_not_hold_the_run_open(tmp_path: Path):
     """The harness keeps the event pipe from the cell's children, and the executor stops
     reading soon after the harness exits either way, so a lingering child cannot stall the

@@ -27,6 +27,7 @@ from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.local_runs import RunFenced
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
+    is_a_deadline,
     kill_subprocess_tree_nowait,
     subprocess_kwargs_for_new_group,
     terminate_subprocess_tree,
@@ -454,18 +455,18 @@ class PooledCellExecutor:
                         warm_proc.process.pid,
                     )
             raise
-        except TimeoutError:
-            # A real cell timeout. Returning None ("pool unavailable") would make
-            # the caller re-run the cell cold: twice the timeout, and side
-            # effects run twice.
-            logger.warning("Warm process execution timed out")
-            raise
         except RunFenced:
             # Nothing the cell does now counts; cold would run it twice, so not None.
             if warm_proc.process.returncode is None:
                 await asyncio.shield(terminate_subprocess_tree(warm_proc.process))
             raise
         except Exception as e:
+            if isinstance(e, TimeoutError) and is_a_deadline(e):
+                # A real cell timeout. Returning None ("pool unavailable") would make
+                # the caller re-run the cell cold: twice the timeout, and side
+                # effects run twice.
+                logger.warning("Warm process execution timed out")
+                raise
             if delivered:
                 # The cell has started: a cold run would run it twice.
                 logger.exception("Warm run failed once its worker had the cell")

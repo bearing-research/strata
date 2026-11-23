@@ -43,6 +43,7 @@ from strata.notebook.models import CellOutput
 from strata.notebook.mounts import moved_key, moved_line, moved_parts
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
+    is_a_deadline,
     subprocess_kwargs_for_new_group,
     terminate_subprocess_tree,
 )
@@ -138,6 +139,36 @@ def _refused_batch(cell_specs: list[dict[str, Any]], error: str) -> BatchExecuti
         failed_cell_id=cell_specs[0]["cell_id"] if cell_specs else None,
         end_reason="cell_error",
     )
+
+
+async def _served_with_an_error(
+    proc: Any,
+    exc: Exception,
+    cell_results: dict[str, BatchCellResult],
+    watchdog_state: dict[str, Any],
+    on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None,
+) -> tuple[str, str | None]:
+    """Stop a batch whose serving raised, and fail the cell it was on with *exc*.
+
+    Returned as a failed batch, so Run All's policy runs the cells after it; raised, it
+    would leave that cell running and end Run All.
+    """
+    logger.exception("Serving a batch failed; stopping its harness")
+    await terminate_subprocess_tree(proc)
+    cell_id = watchdog_state["active_cell_id"]
+    if cell_id is None or cell_results[cell_id].status != "not_run":
+        # Between cells, or after the cell's result was recorded (its outputs may be
+        # stored): the batch ends as a harness that died.
+        return "subprocess_died", None
+    failed = BatchCellResult(cell_id=cell_id, status="cell_error", error=f"Execution failed: {exc}")
+    cell_results[cell_id] = failed
+    if on_cell_event is not None:
+        try:
+            await on_cell_event(failed)
+        except Exception:
+            # What failed may be this callback; the batch's result still says it.
+            logger.exception("Could not report cell %s failed", cell_id)
+    return "cell_error", cell_id
 
 
 async def run_batch(
@@ -319,11 +350,18 @@ async def run_batch(
                         timeout=batch_timeout_seconds,
                     )
                     completed = end_reason == "complete"
-                except TimeoutError:
-                    # SIGTERM the whole tree; proc.kill() alone would leak user-spawned children.
-                    await terminate_subprocess_tree(proc)
-                    end_reason = "subprocess_died"
+                except Exception as exc:
                     completed = False
+                    if isinstance(exc, TimeoutError) and is_a_deadline(exc):
+                        # SIGTERM the whole tree; proc.kill() alone would leak user-spawned
+                        # children.
+                        await terminate_subprocess_tree(proc)
+                        end_reason = "subprocess_died"
+                    else:
+                        # The OS's ETIMEDOUT (a store on NFS) among them.
+                        end_reason, failed_cell_id = await _served_with_an_error(
+                            proc, exc, cell_results, watchdog_state, on_cell_event
+                        )
                 finally:
                     # Close the response fd so a still-live harness sees EOF.
                     try:
