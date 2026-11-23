@@ -796,7 +796,7 @@ exhaustive commit history.
   new interpreter could not be installed, the rollback restored `requires-python` only if
   it pinned one minor (`==3.12.*`); a hand-written range such as `>=3.12` was left as the
   failed minor, with the venv already deleted. The file is now restored as it was and the
-  environment synced again. (#PR)
+  environment synced again. (#1648)
 - **A deny rule refuses a table under every spelling of its name.** Rules matched the
   name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
   served `lake:FINANCE.ledger` past a deny on `*:finance.*`. Deny rules now match in any
