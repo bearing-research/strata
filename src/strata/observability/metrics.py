@@ -399,6 +399,9 @@ class MetricsCollector:
         if self._writer_thread is None:
             self._start_writer()
         try:
+            # Nothing drains the queue of a shut-down collector.
+            if self._shutdown.is_set():
+                raise queue.Full
             self._log_queue.put_nowait(entry)
         except queue.Full:
             # Drop rather than block.

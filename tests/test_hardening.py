@@ -1294,9 +1294,22 @@ class TestNonBlockingLogging:
         assert thread is not None and thread.is_alive()
 
         collector.shutdown()
+        thread.join(timeout=10)
 
         assert not thread.is_alive()
         assert "before_shutdown" in output.getvalue()
+
+    def test_a_log_after_shutdown_is_counted_as_dropped(self):
+        import io
+
+        from strata.observability.metrics import MetricsCollector
+
+        collector = MetricsCollector(output=io.StringIO(), enabled=True)
+        collector.log_event("before")
+        collector.shutdown()
+        collector.log_event("after")
+
+        assert collector.dropped_logs == 1
 
     def test_a_collector_that_only_counts_starts_no_thread(self):
         """DiskCache and the fetcher make their own collectors, which never log."""
@@ -1322,12 +1335,14 @@ class TestNonBlockingLogging:
         collector.log_event("logged")
         thread = collector._writer_thread
         collector.shutdown()
+        assert thread is not None
+        thread.join(timeout=10)
         ref = weakref.ref(collector)
         del collector
         gc.collect()
 
         assert ref() is None
-        assert thread is not None and not thread.is_alive()
+        assert not thread.is_alive()
 
     def test_a_dropped_collector_takes_its_thread_with_it(self):
         """A test fixture's state, built without a lifespan, is never shut down."""
@@ -1359,6 +1374,7 @@ class TestNonBlockingLogging:
             thread = collector._writer_thread
             assert thread is not None and thread.is_alive()
 
+        thread.join(timeout=10)
         assert not thread.is_alive()
 
 
