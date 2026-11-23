@@ -384,7 +384,7 @@ async def test_another_versions_busy_daemon_serves_the_call_until_it_is_idle(pro
         served = _value(await client.call_tool("run", {"source": "1"}))
         assert served["status"] == "ok"
         assert "Strata 0.0.0" in served["note"]
-        assert scratch._healthy(first.url)
+        assert scratch._health_pid(first.url) == first.pid
 
         # Asked again on the next call: idle now, so replaced.
         monkeypatch.setattr(scratch, "_busy", lambda url: False)
@@ -392,7 +392,7 @@ async def test_another_versions_busy_daemon_serves_the_call_until_it_is_idle(pro
         assert again["status"] == "ok"
         assert "note" not in again
         assert "starting the scratchpad" in again["setup_ms"]
-        assert not scratch._healthy(first.url)
+        assert scratch._health_pid(first.url) != first.pid
 
 
 @pytest.mark.asyncio
