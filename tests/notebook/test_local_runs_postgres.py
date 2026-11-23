@@ -55,3 +55,9 @@ class TestGate1OnPostgres(test_local_runs.TestGate1):
 
 class TestALapsedLeaseWithNoRivalOnPostgres(test_local_runs.TestALapsedLeaseWithNoRival):
     """A lapsed lease re-taken in a new attempt, on the second backend."""
+
+
+class TestAnotherProcessBetweenTheReadAndTheWriteOnPostgres(
+    test_local_runs.TestAnotherProcessBetweenTheReadAndTheWrite
+):
+    """open's writes pinned to the claim it read, on the second backend."""

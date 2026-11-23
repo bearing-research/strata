@@ -26,7 +26,7 @@ from vestigo.provenance import (
 from vestigo.releases import ReleaseRejected
 
 from strata.notebook.executor import CellExecutor
-from strata.notebook.local_runs import LocalRun, LocalRuns, RunFenced, RunRefused
+from strata.notebook.local_runs import LEASE_OWNER, LocalRun, LocalRuns, RunFenced, RunRefused
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -678,6 +678,105 @@ class TestALapsedLeaseWithNoRival:
         assert runs._hold(run) is False
         with pytest.raises(RunFenced):
             runs.handle(run, {"event": "checkpoint", "sequence": 1, "parts": {}}, tmp_path)
+
+
+class TestAnotherProcessBetweenTheReadAndTheWrite:
+    """A second process on the store acts on the lapsed build between open's read and write.
+
+    Once the second process has resumed the build, this one is refused, as on one process,
+    and that build is left running. SYSTEMS LR-2.
+    """
+
+    def _lapsed(self, tmp_path: Path):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        first = runs.open(
+            cell_id="train",
+            computation_key="k",
+            variant=None,
+            input_versions={},
+            timeout_seconds=60.0,
+            resume=True,
+        )
+        runs.handle(first, {"event": "checkpoint", "sequence": 1, "parts": {}}, tmp_path)
+        runs.builds.renew_lease(first.build_id, LEASE_OWNER, lease_duration_seconds=0.0)
+        # A lease is live through its deadline: the ledger's writes come a second after it.
+        for store in (runs.builds, runs.releases):
+            store._clock = lambda: time.time() + 1.0
+        return runs, first.build_id
+
+    @staticmethod
+    def _then(runs: LocalRuns, monkeypatch, act) -> None:
+        """Run *act* once, right after open reads the build's latest checkpoint."""
+        latest = runs.releases.latest_accepted
+
+        def read_then_act(build_id):
+            found = latest(build_id)
+            monkeypatch.setattr(runs.releases, "latest_accepted", latest)
+            act(build_id, found)
+            return found
+
+        monkeypatch.setattr(runs.releases, "latest_accepted", read_then_act)
+
+    @staticmethod
+    def _resume_elsewhere(runs: LocalRuns):
+        def act(build_id, found):
+            runs.releases.resume(
+                build_id,
+                "elsewhere",
+                writable_until=time.time() + 600,
+                lease_owner="other-host:1",
+                lease_duration_seconds=60.0,
+                from_release=found.release_id,
+            )
+
+        return act
+
+    def _open(self, runs: LocalRuns, *, resume: bool):
+        return runs.open(
+            cell_id="train",
+            computation_key="k",
+            variant=None,
+            input_versions={},
+            timeout_seconds=60.0,
+            resume=resume,
+        )
+
+    @pytest.mark.parametrize("resume", [False, True], ids=["rerun", "normal run"])
+    def test_a_build_resumed_elsewhere_refuses_this_run(self, tmp_path: Path, monkeypatch, resume):
+        runs, build_id = self._lapsed(tmp_path)
+        self._then(runs, monkeypatch, self._resume_elsewhere(runs))
+
+        with pytest.raises(RunRefused):
+            self._open(runs, resume=resume)
+
+        build = runs.builds.get_build(build_id)
+        assert build.state == "building", "the other process's run goes on"
+        assert build.lease_owner == "other-host:1"
+        assert runs.builds.find_open_build("k").build_id == build_id, "and no second one opened"
+
+    def test_a_build_failed_elsewhere_opens_a_new_one(self, tmp_path: Path, monkeypatch):
+        runs, build_id = self._lapsed(tmp_path)
+        self._then(runs, monkeypatch, lambda b, _: runs.builds.fail_build(b, "elsewhere"))
+
+        run = self._open(runs, resume=False)
+
+        assert run.build_id != build_id
+        assert runs.builds.get_build(build_id).error_message == "elsewhere"
+
+    def test_a_miss_with_the_claim_unchanged_raises(self, tmp_path: Path, monkeypatch):
+        runs, _ = self._lapsed(tmp_path)
+
+        def refused(*args, **kwargs):
+            raise ValueError("refused for a reason that stays")
+
+        monkeypatch.setattr(runs.releases, "resume", refused)
+        monkeypatch.setattr(runs.builds, "fail_build", lambda *a, **k: False)
+
+        with pytest.raises(ValueError, match="stays"):
+            self._open(runs, resume=True)
+        with pytest.raises(RuntimeError, match="could not be failed"):
+            self._open(runs, resume=False)
 
 
 class TestAbandonedRuns:

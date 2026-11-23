@@ -128,19 +128,32 @@ class LocalRuns:
         writable_until = now + writable_seconds
         attempt = uuid.uuid4().hex
 
-        open_build = self.builds.find_open_build(computation_key, occurrence=occurrence)
-        if open_build is not None:
+        # Another process may resume or fail the build between this read and the write
+        # below; each write is pinned to what was read, and on a miss the build is read
+        # again (a resume now holds a live lease, so the next pass refuses). A miss with
+        # the claim unchanged is not that race, and raises.
+        missed: tuple[tuple[Any, ...], Exception] | None = None
+        while (
+            open_build := self.builds.find_open_build(computation_key, occurrence=occurrence)
+        ) is not None:
+            claim = (open_build.build_id, open_build.lease_owner, open_build.lease_expires_at)
+            if missed is not None and missed[0] == claim:
+                raise missed[1]
             self._refuse_if_live(cell_id, open_build, now)
             latest = self.releases.latest_accepted(open_build.build_id)
             if resume and latest is not None:
-                self.releases.resume(
-                    open_build.build_id,
-                    attempt,
-                    writable_until=writable_until,
-                    lease_owner=LEASE_OWNER,
-                    lease_duration_seconds=LEASE_SECONDS,
-                    from_release=latest.release_id,
-                )
+                try:
+                    self.releases.resume(
+                        open_build.build_id,
+                        attempt,
+                        writable_until=writable_until,
+                        lease_owner=LEASE_OWNER,
+                        lease_duration_seconds=LEASE_SECONDS,
+                        from_release=latest.release_id,
+                    )
+                except ValueError as exc:
+                    missed, now = (claim, exc), time.time()
+                    continue
                 logger.info(
                     "Cell %s resumes build %s from checkpoint %d",
                     cell_id,
@@ -158,12 +171,17 @@ class LocalRuns:
                     init=open_build.params.get("init") if open_build.params else None,
                     writable_seconds=writable_seconds,
                 )
-            self.builds.fail_build(
+            if self.builds.fail_build(
                 open_build.build_id,
                 "superseded by a rerun"
                 if latest is not None
                 else "interrupted before a checkpoint",
-            )
+                lease_owner=open_build.lease_owner,
+                lease_expires_at=open_build.lease_expires_at,
+            ):
+                break
+            missed = (claim, RuntimeError(f"build {open_build.build_id} could not be failed"))
+            now = time.time()
 
         build_id = self._new_build(
             cell_id, computation_key, variant, attempt, writable_until, init=init
