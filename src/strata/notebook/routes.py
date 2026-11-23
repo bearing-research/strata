@@ -877,7 +877,7 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
             log_context=str(notebook_path),
         )
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e) or "Not found")
     except HTTPException:
         raise
     except PermissionError as exc:

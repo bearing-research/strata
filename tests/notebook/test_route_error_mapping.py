@@ -2,7 +2,8 @@
 
 Each maps the same exceptions inline (no central mapper), so each is checked: a
 route that dropped or reordered a clause would report a missing notebook, a
-refused write or a held notebook as a server fault.
+refused write or a held notebook as a server fault. These are the routes that
+reload the session inside their try block; others inject a failure elsewhere.
 """
 
 from __future__ import annotations
