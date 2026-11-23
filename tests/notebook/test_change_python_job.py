@@ -31,6 +31,11 @@ class _Uv:
         venv_python = self.notebook_dir / ".venv" / "bin" / "python"
         self.saw.append((read_requested_python_minor(self.notebook_dir), venv_python.exists()))
         outcome = self.outcomes.pop(0)
+        if outcome == "edit, then fail":
+            # Someone writes the file while uv runs.
+            pyproject = self.notebook_dir / "pyproject.toml"
+            pyproject.write_text(pyproject.read_text() + "\n[tool.mine]\nkept = true\n")
+            return SimpleNamespace(success=False, error="no wheel for 3.99", operation_log=None)
         if outcome == "raise":
             raise OSError("uv vanished")
         if outcome == "ok":
@@ -105,3 +110,14 @@ async def test_a_hand_written_spec_is_restored_as_it_was(session):
     assert (job.status, job.error) == ("failed", "no interpreter for 3.99")
     assert pyproject.read_text() == before
     assert len(uv.saw) == 2, "the restored environment is synced again"
+
+
+async def test_an_edit_made_during_the_sync_survives_the_rollback(session):
+    uv = _Uv(session.path, ["edit, then fail", "ok"])
+
+    job = await _change(session, uv, "3.99")
+
+    assert (job.status, job.error) == ("failed", "no wheel for 3.99")
+    text = (session.path / "pyproject.toml").read_text()
+    assert "[tool.mine]\nkept = true" in text
+    assert read_requested_python_minor(session.path) == "3.12"
