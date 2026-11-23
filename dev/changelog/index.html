@@ -4618,6 +4618,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A stale cell keeps its outputs after a reopen.</strong> A cell whose current key finds
+  nothing stored (an input changed, its source was edited, an upstream went stale, it has
+  a read-write mount, or a mount's credential is missing) reopened pointing at nothing,
+  where the session that ran it still pointed at its last outputs, and a cell reading it
+  was keyed as if it had never run. (#1637)</li>
 <li><strong>A deny rule refuses a table under every spelling of its name.</strong> Rules matched the
   name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
   served <code>lake:FINANCE.ledger</code> past a deny on <code>*:finance.*</code>. Deny rules now match in any
