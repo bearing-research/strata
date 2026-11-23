@@ -5,19 +5,6 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## Unreleased
-
-### Changed
-
-- **Strata installs and runs from pipx, pip and conda, not only `uv tool install`.**
-  `strata-notebook` depends on uv (0.12 or 0.13) and runs that uv for every notebook
-  environment, whatever is on `PATH`; `STRATA_UV` names another. The startup guard no
-  longer asks for an environment uv made, only for a uv it can find. A project the
-  scratchpad attaches to runs the uv on `PATH` first, since that uv wrote its lock. Any
-  environment that installs Strata now holds a `uv` binary beside it. The Infisical SDK
-  moved to the `infisical` extra: install `strata-notebook[infisical]` to keep the
-  provider. (#1618)
-
 ## 0.12.0 - 2026-11-22
 
 ### Added
@@ -398,6 +385,15 @@ exhaustive commit history.
   instead of failing to read Arrow. (#1291)
 
 ### Changed
+
+- **Strata installs and runs from pipx, pip and conda, not only `uv tool install`.**
+  `strata-notebook` depends on uv (0.12 or 0.13) and runs that uv for every notebook
+  environment, whatever is on `PATH`; `STRATA_UV` names another. The startup guard no
+  longer asks for an environment uv made, only for a uv it can find. A project the
+  scratchpad attaches to runs the uv on `PATH` first, since that uv wrote its lock. Any
+  environment that installs Strata now holds a `uv` binary beside it. The Infisical SDK
+  moved to the `infisical` extra: install `strata-notebook[infisical]` to keep the
+  provider. (#1618)
 
 - **A removed cell's values are collected after 30 days unused.** Removing a cell
   released nothing, so its outputs survived every sweep. The sweep run when a notebook
