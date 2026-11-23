@@ -42,6 +42,9 @@ the replay becomes the fix's regression test.
 | `tla/LocalRun_Lapse.cfg` | The code before the fix. Violates `NoNeedlessFence` (finding 13) |
 | `tla/LocalRun_Race.cfg` | The fix without its lock. Violates `NoNeedlessFence` |
 | `tla/LocalRun_Patched.cfg` | The code as it is. All invariants hold |
+| `tla/Streams.tla` | One stream-mode miss: GETs waiting for admission, 429s and cancels, the background build, the cleanup timer and expiry (SYSTEMS 2) |
+| `tla/Streams_Retry.cfg` | The code before the fix. Violates `NoFailedServe` (finding 17) |
+| `tla/Streams_Patched.cfg` | The code as it is. All invariants hold |
 | `run_models.py` | Runs every configuration and checks it ends as pinned: passes, or violates its named invariant |
 | `test_pruning_properties.py` | Property: a pruned row group holds no matching row (PR-1) |
 | `test_staleness_properties.py` | Property: random edits and runs on a real notebook match a fresh evaluation (NB-3) |

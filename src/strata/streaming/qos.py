@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 from strata.adaptive_concurrency import ResizableLimiter
@@ -31,6 +32,18 @@ class QoSRejected(Exception):
         self.error = error
         self.tier = tier
         self.retry_after = retry_after
+
+
+class _ClientSemaphore(asyncio.Semaphore):
+    """A caller's per-tier semaphore, which knows whether any of its slots is held."""
+
+    def __init__(self, value: int) -> None:
+        super().__init__(value)
+        self._limit = value
+
+    @property
+    def held(self) -> bool:
+        return self._value < self._limit
 
 
 class Admission:
@@ -95,8 +108,8 @@ class QoSAdmission:
         self._bulk_queue_wait_total_ms = 0.0
         self._bulk_queue_wait_count = 0
         # Per-client fairness: LRU dict of client_id -> Semaphore per tier.
-        self._client_interactive_semaphores: dict[str, asyncio.Semaphore] = {}
-        self._client_bulk_semaphores: dict[str, asyncio.Semaphore] = {}
+        self._client_interactive_semaphores: dict[str, _ClientSemaphore] = {}
+        self._client_bulk_semaphores: dict[str, _ClientSemaphore] = {}
         self._client_semaphore_max_entries = 10000
 
     def attach_controller(self, controller: AdaptiveConcurrencyController | None) -> None:
@@ -130,7 +143,7 @@ class QoSAdmission:
             return "bulk"
         return "interactive"
 
-    def _get_client_semaphore(self, client_id: str, tier: str) -> asyncio.Semaphore | None:
+    def _get_client_semaphore(self, client_id: str, tier: str) -> _ClientSemaphore | None:
         """Get or create a per-client semaphore for the tier, LRU-bounded; None when disabled."""
         if tier == "interactive":
             max_concurrent = self._config.per_client_interactive
@@ -148,11 +161,15 @@ class QoSAdmission:
             client_semaphores[client_id] = sem
             return sem
 
-        sem = asyncio.Semaphore(max_concurrent)
+        sem = _ClientSemaphore(max_concurrent)
         client_semaphores[client_id] = sem
-        while len(client_semaphores) > self._client_semaphore_max_entries:
-            oldest_client = next(iter(client_semaphores))
-            del client_semaphores[oldest_client]
+        # Evict idle callers only: one evicted while held would get a fresh semaphore at full
+        # count on its next request. Past the bound, the held ones are live streams anyway.
+        excess = len(client_semaphores) - self._client_semaphore_max_entries
+        if excess > 0:
+            idle = (c for c, s in client_semaphores.items() if c != client_id and not s.held)
+            for oldest_client in list(islice(idle, excess)):
+                del client_semaphores[oldest_client]
         return sem
 
     async def admit(self, plan: Any, request: Request, scan_id: str) -> Admission:

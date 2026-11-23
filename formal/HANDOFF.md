@@ -29,6 +29,11 @@ in [`README.md`](README.md).
   writers never reusing a delete file's path; MD-2 rests on random snapshot
   ids; MD-1 is still a lead (pyiceberg has no catalog that reuses metadata
   names).
+- **Phase 4 (streams):** `Streams.tla` found finding 17 (a stream expired under a
+  GET waiting for a slot), and a replay confirmed lead ADM-5 as finding 18; both
+  fixed. Two leads did not hold: ADM-6 (no cancel can land in `release()`, which
+  never suspends; now pinned by a test) and STR-2 (stream ids are fresh uuids, so a
+  second miss never replaces another's cleanup).
 
 ## Conventions
 
@@ -96,9 +101,9 @@ property, the replays of what it finds, then a PR per fix.
    PR-2 on integer columns. Open: MD-1 (a catalog that writes `vN.metadata.json`,
    dropped with purge and recreated), CK-4 (`clear()` racing a `put`), and string
    and NaN manifest bounds for PR-2.
-4. **Streams** (SYSTEMS 1 and 2: ADM-5, ADM-6, STR-1, STR-2). A
-   `Streams.tla` of materialize, GET, admit, release (with its lock as a
-   step), cleanup and expiry, with two GETs and two materialize misses.
+4. **Streams** (SYSTEMS 1 and 2). Done for ADM-5, ADM-6, STR-1 and STR-2.
+   Open: the passthrough path (no artifact store) and multi-node ownership are
+   outside `Streams.tla`.
 5. **Run All equals single-cell runs** (BAT-1). A differential property:
    random notebooks run with `notebook_run_all` and cell by cell must leave
    the same stored values and statuses.

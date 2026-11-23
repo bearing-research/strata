@@ -212,3 +212,54 @@ def test_a_stream_miss_nobody_fetches_fails_its_artifact(tmp_path, temp_warehous
             time.sleep(0.05)
 
         assert store.get_artifact(artifact_id, int(version)).state == "failed"
+
+
+async def test_a_stream_is_not_expired_under_a_get_waiting_for_a_slot(
+    in_process_server, temp_warehouse
+):
+    """A retry's 429 re-arms the cleanup while the first GET still waits for a slot. Expiring
+    the stream then failed its unbuilt artifact, and the first GET, once admitted, built into
+    the failed row and answered 500 (finding 17)."""
+    from httpx import ASGITransport, AsyncClient
+    from vestigo.store import get_artifact_store
+
+    import strata.server as server_module
+    from strata.tenancy.registry import get_tenant_registry
+    from strata.tenancy.tenant import get_tenant_id
+
+    state = in_process_server(stream_state_ttl_seconds=0.3, bulk_queue_timeout=10.0)
+    store = get_artifact_store(state.config.artifact_dir)
+    _, bulk = get_tenant_registry().get_or_create_limiters(get_tenant_id())
+    for _ in range(bulk.capacity):  # other scans hold every bulk slot
+        assert await bulk.acquire(timeout=1)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=server_module.app), base_url="http://test"
+    ) as client:
+        materialized = (
+            await client.post(
+                "/v1/materialize",
+                json={
+                    "inputs": [temp_warehouse["table_uri"]],
+                    "transform": {"executor": "scan@v1", "params": {}},
+                    "mode": "stream",
+                },
+            )
+        ).json()
+        artifact_id, version = materialized["artifact_uri"].split("/")[-1].split("@v=")
+
+        waiting = asyncio.create_task(client.get(materialized["stream_url"]))
+        await asyncio.sleep(0.1)
+        # The retry meets the per-client cap the first GET holds.
+        assert (await client.get(materialized["stream_url"])).status_code == 429
+        await asyncio.sleep(1.0)  # past the TTL the 429 re-armed
+
+        for _ in range(bulk.capacity):
+            await bulk.release()
+        served = await waiting
+        assert served.status_code == 200
+        assert store.get_artifact(artifact_id, int(version)).state == "ready"
+
+        # Once nobody waits, the stream is still expired.
+        await asyncio.sleep(1.0)
+        assert state.streams.get(materialized["stream_id"]) is None

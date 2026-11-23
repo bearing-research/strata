@@ -410,3 +410,23 @@ async def test_one_caller_from_two_addresses_still_has_one_cap(monkeypatch):
 
     assert excinfo.value.error == "per_client_limit"
     await first.release()
+
+
+@pytest.mark.asyncio
+async def test_a_held_client_cap_outlives_other_callers(monkeypatch):
+    """The per-client semaphores are an LRU; evicting one still held handed its caller a fresh
+    one at full count, so after enough other callers it streamed past its cap."""
+    _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig(per_client_interactive=1))
+    qos._client_semaphore_max_entries = 2
+
+    held = await qos.admit(_FakePlan(), _request_from("10.0.0.1"), "scan-held")
+    for i in range(2, 5):
+        other = await qos.admit(_FakePlan(), _request_from(f"10.0.0.{i}"), f"scan-{i}")
+        await other.release()
+
+    with pytest.raises(QoSRejected) as excinfo:
+        await qos.admit(_FakePlan(), _request_from("10.0.0.1"), "scan-again")
+    assert excinfo.value.error == "per_client_limit"
+    assert len(qos._client_interactive_semaphores) == 2, "idle callers are still evicted"
+    await held.release()
