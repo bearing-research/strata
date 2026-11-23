@@ -798,7 +798,7 @@ exhaustive commit history.
   `/health` now names the server's `pid`. The setup waits for the daemon it started and
   gives up a taken port for another, whether what took it answers HTTP or not, and
   `strata scratch stop` no longer waits 30 seconds on another Strata server that took the
-  port of the daemon it stopped. (#PR)
+  port of the daemon it stopped. (#1656)
 
 - **A failed change of a notebook's Python puts back the pyproject it had.** When the
   new interpreter could not be installed, the rollback restored `requires-python` only if
