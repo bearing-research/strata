@@ -798,13 +798,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   that changed an input in place (`xs.append(...)`) without publishing it changed only
   its own copy when run alone, but in a Run All batch the cells after it read the changed
   value, and cached what they computed from it. The batch now loads the stored value
-  back after such a cell, as a single run would see it. (#PRNUM)
+  back after such a cell, as a single run would see it. (#1634)
 - **A cell skipped behind a failure says so, whatever runs after.** When a cascade's step
   failed, every later step was marked stale, so an unrelated cell lost its own error; now
   only the steps that read the failure are marked. And a cell blocked behind a failure
   that had never run was shown stale by Run All but idle once anything else ran; it now
   stays stale while the failure stands. Run All and cell-by-cell runs leave the same
-  statuses. (#PRNUM)
+  statuses. (#1634)
 - **A stream waiting for a slot is not expired under its GET.** A retried GET that got a
   429 restarted the stream's cleanup while the first GET still waited for admission; with
   a stream TTL shorter than the wait, the stream expired, its artifact was failed, and
