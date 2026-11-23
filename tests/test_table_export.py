@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import sys
 from types import SimpleNamespace
 
@@ -432,6 +433,60 @@ def test_the_cli_writes_a_local_artifact_into_a_table(tmp_path, notebook_store, 
     assert status == 0, capsys.readouterr().out
     assert "Created" in capsys.readouterr().out
     assert _written_versions(tmp_path / "wh") == [(artifact.id, "1")]
+
+
+class TestTheExportCommand:
+    @staticmethod
+    def _export(tmp_path, ref: str, *, fmt: str = "human", alias: str | None = None) -> int:
+        import argparse
+
+        from strata.artifact.cli import cmd_export_table
+
+        return cmd_export_table(
+            argparse.Namespace(
+                ref=ref,
+                artifact_dir=str(tmp_path / "notebook"),
+                table=f"{tmp_path / 'wh'}#taxi.features",
+                alias=alias,
+                by=None,
+                format=fmt,
+                tenant=None,
+            )
+        )
+
+    def test_json_names_the_snapshot_it_wrote(self, tmp_path, notebook_store, capsys):
+        artifact = _version(notebook_store, pa.table({"trip": [1, 2]}))
+
+        assert self._export(tmp_path, f"{artifact.id}@v={artifact.version}", fmt="json") == 0
+
+        out = json.loads(capsys.readouterr().out)
+        assert out["artifact_uri"] == f"strata://artifact/{artifact.id}@v={artifact.version}"
+        assert out["table"].endswith("taxi.features") and out["created"] is True
+        assert out["snapshot_id"] == _table(tmp_path / "wh").current_snapshot().snapshot_id
+
+    def test_a_second_write_says_wrote_and_names_its_tag(self, tmp_path, notebook_store, capsys):
+        first = _version(notebook_store, pa.table({"trip": [1, 2]}))
+        second = _version(notebook_store, pa.table({"trip": [3]}), tag="2")
+        assert self._export(tmp_path, f"{first.id}@v={first.version}") == 0
+        capsys.readouterr()
+
+        assert self._export(tmp_path, f"{second.id}@v={second.version}", alias="champion") == 0
+
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[0].startswith("Wrote ")
+        assert lines[-1].strip() == "tag:      champion"
+        assert "champion" in _table(tmp_path / "wh").refs()
+
+    def test_an_artifact_that_is_not_a_table_is_refused(self, tmp_path, notebook_store, capsys):
+        artifact = _version(notebook_store, pa.table({"x": [1]}), content_type="json/object")
+
+        assert self._export(tmp_path, f"{artifact.id}@v={artifact.version}") == 1
+
+        assert capsys.readouterr().out.startswith("Cannot export: ")
+        assert not (tmp_path / "wh").exists() or _written_versions(tmp_path / "wh") == []
+
+    def test_an_unknown_ref_is_exit_1(self, tmp_path, notebook_store, capsys):
+        assert self._export(tmp_path, "no-such-artifact@v=1") == 1
 
 
 class TestWhoMayExport:

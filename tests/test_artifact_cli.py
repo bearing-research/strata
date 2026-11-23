@@ -350,6 +350,53 @@ class TestAliasRefsAndAudit:
         assert any(e["action"] == "tag_set" and e["key"] == "auc" for e in entries)
 
 
+class TestPending:
+    """``strata artifact pending``: protected-alias changes awaiting approval."""
+
+    def test_an_empty_queue_says_so(self, chain_store, capsys):
+        from strata.artifact.cli import cmd_pending
+
+        assert cmd_pending(_args(artifact_dir=chain_store["dir"])) == 0
+
+        assert capsys.readouterr().out == "no pending changes\n"
+
+    def test_each_change_names_its_target_and_requester(self, chain_store, capsys):
+        from strata.artifact.cli import cmd_pending
+
+        store = chain_store["store"]
+        store.set_alias("demo/model", "champion", "feat-1", 1)
+        store.request_alias_change(
+            "demo/model", "champion", "set", artifact_id="model-1", version=1, actor="ana"
+        )
+        store.request_alias_change("demo/raw", "stable", "delete")
+
+        assert cmd_pending(_args(artifact_dir=chain_store["dir"])) == 0
+
+        set_line, delete_line = capsys.readouterr().out.splitlines()
+        assert "demo/model@champion" in set_line
+        assert set_line.endswith("set -> model-1@v=1  [ana]")
+        assert "demo/raw@stable" in delete_line
+        # No requester recorded: a dash, not "None".
+        assert delete_line.endswith("delete  [-]")
+
+    def test_json_is_the_queue(self, chain_store, capsys):
+        from strata.artifact.cli import cmd_pending
+
+        chain_store["store"].request_alias_change(
+            "demo/model", "champion", "set", artifact_id="model-1", version=1, actor="ana"
+        )
+
+        assert cmd_pending(_args(artifact_dir=chain_store["dir"], format="json")) == 0
+
+        (entry,) = json.loads(capsys.readouterr().out)
+        assert (entry["name"], entry["alias"], entry["action"]) == ("demo/model", "champion", "set")
+        assert (entry["artifact_id"], entry["version"], entry["requested_by"]) == (
+            "model-1",
+            1,
+            "ana",
+        )
+
+
 class TestPublish:
     """``strata artifact publish`` and the disclosure it prints first."""
 

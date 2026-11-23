@@ -348,6 +348,47 @@ class TestTheCommand:
 
         assert _parse_size(text) == size
 
+    def test_a_dry_run_lists_what_it_would_collect(self, store, capsys):
+        from strata import cli
+
+        keys = [_ready(store, size=2048) for _ in range(22)]
+        for key in keys:
+            _last_used(store, key, 40 * DAY)
+
+        args = ["artifact", "gc", "--artifact-dir", str(store.artifact_dir)]
+        assert cli.main([*args, "--max-idle-days", "30", "--dry-run"]) == 0
+
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[0].startswith(f"store: {store.artifact_dir} (")
+        assert lines[1] == "would collect 22 version(s), 44.0KB"
+        # Twenty listed, the rest counted.
+        assert len([line for line in lines if "last used" in line]) == 20
+        assert lines[-1] == "  … and 2 more"
+        assert all(_exists(store, key) for key in keys)
+
+    def test_a_collection_says_what_went(self, store, capsys):
+        from strata import cli
+
+        idle = _ready(store, size=2048)
+        _last_used(store, idle, 40 * DAY)
+
+        args = ["artifact", "gc", "--artifact-dir", str(store.artifact_dir)]
+        assert cli.main([*args, "--max-idle-days", "30"]) == 0
+
+        assert "collected 1 version(s), 2.0KB" in capsys.readouterr().out.splitlines()
+        assert not _exists(store, idle)
+
+    def test_no_limit_says_there_is_nothing_to_do(self, store, capsys, monkeypatch):
+        from strata import cli
+
+        # 0 turns each limit off.
+        monkeypatch.setenv("STRATA_ARTIFACT_GC_MAX_IDLE_DAYS", "0")
+        monkeypatch.setenv("STRATA_ARTIFACT_GC_MAX_BYTES", "0")
+
+        assert cli.main(["artifact", "gc", "--artifact-dir", str(store.artifact_dir)]) == 0
+
+        assert capsys.readouterr().out.splitlines()[-1].startswith("no limit is set")
+
     def test_a_size_that_is_not_one_is_refused(self, store, capsys):
         from strata import cli
 
