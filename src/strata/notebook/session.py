@@ -800,14 +800,29 @@ class NotebookSession:
                     cell.artifact_uri = uri
 
     def _keep_last_outputs(self, cell: Any) -> None:
-        """Point a cell its current key finds nothing for at what its last run stored.
+        """Point a cell its current key finds nothing for at what its last run left.
 
         The session that ran it still points there: staleness says the result is out of
-        date, not that it is gone. Filled only when the cell points at nothing, which is
-        after a reopen.
+        date, not that it is gone. A hit after an edit is undone makes its version latest
+        again, so the latest is what the last run left. A loop's ``artifact_uri`` is its
+        carry, recorded as a variable only when a cell reads it. Nothing for a cell with
+        no successful run on record, or one that points somewhere (a live session).
         """
-        if not cell.artifact_uris:
-            self._restore_last_stored_outputs(cell)
+        if cell.artifact_uris or cell.last_provenance_hash is None:
+            return
+        self._restore_last_stored_outputs(cell)
+        loop = parse_annotations(cell.source, cell.language).loop
+        if loop is None:
+            return
+        consumed = self.dag.consumed_variables.get(cell.id, set()) if self.dag else set()
+        if loop.carry not in consumed:
+            cell.artifact_uris.pop(loop.carry, None)
+        manager = self.get_artifact_manager()
+        carry = manager.artifact_store.get_latest_version(
+            manager.cell_artifact_id(cell.id, loop.carry)
+        )
+        if carry is not None:
+            cell.artifact_uri = f"strata://artifact/{carry.id}@v={carry.version}"
 
     def _restore_loop_carry(self, cell: Any, provenance_hash: str) -> None:
         """Point a loop cell at its final state, as the run that stored it does.
@@ -1229,6 +1244,7 @@ class NotebookSession:
             if not worker_supports_notebook_execution(worker_spec):
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
+                self._keep_last_outputs(cell)
                 continue
 
             assert self.analysis is not None  # set with the DAG
