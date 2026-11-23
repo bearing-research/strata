@@ -553,13 +553,15 @@ class EnvironmentJobs:
     ) -> list[str]:
         """Change ``requires-python`` and rebuild the venv on the new minor.
 
-        If ``uv sync`` fails, restores the previous ``requires-python`` and re-syncs.
+        If ``uv sync`` fails, restores the previous pyproject and re-syncs.
         If that also fails the notebook is left with the old pyproject and no venv,
         and the error goes to the job's operation log.
         """
         from strata.notebook.writer import update_requires_python
 
-        old_minor = read_requested_python_minor(self.host.path)
+        # The file as it was, not its minor: a hand-written spec such as ">=3.12" has none.
+        pyproject = self.host.path / "pyproject.toml"
+        old_pyproject = await asyncio.to_thread(pyproject.read_text, encoding="utf-8")
         await asyncio.to_thread(update_requires_python, self.host.path, new_minor)
 
         # Otherwise uv sync reports an "interpreter mismatch" and refuses.
@@ -587,20 +589,17 @@ class EnvironmentJobs:
 
         self._apply_operation_log(job, result.operation_log)
         if not result.success:
-            # Rollback: restore previous requires-python and re-sync.
-            if old_minor:
-                try:
-                    await asyncio.to_thread(update_requires_python, self.host.path, old_minor)
-                    rollback = await self.host.backend.sync_streaming(
-                        python_version=None,
-                        timeout=180,
-                        on_update=on_update,
-                    )
-                    self._apply_operation_log(job, rollback.operation_log)
-                except Exception:
-                    logger.exception(
-                        "Failed to rollback python-version change for %s", self.host.path
-                    )
+            # Rollback: restore the previous pyproject and re-sync.
+            try:
+                await asyncio.to_thread(pyproject.write_text, old_pyproject, encoding="utf-8")
+                rollback = await self.host.backend.sync_streaming(
+                    python_version=None,
+                    timeout=180,
+                    on_update=on_update,
+                )
+                self._apply_operation_log(job, rollback.operation_log)
+            except Exception:
+                logger.exception("Failed to rollback python-version change for %s", self.host.path)
             raise RuntimeError(result.error or f"uv sync failed for Python {new_minor}")
 
         job.lockfile_changed = compute_lockfile_hash(self.host.path) != old_lockfile_hash
