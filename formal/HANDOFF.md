@@ -14,6 +14,10 @@ in [`README.md`](README.md).
   specification. It added `SYSTEMS.md`, `run_models.py`, the `Formal`
   workflow and the `Mirrors:` drift test, and listed the open properties
   below. Each lead in `SYSTEMS.md` is unconfirmed until replayed.
+- **Phase 1 (local runs):** `LocalRun.tla` found finding 13, a lapsed lease
+  losing a run nothing else wanted, and a race in the first fix; both fixed.
+  LR-2 (the check-then-act in `open` across processes) and LR-4 (sequence
+  collision) remain leads; LR-5 was fixed in #1613.
 
 ## Conventions
 
@@ -69,13 +73,10 @@ in [`README.md`](README.md).
 In order of consequence over effort. Each step is one PR: the model or
 property, the replays of what it finds, then a PR per fix.
 
-1. **Local runs** (SYSTEMS 10: LR-2 to LR-5). A `LocalRun.tla` with two
-   attempts in one process and a second process: `open` split into its
-   transactions, renewal, checkpoint, head, close, cancel at each await.
-   Invariants: one live attempt per build; only the lease's attempt renews
-   or ends it; a resumed attempt can release; a cell runs at most once per
-   request. LR-3 may need an attempt-scoped renewal in vestigo; check
-   vestigo first.
+1. **Local runs** (SYSTEMS 10). Done for the lease (LR-3, LR-6). Open: LR-2,
+   two processes opening one computation (extend `LocalRun.tla` with `open`
+   split into its transactions, and two fresh opens); LR-4, the checkpoint
+   sequence after an abandoned release (a replay is enough).
 2. **Staleness, current code** (SYSTEMS 8 and 9: NB-1, NB-2, BAT-2). Rework
    `Staleness.tla` to the key rule, inline upstream runs, Run All batches
    and REST/MCP edits. Replays drive the handlers with

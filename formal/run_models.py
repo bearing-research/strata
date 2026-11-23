@@ -37,6 +37,9 @@ MODELS: dict[tuple[str, str], str | None] = {
     ("Admission", "Admission_Patched"): None,
     ("Staleness", "Staleness_EditDuringRun"): "RunningShown",
     ("Staleness", "Staleness_Patched"): None,
+    ("LocalRun", "LocalRun_Lapse"): "NoNeedlessFence",
+    ("LocalRun", "LocalRun_Race"): "NoNeedlessFence",
+    ("LocalRun", "LocalRun_Patched"): None,
 }
 
 

@@ -51,3 +51,7 @@ def ledger_on_postgres(postgres_dsn, monkeypatch):
 
 class TestGate1OnPostgres(test_local_runs.TestGate1):
     """All six conditions, on the second backend."""
+
+
+class TestALapsedLeaseWithNoRivalOnPostgres(test_local_runs.TestALapsedLeaseWithNoRival):
+    """A lapsed lease re-taken in a new attempt, on the second backend."""
