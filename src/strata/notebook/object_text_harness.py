@@ -34,6 +34,9 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001 - whatever the object raises is the answer
         result = {"error": f"{type(exc).__name__}: {exc}"}
     result_stream.write(json.dumps(result))
+    # Exit flushes only the current sys.stdout; the original one, kept alive past that (as
+    # coverage does on Python 3.13), lost the line.
+    result_stream.flush()
 
 
 if __name__ == "__main__":
