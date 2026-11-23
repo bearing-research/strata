@@ -419,13 +419,16 @@ class TestExecutionFlow:
             exit_code = run_main([str(notebook_with_chain), "--no-sync"])
 
         assert exit_code == 1
-        out = capsys.readouterr().out
-        failed = next(line for line in out.splitlines() if line.lstrip().startswith("c1"))
-        assert "✗" in failed
-        # Every line of the error, under the cell, not only the first.
-        assert "ValueError: boom" in out and "at line 1" in out
-        skipped = next(line for line in out.splitlines() if line.lstrip().startswith("c2"))
-        assert "upstream failed" in skipped
+        lines = capsys.readouterr().out.splitlines()
+        failed = next(i for i, line in enumerate(lines) if line.lstrip().startswith("c1"))
+        skipped = next(i for i, line in enumerate(lines) if line.lstrip().startswith("c2"))
+        assert "✗" in lines[failed]
+        # Every line of the error, right under the cell, not only the first.
+        assert [line.strip() for line in lines[failed + 1 : skipped]] == [
+            "ValueError: boom",
+            "at line 1",
+        ]
+        assert "upstream failed" in lines[skipped]
 
     def test_a_hit_says_cached_in_human_output(self, notebook_with_chain, capsys):
         async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):

@@ -779,6 +779,8 @@ class TestCellEditCommand:
         assert main(["cell", "edit", str(chain_nb), "ghost", "--file", str(source)]) == 1
 
         assert json.loads(capsys.readouterr().out) == {"error": "no cell with id 'ghost'"}
+        assert not (chain_nb / "cells" / "ghost.py").exists()
+        assert (chain_nb / "cells" / "b.py").read_text() == "y = x + 1"
 
 
 class TestCellMoveCommand:
