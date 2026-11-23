@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import sysconfig
 from pathlib import Path
@@ -89,7 +90,9 @@ def test_a_users_project_gets_the_uv_on_path(tmp_path, monkeypatch, no_override)
     on_path = _fake_uv(tmp_path / "bin")
     monkeypatch.setenv("PATH", str(on_path.parent))
 
-    assert _uv_runtime.resolve_uv(users_project=True) == str(on_path)
+    # shutil.which takes the extension's case from PATHEXT (uv.EXE) on Windows.
+    found = _uv_runtime.resolve_uv(users_project=True) or ""
+    assert os.path.normcase(found) == os.path.normcase(on_path)
 
 
 def test_a_users_project_without_a_uv_of_its_own_gets_the_bundled_one(
@@ -105,7 +108,7 @@ def test_without_a_bundled_uv_path_is_used(tmp_path, monkeypatch, no_override, n
     on_path = _fake_uv(tmp_path / "bin")
     monkeypatch.setenv("PATH", str(on_path.parent))
 
-    assert _uv_runtime.resolve_uv() == str(on_path)
+    assert os.path.normcase(_uv_runtime.resolve_uv() or "") == os.path.normcase(on_path)
 
 
 def test_a_non_login_shell_finds_uv_in_its_installer_dir(
