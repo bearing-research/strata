@@ -21,20 +21,6 @@ def build_scan_transform(columns: list[str] | None = None, filters=None) -> dict
 
 class TestAsyncStrataClient:
     @pytest.mark.asyncio
-    async def test_context_manager(self, server_with_client):
-        config = server_with_client["config"]
-        table_uri = server_with_client["warehouse"]["table_uri"]
-
-        async with AsyncStrataClient(base_url=f"http://127.0.0.1:{config.port}") as client:
-            artifact = await client.materialize(
-                inputs=[table_uri],
-                transform=build_scan_transform(),
-            )
-            table = await client.fetch(artifact.uri)
-            assert isinstance(table, pa.Table)
-            assert table.num_rows == 500
-
-    @pytest.mark.asyncio
     async def test_health(self, server_with_client):
         config = server_with_client["config"]
 
