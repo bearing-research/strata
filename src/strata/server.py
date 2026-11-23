@@ -1306,6 +1306,7 @@ async def lifespan(app: FastAPI):
     await _graceful_shutdown(_state)
 
     _state.metrics.log_event("server_stopped")
+    _state.metrics.shutdown()
     _state = None
 
     from strata.transforms.registry import reset_transform_registry

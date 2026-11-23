@@ -6,6 +6,7 @@ import math
 import queue
 import sys
 import time
+import weakref
 from dataclasses import dataclass, field
 from threading import Event, Lock, Thread
 from typing import Any, TextIO
@@ -172,12 +173,49 @@ def _render(entry: dict) -> str:
     return f"{'EVENT':7} strata.metrics: {entry.get('event', '')} | {fields}"
 
 
+def _write_entry(output: TextIO, log_queue: queue.Queue, entry: dict) -> None:
+    try:
+        output.write(_render(entry) + "\n")
+        output.flush()
+    except (OSError, TypeError, ValueError):
+        # Broken pipe, closed stream or non-serializable entry: drop it; the writer must
+        # survive one bad log.
+        pass
+    finally:
+        log_queue.task_done()
+
+
+def _drain(owner: weakref.ref, log_queue: queue.Queue, stop: Event, output: TextIO) -> None:
+    """Write queued entries until shutdown or the collector is gone, then the rest."""
+    while not stop.is_set() and owner() is not None:
+        try:
+            # Timeout so the loop can check both.
+            entry = log_queue.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        _write_entry(output, log_queue, entry)
+
+    while True:
+        try:
+            entry = log_queue.get_nowait()
+        except queue.Empty:
+            return
+        _write_entry(output, log_queue, entry)
+
+
+def _shutdown_at_exit(owner: weakref.ref) -> None:
+    collector = owner()
+    if collector is not None:
+        collector.shutdown()
+
+
 @dataclass
 class MetricsCollector:
     """Collects metrics and writes structured log entries.
 
     Logging is non-blocking: entries go through a bounded queue to a background
-    thread, and are dropped (counted in ``dropped_logs``) when it is full.
+    thread, and are dropped (counted in ``dropped_logs``) when it is full. The
+    thread starts with the first log, so a collector that only counts has none.
     """
 
     output: TextIO = field(default_factory=lambda: sys.stdout)
@@ -188,7 +226,8 @@ class MetricsCollector:
     _counter_lock: Lock = field(default_factory=Lock, repr=False)
 
     _log_queue: queue.Queue = field(init=False, repr=False)
-    _writer_thread: Thread = field(init=False, repr=False)
+    _writer_thread: Thread | None = field(default=None, init=False, repr=False)
+    _writer_lock: Lock = field(default_factory=Lock, repr=False)
     _shutdown: Event = field(default_factory=Event, repr=False)
 
     total_cache_hits: int = 0
@@ -214,55 +253,32 @@ class MetricsCollector:
     _table_metrics: dict[str, TableMetrics] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
-        """Create the log queue and start the background writer thread."""
+        """Create the log queue; the writer thread waits for the first log."""
         self._log_queue = queue.Queue(maxsize=self.log_queue_size)
-        self._writer_thread = Thread(
-            target=self._writer_loop,
-            name="MetricsWriter",
-            daemon=True,
-        )
-        self._writer_thread.start()
-        atexit.register(self.shutdown)
 
-    def _writer_loop(self) -> None:
-        """Drain the queue to ``output`` until shutdown, then flush the rest.
-
-        A write or serialization failure drops that entry; the writer keeps running.
-        """
-        while not self._shutdown.is_set():
-            try:
-                # Timeout so the loop can check the shutdown flag.
-                entry = self._log_queue.get(timeout=0.1)
-                try:
-                    self.output.write(_render(entry) + "\n")
-                    self.output.flush()
-                except (OSError, TypeError, ValueError):
-                    # Broken pipe, closed stream or non-serializable entry: drop it; the writer must
-                    # survive one bad log.
-                    pass
-                finally:
-                    self._log_queue.task_done()
-            except queue.Empty:
-                continue
-
-        while True:
-            try:
-                entry = self._log_queue.get_nowait()
-                try:
-                    self.output.write(_render(entry) + "\n")
-                    self.output.flush()
-                except (OSError, TypeError, ValueError):
-                    pass
-                finally:
-                    self._log_queue.task_done()
-            except queue.Empty:
-                break
+    def _start_writer(self) -> None:
+        """Start the writer thread unless it runs already or the collector is shut down."""
+        with self._writer_lock:
+            if self._writer_thread is not None or self._shutdown.is_set():
+                return
+            # Weak references only: a collector dropped without shutdown() takes its thread with it.
+            owner = weakref.ref(self)
+            self._writer_thread = Thread(
+                target=_drain,
+                args=(owner, self._log_queue, self._shutdown, self.output),
+                name="MetricsWriter",
+                daemon=True,
+            )
+            self._writer_thread.start()
+            atexit.register(_shutdown_at_exit, owner)
 
     def shutdown(self) -> None:
-        """Shutdown the background writer thread gracefully."""
-        self._shutdown.set()
-        if self._writer_thread.is_alive():
-            self._writer_thread.join(timeout=1.0)
+        """Stop the writer thread after it writes what is queued."""
+        with self._writer_lock:
+            self._shutdown.set()
+            thread = self._writer_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1.0)
 
     def record_fetch(
         self,
@@ -380,7 +396,12 @@ class MetricsCollector:
 
     def _write_log(self, entry: dict) -> None:
         """Queue a log entry for the writer thread, dropping it if the queue is full."""
+        if self._writer_thread is None:
+            self._start_writer()
         try:
+            # Nothing drains the queue of a shut-down collector.
+            if self._shutdown.is_set():
+                raise queue.Full
             self._log_queue.put_nowait(entry)
         except queue.Full:
             # Drop rather than block.
