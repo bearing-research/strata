@@ -612,7 +612,7 @@ def gpu_executor(): ...
 
 ```bash
 export STRATA_FLY_WORKER_TOKEN=<paste-token-here>
-uv run strata-notebook
+strata-notebook        # or `uv run strata-notebook` in a checkout
 ```
 
 …and reference that env var in `notebook.toml`:

@@ -3281,21 +3281,21 @@ shared?). The flags that follow are the consequences.</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">deployment_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"personal"</span>
 </code></pre></div>
 <p><strong>Default is <code>personal</code></strong>: the common case. A first-time
-<code>uv run strata-notebook</code> boots into a single-user, loopback-only
+<code>strata-notebook</code> (<code>uv run strata-notebook</code> in a checkout) boots into a single-user, loopback-only
 deployment that just works.</p>
 <p>Service mode is explicit opt-in. The coherence checker fires clear
 errors at startup if you set <code>deployment_mode=service</code> without
 matching auth / artifact configuration, so misconfigured production
 deploys fail fast rather than silently exposing write endpoints.</p>
 <h2 id="personal-mode">Personal mode<a class="headerlink" href="#personal-mode" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>The server binds to <code>127.0.0.1</code> by default and refuses non-loopback
 addresses unless you opt in:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nv">STRATA_HOST</span><span class="o">=</span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nv">STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>strata-notebook
 </code></pre></div>
 <p>Opt in only if you have separate protection (firewall, VPN, private
 network): personal mode exposes write endpoints with no authentication.</p>
@@ -3317,7 +3317,7 @@ personal-mode-only.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret&gt;<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>strata-notebook
 </code></pre></div>
 <p>Short version: an upstream proxy authenticates the caller, sets the
 identity headers (<code>X-Strata-Principal</code>, tenant header,

@@ -317,8 +317,8 @@ entry, `uninstall` leaves the Claude Code target as installed, its server being 
 configured: run it again with `claude` on PATH, or remove the entry from
 `~/.claude.json` yourself first. The `strata` written is the one
 that runs `install`: refused from uv's cache (`uvx`), and warned about from a project's
-environment, since every project's agent would use it; `uv tool install` is the
-lasting choice. Ending `strata scratch run` (Ctrl-C, or a shell tool's timeout
+environment, since every project's agent would use it; a `uv tool` or `pipx` install
+is the lasting choice. Ending `strata scratch run` (Ctrl-C, or a shell tool's timeout
 terminating it) cancels its cell on the daemon, or the daemon's setup, killing a daemon
 not yet recorded. When another Strata version
 wrote the files, `strata mcp` rewrites them as it starts.

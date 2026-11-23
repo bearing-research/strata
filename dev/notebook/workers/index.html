@@ -4060,7 +4060,7 @@ panel out. A cell on a named or remote worker still shows its badge and health,
 <p>…then create the Modal secret once: <code>modal secret create strata-worker-token STRATA_WORKER_TOKEN=&lt;paste-token-here&gt;</code>.</p>
 <p><strong>3. Tell the notebook server about the token.</strong> Export it as an environment variable wherever you run <code>strata-notebook</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_FLY_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>strata-notebook<span class="w">        </span><span class="c1"># or `uv run strata-notebook` in a checkout</span>
 </code></pre></div>
 <p>…and reference that env var in <code>notebook.toml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="k">[workers.config]</span>
