@@ -13,6 +13,7 @@ from vestigo.sql_backend import PostgresDialect, SqliteDialect
 from vestigo.store import ArtifactStore
 from vestigo.tables import TRANSIENT_TABLES
 
+from strata.cli import main
 from strata.migrate import MIGRATED_TABLES, migrate, plan_migration
 from strata.notebook.worker_store import NotebookWorkerStore
 from tests.docker_helpers import docker_daemon_reachable
@@ -80,13 +81,9 @@ def target(postgres_dsn, tmp_path):
     dialect = PostgresDialect(postgres_dsn)
     conn = dialect.connect()
     try:
-        conn.executescript(
-            "DROP TABLE IF EXISTS artifact_builds, api_keys, stream_owners, "
-            "artifact_versions, artifact_names, artifact_aliases, artifact_tags, "
-            "registry_audit, registry_pending, artifact_publications, retention_roots, "
-            "retention_edges, "
-            "notebook_workers, notebook_worker_registry CASCADE;"
-        )
+        # Every table, not a list of them: a table added later (store_upgrades,
+        # the graph's, the releases') kept one test's rows for the next.
+        conn.executescript("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
         conn.commit()
     finally:
         conn.close()
@@ -404,3 +401,63 @@ class TestMigration:
         order = [table for table, _ in MIGRATED_TABLES]
         assert order.index("artifact_versions") < order.index("artifact_names")
         assert order.index("artifact_versions") < order.index("artifact_builds")
+
+
+class TestTheCommand:
+    """``strata migrate`` on a real target: what it prints and what it exits with."""
+
+    def _migrate(self, tmp_path, dsn, *flags):
+        return main(["migrate", "--artifact-dir", str(tmp_path / "src"), "--to-dsn", dsn, *flags])
+
+    def test_a_dry_run_reports_the_counts_and_writes_nothing(
+        self, populated_sqlite, target, postgres_dsn, tmp_path, capsys
+    ):
+        assert self._migrate(tmp_path, postgres_dsn, "--dry-run") == 0
+
+        out = capsys.readouterr().out
+        assert "Dry run:" in out
+        assert ArtifactStore(tmp_path / "tgt", dialect=target).get_latest_version("a1") is None
+
+    def test_a_run_moves_the_store_and_hides_the_password(
+        self, populated_sqlite, target, postgres_dsn, tmp_path, capsys
+    ):
+        scheme, rest = postgres_dsn.split("://", 1)
+        credentials, host = rest.rsplit("@", 1)
+        user, password = credentials.split(":", 1)
+
+        assert self._migrate(tmp_path, postgres_dsn) == 0
+
+        out = capsys.readouterr().out
+        assert "Copied " in out
+        assert f"Target  {scheme}://{user}:***@{host}\n" in out
+        assert f":{password}@" not in out
+        assert ArtifactStore(tmp_path / "tgt", dialect=target).get_latest_version("a1") is not None
+
+    def test_a_refused_row_fails_the_command(
+        self, populated_sqlite, target, postgres_dsn, tmp_path, capsys
+    ):
+        # `strata migrate && cut-over` must not switch to a target missing rows.
+        from vestigo.build_store import BuildStore
+
+        BuildStore(tmp_path / "src" / "artifacts.sqlite")
+        _insert_dangling_build(tmp_path / "src" / "artifacts.sqlite", "orphan")
+        BuildStore(tmp_path / "tgt" / "artifacts.sqlite", dialect=target)
+
+        assert self._migrate(tmp_path, postgres_dsn) == 1
+
+        out = capsys.readouterr().out
+        assert "1 rows were refused by the target:" in out
+        refused = out.split("rows were refused by the target:\n", 1)[1].splitlines()[0]
+        assert refused.lstrip().startswith("artifact_builds") and "orphan" in refused
+
+    def test_a_populated_target_needs_the_flag(
+        self, populated_sqlite, target, postgres_dsn, tmp_path, capsys
+    ):
+        assert self._migrate(tmp_path, postgres_dsn) == 0
+        capsys.readouterr()
+
+        assert self._migrate(tmp_path, postgres_dsn) == 1
+        assert capsys.readouterr().out.rstrip().splitlines()[-1].startswith("Refused:")
+
+        assert self._migrate(tmp_path, postgres_dsn, "--allow-nonempty-target") == 0
+        assert "Copied 0 rows" in capsys.readouterr().out
