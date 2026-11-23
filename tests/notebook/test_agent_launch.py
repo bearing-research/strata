@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from strata.cli import main
 from strata.notebook import agent_launch
 
 
@@ -298,3 +299,126 @@ def test_a_spawned_servers_output_goes_to_a_log_not_the_terminal(tmp_path, monke
     assert started["stderr"] is subprocess.STDOUT
     if os.name != "nt":
         assert log.stat().st_mode & 0o077 == 0
+
+
+class _Server:
+    """A stand-in for the server ``strata agent`` spawns: records being stopped."""
+
+    def __init__(self) -> None:
+        self.stopped = False
+
+    def poll(self):
+        return 0 if self.stopped else None
+
+    def terminate(self) -> None:
+        self.stopped = True
+
+    def wait(self, timeout=None) -> int:
+        return 0
+
+
+class TestAgentMain:
+    """``strata agent``'s exits: what each says, and that a server it started is stopped."""
+
+    @pytest.fixture
+    def launcher(self, tmp_path, monkeypatch):
+        from strata.notebook.writer import create_notebook
+
+        notebook = create_notebook(tmp_path, "nb", initialize_environment=False)
+        server = _Server()
+        state = {"alive": False, "mcp": True, "healthy": True, "tui": []}
+        monkeypatch.setattr(agent_launch, "_server_alive", lambda url: state["alive"])
+        monkeypatch.setattr(agent_launch, "_mcp_mounted", lambda url: state["mcp"])
+        monkeypatch.setattr(agent_launch, "_spawn_server", lambda host, port, nb: server)
+        monkeypatch.setattr(agent_launch, "_await_health", lambda url, proc: state["healthy"])
+        monkeypatch.setattr(agent_launch, "_open_session", lambda url, nb: "sid-1")
+        monkeypatch.setattr(agent_launch, "_write_agent_config", lambda *args: None)
+        monkeypatch.setattr(agent_launch, "_launch_tui", lambda *args: state["tui"].append(args))
+
+        def run(*flags: str) -> int:
+            return main(["agent", str(notebook), "--server", "http://127.0.0.1:9", *flags])
+
+        return run, server, state
+
+    def test_a_reused_server_without_mcp_is_refused_and_left_running(self, launcher, capsys):
+        run, server, state = launcher
+        state.update(alive=True, mcp=False)
+
+        assert run("--no-tui") == 2
+
+        assert "its MCP endpoint is disabled" in capsys.readouterr().err
+        assert not server.stopped, "strata agent did not start it, so it must not stop it"
+
+    def test_a_server_that_never_gets_healthy_is_stopped(self, launcher, capsys):
+        run, server, state = launcher
+        state["healthy"] = False
+
+        assert run("--no-tui") == 2
+
+        assert "server failed to start" in capsys.readouterr().err
+        assert server.stopped
+
+    def test_a_started_server_without_mcp_is_stopped(self, launcher, capsys):
+        run, server, state = launcher
+        state["mcp"] = False
+
+        assert run("--no-tui") == 2
+
+        assert "the MCP endpoint did not mount" in capsys.readouterr().err
+        assert server.stopped
+
+    def test_a_session_that_will_not_open_stops_the_started_server(
+        self, launcher, monkeypatch, capsys
+    ):
+        run, server, _state = launcher
+
+        def _refuse(url, nb):
+            raise agent_launch._OpenError("403 outside the storage root")
+
+        monkeypatch.setattr(agent_launch, "_open_session", _refuse)
+
+        assert run("--no-tui") == 2
+
+        err = capsys.readouterr().err
+        assert "failed to open notebook session: 403 outside the storage root" in err
+        # The storage-root hint is for a reused server; this one was started for the notebook.
+        assert "storage root; stop it" not in err
+        assert server.stopped
+
+    def test_a_reused_server_that_will_not_open_the_session_gets_the_hint(
+        self, launcher, monkeypatch, capsys
+    ):
+        run, server, state = launcher
+        state["alive"] = True
+
+        def _refuse(url, nb):
+            raise agent_launch._OpenError("403")
+
+        monkeypatch.setattr(agent_launch, "_open_session", _refuse)
+
+        assert run("--no-tui") == 2
+
+        assert "storage root; stop it" in capsys.readouterr().err
+        assert not server.stopped
+
+    def test_quitting_the_viewer_stops_the_started_server(self, launcher):
+        run, server, state = launcher
+
+        assert run() == 0
+
+        assert state["tui"] == [("http://127.0.0.1:9", "sid-1")]
+        assert server.stopped
+
+    def test_sigterm_handling_is_put_back(self, launcher):
+        run, _server, state = launcher
+        state["healthy"] = False
+
+        def _sentinel(signum, frame):
+            raise AssertionError("not called")
+
+        original = signal.signal(signal.SIGTERM, _sentinel)
+        try:
+            run("--no-tui")
+            assert signal.getsignal(signal.SIGTERM) is _sentinel
+        finally:
+            signal.signal(signal.SIGTERM, original)
