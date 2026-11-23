@@ -688,6 +688,53 @@ class TestValidate:
         codes = [d["code"] for c in payload["cells"] for d in c["diagnostics"]]
         assert "worker_unknown" in codes
 
+    def test_human_output_lists_each_diagnostic_under_its_cell(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(
+            tmp_path,
+            cells=[
+                ("c1", "x = 1", None),
+                ("c2", "# @loop max_iter=5\nstate = 1", "c1"),
+                ("c3", "# @worker nonexistent-worker\ny = 1", "c2"),
+            ],
+        )
+
+        assert _validate(notebook_dir) == 1
+
+        lines = capsys.readouterr().out.splitlines()
+        # A cell with nothing to say gets no header.
+        assert not any(line.strip().startswith("cell c1") for line in lines)
+        loop = lines.index("  cell c2 [python]")
+        assert "loop_missing_carry" in lines[loop + 1] and "error" in lines[loop + 1]
+        worker = lines.index("  cell c3 [python]")
+        assert "worker_unknown" in lines[worker + 1] and "warn" in lines[worker + 1]
+        assert lines[-1].endswith("invalid: 1 error(s), 1 warning(s)")
+
+    def test_human_output_counts_warnings_on_a_valid_notebook(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(
+            tmp_path, cells=[("c1", "# @worker nonexistent-worker\nx = 1", None)]
+        )
+
+        assert _validate(notebook_dir) == 0
+
+        assert capsys.readouterr().out.splitlines()[-1].endswith("valid: 1 cell(s), 1 warning(s)")
+
+    @pytest.mark.parametrize("fmt", ["human", "json"])
+    def test_a_dag_that_cannot_be_built_is_invalid(self, tmp_path, capsys, fmt):
+        notebook_dir = _build_notebook(
+            tmp_path,
+            cells=[("c1", "# @variant g v1\na = 1", None), ("c2", "# @variant g v1\nb = 2", "c1")],
+        )
+
+        assert _validate(notebook_dir, fmt=fmt) == 1
+
+        out = capsys.readouterr().out
+        if fmt == "json":
+            (error,) = json.loads(out)["errors"]
+            assert error["code"] == "dag_build_failed" and "v1" in error["message"]
+        else:
+            assert "dag_build_failed: notebook DAG could not be built: " in out
+            assert "invalid: 1 error(s)," in out.splitlines()[-1]
+
     def test_non_notebook_dir_is_usage_error(self, tmp_path):
         assert _validate(tmp_path) == 2
 

@@ -11,7 +11,7 @@ import json
 import pytest
 
 from strata.cli import main
-from strata.notebook.ops import CellView, LocalNotebookOps, NotebookOpsError
+from strata.notebook.ops import CellView, DependencyResult, LocalNotebookOps, NotebookOpsError
 from tests.notebook.test_cli import _build_notebook
 
 
@@ -806,3 +806,55 @@ class TestCellMoveCommand:
 
         assert json.loads(capsys.readouterr().out) == {"error": "no cell with id 'ghost'"}
         assert self._order_on_disk(chain_nb) == ["a", "b"]
+
+
+class TestDepCommands:
+    def _fake(self, monkeypatch, *, success: bool = True, refuse: bool = False) -> list:
+        calls: list = []
+
+        async def _mutate(self, package, action):
+            calls.append((package, action))
+            if refuse:
+                raise NotebookOpsError("an environment job is already running")
+            return DependencyResult(
+                package=package,
+                action=action,
+                success=success,
+                lockfile_changed=success,
+                error=None if success else "no solution found",
+            )
+
+        monkeypatch.setattr(LocalNotebookOps, "_mutate_dependency", _mutate)
+        return calls
+
+    @pytest.mark.parametrize(("verb", "action"), [("add", "add"), ("rm", "remove")])
+    def test_the_verb_maps_to_its_action(self, chain_nb, monkeypatch, capsys, verb, action):
+        calls = self._fake(monkeypatch)
+
+        assert main(["dep", verb, str(chain_nb), "pandas>=2"]) == 0
+
+        assert calls == [("pandas>=2", action)]
+        assert json.loads(capsys.readouterr().out)["action"] == action
+
+    def test_a_failed_change_is_exit_1_and_says_why(self, chain_nb, monkeypatch, capsys):
+        self._fake(monkeypatch, success=False)
+
+        assert main(["dep", "add", str(chain_nb), "nope", "--format", "human"]) == 1
+
+        assert capsys.readouterr().out.strip() == "add nope: failed: no solution found"
+
+    def test_human_output_says_ok(self, chain_nb, monkeypatch, capsys):
+        self._fake(monkeypatch)
+
+        assert main(["dep", "rm", str(chain_nb), "pandas", "--format", "human"]) == 0
+
+        assert capsys.readouterr().out.strip() == "remove pandas: ok"
+
+    def test_a_refusal_is_exit_1_with_the_error(self, chain_nb, monkeypatch, capsys):
+        self._fake(monkeypatch, refuse=True)
+
+        assert main(["dep", "add", str(chain_nb), "pandas"]) == 1
+
+        assert json.loads(capsys.readouterr().out) == {
+            "error": "an environment job is already running"
+        }

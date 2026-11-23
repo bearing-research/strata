@@ -1354,3 +1354,56 @@ def test_suppression_keeps_code_around_a_non_newline_line_break(head: str) -> No
     namespace: dict[str, object] = {}
     exec(converted, namespace)
     assert namespace["total"] == 42
+
+
+class TestImportCommandSummary:
+    """What ``strata import`` prints, in process (the tests above run it as a subprocess)."""
+
+    def test_each_kind_of_change_is_counted(self, tmp_path: Path, capsys) -> None:
+        from strata.cli import main
+
+        ipynb = _make_ipynb(
+            tmp_path,
+            [
+                _code_cell("%pip install requests\n"),
+                _code_cell("%matplotlib inline\nx = 1\n"),
+                _code_cell("%frobnicate\n"),
+                _code_cell("!ls\n"),
+                {"cell_type": "raw", "source": "raw text", "metadata": {}},
+                {"source": "no type", "metadata": {}},
+            ],
+        )
+
+        assert main(["import", str(ipynb)]) == 0
+
+        out = capsys.readouterr().out
+        assert "  magics translated: 2\n" in out
+        assert "  magics dropped: 1 (see report)\n" in out
+        assert "  shell commands dropped: 1\n" in out
+        assert "  dependencies captured: 1 → pyproject.toml\n" in out
+        assert "  skipped 1 cell(s) of unsupported type(s): raw\n" in out
+        assert "  warnings: 1 (see report)\n" in out
+
+    def test_a_clean_notebook_prints_no_change_lines(self, tmp_path: Path, capsys) -> None:
+        from strata.cli import main
+
+        ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+
+        assert main(["import", str(ipynb)]) == 0
+
+        out = capsys.readouterr().out
+        for line in ("magics", "shell commands", "dependencies", "skipped", "warnings"):
+            assert line not in out
+
+    def test_a_file_that_is_not_json_is_a_usage_error(self, tmp_path: Path, capsys) -> None:
+        from strata.cli import main
+
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not json")
+
+        assert main(["import", str(bad)]) == 2
+
+        err = capsys.readouterr().err
+        assert "does not have .ipynb extension; trying to parse anyway" in err
+        assert "\nerror: " in err
+        assert not (tmp_path / "bad").exists()
