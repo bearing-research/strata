@@ -455,8 +455,14 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-linear_cell_b2_var_y@v=1",
+      "artifact_uris": {
+       "y": {
+        "artifact": "nb_cellgraph-linear_cell_b2_var_y@v=1",
+        "content_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+        "provenance_hash": "3d5c3bb9ca7a6052afcd94290b601c563aff5c47b86af784b301f1b420072b14"
+       }
+      },
       "instances": {}
      },
      "resolved": {
@@ -492,15 +498,25 @@
      "keys": {
       "definition_key": "faf6fe418537fb3cb517ae583d5779730ebbede39d1c2a6a6fd128b847dabec5",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "4b555c12af64cde013955de5b8175fd1f20008d990c3d401060cd35ccc208767",
-      "input_hashes": [],
+      "execution_key": "5865d7af17252c7a03a81596d3523e8e215fa0aa4567688671193b659de737de",
+      "input_hashes": [
+       "[\"provenance\",\"3d5c3bb9ca7a6052afcd94290b601c563aff5c47b86af784b301f1b420072b14\"]"
+      ],
       "source_hash": "faf6fe418537fb3cb517ae583d5779730ebbede39d1c2a6a6fd128b847dabec5",
-      "upstream_hashes": []
+      "upstream_hashes": [
+       "[\"provenance\",\"3d5c3bb9ca7a6052afcd94290b601c563aff5c47b86af784b301f1b420072b14\"]"
+      ]
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-linear_cell_c3_var_z@v=1",
+      "artifact_uris": {
+       "z": {
+        "artifact": "nb_cellgraph-linear_cell_c3_var_z@v=1",
+        "content_sha256": "f5ca38f748a1d6eaf726b8a42fb575c3c71f1864a8143301782de13da2d9202b",
+        "provenance_hash": "23924a8bc8632cdc035750ce635360cb7c1bde8f9b45f066285e1b85eb4a678b"
+       }
+      },
       "instances": {}
      },
      "resolved": {

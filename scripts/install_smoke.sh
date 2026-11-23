@@ -36,7 +36,9 @@ echo "strata and strata-worker --help ok"
 
 "$BIN/strata-notebook" >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
-trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+# WORK holds the fresh HOME's uv cache (~300 MB); uv leaves some of it read-only.
+trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true
+      chmod -R u+w "${WORK:?}"; rm -rf "${WORK:?}"' EXIT
 for _ in $(seq 1 60); do
   curl -fsS "$URL/health" >/dev/null 2>&1 && break
   kill -0 "$SERVER_PID" 2>/dev/null || break  # it exited: say why now, not in 60s

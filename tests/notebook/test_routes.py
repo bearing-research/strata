@@ -3375,3 +3375,81 @@ def test_cell_data_export_rejects_bad_format(client, tmp_path):
         params={"artifact_uri": uri, "fmt": "xlsx"},
     )
     assert response.status_code == 400
+
+
+class TestCreateAndImportRefusals:
+    """What create and the snapshot import refuse, and a sync that cannot start."""
+
+    def test_creating_where_a_notebook_exists_is_a_conflict(self, client, monkeypatch, tmp_path):
+        storage = _import_storage(monkeypatch, tmp_path)
+        body = {"parent_path": str(storage), "name": "Twice"}
+        assert client.post("/v1/notebooks/create", json=body).status_code == 200
+        before = (storage / "twice" / "notebook.toml").read_text()
+
+        response = client.post("/v1/notebooks/create", json=body)
+
+        assert response.status_code == 409
+        assert response.json()["detail"].startswith("A notebook already exists at ")
+        assert (storage / "twice" / "notebook.toml").read_text() == before
+
+    @pytest.mark.parametrize("route", ["create", "import-snapshot"])
+    def test_a_sync_that_cannot_start_still_opens_the_notebook(
+        self, client, monkeypatch, tmp_path, route
+    ):
+        from strata.notebook.environment_jobs import EnvironmentJobs
+
+        storage = _import_storage(monkeypatch, tmp_path / "storage")
+        storage.mkdir()
+
+        async def _refuse(self, **kwargs):
+            raise RuntimeError("no uv on PATH")
+
+        monkeypatch.setattr(EnvironmentJobs, "submit", _refuse)
+
+        if route == "create":
+            response = client.post(
+                "/v1/notebooks/create", json={"parent_path": str(storage), "name": "No Env"}
+            )
+        else:
+            payload, _ = _snapshot_bytes(tmp_path)
+            response = client.post(
+                "/v1/notebooks/import-snapshot",
+                files={"file": ("demo.zip", payload, "application/zip")},
+            )
+
+        assert response.status_code == 200, response.text
+        environment = response.json()["environment"]
+        assert environment["sync_state"] == "failed"
+        assert environment["sync_error"] == (
+            "Failed to start notebook environment initialization: no uv on PATH"
+        )
+        assert environment["sync_notice"] is None
+
+    def test_an_empty_snapshot_upload_is_refused(self, client, monkeypatch, tmp_path):
+        storage = _import_storage(monkeypatch, tmp_path / "storage")
+        storage.mkdir()
+
+        response = client.post(
+            "/v1/notebooks/import-snapshot",
+            files={"file": ("empty.zip", b"", "application/zip")},
+        )
+
+        assert (response.status_code, response.json()["detail"]) == (400, "Empty snapshot upload")
+        assert list(storage.iterdir()) == []
+
+    def test_importing_into_a_directory_with_other_files_is_a_conflict(
+        self, client, monkeypatch, tmp_path
+    ):
+        storage = _import_storage(monkeypatch, tmp_path / "storage")
+        (storage / "demo").mkdir(parents=True)
+        (storage / "demo" / "notes.txt").write_text("mine")
+        payload, _ = _snapshot_bytes(tmp_path)
+
+        response = client.post(
+            "/v1/notebooks/import-snapshot",
+            files={"file": ("demo.zip", payload, "application/zip")},
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"].endswith("is not empty")
+        assert [p.name for p in (storage / "demo").iterdir()] == ["notes.txt"]
