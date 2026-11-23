@@ -947,6 +947,11 @@ async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
     global _state
 
+    from strata.notebook.process_tree import end_children_with_this_process
+
+    # Before any child starts: on Windows what it starts ends with it, as the lifeline does.
+    end_children_with_this_process()
+
     # Tests may pre-set state before uvicorn starts; reuse its config.
     if _state is not None:
         config = _state.config
