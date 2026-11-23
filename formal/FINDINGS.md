@@ -809,5 +809,7 @@ a catalog that lowercases names as Glue does behind a service-mode server, scann
 denied table under two other spellings. Severity: high (an ACL bypass).
 
 **Fixed.** Deny rules match a name in any case; allow rules still match only the spelling
-they were written in, so a spelling never grants. Regression tests:
-`tests/test_auth.py::TestADenyCoversEverySpellingOfTheName`.
+they were written in, so a spelling never grants. Windows CI then showed the matching had
+differed by platform: `fnmatch.fnmatch` folds case on Windows only, so there every table
+and principal pattern, allow rules included, matched any case. Both now use `fnmatchcase`.
+Regression tests: `tests/test_auth.py::TestADenyCoversEverySpellingOfTheName`.

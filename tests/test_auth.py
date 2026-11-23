@@ -5,6 +5,7 @@ ACL deny beats allow; scan ownership is enforced; hide_forbidden_as_not_found gi
 403.
 """
 
+import sys
 from concurrent.futures import Future
 
 import pytest
@@ -1000,11 +1001,23 @@ class TestADenyCoversEverySpellingOfTheName:
         assert allowing.authorize(alice, ref("db.open"))
         assert not allowing.authorize(alice, ref("DB.Open"))
 
+    def test_a_principal_pattern_matches_its_own_case_on_every_platform(self):
+        # fnmatch.fnmatch folds case on Windows only.
+        evaluator = AclEvaluator(
+            AclConfig(default="deny", allow_rules=[AclRule(principal="bi", tables=("*:*.*",))])
+        )
+        table = TableRef(catalog="file", namespace="db", table="t")
+
+        assert evaluator.authorize(Principal(id="bi"), table)
+        assert not evaluator.authorize(Principal(id="BI"), table)
+
+    # pyiceberg's local FileIO cannot resolve a Windows warehouse path (see temp_warehouse).
+    @pytest.mark.skipif(sys.platform == "win32", reason="pyiceberg local FileIO on Windows")
     def test_a_scan_of_another_spelling_is_refused(self, in_process_server, tmp_path):
         import pyarrow as pa
         from fastapi.testclient import TestClient
 
-        import strata.server as server_module
+        from strata.server import app
         from tests.acl_catalog_helpers import LowercasingSqlCatalog
         from tests.conftest import SERVICE_CALLER, service_auth
 
@@ -1030,7 +1043,7 @@ class TestADenyCoversEverySpellingOfTheName:
                 default="allow", deny_rules=[AclRule(principal="*", tables=("lake:db.events",))]
             ),
         )
-        client = TestClient(server_module.app, headers=SERVICE_CALLER)
+        client = TestClient(app, headers=SERVICE_CALLER)
 
         for uri in ("lake:db.events", "lake:DB.EVENTS", "lake:Db.Events"):
             response = client.post(

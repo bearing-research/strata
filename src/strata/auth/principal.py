@@ -201,7 +201,7 @@ class AclEvaluator:
 
         # ``principal`` is a pattern; exact equality would let a deny rule like
         # ``svc-*`` silently fail open.
-        if not fnmatch.fnmatch(principal.id, rule.principal):
+        if not fnmatch.fnmatchcase(principal.id, rule.principal):
             return False
 
         if rule.tenant is not None and rule.tenant != principal.tenant:
@@ -209,9 +209,11 @@ class AclEvaluator:
 
         table_str = str(table_ref)
         for pattern in rule.tables:
-            if any_case and fnmatch.fnmatch(table_str.casefold(), pattern.casefold()):
+            # fnmatchcase: fnmatch folds case on Windows only, which made every rule
+            # case-insensitive there.
+            if any_case and fnmatch.fnmatchcase(table_str.casefold(), pattern.casefold()):
                 return True
-            if fnmatch.fnmatch(table_str, pattern):
+            if fnmatch.fnmatchcase(table_str, pattern):
                 return True
 
         return False
