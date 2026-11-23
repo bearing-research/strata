@@ -740,3 +740,67 @@ def test_cli_run_saves_a_loop_cells_final_display(tmp_path, capsys, argv):
     assert output["content_type"] == "text/markdown"
     assert output["artifact_uri"]
     assert "step 3" in export_notebook(nb)
+
+
+class TestCellEditCommand:
+    def test_a_file_replaces_the_source_on_disk_and_in_the_graph(self, chain_nb, tmp_path, capsys):
+        source = tmp_path / "b.py"
+        source.write_text("y = 2\n")
+
+        assert main(["cell", "edit", str(chain_nb), "b", "--file", str(source)]) == 0
+
+        assert json.loads(capsys.readouterr().out)["source"] == "y = 2\n"
+        assert (chain_nb / "cells" / "b.py").read_text() == "y = 2\n"
+        # b no longer reads x, so the edge a -> b is gone.
+        assert LocalNotebookOps(chain_nb).dag().edges == []
+
+    def test_a_dash_reads_stdin(self, chain_nb, monkeypatch, capsys):
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO("y = 3\n"))
+
+        assert main(["cell", "edit", str(chain_nb), "b", "--file", "-", "--format", "human"]) == 0
+
+        assert capsys.readouterr().out.startswith("edited b")
+        assert (chain_nb / "cells" / "b.py").read_text() == "y = 3\n"
+
+    def test_an_unreadable_file_is_a_usage_error(self, chain_nb, tmp_path, capsys):
+        missing = tmp_path / "nope.py"
+
+        assert main(["cell", "edit", str(chain_nb), "b", "--file", str(missing)]) == 2
+
+        assert capsys.readouterr().err.startswith("error: cannot read --file:")
+        assert (chain_nb / "cells" / "b.py").read_text() == "y = x + 1"
+
+    def test_an_unknown_cell_is_exit_1(self, chain_nb, tmp_path, capsys):
+        source = tmp_path / "s.py"
+        source.write_text("z = 1\n")
+
+        assert main(["cell", "edit", str(chain_nb), "ghost", "--file", str(source)]) == 1
+
+        assert json.loads(capsys.readouterr().out) == {"error": "no cell with id 'ghost'"}
+
+
+class TestCellMoveCommand:
+    def _order_on_disk(self, notebook_dir) -> list[str]:
+        import tomllib
+
+        cells = tomllib.loads((notebook_dir / "notebook.toml").read_text())["cells"]
+        return [c["id"] for c in sorted(cells, key=lambda c: c["order"])]
+
+    def test_a_move_reorders_notebook_toml_and_lists_the_new_order(self, chain_nb, capsys):
+        assert main(["cell", "mv", str(chain_nb), "b", "--to", "0"]) == 0
+
+        assert [c["id"] for c in json.loads(capsys.readouterr().out)] == ["b", "a"]
+        assert self._order_on_disk(chain_nb) == ["b", "a"]
+
+    def test_human_output_is_the_ids_in_order(self, chain_nb, capsys):
+        assert main(["cell", "mv", str(chain_nb), "a", "--to", "1", "--format", "human"]) == 0
+
+        assert capsys.readouterr().out.split() == ["b", "a"]
+
+    def test_an_unknown_cell_is_exit_1_and_moves_nothing(self, chain_nb, capsys):
+        assert main(["cell", "mv", str(chain_nb), "ghost", "--to", "0"]) == 1
+
+        assert json.loads(capsys.readouterr().out) == {"error": "no cell with id 'ghost'"}
+        assert self._order_on_disk(chain_nb) == ["a", "b"]

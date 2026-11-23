@@ -407,6 +407,70 @@ class TestExecutionFlow:
         assert exit_code == 0
         assert set(honor_calls) == {"c1", "c2"}
 
+    def test_a_failure_prints_its_error_and_the_skip_in_human_output(
+        self, notebook_with_chain, capsys
+    ):
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            return _make_result(
+                cell_id, success=False, error="ValueError: boom\n  at line 1", duration_ms=15
+            )
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            exit_code = run_main([str(notebook_with_chain), "--no-sync"])
+
+        assert exit_code == 1
+        out = capsys.readouterr().out
+        failed = next(line for line in out.splitlines() if line.lstrip().startswith("c1"))
+        assert "✗" in failed
+        # Every line of the error, under the cell, not only the first.
+        assert "ValueError: boom" in out and "at line 1" in out
+        skipped = next(line for line in out.splitlines() if line.lstrip().startswith("c2"))
+        assert "upstream failed" in skipped
+
+    def test_a_hit_says_cached_in_human_output(self, notebook_with_chain, capsys):
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            return _make_result(cell_id, success=True, cache_hit=True)
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            assert run_main([str(notebook_with_chain), "--no-sync"]) == 0
+
+        lines = capsys.readouterr().out.splitlines()
+        for cell_id in ("c1", "c2"):
+            line = next(line for line in lines if line.lstrip().startswith(cell_id))
+            assert "✓" in line and "cached" in line
+
+    def test_an_executor_that_raises_fails_the_cell_not_the_run(self, notebook_with_chain, capsys):
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            raise RuntimeError("the harness vanished")
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            exit_code = run_main([str(notebook_with_chain), "--no-sync", "--format", "json"])
+
+        assert exit_code == 1
+        cells = {c["id"]: c for c in json.loads(capsys.readouterr().out)["cells"]}
+        assert cells["c1"]["status"] == "error"
+        assert cells["c1"]["error"] == "RuntimeError: the harness vanished"
+        assert (cells["c2"]["status"], cells["c2"]["reason"]) == ("skipped", "upstream failed")
+
+    def test_a_notebook_whose_dag_cannot_be_built_is_refused(self, tmp_path, capsys):
+        # Two cells claiming one variant name: the build fails rather than guess.
+        notebook_dir = _build_notebook(
+            tmp_path,
+            cells=[("c1", "# @variant g v1\na = 1", None), ("c2", "# @variant g v1\nb = 2", "c1")],
+        )
+        _mk_fake_venv(notebook_dir)
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            pytest.fail("nothing runs in a notebook with no DAG")
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            exit_code = run_main([str(notebook_dir), "--no-sync"])
+
+        assert exit_code == 2
+        err = capsys.readouterr().err
+        assert err.startswith("error: notebook DAG could not be built: ")
+        assert "v1" in err, "the reason names the conflict"
+
 
 class TestRunLogging:
     """Per-cell INFO logs went to stderr as JSON lines, burying the run's own output."""
