@@ -384,10 +384,15 @@ class TestTheCommand:
         # 0 turns each limit off.
         monkeypatch.setenv("STRATA_ARTIFACT_GC_MAX_IDLE_DAYS", "0")
         monkeypatch.setenv("STRATA_ARTIFACT_GC_MAX_BYTES", "0")
+        idle = _ready(store)
+        _last_used(store, idle, 400 * DAY)
 
         assert cli.main(["artifact", "gc", "--artifact-dir", str(store.artifact_dir)]) == 0
 
-        assert capsys.readouterr().out.splitlines()[-1].startswith("no limit is set")
+        lines = capsys.readouterr().out.splitlines()
+        assert "collected 0 version(s), 0B" in lines
+        assert lines[-1].startswith("no limit is set")
+        assert _exists(store, idle)
 
     def test_a_size_that_is_not_one_is_refused(self, store, capsys):
         from strata import cli

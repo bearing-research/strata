@@ -475,7 +475,8 @@ class TestTheExportCommand:
         lines = capsys.readouterr().out.splitlines()
         assert lines[0].startswith("Wrote ")
         assert lines[-1].strip() == "tag:      champion"
-        assert "champion" in _table(tmp_path / "wh").refs()
+        table = _table(tmp_path / "wh")
+        assert table.refs()["champion"].snapshot_id == table.current_snapshot().snapshot_id
 
     def test_an_artifact_that_is_not_a_table_is_refused(self, tmp_path, notebook_store, capsys):
         artifact = _version(notebook_store, pa.table({"x": [1]}), content_type="json/object")
@@ -483,10 +484,13 @@ class TestTheExportCommand:
         assert self._export(tmp_path, f"{artifact.id}@v={artifact.version}") == 1
 
         assert capsys.readouterr().out.startswith("Cannot export: ")
-        assert not (tmp_path / "wh").exists() or _written_versions(tmp_path / "wh") == []
+        assert not (tmp_path / "wh").exists()
 
     def test_an_unknown_ref_is_exit_1(self, tmp_path, notebook_store, capsys):
         assert self._export(tmp_path, "no-such-artifact@v=1") == 1
+
+        assert capsys.readouterr().err == "artifact not found: no-such-artifact@v=1\n"
+        assert not (tmp_path / "wh").exists()
 
 
 class TestWhoMayExport:

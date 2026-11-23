@@ -372,7 +372,11 @@ class TestPending:
 
         assert cmd_pending(_args(artifact_dir=chain_store["dir"])) == 0
 
-        set_line, delete_line = capsys.readouterr().out.splitlines()
+        # Ordered by request time, which two quick requests can share: found by target.
+        lines = capsys.readouterr().out.splitlines()
+        assert len(lines) == 2
+        (set_line,) = [line for line in lines if "demo/model@champion" in line]
+        (delete_line,) = [line for line in lines if "demo/raw@stable" in line]
         assert "demo/model@champion" in set_line
         assert set_line.endswith("set -> model-1@v=1  [ana]")
         assert "demo/raw@stable" in delete_line
