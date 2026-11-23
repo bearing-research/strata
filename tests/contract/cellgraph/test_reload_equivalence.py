@@ -60,7 +60,6 @@ KNOWN_RELOAD_GAPS = {
         "a cell whose mount names a credential loses its artifact_uri and artifact_uris "
         "after a reopen"
     ),
-    "mounts": "a cell with a read-write mount loses its artifact_uri and artifact_uris",
 }
 
 

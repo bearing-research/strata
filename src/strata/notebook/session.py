@@ -770,12 +770,14 @@ class NotebookSession:
             cell.run_diagnostics = list(previous.run_diagnostics)
             cell.widget_values = dict(previous.widget_values)
 
-    def _restore_alternate_scheme_outputs(self, cell: Any) -> None:
+    def _restore_last_stored_outputs(self, cell: Any) -> None:
         """Point a cell at the artifacts its last successful run stored.
 
-        For cell kinds keyed under their own scheme (SQL, prompt, widget) nothing else
-        repopulates ``artifact_uris`` on open, and a downstream cell would otherwise
-        compute a provenance hash that no longer matches its record.
+        For a cell no generic key finds (SQL, prompt and widget cells keyed under their
+        own scheme, a cell with a read-write mount) nothing else repopulates
+        ``artifact_uris`` on open: a downstream cell would compute a provenance hash that
+        no longer matches its record, and the cell would not show what a live session
+        that ran it does.
 
         A ``# @per_variant`` cell stores one artifact per variant, which its run runs in
         the order of the group's tabs, so it ends pointing at the last one stored.
@@ -1244,6 +1246,8 @@ class NotebookSession:
             if outside.has_rw_mount:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
+                # Never cached, so never ready; still showing what its last run stored.
+                self._restore_last_stored_outputs(cell)
                 continue
 
             # A scratchpad cell's result is under its key over what its runs read, as last
@@ -1312,7 +1316,7 @@ class NotebookSession:
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                     # Outputs live under a per-language scheme, so artifact uris are still empty
                     # here, and downstream cells read them to build their provenance.
-                    self._restore_alternate_scheme_outputs(cell)
+                    self._restore_last_stored_outputs(cell)
                 elif code.changed is not None and cell.last_provenance_hash is not None:
                     # A file its last run read is not as that run read it.
                     staleness_map[cell_id] = CellStaleness(
