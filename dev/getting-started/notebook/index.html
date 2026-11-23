@@ -3331,13 +3331,13 @@ Start with the two-minute one on what the cache saves.</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">uv (recommended)</label><label for="__tabbed_1_2">Docker</label><label for="__tabbed_1_3">From source (one-time setup)</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<p>Install the CLI from PyPI into a uv-managed tool environment, then
+<p>Install the CLI from PyPI into a tool environment of its own, then
 open the tutorial:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"strata-notebook[mcp,tui]"</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>strata<span class="w"> </span>tutorial<span class="w"> </span>caching
 </code></pre></div>
 <p>Open the URL it prints. Requires <a href="https://docs.astral.sh/uv/">uv</a>;
-plain <code>pip install</code> is not supported.</p>
+pipx, pip and conda work too (<a href="../installation/">Install</a>).</p>
 <p>The <code>mcp</code> and <code>tui</code> extras are for <code>strata agent</code> and <code>strata watch</code>
 (see <a href="#whats-next">What's next</a>); the web UI needs neither. SQL
 cells need the <code>sql</code> extra plus a driver extra for each database,

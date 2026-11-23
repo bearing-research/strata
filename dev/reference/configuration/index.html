@@ -4752,6 +4752,11 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>Available Python versions for new notebooks (JSON array or comma-separated list). Falls back to the server's own minor when uv is unavailable.</td>
 </tr>
 <tr>
+<td><code>STRATA_UV</code></td>
+<td>the uv installed with Strata</td>
+<td>The uv binary for every uv command Strata runs, in place of the one installed with it (the <code>uv</code> package, a dependency). Unset, a project the scratchpad attaches to runs the uv on <code>PATH</code> first, since that uv wrote its lock; every other command runs the bundled uv first. Environment only.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_ENV_BACKEND</code></td>
 <td><code>uv</code></td>
 <td>How notebook Python environments are kept. <code>uv</code>: each notebook has its own <code>.venv</code>. <code>shared</code>: notebooks with the same <code>uv.lock</code> and interpreter build share one environment, and each notebook's <code>.venv</code> is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. R libraries are shared the same way, one per <code>renv.lock</code> and R build, with <code>renv/library</code> a symlink. POSIX only. See <a href="../../notebook/environment/#shared-environments">Shared environments</a>.</td>

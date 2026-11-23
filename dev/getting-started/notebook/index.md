@@ -29,7 +29,7 @@ Start with the two-minute one on what the cache saves.
 
 === "uv (recommended)"
 
-    Install the CLI from PyPI into a uv-managed tool environment, then
+    Install the CLI from PyPI into a tool environment of its own, then
     open the tutorial:
 
     ```bash
@@ -38,7 +38,7 @@ Start with the two-minute one on what the cache saves.
     ```
 
     Open the URL it prints. Requires [uv](https://docs.astral.sh/uv/);
-    plain `pip install` is not supported.
+    pipx, pip and conda work too ([Install](https://bearingresearch.com/strata/dev/getting-started/installation/)).
 
     The `mcp` and `tui` extras are for `strata agent` and `strata watch`
     (see [What's next](#whats-next)); the web UI needs neither. SQL

@@ -56,7 +56,7 @@ session updates. Captured from a real run, not a mock-up.*
 
     Then open [http://localhost:8765](http://localhost:8765). The `mcp`
     and `tui` extras are what `strata agent` and `strata watch` need.
-    Plain `pip install` is not supported.
+    pipx, pip and conda work too: see [Install](https://bearingresearch.com/strata/dev/getting-started/installation/).
 
 === "Docker"
 

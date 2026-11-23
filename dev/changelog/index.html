@@ -4209,11 +4209,23 @@ exhaustive commit history.</p>
   instead of failing to read Arrow. (#1291)</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>A removed cell's values are collected after 30 days unused.</strong> Removing a cell
+<li>
+<p><strong>Strata installs and runs from pipx, pip and conda, not only <code>uv tool install</code>.</strong>
+  <code>strata-notebook</code> depends on uv (0.12 or 0.13) and runs that uv for every notebook
+  environment, whatever is on <code>PATH</code>; <code>STRATA_UV</code> names another. The startup guard no
+  longer asks for an environment uv made, only for a uv it can find. A project the
+  scratchpad attaches to runs the uv on <code>PATH</code> first, since that uv wrote its lock. Any
+  environment that installs Strata now holds a <code>uv</code> binary beside it. The Infisical SDK
+  moved to the <code>infisical</code> extra: install <code>strata-notebook[infisical]</code> to keep the
+  provider. (#1618)</p>
+</li>
+<li>
+<p><strong>A removed cell's values are collected after 30 days unused.</strong> Removing a cell
   released nothing, so its outputs survived every sweep. The sweep run when a notebook
   opens now takes every output of a cell no longer in <code>notebook.toml</code> once it has gone
   unused for 30 days, values orphaned before the upgrade included; a name, alias, pin,
-  publication, running build, or a current value built from it still keeps it. (#1478)</li>
+  publication, running build, or a current value built from it still keeps it. (#1478)</p>
+</li>
 <li><strong>The ledger is vestigo 0.7.0, from PyPI.</strong> It includes the vestigo entries
   below. On SQLite a store keeps its connections open between
   calls and reuses them, where every call opened one: a lookup on a store nobody else

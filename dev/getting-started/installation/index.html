@@ -3287,12 +3287,12 @@
 <h1 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h1>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><a href="https://docs.astral.sh/uv/">uv</a> ≥ 0.8</strong> - install via the
+<li><strong><a href="https://docs.astral.sh/uv/">uv</a></strong> for the recommended install - via the
   <a href="https://docs.astral.sh/uv/getting-started/installation/">uv installer</a>
   (<code>curl -LsSf https://astral.sh/uv/install.sh | sh</code> on macOS/Linux;
   PowerShell installer on Windows). uv fetches a compatible Python
-  automatically, so you don't need Python 3.12+ pre-installed. Strata
-  refuses to start outside a uv-managed env.</li>
+  automatically, so you don't need Python 3.12+ pre-installed. The
+  other installs below need Python 3.12+ instead.</li>
 <li><strong><a href="https://nodejs.org/">Node.js 26+</a></strong> - only if building the
   frontend from source.</li>
 </ul>
@@ -3304,9 +3304,20 @@ macOS/Linux; WSL2 is the better-trodden path.</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>strata-notebook
 </code></pre></div>
 <p>This puts <code>strata-notebook</code>, <code>strata</code>, <code>strata-notebook-tui</code> and
-<code>strata-worker</code> on <code>PATH</code> in a uv-managed tool environment. The wheel
-is pure Python and ships the frontend prebuilt. Plain <code>pip install</code>
-is not supported; see the uv requirement above.</p>
+<code>strata-worker</code> on <code>PATH</code> in a tool environment of their own. The wheel
+is pure Python and ships the frontend prebuilt.</p>
+<p>Any other installer works too, since Strata depends on uv (0.12 or 0.13)
+and runs that uv for every notebook environment, whatever is on <code>PATH</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pipx<span class="w"> </span>install<span class="w"> </span>strata-notebook<span class="w">                  </span><span class="c1"># its own environment, like uv tool</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>python<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>~/strata<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>~/strata/bin/pip<span class="w"> </span>install<span class="w"> </span>strata-notebook
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>strata<span class="w"> </span><span class="nv">python</span><span class="o">=</span><span class="m">3</span>.13<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>conda<span class="w"> </span>activate<span class="w"> </span>strata
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>pip<span class="w"> </span>install<span class="w"> </span>strata-notebook<span class="w">                   </span><span class="c1"># into the conda environment</span>
+</code></pre></div>
+<p>The install puts a <code>uv</code> binary in the environment beside <code>strata</code>, so a
+venv you activate has that uv first on <code>PATH</code>. To run another uv, set
+<code>STRATA_UV</code> to its path (<a href="../../reference/configuration/">configuration</a>).</p>
 <p>Add extras in brackets, for example
 <code>uv tool install "strata-notebook[mcp,tui]"</code> for <code>strata agent</code>:</p>
 <table>
@@ -3350,6 +3361,10 @@ is not supported; see the uv requirement above.</p>
 <td>OpenTelemetry tracing.</td>
 </tr>
 <tr>
+<td><code>infisical</code></td>
+<td>The <a href="../../notebook/secrets/">Infisical secret provider</a>.</td>
+</tr>
+<tr>
 <td><code>notebook</code></td>
 <td>The cell runtime libraries (pandas, numpy, orjson, cloudpickle, matplotlib, Pillow) in Strata's own environment. A remote worker image needs it; a local server does not, since each notebook gets its own venv.</td>
 </tr>
@@ -3362,37 +3377,37 @@ toolchain needed. See <a href="../../deployment/codespaces/">Codespaces</a> for 
 the devcontainer provisions.</p>
 <h2 id="docker-easiest">Docker (easiest)<a class="headerlink" href="#docker-easiest" title="Permanent link">&para;</a></h2>
 <p>No local toolchain required:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
 </code></pre></div>
 <p>Open <a href="http://localhost:8765">http://localhost:8765</a> in your browser.</p>
 <p>Releases after 0.9.0 also publish the image as <code>ghcr.io/bearing-research/strata:&lt;version&gt;</code>;
 see <a href="../../deployment/docker/#prebuilt-image">Docker → Prebuilt image</a>.</p>
 <h2 id="from-source">From source<a class="headerlink" href="#from-source" title="Permanent link">&para;</a></h2>
 <h3 id="1-install-dependencies">1. Install dependencies<a class="headerlink" href="#1-install-dependencies" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>sync
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>sync
 </code></pre></div>
 <p>This installs all Python dependencies and Strata itself, editable.</p>
 <h3 id="2-build-the-frontend-optional">2. Build the frontend (optional)<a class="headerlink" href="#2-build-the-frontend-optional" title="Permanent link">&para;</a></h3>
 <p>If you want the notebook UI served by the backend:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">cd</span><span class="w"> </span>frontend
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>npm<span class="w"> </span>ci
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>npm<span class="w"> </span>run<span class="w"> </span>build
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nb">cd</span><span class="w"> </span>..
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">cd</span><span class="w"> </span>frontend
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>npm<span class="w"> </span>ci
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>npm<span class="w"> </span>run<span class="w"> </span>build
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nb">cd</span><span class="w"> </span>..
 </code></pre></div>
 <p>The server serves <code>src/strata/_frontend/</code> if it exists, else
 <code>frontend/dist/</code>. <code>_frontend/</code> is the bundle a release copies in, so after a
 fresh build either copy <code>frontend/dist/</code> into <code>src/strata/_frontend/</code> or
 remove <code>src/strata/_frontend/</code>.</p>
 <h3 id="3-start-the-server">3. Start the server<a class="headerlink" href="#3-start-the-server" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Or equivalently:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
 </code></pre></div>
 <p>The server starts on port 8765 by default. Open <a href="http://localhost:8765">http://localhost:8765</a>.</p>
 <h2 id="verify">Verify<a class="headerlink" href="#verify" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>http://localhost:8765/health
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># {"status":"ok"}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>http://localhost:8765/health
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># {"status":"ok"}</span>
 </code></pre></div>
 <h2 id="commands-reference">Commands reference<a class="headerlink" href="#commands-reference" title="Permanent link">&para;</a></h2>
 <p>The PyPI package is <code>strata-notebook</code>; the installed Python module
@@ -3501,37 +3516,37 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 <p>In a checkout with the venv activated (<code>source .venv/bin/activate</code>),
 you can drop the prefix too.</p>
 <h2 id="development-commands">Development commands<a class="headerlink" href="#development-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Sync with all optional extras - matches CI. Required for the test</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># suite because the harness fixtures point the per-notebook venv at</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># the dev interpreter, so the dev env needs the [notebook] extra</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># (orjson, pyarrow, cloudpickle) for cell-execution tests.</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># Run all tests</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># Format and lint</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>uv<span class="w"> </span>run<span class="w"> </span>pre-commit<span class="w"> </span>run<span class="w"> </span>--all-files
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="c1"># Type check (scope is set in pyproject.toml, as in CI)</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>uv<span class="w"> </span>run<span class="w"> </span>ty<span class="w"> </span>check
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="c1"># Start frontend dev server (hot reload, proxies to backend)</span>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Sync with all optional extras - matches CI. Required for the test</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># suite because the harness fixtures point the per-notebook venv at</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># the dev interpreter, so the dev env needs the [notebook] extra</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># (orjson, pyarrow, cloudpickle) for cell-execution tests.</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Run all tests</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c1"># Format and lint</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>uv<span class="w"> </span>run<span class="w"> </span>pre-commit<span class="w"> </span>run<span class="w"> </span>--all-files
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1"># Type check (scope is set in pyproject.toml, as in CI)</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>uv<span class="w"> </span>run<span class="w"> </span>ty<span class="w"> </span>check
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># Start frontend dev server (hot reload, proxies to backend)</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev
 </code></pre></div>
 <h3 id="integration-test-dependencies">Integration test dependencies<a class="headerlink" href="#integration-test-dependencies" title="Permanent link">&para;</a></h3>
 <p>The end-to-end integration script needs a real PostgreSQL instance for
 its Iceberg SQL catalog. A throwaway Postgres container is shipped
 as <code>docker-compose.test.yml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Start the test Postgres (port 5432)</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.test.yml<span class="w"> </span>up<span class="w"> </span>-d
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Run the integration script against it (starts its own server)</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="nv">STRATA_CATALOG_URI</span><span class="o">=</span>postgresql://strata:strata@localhost:5432/iceberg_catalog<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/integration_test.py<span class="w"> </span>--start-server
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># Tear it down</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.test.yml<span class="w"> </span>down
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Start the test Postgres (port 5432)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.test.yml<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Run the integration script against it (starts its own server)</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="nv">STRATA_CATALOG_URI</span><span class="o">=</span>postgresql://strata:strata@localhost:5432/iceberg_catalog<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/integration_test.py<span class="w"> </span>--start-server
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="c1"># Tear it down</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.test.yml<span class="w"> </span>down
 </code></pre></div>
 <p>The compose file is dev-only: it has no health-bound dependency on
 the main <code>docker-compose.yml</code>, and the credentials are intentionally
