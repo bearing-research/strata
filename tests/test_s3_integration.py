@@ -21,10 +21,10 @@ from strata.iceberg.catalog import object_store_unreachable
 from strata.planner import ReadPlanner
 from strata.types import Filter, FilterOp
 from tests.conftest import MINIO_IMAGE
-from tests.docker_helpers import docker_daemon_reachable
+from tests.docker_helpers import backend_unavailable, docker_daemon_reachable
 
 if not docker_daemon_reachable():
-    pytest.skip("Docker daemon is not running", allow_module_level=True)
+    backend_unavailable("Docker daemon is not running", module=True)
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 

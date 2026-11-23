@@ -29,10 +29,14 @@ from strata.notebook.writer import (
     write_cell,
 )
 from tests.conftest import MINIO_IMAGE, make_azurite, service_auth
-from tests.docker_helpers import docker_daemon_reachable, start_container_or_skip
+from tests.docker_helpers import (
+    backend_unavailable,
+    docker_daemon_reachable,
+    start_container_or_skip,
+)
 
 if not docker_daemon_reachable():
-    pytest.skip("Docker daemon is not running", allow_module_level=True)
+    backend_unavailable("Docker daemon is not running", module=True)
 
 from testcontainers.community.minio import MinioContainer  # noqa: E402
 from testcontainers.core.container import DockerContainer  # noqa: E402
