@@ -792,6 +792,12 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A metrics writer thread ends with its collector.** Every metrics collector started a
+  thread that only interpreter exit stopped, and both the thread and its exit hook kept the
+  collector: each server lifespan, and each row-group cache or fetcher built without one,
+  added a thread for good. The thread now starts with the first log (the cache's and the
+  fetcher's never log), a server stops its own when it shuts down, and a collector dropped
+  without being shut down takes its thread with it (#1624).
 - **An OS timeout is the run's error, not its timeout.** Python raises the operating
   system's ETIMEDOUT (a chown on a network filesystem, a store on NFS) as a timeout, which
   a run took for its own deadline, here or on a remote worker: the cell said it timed out
