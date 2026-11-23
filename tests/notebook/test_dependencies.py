@@ -7,7 +7,6 @@ hash change detection.
 from __future__ import annotations
 
 import asyncio
-import os
 import shlex
 import shutil
 import subprocess
@@ -1401,41 +1400,11 @@ class TestRenvAdd:
         assert "not available" in result.operation_log.stderr
 
 
-class TestResolveUv:
-    """resolve_uv tries PATH, then uv's installer dirs (~/.local/bin etc.), so headless shells
-    without them on PATH still find uv.
-    """
+def test_uv_not_found_message_is_actionable():
+    from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE
 
-    def test_found_on_path(self):
-        from strata.notebook import dependencies
-
-        with patch.object(dependencies.shutil, "which", return_value="/usr/bin/uv"):
-            assert dependencies.resolve_uv() == "/usr/bin/uv"
-
-    def test_falls_back_to_local_bin(self, tmp_path, monkeypatch):
-        from strata.notebook import dependencies
-
-        fake_uv = tmp_path / "uv"
-        fake_uv.write_text("")  # presence is enough; is_file() check
-        monkeypatch.setattr(dependencies.shutil, "which", lambda _: None)
-        monkeypatch.setattr(dependencies.Path, "expanduser", lambda self: tmp_path, raising=False)
-        assert dependencies.resolve_uv() == str(fake_uv)
-
-    def test_missing_everywhere_returns_none(self, monkeypatch):
-        from strata.notebook import dependencies
-
-        monkeypatch.setattr(dependencies.shutil, "which", lambda _: None)
-        # Point the probe dirs at a path with no uv.
-        monkeypatch.setattr(
-            dependencies.Path, "expanduser", lambda self: Path("/nonexistent-xyz"), raising=False
-        )
-        assert dependencies.resolve_uv() is None
-
-    def test_message_is_actionable(self):
-        from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE
-
-        assert "uv not found on PATH" in UV_NOT_FOUND_MESSAGE
-        assert "~/.local/bin" in UV_NOT_FOUND_MESSAGE
+    assert "uv not found" in UV_NOT_FOUND_MESSAGE
+    assert "STRATA_UV" in UV_NOT_FOUND_MESSAGE
 
 
 # uv runs on the notebook's environment, not the server's
@@ -1453,14 +1422,14 @@ class TestUvCommandsIgnoreTheServersEnvironment:
 
     @pytest.fixture
     def recorded(self, tmp_path, monkeypatch):
-        """Put a ``uv`` first on PATH that writes its environment to a file."""
+        """Point STRATA_UV at a ``uv`` that writes its environment to a file."""
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         record = tmp_path / "uv-env.txt"
         fake_uv = bin_dir / "uv"
         fake_uv.write_text(f"#!/bin/sh\nenv > {shlex.quote(str(record))}\n")
         fake_uv.chmod(0o755)
-        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        monkeypatch.setenv("STRATA_UV", str(fake_uv))
         monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/server/env")
         monkeypatch.setenv("VIRTUAL_ENV", "/server/venv")
         monkeypatch.setenv("UV_PYTHON", "3.99")
@@ -1540,7 +1509,7 @@ class TestServiceModeInstallsWheelsOnly:
         fake_uv = bin_dir / "uv"
         fake_uv.write_text(f"#!/bin/sh\nenv > {shlex.quote(str(record))}\n")
         fake_uv.chmod(0o755)
-        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        monkeypatch.setenv("STRATA_UV", str(fake_uv))
         monkeypatch.delenv("UV_NO_BUILD", raising=False)
 
         def read() -> dict[str, str]:

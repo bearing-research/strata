@@ -1198,9 +1198,9 @@ def test_import_replaces_a_lone_surrogate_and_warns(tmp_path: Path) -> None:
 
 
 def test_import_check_deps_skipped_when_uv_missing(tmp_path: Path, monkeypatch) -> None:
-    """``check_deps=True`` records a skip warning if uv isn't on PATH."""
+    """``check_deps=True`` records a skip warning if no uv is found."""
     ipynb = _make_ipynb(tmp_path, [_code_cell("import pandas as pd\n")])
-    monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.setattr("strata._uv_runtime.resolve_uv", lambda: None)
     result = import_notebook(ipynb, check_deps=True)
     assert any("uv not found" in w for w in result.warnings)
 

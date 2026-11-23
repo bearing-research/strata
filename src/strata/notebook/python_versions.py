@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import json
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -13,6 +12,8 @@ from pathlib import Path
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
+
+from strata._uv_runtime import resolve_uv
 
 
 def current_python_minor() -> str:
@@ -106,11 +107,11 @@ def _probe_installed_python_minors() -> tuple[str, ...]:
     current = current_python_minor()
     fallback = (current,)
 
-    uv = shutil.which("uv")
+    uv = resolve_uv()
     if uv is None:
         return fallback
     try:
-        completed = subprocess.run(  # noqa: S603 (uv resolved via shutil.which)
+        completed = subprocess.run(  # noqa: S603 (uv resolved via resolve_uv)
             [uv, "python", "list", "--only-installed", "--output-format", "json"],
             capture_output=True,
             text=True,

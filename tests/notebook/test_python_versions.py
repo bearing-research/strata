@@ -120,7 +120,7 @@ class TestDiscoverInstalledPythonMinors:
     def test_uv_is_probed_once_across_config_loads(self, monkeypatch, tmp_path):
         from strata.config import StrataConfig
 
-        monkeypatch.setattr(pv.shutil, "which", lambda _: "/usr/bin/uv")
+        monkeypatch.setattr(pv, "resolve_uv", lambda: "/usr/bin/uv")
         calls: list[tuple] = []
 
         def run(*a, **k):
@@ -141,11 +141,11 @@ class TestDiscoverInstalledPythonMinors:
         assert "9.9" not in pv.discover_installed_python_minors()
 
     def test_falls_back_when_uv_missing(self, monkeypatch):
-        monkeypatch.setattr(pv.shutil, "which", lambda _: None)
+        monkeypatch.setattr(pv, "resolve_uv", lambda: None)
         assert pv.discover_installed_python_minors() == [pv.current_python_minor()]
 
     def test_falls_back_on_subprocess_error(self, monkeypatch):
-        monkeypatch.setattr(pv.shutil, "which", lambda _: "/usr/bin/uv")
+        monkeypatch.setattr(pv, "resolve_uv", lambda: "/usr/bin/uv")
 
         def boom(*a, **k):
             raise OSError("uv exploded")
@@ -154,7 +154,7 @@ class TestDiscoverInstalledPythonMinors:
         assert pv.discover_installed_python_minors() == [pv.current_python_minor()]
 
     def test_falls_back_when_output_not_a_list(self, monkeypatch):
-        monkeypatch.setattr(pv.shutil, "which", lambda _: "/usr/bin/uv")
+        monkeypatch.setattr(pv, "resolve_uv", lambda: "/usr/bin/uv")
         monkeypatch.setattr(
             pv.subprocess,
             "run",
@@ -163,7 +163,7 @@ class TestDiscoverInstalledPythonMinors:
         assert pv.discover_installed_python_minors() == [pv.current_python_minor()]
 
     def test_parses_dedupes_and_prepends_current(self, monkeypatch):
-        monkeypatch.setattr(pv.shutil, "which", lambda _: "/usr/bin/uv")
+        monkeypatch.setattr(pv, "resolve_uv", lambda: "/usr/bin/uv")
         # Two 3.13 patches (dedupe), one 3.99 (kept by >=3.12 spec), a bad
         # version, a non-dict entry, and a dict without a version string.
         payload = (
@@ -179,7 +179,7 @@ class TestDiscoverInstalledPythonMinors:
         assert result.count("3.13") == 1  # deduped
 
     def test_current_version_not_duplicated_when_already_listed(self, monkeypatch):
-        monkeypatch.setattr(pv.shutil, "which", lambda _: "/usr/bin/uv")
+        monkeypatch.setattr(pv, "resolve_uv", lambda: "/usr/bin/uv")
         current = pv.current_python_minor()
         monkeypatch.setattr(
             pv.subprocess,
@@ -192,7 +192,7 @@ class TestDiscoverInstalledPythonMinors:
     def test_uses_default_spec_when_metadata_missing(self, monkeypatch):
         from importlib.metadata import PackageNotFoundError
 
-        monkeypatch.setattr(pv.shutil, "which", lambda _: "/usr/bin/uv")
+        monkeypatch.setattr(pv, "resolve_uv", lambda: "/usr/bin/uv")
         monkeypatch.setattr(
             pv.subprocess, "run", lambda *a, **k: _Completed('[{"version": "3.13.0"}]')
         )

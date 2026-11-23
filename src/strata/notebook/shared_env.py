@@ -28,11 +28,11 @@ from pathlib import Path
 
 import filelock
 
+from strata._uv_runtime import resolve_uv
 from strata.notebook.dependencies import (
     EnvironmentOperationLog,
     _run_uv_command,
     _UvCommandResult,
-    resolve_uv,
     run_uv_command_streaming,
 )
 from strata.notebook.env import uv_lock_key
@@ -122,7 +122,7 @@ class SharedEnvBackend:
         """The interpreter a sync would use, and its exact build; or why not."""
         uv = resolve_uv()
         if uv is None:
-            return "uv not found on PATH"
+            return "uv not found"
         # --system: the base interpreter, not whichever environment .venv links to now.
         args = [uv, "python", "find", "--system"] + ([python_version] if python_version else [])
         try:

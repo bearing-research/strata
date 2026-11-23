@@ -1312,7 +1312,7 @@ def _dispatch_watch(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from strata._uv_runtime import assert_uv_managed_runtime
+    from strata._uv_runtime import assert_uv_available
 
     words = sys.argv[1:] if argv is None else argv
     # `strata agent <path>` opens a notebook; these two words are commands (a notebook
@@ -1329,9 +1329,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    # After parsing, as server.main does: `--help` works from any Python, and
-    # nothing else runs outside a uv-managed environment.
-    assert_uv_managed_runtime()
+    # After parsing, as server.main does: `--help` works without uv, and nothing
+    # else does.
+    assert_uv_available()
 
     return args.func(args)
 

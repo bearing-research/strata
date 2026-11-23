@@ -481,7 +481,7 @@ class TestTheWorkerSide:
         def _timeout(args, **kwargs):
             raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 0))
 
-        monkeypatch.setattr(worker_env.shutil, "which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(worker_env, "resolve_uv", lambda: "/usr/bin/uv")
         monkeypatch.setattr(worker_env.subprocess, "run", _timeout)
 
         with pytest.raises(worker_env.WorkerEnvironmentError, match=f"{message}.*timed out"):
@@ -608,11 +608,7 @@ class TestAWorkerAnswersForTheMachineItIsOn:
         from strata.notebook.remote_executor import create_notebook_executor_app
 
         monkeypatch.delenv("STRATA_WORKER_TOKEN", raising=False)
-        real_which = shutil.which
-        monkeypatch.setattr(
-            "strata.notebook.remote_executor.shutil.which",
-            lambda name, *a, **kw: uv_path if name == "uv" else real_which(name, *a, **kw),
-        )
+        monkeypatch.setattr("strata.notebook.remote_executor.resolve_uv", lambda: uv_path)
         client = TestClient(create_notebook_executor_app())
         return client.get("/health").json()["capabilities"]["features"]
 

@@ -1,0 +1,133 @@
+name: Install matrix
+
+# Installs strata-notebook the ways a user would and runs a notebook from each
+# install with no uv on PATH, so the uv Strata depends on has to be enough.
+# Called by ci.yml (a wheel built from the checkout) and release.yml (the wheel
+# it publishes). Linux only: the Windows lookups (uv.exe, conda's Library/bin)
+# are unit-tested in tests/test_uv_runtime.py.
+
+on:
+  workflow_call:
+    inputs:
+      wheel-artifact:
+        description: An uploaded artifact holding the wheel; empty builds one from the checkout.
+        type: string
+        default: ''
+      ref:
+        description: The commit whose smoke script runs; empty is the caller's.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  # Opt in to Node 24 for JS actions ahead of GitHub's Node 20 removal.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  install:
+    name: install · ${{ matrix.installer }} · uv ${{ matrix.uv }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        installer: [uv-tool, pipx, venv-pip, micromamba-pip]
+        uv: [newest]
+        include:
+          # The lowest uv the dependency allows.
+          - installer: venv-pip
+            uv: '0.12.0'
+          # conda-forge's uv, the binary without the Python module: what a
+          # conda-forge strata-notebook would depend on.
+          - installer: micromamba-conda-uv
+            uv: conda-forge
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+
+      - name: Get the wheel
+        env:
+          WHEEL_ARTIFACT: ${{ inputs.wheel-artifact }}
+        run: |
+          if [ -z "$WHEEL_ARTIFACT" ]; then
+            uv build --wheel --out-dir dist
+          fi
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        if: inputs.wheel-artifact != ''
+        with:
+          name: ${{ inputs.wheel-artifact }}
+          path: dist
+
+      - uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39  # v3.2.1
+        if: startsWith(matrix.installer, 'micromamba')
+        with:
+          environment-name: strata
+          create-args: >-
+            python=3.13 pip
+            ${{ matrix.installer == 'micromamba-conda-uv' && 'uv>=0.12,<0.14' || '' }}
+          init-shell: none
+
+      - name: Install with ${{ matrix.installer }}
+        env:
+          INSTALLER: ${{ matrix.installer }}
+          UV_PIN: ${{ matrix.uv }}
+        run: |
+          set -euo pipefail
+          WHEEL=$(ls dist/strata_notebook-*-py3-none-any.whl | head -1)
+          uv python install 3.13
+          PYTHON=$(uv python find 3.13)
+          PIN=()
+          case "$UV_PIN" in newest | conda-forge) ;; *) PIN=("uv==${UV_PIN}") ;; esac
+          case "$INSTALLER" in
+            uv-tool)
+              uv tool install --python 3.13 "$WHEEL"
+              BIN="$(uv tool dir)/strata-notebook/bin"
+              ;;
+            pipx)
+              pipx install --python "$PYTHON" "$WHEEL"
+              BIN="$(pipx environment --value PIPX_LOCAL_VENVS)/strata-notebook/bin"
+              ;;
+            venv-pip)
+              "$PYTHON" -m venv "$RUNNER_TEMP/strata-venv"
+              "$RUNNER_TEMP/strata-venv/bin/pip" install "$WHEEL" "${PIN[@]}"
+              BIN="$RUNNER_TEMP/strata-venv/bin"
+              ;;
+            micromamba-pip)
+              BIN="$MAMBA_ROOT_PREFIX/envs/strata/bin"
+              "$BIN/pip" install "$WHEEL"
+              ;;
+            micromamba-conda-uv)
+              # Every requirement but uv from PyPI, as conda would resolve the rest.
+              BIN="$MAMBA_ROOT_PREFIX/envs/strata/bin"
+              "$BIN/python" scripts/wheel_requirements.py "$WHEEL" --without uv >"$RUNNER_TEMP/reqs.txt"
+              "$BIN/pip" install -r "$RUNNER_TEMP/reqs.txt"
+              "$BIN/pip" install --no-deps "$WHEEL"
+              if "$BIN/python" -c 'import uv' 2>/dev/null; then
+                echo "::error::the uv Python module is installed; this row needs conda-forge's binary alone"
+                exit 1
+              fi
+              ;;
+          esac
+          # The uv installed with Strata, which must be the one that builds the notebook.
+          if [ "$INSTALLER" = micromamba-conda-uv ]; then
+            UV_VERSION=$("$BIN/uv" --version | cut -d' ' -f2)
+          else
+            UV_VERSION=$("$BIN/python" -c 'from importlib.metadata import version; print(version("uv"))')
+          fi
+          if [ "$UV_PIN" != newest ] && [ "$UV_PIN" != conda-forge ] && [ "$UV_VERSION" != "$UV_PIN" ]; then
+            echo "::error::installed uv $UV_VERSION, not the pinned $UV_PIN"
+            exit 1
+          fi
+          echo "::notice::$INSTALLER installed Strata with uv $UV_VERSION in $BIN"
+          echo "STRATA_BIN=$BIN" >>"$GITHUB_ENV"
+          echo "STRATA_UV_VERSION=$UV_VERSION" >>"$GITHUB_ENV"
+
+      - name: Run a notebook from the install
+        run: bash scripts/install_smoke.sh "$STRATA_BIN" "$STRATA_UV_VERSION"

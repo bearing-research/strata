@@ -16,7 +16,7 @@
 # Pinned by digest for supply-chain safety (Scorecard Pinned-Dependencies).
 # Bump tag and digest together; get the digest with
 # `docker buildx imagetools inspect <image:tag>`.
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.3-python3.13-trixie-slim@sha256:82f018bb3bd8b1d12c376c3e87da186ec1932cbf91bc8e73089feea6428fec00
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.13.9-python3.13-trixie-slim@sha256:803d2b80b6913e562837d69f037f39bfea80f51ef3f0dd0d8fdffbd95688fd6d
 
 # =============================================================================
 # Stage 1a: Frontend Builder (Node.js)
@@ -54,6 +54,7 @@ COPY packages ./packages
 #     Without sql a notebook holding a SQL cell does not open; the SQLite driver
 #     is what the shipped SQL example connects with.
 #   --extra mcp: without it, STRATA_MCP_ENABLED only logs that /mcp is off.
+#   --extra infisical: the Infisical secret provider a notebook may select.
 RUN mkdir -p dist && \
     uv export \
       --frozen \
@@ -67,6 +68,7 @@ RUN mkdir -p dist && \
       --extra sql \
       --extra sql-sqlite \
       --extra mcp \
+      --extra infisical \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 
@@ -81,9 +83,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM ${UV_IMAGE} AS runtime
 ENV UV_LINK_MODE=copy
 
-# Install into a uv venv: Strata refuses to start without the
-# ``uv = <version>`` marker in pyvenv.cfg (src/strata/_uv_runtime.py), which
-# ``uv venv`` writes and ``--system`` would not.
+# Install into a venv rather than the image's system Python. The exported
+# requirements carry the uv dependency, whose binary notebooks run.
 ENV VIRTUAL_ENV=/opt/strata-venv
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 

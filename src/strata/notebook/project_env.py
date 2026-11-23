@@ -181,9 +181,10 @@ def _project_uv_vars(environ: dict[str, str]) -> dict[str, str]:
 def _dry_run(anchor: Path, environ: dict[str, str]) -> tuple[Path, Path, bool] | None:
     """The workspace root, the environment and whether a sync would change anything, as
     ``uv sync --dry-run`` from *anchor* reports them; ``None`` when uv finds no project."""
-    from strata.notebook.dependencies import resolve_uv, uv_env
+    from strata._uv_runtime import resolve_uv
+    from strata.notebook.dependencies import uv_env
 
-    uv = resolve_uv()
+    uv = resolve_uv(users_project=True)
     if uv is None:
         return None
     try:
@@ -782,6 +783,7 @@ class ProjectEnvBackend:
                 timeout=timeout,
                 display_name="uv sync",
                 env=_project_uv_vars(dict(os.environ)),
+                users_project=True,
             )
             if not synced.success:
                 return synced

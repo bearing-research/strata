@@ -6,12 +6,12 @@ description: Install Strata, and the commands it gives you.
 
 ## Prerequisites
 
-- **[uv](https://docs.astral.sh/uv/) ≥ 0.8** - install via the
+- **[uv](https://docs.astral.sh/uv/)** for the recommended install - via the
   [uv installer](https://docs.astral.sh/uv/getting-started/installation/)
   (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux;
   PowerShell installer on Windows). uv fetches a compatible Python
-  automatically, so you don't need Python 3.12+ pre-installed. Strata
-  refuses to start outside a uv-managed env.
+  automatically, so you don't need Python 3.12+ pre-installed. The
+  other installs below need Python 3.12+ instead.
 - **[Node.js 26+](https://nodejs.org/)** - only if building the
   frontend from source.
 
@@ -27,9 +27,24 @@ strata-notebook
 ```
 
 This puts `strata-notebook`, `strata`, `strata-notebook-tui` and
-`strata-worker` on `PATH` in a uv-managed tool environment. The wheel
-is pure Python and ships the frontend prebuilt. Plain `pip install`
-is not supported; see the uv requirement above.
+`strata-worker` on `PATH` in a tool environment of their own. The wheel
+is pure Python and ships the frontend prebuilt.
+
+Any other installer works too, since Strata depends on uv (0.12 or 0.13)
+and runs that uv for every notebook environment, whatever is on `PATH`:
+
+```bash
+pipx install strata-notebook                  # its own environment, like uv tool
+
+python -m venv ~/strata && ~/strata/bin/pip install strata-notebook
+
+conda create -n strata python=3.13 && conda activate strata
+pip install strata-notebook                   # into the conda environment
+```
+
+The install puts a `uv` binary in the environment beside `strata`, so a
+venv you activate has that uv first on `PATH`. To run another uv, set
+`STRATA_UV` to its path ([configuration](../reference/configuration.md)).
 
 Add extras in brackets, for example
 `uv tool install "strata-notebook[mcp,tui]"` for `strata agent`:
@@ -44,6 +59,7 @@ Add extras in brackets, for example
 | `s3` | The S3 artifact backend (`STRATA_ARTIFACT_BLOB_BACKEND=s3`, through boto3, presigned build-manifest URLs included) and notebook `s3://` mounts (`s3fs`). |
 | `gcs` | The GCS artifact backend (`STRATA_ARTIFACT_BLOB_BACKEND=gcs`, through google-cloud-storage, presigned build-manifest URLs included) and notebook `gs://` mounts (`gcsfs`). |
 | `otel` | OpenTelemetry tracing. |
+| `infisical` | The [Infisical secret provider](../notebook/secrets.md). |
 | `notebook` | The cell runtime libraries (pandas, numpy, orjson, cloudpickle, matplotlib, Pillow) in Strata's own environment. A remote worker image needs it; a local server does not, since each notebook gets its own venv. |
 
 ## GitHub Codespaces (zero setup)

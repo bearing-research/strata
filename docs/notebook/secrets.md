@@ -15,6 +15,8 @@ Today Strata ships one provider (Infisical). Vault / AWS Secrets Manager / Doppl
 
 ## Setting up Infisical
 
+The provider's SDK is the `infisical` extra: `uv tool install "strata-notebook[infisical]"`, or the same extra with any other installer.
+
 ### 1. Authenticate the server
 
 Strata reaches Infisical with credentials it reads from the **process environment** of the running server, not from the notebook UI, never from disk. Two auth paths:

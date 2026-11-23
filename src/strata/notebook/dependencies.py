@@ -27,6 +27,7 @@ from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
+from strata._uv_runtime import resolve_uv
 from strata.notebook.harness_user import (
     HarnessUser,
     LocalExecutionRefused,
@@ -191,27 +192,9 @@ def _format_command_for_ui(command: list[str]) -> str:
 
 
 UV_NOT_FOUND_MESSAGE = (
-    "uv not found on PATH. Install uv "
-    "(https://docs.astral.sh/uv/getting-started/installation/) or add it to PATH. "
-    "The installer puts uv in ~/.local/bin, which a non-login shell "
-    "(ssh, cron) often doesn't include."
+    "uv not found: the uv installed with Strata is missing, and none is on PATH or in "
+    "~/.local/bin. Reinstall Strata, or set STRATA_UV to a uv binary."
 )
-
-
-def resolve_uv() -> str | None:
-    """Locate ``uv``: PATH first, then uv's installer dirs.
-
-    Non-login shells (``ssh host 'strata run ...'``, cron) often lack
-    ``~/.local/bin`` and ``~/.cargo/bin`` on PATH.
-    """
-    found = shutil.which("uv")
-    if found:
-        return found
-    for base in ("~/.local/bin", "~/.cargo/bin"):
-        candidate = Path(base).expanduser() / "uv"
-        if candidate.is_file():
-            return str(candidate)
-    return None
 
 
 # Vars that point uv at the server's environment instead of the notebook's
@@ -248,13 +231,15 @@ def _run_uv_command(
     timeout: int,
     display_name: str,
     env: dict[str, str] | None = None,
+    users_project: bool = False,
 ) -> _UvCommandResult:
     """Run a uv command and capture bounded UI logs.
 
     *env* adds to the inherited environment, e.g. ``UV_PROJECT_ENVIRONMENT``.
+    *users_project* runs the user's own uv first (:func:`resolve_uv`).
     """
     started = time.perf_counter()
-    uv = resolve_uv()
+    uv = resolve_uv(users_project=users_project)
     if uv is None:
         return _UvCommandResult(
             success=False,
@@ -294,7 +279,7 @@ def _run_uv_command(
     except FileNotFoundError:
         return _UvCommandResult(
             success=False,
-            error="uv not found on PATH",
+            error=f"uv not found at {uv}",
             operation_log=EnvironmentOperationLog(
                 command=formatted_command,
                 duration_ms=int((time.perf_counter() - started) * 1000),
@@ -343,9 +328,19 @@ async def run_uv_command_streaming(
     env: dict[str, str] | None = None,
 ) -> _UvCommandResult:
     """Run a uv command asynchronously and surface bounded live stdout/stderr."""
-    command = ["uv", *args]
     started = time.perf_counter()
-    formatted_command = _format_command_for_ui(command)
+    formatted_command = _format_command_for_ui(["uv", *args])
+    uv = resolve_uv()
+    if uv is None:
+        return _UvCommandResult(
+            success=False,
+            error=UV_NOT_FOUND_MESSAGE,
+            operation_log=EnvironmentOperationLog(
+                command=formatted_command,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            ),
+        )
+    command = [uv, *args]
     stdout_buffer = _BoundedOutputBuffer()
     stderr_buffer = _BoundedOutputBuffer()
 
@@ -367,7 +362,7 @@ async def run_uv_command_streaming(
     except FileNotFoundError:
         return _UvCommandResult(
             success=False,
-            error="uv not found on PATH",
+            error=f"uv not found at {uv}",
             operation_log=EnvironmentOperationLog(
                 command=formatted_command,
                 duration_ms=int((time.perf_counter() - started) * 1000),

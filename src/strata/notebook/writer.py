@@ -22,6 +22,7 @@ import tomli_w
 from packaging.requirements import Requirement
 from vestigo.file_modes import private_dir
 
+from strata._uv_runtime import resolve_uv
 from strata.notebook.dependencies import rscript_env, uv_env
 from strata.notebook.harness_user import (
     HarnessUser,
@@ -618,7 +619,11 @@ _logger = logging.getLogger(__name__)
 
 def _uv_sync(notebook_dir: Path, *, timeout: int = 60, python_version: str | None = None) -> bool:
     """Run ``uv sync`` in *notebook_dir*; False on failure (logged, never raised)."""
-    command = ["uv", "sync"]
+    uv = resolve_uv()
+    if uv is None:
+        _logger.warning("uv not found; skipping venv creation")
+        return False
+    command = [uv, "sync"]
     if python_version is not None:
         command.extend(["--python", normalize_python_minor(python_version)])
     try:
@@ -633,7 +638,7 @@ def _uv_sync(notebook_dir: Path, *, timeout: int = 60, python_version: str | Non
         _logger.debug("uv sync succeeded in %s", notebook_dir)
         return True
     except FileNotFoundError:
-        _logger.warning("uv not found on PATH; skipping venv creation")
+        _logger.warning("uv not found at %s; skipping venv creation", uv)
     except subprocess.TimeoutExpired:
         _logger.warning("uv sync timed out after %ds in %s", timeout, notebook_dir)
     except subprocess.CalledProcessError as exc:

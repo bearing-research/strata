@@ -519,6 +519,8 @@ def test_the_skill_comes_back_on_uninstall(agent_home):
         ("share/uv/tools/strata-notebook/bin/strata", "quiet"),
         ("custom-tool-dir/tools/strata-notebook/bin/strata", "quiet"),
         ("repo/.venv/bin/strata", "warned"),
+        ("pipx/venvs/strata-notebook/bin/strata", "quiet"),
+        ("miniforge/envs/strata/bin/strata", "warned"),
         ("opt/bin/strata", "quiet"),
     ],
 )
@@ -526,11 +528,17 @@ def test_the_command_written_is_a_lasting_one(tmp_path, monkeypatch, where, outc
     command = tmp_path / where
     command.parent.mkdir(parents=True)
     command.write_text("")
-    # Every environment has one, a uv tool's too, which also holds uv's receipt.
-    if not where.startswith("opt"):
-        (command.parent.parent / "pyvenv.cfg").write_text("")
+    # Every venv has one, a uv tool's and pipx's too, which also hold their receipts;
+    # a conda environment has conda-meta instead.
+    environment = command.parent.parent
+    if "miniforge" in where:
+        (environment / "conda-meta").mkdir()
+    elif not where.startswith("opt"):
+        (environment / "pyvenv.cfg").write_text("")
     if "tools" in where:
-        (command.parent.parent / "uv-receipt.toml").write_text("")
+        (environment / "uv-receipt.toml").write_text("")
+    if "pipx" in where:
+        (environment / "pipx_metadata.json").write_text("{}")
     monkeypatch.setattr(sys, "argv", [str(command), "agent", "install"])
 
     if outcome == "refused":

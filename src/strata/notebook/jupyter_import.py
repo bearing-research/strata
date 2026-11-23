@@ -306,11 +306,16 @@ def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
     """
     import subprocess
 
+    from strata._uv_runtime import resolve_uv
     from strata.notebook.dependencies import uv_env
 
+    uv = resolve_uv()
+    if uv is None:
+        result.warnings.append("--check-deps skipped: uv not found")
+        return
     try:
         completed = subprocess.run(
-            ["uv", "lock"],
+            [uv, "lock"],
             cwd=str(notebook_dir),
             env=uv_env(),
             capture_output=True,
@@ -319,7 +324,7 @@ def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
             check=False,
         )
     except FileNotFoundError:
-        result.warnings.append("--check-deps skipped: uv not found on PATH")
+        result.warnings.append(f"--check-deps skipped: uv not found at {uv}")
         return
     except subprocess.TimeoutExpired:
         result.warnings.append("--check-deps timed out after 120s")

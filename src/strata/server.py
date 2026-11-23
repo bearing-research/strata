@@ -2240,12 +2240,12 @@ def main(argv: list[str] | None = None):
     """Run the server."""
     from uvicorn.config import STARTUP_FAILURE
 
-    from strata._uv_runtime import assert_uv_managed_runtime
+    from strata._uv_runtime import assert_uv_available
 
     args = _build_server_arg_parser().parse_args(argv)
-    # After parsing, so --help prints from any Python; before the overrides,
-    # so a refused run changes nothing.
-    assert_uv_managed_runtime()
+    # After parsing, so --help prints without uv; before the overrides, so a
+    # refused run changes nothing.
+    assert_uv_available()
     _apply_server_cli_overrides(args)
 
     try:
