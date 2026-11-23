@@ -17,7 +17,7 @@
 # Pinned by digest for supply-chain safety (Scorecard Pinned-Dependencies).
 # Bump tag and digest together; get the digest with
 # `docker buildx imagetools inspect <image:tag>`.
-FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # Plain pip on a stock Python image (and Modal's): Strata runs in any
 # environment where uv can be found (src/strata/_uv_runtime.py).
