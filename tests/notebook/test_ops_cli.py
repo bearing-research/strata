@@ -11,7 +11,7 @@ import json
 import pytest
 
 from strata.cli import main
-from strata.notebook.ops import CellView, LocalNotebookOps, NotebookOpsError
+from strata.notebook.ops import CellView, DependencyResult, LocalNotebookOps, NotebookOpsError
 from tests.notebook.test_cli import _build_notebook
 
 
@@ -740,3 +740,121 @@ def test_cli_run_saves_a_loop_cells_final_display(tmp_path, capsys, argv):
     assert output["content_type"] == "text/markdown"
     assert output["artifact_uri"]
     assert "step 3" in export_notebook(nb)
+
+
+class TestCellEditCommand:
+    def test_a_file_replaces_the_source_on_disk_and_in_the_graph(self, chain_nb, tmp_path, capsys):
+        source = tmp_path / "b.py"
+        source.write_text("y = 2\n")
+
+        assert main(["cell", "edit", str(chain_nb), "b", "--file", str(source)]) == 0
+
+        assert json.loads(capsys.readouterr().out)["source"] == "y = 2\n"
+        assert (chain_nb / "cells" / "b.py").read_text() == "y = 2\n"
+        # b no longer reads x, so the edge a -> b is gone.
+        assert LocalNotebookOps(chain_nb).dag().edges == []
+
+    def test_a_dash_reads_stdin(self, chain_nb, monkeypatch, capsys):
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO("y = 3\n"))
+
+        assert main(["cell", "edit", str(chain_nb), "b", "--file", "-", "--format", "human"]) == 0
+
+        assert capsys.readouterr().out.startswith("edited b")
+        assert (chain_nb / "cells" / "b.py").read_text() == "y = 3\n"
+
+    def test_an_unreadable_file_is_a_usage_error(self, chain_nb, tmp_path, capsys):
+        missing = tmp_path / "nope.py"
+
+        assert main(["cell", "edit", str(chain_nb), "b", "--file", str(missing)]) == 2
+
+        assert capsys.readouterr().err.startswith("error: cannot read --file:")
+        assert (chain_nb / "cells" / "b.py").read_text() == "y = x + 1"
+
+    def test_an_unknown_cell_is_exit_1(self, chain_nb, tmp_path, capsys):
+        source = tmp_path / "s.py"
+        source.write_text("z = 1\n")
+
+        assert main(["cell", "edit", str(chain_nb), "ghost", "--file", str(source)]) == 1
+
+        assert json.loads(capsys.readouterr().out) == {"error": "no cell with id 'ghost'"}
+        assert not (chain_nb / "cells" / "ghost.py").exists()
+        assert (chain_nb / "cells" / "b.py").read_text() == "y = x + 1"
+
+
+class TestCellMoveCommand:
+    def _order_on_disk(self, notebook_dir) -> list[str]:
+        import tomllib
+
+        cells = tomllib.loads((notebook_dir / "notebook.toml").read_text())["cells"]
+        return [c["id"] for c in sorted(cells, key=lambda c: c["order"])]
+
+    def test_a_move_reorders_notebook_toml_and_lists_the_new_order(self, chain_nb, capsys):
+        assert main(["cell", "mv", str(chain_nb), "b", "--to", "0"]) == 0
+
+        assert [c["id"] for c in json.loads(capsys.readouterr().out)] == ["b", "a"]
+        assert self._order_on_disk(chain_nb) == ["b", "a"]
+
+    def test_human_output_is_the_ids_in_order(self, chain_nb, capsys):
+        assert main(["cell", "mv", str(chain_nb), "a", "--to", "1", "--format", "human"]) == 0
+
+        assert capsys.readouterr().out.split() == ["b", "a"]
+
+    def test_an_unknown_cell_is_exit_1_and_moves_nothing(self, chain_nb, capsys):
+        assert main(["cell", "mv", str(chain_nb), "ghost", "--to", "0"]) == 1
+
+        assert json.loads(capsys.readouterr().out) == {"error": "no cell with id 'ghost'"}
+        assert self._order_on_disk(chain_nb) == ["a", "b"]
+
+
+class TestDepCommands:
+    def _fake(self, monkeypatch, *, success: bool = True, refuse: bool = False) -> list:
+        calls: list = []
+
+        async def _mutate(self, package, action):
+            calls.append((package, action))
+            if refuse:
+                raise NotebookOpsError("an environment job is already running")
+            return DependencyResult(
+                package=package,
+                action=action,
+                success=success,
+                lockfile_changed=success,
+                error=None if success else "no solution found",
+            )
+
+        monkeypatch.setattr(LocalNotebookOps, "_mutate_dependency", _mutate)
+        return calls
+
+    @pytest.mark.parametrize(("verb", "action"), [("add", "add"), ("rm", "remove")])
+    def test_the_verb_maps_to_its_action(self, chain_nb, monkeypatch, capsys, verb, action):
+        calls = self._fake(monkeypatch)
+
+        assert main(["dep", verb, str(chain_nb), "pandas>=2"]) == 0
+
+        assert calls == [("pandas>=2", action)]
+        assert json.loads(capsys.readouterr().out)["action"] == action
+
+    def test_a_failed_change_is_exit_1_and_says_why(self, chain_nb, monkeypatch, capsys):
+        self._fake(monkeypatch, success=False)
+
+        assert main(["dep", "add", str(chain_nb), "nope", "--format", "human"]) == 1
+
+        assert capsys.readouterr().out.strip() == "add nope: failed: no solution found"
+
+    def test_human_output_says_ok(self, chain_nb, monkeypatch, capsys):
+        self._fake(monkeypatch)
+
+        assert main(["dep", "rm", str(chain_nb), "pandas", "--format", "human"]) == 0
+
+        assert capsys.readouterr().out.strip() == "remove pandas: ok"
+
+    def test_a_refusal_is_exit_1_with_the_error(self, chain_nb, monkeypatch, capsys):
+        self._fake(monkeypatch, refuse=True)
+
+        assert main(["dep", "add", str(chain_nb), "pandas"]) == 1
+
+        assert json.loads(capsys.readouterr().out) == {
+            "error": "an environment job is already running"
+        }
