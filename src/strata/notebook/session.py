@@ -774,10 +774,10 @@ class NotebookSession:
         """Point a cell at the artifacts its last successful run stored.
 
         For a cell no generic key finds (SQL, prompt and widget cells keyed under their
-        own scheme, a cell with a read-write mount) nothing else repopulates
-        ``artifact_uris`` on open: a downstream cell would compute a provenance hash that
-        no longer matches its record, and the cell would not show what a live session
-        that ran it does.
+        own scheme) and one its key finds nothing for (:meth:`_keep_last_outputs`),
+        nothing else repopulates ``artifact_uris`` on open: a downstream cell would
+        compute a provenance hash that no longer matches its record, and the cell would
+        not show what a live session that ran it does.
 
         A ``# @per_variant`` cell stores one artifact per variant, which its run runs in
         the order of the group's tabs, so it ends pointing at the last one stored.
@@ -798,6 +798,16 @@ class NotebookSession:
                     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
                     cell.artifact_uris[name] = uri
                     cell.artifact_uri = uri
+
+    def _keep_last_outputs(self, cell: Any) -> None:
+        """Point a cell its current key finds nothing for at what its last run stored.
+
+        The session that ran it still points there: staleness says the result is out of
+        date, not that it is gone. Filled only when the cell points at nothing, which is
+        after a reopen.
+        """
+        if not cell.artifact_uris:
+            self._restore_last_stored_outputs(cell)
 
     def _restore_loop_carry(self, cell: Any, provenance_hash: str) -> None:
         """Point a loop cell at its final state, as the run that stored it does.
@@ -1208,6 +1218,7 @@ class NotebookSession:
                     self._parts_under_stale_upstream(cell, prefetched.get(cell_id), packages),
                     tuple(uid for uid in cell.upstream_ids if uid in stale_cells),
                 )
+                self._keep_last_outputs(cell)
                 continue
 
             effective_worker = self._effective_worker_name(cell)
@@ -1246,8 +1257,7 @@ class NotebookSession:
             if outside.has_rw_mount:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
-                # Never cached, so never ready; still showing what its last run stored.
-                self._restore_last_stored_outputs(cell)
+                self._keep_last_outputs(cell)
                 continue
 
             # A scratchpad cell's result is under its key over what its runs read, as last
@@ -1345,6 +1355,7 @@ class NotebookSession:
                     stale_cells.add(cell_id)
                 if cell_id in stale_cells:
                     to_explain[cell_id] = StaleCell(key.parts)
+                    self._keep_last_outputs(cell)
             else:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 for var_name, (artifact_id, version) in cached_outputs.items():
