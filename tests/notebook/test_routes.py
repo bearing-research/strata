@@ -3380,11 +3380,8 @@ def test_cell_data_export_rejects_bad_format(client, tmp_path):
 class TestCreateAndImportRefusals:
     """What create and the snapshot import refuse, and a sync that cannot start."""
 
-    def _storage(self, monkeypatch, tmp_path) -> Path:
-        return _import_storage(monkeypatch, tmp_path)
-
     def test_creating_where_a_notebook_exists_is_a_conflict(self, client, monkeypatch, tmp_path):
-        storage = self._storage(monkeypatch, tmp_path)
+        storage = _import_storage(monkeypatch, tmp_path)
         body = {"parent_path": str(storage), "name": "Twice"}
         assert client.post("/v1/notebooks/create", json=body).status_code == 200
         before = (storage / "twice" / "notebook.toml").read_text()
@@ -3401,9 +3398,8 @@ class TestCreateAndImportRefusals:
     ):
         from strata.notebook.environment_jobs import EnvironmentJobs
 
-        storage = self._storage(monkeypatch, tmp_path / "storage")
+        storage = _import_storage(monkeypatch, tmp_path / "storage")
         storage.mkdir()
-        payload, _ = _snapshot_bytes(tmp_path)
 
         async def _refuse(self, **kwargs):
             raise RuntimeError("no uv on PATH")
@@ -3415,6 +3411,7 @@ class TestCreateAndImportRefusals:
                 "/v1/notebooks/create", json={"parent_path": str(storage), "name": "No Env"}
             )
         else:
+            payload, _ = _snapshot_bytes(tmp_path)
             response = client.post(
                 "/v1/notebooks/import-snapshot",
                 files={"file": ("demo.zip", payload, "application/zip")},
@@ -3429,7 +3426,7 @@ class TestCreateAndImportRefusals:
         assert environment["sync_notice"] is None
 
     def test_an_empty_snapshot_upload_is_refused(self, client, monkeypatch, tmp_path):
-        storage = self._storage(monkeypatch, tmp_path / "storage")
+        storage = _import_storage(monkeypatch, tmp_path / "storage")
         storage.mkdir()
 
         response = client.post(
@@ -3443,7 +3440,7 @@ class TestCreateAndImportRefusals:
     def test_importing_into_a_directory_with_other_files_is_a_conflict(
         self, client, monkeypatch, tmp_path
     ):
-        storage = self._storage(monkeypatch, tmp_path / "storage")
+        storage = _import_storage(monkeypatch, tmp_path / "storage")
         (storage / "demo").mkdir(parents=True)
         (storage / "demo" / "notes.txt").write_text("mine")
         payload, _ = _snapshot_bytes(tmp_path)
