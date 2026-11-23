@@ -4606,6 +4606,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>On Windows a server's cells end with it.</strong> A server stopped there (<code>strata scratch
+  stop</code> terminates it) or one that crashed left a running cell, and what it started,
+  running on: Windows has neither the lifeline nor the process groups POSIX ends them
+  with. The server now runs in a job of its own, which Windows closes as it exits,
+  ending every process left in it. (#1617)</li>
 <li><strong>A scratchpad's warm worker is not lost when its check fails.</strong> A worker is checked
   against the environment it was built on as it is taken from the pool. When that check
   raised, or the run was cancelled during it, the worker was neither handed out nor
