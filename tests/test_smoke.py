@@ -765,7 +765,7 @@ class TestEagerWarmup:
 
 # Run in a fresh interpreter, so what the server's start loaded is all that sys.modules holds.
 _STARTUP_PROBE = """
-import json, sys
+import json, os, sys
 from fastapi.testclient import TestClient
 from strata.server import app, get_state
 
@@ -781,7 +781,9 @@ with TestClient(app, base_url="http://127.0.0.1") as client:
     if sys.argv[1:] == ["scan"]:
         get_state().planner
 seen["stopped"] = [m for m in HEAVY if m in sys.modules]
-print(json.dumps(seen))
+# A file, not stdout: the server's own log lines go there too, in any order.
+with open(os.environ["PROBE_OUT"], "w") as out:
+    json.dump(seen, out)
 """
 
 
@@ -887,7 +889,9 @@ class TestScanPlaneAtStartup:
             STRATA_ARTIFACT_DIR=str(tmp_path / "artifacts"),
             STRATA_CACHE_DIR=str(tmp_path / "cache"),
             STRATA_NOTEBOOK_STORAGE_DIR=str(tmp_path),
+            PROBE_OUT=str(tmp_path / "probe.json"),
         )
+        (tmp_path / "probe.json").unlink(missing_ok=True)  # the test's first start wrote one
         done = subprocess.run(
             [sys.executable, "-c", _STARTUP_PROBE, *args],
             env=env,
@@ -896,7 +900,7 @@ class TestScanPlaneAtStartup:
             timeout=120,
         )
         assert done.returncode == 0, done.stderr[-2000:]
-        return json.loads(done.stdout.splitlines()[-1])
+        return json.loads((tmp_path / "probe.json").read_text())
 
     def test_a_scratchpad_daemon_loads_it_on_first_use_only(self, tmp_path):
         idle = self._start(tmp_path, str(tmp_path))
