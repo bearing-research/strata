@@ -32,7 +32,7 @@ def _notebook(tmp_path: Path) -> Path:
     return notebook_dir
 
 
-def _active_in_toml(notebook_dir: Path) -> dict[str, str]:
+def _active_in_toml(notebook_dir: Path) -> dict[str, str | None]:
     data = tomllib.loads((notebook_dir / "notebook.toml").read_text())
     return {g["group"]: g.get("active") for g in data.get("variant_group", [])}
 
@@ -53,7 +53,6 @@ def connected(tmp_path):
     """A session on the switch notebook, with a socket that receives its broadcasts."""
     notebook_dir = _notebook(tmp_path)
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
-    session.refresh_environment_runtime()
     socket = _Socket()
     _notebook_connections[session.id] = [socket]
     try:
@@ -108,6 +107,8 @@ class TestSetActiveOverTheWebSocket:
 
         assert socket.sent == []
         assert (session.path / "notebook.toml").read_text() == before
+        (group,) = session.notebook_state.variant_groups
+        assert group.active_name == "a"
 
 
 class TestAddOverTheWebSocket:
@@ -166,6 +167,7 @@ class TestOverRest:
         assert response.status_code == 200, response.text
         assert response.json()["variant_groups"][0]["active_name"] == "b"
         assert _active_in_toml(session.path) == {"g": "b"}
+        assert _producer_of_x(session) == "b"
 
     def test_post_adds_an_active_copy(self, client):
         http, url, session = client
