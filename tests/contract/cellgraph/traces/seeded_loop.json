@@ -725,8 +725,14 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-seeded_loop_cell_P_var_state@v=1",
+      "artifact_uris": {
+       "state": {
+        "artifact": "nb_cellgraph-seeded_loop_cell_P_var_state@v=1",
+        "content_sha256": "ad57366865126e55649ecb23ae1d48887544976efea46a48eb5d85a6eeb4d306",
+        "provenance_hash": "e030b88cb98a4e686935620354471014fa8a7bf9a5f4a907049e1ca3753cccfb"
+       }
+      },
       "instances": {}
      },
      "resolved": {
@@ -1197,15 +1203,25 @@
      "keys": {
       "definition_key": "0244a2027f8bc458762bfae89720a31d4eed44cb6d43937971c22709b36d371d",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "8d35d6a2ae8bbb0d1e3cd697ccab1a7b564b98851edf84b3abecd39ed73a4b32",
-      "input_hashes": [],
+      "execution_key": "196db3290dd13777a4898cc24edf78a0f9a36659e2df5474c3f6b6c6ba874b41",
+      "input_hashes": [
+       "[\"provenance\",\"f22b518a51388c60641c0e199b799e2056cb2b1d975b8abcf161031705ae84d6\"]"
+      ],
       "source_hash": "0244a2027f8bc458762bfae89720a31d4eed44cb6d43937971c22709b36d371d",
-      "upstream_hashes": []
+      "upstream_hashes": [
+       "[\"provenance\",\"f22b518a51388c60641c0e199b799e2056cb2b1d975b8abcf161031705ae84d6\"]"
+      ]
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-seeded_loop_cell_F_var_state@v=1",
+      "artifact_uris": {
+       "state": {
+        "artifact": "nb_cellgraph-seeded_loop_cell_F_var_state@v=1",
+        "content_sha256": "6f4b6612125fb3a0daecd2799dfd6c9c299424fd920f9b308110a2c1fbd8f443",
+        "provenance_hash": "ff91ef96c5fd0d6bc640de1dd14a077829c27b553dde6954dc183603c75e93cb"
+       }
+      },
       "instances": {}
      },
      "resolved": {
@@ -1250,8 +1266,14 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-seeded_loop_cell_L_var_state@v=1",
+      "artifact_uris": {
+       "state": {
+        "artifact": "nb_cellgraph-seeded_loop_cell_L_var_state@v=1",
+        "content_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+        "provenance_hash": "f22b518a51388c60641c0e199b799e2056cb2b1d975b8abcf161031705ae84d6"
+       }
+      },
       "instances": {}
      },
      "resolved": {
@@ -1285,10 +1307,14 @@
      "keys": {
       "definition_key": "893fdd1ab4bd1a41188a0ea75cc6191cba2c09f4e00f951c3de4937d8959b685",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "1c79e16fddd694684e4601046ef2b8495af8c8387859b67e403bf417ce579cf3",
-      "input_hashes": [],
+      "execution_key": "700af036560dad5c387aaed73f51953d58aa43850d0b4523057166f466726955",
+      "input_hashes": [
+       "[\"provenance\",\"ff91ef96c5fd0d6bc640de1dd14a077829c27b553dde6954dc183603c75e93cb\"]"
+      ],
       "source_hash": "893fdd1ab4bd1a41188a0ea75cc6191cba2c09f4e00f951c3de4937d8959b685",
-      "upstream_hashes": []
+      "upstream_hashes": [
+       "[\"provenance\",\"ff91ef96c5fd0d6bc640de1dd14a077829c27b553dde6954dc183603c75e93cb\"]"
+      ]
      },
      "language": "python",
      "published": {

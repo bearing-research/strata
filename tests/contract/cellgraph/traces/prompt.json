@@ -417,10 +417,14 @@
      "keys": {
       "definition_key": "f216562e7f3d05227788279089b1797c41ceaa5d027027edf0f2a70e166830e7",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "c862b213e6e32811d050c631cdef633da611ec5e059b54cc8870b6a5265b1846",
-      "input_hashes": [],
+      "execution_key": "b4e66bac7ce639835ae3fb412165fbcc044a912af915d056eba59671fbac0c25",
+      "input_hashes": [
+       "[\"provenance\",\"c37c21b48f7df15f0dd7e7e3fc714fe58b7b8b92af935b4d60f8978ad34e5771\"]"
+      ],
       "source_hash": "f216562e7f3d05227788279089b1797c41ceaa5d027027edf0f2a70e166830e7",
-      "upstream_hashes": []
+      "upstream_hashes": [
+       "[\"provenance\",\"c37c21b48f7df15f0dd7e7e3fc714fe58b7b8b92af935b4d60f8978ad34e5771\"]"
+      ]
      },
      "language": "python",
      "published": {
@@ -471,8 +475,14 @@
      },
      "language": "prompt",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-prompt_cell_p2_var_answer@v=1",
+      "artifact_uris": {
+       "answer": {
+        "artifact": "nb_cellgraph-prompt_cell_p2_var_answer@v=1",
+        "content_sha256": "0db32a8426b9263483bde2d4ad9242db60466b25ae0f617a6781b256110a56ab",
+        "provenance_hash": "c37c21b48f7df15f0dd7e7e3fc714fe58b7b8b92af935b4d60f8978ad34e5771"
+       }
+      },
       "instances": {}
      },
      "resolved": {

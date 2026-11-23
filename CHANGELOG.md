@@ -792,6 +792,11 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A stale cell keeps its outputs after a reopen.** A cell whose current key finds
+  nothing stored (an input changed, its source was edited, an upstream went stale, it has
+  a read-write mount, or a mount's credential is missing) reopened pointing at nothing,
+  where the session that ran it still pointed at its last outputs, and a cell reading it
+  was keyed as if it had never run. (#1637)
 - **A deny rule refuses a table under every spelling of its name.** Rules matched the
   name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
   served `lake:FINANCE.ledger` past a deny on `*:finance.*`. Deny rules now match in any
