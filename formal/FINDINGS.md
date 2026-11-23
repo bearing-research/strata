@@ -753,3 +753,48 @@ Severity: low (fairness only; the tenant limiter still bounds the tenant).
 **Fixed.** Eviction skips semaphores with a slot held; past the bound, the held ones are
 live streams, so the table stays bounded by them. Regression test:
 `tests/test_qos_admission.py::test_a_held_client_cap_outlives_other_callers`.
+
+### 19. A cascade marks a step stale that reads nothing that failed
+
+**Property:** `test_run_all_properties.py` (SYSTEMS 9, BAT-1). Shrunk case: `c1` reads a
+variable defined only below it (unresolved, so it fails), `c2` fails on its own, and a
+sink reads both. Run cell by cell, the sink's cascade ran `c1`, which failed, then skipped
+`c2` and marked it stale: once a step fails the cascade skips the rest and marked every
+one stale, overwriting `c2`'s own error though nothing it reads had failed. Run All left
+`c2` in error. Severity: low (a wrong status).
+
+**Fixed.** The cascade still stops at a failure, since its target cannot run, but marks
+blocked (stale, reason upstream, as Run All does) only the steps that read the failure;
+the others keep their status. Regression test:
+`tests/notebook/test_ws.py::test_a_cascade_blocks_only_what_reads_the_failure`.
+
+### 20. A cell blocked behind a failure is shown idle after the next run
+
+**Property:** `test_run_all_properties.py` (SYSTEMS 9, BAT-1). Run All and a cascade mark
+a cell that cannot run because what it reads failed as stale, reason upstream, to say why
+it did not run. The staleness walk after any later successful run recomputed every cell
+and called one that had never run idle ("no result to invalidate"), so the status a
+blocked cell ended with depended on whether anything ran after it: in Run All a later
+independent cell did, cell by cell the sink's cascade marked it again. Severity: low (a
+wrong status).
+
+**Fixed.** A blocked mark stands while the failure it waits on does: the walk keeps it on
+a cell it would call idle when an upstream's failure still stands. A never-run cell that
+no run tried to run (below a cell that failed alone, or on a cold open) is still idle. Regression test:
+`tests/notebook/test_ws.py::test_a_cell_blocked_by_a_failure_stays_blocked_after_another_run`.
+
+### 21. A batched cell reads an input the cell before it changed in place
+
+**Property:** `test_run_all_properties.py` (SYSTEMS 9, BAT-1), confirming a survey lead.
+Shrunk case: `xs = [0]`; `xs.append(0); n = len(xs)`; `m = len(xs)`. Run cell by cell,
+the second cell changes only its own copy of `xs`, and the third loads the stored `[0]`:
+`m = 1`. In a Run All batch the cells share one namespace, so the third read the appended
+list: `m = 2`, stored and cached under a key over `xs = [0]`, which a later single-cell
+run of it then hits. The batch detected the mutation and only warned. Severity: medium
+(a wrong value, silently cached, behind a mutation warning).
+
+**Fixed.** After a batched cell changes an input in place that it does not publish, the
+harness loads that input again from the file it was stored as (seeded from the store, or
+written by an earlier cell of the batch), so later cells read what a single-cell run
+would. Regression test:
+`tests/notebook/test_mutation_parity.py::test_a_batched_cell_after_an_input_mutation_reads_the_stored_value`.

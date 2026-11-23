@@ -762,6 +762,55 @@ y + 1
     assert terminal["payload"]["status"] == "ready"
 
 
+@pytest.mark.asyncio
+async def test_a_cascade_blocks_only_what_reads_the_failure(temp_notebook):
+    """Once a step fails the cascade skips the rest. It marked every skipped step stale,
+    so an independent one lost its own error (finding 19)."""
+    notebook_dir, _ = temp_notebook
+    write_cell(notebook_dir, "root", "x = 1 // 0")
+    write_cell(notebook_dir, "middle", "y = 1 // 0")
+    write_cell(notebook_dir, "leaf", "z = x + y")
+    session = open_session(notebook_dir)
+    await _run_cell_to_terminal(session, "middle")
+
+    await _run_cell_to_terminal(session, "leaf")
+
+    status = {c.id: c.status.value for c in session.notebook_state.cells}
+    assert status == {"root": "error", "middle": "error", "leaf": "stale"}
+
+
+@pytest.mark.asyncio
+async def test_a_cell_blocked_by_a_failure_stays_blocked_after_another_run(temp_notebook):
+    """A cell skipped behind a failure is stale (it cannot run). The next run's staleness
+    walk called one that never ran idle, so what a cell showed depended on what ran after
+    (finding 20)."""
+    notebook_dir, _ = temp_notebook
+    write_cell(notebook_dir, "root", "x = 1 // 0")
+    write_cell(notebook_dir, "middle", "y = x + 1")
+    write_cell(notebook_dir, "leaf", "z = 3")
+    session = open_session(notebook_dir)
+    await _run_cell_to_terminal(session, "middle")
+
+    await _run_cell_to_terminal(session, "leaf")
+
+    status = {c.id: c.status.value for c in session.notebook_state.cells}
+    assert status == {"root": "error", "middle": "stale", "leaf": "ready"}
+
+
+@pytest.mark.asyncio
+async def test_a_cascade_blocks_a_step_with_a_result_behind_a_failure(temp_notebook):
+    notebook_dir, _ = temp_notebook
+    session = open_session(notebook_dir)
+    await _run_cell_to_terminal(session, "leaf")
+    write_cell(notebook_dir, "root", "x = 1 // 0")
+    session = open_session(notebook_dir)
+
+    await _run_cell_to_terminal(session, "leaf")
+
+    status = {c.id: c.status.value for c in session.notebook_state.cells}
+    assert status == {"root": "error", "middle": "stale", "leaf": "stale"}
+
+
 # --- Environment-busy / blocked ---
 
 

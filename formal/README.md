@@ -48,6 +48,7 @@ the replay becomes the fix's regression test.
 | `run_models.py` | Runs every configuration and checks it ends as pinned: passes, or violates its named invariant |
 | `test_pruning_properties.py` | Property: a pruned row group holds no matching row (PR-1) |
 | `test_staleness_properties.py` | Property: random edits and runs on a real notebook match a fresh evaluation (NB-3) |
+| `test_run_all_properties.py` | Differential property: random notebooks run with Run All and cell by cell, fresh and after an edit, leave the same statuses and stored values (BAT-1) |
 | `test_cache_soundness_properties.py` | Stateful property: a long-lived planner and row-group cache serve exactly the live rows of a real Iceberg table under writes, deletes, schema evolution and recreation (CK-1, PR-2, MD-2) |
 
 The artifact lifecycle and build lease models live in the

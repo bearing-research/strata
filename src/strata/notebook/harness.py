@@ -444,11 +444,13 @@ def _run_one_batched_cell(
     frame_out: Any,
     resp_in: Any,
     manifest: dict,
+    published: dict[str, tuple[str, Path]],
 ) -> tuple[str, str | None]:
     """Execute one cell within a batch; return ``(status, failed_reason)``.
 
     ``status`` is ``"ok"``, ``"cell_error"`` or ``"persist_failed"``;
-    ``failed_reason`` matches ``batch_end``'s ``reason`` field.
+    ``failed_reason`` matches ``batch_end``'s ``reason`` field. ``published`` maps each
+    variable the batch can read to the file it was stored as; the cell adds its own.
     """
     cell_id = cell["cell_id"]
     source = cell["source"]
@@ -523,6 +525,8 @@ def _run_one_batched_cell(
                             f"Warning: failed to load cached {var_name} for {cell_id}: {exc}",
                             file=sys.stderr,
                         )
+                    else:
+                        published[var_name] = (content_type, blob_path)
                 _send_frame(
                     frame_out,
                     "cell_output",
@@ -552,8 +556,7 @@ def _run_one_batched_cell(
             old_stdout, old_stderr = sys.stdout, sys.stderr
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
-            # Batch can't recapture in-place input mutations (the DAG is static), so
-            # this is warn-only.
+            # An input changed in place is put back from its file after the cell (below).
             input_snapshots = _immut.snapshot_inputs(namespace, references)
             # What a later hit saves: the body and its serialization, not the cell's
             # share of the batch's setup or the parent's persist.
@@ -587,11 +590,10 @@ def _run_one_batched_cell(
                 # Catches mutations the static analyzer can't see (aliases, helper-fn
                 # mutation, bare mutators). An input the cell changes in place and
                 # passes on reaches downstream as published, as in a single run.
-                mutation_warnings = list(
-                    _immut.detect_mutations(
-                        namespace, input_snapshots, exported_names=mutation_defines
-                    )
+                input_mutations = _immut.detect_mutations(
+                    namespace, input_snapshots, exported_names=mutation_defines
                 )
+                mutation_warnings = list(input_mutations)
                 mutation_warnings.extend(
                     _immut.detect_shared_mutable_outputs(
                         {vn: namespace[vn] for vn in consumed_vars if vn in namespace}
@@ -658,6 +660,15 @@ def _run_one_batched_cell(
             ack = _recv_response(resp_in)
             if not ack.get("ok"):
                 return ("persist_failed", "persist_failed")
+            # A single-cell run changes only its own copy of an input, and later cells
+            # load the stored value; put that value back, or they read the change.
+            for warning in input_mutations:
+                stored = published.get(warning["var_name"])
+                if stored is not None:
+                    namespace[warning["var_name"]] = _ser.deserialize_value(*stored)
+            for var_name, meta in outputs.items():
+                if "file" in meta:
+                    published[var_name] = (meta["content_type"], cell_output_dir / meta["file"])
             return ("ok", None)
     finally:
         # The batch process is reused across cells, so close the client (no leaked
@@ -743,6 +754,11 @@ def execute_batch(
 
     with apply_env_overrides({"env": shared_env}):
         _seed_upstream_namespace(upstream_inputs, output_dir, namespace, tainted_inputs)
+    published = {
+        var_name: (spec.get("content_type", ""), output_dir / spec["file"])
+        for var_name, spec in (upstream_inputs or {}).items()
+        if spec.get("file") and var_name in namespace
+    }
 
     for cell in cells:
         blocker = _first_tainted_reference(cell["source"], tainted_inputs)
@@ -756,7 +772,7 @@ def execute_batch(
             return
 
         status, reason = _run_one_batched_cell(
-            cell, namespace, output_dir, frame_out, resp_in, manifest
+            cell, namespace, output_dir, frame_out, resp_in, manifest, published
         )
         if status != "ok":
             _send_frame(

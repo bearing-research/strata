@@ -34,6 +34,11 @@ in [`README.md`](README.md).
   fixed. Two leads did not hold: ADM-6 (no cancel can land in `release()`, which
   never suspends; now pinned by a test) and STR-2 (stream ids are fresh uuids, so a
   second miss never replaces another's cleanup).
+- **Phase 5 (Run All):** `test_run_all_properties.py`, a differential property over
+  random notebooks run with Run All and cell by cell, found findings 19 and 20 (the
+  statuses of cells skipped behind a failure) and confirmed the mutation lead as
+  finding 21 (a batched cell read an input the cell before changed in place); all
+  fixed.
 
 ## Conventions
 
@@ -104,9 +109,9 @@ property, the replays of what it finds, then a PR per fix.
 4. **Streams** (SYSTEMS 1 and 2). Done for ADM-5, ADM-6, STR-1 and STR-2.
    Open: the passthrough path (no artifact store) and multi-node ownership are
    outside `Streams.tla`.
-5. **Run All equals single-cell runs** (BAT-1). A differential property:
-   random notebooks run with `notebook_run_all` and cell by cell must leave
-   the same stored values and statuses.
+5. **Run All equals single-cell runs** (BAT-1). Done for Python cells over ints
+   and lists. Open: module state, `@nocache` (BAT-2), workers and loops in the
+   generator.
 6. **Encodings and naming** (PROV-3, ACL-2 beyond the SQL-catalog shape).
    Property tests: transform specs round-trip canonically; for each catalog
    shape, every URI form that loads one table is refused by a deny on any.
