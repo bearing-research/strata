@@ -395,9 +395,11 @@ jobs:
           - os: ubuntu-latest
             r: oldrel-1
 
-    # Every test marked ``r``, wherever it lives: a list of files left out the R
-    # tests in other files, which then skipped in every job.
+    # Selected by marker, not by file: a list of files missed R tests in other
+    # files, which then skipped in every job. REQUIRE turns a missing R or R
+    # package into a failure, where a skip would pass with nothing checked.
     env:
+      STRATA_TEST_REQUIRE_R: "1"
       R_TEST_ARGS: >-
         tests/ -m r
         -v --tb=short

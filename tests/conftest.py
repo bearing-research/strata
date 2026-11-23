@@ -145,13 +145,24 @@ def _r_missing(packages: tuple[str, ...]) -> str | None:
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip an ``r``-marked test without R or the packages it names (CI's R job runs ``-m r``)."""
+    """Skip an ``r``-marked test without R or the packages it names (CI's R job runs ``-m r``).
+
+    With ``STRATA_TEST_REQUIRE_R`` set, as in the R job, a missing R fails the run: there a
+    skip would pass with nothing checked.
+    """
+    required = os.environ.get("STRATA_TEST_REQUIRE_R") == "1"
     for item in items:
         for mark in item.iter_markers("r"):
-            reason = _r_missing(tuple(mark.kwargs.get("packages", ())))
-            if reason is not None:
-                item.add_marker(pytest.mark.skip(reason=reason))
-                break
+            packages = mark.kwargs.get("packages", [])
+            if mark.args or isinstance(packages, str) or set(mark.kwargs) - {"packages"}:
+                raise pytest.UsageError(f"{item.nodeid}: write pytest.mark.r(packages=[...])")
+            reason = _r_missing(tuple(packages))
+            if reason is None:
+                continue
+            if required:
+                raise pytest.UsageError(f"{item.nodeid}: {reason} (STRATA_TEST_REQUIRE_R=1)")
+            item.add_marker(pytest.mark.skip(reason=reason))
+            break
 
 
 _INSTALLED = pytest.StashKey[set[str]]()
