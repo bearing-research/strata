@@ -280,7 +280,7 @@ class TestAFailedCacheWriteIsAMiss:
     def test_a_clear_under_the_write_does_not_fail_the_scan(
         self, strata_config, cache_key, sample_batch, monkeypatch
     ):
-        import strata.cache.disk as disk
+        from strata.cache import disk
         from strata.types import Task
 
         class Storage:
@@ -312,7 +312,7 @@ class TestAFailedCacheWriteIsAMiss:
     def test_a_put_whose_sidecar_fails_leaves_no_entry(
         self, strata_config, cache_key, sample_batch, monkeypatch
     ):
-        import strata.cache.disk as disk
+        from strata.cache import disk
 
         cache = DiskCache(strata_config)
         cache.put(cache_key, sample_batch)
