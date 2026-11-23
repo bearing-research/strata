@@ -26,8 +26,8 @@ from strata.fetcher import create_fetcher
 from strata.notebook.models import TableSpec
 from strata.notebook.tables import resolve_table_snapshot
 from strata.planner import ReadPlanner
-from tests.conftest import MINIO_IMAGE, make_azurite, start_container_or_skip
-from tests.docker_helpers import docker_daemon_reachable
+from tests.conftest import MINIO_IMAGE, make_azurite
+from tests.docker_helpers import docker_daemon_reachable, start_container_or_skip
 
 if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)

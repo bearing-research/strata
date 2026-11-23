@@ -17,7 +17,8 @@ if not docker_daemon_reachable():
 from vestigo.blob_store import AzureBlobStore  # noqa: E402
 
 from strata.config import StrataConfig  # noqa: E402
-from tests.conftest import make_azurite, start_container_or_skip  # noqa: E402
+from tests.conftest import make_azurite  # noqa: E402
+from tests.docker_helpers import start_container_or_skip  # noqa: E402
 from tests.presign_helpers import run_presigned_job  # noqa: E402
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]

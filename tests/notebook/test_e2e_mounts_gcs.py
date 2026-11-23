@@ -28,8 +28,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
-from tests.conftest import start_container_or_skip
-from tests.docker_helpers import docker_daemon_reachable
+from tests.docker_helpers import docker_daemon_reachable, start_container_or_skip
 from tests.notebook.test_keyless_mounts import _TokenService, external_account_file
 
 if not docker_daemon_reachable():

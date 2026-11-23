@@ -27,8 +27,8 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
-from tests.conftest import MINIO_IMAGE, start_container_or_skip
-from tests.docker_helpers import docker_daemon_reachable
+from tests.conftest import MINIO_IMAGE
+from tests.docker_helpers import docker_daemon_reachable, start_container_or_skip
 
 if not docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)

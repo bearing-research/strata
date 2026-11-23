@@ -1,8 +1,14 @@
-"""Whether a Docker daemon answers, for the modules whose tests need one."""
+"""Whether a Docker daemon answers, and starting a container, for the tests that need one."""
 
 import os
 import socket
 from urllib.parse import urlsplit
+
+import pytest
+
+# Set where the containers must start, the integration job: there a skip would pass
+# a run that never reached the backend.
+REQUIRE_CONTAINERS_ENV = "STRATA_TESTS_REQUIRE_CONTAINERS"
 
 _DEFAULT_HOST = (
     "npipe:////./pipe/docker_engine" if os.name == "nt" else "unix:///var/run/docker.sock"
@@ -30,3 +36,25 @@ def docker_daemon_reachable() -> bool:
     except OSError:
         return False
     return True
+
+
+def start_container_or_skip(container, *, label: str):
+    """Start a testcontainers container, skipping the module if startup fails.
+
+    A failed image pull (a Docker Hub flake, or fork CI without registry secrets) means the
+    backend is unavailable: a skip, not a failure, unless ``REQUIRE_CONTAINERS_ENV`` is set.
+    Only startup, including the container's wait strategy, is converted; later errors
+    propagate. The caller owns ``stop()``.
+    """
+    try:
+        container.start()
+    except Exception as exc:
+        try:
+            container.stop()
+        except Exception:
+            pass
+        reason = f"{label} container unavailable (Docker image pull/start failed): {exc}"
+        if os.environ.get(REQUIRE_CONTAINERS_ENV) == "1":
+            pytest.fail(reason)
+        pytest.skip(reason)
+    return container
