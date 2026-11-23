@@ -3249,13 +3249,15 @@ that matches your trust boundary.</p>
 <p>The original Strata value prop: identical scans hit the same cache.
 The key is content-addressed:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>hash(tenant | table_identity | table_uuid | file_path | file_size | row_group_id
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>     | projection_fingerprint | schema_id | deletes | reading)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>     | projection_fingerprint | schema_id | deletes | reading | added_snapshot_id)
 </code></pre></div>
 <p>No snapshot id: a data file never changes, so a row group stays cached
 across appends. <code>deletes</code> names the rows a snapshot deletes from that
-row group, <code>reading</code> the table's format version and name mapping, and
+row group, <code>reading</code> the table's format version and name mapping,
 <code>table_uuid</code> the table itself, so a dropped and recreated table never
-reads the old one's entries.</p>
+reads the old one's entries, and <code>added_snapshot_id</code> the snapshot that
+added the file, so a file rewritten at its path and registered again is
+read again.</p>
 <p>If Alice ran a scan an hour ago and Bob runs the same scan now, Bob
 hits Alice's cached result. <strong>This is intentional</strong>: it's the
 performance win that makes Strata interesting. In multi-tenant

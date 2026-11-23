@@ -4618,6 +4618,28 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A file registered again at the same path is read again.</strong> A Hive-layout file
+  rewritten in place and registered again (the old entry removed, the new one added) was
+  served from the row-group cache when it kept its size, since the cache knew it by
+  table, path and size. Its old footer also pruned the new rows by the old statistics,
+  filled a partition column the file omits with the old value, and after a rename failed
+  the scan. Every cache of a data file (row groups, footers, the column layout) now also
+  names the snapshot that added it, which registering a file changes and an append
+  keeps. The planning metadata store is discarded once, and the row-group cache misses
+  once. (#1627)</li>
+<li><strong>An edit cannot change a running cell, and a cell edited mid-batch is not shown
+  ready.</strong> <code>PUT /cells/{id}</code> and the MCP <code>edit_cell</code> tool accepted an edit of the running
+  cell, which the WebSocket refuses, and the recompute after any of their edits showed
+  the running cell idle, then ready on a source it never ran. They now refuse it (REST
+  answers 409 <code>cell_busy</code>) and leave a running cell running. A Run All cell edited while
+  it waited ran the source the batch had planned and was shown ready; it is now stale.
+  (#1622)</li>
+<li><strong>A run whose lease lapsed with nobody else wanting it goes on.</strong> A local cell run
+  holds its build's lease, renewed every 20 seconds. A laptop asleep through the cell,
+  or a minute of blocked event loop, let it lapse, and every later checkpoint and the
+  final store were refused, so a run that finished lost its outputs. The run now renews
+  the lease, or goes on in a new attempt of the same build when no other process took
+  it. (#1620)</li>
 <li><strong>A metrics writer thread ends with its collector.</strong> Every metrics collector started a
   thread that only interpreter exit stopped, and both the thread and its exit hook kept the
   collector: each server lifespan, and each row-group cache or fetcher built without one,
