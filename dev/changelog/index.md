@@ -785,6 +785,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A run no longer holds up the server while it hands its files to the harness user.**
+  With a harness user, the sweep for processes earlier cells left running and the change
+  of owner of the run's directory ran on the server's event loop, so every notebook and
+  socket it served waited for them on each run: the longer, the more processes the host
+  ran or files a mount staged. They now run in a thread. (#1614)
 - **A warm cell whose head the server could not record runs once.** When applying a
   cell's `strata.head` failed, the warm worker's error was taken for a missing worker, so
   the cell ran again cold, its side effects with it. The run now stops and fails with
