@@ -70,11 +70,11 @@ class PyArrowFetcher:
         self._max_file_cache_size = max_file_cache_size
         self._s3_filesystem = s3_filesystem
         self._equality_deletes = EqualityDeleteSets(s3_filesystem, max_equality_delete_rows)
-        # Parsed footers by (path, manifest size), least recently used first. Footers,
-        # not open handles: the fetch pool reads row groups of one file in parallel, and a
-        # ParquetFile is not thread-safe (pyarrow 25 segfaults). An immutable
-        # FileMetaData is shared; each read opens its own handle with it.
-        self._file_cache: OrderedDict[tuple[str, int], pq.FileMetaData] = OrderedDict()
+        # Parsed footers by (path, manifest size, added snapshot), least recently used
+        # first. Footers, not open handles: the fetch pool reads row groups of one file in
+        # parallel, and a ParquetFile is not thread-safe (pyarrow 25 segfaults). An
+        # immutable FileMetaData is shared; each read opens its own handle with it.
+        self._file_cache: OrderedDict[tuple[str, int, int | None], pq.FileMetaData] = OrderedDict()
         self._file_cache_lock = threading.Lock()
 
     @staticmethod
@@ -84,15 +84,17 @@ class PyArrowFetcher:
         if callable(close):
             close()
 
-    def _open(self, file_path: str, file_size: int) -> pq.ParquetFile:
+    def _open(
+        self, file_path: str, file_size: int, added_snapshot_id: int | None = None
+    ) -> pq.ParquetFile:
         """Return a handle on *file_path* for one read, opened with its cached footer.
 
-        The footer is cached under the manifest's *file_size* too, so a table recreated at
-        the same paths does not read its new files with the old files' footers.
+        The footer is cached under the manifest's *file_size* and the snapshot that added the
+        file too, so a path registered again is not read with the old file's footer.
         """
         from strata.iceberg.lake_files import open_parquet
 
-        key = (file_path, file_size)
+        key = (file_path, file_size, added_snapshot_id)
         with self._file_cache_lock:
             metadata = self._file_cache.get(key)
             if metadata is not None:
@@ -125,7 +127,7 @@ class PyArrowFetcher:
                 if name is not None and name not in columns
             ]
             columns = [*columns, *keys_only]
-        pf = self._open(task.file_path, task.cache_key.file_size)
+        pf = self._open(task.file_path, task.cache_key.file_size, task.cache_key.added_snapshot_id)
         try:
             table = pf.read_row_group(task.row_group_id, columns=columns)
             task.storage_bytes = _chunk_bytes(pf.metadata.row_group(task.row_group_id), columns)

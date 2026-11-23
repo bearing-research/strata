@@ -84,7 +84,7 @@ def test_concurrent_reads_of_one_path_keep_one_footer(tmp_path):
     with ThreadPoolExecutor(max_workers=6) as pool:
         list(pool.map(read, range(6)))
 
-    assert list(fetcher._file_cache) == [(path, 1)]
+    assert list(fetcher._file_cache) == [(path, 1, None)]
 
 
 def test_a_file_rewritten_at_its_path_is_not_read_with_the_old_footer(tmp_path):

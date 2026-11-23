@@ -75,17 +75,20 @@ the same artifact id.
 (`cache/disk.py`), keyed by `CacheKey` (`types.py`). Since #1214 the key has
 no snapshot id: it names what a snapshot can change about a row group's rows
 instead, `hash(tenant | table_identity | table_uuid | file_path | file_size |
-row_group_id | projection | schema_id | deletes | reading)`. `deletes` is a
-digest of the row group's deleted positions and the paths of the equality
+row_group_id | projection | schema_id | deletes | reading | added)`. `deletes`
+is a digest of the row group's deleted positions and the paths of the equality
 delete files that may apply; `reading` is the format version and name
-mapping (`planner.py`).
+mapping; `added` is the snapshot that added the data file, which a file
+registered again at its path changes and an append keeps (`planner.py`). The
+planner's footer cache (memory and SQLite), its column layouts and the
+fetcher's footers are keyed on the same `(path, size, added)`.
 
 **Actors.** Concurrent scans in one process, other processes sharing the
 cache directory, eviction to the size limit, `clear()`.
 
 | ID | Property | Checked by |
 | --- | --- | --- |
-| CK-1 | Equal keys mean equal cached content: every input that decides a cached row group's bytes is in its key. | none as a whole. Projection, schema evolution, defaults, name mapping, nanosecond handling, positional deletes and which equality deletes apply are in the key. **Leads:** (a) identity-partition values used to fill a column missing from the file come from the manifest, not the key, so a file re-added at the same path with another partition value hits the old entry; (b) the process-lifetime caches of delete rows (`DeletedRows`, `EqualityDeleteSets`) and of file columns are keyed by path only, so a table recreated at the same location can mix the old delete rows into a new-uuid key in a long-lived process. |
+| CK-1 | Equal keys mean equal cached content: every input that decides a cached row group's bytes is in its key. | property `test_cache_soundness_properties.py` (finding 16): one long-lived planner and fetcher, with restarts on the same cache, under appends, positional and equality deletes, files registered and replaced at a fixed path (omitting their partition column), schema evolution and drop-and-recreate, against a model of the live rows; tests `tests/test_row_group_cache_key.py`. Lead (a), a file registered again under another partition value, was finding 16 and is fixed. Lead (b) rests on an assumption about writers: the delete-row caches (`DeletedRows`, `EqualityDeleteSets`) and the equality part of `deletes` name a delete file by its path alone, which is safe while writers never reuse a delete file's path (they name them by uuid; `add_files` registers data files only). |
 | CK-2 | The projection fingerprint is injective. | test `tests/test_smoke.py::TestCacheKey` (finding 4) |
 | CK-3 | A reader never sees a partial or torn entry. | construction: `put` writes a temp file, fsyncs and `os.replace`s it; an unlinked file stays readable through an open descriptor on POSIX. Not checked on Windows, where replace over an open file fails. |
 | CK-4 | A cache failure is a miss, never a failed scan. | none. **Lead:** `clear()` racing a `put` makes the temp write raise, and `_fetch_from_storage` does not catch it. |
@@ -101,7 +104,7 @@ plans by `(catalog, identity, snapshot_id, filter)`.
 | ID | Property | Checked by |
 | --- | --- | --- |
 | MD-1 | A cached metadata file holds the bytes its location holds. | test `tests/test_iceberg_metadata_files.py` for the write and read path. **Leads:** a Hadoop-style catalog names metadata `vN.metadata.json`, and drop with purge then recreate reuses `v1.metadata.json`; a short read is cached without a length check. |
-| MD-2 | A cached plan belongs to the table it is served for. | none. **Lead:** the manifest-plan key has no table uuid, so a recreated table that reuses a snapshot id gets the old plan. |
+| MD-2 | A cached plan belongs to the table it is served for. | property `test_cache_soundness_properties.py` exercises time travel across recreates and restarts. The manifest-plan key has no table uuid, so the property rests on snapshot ids being random 63-bit numbers (as Iceberg writers make them): a recreated table would have to reuse one. |
 
 ## 5. Pruning
 
@@ -113,7 +116,7 @@ conservative: when safety cannot be proved, read the data.
 | ID | Property | Checked by |
 | --- | --- | --- |
 | PR-1 | A pruned row group holds no row the filter keeps. | property `test_pruning_properties.py` (float64, int64, string, timestamp, decimal, with nulls; finding 3) |
-| PR-2 | A pruned data file holds no row the filter keeps. | none. Manifest bounds have their own NaN counts and string truncation. |
+| PR-2 | A pruned data file holds no row the filter keeps. | property `test_cache_soundness_properties.py`, for integer columns under schema evolution (filtered scans return every live row that matches). Not checked: NaN counts and truncated string bounds. |
 
 ## 6. Access control
 

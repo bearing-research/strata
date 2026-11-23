@@ -233,7 +233,7 @@ class TestS3Fetcher:
         task = Task(
             file_path=str(local_parquet_file),
             row_group_id=0,
-            cache_key=SimpleNamespace(file_size=1),  # type: ignore
+            cache_key=SimpleNamespace(file_size=1, added_snapshot_id=None),  # type: ignore
             num_rows=5,
             columns=columns,
             estimated_bytes=0,
@@ -249,7 +249,7 @@ class TestS3Fetcher:
         task = Task(
             file_path=str(local_parquet_file),
             row_group_id=0,
-            cache_key=SimpleNamespace(file_size=1),  # type: ignore
+            cache_key=SimpleNamespace(file_size=1, added_snapshot_id=None),  # type: ignore
             num_rows=5,
             columns=None,
             estimated_bytes=0,
@@ -288,7 +288,7 @@ class TestS3Fetcher:
         monkeypatch.setattr(fetcher_module.pq, "ParquetFile", FakeParquetFile)
 
         fetcher = PyArrowFetcher(max_file_cache_size=4)
-        cache_key = SimpleNamespace(file_size=1)
+        cache_key = SimpleNamespace(file_size=1, added_snapshot_id=None)
         task = Task(file_path="/tmp/one.parquet", row_group_id=0, cache_key=cache_key, num_rows=1)  # type: ignore[arg-type]
         fetcher.fetch(task)
         fetcher.fetch(task)
@@ -299,7 +299,7 @@ class TestS3Fetcher:
 
     def test_fetcher_close_forgets_the_cached_footers(self):
         fetcher = PyArrowFetcher(max_file_cache_size=2)
-        fetcher._file_cache[("/tmp/one.parquet", 1)] = object()  # type: ignore[assignment]
+        fetcher._file_cache[("/tmp/one.parquet", 1, None)] = object()  # type: ignore[assignment]
         fetcher.close()
         assert not fetcher._file_cache
 

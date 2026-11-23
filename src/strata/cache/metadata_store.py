@@ -71,8 +71,9 @@ def _stat_identity(file_path: str) -> tuple[float | None, int | None]:
 
 # Bump when a table's layout or a stored value's meaning changes; a store in another
 # version is discarded. Manifest entries carry delete files (1), equality deletes (2),
-# identity-partition values (3), file sizes (4), nanosecond timestamp stats (5).
-METADATA_STORE_VERSION = 5
+# identity-partition values (3), file sizes (4), nanosecond timestamp stats (5), the
+# snapshot that added each data file, also on its footer (6).
+METADATA_STORE_VERSION = 6
 
 
 class MetadataStore:
@@ -133,6 +134,7 @@ class MetadataStore:
                     column_names_json TEXT NOT NULL,
                     file_mtime REAL,
                     file_size INTEGER,
+                    added_snapshot_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -178,12 +180,15 @@ class MetadataStore:
         finally:
             conn.close()
 
-    def get_parquet_meta(self, file_path: str, file_size: int) -> PersistedParquetMeta | None:
+    def get_parquet_meta(
+        self, file_path: str, file_size: int, added_snapshot_id: int | None = None
+    ) -> PersistedParquetMeta | None:
         """Get cached Parquet metadata, or None if not cached or stale.
 
-        Staleness is another ``file_size`` (the manifest's, so a remote file is checked
-        too) or a changed local (mtime, size). Stale rows are left in place to keep reads
-        free of write locks; the next put or :meth:`cleanup_stale_parquet_meta` replaces them.
+        Staleness is another ``file_size`` or ``added_snapshot_id`` (the manifest's, so a
+        remote file is checked too) or a changed local (mtime, size). Stale rows are left in
+        place to keep reads free of write locks; the next put or
+        :meth:`cleanup_stale_parquet_meta` replaces them.
         """
         with closing(self._get_conn()) as conn:
             row = conn.execute(
@@ -195,7 +200,7 @@ class MetadataStore:
                 self.parquet_meta_misses += 1
                 return None
 
-            if row["file_size"] != file_size:
+            if row["file_size"] != file_size or row["added_snapshot_id"] != added_snapshot_id:
                 self.stale_invalidations += 1
                 self.parquet_meta_misses += 1
                 return None
@@ -240,7 +245,13 @@ class MetadataStore:
                 column_names=json.loads(row["column_names_json"]),
             )
 
-    def put_parquet_meta(self, file_path: str, file_size: int, meta: PersistedParquetMeta) -> None:
+    def put_parquet_meta(
+        self,
+        file_path: str,
+        file_size: int,
+        meta: PersistedParquetMeta,
+        added_snapshot_id: int | None = None,
+    ) -> None:
         """Store Parquet metadata for a file of ``file_size`` bytes."""
         try:
             file_mtime = _stat_identity(file_path)[0]
@@ -264,8 +275,8 @@ class MetadataStore:
             conn.execute(
                 """INSERT OR REPLACE INTO parquet_meta
                    (file_path, schema_ipc, num_row_groups, row_groups_json,
-                    column_names_json, file_mtime, file_size)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    column_names_json, file_mtime, file_size, added_snapshot_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     file_path,
                     meta.arrow_schema_bytes,
@@ -274,16 +285,23 @@ class MetadataStore:
                     json.dumps(meta.column_names),
                     file_mtime,
                     file_size,
+                    added_snapshot_id,
                 ),
             )
             conn.commit()
         finally:
             conn.close()
 
-    def get_parquet_meta_many(self, file_sizes: dict[str, int]) -> dict[str, PersistedParquetMeta]:
-        """Get cached, non-stale Parquet metadata for ``{path: size}`` in one query, by path."""
+    def get_parquet_meta_many(
+        self, file_sizes: dict[str, int], added: dict[str, int | None] | None = None
+    ) -> dict[str, PersistedParquetMeta]:
+        """Get cached, non-stale Parquet metadata for ``{path: size}`` in one query, by path.
+
+        ``added`` gives each file's added snapshot, as for :meth:`get_parquet_meta`.
+        """
         if not file_sizes:
             return {}
+        added = added or {}
 
         result: dict[str, PersistedParquetMeta] = {}
         with closing(self._get_conn()) as conn:
@@ -295,7 +313,9 @@ class MetadataStore:
 
             for row in rows:
                 file_path = row["file_path"]
-                if row["file_size"] != file_sizes[file_path]:
+                if row["file_size"] != file_sizes[file_path] or row[
+                    "added_snapshot_id"
+                ] != added.get(file_path):
                     self.stale_invalidations += 1
                     continue
                 local_path = _local_path_for_stat(file_path)
@@ -309,11 +329,9 @@ class MetadataStore:
                         if stored_mtime is not None and stored_size is not None:
                             if stat.st_mtime != stored_mtime or stat.st_size != stored_size:
                                 self.stale_invalidations += 1
-                                self.parquet_meta_misses += 1
                                 continue
                     except OSError:
                         self.stale_invalidations += 1
-                        self.parquet_meta_misses += 1
                         continue
 
                 self.parquet_meta_hits += 1
@@ -337,10 +355,15 @@ class MetadataStore:
         self.parquet_meta_misses += len(file_sizes) - len(result)
         return result
 
-    def put_parquet_meta_many(self, items: list[tuple[str, int, PersistedParquetMeta]]) -> None:
+    def put_parquet_meta_many(
+        self,
+        items: list[tuple[str, int, PersistedParquetMeta]],
+        added: dict[str, int | None] | None = None,
+    ) -> None:
         """Store many ``(file_path, file_size, metadata)`` entries in one transaction."""
         if not items:
             return
+        added = added or {}
 
         rows = []
         for file_path, file_size, meta in items:
@@ -369,6 +392,7 @@ class MetadataStore:
                     json.dumps(meta.column_names),
                     file_mtime,
                     file_size,
+                    added.get(file_path),
                 )
             )
 
@@ -377,8 +401,8 @@ class MetadataStore:
             conn.executemany(
                 """INSERT OR REPLACE INTO parquet_meta
                    (file_path, schema_ipc, num_row_groups, row_groups_json,
-                    column_names_json, file_mtime, file_size)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    column_names_json, file_mtime, file_size, added_snapshot_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 rows,
             )
             conn.commit()

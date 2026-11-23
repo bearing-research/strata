@@ -57,6 +57,7 @@ jobs:
     env:
       PRUNING_EXAMPLES: ${{ github.event_name == 'schedule' && '30000' || '2000' }}
       STALENESS_EXAMPLES: ${{ github.event_name == 'schedule' && '40' || '8' }}
+      CACHE_SOUNDNESS_EXAMPLES: ${{ github.event_name == 'schedule' && '100' || '25' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 

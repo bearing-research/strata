@@ -287,16 +287,16 @@ class TestParquetMetadataCache:
         import sqlite3
 
         class _LockedStore:
-            def get_parquet_meta(self, file_path, file_size):
+            def get_parquet_meta(self, file_path, file_size, added_snapshot_id=None):
                 return None
 
-            def get_parquet_meta_many(self, file_sizes):
+            def get_parquet_meta_many(self, file_sizes, added=None):
                 return {}
 
-            def put_parquet_meta(self, file_path, file_size, meta):
+            def put_parquet_meta(self, file_path, file_size, meta, added_snapshot_id=None):
                 raise sqlite3.OperationalError("database is locked")
 
-            def put_parquet_meta_many(self, items):
+            def put_parquet_meta_many(self, items, added=None):
                 raise sqlite3.OperationalError("database is locked")
 
         cache = ParquetMetadataCache(max_size=10, store=_LockedStore())
@@ -966,6 +966,35 @@ class TestMetadataStore:
 
         assert store.get_parquet_meta(remote_path, size + 1) is None
         assert store.get_parquet_meta_many({remote_path: size + 1}) == {}
+
+    def test_a_stale_local_footer_in_a_batch_is_one_miss(self, store, tmp_path):
+        """A file changed since its footer was stored misses once, as a single lookup does."""
+        import os
+
+        from strata.cache.metadata_store import extract_parquet_meta
+
+        path = tmp_path / "local.parquet"
+        pq.write_table(pa.table({"x": [1, 2, 3]}), path)
+        store.put_parquet_meta(str(path), _size(path), extract_parquet_meta(str(path)))
+        stat = path.stat()
+        os.utime(path, (stat.st_atime, stat.st_mtime + 10))
+
+        assert store.get_parquet_meta_many({str(path): _size(path)}) == {}
+        assert store.stats()["parquet_meta_misses"] == 1
+
+    def test_remote_parquet_meta_of_another_registration_is_stale(self, store, tmp_path):
+        """A path registered again at the same size is told apart by the snapshot that added it."""
+        from strata.cache.metadata_store import extract_parquet_meta
+
+        source_file = tmp_path / "remote_source.parquet"
+        pq.write_table(pa.table({"x": [1, 2, 3]}), source_file)
+        remote_path = "s3://bucket/path/remote_source.parquet"
+        size = _size(source_file)
+        store.put_parquet_meta(remote_path, size, extract_parquet_meta(str(source_file)), 1)
+
+        assert store.get_parquet_meta(remote_path, size, 1) is not None
+        assert store.get_parquet_meta(remote_path, size, 2) is None
+        assert store.get_parquet_meta_many({remote_path: size}, {remote_path: 2}) == {}
 
     def test_schema_migration(self, tmp_path):
         """Old databases migrate to the current schema."""

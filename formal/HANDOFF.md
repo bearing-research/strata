@@ -23,6 +23,12 @@ in [`README.md`](README.md).
   replay: a batched cell edited while it waits is corrected by the next cell's
   recompute (only the last cell stayed wrong, finding 14), and the MCP reload's
   new cell objects still receive the run's outputs.
+- **Phase 3 (cache soundness):** `test_cache_soundness_properties.py`, a
+  Hypothesis state machine over a real Iceberg table, found finding 16 (four
+  caches keyed a data file by path and size); fixed. Lead CK-1 (b) rests on
+  writers never reusing a delete file's path; MD-2 rests on random snapshot
+  ids; MD-1 is still a lead (pyiceberg has no catalog that reuses metadata
+  names).
 
 ## Conventions
 
@@ -86,13 +92,10 @@ property, the replays of what it finds, then a PR per fix.
    batched `@nocache` producer run again by a later single-cell consumer; a
    replay through `_execute_run_all` is enough), and content-key readiness and
    uncached leaves in the model (see SYSTEMS 8, what the model leaves out).
-3. **Row-group cache soundness** (SYSTEMS 3 and 4: CK-1, MD-1, MD-2, PR-2).
-   A stateful Hypothesis test over a real Iceberg table: appends, deletes
-   (positional and equality), overwrites, schema evolution, `add_files`, drop
-   and recreate at the same location, with scans in between through one
-   long-lived planner and cache. Oracle: the same scan with every cache
-   cleared, and the rows read straight from pyiceberg. Filtered scans also
-   cover PR-2.
+3. **Row-group cache soundness** (SYSTEMS 3 and 4). Done for CK-1, MD-2 and
+   PR-2 on integer columns. Open: MD-1 (a catalog that writes `vN.metadata.json`,
+   dropped with purge and recreated), CK-4 (`clear()` racing a `put`), and string
+   and NaN manifest bounds for PR-2.
 4. **Streams** (SYSTEMS 1 and 2: ADM-5, ADM-6, STR-1, STR-2). A
    `Streams.tla` of materialize, GET, admit, release (with its lock as a
    step), cleanup and expiry, with two GETs and two materialize misses.

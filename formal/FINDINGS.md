@@ -699,3 +699,28 @@ Agents read status through these paths. Severity: low to medium.
 REST passes the running cell to its recompute, and a reload keeps a running cell
 running. Regression tests: `tests/notebook/test_e2e_staleness.py::TestARestEditDuringARun`,
 `tests/notebook/test_mcp_server.py::test_an_agent_edit_of_the_running_cell_is_refused`.
+
+### 16. A file registered again at the same path is served its old rows
+
+**Property:** `test_cache_soundness_properties.py` (SYSTEMS 3, CK-1). Shrunk case: a
+Hive-layout file registered at a fixed path, rewritten there at the same size with other
+rows, and registered again in place of the old entry. The full scan returned the old
+rows. The row-group key named the file by table, uuid, path and size, all unchanged;
+the existing test of a rewritten path passed only because it recreated the table, which
+changes the uuid, and only scanned unfiltered.
+
+The same `(path, size)` keyed three more caches, each with its own symptom once the
+row-group key was fixed: the planner's footers, whose old statistics pruned the new rows
+from a filtered scan; its column layouts, which filled a partition column the file omits
+with the value it was first registered under (lead CK-1 (a)); and the fetcher's footers,
+which read the new bytes by the old file's schema and failed the scan after a column
+rename (`KeyError`). Re-registering a rewritten file is outside Iceberg's rule that files
+never change, but `add_files` over Hive-layout data does it, and Strata already meant to
+handle a rewritten path. Severity: high (wrong rows, silently).
+
+**Fixed.** Every cache of a data file also names the snapshot that added it (the
+manifest entry's `snapshot_id`): registering a file again changes it; an append, a delete
+or a manifest rewrite keeps it, so those still hit. Regression tests:
+`tests/test_row_group_cache_key.py::TestAPathRegisteredAgainInTheSameTable`,
+`tests/test_metadata_cache.py::TestMetadataStore::test_remote_parquet_meta_of_another_registration_is_stale`.
+
