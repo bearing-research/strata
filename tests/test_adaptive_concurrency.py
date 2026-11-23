@@ -159,6 +159,27 @@ class TestResizableLimiter:
             next_in_line.cancel()
 
     @pytest.mark.asyncio
+    async def test_release_never_suspends(self):
+        """Admission marks itself released before awaiting this; a cancel landing inside would
+        leak the slot. None can: nothing holds the lock across an await (ADM-6)."""
+        limiter = ResizableLimiter(1)
+        assert await limiter.acquire()
+        waiters = [
+            asyncio.create_task(limiter.acquire()),
+            asyncio.create_task(limiter.acquire(timeout=30)),
+        ]
+        await asyncio.sleep(0)
+        try:
+            release = limiter.release()
+            with pytest.raises(StopIteration):
+                release.send(None)
+            assert limiter.in_use == 0
+        finally:
+            for waiter in waiters:
+                waiter.cancel()
+            await asyncio.gather(*waiters, return_exceptions=True)
+
+    @pytest.mark.asyncio
     async def test_release_without_acquire_raises(self):
         limiter = ResizableLimiter(2)
         with pytest.raises(RuntimeError, match="release.*without"):

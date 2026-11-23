@@ -792,6 +792,15 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A stream waiting for a slot is not expired under its GET.** A retried GET that got a
+  429 restarted the stream's cleanup while the first GET still waited for admission; with
+  a stream TTL shorter than the wait, the stream expired, its artifact was failed, and
+  the first GET, once admitted, answered 500. Expiry now waits for the GETs in the
+  queue. (#1632)
+- **A caller holding a stream slot keeps its per-client cap.** After 10,000 other callers
+  its semaphore was evicted while held, and its next request got a fresh one, admitted
+  past `per_client_interactive` or `per_client_bulk`. Only idle callers are evicted now.
+  (#1632)
 - **A file registered again at the same path is read again.** A Hive-layout file
   rewritten in place and registered again (the old entry removed, the new one added) was
   served from the row-group cache when it kept its size, since the cache knew it by

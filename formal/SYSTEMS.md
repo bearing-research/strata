@@ -45,8 +45,8 @@ registry eviction under tenant pressure; graceful shutdown, which drains on
 | ADM-2 | A tenant never holds more slots than its quota. | model `Admission_Patched` (finding 9) |
 | ADM-3 | The shutdown drain counts every live stream. | model `Admission_Patched` (finding 10) |
 | ADM-4 | Bulk requests never starve interactive ones. | construction: the tiers have separate limiters and never wait on each other |
-| ADM-5 | A client never holds more than its `per_client_*` slots. | none. **Lead:** `_get_client_semaphore` evicts the LRU semaphore even while it is held; after 10,000 other callers, a client's next request gets a fresh semaphore at full count. |
-| ADM-6 | Each admission is released exactly once. | none. **Lead:** `_release` sets `_released` before awaiting `limiter.release()`, which takes the condition's lock; a cancel while it waits for the lock leaks the tenant slot and the client semaphore, and the flag stops a retry. |
+| ADM-5 | A client never holds more than its `per_client_*` slots. | test `test_qos_admission.py::test_a_held_client_cap_outlives_other_callers` (finding 18: the LRU evicted a held semaphore, and the caller's next request got a fresh one at full count; now only idle callers are evicted) |
+| ADM-6 | Each admission is released exactly once. | construction: `_release` sets `_released` before awaiting `limiter.release()`, so a cancel inside it would leak the slot, but none can land there: nothing holds the limiter's lock across an await, so the lock is always free and `release()` never suspends. Pinned by `test_adaptive_concurrency.py::TestResizableLimiter::test_release_never_suspends` |
 
 ## 2. Stream lifecycle
 
@@ -65,8 +65,8 @@ the same artifact id.
 
 | ID | Property | Checked by |
 | --- | --- | --- |
-| STR-1 | A scan's state is not expired while a GET is serving it. | none. **Lead:** each GET re-arms the cleanup when it exits; a second GET that gets a 429 or finishes re-arms it while the first is still queued or streaming, and a TTL shorter than that wait expires the scan under it. |
-| STR-2 | Every registered stream is expired once, and its unbuilt placeholder failed. | none. **Lead:** a second miss for the same artifact id registers the same stream id, and its `schedule_cleanup` cancels the first's, whose scan id is then never expired. |
+| STR-1 | A GET admitted to a stream serves its artifact: the stream is not expired, and its placeholder failed, while a GET waits for admission. | model `Streams_Patched` (finding 17: a retry's 429 re-armed the cleanup under a GET still queued; `Streams_Retry` shows it). Expiry under a GET already admitted is harmless: the build has started, and the passthrough holds its plan |
+| STR-2 | Every registered stream is expired once nothing is in flight, and its unbuilt placeholder failed. | model `Streams_Patched` (`NeverStranded`: every exit re-arms the cleanup), and construction for a second miss: each registers a fresh uuid stream id (a plain miss mints its artifact id, a refresh a new stream id), so no cleanup replaces another stream's |
 | STR-3 | Only one background build runs per stream. | construction: the build is created check-then-set with no await between |
 
 ## 3. Row-group cache

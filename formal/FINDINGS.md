@@ -724,3 +724,32 @@ or a manifest rewrite keeps it, so those still hit. Regression tests:
 `tests/test_row_group_cache_key.py::TestAPathRegisteredAgainInTheSameTable`,
 `tests/test_metadata_cache.py::TestMetadataStore::test_remote_parquet_meta_of_another_registration_is_stale`.
 
+### 17. A stream expires under a GET waiting for a slot, which then answers 500
+
+**Model:** `Streams.tla` (SYSTEMS 2, STR-1), configuration `Streams_Retry`. A GET
+cancels the stream's cleanup and queues for admission; a retry of the same stream meets
+the per-client cap the first holds and gets a 429, whose exit re-arms the cleanup. If
+the TTL passes before the first is admitted, expiry drops the stream and, no build
+having started, fails its placeholder artifact. The first GET is then admitted, starts
+the build, whose finalize is refused (`not in building state`), and answers 500
+`scan_build_failed`. Replayed against the real handler with a 0.3 s TTL. It needs a TTL
+shorter than the queue wait (defaults: 300 s against 10 s and 30 s queue timeouts), which
+the config allows. Severity: low (a visible failure, under an unusual config).
+
+**Fixed.** `StreamState.waiting` counts the GETs between cancelling the cleanup and
+settling admission, and expiry leaves a stream with one alone; each re-arms the cleanup
+as it leaves the queue, and one admitted has started the build, so the stream is still
+expired once nobody waits (`NeverStranded`). Regression test:
+`tests/test_stream_registry.py::test_a_stream_is_not_expired_under_a_get_waiting_for_a_slot`.
+
+### 18. A caller holding a per-client slot gets a fresh cap after 10,000 others
+
+**Replay** of lead ADM-5 (SYSTEMS 1). The per-client semaphores are an LRU of 10,000
+callers per tier, and eviction took the oldest whether or not it was held. A caller
+streaming a long bulk scan while 10,000 others arrived lost its semaphore; its next
+request made a new one at full count and was admitted past its `per_client_*` cap.
+Severity: low (fairness only; the tenant limiter still bounds the tenant).
+
+**Fixed.** Eviction skips semaphores with a slot held; past the bound, the held ones are
+live streams, so the table stays bounded by them. Regression test:
+`tests/test_qos_admission.py::test_a_held_client_cap_outlives_other_callers`.

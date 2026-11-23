@@ -40,6 +40,9 @@ class StreamState:
     background_task: asyncio.Task[None] | None = None
     build_slot: BuildSlot | None = None
     qos_tenant_id: str | None = None
+    # GETs queued for admission. Expiry skips the stream meanwhile: each re-arms the cleanup
+    # when it leaves the queue, and one admitted has started the build.
+    waiting: int = 0
 
 
 class StreamRegistry:
@@ -132,6 +135,9 @@ class StreamRegistry:
             # outside any loop, where current_task() raises.
             if self._cleanup_tasks.get(stream_id) is asyncio.current_task():
                 self._cleanup_tasks.pop(stream_id, None)
+            live = self._streams.get(stream_id)
+            if live is not None and live.waiting:
+                return
 
             if scan_id is not None and self._on_expire is not None:
                 self._on_expire(scan_id)

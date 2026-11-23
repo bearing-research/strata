@@ -108,6 +108,7 @@ async def get_stream(stream_id: str, request: Request):
 
     # Every exit path below must release the admission token, and one that leaves the stream
     # unserved must re-arm the cleanup cancelled above, or the stream and its plan stay for good.
+    stream_state.waiting += 1
     try:
         admission = await state.qos.admit(plan, request, scan_id)
     except asyncio.CancelledError:
@@ -120,6 +121,8 @@ async def get_stream(stream_id: str, request: Request):
             content={"error": exc.error, "tier": exc.tier},
             headers={"Retry-After": str(exc.retry_after)},
         )
+    finally:
+        stream_state.waiting -= 1
 
     from vestigo.store import get_artifact_store
 
