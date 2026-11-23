@@ -45,7 +45,19 @@ in [`README.md`](README.md).
   case-insensitively); fixed. The `scan@v1` identity hash is a lead (PROV-3).
 - **Phase 7 (replays):** four leads replayed against the real code. LR-4, BAT-2 and
   CK-4 held (findings 23, 24 and 25), all fixed; MD-1's short read did not (both S3
-  readers raise on a truncated body).
+  readers raise on a truncated body). `test_bounds_pruning_properties.py` then checked
+  PR-2 over truncated string bounds and NaN-bearing doubles, through files (with and
+  without manifest NaN counts), row groups and equality deletes. It found finding 27,
+  fixed: a NaN filter value failed planning on a cold manifest cache. A filtered plan
+  reuses a cached unfiltered resolution, so the property scans filtered first; before
+  that, pyiceberg's file pruning never ran in it. `test_cache_soundness_properties.py`
+  keeps one planner across steps, so its filtered scans prune files only when no
+  unfiltered scan of that snapshot came first. Teeth (each caught; plugins patch the
+  named function): `may_apply` always False; `Filter.matches_stats` without the NE NaN
+  guard; `may_apply` reading a truncated upper bound as a prefix; pyiceberg's
+  `_InclusiveMetricsEvaluationVisitor._contains_nans_only` true on any NaN. All but
+  the first are caught through pinned examples, since random search rarely builds
+  those layouts.
 
 ## Conventions
 
@@ -101,9 +113,8 @@ in [`README.md`](README.md).
 In order of consequence over effort. Each step is one PR: the model or
 property, the replays of what it finds, then the fixes.
 
-1. **Pruning over strings and NaN** (PR-2). Extend `test_cache_soundness_properties.py`
-   with string columns (Iceberg truncates their manifest bounds) and float columns
-   with NaN counts: the one place pruning can still drop rows unseen.
+1. **Done: pruning over strings and NaN** (PR-2), `test_bounds_pruning_properties.py`;
+   finding 27.
 2. **Two processes on one store** (LR-2, EACH-2). Extend `LocalRun.tla` with `open`
    split into its transactions and two processes; replay on SQLite and Postgres.
    EACH-2's guard against collecting during a run is a process-local counter.

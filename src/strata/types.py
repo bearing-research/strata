@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -191,6 +192,9 @@ def filters_to_iceberg_expression(filters: list[Filter] | None):
     for f in filters:
         # Skip nested column references (contain dots)
         if "." in f.column:
+            continue
+        # pyiceberg has no NaN literal; row-group pruning still applies the filter.
+        if isinstance(f.value, float) and math.isnan(f.value):
             continue
 
         # pyiceberg's constructors are typed to require a ``Reference`` and a typed ``Literal``
