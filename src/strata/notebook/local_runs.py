@@ -18,10 +18,11 @@ import json
 import logging
 import os
 import socket
+import threading
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -76,8 +77,11 @@ class LocalRun:
     input_versions: dict[str, str]
     resumed_from: str | None = None
     init: str | None = None
+    # How long an attempt of the run may write, from when it opens.
+    writable_seconds: float = WRITE_WINDOW_MARGIN_SECONDS
 
     finalized: bool = False
+    hold_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     @property
     def restores_from(self) -> str | None:
@@ -120,7 +124,8 @@ class LocalRuns:
         """
         occurrence = f"variant={variant}" if variant else None
         now = time.time()
-        writable_until = now + timeout_seconds + WRITE_WINDOW_MARGIN_SECONDS
+        writable_seconds = timeout_seconds + WRITE_WINDOW_MARGIN_SECONDS
+        writable_until = now + writable_seconds
         attempt = uuid.uuid4().hex
 
         open_build = self.builds.find_open_build(computation_key, occurrence=occurrence)
@@ -151,6 +156,7 @@ class LocalRuns:
                     input_versions=input_versions,
                     resumed_from=latest.release_id,
                     init=open_build.params.get("init") if open_build.params else None,
+                    writable_seconds=writable_seconds,
                 )
             self.builds.fail_build(
                 open_build.build_id,
@@ -170,6 +176,7 @@ class LocalRuns:
             variant=variant,
             input_versions=input_versions,
             init=init,
+            writable_seconds=writable_seconds,
         )
 
     def _new_build(
@@ -346,12 +353,43 @@ class LocalRuns:
     async def _renew(self, run: LocalRun) -> None:
         while True:
             await asyncio.sleep(RENEW_EVERY_SECONDS)
-            held = await anyio.to_thread.run_sync(
-                self.builds.renew_lease, run.build_id, LEASE_OWNER, LEASE_SECONDS
-            )
+            held = await anyio.to_thread.run_sync(self._hold, run)
             if not held:
                 logger.warning("Lost the lease on build %s of cell %s", run.build_id, run.cell_id)
                 return
+
+    def _hold(self, run: LocalRun) -> bool:
+        """Whether the run's attempt holds its build's lease, renewed now.
+
+        A lease lapses with nothing wrong: a laptop asleep, a loop blocked past it. A
+        lapsed lease stays lapsed, so the run goes on in a new attempt of its build,
+        unless another process took the build meanwhile: ``open_attempt`` refuses
+        while that one's lease is live. One hold at a time per run: the renewal task
+        and a release both hold, and a renewal is the process's, not the attempt's, so
+        it succeeds between the other thread opening an attempt and assigning it
+        (``formal/tla/LocalRun.tla``).
+        """
+        with run.hold_lock:
+            if self.builds.renew_lease(run.build_id, LEASE_OWNER, LEASE_SECONDS):
+                return True
+            attempt = uuid.uuid4().hex
+            if not self.builds.open_attempt(
+                run.build_id,
+                attempt,
+                writable_until=time.time() + run.writable_seconds,
+                lease_owner=LEASE_OWNER,
+                lease_duration_seconds=LEASE_SECONDS,
+                principal=caller_principal_id(),
+            ):
+                return False
+            logger.warning(
+                "The lease on build %s of cell %s lapsed; the run goes on in attempt %s",
+                run.build_id,
+                run.cell_id,
+                attempt,
+            )
+            run.attempt = attempt
+            return True
 
     def finalize(self, run: LocalRun, staged: list[StagedVersion]) -> list[ArtifactVersion]:
         """Make the run's staged outputs its ``final`` release; completes the build.
@@ -359,9 +397,11 @@ class LocalRuns:
         Raises whatever acceptance raises (a fenced attempt, missing bytes), in which
         case the rows stay ``building`` for the caller to discard.
         """
+        # Not held, the release is refused below: a fence has one path.
+        self._hold(run)
         release = self.releases.prepare(run.build_id, run.attempt, "final")
         self.releases.attach(
-            release.release_id, run.attempt, [(s.artifact_id, s.version) for s in staged]
+            release.release_id, release.attempt, [(s.artifact_id, s.version) for s in staged]
         )
         bundle = self.releases.accept(release.release_id, staged)
         run.finalized = True
@@ -419,6 +459,7 @@ class LocalRuns:
     def _checkpoint(self, run: LocalRun, payload: dict[str, Any], run_dir: Path) -> None:
         sequence = int(payload["sequence"])
         try:
+            self._hold(run)
             release = self.releases.prepare(
                 run.build_id, run.attempt, "checkpoint", sequence=sequence
             )
@@ -449,7 +490,7 @@ class LocalRuns:
         except Exception:
             # A checkpoint is a convenience the outputs do not depend on: the cell goes on.
             logger.exception("Checkpoint %d of cell %s was not released", sequence, run.cell_id)
-            self.releases.abandon(release.release_id, run.attempt)
+            self.releases.abandon(release.release_id, release.attempt)
             self._manager.discard_cell_outputs(staged)
             return
         logger.info(
@@ -532,6 +573,7 @@ class LocalRuns:
         )
 
     def _head(self, run: LocalRun, payload: dict[str, Any]) -> None:
+        self._hold(run)
         name = str(payload["name"])
         sequence = int(payload["sequence"])
         release = next(

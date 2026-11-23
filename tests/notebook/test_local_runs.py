@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -584,6 +585,99 @@ class TestGate1:
         assert len(_only_build(session, "a")) == 3  # the run's; no revert's
         latest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("a", "x"))
         assert latest is not None and latest.version == 2
+
+
+LAPSE_WORK = """
+import time
+strata.checkpoint(step={"n": 1})
+time.sleep(1.0)
+strata.checkpoint(step={"n": 2})
+result = 42
+"""
+
+
+class TestALapsedLeaseWithNoRival:
+    """A lease lapses with nothing wrong (a laptop asleep, a blocked loop): the run goes on.
+
+    The ledger's clock jumps two minutes mid-run, past the 60 s lease, as the wall
+    clock does when a laptop wakes. Finding 13 (formal/tla/LocalRun.tla).
+    """
+
+    def _session(self, tmp_path: Path, work: str):
+        notebook_dir = create_notebook(tmp_path, "Lapse", initialize_environment=False)
+        add_cell_to_notebook(notebook_dir, "work")
+        write_cell(notebook_dir, "work", work)
+        add_cell_to_notebook(notebook_dir, "reader", "work")
+        write_cell(notebook_dir, "reader", "seen = result\n")
+        session = NotebookSession(
+            parse_notebook(notebook_dir), notebook_dir, ledger_dialect=_dialect()
+        )
+        session.refresh_environment_runtime()
+        offset = [0.0]
+        _, builds, releases = _ledger(session)
+        for store in (builds, releases):
+            store._clock = lambda: time.time() + offset[0]
+        return session, CellExecutor(session), offset
+
+    def _stored(self, session: NotebookSession):
+        manager = session.get_artifact_manager()
+        return manager.artifact_store.get_latest_version(manager.cell_artifact_id("work", "result"))
+
+    def test_a_checkpoint_after_the_lapse_is_released(self, tmp_path: Path, monkeypatch):
+        session, executor, offset = self._session(tmp_path, LAPSE_WORK)
+        handle = LocalRuns.handle
+
+        def handle_then_sleep(self, run, payload, run_dir):
+            handle(self, run, payload, run_dir)
+            if payload.get("sequence") == 1:
+                offset[0] = 120.0
+
+        monkeypatch.setattr(LocalRuns, "handle", handle_then_sleep)
+        result = _run(executor, "work", LAPSE_WORK)
+
+        assert result.success is True, result.error
+        assert self._stored(session) is not None
+        (build,) = _only_build(session, "work")
+        _, builds, releases = _ledger(session)
+        assert build.state == "ready"
+        assert [r.sequence for r in releases.releases_of(build.build_id, "checkpoint")] == [1, 2]
+        assert len(builds.attempts_of(build.build_id)) == 2, "the run went on in a new attempt"
+
+    def test_a_run_that_finished_across_the_lapse_keeps_its_outputs(self, tmp_path: Path):
+        work = "import time\ntime.sleep(1.5)\nresult = 42\n"
+        session, executor, offset = self._session(tmp_path, work)
+
+        async def run():
+            task = asyncio.create_task(executor.execute_cell("work", work))
+            await asyncio.sleep(0.8)
+            offset[0] = 120.0
+            return await task
+
+        result = asyncio.run(run())
+
+        assert result.success is True, result.error
+        assert self._stored(session) is not None
+
+    def test_a_build_another_process_took_still_fences_the_run(self, tmp_path: Path):
+        session, _, offset = self._session(tmp_path, LAPSE_WORK)
+        runs = LocalRuns(session.get_artifact_manager())
+        run = runs.open(
+            cell_id="work",
+            computation_key="k",
+            variant=None,
+            input_versions={},
+            timeout_seconds=60.0,
+            resume=True,
+        )
+        offset[0] = 120.0
+        _, builds, _ = _ledger(session)
+        assert builds.open_attempt(
+            run.build_id, "rival", writable_until=time.time() + 600, lease_owner="other:1"
+        )
+
+        assert runs._hold(run) is False
+        with pytest.raises(RunFenced):
+            runs.handle(run, {"event": "checkpoint", "sequence": 1, "parts": {}}, tmp_path)
 
 
 class TestAbandonedRuns:

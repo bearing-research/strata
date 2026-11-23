@@ -1,7 +1,8 @@
-# Formal verification of Strata: findings, 2026-09
+# Formal verification of Strata: findings
 
-The record of the first investigation, which asked whether formal methods
-could usefully model and verify Strata's core components.
+Findings 1–12 are the record of the first investigation (2026-09), which
+asked whether formal methods could usefully model and verify Strata's core
+components; later findings follow at the end.
 [`SYSTEMS.md`](SYSTEMS.md) is the specification these findings fed into, and
 [`README.md`](README.md) says how to run everything.
 
@@ -631,3 +632,35 @@ must hold the value the evaluation gives.
   followed by `|`. Real file paths start with a scheme or `/`, so this
   can't happen in practice. The projection fingerprint (finding 4) is
   the real hole in the key.
+
+## Findings since the 2026-11 review
+
+### 13. A lapsed lease loses a run that nothing else wanted
+
+**Model:** `tla/LocalRun.tla` (SYSTEMS 10, LR-6). A local run's lease is wall-clock,
+60 s, renewed every 20 s by a task on the event loop, and a lapsed lease stays
+lapsed. A lease lapses with nothing wrong whenever the process cannot renew for a
+minute: a laptop asleep through the cell (the renewal timer is monotonic and stops,
+the wall clock does not), or the event loop blocked, which it is while a run's
+outputs are stored. Every later release of the run is then refused, though no
+other process took the build. TLC trace (4 states): `lapse → work → release`
+fenced.
+
+The replay jumped the ledger's clock two minutes mid-run. A cell that checkpoints
+was fenced and killed at its next checkpoint; a cell that does not ran to the end
+and then lost its outputs ("executed successfully but failed to store output
+artifacts"). Personal mode on a laptop is the main deployment, and checkpoints exist
+for exactly the long runs a sleep interrupts. Severity: high (a finished run's
+result discarded).
+
+**Fixed.** Before each release, and on each renewal, the run holds its lease
+(`LocalRuns._hold`): it renews, and if the lease lapsed and nobody took the build,
+it goes on in a new attempt of the same build. A process that did take it keeps
+it, since `open_attempt` refuses while another attempt's lease is live. The model
+found a hole in the first version of this fix: with the renewal task and a release
+holding at once, one opened a new attempt and, before it was recorded on the run,
+the other's renewal succeeded, because `renew_lease` checks the process and not
+the attempt; the release then went out under the fenced attempt (`LocalRun_Race`,
+one lapse, 7 states). Holds are serialized per run. `LocalRun_Patched` (a rival
+process that may resume the build, three lapses) passes. Regression tests:
+`tests/notebook/test_local_runs.py::TestALapsedLeaseWithNoRival`, also on Postgres.

@@ -199,16 +199,26 @@ proxy token on the ambient client's routes until the run ends.
 
 **Actors.** The run's harness (cold, over a pipe; warm, over the worker's
 stdout), the renewal task, cancel, another process or session opening the
-same key, server restart. Every ledger call is its own transaction;
-`LocalRuns.open` is several, with thread hops between.
+same key, server restart, and the wall clock: the lease is wall-clock time,
+so it lapses whenever the process cannot renew for a minute (a laptop
+asleep, an event loop blocked while outputs are stored). Every ledger call is
+its own transaction; `LocalRuns.open` is several, with thread hops between.
+
+**Holding the lease** (`LocalRuns._hold`, before every release and on every
+renewal): renew it, or, when it lapsed and no other process took the build,
+go on in a new attempt of the same build. A lapsed lease stays lapsed, and
+`open_attempt` refuses while another attempt's lease is live, so a process
+that took the build keeps it. Holds are serialized per run, because a renewal
+is the process's, not the attempt's.
 
 | ID | Property | Checked by |
 | --- | --- | --- |
 | LR-1 | A run interrupted after a checkpoint resumes from its newest accepted checkpoint; a rerun starts fresh. | test `tests/notebook/test_local_runs.py` (and on Postgres) |
 | LR-2 | A live run of a key refuses a second. | test `tests/notebook/test_local_runs.py`, sequentially. **Lead:** `open` checks and acts in separate transactions, so two processes can both find no open build and create two, or one can fail a build the other just resumed. |
-| LR-3 | Only the attempt that holds the lease releases, renews or ends its build. | the ledger's fence for releases (section 7). **Lead:** the lease owner is the process (`hostname:pid`), not the attempt, and `renew_lease` and the close path (`renew_lease(…, 0)`, `fail_build(lease_owner=…)`) are not checked against the attempt; a stale attempt in the same process can renew, zero or fail its successor's lease. |
-| LR-4 | A resumed attempt can always release its next checkpoint. | none. **Lead:** the sequence restarts after the newest *accepted* checkpoint, but the unique `(build, kind, sequence)` also counts abandoned and rejected rows; the collision raises an uncaught `ReleaseError`. |
-| LR-5 | A cell executes at most once per request. | construction for fenced and timed-out warm runs (no cold fallback). **Lead:** a non-fence error from a run event on the warm path returns as a failed warm run, which falls back to a cold run of the same cell. |
+| LR-3 | Only the attempt that holds the lease releases, renews or ends its build. | the ledger's fence for releases (section 7); model `LocalRun_Patched` (`RunAttemptIsOwn`, `OneLiveHolder`). **Lead:** the lease owner is the process (`hostname:pid`), not the attempt, and the close path (`renew_lease(…, 0)`, `fail_build(lease_owner=…)`) is not checked against the attempt; within one process, runs of one computation are serialized, so this needs two processes sharing a pid. |
+| LR-6 | A lease that lapses while no other process wants the build never costs the run. | model `LocalRun_Patched` (`NoNeedlessFence`; `LocalRun_Lapse` shows finding 13, `LocalRun_Race` the fix without its lock); test `tests/notebook/test_local_runs.py::TestALapsedLeaseWithNoRival`, also on Postgres. Assumes a hold and its release take far less than the 60 s lease. |
+| LR-4 | A resumed attempt can always release its next checkpoint. | none. **Lead:** the sequence restarts after the newest *accepted* checkpoint, but the unique `(build, kind, sequence)` also counts abandoned and rejected rows; the colliding checkpoint is logged and skipped (`prepare` raises `ReleaseError`), and a `strata.head` naming its sequence can point at the earlier attempt's release. |
+| LR-5 | A cell executes at most once per request. | construction: a fenced, timed-out or failed warm run is never run again cold; only a worker that never got the manifest is a miss. Test `tests/notebook/test_subprocess_line_limits.py::test_an_event_that_fails_is_the_run_s_error_not_a_pool_miss` (#1613). |
 | TOK-1 | A run's token is refused once its run ends, and never carries `admin:` scopes. | test `tests/test_run_tokens.py`, `tests/notebook/test_run_token_cells.py` |
 
 ## 11. `@each` cells

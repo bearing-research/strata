@@ -36,6 +36,10 @@ the replay becomes the fix's regression test.
 | `tla/Staleness.tla` | Cell status for a chain `a → b → c` under edits and runs (SYSTEMS 8; drifted, see there) |
 | `tla/Staleness_EditDuringRun.cfg` | An upstream edited while a downstream runs. Violates `RunningShown` (finding 11) |
 | `tla/Staleness_Patched.cfg` | The fix. All invariants hold |
+| `tla/LocalRun.tla` | A local cell run holding its build's lease: releases, the renewal task, lapses, a rival process that resumes the build (SYSTEMS 10) |
+| `tla/LocalRun_Lapse.cfg` | The code before the fix. Violates `NoNeedlessFence` (finding 13) |
+| `tla/LocalRun_Race.cfg` | The fix without its lock. Violates `NoNeedlessFence` |
+| `tla/LocalRun_Patched.cfg` | The code as it is. All invariants hold |
 | `run_models.py` | Runs every configuration and checks it ends as pinned: passes, or violates its named invariant |
 | `test_pruning_properties.py` | Property: a pruned row group holds no matching row (PR-1) |
 | `test_staleness_properties.py` | Property: random edits and runs on a real notebook match a fresh evaluation (NB-3) |
