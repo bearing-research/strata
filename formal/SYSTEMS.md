@@ -189,7 +189,7 @@ is the sole source of truth".
 
 | ID | Property | Checked by |
 | --- | --- | --- |
-| BAT-1 | Run All leaves the same stored values and statuses as running each cell in order. | none. **Leads:** an in-place mutation of an upstream value is visible to later cells in the batch (detected, warned, not keyed); a cache hit loads only consumed variables, so other names and module state depend on which cells hit; a consumer above its producer in display order. |
+| BAT-1 | Run All leaves the same stored values and statuses as running each cell in order. | property `test_run_all_properties.py` (findings 19 and 20: the cascade a single-cell run takes marked every step after a failure stale, and a cell blocked behind a failure was called idle by the next run's staleness walk; finding 21: a batched cell read an input the cell before it changed in place, which a single run never sees, and its result was cached under the unchanged input's key). Covers in-place mutation of an upstream list, failing cells and a consumer above its producer (a reference to a variable defined below is unresolved in both paths). Not covered: module state, `@nocache`, workers, loops |
 | BAT-2 | A `@nocache` cell runs at most once per run. | none. **Lead:** batch results are not recorded in the run's at-most-once record, so a later single-cell consumer runs a batched `@nocache` producer again. |
 
 ## 10. Local cell runs and the ledger

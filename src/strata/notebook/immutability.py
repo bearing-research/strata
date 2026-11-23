@@ -1,7 +1,8 @@
 """Runtime mutation detection for notebook cell inputs.
 
-Best-effort and warn-only: catches in-place mutation the static analyzer cannot
-see (aliases, helper functions, bare method mutators). Each input gets an
+Best-effort: catches in-place mutation the static analyzer cannot see (aliases,
+helper functions, bare method mutators). A cell is warned; a Run All batch also
+loads the input back from its file, so later cells read what a single run would. Each input gets an
 identity check plus a sampled content fingerprint from an extensible registry;
 see ``docs/internal/design-mutation-fingerprint-registry.md``.
 """

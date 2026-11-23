@@ -84,3 +84,37 @@ async def test_run_all_batch_warns_as_a_single_run_does(tmp_path, up, mid, down,
     assert in_batch.success, in_batch.error
     assert in_batch.execution_method == "batch"
     assert _warned(in_batch.mutation_warnings) == warned
+
+
+def _stored(session: NotebookSession, cell_id: str, var: str):
+    import json
+
+    uri = session.notebook_state.get_cell(cell_id).artifact_uris[var]
+    artifact_id, _, version = uri.removeprefix("strata://artifact/").partition("@v=")
+    store = session.get_artifact_manager().artifact_store
+    return json.loads(store.blob_store.read_blob(artifact_id, int(version)))
+
+
+async def test_a_batched_cell_after_an_input_mutation_reads_the_stored_value(tmp_path):
+    """A single-cell run changes only its own copy of an input, and the next cell loads the
+    stored one. In a batch the next cell read the change from the shared namespace, and
+    its result was cached under the unchanged input's key (finding 21)."""
+    cells = {"up": "xs = [0]", "mid": "xs.append(0)\nn = len(xs)", "down": "m = len(xs)"}
+    sink = {"sink": "out = (n, m)"}
+
+    single = _session(tmp_path / "single", {**cells, **sink})
+    executor = CellExecutor(single)
+    for cell_id, source in cells.items():
+        assert (await executor.execute_cell(cell_id, source)).success
+
+    batched = _session(tmp_path / "batch", {**cells, **sink})
+    try:
+        await ws._execute_run_all(
+            None, batched, list(cells), ws._ensure_execution_state(batched.id), batched.id
+        )
+    finally:
+        ws.forget_notebook_execution_state(batched.id)
+
+    assert _stored(single, "down", "m") == 1
+    assert _stored(batched, "mid", "n") == _stored(single, "mid", "n") == 2
+    assert _stored(batched, "down", "m") == 1

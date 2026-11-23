@@ -2490,6 +2490,7 @@ async def _execute_cascade(
     )
 
     cascade_failed = False
+    failed: set[str] = set()
     # Under target_force the cached-ready target must still rerun.
     steps_to_run = [
         s for s in plan.steps if not s.skip or (target_force and s.cell_id == plan.target_cell_id)
@@ -2529,18 +2530,11 @@ async def _execute_cascade(
                         plan.plan_id,
                         cell_id,
                     )
-                    # "stale", not "idle", marks a cascade abort.
-                    cell_to_skip = session.notebook_state.get_cell(cell_id)
-                    if cell_to_skip:
-                        cell_to_skip.status = CellStatus.STALE
-                    await _broadcast_message(
-                        notebook_id,
-                        _make_message(
-                            MessageType.CELL_STATUS,
-                            next_notebook_sequence(notebook_id),
-                            cell_status_payload(cell_id, "stale"),
-                        ),
-                    )
+                    # Only a step that reads the failure is blocked, as in Run All; one
+                    # skipped just because the target cannot run keeps its status.
+                    if session.dag is not None and session.dag.upstream_reachable(cell_id) & failed:
+                        run_all.mark_blocked(session, cell_id)
+                        await _broadcast_blocked_by_failure(notebook_id, cell_id)
                     continue
 
                 execution_state.running_cell = cell_id
@@ -2593,6 +2587,7 @@ async def _execute_cascade(
 
                     if not result.success:
                         cascade_failed = True
+                        failed.add(cell_id)
 
                 except asyncio.CancelledError:
                     await _set_cell_idle(
@@ -2619,6 +2614,7 @@ async def _execute_cascade(
                     )
                     await _broadcast_downstream_stale(notebook_id, downstream_stale)
                     cascade_failed = True
+                    failed.add(cell_id)
                 completed += 1
             if not cascade_failed:
                 if steps_to_run:

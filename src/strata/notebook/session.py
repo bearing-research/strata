@@ -1448,6 +1448,7 @@ class NotebookSession:
         self, staleness_map: dict[str, CellStaleness], executing: str | None = None
     ) -> None:
         """Write computed staleness back onto in-memory cell state."""
+        failing = {c.id for c in self.notebook_state.cells if self._failure_still_stands(c)}
         for cell in self.notebook_state.cells:
             if cell.id == executing:
                 # Still running: a verdict now would tell every client it had stopped.
@@ -1457,6 +1458,7 @@ class NotebookSession:
             staleness = staleness_map.get(cell.id)
             if staleness is None:
                 continue
+            marked = cell.staleness
             cell.staleness = staleness
             if self._failure_still_stands(cell):
                 # A failed cell stored no artifact, so the walk may call it idle, stale or even
@@ -1469,6 +1471,20 @@ class NotebookSession:
                 cell.staleness = CellStaleness(status=CellStatus.ERROR, reasons=staleness.reasons)
                 staleness_map[cell.id] = cell.staleness
                 continue
+            if (
+                staleness.status == CellStatus.IDLE
+                and cell.status == CellStatus.STALE
+                and marked is not None
+                and marked.reasons == [StalenessReason.UPSTREAM]
+                and self.dag is not None
+                and (self.dag.upstream_reachable(cell.id) - {cell.id}) & failing
+            ):
+                # A run skipped it because what it reads failed (Run All, a cascade). The
+                # walk calls a cell that never ran idle; the mark stands while the failure
+                # does, or what it shows would depend on what ran after.
+                staleness = marked
+                cell.staleness = staleness
+                staleness_map[cell.id] = staleness
             if staleness.status == CellStatus.READY and cell.status == CellStatus.STALE:
                 # Nothing ran: what it showed is current again, as a cache hit would make it.
                 cell.cache_hit = True
