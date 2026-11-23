@@ -162,6 +162,19 @@ def runs_in_flight() -> bool:
     return any(notebook_has_active_execution(nid) for nid in list(_notebook_execution_state))
 
 
+async def cells_under_run(notebook_id: str) -> tuple[str | None, set[str]]:
+    """The notebook's running cell, and the cells an edit must refuse: it and the requested.
+
+    What ``cell_source_update`` checks, for the edits that arrive another way (REST, MCP).
+    """
+    state = _notebook_execution_state.get(notebook_id)
+    if state is None:
+        return None, set()
+    async with state.control_lock:
+        running, requested = state.running_cell, state.requested_cell
+    return running, {cell for cell in (running, requested) if cell is not None}
+
+
 _notebook_inspect_managers: dict[str, InspectManager] = {}
 
 # Deferred teardowns after the last WS disconnects, so a refresh or VPN blip
@@ -492,6 +505,10 @@ async def _refresh_and_broadcast_changed_staleness(
                 status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
             )
             staleness_map[preserve_ready_cell_id] = ran.staleness
+        elif ran is not None and staleness_map[preserve_ready_cell_id].status == CellStatus.STALE:
+            # Its own key moved during the run (a Run All cell edited while it waited
+            # runs the source the batch froze): the walk's verdict stands.
+            pass
         else:
             session.mark_executed_ready(preserve_ready_cell_id)
             staleness_map[preserve_ready_cell_id] = (

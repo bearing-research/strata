@@ -3,45 +3,69 @@
 (* Model of notebook cell status under edits and runs.                    *)
 (*                                                                         *)
 (* A chain of cells, each reading its upstream's latest result. Mirrors    *)
-(* notebook/ws.py and session.py:                                          *)
+(* notebook/ws.py, routes.py, ops.py and session.py:                       *)
 (*                                                                         *)
-(*   Edit   : cell_source_update. Refused for the cell that is executing   *)
-(*            (running_cell / requested_cell), allowed for any other cell; *)
-(*            then compute_staleness_async() applies the walk to every     *)
-(*            cell's status (_apply_staleness_map).                        *)
-(*   Start  : one execution at a time. A cell whose upstream is not ready  *)
-(*            gets a cascade, which runs the upstream first, so a run      *)
-(*            starts only on a ready upstream. The cell reads its          *)
-(*            upstream's current result when it starts (_load_input_blobs). *)
-(*   Finish : the run stores its result, keyed on what it read. Then       *)
-(*            _refresh_and_broadcast_changed_staleness runs the walk and,  *)
-(*            through preserve_ready_cell_id, marks the cell READY.        *)
+(*   WsEdit  : cell_source_update. Refused for the cell that is executing  *)
+(*             or requested (running_cell / requested_cell); then          *)
+(*             compute_staleness_async() applies the walk to every cell's  *)
+(*             status (_apply_staleness_map), leaving the running cell     *)
+(*             alone when KeepRunning.                                     *)
+(*   ApiEdit : PUT /cells/{id} and MCP edit_cell, when ApiEdits. Guarded   *)
+(*             like WsEdit only when ApiGuarded; otherwise any cell, and   *)
+(*             the walk is applied to every cell, the running one too.     *)
+(*   Start   : one execution at a time. A cell whose upstream is not ready *)
+(*             gets a cascade, which runs the upstream first, so a run     *)
+(*             starts only on a ready upstream (the code also runs stale   *)
+(*             upstreams inline; the model leaves that out). The cell      *)
+(*             reads its source and its upstream's current result when it  *)
+(*             starts (_load_input_blobs).                                 *)
+(*   Plan / BatchStart : Run All (Batch). Planning freezes every cell's    *)
+(*             source; the cells then run in order, each on its frozen     *)
+(*             source and its upstream's result. Only the first cell is    *)
+(*             requested, so the others stay editable while they wait.     *)
+(*   Finish  : the run stores its result, keyed on what it read. Then      *)
+(*             _refresh_and_broadcast_changed_staleness runs the walk and  *)
+(*             sets the cell's status by Rule:                             *)
+(*               "ready"    : ready (before finding 11's fix);             *)
+(*               "upstream" : ready unless an upstream is not ready;       *)
+(*               "walk"     : the walk's verdict.                          *)
 (*                                                                         *)
 (* The walk (_compute_staleness_locked) is modelled by what it decides: a  *)
 (* cell is ready when its latest result was computed from its current      *)
 (* source and from its upstream's latest result, and that upstream is      *)
 (* ready too. Source versions only grow, so an edit never reverts to a     *)
-(* source that already has a cached result.                                *)
+(* source that already has a cached result. The model has no uncached      *)
+(* leaves, for which the walk says idle after a run and the code keeps     *)
+(* the cell ready.                                                         *)
 (*                                                                         *)
 (* Mirrors:                                                                *)
 (*   strata/notebook/ws.py::_handle_cell_source_update                     *)
+(*   strata/notebook/routes.py::update_cell_source                         *)
+(*   strata/notebook/ops.py::LocalNotebookOps.edit_cell                    *)
+(*   strata/notebook/ws.py::_execute_run_all                               *)
 (*   strata/notebook/ws.py::_refresh_and_broadcast_changed_staleness       *)
 (*   strata/notebook/session.py::NotebookSession.compute_staleness_async   *)
 (*   strata/notebook/session.py::NotebookSession._compute_staleness_locked *)
 (*   strata/notebook/session.py::NotebookSession._apply_staleness_map      *)
 (*   strata/notebook/executor.py::CellExecutor._load_input_blobs           *)
 (***************************************************************************)
-EXTENDS Naturals
+EXTENDS Naturals, Sequences
 
 CONSTANTS
-    MaxSrc,     \* bound on edits per cell
-    MaxRuns,    \* bound on runs per cell
-    Patched     \* TRUE = the proposed fix
+    MaxSrc,       \* bound on edits per cell
+    MaxRuns,      \* bound on runs per cell
+    MaxBatch,     \* bound on Run Alls
+    KeepRunning,  \* a guarded edit's recompute leaves the running cell alone
+    ApiEdits,     \* REST / MCP edits happen
+    ApiGuarded,   \* ... and are refused for the running or requested cell
+    Batch,        \* Run All happens
+    Rule          \* how a finished run's status is set: "ready" | "upstream" | "walk"
 
 None == "none"
 
 \* The chain a -> b -> c (b reads a, c reads b).
 Cells == {"a", "b", "c"}
+Order == <<"a", "b", "c">>
 Up == [x \in Cells |-> CASE x = "a" -> None [] x = "b" -> "a" [] x = "c" -> "b"]
 Depth == 3
 NoArt == [s |-> 0, up |-> 0, ok |-> FALSE]
@@ -52,15 +76,21 @@ VARIABLES
     art,        \* art[x] : what x's latest result was computed from
     status,     \* status[x] : what the session reports
     running,    \* the cell being executed, or None
-    snap        \* what the running cell read when it started
+    snap,       \* what the running cell read when it started
+    queue,      \* Run All's cells still to run, in order
+    frozen,     \* the sources Run All planned with
+    requested,  \* Run All's requested cell, or None
+    batches     \* Run Alls so far
 
-vars == <<src, gen, art, status, running, snap>>
+vars == <<src, gen, art, status, running, snap, queue, frozen, requested, batches>>
 
 TypeOK ==
     /\ src \in [Cells -> 0..MaxSrc]
     /\ gen \in [Cells -> 0..MaxRuns]
     /\ status \in [Cells -> {"idle", "ready", "stale", "running"}]
     /\ running \in Cells \union {None}
+    /\ requested \in Cells \union {None}
+    /\ batches \in 0..MaxBatch
 
 \* Is x's latest result current, given source versions S, run counts G and
 \* results A? Unrolled Depth times, which is exact for chains that long.
@@ -81,10 +111,11 @@ WalkIn(S, G, A, x) ==
 
 Fresh(x) == FreshIn(src, gen, art, x, Depth)
 
-\* _apply_staleness_map writes every cell, the running one included.
-\* Patched, a running cell keeps "running".
-Applied(S, G, A, run) ==
-    [x \in Cells |-> IF Patched /\ x = run THEN "running" ELSE WalkIn(S, G, A, x)]
+\* _apply_staleness_map: the walk's verdict for every cell not in Keep.
+Applied(S, G, A, Keep) ==
+    [x \in Cells |-> IF x \in Keep THEN status[x] ELSE WalkIn(S, G, A, x)]
+
+Busy == {running, requested} \ {None}
 
 Init ==
     /\ src = [x \in Cells |-> 0]
@@ -93,43 +124,80 @@ Init ==
     /\ status = [x \in Cells |-> "idle"]
     /\ running = None
     /\ snap = NoArt
+    /\ queue = <<>>
+    /\ frozen = src
+    /\ requested = None
+    /\ batches = 0
 
-Edit(x) ==
+EditWith(x, keep) ==
     LET S == [src EXCEPT ![x] = @ + 1] IN
-    /\ x # running
     /\ src[x] < MaxSrc
     /\ src' = S
-    /\ status' = Applied(S, gen, art, running)
-    /\ UNCHANGED <<gen, art, running, snap>>
+    /\ status' = Applied(S, gen, art, keep)
+    /\ UNCHANGED <<gen, art, running, snap, queue, frozen, requested, batches>>
+
+Running == IF running = None THEN {} ELSE {running}
+
+WsEdit(x) ==
+    /\ x \notin Busy
+    /\ EditWith(x, IF KeepRunning THEN Running ELSE {})
+
+ApiEdit(x) ==
+    /\ ApiEdits
+    /\ ApiGuarded => x \notin Busy
+    /\ EditWith(x, IF ApiGuarded THEN Running ELSE {})
+
+Reads(x, s) == [s |-> s, up |-> IF Up[x] = None THEN 0 ELSE gen[Up[x]], ok |-> TRUE]
 
 Start(x) ==
-    /\ running = None
+    /\ running = None /\ queue = <<>>
     /\ gen[x] < MaxRuns
     /\ Up[x] # None => status[Up[x]] = "ready"
     /\ running' = x
-    /\ snap' = [s |-> src[x], up |-> IF Up[x] = None THEN 0 ELSE gen[Up[x]], ok |-> TRUE]
+    /\ snap' = Reads(x, src[x])
     /\ status' = [status EXCEPT ![x] = "running"]
-    /\ UNCHANGED <<src, gen, art>>
+    /\ UNCHANGED <<src, gen, art, queue, frozen, requested, batches>>
 
-\* The run stores its result, the walk runs, and the cell is preserved as
-\* READY. Patched, the walk's verdict for the cell stands.
+Plan ==                                        \* notebook_run_all plans one batch
+    /\ Batch /\ running = None /\ queue = <<>> /\ batches < MaxBatch
+    /\ \A x \in Cells : gen[x] < MaxRuns
+    /\ queue' = Order /\ frozen' = src /\ requested' = Head(Order)
+    /\ batches' = batches + 1
+    /\ UNCHANGED <<src, gen, art, status, running, snap>>
+
+BatchStart ==
+    /\ running = None /\ queue # <<>>
+    /\ LET x == Head(queue) IN
+       /\ running' = x
+       /\ snap' = Reads(x, frozen[x])
+       /\ status' = [status EXCEPT ![x] = "running"]
+    /\ UNCHANGED <<src, gen, art, queue, frozen, requested, batches>>
+
 Finish ==
     LET x == running
         G == [gen EXCEPT ![x] = @ + 1]
         A == [art EXCEPT ![x] = snap]
-        walked == Applied(src, G, A, None)
+        walked == Applied(src, G, A, {})
+        upstreamOff == Up[x] # None /\ walked[Up[x]] # "ready"
     IN
     /\ running # None
     /\ gen' = G
     /\ art' = A
     /\ running' = None
     /\ snap' = NoArt
-    /\ status' = IF Patched THEN walked ELSE [walked EXCEPT ![x] = "ready"]
-    /\ UNCHANGED src
+    /\ status' = CASE Rule = "ready" -> [walked EXCEPT ![x] = "ready"]
+                   [] Rule = "upstream" ->
+                        [walked EXCEPT ![x] = IF upstreamOff THEN "stale" ELSE "ready"]
+                   [] Rule = "walk" -> walked
+    /\ IF queue # <<>> /\ Head(queue) = x
+       THEN /\ queue' = Tail(queue)
+            /\ requested' = IF Tail(queue) = <<>> THEN None ELSE requested
+       ELSE UNCHANGED <<queue, requested>>
+    /\ UNCHANGED <<src, frozen, batches>>
 
 Next ==
-    \/ Finish
-    \/ \E x \in Cells : Edit(x) \/ Start(x)
+    \/ Finish \/ Plan \/ BatchStart
+    \/ \E x \in Cells : WsEdit(x) \/ ApiEdit(x) \/ Start(x)
 
 Spec == Init /\ [][Next]_vars
 

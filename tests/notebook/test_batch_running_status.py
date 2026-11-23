@@ -161,3 +161,57 @@ async def test_a_harness_that_dies_mid_cell_leaves_it_idle(tmp_path, monkeypatch
 
     assert session.notebook_state.get_cell("first").status == CellStatus.IDLE
     assert _statuses(sent, "first") == ["running", "idle"]
+
+
+@pytest.mark.asyncio
+async def test_a_batched_cell_edited_while_it_waits_is_not_shown_ready(tmp_path, monkeypatch):
+    """Run All froze its source, so it ran the old one: its status says so.
+
+    Only the batch's first cell is requested, so a later one takes edits while it waits.
+    Finding 14 (formal/tla/Staleness.tla).
+    """
+    from strata.notebook import ws
+    from strata.notebook.executor import partition_batchable_runs
+    from strata.notebook.ws import (
+        NotebookExecutionState,
+        _execute_run_all,
+        _handle_cell_source_update,
+    )
+    from tests.notebook.e2e_fixtures import FakeNotebookWebSocket
+
+    gate = tmp_path / "gate"
+    waits = (
+        "import pathlib, time\n"
+        f"while not pathlib.Path({str(gate)!r}).exists():\n"
+        "    time.sleep(0.05)\n"
+        "x = 1\n"
+    )
+    # The edited cell is the batch's last, so no later cell's recompute corrects it.
+    session = _session(
+        tmp_path,
+        [("first", waits, None), ("second", "y = x + 1\n", "first"), ("sink", "w = y\n", "second")],
+    )
+    cells = session.notebook_state.cells
+    assert [kind for kind, _ in partition_batchable_runs(CellExecutor(session), cells)] == ["batch"]
+    state = NotebookExecutionState()
+    edit = FakeNotebookWebSocket()
+    sent: list[dict[str, Any]] = []
+
+    async def record(notebook_id: str, message: dict[str, Any], **kwargs: Any) -> None:
+        sent.append(message)
+        announced = message["type"] == "cell_status" and message["payload"] == (
+            cell_status_payload("first", "running")
+        )
+        if announced and not gate.exists():
+            await _handle_cell_source_update(
+                edit, session, {"cell_id": "sink", "source": "w = y * 1000\n"}, state, session.id
+            )
+            gate.touch()
+
+    monkeypatch.setattr(ws, "_broadcast_message", record)
+    await _execute_run_all(None, session, [c.id for c in cells], state, session.id)
+
+    assert gate.exists(), "the edit landed while the batch waited"
+    assert not [text for text in edit.raw_sent if "cell_busy" in text]
+    assert session.notebook_state.get_cell("sink").status == CellStatus.STALE
+    assert _statuses(sent, "sink")[-1] == "stale"

@@ -36,6 +36,8 @@ MODELS: dict[tuple[str, str], str | None] = {
     ("Admission", "Admission_Eviction"): "DrainSeesAll",
     ("Admission", "Admission_Patched"): None,
     ("Staleness", "Staleness_EditDuringRun"): "RunningShown",
+    ("Staleness", "Staleness_ApiEdit"): "RunningShown",
+    ("Staleness", "Staleness_BatchEdit"): "ReadyMeansCurrent",
     ("Staleness", "Staleness_Patched"): None,
     ("LocalRun", "LocalRun_Lapse"): "NoNeedlessFence",
     ("LocalRun", "LocalRun_Race"): "NoNeedlessFence",
@@ -85,8 +87,9 @@ def check(jar: Path, spec: str, config: str, expected: str | None) -> str | None
             text=True,
         )
     out = result.stdout + result.stderr
-    states = re.search(r"([\d,]+) distinct states found", out)
-    print(f"  {config}: {states.group(1) if states else '?'} distinct states")
+    # The last count is the final one; earlier ones are progress reports.
+    states = re.findall(r"([\d,]+) distinct states found", out)
+    print(f"  {config}: {states[-1] if states else '?'} distinct states")
     violated = re.search(r"Invariant (\w+) is violated", out)
     if expected is None:
         if "Model checking completed. No error has been found." in out:

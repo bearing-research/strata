@@ -664,3 +664,38 @@ the attempt; the release then went out under the fenced attempt (`LocalRun_Race`
 one lapse, 7 states). Holds are serialized per run. `LocalRun_Patched` (a rival
 process that may resume the build, three lapses) passes. Regression tests:
 `tests/notebook/test_local_runs.py::TestALapsedLeaseWithNoRival`, also on Postgres.
+
+### 14. A Run All cell edited while it waits is shown ready on its old source
+
+**Model:** `tla/Staleness.tla`, configuration `Staleness_BatchEdit` (SYSTEMS 8, NB-1).
+Run All freezes every batched cell's source when it plans the batch, and only the
+first cell is requested, so the WebSocket accepts an edit of any later cell while
+it waits. The cell then runs its frozen source, and `preserve_ready_cell_id` marks
+it ready, checking its upstreams but not its own key. TLC trace (7 states): plan,
+`a` runs, edit `b`, `b` runs its frozen source, `b` ready.
+
+The replay showed the walk does find the cell stale: the next batched cell's
+recompute corrects it, so the ready frame is transient, except for the batch's last
+cell, which stays ready on a source it never ran. As with finding 11 the harm is the
+reported status; the executor re-checks provenance before using it. Severity: low.
+
+**Fixed.** After a run, a cell the walk finds stale keeps the walk's verdict.
+Regression test:
+`tests/notebook/test_batch_running_status.py::test_a_batched_cell_edited_while_it_waits_is_not_shown_ready`.
+
+### 15. REST and MCP edits change a running cell
+
+**Model:** `Staleness_ApiEdit` (NB-2). The WebSocket refuses an edit of the running
+or requested cell and leaves the running cell's status alone in the recompute that
+follows any edit (finding 11's fix). `PUT /cells/{id}` and the MCP `edit_cell`
+tool did neither. The replay ran `b`, edited it over REST (accepted), and found `b`
+taken off running mid-run and then ready on a source it never ran. An MCP edit of
+another cell reloads the session, whose fresh cells parse idle, so the running cell
+read idle. (The reload also replaces the cell objects mid-run; a probe showed the
+run's outputs still land on the live ones, so no key names the wrong upstream.)
+Agents read status through these paths. Severity: low to medium.
+
+**Fixed.** REST answers `409 cell_busy` and MCP raises, as the WebSocket refuses;
+REST passes the running cell to its recompute, and a reload keeps a running cell
+running. Regression tests: `tests/notebook/test_e2e_staleness.py::TestARestEditDuringARun`,
+`tests/notebook/test_mcp_server.py::test_an_agent_edit_of_the_running_cell_is_refused`.

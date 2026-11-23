@@ -18,6 +18,11 @@ in [`README.md`](README.md).
   losing a run nothing else wanted, and a race in the first fix; both fixed.
   LR-2 (the check-then-act in `open` across processes) and LR-4 (sequence
   collision) remain leads; LR-5 was fixed in #1613.
+- **Phase 2 (staleness):** `Staleness.tla` now has REST/MCP edits and Run All.
+  It found findings 14 and 15, both fixed. Two survey leads did not hold up on
+  replay: a batched cell edited while it waits is corrected by the next cell's
+  recompute (only the last cell stayed wrong, finding 14), and the MCP reload's
+  new cell objects still receive the run's outputs.
 
 ## Conventions
 
@@ -77,11 +82,10 @@ property, the replays of what it finds, then a PR per fix.
    two processes opening one computation (extend `LocalRun.tla` with `open`
    split into its transactions, and two fresh opens); LR-4, the checkpoint
    sequence after an abandoned release (a replay is enough).
-2. **Staleness, current code** (SYSTEMS 8 and 9: NB-1, NB-2, BAT-2). Rework
-   `Staleness.tla` to the key rule, inline upstream runs, Run All batches
-   and REST/MCP edits. Replays drive the handlers with
-   `FakeNotebookWebSocket` (`tests/notebook/e2e_fixtures.py`) so an edit
-   lands while a run awaits.
+2. **Staleness** (SYSTEMS 8 and 9). Done for NB-1 and NB-2. Open: BAT-2 (a
+   batched `@nocache` producer run again by a later single-cell consumer; a
+   replay through `_execute_run_all` is enough), and content-key readiness and
+   uncached leaves in the model (see SYSTEMS 8, what the model leaves out).
 3. **Row-group cache soundness** (SYSTEMS 3 and 4: CK-1, MD-1, MD-2, PR-2).
    A stateful Hypothesis test over a real Iceberg table: appends, deletes
    (positional and equality), overwrites, schema evolution, `add_files`, drop
