@@ -671,8 +671,16 @@ class NotebookSession:
         # Restore ``last_provenance_hash`` *before* computing staleness, or every cell
         # falls back to IDLE and none can be marked STALE.
         self._restore_execution_history(previous_cells)
-        self.compute_staleness()
+        # A reload during a run (an agent's edit of another cell) leaves the run's cell
+        # running: the fresh cells parse idle.
+        executing = next(
+            (cell.id for cell in previous_cells.values() if cell.status == CellStatus.RUNNING),
+            None,
+        )
+        self.compute_staleness(executing)
         self._restore_ready_runtime_state(previous_cells, previous_runtime_identities)
+        if executing is not None and (running := self.notebook_state.get_cell(executing)):
+            running.status = CellStatus.RUNNING
 
     def _analyze_and_build_dag(self) -> None:
         """Analyze all cells, build the DAG, and update each cell's DAG fields."""

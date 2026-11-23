@@ -496,9 +496,22 @@ async def _edit_cell(
     cell_id: str,
     source: str,
     author: str | None = None,
+    *,
+    by_its_run: bool = False,
 ) -> dict[str, Any]:
-    """Replace a cell's source, then sync + broadcast the new state."""
+    """Replace a cell's source, then sync + broadcast the new state.
+
+    Refused while the cell is running or requested, unless *by_its_run*: the
+    scratchpad's run edits its own cell under its reservation, before it starts.
+    """
+    from strata.notebook.ws import cells_under_run
+
     session = _live_session(session_manager, session_id)
+    _, busy = await cells_under_run(session_id)
+    if cell_id in busy and not by_its_run:
+        raise NotebookOpsError(
+            f"Cannot update cell {cell_id} while it is executing; retry after it finishes"
+        )
     view = LocalNotebookOps.from_session(session, author=author).edit_cell(cell_id, source)
     await _sync_and_broadcast(session_id, session)
     await _agent_note(session_id, "mcp", f"edited cell {cell_id}")
@@ -995,7 +1008,7 @@ async def _scratch_run(
         async def edit_and_run(execution_state: Any) -> Any:
             # Under the reservation, so a busy refusal leaves an edited cell as it was.
             if not added:
-                await _edit_cell(session_manager, session_id, target, source)
+                await _edit_cell(session_manager, session_id, target, source, by_its_run=True)
             # The plan lists the target too.
             for cell_id in run_cells(session, target, mode):
                 upstream = session.notebook_state.get_cell(cell_id)

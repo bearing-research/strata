@@ -33,9 +33,11 @@ the replay becomes the fix's regression test.
 | `tla/Admission_Py312.cfg` | CPython 3.12 `asyncio.Condition` semantics. Violates `NoLostWakeup` (finding 8) |
 | `tla/Admission_Eviction.cfg` | LRU eviction of a limiter in use. Violates `DrainSeesAll` and `WithinQuota` (findings 9, 10) |
 | `tla/Admission_Patched.cfg` | The code as it is. All invariants hold |
-| `tla/Staleness.tla` | Cell status for a chain `a → b → c` under edits and runs (SYSTEMS 8; drifted, see there) |
+| `tla/Staleness.tla` | Cell status for a chain `a → b → c` under WebSocket, REST and MCP edits, single runs and Run All (SYSTEMS 8) |
 | `tla/Staleness_EditDuringRun.cfg` | An upstream edited while a downstream runs. Violates `RunningShown` (finding 11) |
-| `tla/Staleness_Patched.cfg` | The fix. All invariants hold |
+| `tla/Staleness_ApiEdit.cfg` | A REST or MCP edit during a run. Violates `RunningShown` (finding 15) |
+| `tla/Staleness_BatchEdit.cfg` | A Run All cell edited while it waits. Violates `ReadyMeansCurrent` (finding 14) |
+| `tla/Staleness_Patched.cfg` | The code as it is. All invariants hold |
 | `tla/LocalRun.tla` | A local cell run holding its build's lease: releases, the renewal task, lapses, a rival process that resumes the build (SYSTEMS 10) |
 | `tla/LocalRun_Lapse.cfg` | The code before the fix. Violates `NoNeedlessFence` (finding 13) |
 | `tla/LocalRun_Race.cfg` | The fix without its lock. Violates `NoNeedlessFence` |

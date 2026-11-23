@@ -2175,7 +2175,20 @@ async def update_cell_source(
     """Update cell source code; returns the updated cell state and DAG."""
 
     from strata.notebook.presence import lock_window_seconds
-    from strata.notebook.ws import broadcast_presence
+    from strata.notebook.ws import broadcast_presence, cells_under_run
+
+    # As the WebSocket refuses it: the run already has the source it stores under.
+    running, busy = await cells_under_run(notebook_id)
+    if cell_id in busy:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "cell_busy",
+                "cell_id": cell_id,
+                "message": f"Cannot update cell {cell_id} while it is executing; "
+                "retry after it finishes",
+            },
+        )
 
     author = resolve_author(req.author)
     held_by = session.presence.holder(cell_id, author, lock_window_seconds())
@@ -2205,7 +2218,7 @@ async def update_cell_source(
         session.re_analyze_cell(cell_id)
 
         # Without this, cells keep "ready" and the cascade planner won't trigger.
-        await session.compute_staleness_async()
+        await session.compute_staleness_async(executing=running)
 
         cell = session.notebook_state.get_cell(cell_id)
         if not cell:

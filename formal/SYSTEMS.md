@@ -151,7 +151,10 @@ cellgraph's `parts_digest` over its definition, environment, upstream
 outputs and inputs (mounts, tables, fetches, datasets). A leaf, or a SQL,
 prompt or per-variant cell, keeps a ready status it already had while its key
 is unchanged. After a run, `preserve_ready_cell_id` marks the cell ready
-unless a direct upstream is not ready.
+unless a direct upstream is not ready (then stale, reason upstream) or the walk
+finds the cell itself stale (then the walk's verdict). An edit of the cell
+being executed or requested is refused on every path (`cell_busy`), and every
+edit's recompute leaves the running cell's status alone.
 
 **Actors.** One execution per notebook (`NotebookExecutionState`, shared by
 the WebSocket, REST and MCP), but one execution runs several cells: a target
@@ -161,17 +164,17 @@ reloads the session).
 
 | ID | Property | Checked by |
 | --- | --- | --- |
-| NB-1 | A cell shown ready holds the result its current key names. | model `Staleness_Patched` (finding 11), for the code as of 2026-09. The model has drifted; see below. **Leads:** a batched cell edited after the batch was planned runs its old source and is then preserved ready; `preserve_ready_cell_id` checks upstreams but not the cell's own key. |
-| NB-2 | The executing cell is shown running. | model `Staleness_Patched`; test `tests/notebook/test_e2e_staleness.py::TestAnEditDuringARun` for the WebSocket edit. **Lead:** REST and MCP edits pass no executing cell to the recompute, and the MCP reload replaces the cell-state objects the executor is writing to. |
+| NB-1 | A cell shown ready holds the result its current key names. | model `Staleness_Patched` (findings 11 and 14; `Staleness_BatchEdit` shows 14); test `tests/notebook/test_batch_running_status.py::test_a_batched_cell_edited_while_it_waits_is_not_shown_ready` |
+| NB-2 | The executing cell is shown running, and no edit changes the source its run has. | model `Staleness_Patched` (findings 11 and 15; `Staleness_ApiEdit` shows 15); tests `tests/notebook/test_e2e_staleness.py::TestAnEditDuringARun` (WebSocket), `::TestARestEditDuringARun` (REST), `tests/notebook/test_mcp_server.py::test_an_agent_edit_of_the_running_cell_is_refused` (MCP) |
 | NB-3 | Sequential edits and runs keep statuses and values consistent. | property `test_staleness_properties.py` (diamond of plain Python cells, through the real WebSocket) |
 
-**Where `Staleness.tla` no longer matches the code.** It models one cell per
-run, starting only on a ready upstream, and readiness as version counters.
-The code now runs upstreams inline (and "run this only" on stale ones), runs
-several cells per Run All, keys readiness on content (an edit back to an old
-source is ready again once its result is latest), and has ERROR,
-blocked-by-failure and the ready-preserving branches. The model still
-catches finding 11's shape, but it says nothing about these paths.
+**What `Staleness.tla` leaves out.** It models the three edit paths, single
+runs that start on a ready upstream, and Run All with its frozen sources, over
+a chain of three cells. It leaves out: upstreams run inline (and "run this
+only" on stale ones); readiness by content key, under which an edit back to
+an old source is ready again once that result is latest (the model's source
+versions only grow); uncached leaves, which the walk calls idle after a run
+and the code keeps ready; and the ERROR and blocked-by-failure statuses.
 
 ## 9. Run All batching
 

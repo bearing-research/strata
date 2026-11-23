@@ -33,6 +33,7 @@ from strata.notebook.mcp_server import (
     _status,
     build_mcp_app,
 )
+from strata.notebook.models import CellStatus
 from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
 from tests.notebook.test_cli import _build_notebook
 
@@ -392,6 +393,30 @@ async def test_an_agent_edit_honours_the_soft_lock(sm_with_session, monkeypatch)
 
     await _edit_cell(sm, session_id, "b", "y = x + 2", author="claude")
     assert session.presence.holder("b", "alice", 60.0) == "claude"
+
+
+@pytest.mark.asyncio
+async def test_an_agent_edit_of_the_running_cell_is_refused(sm_with_session, monkeypatch):
+    """As the WebSocket refuses it: the run already has the source it stores under."""
+    from strata.notebook import ws
+
+    async def fake_sync(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+    sm, session_id, _ = sm_with_session
+    state = ws.NotebookExecutionState()
+    state.running_cell, state.requested_cell = "b", "b"
+    monkeypatch.setitem(ws._notebook_execution_state, session_id, state)
+
+    with pytest.raises(NotebookOpsError, match="while it is executing"):
+        await _edit_cell(sm, session_id, "b", "y = x + 2", author="claude")
+    assert _get_cell(sm, session_id, "b")["source"] == "y = x + 1"
+
+    # Another cell may change; the run's cell stays running through the reload.
+    sm.get_session(session_id).notebook_state.get_cell("b").status = CellStatus.RUNNING
+    await _edit_cell(sm, session_id, "a", "x = 2", author="claude")
+    assert sm.get_session(session_id).notebook_state.get_cell("b").status == CellStatus.RUNNING
 
 
 @pytest.mark.asyncio

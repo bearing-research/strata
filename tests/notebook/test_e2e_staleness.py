@@ -177,6 +177,66 @@ class TestAnEditDuringARun:
                 assert "1010" in str(output["payload"])
 
 
+class TestARestEditDuringARun:
+    """REST edits keep the WebSocket's rules: the running cell refuses them, and any
+    other edit leaves it running. Finding 15 (formal/tla/Staleness.tla)."""
+
+    def _chain(self, tmp: Path, release: Path):
+        return (
+            NotebookBuilder(tmp)
+            .add_cell("a", "x = 1")
+            .add_cell(
+                "b",
+                "import pathlib, time\n"
+                f"while not pathlib.Path({str(release)!r}).exists():\n"
+                "    time.sleep(0.05)\n"
+                "y = x + 1",
+                "a",
+            )
+            .add_cell("c", "z = y * 10\nz", "b")
+        )
+
+    def test_the_running_cell_refuses_an_edit(self, setup):
+        client, tmp = setup
+        release = tmp / "release"
+        nb = self._chain(tmp, release)
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                execute_cell_and_wait(ws, "a")
+                ws.execute_cell("b")
+                ws.receive_until("cell_status", cell_id="b", status="running")
+
+                response = client.put(f"/v1/notebooks/{sid}/cells/b", json={"source": "y = 5"})
+                assert response.status_code == 409
+                assert response.json()["detail"]["code"] == "cell_busy"
+                assert session.notebook_state.get_cell("b").status.value == "running"
+
+                release.touch()
+                finished = ws.receive_until("cell_status", cell_id="b", max_messages=300)
+                assert finished["payload"]["status"] == "ready"
+                assert "y = x + 1" in session.notebook_state.get_cell("b").source
+
+    def test_an_edit_of_another_cell_leaves_it_running(self, setup):
+        client, tmp = setup
+        release = tmp / "release"
+        nb = self._chain(tmp, release)
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                execute_cell_and_wait(ws, "a")
+                ws.execute_cell("b")
+                ws.receive_until("cell_status", cell_id="b", status="running")
+
+                response = client.put(f"/v1/notebooks/{sid}/cells/a", json={"source": "x = 100"})
+                assert response.status_code == 200
+                assert session.notebook_state.get_cell("b").status.value == "running"
+                statuses = {cell["id"]: cell["status"] for cell in response.json()["cells"]}
+                assert statuses["b"] == "running"
+
+                release.touch()
+                finished = ws.receive_until("cell_status", cell_id="b", max_messages=300)
+                assert finished["payload"]["status"] == "stale"  # built from the old a
+
+
 class TestDAGRestructuring:
     def test_add_new_dependency(self, setup):
         """Edit c2 to reference a new variable from c1."""
