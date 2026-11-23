@@ -146,7 +146,7 @@ settled and covered by tests. Three surfaces are not:
 ## Learn more
 
 - [Documentation](https://bearingresearch.com/strata/latest/), including the full feature list
-- [Installation](https://bearingresearch.com/strata/latest/getting-started/installation/): Docker, source builds, and why Strata needs uv
+- [Installation](https://bearingresearch.com/strata/latest/getting-started/installation/): uv, pipx, pip and conda, Docker, and source builds
 - [Use Strata as a library](https://bearingresearch.com/strata/latest/getting-started/core/) with `strata-client`
 - [Deployment](https://bearingresearch.com/strata/latest/deployment/modes/): service mode, multi-tenancy, workers
 - [Issues](https://github.com/bearing-research/strata/issues) for bugs and questions

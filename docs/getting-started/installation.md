@@ -30,24 +30,52 @@ This puts `strata-notebook`, `strata`, `strata-notebook-tui` and
 `strata-worker` on `PATH` in a tool environment of their own. The wheel
 is pure Python and ships the frontend prebuilt.
 
-Any other installer works too, since Strata depends on uv (0.12 or 0.13)
-and runs that uv for every notebook environment, whatever is on `PATH`:
+### pipx, pip or conda
+
+Any other installer works too. Strata depends on uv (0.12 or 0.13), so every
+install brings a `uv` binary, and Strata runs that uv for every notebook
+environment whatever is on `PATH`. You don't need uv installed beforehand,
+only Python 3.12 or newer.
 
 ```bash
-pipx install strata-notebook                  # its own environment, like uv tool
+# pipx: an environment of its own, like uv tool
+pipx install strata-notebook
 
+# pip into a virtual environment
 python -m venv ~/strata && ~/strata/bin/pip install strata-notebook
 
+# pip into a conda environment
 conda create -n strata python=3.13 && conda activate strata
-pip install strata-notebook                   # into the conda environment
+pip install strata-notebook
 ```
 
-The install puts a `uv` binary in the environment beside `strata`, so a
-venv you activate has that uv first on `PATH`. To run another uv, set
-`STRATA_UV` to its path ([configuration](../reference/configuration.md)).
+After a pip install, run the commands from that environment: activate it, or
+call `~/strata/bin/strata-notebook`. Strata isn't on conda-forge yet; pip into
+the conda environment as above.
 
-Add extras in brackets, for example
-`uv tool install "strata-notebook[mcp,tui]"` for `strata agent`:
+The `uv` binary lands in the environment beside `strata`, so an activated
+environment puts that uv first on `PATH`. To run another uv, set `STRATA_UV` to
+its path ([configuration](../reference/configuration.md)). A
+[project the scratchpad attaches to](../notebook/mcp.md#a-projects-own-daemon)
+runs the uv on your `PATH` first, since that uv wrote the project's lock.
+
+### Upgrade and remove
+
+| Installed with | Upgrade | Remove |
+| --- | --- | --- |
+| uv tool | `uv tool upgrade strata-notebook` | `uv tool uninstall strata-notebook` |
+| pipx | `pipx upgrade strata-notebook` | `pipx uninstall strata-notebook` |
+| pip, in a venv or conda environment | `pip install -U strata-notebook` | Delete the environment |
+
+`uv tool upgrade` also moves uv to the newest version Strata allows. pip and pipx
+leave it where it is unless the new Strata needs a newer one; add `uv` to the pip
+command (`pip install -U strata-notebook uv`) to take it as well.
+
+### Extras
+
+Add extras in brackets with any installer, for example
+`uv tool install "strata-notebook[mcp,tui]"` or
+`pipx install "strata-notebook[mcp,tui]"` for `strata agent`:
 
 | Extra | Enables |
 | --- | --- |
@@ -135,8 +163,9 @@ The PyPI package is `strata-notebook`; the installed Python module
 and CLI binary are both named `strata`.
 
 The table assumes a source checkout, where `uv run` resolves each command
-inside the project venv. After `uv tool install`, drop the `uv run` prefix
-and call `strata-notebook` / `strata` / `strata-worker` directly.
+inside the project venv. After an install from PyPI (uv tool, pipx, or pip into
+an environment you have activated), drop the `uv run` prefix and call
+`strata-notebook` / `strata` / `strata-worker` directly.
 
 | Command | What it does |
 | --- | --- |
@@ -151,7 +180,7 @@ and call `strata-notebook` / `strata` / `strata-worker` directly.
 | `uv run strata scratch start\|stop\|status [--root DIR]` | Start, stop or show a project's scratchpad daemon: a server with the [scratchpad MCP profile](../notebook/mcp.md#a-projects-own-daemon) serving `<DIR>/.strata-scratch/`, which it creates on first start. `DIR` defaults to the project the command runs in: the nearest directory at or above it holding a `pyproject.toml`, within its git repository, else the repository ([which project](../notebook/mcp.md#a-projects-own-daemon)). One per project, shared by every client there; it stops itself after 30 idle minutes. |
 | `uv run strata scratch ls\|gc\|rm\|retire` | List every project's scratchpad (size, last use, overage, daemon up), retire its idle cells and sweep it now (`gc [--root DIR \| --all]`), stop its daemon and delete it (`rm [--root DIR]`, which costs reruns only), or retire one cell by hand (`retire <cell> [--root DIR]`). See [A project's own daemon](../notebook/mcp.md#a-projects-own-daemon). |
 | `uv run strata scratch run\|show [--root DIR]` | Run Python in the project's scratchpad (`run -c CODE`, or `--file`, `--cell ID` to replace one, `--fresh`) or print what it holds (`show [NAME]`), as the MCP `run` and `scratchpad` tools do, starting its daemon if none runs; prints JSON. For an agent with only a shell. Needs the `[mcp]` extra. See [From a shell](../notebook/mcp.md#from-a-shell-strata-scratch-run-and-show). |
-| `strata agent install\|uninstall` | From a `uv tool install` of Strata, since the config it writes runs that `strata` in every project: wire the project scratchpad into Claude Code's or Codex's own config (`--target claude,codex`, default every one on PATH; `--yes` skips the question): the MCP entry, its permission, and a block in `CLAUDE.md` / `AGENTS.md`. `uninstall` removes exactly that. See [Install it into the agent](../notebook/mcp.md#install-it-into-the-agent-strata-agent-install). |
+| `strata agent install\|uninstall` | From a `uv tool` or `pipx` install of Strata, since the config it writes runs that `strata` in every project: wire the project scratchpad into Claude Code's or Codex's own config (`--target claude,codex`, default every one on PATH; `--yes` skips the question): the MCP entry, its permission, and a block in `CLAUDE.md` / `AGENTS.md`. `uninstall` removes exactly that. See [Install it into the agent](../notebook/mcp.md#install-it-into-the-agent-strata-agent-install). |
 | `uv run strata mcp [--root DIR]` | Serve a project's scratchpad to a coding agent as a stdio MCP server, for the agent's MCP config: it lists the tools at once and starts the project's scratchpad daemon as the session opens when the project has a scratchpad, else on the first tool call. Needs the `[mcp]` extra. See [MCP server](../notebook/mcp.md#from-an-agents-config-strata-mcp). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot), or write a portable snapshot zip with `--to snapshot`. See [Export and import](../notebook/export.md). |
 | `uv run strata import <file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory, or unpack a snapshot zip back into one. See [Coming from Jupyter](../notebook/import.md). |
