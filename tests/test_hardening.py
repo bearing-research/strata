@@ -1178,10 +1178,9 @@ class TestNonBlockingLogging:
             assert hasattr(collector, "_log_queue")
             assert isinstance(collector._log_queue, queue_module.Queue)
 
-            assert hasattr(collector, "_writer_thread")
-            assert collector._writer_thread.is_alive()
-
             collector.log_event("test_event", key="value")
+            assert collector._writer_thread is not None
+            assert collector._writer_thread.is_alive()
 
             collector._log_queue.join()
 
@@ -1224,9 +1223,8 @@ class TestNonBlockingLogging:
         collector = MetricsCollector(output=output, enabled=True, log_queue_size=2)
 
         try:
-            # Stop the writer so the queue fills up.
+            # A shut-down collector starts no writer, so the queue fills up.
             collector._shutdown.set()
-            collector._writer_thread.join(timeout=1)
 
             initial_dropped = collector.dropped_logs
 
@@ -1274,7 +1272,6 @@ class TestNonBlockingLogging:
 
         try:
             collector._shutdown.set()
-            collector._writer_thread.join(timeout=1)
 
             for _ in range(50):
                 collector.log_event("flood")
@@ -1292,12 +1289,77 @@ class TestNonBlockingLogging:
 
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True)
-
-        assert collector._writer_thread.is_alive()
+        collector.log_event("before_shutdown")
+        thread = collector._writer_thread
+        assert thread is not None and thread.is_alive()
 
         collector.shutdown()
 
-        assert not collector._writer_thread.is_alive()
+        assert not thread.is_alive()
+        assert "before_shutdown" in output.getvalue()
+
+    def test_a_collector_that_only_counts_starts_no_thread(self):
+        """DiskCache and the fetcher make their own collectors, which never log."""
+        import io
+
+        from strata.observability.metrics import MetricsCollector
+
+        collector = MetricsCollector(output=io.StringIO(), enabled=True)
+        collector.record_fetch(1000, 10, 5.0, from_cache=True)
+        collector.record_cache_write(100)
+
+        assert collector._writer_thread is None
+
+    def test_a_shut_down_collector_is_released(self):
+        """Nothing it registered keeps it: one per server lifespan piled up in a long process."""
+        import gc
+        import io
+        import weakref
+
+        from strata.observability.metrics import MetricsCollector
+
+        collector = MetricsCollector(output=io.StringIO(), enabled=True)
+        collector.log_event("logged")
+        thread = collector._writer_thread
+        collector.shutdown()
+        ref = weakref.ref(collector)
+        del collector
+        gc.collect()
+
+        assert ref() is None
+        assert thread is not None and not thread.is_alive()
+
+    def test_a_dropped_collector_takes_its_thread_with_it(self):
+        """A test fixture's state, built without a lifespan, is never shut down."""
+        import gc
+        import io
+
+        from strata.observability.metrics import MetricsCollector
+
+        collector = MetricsCollector(output=io.StringIO(), enabled=True)
+        collector.log_event("logged")
+        thread = collector._writer_thread
+        assert thread is not None
+        del collector
+        gc.collect()
+        thread.join(timeout=10)
+
+        assert not thread.is_alive()
+
+    def test_a_server_lifespan_stops_its_collectors_writer(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+
+        monkeypatch.setenv("STRATA_DEPLOYMENT_MODE", "personal")
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+        monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
+        with TestClient(server_module.app):
+            collector = server_module.get_state().metrics
+            thread = collector._writer_thread
+            assert thread is not None and thread.is_alive()
+
+        assert not thread.is_alive()
 
 
 class TestCacheVersioning:
