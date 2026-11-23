@@ -792,6 +792,10 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A deny rule refuses a table under every spelling of its name.** Rules matched the
+  name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
+  served `lake:FINANCE.ledger` past a deny on `*:finance.*`. Deny rules now match in any
+  case; allow rules still match only the spelling they name. (#PRNUM)
 - **Run All no longer lets a cell see another's in-place change of an input.** A cell
   that changed an input in place (`xs.append(...)`) without publishing it changed only
   its own copy when run alone, but in a Run All batch the cells after it read the changed

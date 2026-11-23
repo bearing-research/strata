@@ -798,3 +798,16 @@ harness loads that input again from the file it was stored as (seeded from the s
 written by an earlier cell of the batch), so later cells read what a single-cell run
 would. Regression test:
 `tests/notebook/test_mutation_parity.py::test_a_batched_cell_after_an_input_mutation_reads_the_stored_value`.
+
+### 22. A deny rule refuses one spelling of a table's name
+
+**Property:** `test_encoding_properties.py` (SYSTEMS 6, ACL-2). ACL rules match the name a
+table was requested under, by `fnmatch`, which is case-sensitive. Glue and Hive resolve
+names case-insensitively, so a named catalog of either loads `lake:DB.EVENTS` as
+`db.events`, and a deny on `lake:db.events` (or `*:db.*`) did not match it. The replay,
+a catalog that lowercases names as Glue does behind a service-mode server, scanned the
+denied table under two other spellings. Severity: high (an ACL bypass).
+
+**Fixed.** Deny rules match a name in any case; allow rules still match only the spelling
+they were written in, so a spelling never grants. Regression tests:
+`tests/test_auth.py::TestADenyCoversEverySpellingOfTheName`.
