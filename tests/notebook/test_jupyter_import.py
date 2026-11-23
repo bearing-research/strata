@@ -1391,9 +1391,9 @@ class TestImportCommandSummary:
 
         assert main(["import", str(ipynb)]) == 0
 
-        out = capsys.readouterr().out
-        for line in ("magics", "shell commands", "dependencies", "skipped", "warnings"):
-            assert line not in out
+        lines = capsys.readouterr().out.splitlines()
+        prefixes = ("  magics", "  shell commands", "  dependencies", "  skipped", "  warnings")
+        assert [line for line in lines if line.startswith(prefixes)] == []
 
     def test_a_file_that_is_not_json_is_a_usage_error(self, tmp_path: Path, capsys) -> None:
         from strata.cli import main

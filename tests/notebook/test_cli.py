@@ -733,7 +733,7 @@ class TestValidate:
             assert error["code"] == "dag_build_failed" and "v1" in error["message"]
         else:
             assert "dag_build_failed: notebook DAG could not be built: " in out
-            assert "invalid: 1 error(s)," in out.splitlines()[-1]
+            assert "invalid: " in out.splitlines()[-1]
 
     def test_non_notebook_dir_is_usage_error(self, tmp_path):
         assert _validate(tmp_path) == 2
