@@ -792,6 +792,9 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A cell with a read-write mount keeps its outputs after a reopen.** The notebook
+  reopened with the cell pointing at nothing it had stored, where the session that ran it
+  pointed at its outputs, and a cell reading it was keyed as if it had never run. (#1637)
 - **A deny rule refuses a table under every spelling of its name.** Rules matched the
   name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
   served `lake:FINANCE.ledger` past a deny on `*:finance.*`. Deny rules now match in any
