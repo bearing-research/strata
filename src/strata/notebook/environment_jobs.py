@@ -554,8 +554,8 @@ class EnvironmentJobs:
         """Change ``requires-python`` and rebuild the venv on the new minor.
 
         If ``uv sync`` fails, restores the previous ``requires-python`` spec and re-syncs,
-        all under the notebook lock; uv picks the interpreter for that spec as any sync of
-        it would. If the rollback fails too, it is logged and the job reports the first
+        under the lock the sync holds; uv picks the interpreter for that spec as any sync
+        of it would. If the rollback fails too, it is logged and the job reports the first
         failure; the notebook may be left with no venv, and uv.lock as the failed sync
         left it.
         """
