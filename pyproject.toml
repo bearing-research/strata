@@ -290,11 +290,13 @@ markers = [
 
 # Coverage is opt-in: pass ``--cov`` (or ``--cov=strata --cov-report=html``).
 [tool.coverage.run]
-source_pkgs = ["strata"]
+# A directory, not a package: the cell harness runs as __main__ and loads its
+# siblings under other names, so a module-name match measured none of it.
+source = ["src/strata"]
 branch = true
-# Set true (per-process data files for ``coverage combine``) once subprocess
-# coverage is wired in.
-parallel = false
+# Cells, warm workers and inspect REPLs run in Python subprocesses.
+patch = ["subprocess"]
+parallel = true
 omit = [
     # Re-export shim only.
     "*/strata/__init__.py",
