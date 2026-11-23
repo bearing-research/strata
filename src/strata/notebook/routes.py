@@ -880,8 +880,6 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
         raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:
         raise
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
@@ -972,8 +970,6 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
     except NotebookQuiesced as exc:
         raise _quiesced_conflict(exc) from exc
     except Exception:
@@ -2716,8 +2712,6 @@ async def add_variant_endpoint(
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
     except NotebookQuiesced as exc:
         raise _quiesced_conflict(exc) from exc
     except Exception:
@@ -3037,8 +3031,6 @@ async def rename_notebook_endpoint(
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
     except NotebookQuiesced as exc:
         raise _quiesced_conflict(exc) from exc
     except Exception:
