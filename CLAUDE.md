@@ -88,11 +88,13 @@ dev interpreter, so the dev env needs the `[notebook]` extra
 
 ### Cache key & pruning
 
-Cache key: `hash(tenant | table_identity | table_uuid | file_path | file_size | row_group_id | projection_fingerprint | schema_id | deletes | reading)`.
+Cache key: `hash(tenant | table_identity | table_uuid | file_path | file_size | row_group_id | projection_fingerprint | schema_id | deletes | reading | added_snapshot_id)`.
 No snapshot: `deletes` fingerprints the row group's deleted positions and the
 equality delete files that may meet it (empty for most), and `reading` the
 format version and name mapping, which change without a snapshot. `table_uuid`
-keeps a recreated table, or another warehouse's table of the same name, apart.
+keeps a recreated table, or another warehouse's table of the same name, apart;
+`added_snapshot_id` (the snapshot that added the file) a path registered again,
+and it keys the footer and layout caches too.
 `TableIdentity` is canonical (`catalog.namespace.table`) to avoid URI-variation duplicates.
 
 Filters apply at two levels: Iceberg manifest stats (skip files) → Parquet

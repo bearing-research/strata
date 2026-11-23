@@ -346,11 +346,10 @@ class ReadPlanner:
         )
         self.manifest_cache = manifest_cache or get_manifest_cache(cache_dir=cache_dir)
         self._deleted_rows = DeletedRows()
-        # Per (table, table UUID, schema id, reading fingerprint, file): column layout (None
-        # when it needs none), columns by field id, identity-partition values. Safe to cache:
-        # data files never change.
+        # Per (table, table UUID, schema id, reading fingerprint, file, added snapshot): column
+        # layout (None when it needs none), columns by field id, identity-partition values.
         self._file_columns: LRUCache[
-            tuple[str, str, int, str, str],
+            tuple[str, str, int, str, str, int | None],
             tuple[tuple[Column, ...] | None, dict[int, str], dict[int, Any]],
         ] = LRUCache(10_000)
 
@@ -479,6 +478,7 @@ class ReadPlanner:
                                 lambda path: self._resolve_file_path(table_uri, path),
                             ),
                             partition_values=_partition_values(planned.data_file, table, top_level),
+                            added_snapshot_id=planned.added_snapshot_id,
                         )
                     )
 
@@ -521,7 +521,11 @@ class ReadPlanner:
             {
                 entry.actual_path: entry.file_size_in_bytes
                 for entry in manifest_resolution.data_files
-            }
+            },
+            {
+                entry.actual_path: entry.added_snapshot_id
+                for entry in manifest_resolution.data_files
+            },
         )
 
         for entry in manifest_resolution.data_files:
@@ -541,6 +545,7 @@ class ReadPlanner:
                 snapshot_schema.schema_id,
                 reading,
                 actual_path,
+                entry.added_snapshot_id,
             )
             cached_layout = self._file_columns.get(layout_key)
             if cached_layout is None:
@@ -650,6 +655,7 @@ class ReadPlanner:
                     deletes=_deletes_fingerprint(deleted_rows, equality),
                     reading=reading,
                     table_uuid=table_uuid,
+                    added_snapshot_id=entry.added_snapshot_id,
                 )
 
                 # Projection-aware; takes our RowGroupMeta or PyArrow's RowGroupMetaData.

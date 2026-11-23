@@ -218,3 +218,144 @@ def test_a_recreated_table_reading_a_rewritten_path_is_not_served_the_old_rows(t
     assert path.stat().st_size == size
 
     assert _ids(_scan(config, uri)[0]) == [7, 8, 9]
+
+
+class TestAPathRegisteredAgainInTheSameTable:
+    """A Hive-layout file rewritten in place at the same size and registered again.
+
+    Same table, same path, same size: only the manifest entry is new, so every cache
+    keyed on the file names the snapshot that added it. Finding 16
+    (formal/test_cache_soundness_properties.py).
+    """
+
+    def _register(self, catalog, path, columns: dict[str, list[int]], old=None):
+        from pyiceberg.manifest import DataFile, DataFileContent, FileFormat
+        from pyiceberg.typedef import Record
+
+        table = catalog.load_table("db.t")
+        fields = [
+            pa.field(name, pa.int64(), metadata={b"PARQUET:field_id": str(field_id).encode()})
+            for field_id, name in enumerate(columns, start=1)
+        ]
+        arrays = [pa.array(values, pa.int64()) for values in columns.values()]
+        pq.write_table(
+            pa.Table.from_arrays(arrays, schema=pa.schema(fields)),
+            path,
+            compression="none",
+            use_dictionary=False,
+        )
+        new = DataFile.from_args(
+            content=DataFileContent.DATA,
+            file_path=path.as_uri(),
+            file_format=FileFormat.PARQUET,
+            partition=Record(),
+            record_count=len(arrays[0]),
+            file_size_in_bytes=path.stat().st_size,
+        )
+        new.spec_id = table.metadata.default_spec_id
+        with table.transaction() as tx:
+            with tx.update_snapshot().overwrite() as overwrite:
+                if old is not None:
+                    overwrite.delete_data_file(old)
+                overwrite.append_data_file(new)
+        return new
+
+    def _table(self, catalog, *names):
+        from pyiceberg.schema import Schema
+        from pyiceberg.types import LongType, NestedField
+
+        fields = [
+            NestedField(field_id, name, LongType(), required=False)
+            for field_id, name in enumerate(names, start=1)
+        ]
+        catalog.create_table("db.t", schema=Schema(*fields))
+
+    def _scan(self, planner, fetcher, uri, filters=None):
+        plan = planner.plan(uri, filters=filters)
+        return [row for task in plan.tasks for row in fetcher.fetch(task).to_pylist()]
+
+    def test_its_new_rows_are_read_and_its_new_stats_prune(self, tmp_path, lake):
+        from strata.filters import Filter, FilterOp
+
+        catalog, uri = lake
+        config = _config(tmp_path)
+        path = tmp_path / "part-00000.parquet"
+        self._table(catalog, "id")
+        with ReadPlanner(config) as planner:
+            fetcher = CachedFetcher(config)
+            old = self._register(catalog, path, {"id": [1, 2, 3]})
+            size = path.stat().st_size
+            assert _ids(self._scan(planner, fetcher, uri)) == [1, 2, 3]
+
+            self._register(catalog, path, {"id": [7, 8, 9]}, old=old)
+            assert path.stat().st_size == size
+
+            assert _ids(self._scan(planner, fetcher, uri)) == [7, 8, 9]
+            # The old footer's stats (1-3) would prune the row group holding 8.
+            matching = self._scan(planner, fetcher, uri, [Filter("id", FilterOp.EQ, 8)])
+            assert 8 in _ids(matching)
+
+    def test_it_is_read_with_its_own_footer(self, tmp_path, lake):
+        """The column was renamed and the file written again under the new name."""
+        catalog, uri = lake
+        config = _config(tmp_path)
+        path = tmp_path / "part-00000.parquet"
+        self._table(catalog, "id", "v")
+        with ReadPlanner(config) as planner:
+            fetcher = CachedFetcher(config)
+            old = self._register(catalog, path, {"id": [1], "v": [10]})
+            size = path.stat().st_size
+            assert self._scan(planner, fetcher, uri) == [{"id": 1, "v": 10}]
+
+            with catalog.load_table("db.t").update_schema() as update:
+                update.rename_column("v", "x")
+            self._register(catalog, path, {"id": [2], "x": [20]}, old=old)
+            assert path.stat().st_size == size
+
+            assert self._scan(planner, fetcher, uri) == [{"id": 2, "x": 20}]
+
+    def test_it_reads_the_partition_value_it_was_registered_under(self, tmp_path, lake):
+        """The same bytes, registered again under another value of the column they omit."""
+        from pyiceberg.manifest import DataFile, DataFileContent, FileFormat
+        from pyiceberg.partitioning import PartitionField, PartitionSpec
+        from pyiceberg.schema import Schema
+        from pyiceberg.transforms import IdentityTransform
+        from pyiceberg.typedef import Record
+        from pyiceberg.types import LongType, NestedField, StringType
+
+        catalog, uri = lake
+        config = _config(tmp_path)
+        schema = Schema(
+            NestedField(1, "id", LongType(), required=False),
+            NestedField(2, "region", StringType(), required=False),
+        )
+        spec = PartitionSpec(PartitionField(2, 1000, IdentityTransform(), "region"))
+        catalog.create_table("db.t", schema=schema, partition_spec=spec)
+        path = tmp_path / "part-00000.parquet"
+        field = pa.field("id", pa.int64(), metadata={b"PARQUET:field_id": b"1"})
+        pq.write_table(pa.table({"id": pa.array([1], pa.int64())}).cast(pa.schema([field])), path)
+
+        def register(region: str, old=None):
+            table = catalog.load_table("db.t")
+            new = DataFile.from_args(
+                content=DataFileContent.DATA,
+                file_path=path.as_uri(),
+                file_format=FileFormat.PARQUET,
+                partition=Record(region),
+                record_count=1,
+                file_size_in_bytes=path.stat().st_size,
+            )
+            new.spec_id = table.metadata.default_spec_id
+            with table.transaction() as tx:
+                with tx.update_snapshot().overwrite() as overwrite:
+                    if old is not None:
+                        overwrite.delete_data_file(old)
+                    overwrite.append_data_file(new)
+            return new
+
+        with ReadPlanner(config) as planner:
+            fetcher = CachedFetcher(config)
+            old = register("eu")
+            assert self._scan(planner, fetcher, uri) == [{"id": 1, "region": "eu"}]
+            register("us", old=old)
+            assert self._scan(planner, fetcher, uri) == [{"id": 1, "region": "us"}]

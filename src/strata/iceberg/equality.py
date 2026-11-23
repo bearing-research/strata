@@ -47,6 +47,8 @@ class PlannedFile:
     data_file: DataFile
     positional_deletes: set[DataFile]
     equality_deletes: list[DataFile]
+    # The snapshot that added it: a path registered again is another file (see CacheKey).
+    added_snapshot_id: int | None = None
 
 
 class EqualityDeleteIndex:
@@ -129,6 +131,7 @@ def plan_files(
                     sequence_number, data_file, partition_key=data_file.partition
                 ),
                 equality_deletes=equality.for_data_file(sequence_number, data_file),
+                added_snapshot_id=entry.snapshot_id,
             )
         )
     return planned

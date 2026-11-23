@@ -235,8 +235,9 @@ class CacheKey:
     """Immutable cache key for one row group, as a snapshot reads it.
 
     SHA-256 over ``tenant|table_identity|table_uuid|file|size|row_group[|projection]|schema=|
-    deletes=|reading=``; the projection is included only under ``ROW_GROUP_PROJECTION``. Keyed
-    by the canonical ``TableIdentity``, not the URI, so URI spellings share entries.
+    deletes=|reading=|added=``; the projection is included only under
+    ``ROW_GROUP_PROJECTION``. Keyed by the canonical ``TableIdentity``, not the URI, so URI
+    spellings share entries.
 
     No snapshot: a data file never changes, so its row group stays cached across every
     snapshot that reads it the same way, and an append misses only the new files. What a
@@ -261,6 +262,10 @@ class CacheKey:
     # The table's metadata UUID: a dropped and recreated table, or another warehouse's table
     # of the same name, can list the same path for other bytes.
     table_uuid: str = ""
+    # The snapshot that added the file. A path registered again (add_files of a file
+    # rewritten in place, maybe at the same size) is a new manifest entry; an append or a
+    # manifest rewrite keeps the old one.
+    added_snapshot_id: int | None = None
 
     @property
     def table_id(self) -> str:
@@ -275,7 +280,10 @@ class CacheKey:
         )
         if granularity != CacheGranularity.ROW_GROUP:
             key_str += f"|{self.projection_fingerprint}"
-        key_str += f"|schema={self.schema_id}|deletes={self.deletes}|reading={self.reading}"
+        key_str += (
+            f"|schema={self.schema_id}|deletes={self.deletes}|reading={self.reading}"
+            f"|added={self.added_snapshot_id}"
+        )
         return hashlib.sha256(key_str.encode()).hexdigest()
 
     @staticmethod

@@ -282,6 +282,8 @@ class ManifestEntry:
     # Identity-partition values, which a source column the file omits reads as:
     # (source field id, Iceberg type, single-value encoding as hex).
     partition_values: tuple[tuple[int, str, str], ...] = ()
+    # The snapshot that added the file; part of every cache key for it (see CacheKey).
+    added_snapshot_id: int | None = None
 
 
 @dataclass
@@ -384,49 +386,62 @@ class ParquetMetadataCache:
         s3_filesystem: "pa.fs.S3FileSystem | None" = None,
         max_workers: int = 8,
     ) -> None:
-        self._cache: LRUCache[tuple[str, int], ParquetMetadata] = LRUCache(max_size)
+        # By (path, size, the snapshot that added it): the manifest's view of the file.
+        self._cache: LRUCache[tuple[str, int, int | None], ParquetMetadata] = LRUCache(max_size)
         self._store = store
         self._s3_filesystem = s3_filesystem
         self._max_workers = max_workers
 
-    def get(self, file_path: str, file_size: int) -> ParquetMetadata | None:
+    def get(
+        self, file_path: str, file_size: int, added_snapshot_id: int | None = None
+    ) -> ParquetMetadata | None:
         """Get cached metadata for a file of ``file_size`` bytes."""
-        return self._cache.get((file_path, file_size))
+        return self._cache.get((file_path, file_size, added_snapshot_id))
 
-    def get_or_load(self, file_path: str, file_size: int) -> ParquetMetadata:
+    def get_or_load(
+        self, file_path: str, file_size: int, added_snapshot_id: int | None = None
+    ) -> ParquetMetadata:
         """Get metadata from memory, then the SQLite store, then the Parquet file."""
-        cached = self._cache.get((file_path, file_size))
+        key = (file_path, file_size, added_snapshot_id)
+        cached = self._cache.get(key)
         if cached is not None:
             return cached
 
         if self._store is not None:
-            persisted = self._load_from_store(file_path, file_size)
+            persisted = self._load_from_store(file_path, file_size, added_snapshot_id)
             if persisted is not None:
-                self._cache.put((file_path, file_size), persisted)
+                self._cache.put(key, persisted)
                 return persisted
 
         metadata = self._load_metadata(file_path)
-        self._cache.put((file_path, file_size), metadata)
+        self._cache.put(key, metadata)
 
         if self._store is not None:
-            self._save_to_store(file_path, file_size, metadata)
+            self._save_to_store(file_path, file_size, metadata, added_snapshot_id)
 
         return metadata
 
-    def get_or_load_many(self, file_sizes: dict[str, int]) -> dict[str, ParquetMetadata]:
+    def get_or_load_many(
+        self, file_sizes: dict[str, int], added: dict[str, int | None] | None = None
+    ) -> dict[str, ParquetMetadata]:
         """Get metadata for many files, given as ``{path: size}``, keyed by path.
 
-        Batches the SQLite lookups and reads missing footers on a thread pool; this dominates
-        cold-table planning time.
+        ``added`` gives the snapshot that added each file, as the manifest says. Batches the
+        SQLite lookups and reads missing footers on a thread pool; this dominates cold-table
+        planning time.
         """
         if not file_sizes:
             return {}
+        added = added or {}
+
+        def key(fp: str) -> tuple[str, int, int | None]:
+            return (fp, file_sizes[fp], added.get(fp))
 
         result: dict[str, ParquetMetadata] = {}
         missing_from_memory: list[str] = []
 
         for fp in file_sizes:
-            cached = self._cache.get((fp, file_sizes[fp]))
+            cached = self._cache.get(key(fp))
             if cached is not None:
                 result[fp] = cached
             else:
@@ -438,13 +453,13 @@ class ParquetMetadataCache:
         missing_from_store: list[str] = []
         if self._store is not None:
             persisted_batch = self._store.get_parquet_meta_many(
-                {fp: file_sizes[fp] for fp in missing_from_memory}
+                {fp: file_sizes[fp] for fp in missing_from_memory}, added
             )
             for fp in missing_from_memory:
                 if fp in persisted_batch:
                     meta = self._convert_persisted(persisted_batch[fp])
                     if meta is not None:
-                        self._cache.put((fp, file_sizes[fp]), meta)
+                        self._cache.put(key(fp), meta)
                         result[fp] = meta
                     else:
                         missing_from_store.append(fp)
@@ -482,7 +497,7 @@ class ParquetMetadataCache:
                         errors[fp] = e
 
         for fp, metadata in loaded.items():
-            self._cache.put((fp, file_sizes[fp]), metadata)
+            self._cache.put(key(fp), metadata)
             result[fp] = metadata
 
         if errors:
@@ -507,7 +522,7 @@ class ParquetMetadataCache:
 
             if to_persist:
                 try:
-                    self._store.put_parquet_meta_many(to_persist)
+                    self._store.put_parquet_meta_many(to_persist, added)
                 except sqlite3.Error as exc:
                     # Persistence is best-effort: the in-memory entries serve this process.
                     logger.debug("Could not persist %d Parquet footers: %s", len(to_persist), exc)
@@ -567,13 +582,15 @@ class ParquetMetadataCache:
         except Exception:
             return None
 
-    def _load_from_store(self, file_path: str, file_size: int) -> ParquetMetadata | None:
+    def _load_from_store(
+        self, file_path: str, file_size: int, added_snapshot_id: int | None
+    ) -> ParquetMetadata | None:
         """Load metadata from persistent store without reading the file."""
         from strata.cache.metadata_store import deserialize_arrow_schema
 
         if self._store is None:
             return None
-        persisted = self._store.get_parquet_meta(file_path, file_size)
+        persisted = self._store.get_parquet_meta(file_path, file_size, added_snapshot_id)
         if persisted is None:
             return None
 
@@ -627,7 +644,13 @@ class ParquetMetadataCache:
         except Exception:
             return None
 
-    def _save_to_store(self, file_path: str, file_size: int, metadata: ParquetMetadata) -> None:
+    def _save_to_store(
+        self,
+        file_path: str,
+        file_size: int,
+        metadata: ParquetMetadata,
+        added_snapshot_id: int | None,
+    ) -> None:
         """Save metadata to persistent store."""
         if self._store is None:
             return
@@ -638,7 +661,7 @@ class ParquetMetadataCache:
             logger.debug("Could not convert Parquet metadata for %s: %s", file_path, exc)
             return
         try:
-            self._store.put_parquet_meta(file_path, file_size, persisted)
+            self._store.put_parquet_meta(file_path, file_size, persisted, added_snapshot_id)
         except sqlite3.Error as exc:
             # Persistence is best-effort: the in-memory entry serves this process.
             logger.debug("Could not persist Parquet metadata for %s: %s", file_path, exc)
@@ -661,9 +684,15 @@ class ParquetMetadataCache:
             parquet_schema=pq_file.metadata.schema,
         )
 
-    def put(self, file_path: str, file_size: int, metadata: ParquetMetadata) -> None:
+    def put(
+        self,
+        file_path: str,
+        file_size: int,
+        metadata: ParquetMetadata,
+        added_snapshot_id: int | None = None,
+    ) -> None:
         """Manually put metadata in the cache."""
-        self._cache.put((file_path, file_size), metadata)
+        self._cache.put((file_path, file_size, added_snapshot_id), metadata)
 
     def clear(self) -> None:
         """Clear all cached metadata."""
@@ -734,6 +763,7 @@ class ManifestCache:
                             partition_values=tuple(
                                 tuple(value) for value in entry["partition_values"]
                             ),
+                            added_snapshot_id=entry["added_snapshot_id"],
                         )
                         for entry in persisted
                     ]
