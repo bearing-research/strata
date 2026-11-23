@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from pathlib import Path
 
 import pytest
@@ -46,10 +45,14 @@ def test_the_oracle_holds_every_case():
     assert sorted(_ORACLE) == sorted(_CASES)
 
 
-@pytest.mark.parametrize("name", sorted(_CASES))
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(name, marks=pytest.mark.r) if name.startswith("r-") else name
+        for name in sorted(_CASES)
+    ],
+)
 def test_a_cell_reports_what_strata_reported(name, tmp_path):
-    if name.startswith("r-") and shutil.which("Rscript") is None:
-        pytest.skip("Rscript is not on PATH")
     diagnostics_corpus.write(tmp_path / name, _CASES[name])
     observed = _as_recorded(diagnostics_corpus.observe(tmp_path / name))
     expected = _in_sql_marker(_ORACLE[name]) if name.startswith("sql-") else _ORACLE[name]

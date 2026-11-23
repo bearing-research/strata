@@ -14,7 +14,6 @@ import pytest
 
 from strata.notebook.pool import PooledCellExecutor, WarmProcessPool
 from strata.notebook.writer import create_notebook
-from tests.notebook.conftest import skip_if_no_r
 
 pytestmark = [pytest.mark.integration, pytest.mark.warm_pool]
 
@@ -45,7 +44,7 @@ def notebook_dir(tmp_path):
     return create_notebook(tmp_path, "R Pool Test")
 
 
-@skip_if_no_r
+@pytest.mark.r
 class TestRWarmPool:
     @pytest.mark.asyncio
     async def test_pool_starts_and_workers_ready(self, notebook_dir):
@@ -159,7 +158,7 @@ class TestRPoolSessionGating:
         session.start_r_pool_background()
         assert session.r_warm_pool is None
 
-    @skip_if_no_r
+    @pytest.mark.r
     def test_r_notebook_creates_pool(self, tmp_path):
         from strata.notebook.models import CellLanguage
 
@@ -182,7 +181,7 @@ class TestRPoolSessionGating:
         assert session.r_warm_pool is None
 
 
-@skip_if_no_r
+@pytest.mark.r
 class TestRPoolExecutorDispatch:
     """The executor uses a warm R worker when the session holds a pool."""
 

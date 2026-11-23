@@ -33,7 +33,6 @@ from strata.notebook.writer import (
     set_variant_mode,
     write_cell,
 )
-from tests.notebook.conftest import skip_if_no_r_arrow
 
 windows = pytest.mark.skipif(
     sys.platform == "win32", reason="pyiceberg's local warehouse paths fail on Windows"
@@ -513,7 +512,7 @@ class TestAWritingCell:
         # One's from its stored output, three's from its run.
         assert _rows(warehouse) == [(1, 1), (3, 3)]
 
-    @skip_if_no_r_arrow
+    @pytest.mark.r(packages=["arrow"])
     async def test_an_r_cell_writes_a_deleted_warehouse_from_its_hit(self, tmp_path):
         warehouse, uri = _warehouse(tmp_path)
         source = f"# @write_table rows {uri} append\nrows <- data.frame(id = 1L, v = 10L)\n"

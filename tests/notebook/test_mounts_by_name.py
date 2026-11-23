@@ -26,7 +26,6 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
-from tests.notebook.conftest import skip_if_no_r
 
 DATA = MountSpec(name="data", uri="file:///d", mode=MountMode.READ_ONLY)
 OTHER = MountSpec(name="other", uri="file:///o", mode=MountMode.READ_ONLY)
@@ -230,7 +229,7 @@ class TestARun:
         assert (result.passed, result.failed, result.errored) == (1, 0, 0), result
 
 
-@skip_if_no_r
+@pytest.mark.r
 class TestAnRRun:
     def _r_session(self, tmp_path: Path, *sources: str) -> tuple[NotebookSession, Path]:
         folder = tmp_path / "folder"

@@ -29,7 +29,6 @@ from strata.notebook.remote_executor import (
     create_notebook_executor_app,
 )
 from tests.conftest import prepared_venv
-from tests.notebook.conftest import skip_if_no_r, skip_if_no_r_arrow
 
 _REAL_WHICH = shutil.which
 
@@ -168,8 +167,7 @@ _R_C2 = "df_r <- df\ndf_r$z <- df_r$x + df_r$y\n"
 _PY_C3 = "total = int(df_r['z'].sum())\n"
 
 
-@skip_if_no_r
-@skip_if_no_r_arrow
+@pytest.mark.r(packages=["arrow"])
 @pytest.mark.asyncio
 async def test_an_r_cell_runs_on_its_worker_and_python_reads_its_data_frame(
     r_notebook, notebook_executor_server
@@ -201,8 +199,7 @@ async def test_an_r_cell_runs_on_its_worker_and_python_reads_its_data_frame(
     assert downstream.outputs["total"]["preview"] == 66
 
 
-@skip_if_no_r
-@skip_if_no_r_arrow
+@pytest.mark.r(packages=["arrow"])
 @pytest.mark.asyncio
 async def test_an_r_cell_runs_on_a_signed_transport_worker(
     r_notebook, notebook_executor_server, notebook_build_server
@@ -560,7 +557,7 @@ class TestWhichWorkerGetsTheRLock:
         )
 
 
-@skip_if_no_r
+@pytest.mark.r
 @pytest.mark.skipif(
     _REAL_WHICH("Rscript") is None or not worker_env.renv_available(_REAL_WHICH("Rscript")),
     reason="needs R with renv in its library",

@@ -18,7 +18,6 @@ import pytest
 from strata.notebook import dependencies, shared_env, writer
 from strata.notebook.env import compute_execution_env_hash, local_packages
 from strata.notebook.shared_env import COMPLETE_MARKER, collect
-from tests.notebook.conftest import skip_if_no_r
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the link is a symlink")
 
@@ -189,7 +188,7 @@ def test_collect_removes_an_unlinked_library_and_keeps_a_linked_one(tmp_path, sh
     assert (shared / "r" / "cache" / "jsonlite").is_dir()
 
 
-@skip_if_no_r
+@pytest.mark.r
 @pytest.mark.asyncio
 async def test_a_real_lock_restores_once_and_an_r_cell_runs_on_the_link(
     tmp_path, shared, monkeypatch

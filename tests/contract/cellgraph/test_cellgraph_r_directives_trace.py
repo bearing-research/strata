@@ -15,6 +15,8 @@ if os.name == "nt":
 from tests.contract.cellgraph import record  # noqa: E402
 from tests.contract.cellgraph.test_replay import assert_replays  # noqa: E402
 
+pytestmark = pytest.mark.r
+
 
 @pytest.mark.usefixtures("executor_host_only")
 def test_the_r_trace_is_reproduced():

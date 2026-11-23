@@ -12,13 +12,8 @@ import pytest
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.writer import _renv_sync
-from tests.notebook.conftest import (
-    skip_if_no_r,
-    skip_if_no_r_arrow,
-    skip_if_no_r_ggplot2,
-)
 
-pytestmark = [skip_if_no_r, skip_if_no_r_arrow]
+pytestmark = pytest.mark.r(packages=["arrow"])
 # Deliberately not ``@pytest.mark.integration``: that marker opts out of the
 # autouse ``fast_notebook_env`` override, which runs Python cells on the dev
 # interpreter. The R harness always shells out to real ``Rscript``, so Python
@@ -507,7 +502,7 @@ async def test_r_cell_grid_draw_captured_as_png_display(r_notebook):
     _assert_png_display(result.display_outputs[0])
 
 
-@skip_if_no_r_ggplot2
+@pytest.mark.r(packages=["ggplot2"])
 @pytest.mark.asyncio
 async def test_r_cell_ggplot_emitted_as_png_display(r_notebook):
     """A bare trailing ggplot object renders without ``print(p)``; skips without ggplot2."""

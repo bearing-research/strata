@@ -22,7 +22,6 @@ from strata.notebook.writer import (
     set_variant_mode,
     write_cell,
 )
-from tests.notebook.conftest import skip_if_no_r
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX cell execution")
 
@@ -116,7 +115,7 @@ class TestAnUndoneEdit:
         ("source", "language"),
         [
             pytest.param(PYTHON, "python", id="python"),
-            pytest.param(R, "r", id="r", marks=skip_if_no_r),
+            pytest.param(R, "r", id="r", marks=pytest.mark.r),
         ],
     )
     async def test_a_consumed_cell_replays_the_first_runs_console(self, tmp_path, source, language):
@@ -159,7 +158,7 @@ class TestAnUndoneEdit:
                 'cat("two\\n")\n',
                 "r",
                 id="r",
-                marks=skip_if_no_r,
+                marks=pytest.mark.r,
             ),
         ],
     )
