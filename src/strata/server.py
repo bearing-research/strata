@@ -833,6 +833,7 @@ async def _scratch_upkeep_loop(anchor: Path, config: StrataConfig) -> None:
 
 
 _NOTEBOOK_SESSION_SWEEP_SECONDS = 60.0
+_SSH_TUNNEL_RECONCILE_SECONDS = 30.0
 _IDLE_CHECK_SECONDS = 5.0
 
 
@@ -959,6 +960,19 @@ async def _notebook_session_sweep_loop() -> None:
             await get_session_manager().sweep()
         except Exception:
             logger.exception("notebook_session_sweep_failed")
+
+
+async def _ssh_tunnel_reconcile_loop() -> None:
+    """Re-open SSH worker tunnels that dropped (a slept laptop, a network blip)."""
+    while True:
+        await asyncio.sleep(_SSH_TUNNEL_RECONCILE_SECONDS)
+        try:
+            from strata.notebook.routes import reconcile_worker_supervisor
+
+            # ``ssh`` spawns and health probes block.
+            await asyncio.to_thread(reconcile_worker_supervisor)
+        except Exception:
+            logger.exception("ssh_tunnel_reconcile_failed")
 
 
 @asynccontextmanager
@@ -1195,6 +1209,7 @@ async def lifespan(app: FastAPI):
     # The condition the ownership store is created under (_init_configured_artifact_store).
     if config.node_advertised_url and config.artifact_dir is not None:
         ownership_task = asyncio.create_task(_stream_ownership_loop())
+    tunnel_task = asyncio.create_task(_ssh_tunnel_reconcile_loop())
     scratch_task: asyncio.Task | None = None
     if config.scratch_anchor:
         scratch_task = asyncio.create_task(
@@ -1307,6 +1322,7 @@ async def lifespan(app: FastAPI):
         env_gc_task,
         session_sweep_task,
         ownership_task,
+        tunnel_task,
         scratch_task,
         idle_exit_task,
     ):

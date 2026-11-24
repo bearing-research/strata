@@ -74,6 +74,10 @@ async def send_hint(session: Any, worker_name: str | None, reason: HintReason) -
         return False
     if spec is None or spec.backend != WorkerBackendType.EXECUTOR or not spec.config.url:
         return False
+    from strata.notebook.worker_secrets import runtime_worker_withheld
+
+    if runtime_worker_withheld(spec.name):
+        return False  # its tunnel does not reach it
     _last_sent[key] = now
 
     from strata.notebook.executor import _resolve_worker_token

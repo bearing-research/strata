@@ -102,6 +102,19 @@ class DispatchContext:
     received_output_files: dict[str, Any]
 
 
+def ensure_worker_reachable(worker_spec: Any) -> None:
+    """Refuse an SSH worker whose tunnel was last found not reaching it: what holds its
+    local port now is not the worker, and would be sent the cell."""
+    from strata.notebook.worker_secrets import runtime_worker_withheld
+
+    name = str(getattr(worker_spec, "name", None) or "").strip()
+    if name and runtime_worker_withheld(name):
+        raise RuntimeError(
+            f"SSH worker {name!r}: its tunnel does not reach the worker this server "
+            "launched. The server checks it again every 30 s; or run `add-ssh` again."
+        )
+
+
 def _resolve_worker_token(worker_spec: Any) -> str | None:
     """Look up the shared-secret token for an HTTP executor worker.
 
@@ -433,6 +446,7 @@ async def dispatch_http(
     if not executor_url:
         raise RuntimeError(f"Executor worker '{worker_spec.name}' is missing config.url")
 
+    ensure_worker_reachable(worker_spec)
     worker_token = _resolve_worker_token(worker_spec)
     transport = str(worker_spec.config.transport or "direct").strip().lower()
     if transport in SIGNED_TRANSPORTS:
@@ -686,6 +700,7 @@ async def dispatch_signed(
     if not executor_url:
         raise RuntimeError(f"Executor worker '{worker_spec.name}' is missing config.url")
 
+    ensure_worker_reachable(worker_spec)
     worker_token = _resolve_worker_token(worker_spec)
     base_url = str(worker_spec.config.strata_url or "").strip() or state.config.server_url
     principal = get_principal()

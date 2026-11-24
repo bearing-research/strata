@@ -1938,9 +1938,11 @@ class CellExecutor:
         listings: dict[str, dict[str, dict[str, Any]]],
     ) -> list[InputWeight]:
         """*weights* with the mounts' cached shares a remote worker reports, if it does."""
+        from strata.notebook.worker_secrets import runtime_worker_withheld
+
         worker = resolve_worker_spec(self.session.notebook_state, worker_name)
-        if worker is None:
-            return weights
+        if worker is None or runtime_worker_withheld(worker.name):
+            return weights  # a tunnel not reaching its worker: the listings stay here
         specs = {m.name: m for m in mount_specs}
         names = sorted(listings)
         answer = await worker_cached_bytes(

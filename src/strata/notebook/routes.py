@@ -136,6 +136,13 @@ def get_worker_supervisor() -> RemoteWorkerSupervisor:
     return _worker_supervisor
 
 
+def reconcile_worker_supervisor() -> None:
+    """Re-open any SSH worker tunnel that dropped; nothing until one is established."""
+    supervisor = _worker_supervisor
+    if supervisor is not None:
+        supervisor.reconcile()
+
+
 def shutdown_worker_supervisor() -> None:
     """Tear down all SSH tunnels on server shutdown (called from the lifespan)."""
     global _worker_supervisor
@@ -2481,7 +2488,8 @@ async def list_ssh_workers(notebook_id: str, session: SessionDep) -> dict:
     """List the live SSH-tunnel status for this server's remote workers."""
     from dataclasses import asdict
 
-    records = get_worker_supervisor().status()
+    # Polls each forward's process under the supervisor's lock: off the event loop.
+    records = await asyncio.to_thread(get_worker_supervisor().status)
     return {"tunnels": [asdict(record) for record in records]}
 
 
