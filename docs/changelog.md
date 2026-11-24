@@ -842,6 +842,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   as its run left it. A deleted or changed file, a second write cell on it, and any other
   database run it again in a new session, as before; explicit `session`, `forever` and
   `ttl` keep their meaning. (#1672)
+- **A SQL cell after a seed runs again once the seed computes something else.** Its key
+  covered only the variables it binds, so a cell `-- @after seed` under `forever`, `session`
+  or `ttl` kept its old rows after the seed ran with a new body, or again in a new session
+  under `@cache session`. The key now carries each `@after` upstream's last run; one that
+  records none (`# @nocache`, an `rw` mount) keeps nothing after it cached. (#1673)
 - **A SQL `@name` must be a variable name.** One that was not (`top-orders`, `Hottest
   stations`) fell back to `result` without a word, so a cell reading the name found nothing.
   It is now the error `name_unreadable`, as on a prompt cell, and both refuse a keyword such as
