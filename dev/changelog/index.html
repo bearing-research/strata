@@ -4655,6 +4655,9 @@ exhaustive commit history.</p>
   cell's <code>-- @app hide</code>. Both read the parsed annotation now, a live app view follows an edit,
   and an <code>@app</code> line after the code warns (<code>app_outside_annotations</code>) that it is not read.
   (#1663)</li>
+<li><strong><code>@loop</code> runs Python cells only.</strong> An R, SQL, prompt or widget cell with <code>@loop</code> went
+  down the loop path, which runs the source in the Python harness. <code>@loop</code> and <code>@loop_until</code>
+  outside Python are now the error <code>loop_not_python</code>, and the cell does not run. (#1664)</li>
 <li><strong>A scan filtered on a NaN value plans.</strong> A filter such as <code>value = NaN</code> failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)</li>

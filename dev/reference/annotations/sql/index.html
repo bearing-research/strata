@@ -3177,9 +3177,10 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 <p>These eight are the only ones a SQL cell acts on. Any other annotation, such as
 <code>-- @worker</code> or <code>-- @timeout</code>, does nothing on a SQL cell, and validation warns
 about it (<code>annotation_not_for_sql</code>). A SQL cell runs in the server, so it has no
-worker, timeout or environment of its own. <code>-- @each</code> and <code>-- @per_variant</code> run
-Python cells only: on a SQL cell each is an error (<code>each_not_python</code>,
-<code>per_variant_not_python</code>), and the cell does not run.</p>
+worker, timeout or environment of its own. <code>-- @each</code>, <code>-- @per_variant</code> and
+<code>-- @loop</code> (with <code>-- @loop_until</code>) run Python cells only: on a SQL cell each is an
+error (<code>each_not_python</code>, <code>per_variant_not_python</code>, <code>loop_not_python</code>), and the
+cell does not run.</p>
 <h2 id="sql"><code>@sql</code><a class="headerlink" href="#sql" title="Permanent link">&para;</a></h2>
 <p>Binds a SQL cell to a named connection. The cell is SQL by its kind (<code>language = "sql"</code>), not by this line.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">-- @sql connection=warehouse</span>

@@ -3093,7 +3093,9 @@
 
 <h1 id="loop-and-variant-annotations">Loop and variant annotations<a class="headerlink" href="#loop-and-variant-annotations" title="Permanent link">&para;</a></h1>
 <p>A Python cell carrying <code>@loop</code> is executed iteratively. The body runs once per
-iteration and the <code>carry</code> variable threads state between them.</p>
+iteration and the <code>carry</code> variable threads state between them. Only a Python cell
+loops: on an R, SQL, prompt or widget cell <code>@loop</code> is the error <code>loop_not_python</code>,
+and the cell does not run.</p>
 <h2 id="loop"><code>@loop</code><a class="headerlink" href="#loop" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># @loop max_iter=50 carry=state</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># @loop_until state["converged"]</span>

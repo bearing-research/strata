@@ -1,7 +1,9 @@
 # Loop and variant annotations
 
 A Python cell carrying `@loop` is executed iteratively. The body runs once per
-iteration and the `carry` variable threads state between them.
+iteration and the `carry` variable threads state between them. Only a Python cell
+loops: on an R, SQL, prompt or widget cell `@loop` is the error `loop_not_python`,
+and the cell does not run.
 
 ## `@loop`
 

@@ -9897,9 +9897,10 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 These eight are the only ones a SQL cell acts on. Any other annotation, such as
 `-- @worker` or `-- @timeout`, does nothing on a SQL cell, and validation warns
 about it (`annotation_not_for_sql`). A SQL cell runs in the server, so it has no
-worker, timeout or environment of its own. `-- @each` and `-- @per_variant` run
-Python cells only: on a SQL cell each is an error (`each_not_python`,
-`per_variant_not_python`), and the cell does not run.
+worker, timeout or environment of its own. `-- @each`, `-- @per_variant` and
+`-- @loop` (with `-- @loop_until`) run Python cells only: on a SQL cell each is an
+error (`each_not_python`, `per_variant_not_python`, `loop_not_python`), and the
+cell does not run.
 
 ## `@sql`
 
@@ -10063,7 +10064,7 @@ library (see [Workers](https://bearingresearch.com/strata/dev/notebook/workers/)
 is read on this machine, so an R cell with both `@fetch` and `@worker` fails;
 run it locally, or fetch in an upstream Python cell.
 
-Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells, and an R cell that declares `@dataset` or `@table` fails; read the dataset or table in an upstream Python cell.
+Prompt-cell annotations (`@output_schema` etc.) do not apply to R cells, `@loop` and `@loop_until` are an error there (`loop_not_python`) and the cell does not run, and an R cell that declares `@dataset` or `@table` fails; read the dataset or table in an upstream Python cell.
 
 <!-- https://bearingresearch.com/strata/dev/reference/annotations/prompt/index.md -->
 
@@ -10152,7 +10153,9 @@ turn.
 # Loop and variant annotations
 
 A Python cell carrying `@loop` is executed iteratively. The body runs once per
-iteration and the `carry` variable threads state between them.
+iteration and the `carry` variable threads state between them. Only a Python cell
+loops: on an R, SQL, prompt or widget cell `@loop` is the error `loop_not_python`,
+and the cell does not run.
 
 ## `@loop`
 

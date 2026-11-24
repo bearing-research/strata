@@ -831,6 +831,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   cell's `-- @app hide`. Both read the parsed annotation now, a live app view follows an edit,
   and an `@app` line after the code warns (`app_outside_annotations`) that it is not read.
   (#1663)
+- **`@loop` runs Python cells only.** An R, SQL, prompt or widget cell with `@loop` went
+  down the loop path, which runs the source in the Python harness. `@loop` and `@loop_until`
+  outside Python are now the error `loop_not_python`, and the cell does not run. (#1664)
 - **A scan filtered on a NaN value plans.** A filter such as `value = NaN` failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)
