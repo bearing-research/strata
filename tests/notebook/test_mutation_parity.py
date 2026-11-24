@@ -118,3 +118,89 @@ async def test_a_batched_cell_after_an_input_mutation_reads_the_stored_value(tmp
     assert _stored(single, "down", "m") == 1
     assert _stored(batched, "mid", "n") == _stored(single, "mid", "n") == 2
     assert _stored(batched, "down", "m") == 1
+
+
+async def _run_all(session: NotebookSession, cell_ids: list[str]) -> None:
+    try:
+        await ws._execute_run_all(
+            None, session, cell_ids, ws._ensure_execution_state(session.id), session.id
+        )
+    finally:
+        ws.forget_notebook_execution_state(session.id)
+
+
+@pytest.mark.parametrize(
+    "cells",
+    [
+        pytest.param(
+            {
+                "up": "xs = [0]",
+                "f": "def f(x):\n    xs.append(x)\n    return len(xs)",
+                "mid": "n = f(0)",
+                "down": "m = len(xs)",
+            },
+            id="through a function's globals",
+        ),
+        pytest.param(
+            {
+                "up": "xs = [0]",
+                "box": "box = [xs]",
+                "mid": "box[0].append(0)\nn = len(box[0])",
+                "down": "m = len(xs)",
+            },
+            id="through a container holding it",
+        ),
+    ],
+)
+async def test_a_batched_cell_changing_an_input_it_does_not_name(tmp_path, cells):
+    """A cell can change an upstream value it never names; a single run changes only its
+    own copy, so a later cell reads the stored value (finding 28)."""
+    sink = {"sink": "out = (n, m)"}
+    single = _session(tmp_path / "single", {**cells, **sink})
+    executor = CellExecutor(single)
+    for cell_id, source in cells.items():
+        assert (await executor.execute_cell(cell_id, source)).success
+
+    batched = _session(tmp_path / "batch", {**cells, **sink})
+    await _run_all(batched, list(cells))
+
+    assert _stored(single, "down", "m") == 1
+    assert _stored(batched, "mid", "n") == _stored(single, "mid", "n") == 2
+    assert _stored(batched, "down", "m") == 1
+
+
+async def test_a_stored_function_called_twice_in_a_batch(tmp_path):
+    """A function from a cell run on its own is loaded with the stored values it reads
+    (finding 29), and a call that changes one does not reach the next call (finding 30)."""
+    cells = {
+        "up": "xs = [0]",
+        "f": "# @timeout 60\ndef f(x):\n    xs.append(x)\n    return len(xs)",
+        "a": "a = f(1)",
+        "b": "b = f(2)",
+    }
+    session = _session(tmp_path, {**cells, "sink": "out = (a, b)"})
+    await _run_all(session, list(cells))
+
+    for cell_id in cells:
+        cell = session.notebook_state.get_cell(cell_id)
+        assert cell.status.value == "ready", cell.error
+    assert _stored(session, "a", "a") == _stored(session, "b", "b") == 2
+
+
+async def test_a_batch_cache_hit_loads_a_function_with_what_it_reads(tmp_path):
+    """On a second Run All the function's cell is a cache hit in the batch, and the cell
+    calling it runs (finding 29)."""
+    cells = {
+        "up": "xs = [0]",
+        "f": "def f(x):\n    xs.append(x)\n    return len(xs)",
+        "a": "a = f(1)",
+    }
+    session = _session(tmp_path, {**cells, "sink": "out = a"})
+    await _run_all(session, list(cells))
+    write_cell(session.path, "a", "a = f(2)")
+    session.reload()
+    await _run_all(session, list(cells))
+
+    cell = session.notebook_state.get_cell("a")
+    assert cell.status.value == "ready", cell.error
+    assert _stored(session, "a", "a") == 2

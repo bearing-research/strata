@@ -870,7 +870,8 @@ process's run killed; two processes on one store).
 so a build resumed elsewhere refuses this run. Regression tests:
 `tests/notebook/test_local_runs.py::TestAnotherProcessBetweenTheReadAndTheWrite`, also
 run on Postgres. Still open: two processes that both find no open build each create
-one. That needs a computation-keyed open in vestigo; the handoff is
+one. That needs vestigo's `BuildStore.open_build`, the create and the open in one
+transaction keyed on the computation; the handoff is
 `docs/internal/one-open-execution.md` in vestigo's checkout, item 8 of its HANDOFF.
 
 ### 27. A NaN filter value fails planning on a cold cache
@@ -886,3 +887,48 @@ the outcome hung on what ran before. Severity: low (a client must send a NaN val
 nested column's, which only widens the file-level pruning; row-group pruning still
 applies it. Regression test:
 `tests/test_filters.py::TestTwoTierPruning::test_a_nan_filter_plans_on_a_cold_cache`.
+
+### 28. A batched cell changes an upstream value it never names
+
+**Property:** `test_run_all_properties.py` (SYSTEMS 7, BAT-1), with functions added to
+the generator. A cell in a Run All batch can change a value it does not reference: by
+calling a function that appends to an upstream list through its globals, or through a
+container that holds the value (`box = [xs]`, then `box[0].append(0)`). Later cells in
+the batch read the change, and their results were cached under a key over the stored,
+unchanged value. Run cell by cell, each cell changes only its own copy. Finding 21's
+fix reloaded only the inputs the cell names. Severity: medium (a Run All result differs
+from a single run and is cached as if it did not).
+
+**Fixed.** After each batched cell, the harness puts back from its file every value the
+batch has published that changed, not only the cell's references. Mutation warnings
+still name only what the cell references, as a single run's do. Each published value is
+fingerprinted per batched cell (pandas sampled, numpy and pickled values hashed whole),
+by the user's decision. Regression test:
+`tests/notebook/test_mutation_parity.py::test_a_batched_cell_changing_an_input_it_does_not_name`.
+
+### 29. A stored function in a batch cannot reach the values it reads
+
+**Property:** `test_run_all_properties.py`, the edit pass. A stored function (a
+`module/cell` export) names the upstream values it reads in `injected`, and a single
+run's inputs load them into its module. A batch loaded the function without them, on
+both its paths: an upstream cell run on its own, and a cache hit inside the batch. A
+later cell calling it raised `NameError` under Run All and succeeded cell by cell.
+Severity: medium (Run All fails a notebook that runs).
+
+**Fixed.** The batch attaches the injected values to the function's spec on both paths
+(`attach_injected` in `cell_paths/batch.py`), and the harness loads it through
+`_deserialize_one`, as a single run's inputs are. Regression tests:
+`test_mutation_parity.py::test_a_stored_function_called_twice_in_a_batch`,
+`::test_a_batch_cache_hit_loads_a_function_with_what_it_reads`.
+
+### 30. A stored function's own globals carry a change to the next batched call
+
+**Property:** `test_run_all_properties.py`, pinned after 29's fix. A stored function
+keeps its injected values in its own module, outside the batch's namespace, so 28's
+reload never sees them. A function that appends to one returned 2 then 3 across two
+batched cells, and 2 and 2 cell by cell. Severity: medium (as 28).
+
+**Fixed.** The harness tracks the injected globals of each stored function it loads
+(`_StoredGlobals`) and puts back, after each cell, any that changed. The pool worker
+runs one cell per process, so nothing carries over there. Regression test:
+`test_mutation_parity.py::test_a_stored_function_called_twice_in_a_batch`.
