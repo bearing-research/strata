@@ -43,6 +43,9 @@ the replay becomes the fix's regression test.
 | `tla/LocalRun_Race.cfg` | The fix without its lock. Violates `NoNeedlessFence` |
 | `tla/LocalRun_SharedOwner.cfg` | The rival shares the run's `hostname:pid` and the owner is the process. Violates `CloseLeavesOthers` (finding 32) |
 | `tla/LocalRun_Patched.cfg` | The code as it is. All invariants hold |
+| `tla/LocalOpen.tla` | `LocalRuns.open` in two processes on one store: the read, then a refusal, a resume, a rerun's fail or an open of a new build; lapses (SYSTEMS 10, LR-2) |
+| `tla/LocalOpen_Split.cfg` | The code before the fix: the create and the first attempt's open as two transactions. Violates `OneOpenBuild` (finding 35) |
+| `tla/LocalOpen_Patched.cfg` | The code as it is (`open_build`). All invariants hold |
 | `tla/Streams.tla` | One stream-mode miss: GETs waiting for admission, 429s and cancels, the background build, the cleanup timer and expiry (SYSTEMS 2) |
 | `tla/Streams_Retry.cfg` | The code before the fix. Violates `NoFailedServe` (finding 17) |
 | `tla/Streams_Patched.cfg` | The code as it is. All invariants hold |

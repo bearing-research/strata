@@ -869,10 +869,8 @@ process's run killed; two processes on one store).
 `lease_expires_at`). When the fail or the resume misses, `open` reads the build again,
 so a build resumed elsewhere refuses this run. Regression tests:
 `tests/notebook/test_local_runs.py::TestAnotherProcessBetweenTheReadAndTheWrite`, also
-run on Postgres. Still open: two processes that both find no open build each create
-one. That needs vestigo's `BuildStore.open_build`, the create and the open in one
-transaction keyed on the computation; the handoff is
-`docs/internal/one-open-execution.md` in vestigo's checkout, item 8 of its HANDOFF.
+run on Postgres. The other half, two processes that both find no open build each
+creating one, is finding 35.
 
 ### 27. A NaN filter value fails planning on a cold cache
 
@@ -1019,4 +1017,25 @@ entries (filtered manifest plans were never stored). The property
 examples, and its "spelled" pairs find the second without one. Regression tests:
 `tests/test_materialize_service.py::TestComputeIdentityProvenance::test_one_fields_text_cannot_run_into_the_next`,
 `tests/test_filters_conformance.py::test_fingerprint_a_string_spelling_a_tagged_value_is_not_that_value`.
+
+### 35. Two processes that both find no open build each open one
+
+**Survey lead** (SYSTEMS 10, LR-2), the half finding 26 left. `LocalRuns.open` reads the
+computation's open build and, finding none, creates one (`create_build`) and opens its
+first attempt (`open_attempt`): two more transactions, neither of which looks again.
+Two processes on one store (a CLI run beside the server) that both read nothing open
+each created a build, and the computation ran twice, each run's final release
+repointing its outputs. Model `LocalOpen_Split` shows it in four steps. Severity: low
+(two processes starting one computation within a transaction of each other).
+
+**Fixed** with vestigo 0.8.0's `BuildStore.open_build`: the create and the first
+attempt's open in one transaction under a lock keyed on the computation, returning the
+open build when there is one. `_new_build` calls it; when another build comes back it
+fails its own placeholder and returns None, and `open` reads the build again, as one
+found (a live lease refuses the run), while a revert or a team-cache pull waits for that
+run. An open that raises fails the placeholder too, unless its build committed. Model
+`LocalOpen_Patched` (`OneOpenBuild`, the whole `open` loop of two processes with lapses,
+resumes and reruns). Regression tests:
+`tests/notebook/test_local_runs.py::TestTwoProcessesThatBothFindNoOpenBuild`, also run
+on Postgres.
 
