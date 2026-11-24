@@ -19,8 +19,8 @@ as first-class cell behaviors rather than escape hatches.
 | Built-in SQL cells | Yes (named connections, schema discovery, snapshot-aware caching) | Yes (built-in SQL engine) | Community library | Community extensions |
 | Loop / iteration cells | Yes (`# @loop max_iter=N carry=var`), checkpointed per iteration | No | No | No |
 | Variant cells (tabbed alternatives sharing a DAG slot) | Yes | No | No | No |
-| Per-notebook Python environment | Separate `pyproject.toml` + `uv.lock` per notebook | PEP 723 inline script metadata at the top of the `.py` file (`# /// script` block); `marimo edit --sandbox` provisions the venv via uv (or pip/poetry/pixi/rye) | Julia project / Project.toml | Manual (venv / conda / kernel spec) |
-| Headless / CI runner | `strata run` (executes the cascade in topological order) | Notebooks runnable as `python file.py` | None first-class - `.jl` file works ad-hoc via `julia notebook.jl`, otherwise via PlutoUtils.jl | `nbconvert --execute` |
+| Per-notebook Python environment | Separate `pyproject.toml` + `uv.lock` per notebook | PEP 723 inline script metadata at the top of the `.py` file (`# /// script` block); `marimo edit --sandbox` provisions the venv via uv (or pip/poetry/pixi/rye) | Built-in package manager embeds `Project.toml` and `Manifest.toml` in the `.jl` file | Manual (venv / conda / kernel spec) |
+| Headless / CI runner | `strata run` (executes the cascade in topological order) | Notebooks runnable as `python file.py` | No dedicated CLI: PlutoSliderServer.jl's `export_directory` runs notebooks and exports HTML (used in CI), or `julia notebook.jl` runs the file as a plain script | `nbconvert --execute` |
 
 ## Where Strata is distinctive
 
@@ -81,10 +81,11 @@ cell 3 from rebasing on top of changes to cell 7.
   Julia, Scala, Bash, etc.), and integrations is unmatched. Strata runs
   Python, R, SQL, prompt, markdown and widget cells in one DAG, which covers
   a narrower range than Jupyter's kernels.
-- **Reactive evaluation at the keystroke level:** Pluto and marimo
-  immediately re-run dependent cells on edit. Strata is reactive about
-  *staleness* (the DAG updates, downstream cells flip to stale on every
-  source change) and execution is explicit, you press Run. The exception is
+- **Automatic re-execution of dependents:** in Pluto, and in marimo's
+  default mode, running an edited cell re-runs every cell that depends on
+  it (marimo's lazy mode marks them stale instead). Strata is reactive about
+  *staleness* (the DAG updates and downstream cells flip to stale on every
+  source change), but execution is explicit: you press Run. The exception is
   a widget cell with Live on, where moving a control re-runs its dependents
   immediately.
 - **Hosted offerings:** Google Colab, Deepnote, Hex, and Databricks
@@ -104,11 +105,13 @@ notebook runtime itself:
 | Kaggle Notebooks | Jupyter | `.ipynb` |
 | AWS SageMaker Studio | JupyterLab | `.ipynb` |
 | Azure ML Notebooks | Jupyter / JupyterLab | `.ipynb` |
-| Databricks Notebooks | Custom UI on IPython kernel | `.ipynb` (default), `.dbc` legacy |
+| Databricks Notebooks | Custom UI on IPython kernel | `.ipynb` (default) or source files (`.py`, `.sql`, `.scala`, `.r`); `.dbc` is an export archive |
 
-None of them have automatic content-addressed caching, per-cell remote
-dispatch, or first-class AI cells, because the underlying Jupyter
-runtime doesn't.
+None of them caches cell outputs by content or dispatches a single cell
+to remote compute. Several now ship AI features (Gemini in Colab,
+Databricks Assistant and the `ai_query` SQL function, the SageMaker Data
+Agent), but these generate code or answer one-shot prompts; none makes an
+LLM response a cached DAG node keyed on its template, inputs and model.
 
 The smaller "we-rejected-Jupyter" cohort (marimo, Observable, Deepnote,
 Hex) explicitly stepped away from `.ipynb` to redesign the runtime:

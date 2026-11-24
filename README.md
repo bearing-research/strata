@@ -61,7 +61,8 @@ The data was loaded once in 21 of 21 tuned iteration and plot trials, against 3
 of 21 without it (held out: 9 of 9, against 2 of 9).
 [What it saves →](https://bearingresearch.com/strata/latest/notebook/scratchpad/#what-it-saves)
 
-Other agents connect to the MCP endpoint at `/mcp`, or script the `strata` CLI,
+Other agents connect to the MCP endpoint at `/mcp` (on a server started with
+`STRATA_MCP_ENABLED=true`, as `strata agent` does), or script the `strata` CLI,
 which returns JSON and stable exit codes.
 
 ## Why the work holds up
@@ -121,14 +122,54 @@ machine. [How Strata compares →](https://bearingresearch.com/strata/latest/not
 
 ## Examples
 
-| Example | What it shows |
-| --- | --- |
-| [agent_demo](https://bearingresearch.com/strata/latest/examples/agent_demo/) | A coding agent builds the notebook live; only the eval re-runs when the model caches |
-| [pandas_basics](https://bearingresearch.com/strata/latest/examples/pandas_basics/) | A DataFrame pipeline: caching, staleness and per-cell tests |
-| [review_triage](https://bearingresearch.com/strata/latest/examples/review_triage/) | A prompt cell with schema-validated LLM output |
-| [arxiv_classifier](https://bearingresearch.com/strata/latest/examples/arxiv_classifier/) | One cell sent to a GPU worker |
-| [r_lm_vs_sklearn](https://bearingresearch.com/strata/latest/examples/r_lm_vs_sklearn/) | R and Python sharing one graph over Arrow |
-| [sql_orders_report](https://bearingresearch.com/strata/latest/examples/sql_orders_report/) | SQL, Python and markdown cells together |
+<table>
+<tr>
+<td width="33%" valign="top">
+<a href="https://bearingresearch.com/strata/latest/examples/caching/"><picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/caching-dark.webp">
+<img alt="A bar chart of revenue by region under the cell that plots it." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/caching-light.webp">
+</picture></a>
+<br><b><a href="https://bearingresearch.com/strata/latest/examples/caching/">caching</a></b><br>The two-minute tutorial: what the cache saves, and what an edit runs again
+</td>
+<td width="33%" valign="top">
+<a href="https://bearingresearch.com/strata/latest/examples/data_viewer/"><picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/data_viewer-dark.webp">
+<img alt="A 2,000-row transactions table with search, filter, CSV and Parquet buttons and paging." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/data_viewer-light.webp">
+</picture></a>
+<br><b><a href="https://bearingresearch.com/strata/latest/examples/data_viewer/">data_viewer</a></b><br>A 2,000-row DataFrame you can page, sort and filter
+</td>
+<td width="33%" valign="top">
+<a href="https://bearingresearch.com/strata/latest/examples/model_variants/"><picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/model_variants-dark.webp">
+<img alt="A confusion matrix for the active logistic-regression variant." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/model_variants-light.webp">
+</picture></a>
+<br><b><a href="https://bearingresearch.com/strata/latest/examples/model_variants/">model_variants</a></b><br>Three classifiers in one DAG slot; switch and only downstream reruns
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<a href="https://bearingresearch.com/strata/latest/examples/review_triage/"><picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/review_triage-dark.webp">
+<img alt="A structured JSON verdict from a prompt cell." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/review_triage-light.webp">
+</picture></a>
+<br><b><a href="https://bearingresearch.com/strata/latest/examples/review_triage/">review_triage</a></b><br>A prompt cell with schema-validated LLM output
+</td>
+<td width="33%" valign="top">
+<a href="https://bearingresearch.com/strata/latest/examples/sql_orders_report/"><picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/sql_orders_report-dark.webp">
+<img alt="The Python cell that combines two SQL results, above the report it prints." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/sql_orders_report-light.webp">
+</picture></a>
+<br><b><a href="https://bearingresearch.com/strata/latest/examples/sql_orders_report/">sql_orders_report</a></b><br>SQL, Python and markdown cells in one graph
+</td>
+<td width="33%" valign="top">
+<a href="https://bearingresearch.com/strata/latest/examples/widget_playground/"><picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/widget_playground-dark.webp">
+<img alt="A slider, number and dropdown above the table they drive." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/widget_playground-light.webp">
+</picture></a>
+<br><b><a href="https://bearingresearch.com/strata/latest/examples/widget_playground/">widget_playground</a></b><br>Controls that drive downstream cells, live
+</td>
+</tr>
+</table>
 
 [All examples →](https://bearingresearch.com/strata/latest/notebook/examples/)
 
@@ -157,7 +198,14 @@ settled and covered by tests. Three surfaces are not:
 uv sync --all-extras                   # install dependencies (matches CI)
 uv run pytest                          # run the tests
 uv run pre-commit run --all-files      # lint and format
-cd frontend && npm run dev             # frontend dev server
+```
+
+For the frontend with hot reload, run the server and Vite side by side; Vite
+does not proxy to the backend:
+
+```bash
+STRATA_CORS_ALLOW_ORIGINS='["http://localhost:5173"]' uv run strata-notebook
+cd frontend && npm ci && VITE_STRATA_URL=http://localhost:8765 npm run dev
 ```
 
 ## License

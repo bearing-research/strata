@@ -58,7 +58,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Endpoint | Required scope |
 | --- | --- |
 | Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
-| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, `/recents/validate`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
+| Content and configuration changes that run nothing: `/open`, `/create`, `/samples/{name}/open`, `/import`, `/import-snapshot`, `/recents/validate`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
 | Anything that runs code - execute, cancelling a run, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
@@ -77,7 +77,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 
 `notebook:execute` is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is `src/strata/notebook/scopes.py`, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.
 
-Without principal auth (personal mode, or `auth_mode="none"`), the scope gate returns immediately and none of this applies.
+Without principal auth (personal mode; service mode refuses `auth_mode="none"` at startup), the scope gate returns immediately and none of this applies.
 
 Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
 
@@ -146,7 +146,7 @@ Every request gets an `X-Request-ID` response header (and the same value is echo
 
 ### Tenancy
 
-In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service mode](../deployment/service-mode.md) for the full contract.
+In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`, starting with a letter or digit) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into row-group cache keys and cache directories and selects the QoS limiter pools; artifact rows record their tenant, and reads are filtered by it. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service mode](../deployment/service-mode.md) for the full contract.
 
 ## Notebook lifecycle
 
@@ -1293,6 +1293,8 @@ by that team store, after this server's own gate.
 | `GET` | `/v1/artifacts/{id}/v/{n}/tags` | read | The version's tags |
 | `PUT` | `/v1/artifacts/{id}/v/{n}/tags` | write | Set one key/value tag |
 | `DELETE` | `/v1/artifacts/{id}/v/{n}/tags/{key}` | write | Delete one tag |
+| `POST` | `/v1/artifacts/{id}/v/{n}/pin` | `artifacts:pin` | Hold a version and its chain against garbage collection under a `reason`; pinning again under the same reason refreshes it (see [Pins](../deployment/lifecycle.md#pins)) |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}/pin` | `artifacts:pin` | Release the pin placed under `?reason=`; no such pin is a `404` |
 | `GET` | `/v1/artifacts/by-provenance/{hash}` | read | A ready artifact by provenance hash (the team-cache lookup); an `# @output_dir` folder whose files are gone is a miss |
 | `PUT` | `/v1/artifacts` | write | Store a locally computed result (`client.put`) under its inputs and transform, optionally naming it. The name is written in the commit that makes the version ready, so a name that cannot be written fails the request with `500` and leaves nothing ready |
 | `PUT` | `/v1/artifacts/by-provenance/{hash}` | write | Store a result under a provenance key the caller computed; the first writer's result stays the answer, unless it is a folder whose files are gone. An `artifact_id` another tenant holds, at any version, is a `409` |
@@ -1317,6 +1319,8 @@ by that team store, after this server's own gate.
 | `GET` | `/v1/cache/stats` | `admin:cache` | Disk cache statistics, with counts per table across tenants |
 | `GET` | `/v1/cache/evictions` | open | Eviction rate and pressure level; `include_events=true` adds recent events |
 | `POST` | `/v1/cache/warm` | table ACL | Warm the cache for some tables and wait until every row group is fetched |
+| `POST` | `/v1/cache/warm/async` | table ACL | Start a background warming job and return its id at once; it can target a snapshot |
+| `GET` | `/v1/cache/warm/jobs` | caller's tenant | Pending and running warming jobs; `include_completed=true` adds finished ones |
 | `GET` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | A warming job's progress |
 | `DELETE` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | Cancel a warming job; what it cached stays |
 | `GET` | `/v1/metadata/stats` | open | Hit/miss counters and entry counts for the metadata store and its caches |
@@ -1329,5 +1333,10 @@ by that team store, after this server's own gate.
 | `GET` | `/v1/debug/rate-limits` | `admin:*` | Rate limiter allowed and rejected counts |
 | `GET` | `/v1/debug/cache/inspect` | `admin:cache` | Disk cache entries: key hash, file path, size and stored metadata |
 
-The `admin:*`, `admin:cache` and `admin:registry` gates apply under principal auth; without it
+The `admin:*`, `admin:cache`, `admin:registry` and `artifacts:pin` gates apply under principal auth; without it
 those routes are open.
+
+The signed build-transport routes (`GET /v1/artifacts/download`, `POST /v1/artifacts/upload`,
+`GET /v1/builds/{build_id}` and its `manifest`, `finalize`, `log` and `output-file`) are called by
+workers through the URLs a build manifest carries; see the
+[pull model](executor-protocol.md#post-v1execute-manifest-pull-model).

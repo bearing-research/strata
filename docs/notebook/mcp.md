@@ -129,7 +129,8 @@ command run in its `src/` serves `services/api/`'s scratchpad. With no
 `pyproject.toml` found, the repository is the project (never your home directory,
 should it be one), or outside one the directory itself. A command run inside a
 notebook, `.strata-scratch/` included, serves the project the notebook is in.
-`--root DIR` on any `strata scratch` command or on `strata mcp`, or
+`--root DIR` on every `strata scratch` command but `ls` (on `gc`, `--all` sweeps
+every one instead) or on `strata mcp`, or
 `STRATA_SCRATCH_ROOT` for a config that cannot pass arguments, names the project
 instead.
 
@@ -189,7 +190,7 @@ installed in the project's environment as the environment and does not warn abou
 installed packages syncs it again, once no cell is running; whether a project has an environment at all is
 decided again when the scratchpad opens, and recorded in
 `.strata-scratch/.strata/scratchpad_environment.json`. `--python PATH` on `strata
-mcp` or `strata scratch start`, or `STRATA_SCRATCH_PYTHON`, names the interpreter
+mcp` or `strata scratch start`, `run` or `show`, or `STRATA_SCRATCH_PYTHON`, names the interpreter
 instead. A client asking for another than the daemon's replaces it once idle, and
 while it is busy is refused with both named; a client asking for none keeps the
 daemon's. A scratchpad cell's `# @env` may not set `PYTHONPATH`, `PYTHONHOME`,
@@ -344,7 +345,7 @@ Needs the `[mcp]` extra.
 | `list_notebooks` | The sessions currently open on the server: `session_id`, `name`, `path`. |
 | `get_notebook(session_id)` | Every cell of a session, in order. |
 | `get_cell(session_id, cell_id)` | One cell: source, status, outputs. A failed cell has its `error` and `error_full`, the traceback from the cell's first frame and the one with the harness frames too. For a widget cell, its controls and what each is set to. |
-| `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session …`, which downloads and writes the file locally. |
+| `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session … <cell_id> --out plot.png`, which downloads and writes the file locally. |
 | `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. For a swept variable, each variant's cell and the name `lineage` takes for it. |
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
@@ -354,7 +355,7 @@ Needs the `[mcp]` extra.
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
 | `add_cell(session_id, source, after?, language?, author?)` | Add a cell (server mints the id). `language` is one of `python`, `markdown`, `sql`, `r`, `prompt`, `widget`. |
-| `run_snippet(session_id, source, after?, language?, author?)` | Add a cell **and run it** in one call; returns the cell view with the run outcome nested under `run`. The scratchpad primitive. |
+| `run_snippet(session_id, source, after?, language?, author?)` | Add a cell **and run it** in one call; returns the cell view with the run outcome nested under `run`. The scratchpad profile's `run` is the form that takes no `session_id`. |
 | `edit_cell(session_id, cell_id, source, author?)` | Replace a cell's source. |
 | `remove_cell(session_id, cell_id)` | Delete a cell and its files. |
 | `move_cell(session_id, cell_id, index)` | Reorder a cell. |

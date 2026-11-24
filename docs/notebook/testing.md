@@ -162,7 +162,9 @@ def test_predicate_holds_for_every_row(cell):
 
 ## Limitations
 
-- **Python cells only** (not prompt, SQL, R, or markdown cells).
+- **Python cells only** (not prompt, SQL, R, widget or markdown cells).
+- An `@each` cell's tests, and an inactive variant's, are refused: the run
+  reports one errored result saying why.
 - `pytest` must be installable into the notebook environment (it is added to
   the dev dependencies on the first run if missing).
 - Tests run the cell's source, so they run as the same OS user a cell does. A

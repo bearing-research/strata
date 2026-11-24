@@ -32,10 +32,10 @@ evaluated and its feature weights plotted.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Then open `examples/titanic_ml` from the Strata home page.
+Then open **Titanic Survival Prediction** from the notebook list on the Strata home page.
 
 ## Try this
 

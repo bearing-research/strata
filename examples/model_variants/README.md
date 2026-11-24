@@ -16,7 +16,7 @@ re-runs against it; switch back and the previous result is a cache hit.
 - **Strict contract.** All variants must produce the same value
   bindings (imports don't count, they're scaffolding). If one variant
   accidentally adds an extra value, you get a
-  `variant_contract_mismatch` diagnostic, the contract is what makes
+  `variant_contract_mismatch` diagnostic: the contract is what makes
   downstream cells correct under any selection.
 
 ## Cells
@@ -36,25 +36,25 @@ re-runs against it; switch back and the previous result is a cache hit.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Open `examples/model_variants` from the Strata home page. The
-classifier group renders as a tab strip on the train cell, click a
+Open **Model Variants** from the notebook list on the Strata home page. The
+classifier group renders as a tab strip on the train cell; click a
 tab to switch.
 
 ## Try this
 
 - Run the notebook on `logreg`, then click the `rf` tab. `evaluate`
   and `confusion` go stale; re-run them to see the random-forest
-  numbers. Click `logreg` again, both downstream cells become cache
+  numbers. Click `logreg` again and both downstream cells become cache
   hits.
 - Add a fourth variant: click the `+` on the tab strip, which clones
   the active variant, then change its annotation to
   `# @variant classifier svc` and its body to `model = SVC(...)`. A
   file dropped into `cells/` on its own is ignored: only cells listed
   in `notebook.toml` load, so a hand-made `cells/train_svc.py` also
-  needs a `[[cells]]` entry there.
+  needs an entry in the `cells = [...]` list there.
 - Edit a variant cell to define an extra variable (say,
   `feature_importance = ...`). The header pill flags
   `variant_contract_mismatch`: siblings disagree on what they
@@ -63,6 +63,6 @@ tab to switch.
 ## Notes
 
 The active selection is committed in `notebook.toml`'s
-`[[variant_group]]` table, flipping variants from the UI shows up as a
+`[[variant_group]]` table, so flipping variants from the UI shows up as a
 git diff on that one line. That's intentional: the notebook records
 which experiment you ran.

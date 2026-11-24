@@ -37,8 +37,9 @@ run` says where it is as it goes. Run it again and nothing runs: the summary cel
 one lookup, after listing the bucket to see that nothing changed.
 
 Strata reads the bucket in its own process, so an installed Strata needs the `s3`
-extra (`s3fs`): `uv tool install "strata-notebook[s3]"`. The development environment
-already has it.
+extra (`s3fs`), and the `hottest` SQL cell needs the `sql` extra (DuckDB itself is a
+core dependency): `uv tool install "strata-notebook[s3,sql]"`. The development
+environment already has both.
 
 ## Try it
 

@@ -22,5 +22,5 @@ uv run python -m strata
 ```
 
 Then open the notebook UI and pick **Library Cells** from the discover
-list. Run the cells top-to-bottom; the `blocked` cell is meant to fail
-so you can see the new diagnostic.
+list. Run the cells top-to-bottom. The `blocked` cell carries the
+export diagnostic, and `try_blocked` shows the `NameError` its call raises.

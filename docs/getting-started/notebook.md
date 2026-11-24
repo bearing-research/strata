@@ -49,6 +49,8 @@ Start with the two-minute one on what the cache saves.
 
 === "Docker"
 
+    From a clone of the repo:
+
     ```bash
     docker compose up -d --build
     ```
@@ -96,8 +98,9 @@ directory under the notebook storage root, and a Python version.
 Strata creates a directory containing `notebook.toml`, a per-notebook
 `pyproject.toml`, and a `cells/` folder.
 
-The notebook opens empty - click **+ Add cell** and pick a kind to
-write the first one.
+The notebook opens empty, with buttons for a first **Python**, **SQL**,
+**Prompt** or **Markdown** cell. **+ Add cell** below them offers every
+kind.
 
 By default the storage root is `~/.strata/notebooks` - **not** the
 directory you launched from - so new notebooks land there regardless of
@@ -114,8 +117,9 @@ location on startup.
 
 Each notebook gets its own Python environment, managed by `uv`, so
 installing pandas in one notebook doesn't touch another. Everything
-autosaves: source goes to `cells/`, runtime state to `.strata/`.
-Both diff cleanly in git, no JSON blobs in commits.
+autosaves: source goes to `cells/` and diffs cleanly in git, no JSON
+blobs in commits. Runtime state goes to `.strata/`, which the default
+`.gitignore` keeps out.
 
 ### Cell types
 
@@ -266,8 +270,8 @@ Strata re-analyzes the source and computes a new provenance hash, so
 the loader's cached result no longer matches its source and the cell
 flips **stale**. So do the summary and plot cells: they referenced
 `df`, which is no longer the cached value. (Hover **Why stale?** on
-any of them to see the reason: `source changed` on the loader,
-`upstream changed` on the others.)
+any of them to see the reason: `source of "load" changed` on the loader,
+`upstream "load" changed` on the others.)
 
 Now press ++shift+enter++ on the plot cell. Strata walks back through
 the stale upstream cells and runs loader → summary → plot in

@@ -115,7 +115,7 @@ once you've thrown away the intermediates.
 - Loops where intermediate state is genuinely disposable: store only the final answer in a regular Python cell.
 - Anything that needs to branch out into multiple parallel runs: loop cells are sequential by design. Use separate cells, or model the fan-out in Python.
 
-A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch` or `@dataset`; read those in an upstream cell. Its `@table` names are bound in every iteration, at the snapshot its provenance records. A `@write_table` on a loop cell writes the final value once, after the last iteration.
+A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch`, `@dataset` or a read-write `@mount`; read or write those in an upstream cell. Its `@table` names are bound in every iteration, at the snapshot its provenance records. A `@write_table` on a loop cell writes the final value once, after the last iteration.
 
 A loop cell runs on the notebook's own server, never on a [remote worker](../../notebook/workers.md): one whose `# @worker`, or the notebook's default worker, names another fails before it starts. Add `# @worker local` to the loop cell, or put the work that needs the worker in an ordinary cell upstream.
 
@@ -263,11 +263,14 @@ defined, so after a plain cell redefines `preds` there is no sweep left to fan
 out over. If it reads from two or more, name the one
 to fan out over - `# @per_variant model` - and the others collapse to dicts. A
 cell fans out over **one** group; comparing across two groups (cartesian) isn't
-supported. The validator flags the mistakes: `per_variant_no_sweep_source`
+supported. The validator warns about the mistakes: `per_variant_no_sweep_source`
 (nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),
-`per_variant_on_variant_member` (a cell can't both be a variant and fan out),
-`per_variant_write_table_overwrite` (every variant would overwrite the same
-table). The named group is part of the cell's cache key, so switching it runs the
+`per_variant_unknown_group` (the named group is not a sweep the cell reads),
+`per_variant_on_variant_member` (a cell can't both be a variant and fan out). A
+group of one variant is a note (`per_variant_group_of_one`). Two are errors that
+keep the cell from running: `per_variant_write_table_overwrite` and
+`per_variant_write_table_sync` (each variant would remove the rows of the one
+before it). The named group is part of the cell's cache key, so switching it runs the
 instances again.
 
 ### Defines contract

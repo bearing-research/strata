@@ -52,8 +52,30 @@ def on_pre_build(config):
             continue
 
         target = out_dir / f"{notebook_dir.name}.md"
+        rendered = with_thumbnail(rendered, notebook_dir.name, docs_dir / "assets" / "examples")
         target.write_text(rendered, encoding="utf-8")
         rendered_count += 1
 
     if rendered_count:
         logger.info("export_examples: rendered %d notebook(s)", rendered_count)
+
+
+def with_thumbnail(rendered: str, name: str, thumbs_dir: Path) -> str:
+    """Put the example's screenshot (``scripts/capture_docs_shots.py``) under its title.
+
+    An example with no screenshot yet (one whose run needs what the capturing
+    machine lacked) renders without one.
+    """
+    if not (thumbs_dir / f"{name}-light.webp").is_file():
+        return rendered
+    lines = rendered.split("\n")
+    title_at = next((i for i, line in enumerate(lines) if line.startswith("# ")), None)
+    if title_at is None:
+        return rendered
+    title = lines[title_at].removeprefix("# ").strip()
+    alt = f"The {title} notebook in the editor after a run"
+    images = [
+        f"![{alt}](../assets/examples/{name}-{theme}.webp#only-{theme})"
+        for theme in ("light", "dark")
+    ]
+    return "\n".join([*lines[: title_at + 1], "", *images, *lines[title_at + 1 :]])

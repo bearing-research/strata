@@ -33,7 +33,7 @@ Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
   you: it sets `sha256=` on each named fetch (all of the cell's by default) to
   the digest of the bytes the notebook last downloaded, keeping the line's other
   options. Run the cell first so there are bytes to pin. After a mismatch,
-  running it again accepts what the URL serves now.
+  running `pin-fetch` again pins what the URL serves now.
 - **`refetch=stale`** (default) checks the URL with a conditional GET
   (`ETag` / `Last-Modified`): at most once a minute while staleness is being
   recomputed, and always right before the cell runs, so what a run records is
@@ -76,7 +76,7 @@ than in a batch.
 On a remote worker the server does the fetching: the bytes travel with the
 cell's other inputs, uploaded on the direct transport and staged behind a
 signed URL on the signed one, so the worker never contacts the URL and needs no
-route to it. The worker must be running this version of Strata or later. An
+route to it. The worker must be running Strata 0.8.0 or later. An
 older one does not recognise the input and the cell fails with a `NameError`
 on `<name>`.
 
@@ -99,9 +99,10 @@ Format: `# @dataset <name> <registry-name>[@<alias>|@v=<n>]`.
 - **`taxi/model@champion`** follows the alias. The cell goes out of date when
   the alias points somewhere else.
 - **`taxi/model`** follows the name pointer the same way.
-- **`taxi/model@v=3`** pins version 3 of the artifact the name points at. A
-  pinned dataset never makes the cell out of date, as `snapshot=` does for
-  `@table`.
+- **`taxi/model@v=3`** pins version 3 of the artifact the name points at. New
+  versions of that artifact never make the cell out of date, as `snapshot=`
+  does for `@table`. Pointing the name at a different artifact does: the pin
+  then names that artifact's version 3, and the cell fails if it has none.
 
 The server resolves the name in its own registry, or in the team store when
 `STRATA_NOTEBOOK_REMOTE_STORE_URL` is set. The version is copied into the

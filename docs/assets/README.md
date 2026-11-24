@@ -12,6 +12,7 @@ one command rather than an afternoon of cropping:
 ```bash
 uv run python scripts/capture_docs_shots.py           # everything
 uv run python scripts/capture_docs_shots.py --only tui # only the SVGs (fast, no server)
+uv run python scripts/capture_docs_shots.py --only examples --example caching  # one gallery card
 ```
 
 Re-run it whenever the notebook UI or the TUI changes shape, and commit the
@@ -38,12 +39,18 @@ result alongside that change.
 | `tui-cache-payoff.gif` | TUI | Terminal viewer, watching a re-run |
 | `tui-agent-live.gif` | TUI | Terminal viewer (watching a coding agent) |
 | `agent-demo.gif` | Screen recording | Not yet recorded - see below |
+| `examples/<name>-{light,dark}.webp` | Web UI | Example gallery cards, each example's page, `README.md` |
 
 ## Conventions
 
 - **Web shots are PNG and come in both themes.** Reference them with Material's
   `#only-light` / `#only-dark` suffix so a page never shows a dark screenshot on
   a light background. `README.md` uses a `<picture>` element for the same reason.
+- **Example cards are WebP**, 640 px wide: twenty pairs of full-page PNGs would
+  weigh more than the rest of the site's images together. `--only examples`
+  runs each example in a scratch copy first (an example whose services, keys or
+  run fail is skipped and keeps its old picture), so a card is never a notebook
+  that has not run.
 - **TUI shots are SVG**, exported by Textual. They stay crisp at any zoom, are
   roughly a tenth the size of the equivalent PNG, keep the text selectable, and
   read correctly on either docs theme, so they need only one variant.

@@ -31,8 +31,8 @@ reads the same way, with no `@table` line.
 
 - A running Strata server: `strata-notebook` (personal mode, the default)
   serves the notebook UI on `http://localhost:8765`.
-- `pyiceberg` for the two setup scripts below. It is a core Strata dependency,
-  so `uv run python` in the Strata project has it. The notebook's own
+- `pyiceberg` for the two setup scripts below. `uv run --with
+  "pyiceberg[sql-sqlite,pyarrow]"` provides it wherever Strata is installed. The notebook's own
   environment does not need it: the server resolves the snapshot and runs the
   scan.
 
@@ -74,7 +74,7 @@ print("snapshot S1:", table.current_snapshot().snapshot_id)
 
 ```bash
 mkdir -p /tmp/strata-demo/warehouse
-uv run python setup_warehouse.py
+uv run --with "pyiceberg[sql-sqlite,pyarrow]" python setup_warehouse.py
 ```
 
 The **table URI** is `<warehouse>#<namespace>.<table>` - here
@@ -150,11 +150,11 @@ print("snapshot S2:", table.current_snapshot().snapshot_id)
 ```
 
 ```bash
-uv run python append_month2.py
+uv run --with "pyiceberg[sql-sqlite,pyarrow]" python append_month2.py
 ```
 
-Back in the notebook, the `@table` cell now reads **stale · input changed** - its
-snapshot id moved from S1 to S2, so its provenance changed and no stored result
+Back in the notebook, the `@table` cell turns stale (hover its status dot:
+**stale · input changed**). Its snapshot id moved from S1 to S2, so its provenance changed and no stored result
 matches it. The cells downstream of it that ran before read **stale** too. The
 badges do not update live: the notebook looks up the current snapshot only when
 it recomputes staleness, which happens when you reopen the notebook, edit a
@@ -177,19 +177,15 @@ add `snapshot=<id>`:
 ```
 
 A pinned cell reads that snapshot regardless of new data and **never goes
-out of date** on appends - the lake-side analog of a mount `pin`. Drop the
+out of date** on appends - the lake-side analog of a mount's
+[`pin`](../reference/notebook-toml.md#mounts-filesystem-mounts). Drop the
 `snapshot=` to return to tracking the current snapshot.
 
 ## How it works
 
-The snapshot id is part of the cell's **provenance hash**, alongside the
-source hash, environment hash, and input hashes:
-
-```
-provenance = hash(input_hashes + mount_fingerprints + table_fingerprints
-                  + fetch_fingerprints + dataset_fingerprints,
-                  source_hash, env_hash)
-```
+The snapshot id is part of the cell's **provenance hash**: a digest over the
+cell's definition, its environment, its upstream outputs and its inputs
+(mounts, tables, fetches, datasets).
 
 A table fingerprint is `"<name>:table:<uri>:<snapshot_id>"`. Because the
 snapshot id is immutable and content-addressed, a cached result for a given

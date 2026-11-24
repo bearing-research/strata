@@ -57,10 +57,14 @@ statement of an indented block leaves a `pass` behind.
 - **REPL-inspection magics** (`%who`, `%whos`, `%lsmagic`, `%history`,
   `%alias`, etc.). Dropped; no Strata equivalent.
 
-Everything that's "dropped" is listed in the import report
-(`<notebook_dir>/import_report.md`), and the cell source carries a
-`# strata: ...` marker comment where it was, so there's no silent
-data loss.
+Everything above is listed in the import report
+(`<notebook_dir>/import_report.md`). Line magics with nothing to do in
+Strata (`%matplotlib`, `%load_ext`, the REPL-inspection ones and the
+rest of the drop rows in the [table below](#magic-translation-table))
+are removed without a trace in the cell and listed under *Magics
+translated*. Cell magics, shell commands and unrecognized magics leave
+a `# strata: ...` marker comment where they were and are listed under
+*Magics dropped* or *Shell commands dropped*.
 
 ## When to use it
 
@@ -159,8 +163,8 @@ statement counts: one inside a comment or a string does not.
 
 ### Magic translation table
 
-Single dict in `strata.notebook.jupyter_import`. Adding a row
-extends support; rows can be:
+Two dicts in `strata.notebook.jupyter_import`, `_LINE_MAGIC_TABLE`
+and `_CELL_MAGIC_TABLE`. Adding a row extends support; rows can be:
 
 | Magic | Action |
 |---|---|
@@ -177,7 +181,7 @@ extends support; rows can be:
 | `%%timeit`, `%%time`, `%%capture` | Recurse on body as plain code. |
 | `%%javascript`, `%%js`, `%%html`, `%%latex`, `%%svg`, `%%markdown` | Dropped. Strata has no equivalent renderer. |
 | `%%R`, `%%ruby`, `%%perl`, `%%cython`, `%%fortran`, `%%sql` | Dropped (non-Python languages and embedded SQL aren't auto-translatable; use Strata's SQL cell type for `%%sql` content). |
-| Anything unrecognized | Dropped with a `# strata: unsupported magic '<name>' dropped` comment at the original location. |
+| Anything unrecognized | Dropped with a `# strata: unsupported magic '%<name>' dropped` comment at the original location (`unsupported cell magic '%%<name>'` for a cell magic). |
 
 ### `!shell` commands
 
@@ -253,9 +257,11 @@ Sections that surface when applicable:
 - **Counts**: markdown / code cells, `;`-suppression instances,
   skipped cell types.
 - **Magics translated**: list of every magic the converter rewrote
-  or absorbed.
-- **Magics dropped**: magics with no Strata equivalent; the source
-  carries a marker comment where each one used to live.
+  or absorbed, including the no-op line magics it removed without a
+  marker (`%matplotlib`, `%load_ext`, `%who`, ...).
+- **Magics dropped**: cell magics and unrecognized magics with no
+  Strata equivalent, plus `%pip` / `%conda` other than `install` and
+  `%env` / `%run` lines with nothing to act on; the source carries a marker comment where each one used to live.
 - **Shell commands dropped**: `!cmd` lines (except `!pip install`)
   and shell cell magics that the converter removed.
 - **Dependencies captured**: what landed in `pyproject.toml`,
