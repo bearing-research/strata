@@ -259,8 +259,6 @@ def _value_problem(key: str, value: str, language: CellLanguage) -> tuple[str, s
     code = f"{key}_unreadable"
     if key in _NEEDS_VALUE and not value:
         return code, "it needs a value"
-    if key == "name" and language == CellLanguage.PROMPT and not value.isidentifier():
-        return code, "a prompt cell's name is its output variable, so a Python identifier"
     if key in ("nocache", "stochastic", "live") and value.lower() not in _FLAG_VALUES:
         return code, "expected nothing, or one of on, off, true, false, yes, no, 1, 0"
     if key == "per_variant":

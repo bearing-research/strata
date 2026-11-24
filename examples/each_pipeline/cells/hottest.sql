@@ -1,4 +1,4 @@
--- @name Hottest stations
+-- @name hottest_stations
 -- @sql connection=lake
 -- @after summarize
 SELECT station, name, days, hottest_f

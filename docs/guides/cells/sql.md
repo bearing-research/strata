@@ -200,7 +200,7 @@ A query runs off the server's event loop, so a cancel lands at once: the run is 
 
 ## `-- @name` and downstream consumption
 
-A SQL cell's output variable name defaults to `result`; override with `-- @name <identifier>`. Downstream cells receive the result as a `pyarrow.Table` (Arrow IPC artifacts deserialize through the standard notebook serializer); call `.to_pandas()` for a pandas DataFrame:
+A SQL cell's output variable name defaults to `result`; override with `-- @name <identifier>` (a Python identifier, not a keyword). Downstream cells receive the result as a `pyarrow.Table` (Arrow IPC artifacts deserialize through the standard notebook serializer); call `.to_pandas()` for a pandas DataFrame:
 
 ```sql
 -- @sql connection=warehouse

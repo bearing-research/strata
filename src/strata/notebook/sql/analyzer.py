@@ -15,7 +15,12 @@ from typing import Any
 
 from sqlglot.errors import SqlglotError as _SqlglotError
 
-from strata.notebook.annotations import CachePolicy, parse_annotations, strip_leading_annotations
+from strata.notebook.annotations import (
+    CachePolicy,
+    is_output_name,
+    parse_annotations,
+    strip_leading_annotations,
+)
 from strata.notebook.models import CellLanguage
 from strata.notebook.sql.adapter import QualifiedTable
 
@@ -60,8 +65,8 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
     sql_body = strip_leading_annotations(source, CellLanguage.SQL).strip()
 
     output_name = annotations.name if annotations.name else "result"
-    if not output_name.isidentifier():
-        output_name = "result"
+    if not is_output_name(output_name):
+        output_name = "result"  # and ``name_unreadable`` keeps the cell from running
 
     positions = _extract_placeholder_positions(sql_body, dialect)
     references = _dedupe_preserve_order(positions)

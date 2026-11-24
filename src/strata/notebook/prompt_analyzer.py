@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from strata.notebook.annotations import (
+    is_output_name,
     iter_annotation_block,
     parse_annotation_directive,
     strip_leading_annotations,
@@ -66,7 +67,7 @@ def analyze_prompt_cell(source: str) -> PromptAnalysis:
         key, value = parsed
 
         if key == "name":
-            if value and value.isidentifier():
+            if value and is_output_name(value):
                 result.name = value
         elif key == "model":
             result.model = value or None

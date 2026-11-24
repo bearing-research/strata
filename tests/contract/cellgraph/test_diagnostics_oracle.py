@@ -34,9 +34,17 @@ _NEWER_CODES = {
 }
 
 
-def _as_recorded(observed: dict) -> dict:
+# A SQL ``@name`` is now checked as a prompt's is, so one that is no identifier is newer.
+def _newer(diagnostic: list, language: str) -> bool:
+    code, _severity, _line, message = diagnostic
+    if code in _NEWER_CODES:
+        return True
+    return language == "sql" and code == "name_unreadable" and "output variable" in message
+
+
+def _as_recorded(observed: dict, language: str) -> dict:
     cells = {
-        cell: [d for d in diagnostics if d[0] not in _NEWER_CODES]
+        cell: [d for d in diagnostics if not _newer(d, language)]
         for cell, diagnostics in observed["cells"].items()
     }
     return {**observed, "cells": cells}
@@ -60,6 +68,6 @@ def test_the_oracle_holds_every_case():
 )
 def test_a_cell_reports_what_strata_reported(name, tmp_path):
     diagnostics_corpus.write(tmp_path / name, _CASES[name])
-    observed = _as_recorded(diagnostics_corpus.observe(tmp_path / name))
+    observed = _as_recorded(diagnostics_corpus.observe(tmp_path / name), name.split("-")[0])
     expected = _in_sql_marker(_ORACLE[name]) if name.startswith("sql-") else _ORACLE[name]
     assert observed == expected
