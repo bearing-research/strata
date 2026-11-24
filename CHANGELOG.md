@@ -792,6 +792,11 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A cell imports its own `datasets` and `tables`.** Every process that ran a cell put
+  Strata's notebook package first on `sys.path`, so its `datasets.py` and `tables.py`
+  shadowed Hugging Face `datasets` and PyTables, and transformers' `Trainer` failed to
+  import. They start with `python -P` now; a script a cell test starts imports its
+  neighbours again. (#1659)
 - **A scan filtered on a NaN value plans.** A filter such as `value = NaN` failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)
