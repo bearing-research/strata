@@ -4618,6 +4618,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A rerun no longer fails a run another process has just resumed.</strong> With two processes
+  on one notebook's store, a rerun of a cell whose interrupted run another process resumed
+  a moment earlier failed that build and killed its run. The rerun is now refused, as it
+  would be on one process. (#1653)</li>
 <li><strong>A resumed run keeps its first checkpoint.</strong> A run that died while a checkpoint was
   being written, or whose checkpoint failed to write, numbered its next attempt's
   checkpoints from the one it resumed, so the first collided with the abandoned one and
