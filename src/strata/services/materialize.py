@@ -182,26 +182,26 @@ class MaterializeService:
         the projection in request order (the result keeps it) and the normalized filters,
         so the same query dedups to the same artifact. A table with no snapshots
         (``snapshot_id`` None) has nothing to key a result on, so its hash is unique per
-        call and never dedups.
+        call and never dedups. Hashed as canonical JSON over named fields, so no field's
+        text can run into the next one's (SYSTEMS PROV-3).
         """
         import hashlib
+        import json
 
         from strata.types import compute_filter_fingerprint
 
-        hasher = hashlib.sha256()
-        snapshot = snapshot_id if snapshot_id is not None else f"empty:{uuid.uuid4().hex}"
-        hasher.update(f"table:{table_identity}@{snapshot}".encode())
-        hasher.update(f"schema:{schema_id}".encode())
-        hasher.update(f"reading:{reading}".encode())
-        hasher.update(b"executor:scan@v1")
-        # An empty list projects no column (a row count), not all of them.
-        if columns is not None:
-            hasher.update(f"columns:{columns}".encode())
-        else:
-            hasher.update(b"columns:*")
-        filter_fp = compute_filter_fingerprint(filters)
-        hasher.update(f"filters:{filter_fp}".encode())
-        return hasher.hexdigest()
+        identity = {
+            "executor": "scan@v1",
+            "table": table_identity,
+            "snapshot": snapshot_id if snapshot_id is not None else f"empty:{uuid.uuid4().hex}",
+            "schema_id": schema_id,
+            "reading": reading,
+            # None projects every column; an empty list none (a row count).
+            "columns": columns,
+            "filters": compute_filter_fingerprint(filters),
+        }
+        encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
 
     def rebuild_artifact_id(
         self,

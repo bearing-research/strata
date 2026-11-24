@@ -116,7 +116,7 @@ class TestFilterFingerprint:
     def test_single_filter_produces_hash(self):
         filters = [Filter(column="value", op=FilterOp.GT, value=100)]
         fingerprint = compute_filter_fingerprint(filters)
-        assert len(fingerprint) == 16
+        assert len(fingerprint) == 64
         assert fingerprint != "nofilter"
 
     def test_same_filters_produce_same_fingerprint(self):
@@ -144,7 +144,7 @@ class TestFilterFingerprint:
         dt = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         filters = [Filter(column="timestamp", op=FilterOp.GT, value=dt)]
         fingerprint = compute_filter_fingerprint(filters)
-        assert len(fingerprint) == 16
+        assert len(fingerprint) == 64
 
     def test_datetime_fingerprint_is_stable(self):
         dt1 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)

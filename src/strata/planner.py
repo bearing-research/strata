@@ -213,7 +213,7 @@ def _deletes_fingerprint(
 def _reading_fingerprint(format_version: int, name_mapping: NameMapping | None) -> str:
     """Name how a table reads its files: a property change, which makes no snapshot."""
     mapping = name_mapping.model_dump_json() if name_mapping is not None else ""
-    return hashlib.sha256(f"{format_version}|{mapping}".encode()).hexdigest()[:16]
+    return hashlib.sha256(f"{format_version}|{mapping}".encode()).hexdigest()
 
 
 def _partition_values(

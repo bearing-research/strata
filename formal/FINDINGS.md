@@ -994,3 +994,29 @@ review caught it). Regression tests:
 `tests/test_stream_ownership.py::TestRegistryHooks::test_a_live_stream_stays_claimed_past_its_first_ttl`,
 `::test_a_stream_ended_during_its_renewal_is_left_unclaimed`,
 `::test_the_server_renews_claims_and_sweeps_expired_ones`.
+
+### 34. Two scans could share a `scan@v1` identity hash
+
+**Property** (phase 7, item 4; PROV-3). `compute_identity_provenance` fed sha256 the
+labelled fields one after another, `table:{table}@{snapshot}`, `schema:…`, `reading:…`,
+`columns:{repr}`, `filters:…`, with no separator. Text in one field could stand in for
+the next: table `t@1schema:Nonereading:A` with reading `B` (snapshot 5, schema 0) and
+table `t` with reading `A@5schema:0reading:B` (snapshot 1, schema none) hashed alike.
+Its filter fingerprint encoded each value as its wire spelling, so the string
+`"__date__:2024-01-01"` and the date it spells had one fingerprint. The fingerprint was
+also an MD5 prefix of 64 bits, and the projection and reading fingerprints (in the
+row-group key, the reading also in the identity) SHA-256 prefixes of 64 bits.
+Severity: low (a hash shared by two scans serves one's result for the other, but the
+planner makes the `reading` string, and the wire turns such a string into the date
+before the server sees it; neither pair arrives from a request).
+
+**Fixed.** The identity hash is sha256 of canonical JSON over named fields; the filter
+fingerprint adds each value's type (the type it is encoded as, so `numpy.float64` is a
+float), and the three fingerprints are full SHA-256 digests. Every stored scan is keyed
+anew once; the row-group cache moves to format version 7, whose start removes the old
+entries (filtered manifest plans were never stored). The property
+`test_two_scans_share_an_identity_hash_only_when_they_are_one_scan` pins both pairs as
+examples, and its "spelled" pairs find the second without one. Regression tests:
+`tests/test_materialize_service.py::TestComputeIdentityProvenance::test_one_fields_text_cannot_run_into_the_next`,
+`tests/test_filters_conformance.py::test_fingerprint_a_string_spelling_a_tagged_value_is_not_that_value`.
+
