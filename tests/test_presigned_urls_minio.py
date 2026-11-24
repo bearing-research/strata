@@ -9,10 +9,10 @@ import httpx
 import pytest
 from vestigo.blob_store import S3BlobStore
 
-from tests.docker_helpers import docker_daemon_reachable
+from tests.docker_helpers import backend_unavailable, docker_daemon_reachable
 
 if not docker_daemon_reachable():
-    pytest.skip("Docker daemon is not running", allow_module_level=True)
+    backend_unavailable("Docker daemon is not running", module=True)
 
 from testcontainers.community.minio import MinioContainer  # noqa: E402
 

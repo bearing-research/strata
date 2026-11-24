@@ -348,24 +348,6 @@ def make_azurite():
     )
 
 
-def start_container_or_skip(container, *, label: str):
-    """Start a testcontainers container, skipping the module if startup fails.
-
-    A failed image pull (a Docker Hub flake, or fork CI without registry secrets) means the
-    backend is unavailable: a skip, not a failure. Only startup, including the container's
-    wait strategy, is converted; later errors propagate. The caller owns ``stop()``.
-    """
-    try:
-        container.start()
-    except Exception as exc:
-        try:
-            container.stop()
-        except Exception:
-            pass
-        pytest.skip(f"{label} container unavailable (Docker image pull/start failed): {exc}")
-    return container
-
-
 def _reset_transform_singletons() -> None:
     """Reset build store and runner globals between test servers.
 
