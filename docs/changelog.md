@@ -794,6 +794,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A recreated Hadoop-style table no longer plans as the table it replaced.** The
+  Iceberg metadata cache kept every remote `metadata.json` and manifest by location. A
+  Hadoop-style table names its metadata `vN.metadata.json` and starts at `v1` again
+  when dropped and created at the same location, so the new table loaded the old one's
+  schema and snapshots from the cache. Only files named with a uuid, as Iceberg's
+  writers name them, are cached now; such a table is read from the store each time and
+  no longer plans while the store is down (#1668).
 - **Run All gives what running each cell gives when cells share functions.** In a Run
   All batch, a cell that changed an upstream value without naming it (by calling a
   function that appends to it, or through a list holding it) passed the change to later

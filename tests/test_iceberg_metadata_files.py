@@ -75,8 +75,8 @@ class StoreFileIO(FileIO):
         del _Store.files[path]
 
 
-METADATA = "s3://lake/t/metadata/00001-5f2c.metadata.json"
-MANIFEST = "s3://lake/t/metadata/snap-1-0-ab.avro"
+METADATA = "s3://lake/t/metadata/00001-5f2c0e7a-3b1d-4c8e-9a6f-2d4b8e1c7a90.metadata.json"
+MANIFEST = "s3://lake/t/metadata/snap-1-0-ab12cd34-5e6f-4a7b-8c9d-0e1f2a3b4c5d.avro"
 
 
 @pytest.fixture(autouse=True)
@@ -129,8 +129,10 @@ def test_a_hit_does_not_read_the_store(tmp_path):
     [
         "s3://lake/t/data/00000-0-ab.parquet",
         "s3://lake/t/metadata/version-hint.text",
-        "/warehouse/t/metadata/00001-5f2c.metadata.json",
-        "file:///warehouse/t/metadata/00001-5f2c.metadata.json",
+        "s3://lake/t/metadata/v1.metadata.json",
+        "s3://lake/t/metadata/manifest.avro",
+        "/warehouse/t/metadata/00001-5f2c0e7a-3b1d-4c8e-9a6f-2d4b8e1c7a90.metadata.json",
+        "file:///warehouse/t/metadata/00001-5f2c0e7a-3b1d-4c8e-9a6f-2d4b8e1c7a90.metadata.json",
     ],
 )
 def test_data_files_changing_files_and_local_files_are_not_cached(tmp_path, location):
@@ -142,8 +144,34 @@ def test_data_files_changing_files_and_local_files_are_not_cached(tmp_path, loca
         _read(file_io, location)
 
 
+def test_a_hadoop_style_name_a_recreated_table_reuses_is_read_from_the_store(tmp_path):
+    # Dropped with purge and created again at its location, the table starts at v1.
+    location = "s3://lake/t/metadata/v1.metadata.json"
+    _Store.files[location] = b'{"table-uuid": "dropped"}'
+    file_io = _io(tmp_path)
+    _read(file_io, location)
+    _Store.files[location] = b'{"table-uuid": "recreated"}'
+    assert _read(_io(tmp_path), location) == b'{"table-uuid": "recreated"}'
+
+
+def test_the_names_iceberg_writers_give_are_cached(tmp_path):
+    names = [
+        "00000-9a1d3c5e-7b2f-4d6a-8e0c-1f3b5d7a9c2e.metadata.json",
+        "00003-9a1d3c5e-7b2f-4d6a-8e0c-1f3b5d7a9c2e.gz.metadata.json",
+        "snap-6214731882461927845-1-9a1d3c5e-7b2f-4d6a-8e0c-1f3b5d7a9c2e.avro",
+        "9a1d3c5e-7b2f-4d6a-8e0c-1f3b5d7a9c2e-m0.avro",
+    ]
+    file_io = _io(tmp_path)
+    for name in names:
+        _Store.files[f"s3://lake/t/metadata/{name}"] = name.encode()
+        _read(file_io, f"s3://lake/t/metadata/{name}")
+    _Store.down = True
+    for name in names:
+        assert _read(file_io, f"s3://lake/t/metadata/{name}") == name.encode()
+
+
 def test_a_write_does_not_fill_the_cache(tmp_path):
-    location = "s3://lake/t/metadata/00002-9a1d.metadata.json"
+    location = "s3://lake/t/metadata/00002-9a1d3c5e-7b2f-4d6a-8e0c-1f3b5d7a9c2e.metadata.json"
     file_io = _io(tmp_path)
     with file_io.new_output(location).create() as stream:
         stream.write(b"written")
@@ -162,7 +190,10 @@ def test_one_location_on_two_stores_is_two_entries(tmp_path):
 
 
 def test_the_least_recently_read_is_evicted_past_the_size(tmp_path):
-    first, second, third = (f"s3://lake/t/metadata/0000{i}-a.metadata.json" for i in (1, 2, 3))
+    first, second, third = (
+        f"s3://lake/t/metadata/0000{i}-5f2c0e7a-3b1d-4c8e-9a6f-2d4b8e1c7a90.metadata.json"
+        for i in (1, 2, 3)
+    )
     for location in (first, second, third):
         _Store.files[location] = b"x" * 40
     file_io = _io(tmp_path, size_bytes=100)

@@ -932,3 +932,23 @@ batched cells, and 2 and 2 cell by cell. Severity: medium (as 28).
 (`_StoredGlobals`) and puts back, after each cell, any that changed. The pool worker
 runs one cell per process, so nothing carries over there. Regression test:
 `test_mutation_parity.py::test_a_stored_function_called_twice_in_a_batch`.
+
+### 31. A recreated Hadoop-style table plans as the table it replaced
+
+**Replay** (phase 7, item 4; MD-1). The metadata cache kept every remote
+`*.metadata.json` and `*.avro` by location, on the claim that Iceberg never reuses a
+name. A Hadoop-style table names its metadata `vN.metadata.json`, and one dropped with
+purge and created again at its location writes `v1.metadata.json` again. Registered in
+a catalog Strata reads (a `SqlCatalog` over a remote scheme in the replay), the new
+table loaded with the old table's uuid, schema and snapshots from the cache, and its
+scan read the old manifests (cached too) and failed on the purged data files. With the
+old row groups in the row-group cache, whose key takes the uuid, paths and sizes from
+that metadata, the scan would serve the old rows (follows from the key; not replayed).
+Severity: high (silent wrong data when the row groups are cached; otherwise a table
+that fails every scan until the entry is evicted). Narrow: it needs a Hadoop-style
+table, which pyiceberg cannot write, behind a catalog.
+
+**Fixed.** Only names with a uuid are cached, as Iceberg's writers name metadata,
+manifest lists and manifests; any other name is read from the store every time.
+Regression tests: `tests/test_iceberg_metadata_files.py::test_a_hadoop_style_name_a_recreated_table_reuses_is_read_from_the_store`,
+`::test_the_names_iceberg_writers_give_are_cached`.

@@ -27,8 +27,8 @@ in [`README.md`](README.md).
   Hypothesis state machine over a real Iceberg table, found finding 16 (four
   caches keyed a data file by path and size); fixed. Lead CK-1 (b) rests on
   writers never reusing a delete file's path; MD-2 rests on random snapshot
-  ids; MD-1 is still a lead (pyiceberg has no catalog that reuses metadata
-  names).
+  ids; MD-1 was a lead then (pyiceberg has no catalog that reuses metadata
+  names) and is finding 31 since.
 - **Phase 4 (streams):** `Streams.tla` found finding 17 (a stream expired under a
   GET waiting for a slot), and a replay confirmed lead ADM-5 as finding 18; both
   fixed. Two leads did not hold: ADM-6 (no cancel can land in `release()`, which
@@ -70,6 +70,12 @@ in [`README.md`](README.md).
   sink, so every value as the last cell sees it is stored and compared. Events from
   inside a composite strategy are mostly lost: the generator returns its traits and
   the test records them.
+- **Phase 7, item 4 (smaller items):** MD-1 held on replay as finding 31, fixed: a
+  Hadoop-style table recreated at its location wrote `v1.metadata.json` again, and the
+  metadata cache served the old table. The replay needs a FileIO that keeps `s3://`
+  locations while storing locally (override `parse_location` and `fs_by_scheme`):
+  rewriting the location instead writes `file://` paths into the manifest list, and
+  nothing is cached.
 
 ## Conventions
 
@@ -140,8 +146,7 @@ property, the replays of what it finds, then the fixes.
 3. **Done: a wider Run All property** (BAT-1, BAT-2). Module state, `@nocache`, `@loop`
    and `@timeout` (a worker's single-run path) in the generator; findings 28, 29, 30. A
    real remote worker is not covered.
-4. **Smaller open items.** MD-1 (a catalog that writes `vN.metadata.json`, dropped
-   with purge and recreated); LR-3 (the close path checked against the process, not
-   the attempt); the passthrough stream path and multi-node ownership (outside
-   `Streams.tla`); the `scan@v1` identity hash (PROV-3, a decision: encoding its
-   fields as JSON re-keys every stored scan once).
+4. **Smaller open items.** MD-1 done (finding 31). LR-3 (the close path checked
+   against the process, not the attempt); the passthrough stream path and multi-node
+   ownership (outside `Streams.tla`); the `scan@v1` identity hash (PROV-3, a decision:
+   encoding its fields as JSON re-keys every stored scan once).

@@ -1,9 +1,11 @@
 """A disk cache of the Iceberg metadata files planning reads from an object store.
 
-Iceberg writes a table's metadata files once, under names it never reuses: each
-``metadata.json``, manifest list and manifest. So a copy read once serves every later
-read of that location, and a scan of a snapshot already planned plans with no
-object-store reads while the catalog answers (#1181).
+Iceberg's writers name each ``metadata.json``, manifest list and manifest with a fresh
+uuid, and write it once. So a copy read once serves every later read of that location,
+and a scan of a snapshot already planned plans with no object-store reads while the
+catalog answers (#1181). The exception is a Hadoop-style table: it names its metadata
+``vN.metadata.json``, and one dropped and created again at its location starts at
+``v1`` again. So a name with no uuid is read from the store every time.
 
 pyiceberg loads the FileIO named by the ``py-io-impl`` catalog property; Strata names
 :class:`CachedFileIO`, which reads through pyiceberg's own choice for each scheme.
@@ -15,6 +17,7 @@ import hashlib
 import io
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -57,6 +60,8 @@ _STORE = (
 )
 # Avro files in a table are its manifest lists and manifests. version-hint.text changes.
 _IMMUTABLE_SUFFIXES = (".metadata.json", ".avro")
+# What makes a name written once: a uuid of its own, as Iceberg's writers name files.
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 # A put's temp file older than this was left by a crash; a live put renames it at once,
 # and another process sharing the directory may be mid-put.
 _STALE_TEMP_SECONDS = 3600
@@ -198,7 +203,7 @@ class _CachedInputFile(InputFile):
 
 
 class CachedFileIO(FileIO):
-    """pyiceberg's FileIO for each scheme, with immutable remote metadata read from a cache.
+    """pyiceberg's FileIO for each scheme, with remote metadata written once read from a cache.
 
     Writes, deletes, data files and local paths go straight through.
     """
@@ -233,7 +238,11 @@ class CachedFileIO(FileIO):
     def new_input(self, location: str) -> InputFile:
         inner = self._inner(location).new_input(location)
         scheme = urlparse(location).scheme
-        if scheme in ("", "file") or not location.endswith(_IMMUTABLE_SUFFIXES):
+        if (
+            scheme in ("", "file")
+            or not location.endswith(_IMMUTABLE_SUFFIXES)
+            or not _UUID.search(location.rsplit("/", 1)[-1])
+        ):
             return inner
         key = hashlib.sha256(f"{self._store}\n{location}".encode()).hexdigest()
         return _CachedInputFile(inner, self._cache, key)

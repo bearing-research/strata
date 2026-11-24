@@ -98,12 +98,12 @@ cache directory, eviction to the size limit, `clear()`.
 **What it is.** Two caches make planning cheap and survive an object-store
 outage: the metadata FileIO (`iceberg/metadata_files.py`) keeps
 `*.metadata.json` and `*.avro` files on disk on the claim that Iceberg writes
-each once under a name it never reuses, and the planner caches manifest
+each once under a name with its own uuid (any other name is read through), and the planner caches manifest
 plans by `(catalog, identity, snapshot_id, filter)`.
 
 | ID | Property | Checked by |
 | --- | --- | --- |
-| MD-1 | A cached metadata file holds the bytes its location holds. | test `tests/test_iceberg_metadata_files.py` for the write and read path. **Leads:** a Hadoop-style catalog names metadata `vN.metadata.json`, and drop with purge then recreate reuses `v1.metadata.json`. A short read was a lead too; it does not hold: pyarrow's and fsspec's S3 readers both raise on a body shorter than its `Content-Length` (replayed against a server that closed early), so nothing is cached. |
+| MD-1 | A cached metadata file holds the bytes its location holds. | test `tests/test_iceberg_metadata_files.py` for the write and read path (finding 31: a Hadoop-style table recreated at its location wrote `v1.metadata.json` again, and the cache served the old table; only uuid-named files are cached now, so such a table no longer plans from the cache while the store is down). A short read was a lead too; it does not hold: pyarrow's and fsspec's S3 readers both raise on a body shorter than its `Content-Length` (replayed against a server that closed early), so nothing is cached. Rests on writers never reusing a uuid name; metadata copied from another table into a location is outside it. |
 | MD-2 | A cached plan belongs to the table it is served for. | property `test_cache_soundness_properties.py` exercises time travel across recreates and restarts. The manifest-plan key has no table uuid, so the property rests on snapshot ids being random 63-bit numbers (as Iceberg writers make them): a recreated table would have to reuse one. |
 
 ## 5. Pruning
