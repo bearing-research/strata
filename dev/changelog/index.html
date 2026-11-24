@@ -4637,6 +4637,9 @@ exhaustive commit history.</p>
   stations</code>) fell back to <code>result</code> without a word, so a cell reading the name found nothing.
   It is now the error <code>name_unreadable</code>, as on a prompt cell, and both refuse a keyword such as
   <code>class</code>. A notebook whose SQL <code>@name</code> is a label needs an identifier there. (#1665)</li>
+<li><strong>A <code>@stochastic</code> R or prompt cell keeps every run.</strong> Each run is meant to be a version of
+  its own, as on a Python cell, but R and prompt cells stored under the plain output key, so
+  every run superseded the last. (#1666)</li>
 <li><strong>The shared-object warning names only outputs that are stored.</strong> <code>fig, ax =
   plt.subplots()</code> in a cell nobody reads warned that the two share a Figure, though neither
   is kept. A run now checks only what it stores: what other cells read, a scratchpad's

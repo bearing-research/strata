@@ -2752,7 +2752,7 @@ A prompt cell's provenance hash mixes together:
 Editing any of these invalidates the cache. In particular, tweaking `@output_schema` on a cached cell forces a fresh call, which is what you want when iterating on the response shape.
 
 !!! tip "Keep temperature at 0.0 for prompt cells"
-    With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling.
+    With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling. To sample again on every run and keep each response as its own version, add `# @stochastic`.
 
 ## Provider configuration
 
@@ -10045,6 +10045,7 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | `# @fetch data <url>`      | Downloads a URL as a recorded input; `data` is the file's path as a string. |
 | `# @output_dir ckpt`       | Gives the cell an empty output folder; `ckpt` is its path as a string. An R cell cannot read another cell's folder yet. |
 | `# @nocache`               | Always re-execute.                                                      |
+| `# @stochastic`            | Re-execute every time and keep each run's outputs as their own version, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic). |
 | `# @worker gpu-box`        | Runs the cell on an executor worker with R (see below).                 |
 | `# @write_table df lake:lab.t append` | Writes a variable into an Iceberg table when the run succeeds, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table). |
 | `# @after seed`            | An ordering-only edge from another cell, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#after). |
