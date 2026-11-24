@@ -23,7 +23,7 @@ import anyio.to_thread
 import uvicorn
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from starlette.applications import Starlette
 
@@ -930,6 +930,25 @@ async def _idle_exit_loop(idle_seconds: float, stop: Callable[[], None] = _stop_
             return
 
 
+async def _stream_ownership_loop(
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """Renew each live stream's ownership claim a few times per TTL, and drop expired ones.
+
+    A dead node stops renewing, so its claims lapse within a TTL.
+    """
+    state = get_state()
+    while True:
+        await sleep(state.config.stream_state_ttl_seconds / 3)
+        try:
+            await state.streams.renew_claims()
+            store = state._ownership_store()
+            if store is not None:
+                await anyio.to_thread.run_sync(store.sweep_expired)
+        except Exception:
+            logger.exception("stream_ownership_renewal_failed")
+
+
 async def _notebook_session_sweep_loop() -> None:
     """Close idle, over-limit and memory-pressure notebook sessions every minute."""
     from strata.notebook.routes import get_session_manager
@@ -1172,6 +1191,10 @@ async def lifespan(app: FastAPI):
         )
 
     session_sweep_task = asyncio.create_task(_notebook_session_sweep_loop())
+    ownership_task: asyncio.Task | None = None
+    # The condition the ownership store is created under (_init_configured_artifact_store).
+    if config.node_advertised_url and config.artifact_dir is not None:
+        ownership_task = asyncio.create_task(_stream_ownership_loop())
     scratch_task: asyncio.Task | None = None
     if config.scratch_anchor:
         scratch_task = asyncio.create_task(
@@ -1279,7 +1302,14 @@ async def lifespan(app: FastAPI):
     else:
         yield
 
-    for task in (gc_task, env_gc_task, session_sweep_task, scratch_task, idle_exit_task):
+    for task in (
+        gc_task,
+        env_gc_task,
+        session_sweep_task,
+        ownership_task,
+        scratch_task,
+        idle_exit_task,
+    ):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

@@ -792,6 +792,11 @@ exhaustive commit history.
 
 ### Fixed
 
+- **In a multi-node deployment, a stream stays reachable from every node while it lives.**
+  A node's claim on a stream expired one `STRATA_STREAM_STATE_TTL_SECONDS` after the
+  stream was created, while the stream lived on as its GETs re-armed it, so a retry
+  routed to another node got `404`. Each node now renews its live streams' claims three
+  times per TTL and removes expired ones (#1670).
 - **A local run's close no longer ends another process's run of its cell.** A run's
   lease owner was its process (`hostname:pid`), so two processes on one notebook store
   with the same hostname and pid (two containers given one hostname, both pid 1) shared

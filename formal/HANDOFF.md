@@ -79,7 +79,10 @@ in [`README.md`](README.md).
   a lapsed run's close dropped the lease of a process with the same hostname and pid that
   had resumed its build. `LocalRun.tla` now has the close and a `SharedOwner` rival; the
   lease owner names the attempt. Within one process a notebook runs one execution at a
-  time, so only a shared hostname and pid reaches it.
+  time, so only a shared hostname and pid reaches it. The passthrough stream path holds
+  by construction (STR-4). Multi-node ownership held as finding 33, fixed: a stream's
+  claim lapsed a TTL after it was created while its GETs kept the stream alive, so a
+  retry on another node got 404; each node now renews its live streams' claims.
 
 ## Conventions
 
@@ -150,6 +153,6 @@ property, the replays of what it finds, then the fixes.
 3. **Done: a wider Run All property** (BAT-1, BAT-2). Module state, `@nocache`, `@loop`
    and `@timeout` (a worker's single-run path) in the generator; findings 28, 29, 30. A
    real remote worker is not covered.
-4. **Smaller open items.** MD-1 and LR-3 done (findings 31, 32). The passthrough
-   stream path and multi-node ownership (outside `Streams.tla`); the `scan@v1` identity
-   hash (PROV-3, a decision: encoding its fields as JSON re-keys every stored scan once).
+4. **Smaller open items.** MD-1, LR-3, the passthrough path (STR-4) and multi-node
+   ownership (STR-5) done (findings 31, 32, 33). Left: the `scan@v1` identity hash
+   (PROV-3, a decision: encoding its fields as JSON re-keys every stored scan once).

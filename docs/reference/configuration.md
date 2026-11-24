@@ -519,8 +519,9 @@ owner instead of `404`. This removes the need for session affinity on the
 stream-fetch step; the URL must be one clients can actually reach.
 
 Leave it unset for a single-node deployment: nothing is written or read, so
-there is no cost. Claims expire with `STRATA_STREAM_STATE_TTL_SECONDS`, which
-is what stops a node that died from being advertised indefinitely.
+there is no cost. A node renews the claims of the streams it holds three times
+per `STRATA_STREAM_STATE_TTL_SECONDS`, and a claim expires a TTL after its last
+renewal, which is what stops a node that died from being advertised indefinitely.
 
 Note this makes stream *fetches* routable, not stream *survival*. A node lost
 mid-stream still ends that stream; the artifact behind it is durable and its

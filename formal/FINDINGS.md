@@ -974,3 +974,23 @@ lock; the model's close runs from any state with no hold in flight (a fenced run
 whose cell failed while working). Regression tests:
 `tests/notebook/test_local_runs.py::TestTwoProcessesWithOneHostAndPid` (also on
 Postgres).
+
+### 33. A live stream's ownership claim lapses, and other nodes 404 it
+
+**Replay** (phase 7, item 4; STR-5). With `node_advertised_url` set, a node claims each
+stream it registers, and the claim expires one stream TTL later. Nothing renewed it,
+while the stream lives on past that: a GET cancels its cleanup and re-arms it for
+another TTL when it ends, whether it served the stream or was refused 429. Past the
+first TTL, a retry routed to another node found no owner and got 404 for a stream its
+node still held (the replay drives `StreamRegistry` and `StreamOwnershipStore` through
+a re-arm). Nothing called `sweep_expired`, so a dead node's rows stayed in the table.
+Severity: low (a visible 404 on a retry, multi-node only).
+
+**Fixed.** A server loop renews every live stream's claim three times per TTL
+(`StreamRegistry.renew_claims`) and sweeps expired rows; a node that dies stops
+renewing, so its claims lapse within a TTL. A stream that ends while its renewal writes
+is released again, or the renewal would restore its row after the release (the code
+review caught it). Regression tests:
+`tests/test_stream_ownership.py::TestRegistryHooks::test_a_live_stream_stays_claimed_past_its_first_ttl`,
+`::test_a_stream_ended_during_its_renewal_is_left_unclaimed`,
+`::test_the_server_renews_claims_and_sweeps_expired_ones`.
