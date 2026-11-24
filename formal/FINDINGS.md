@@ -952,3 +952,25 @@ table, which pyiceberg cannot write, behind a catalog.
 manifest lists and manifests; any other name is read from the store every time.
 Regression tests: `tests/test_iceberg_metadata_files.py::test_a_hadoop_style_name_a_recreated_table_reuses_is_read_from_the_store`,
 `::test_the_names_iceberg_writers_give_are_cached`.
+
+### 32. A lapsed run's close drops the lease of the process that resumed it
+
+**Replay and model** (phase 7, item 4; LR-3). A local run's lease owner was its
+process, `hostname:pid`, and the close of a run that ended without its final release
+(`_end_without_final`) dropped the lease, or failed the build, by that owner. Two
+processes on one store whose hostname and pid agree (two containers given one hostname,
+both pid 1) are one owner. Run A lapsed after a checkpoint, B resumed the build, and A's
+close then dropped B's live lease: a third run resumed the build and fenced B mid-run.
+A's renewal also renewed B's lease. `LocalRun.tla` gained the close and a rival sharing
+the owner string; `LocalRun_SharedOwner` violates the new `CloseLeavesOthers`. Severity:
+medium (a live run fenced and run again; the fence keeps its releases out, so no wrong
+data). Needs a shared hostname and pid.
+
+**Fixed.** The lease owner names the attempt (`lease_owner(attempt)`), so a renewal, a
+drop or a fail by an attempt that is no longer current is refused. `LocalRun_Patched`
+holds with the rival sharing the run's hostname and pid. With the owner per attempt, the
+close must name the attempt a hold in flight is opening, so it now takes the run's hold
+lock; the model's close runs from any state with no hold in flight (a fenced run, or one
+whose cell failed while working). Regression tests:
+`tests/notebook/test_local_runs.py::TestTwoProcessesWithOneHostAndPid` (also on
+Postgres).
