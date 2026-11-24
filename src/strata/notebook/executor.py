@@ -324,6 +324,8 @@ class _CellProvenance:
     prepared: Mapping[str, ResolvedMount] | None = None
     # The local path packages as the run keyed them, checked again after it.
     local_packages: LocalPackages | None = None
+    # Each ``@after`` input's fingerprint, as the key read it (``keys.after_fingerprints``).
+    after_fingerprints: list[str] = field(default_factory=list)
 
     @property
     def inputs(self) -> InputFingerprints:
@@ -340,8 +342,8 @@ class _CellProvenance:
         return self._rehashed(instance=instance)
 
     def rekeyed(self) -> _CellProvenance:
-        """The same provenance over what the upstreams publish now."""
-        return self._rehashed()
+        """The same provenance over what the upstreams publish now, and their runs."""
+        return self._rehashed(afters_now=True)
 
     def over_mounts(self, prepared: Mapping[str, ResolvedMount]) -> _CellProvenance:
         """The same provenance over the mounts as a run prepared them, the listing it reads.
@@ -357,7 +359,7 @@ class _CellProvenance:
             return replace(self, prepared=prepared)
         return replace(self._rehashed(mount_fingerprints=fingerprints), prepared=prepared)
 
-    def _rehashed(self, **changes: Any) -> _CellProvenance:
+    def _rehashed(self, *, afters_now: bool = False, **changes: Any) -> _CellProvenance:
         changed = replace(self, **changes)
         key = cell_key(
             changed.session,
@@ -366,12 +368,15 @@ class _CellProvenance:
             inputs=changed.inputs,
             env_hash=changed.env_hash,
             instance=changed.instance,
+            # Otherwise one run reads one run of each cell it is after.
+            afters=None if afters_now else changed.after_fingerprints,
         )
         return replace(
             changed,
             provenance_hash=key.provenance_hash,
             input_hashes=key.upstream,
             key_parts=key.parts,
+            after_fingerprints=key.afters,
         )
 
     def reads(
@@ -1116,6 +1121,7 @@ class CellExecutor:
             table_snapshots=table_snapshots,
             provenance_hash=key.provenance_hash,
             key_parts=key.parts,
+            after_fingerprints=key.afters,
             fetch_fingerprints=fetch_fingerprints,
             fetched=fetched,
             fetch_error=fetch_error,

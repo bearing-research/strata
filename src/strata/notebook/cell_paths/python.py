@@ -23,6 +23,7 @@ import anyio.to_thread
 from vestigo import checkpoint_files
 from vestigo.provenance import derive_subkey
 
+from strata.notebook import runs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import (
     _ARTIFACT_EXT_BY_CONTENT_TYPE,
@@ -731,36 +732,38 @@ async def run_python_cell(
             else:
                 restore = None
 
-            (
-                result,
-                result_output_dir,
-                execution_method,
-                resolved_mounts,
-            ) = await context.dispatch_execution(
-                worker_spec,
-                source,
-                input_specs,
-                mount_specs,
-                output_dir,
-                Path(result_tmpdir),
-                venv_path,
-                runtime_env,
-                timeout_seconds,
-                remote_build_id=remote_build_id,
-                mutation_defines=list(getattr(cell, "mutation_defines", []) or []),
-                stored_vars=context.stored_vars(
-                    cell_id,
+            # Around its code: a cell after it reads whatever this run leaves.
+            async with runs.running(host.path, cell_id):
+                (
+                    result,
+                    result_output_dir,
+                    execution_method,
+                    resolved_mounts,
+                ) = await context.dispatch_execution(
+                    worker_spec,
                     source,
-                    variant=fanout_variant,
-                    stochastic=prov.annotations.stochastic,
-                ),
-                tables=manifest_tables,
-                cell_id=cell_id,
-                cell_provenance_hash=provenance_hash,
-                local_run=local_run,
-                restore=restore,
-                resolved_mounts=prepared_mounts,
-            )
+                    input_specs,
+                    mount_specs,
+                    output_dir,
+                    Path(result_tmpdir),
+                    venv_path,
+                    runtime_env,
+                    timeout_seconds,
+                    remote_build_id=remote_build_id,
+                    mutation_defines=list(getattr(cell, "mutation_defines", []) or []),
+                    stored_vars=context.stored_vars(
+                        cell_id,
+                        source,
+                        variant=fanout_variant,
+                        stochastic=prov.annotations.stochastic,
+                    ),
+                    tables=manifest_tables,
+                    cell_id=cell_id,
+                    cell_provenance_hash=provenance_hash,
+                    local_run=local_run,
+                    restore=restore,
+                    resolved_mounts=prepared_mounts,
+                )
             if remote_build_id and remote_metadata.get("remote_transport") == "signed":
                 remote_metadata["remote_build_state"] = "ready"
 

@@ -126,6 +126,15 @@ async def test_a_cell_after_itself_keeps_its_cache(tmp_path):
     assert (await _run(session, "read")).cache_hit is True
 
 
+def test_a_cell_after_itself_has_no_after_part(tmp_path):
+    from strata.notebook.sql.cell_executor import _load_upstream_variables
+
+    nb_dir = _notebook(tmp_path, READ.format(policy="forever"))
+    _, hashes, _ = _load_upstream_variables(_open(nb_dir), "read", [], ["read", "seed"])
+
+    assert list(hashes) == ["@after:seed"]
+
+
 @pytest.mark.asyncio
 async def test_an_unchanged_seed_keeps_the_cell_after_it(tmp_path):
     """Across sessions too, now a seed's key is its body (#1672)."""
@@ -196,16 +205,18 @@ def _after_setup(tmp_path: Path, setup: str) -> Path:
 
 
 @pytest.mark.asyncio
-async def test_a_python_setup_with_a_new_body_runs_the_cell_after_it_again(tmp_path):
-    """Its console record carries its run."""
+async def test_a_python_setup_run_again_runs_the_cell_after_it_again(tmp_path):
+    """Run again, even unchanged, it rebuilt what the cell after it reads, and a write
+    after it would be gone."""
     nb_dir = _after_setup(tmp_path, _setup(7))
     session = _open(nb_dir)
     await _run(session, "setup")
     await _run(session, "read")
     assert _read_rows(session) == [7]
+    assert (await _run(session, "read")).cache_hit is True
     rerun = await CellExecutor(session).execute_cell_rerun("setup", _setup(7))
     assert rerun.success
-    assert (await _run(session, "read")).cache_hit is True  # the same computation
+    assert (await _run(session, "read")).cache_hit is False
 
     _edit(session, nb_dir, "setup", _setup(8))
     await _run(session, "setup")
@@ -215,8 +226,8 @@ async def test_a_python_setup_with_a_new_body_runs_the_cell_after_it_again(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_after_a_setup_that_records_no_run_nothing_is_reused(tmp_path):
-    """A `@nocache` setup stores nothing that tells its runs apart."""
+async def test_a_nocache_setup_runs_the_cell_after_it_again_each_time(tmp_path):
+    """A normal run runs the `@nocache` setup first, and so this one after it."""
     nb_dir = _after_setup(tmp_path, _setup(7, nocache=True))
     session = _open(nb_dir)
     await _run(session, "setup")

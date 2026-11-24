@@ -594,6 +594,7 @@ def _write_runtime_state(
 
     This is what lets an imported notebook show its outputs before anything runs.
     """
+    from strata.notebook import runs
     from strata.notebook.runtime_state import load_runtime_state, save_runtime_state
     from strata.notebook.writer import update_cell_console_output
 
@@ -604,6 +605,7 @@ def _write_runtime_state(
         return _ARTIFACT_URI_PREFIX + landed.get(old_ref, _rename_ref(old_ref, rename))
 
     state = load_runtime_state(dest)
+    carried_runs: dict[str, str] = {}
     names = set(archive.namelist())
     for cell_id, cell in manifest.get("cells", {}).items():
         entry = state.get_or_create_cell(cell_id)
@@ -613,6 +615,9 @@ def _write_runtime_state(
         entry.last_key_parts = _readable_key_parts(cell.get("key_parts"))
         identity = cell.get("reopen_identity")
         entry.last_reopen_identity = identity if isinstance(identity, str) else None
+        last_run = cell.get("last_run")
+        if isinstance(last_run, str):
+            carried_runs[cell_id] = last_run
         entry.execution_samples = list(cell.get("execution_samples") or [])
         # Older snapshots omit the error pair.
         entry.last_error = cell.get("error") or None
@@ -637,3 +642,5 @@ def _write_runtime_state(
                 dest, cell_id, console.get("stdout", ""), console.get("stderr", "")
             )
     save_runtime_state(dest, state)
+    if carried_runs:
+        runs.update(dest, carried_runs)

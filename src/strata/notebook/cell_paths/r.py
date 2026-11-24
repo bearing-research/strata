@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio.to_thread
 
+from strata.notebook import runs
 from strata.notebook.cell_paths.context import (
     OutputNotSaved,
     RemoteExecutionError,
@@ -375,24 +376,26 @@ async def run_r_cell(
                     notebook_id=notebook_id,
                     cell_id=cell_id,
                 ):
-                    (
-                        result,
-                        result_output_dir,
-                        execution_method,
-                        resolved_mounts,
-                    ) = await context.dispatch_http_executor(
-                        remote,
-                        source,
-                        input_specs,
-                        mount_specs,
-                        output_dir,
-                        runtime_env,
-                        timeout_seconds,
-                        remote_build_id=remote_build_id,
-                        cell_id=cell_id,
-                        cell_provenance_hash=provenance_hash,
-                        language="r",
-                    )
+                    # Around its code (``runs``).
+                    async with runs.running(host.path, cell_id):
+                        (
+                            result,
+                            result_output_dir,
+                            execution_method,
+                            resolved_mounts,
+                        ) = await context.dispatch_http_executor(
+                            remote,
+                            source,
+                            input_specs,
+                            mount_specs,
+                            output_dir,
+                            runtime_env,
+                            timeout_seconds,
+                            remote_build_id=remote_build_id,
+                            cell_id=cell_id,
+                            cell_provenance_hash=provenance_hash,
+                            language="r",
+                        )
                 if remote_build_id and remote_metadata.get("remote_transport") == "signed":
                     remote_metadata["remote_build_state"] = "ready"
             else:
@@ -416,20 +419,22 @@ async def run_r_cell(
                 result = None
                 execution_method = "cold"
                 r_pool = host.r_warm_pool
-                if r_pool is not None:
-                    from strata.notebook.pool import PooledCellExecutor
+                # Around its code, warm or cold (``runs``).
+                async with runs.running(host.path, cell_id):
+                    if r_pool is not None:
+                        from strata.notebook.pool import PooledCellExecutor
 
-                    pool_result = await PooledCellExecutor.execute_with_pool(
-                        r_pool,
-                        manifest_path,
-                        host.path,
-                        timeout_seconds,
-                    )
-                    if pool_result is not None:
-                        result = pool_result
-                        execution_method = "warm"
-                if result is None:
-                    result = await context.run_r_harness(manifest_path, timeout_seconds)
+                        pool_result = await PooledCellExecutor.execute_with_pool(
+                            r_pool,
+                            manifest_path,
+                            host.path,
+                            timeout_seconds,
+                        )
+                        if pool_result is not None:
+                            result = pool_result
+                            execution_method = "warm"
+                    if result is None:
+                        result = await context.run_r_harness(manifest_path, timeout_seconds)
 
             duration_ms = (time.time() - start_time) * 1000
             exec_result = context.parse_result(

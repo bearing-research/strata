@@ -51,7 +51,14 @@ from strata.notebook.environment_jobs import EnvironmentJobs, EnvironmentJobSnap
 from strata.notebook.execution_result import CachedConsole
 from strata.notebook.graph import analysis_with, analyze_notebook, mounts_of
 from strata.notebook.inputs import InputFingerprints
-from strata.notebook.keys import CellKey, InputNotFingerprinted, cell_key, input_parts
+from strata.notebook.keys import (
+    CellKey,
+    InputNotFingerprinted,
+    after_fingerprints,
+    after_parts,
+    cell_key,
+    input_parts,
+)
 from strata.notebook.models import (
     AnnotationDiagnostic,
     CellLanguage,
@@ -1267,7 +1274,7 @@ class NotebookSession:
                 outside = self._outside_world_for(cell, probe=False)
                 key = self._cell_key(analysis, cell_id, outside, env_hash)
 
-            inputs = cell_provenance_inputs(key.upstream, outside.inputs)
+            inputs = cell_provenance_inputs(key.upstream, outside.inputs) + key.afters
             test_inputs[cell_id] = cell_test_input_fingerprint(inputs, env_hash)
 
             if outside.has_rw_mount:
@@ -1416,7 +1423,10 @@ class NotebookSession:
         }
         # Missing only if the DAG moved meanwhile, and the next flush recomputes.
         if outside is not None:
-            parts["inputs"] = input_parts(outside.inputs.by_kind())
+            parts["inputs"] = sorted(
+                input_parts(outside.inputs.by_kind())
+                + after_parts(after_fingerprints(self, analysis, cell.id))
+            )
         return parts
 
     def _upstream_moved_under(self, cell: CellState, source_hash: str, env_hash: str) -> bool:

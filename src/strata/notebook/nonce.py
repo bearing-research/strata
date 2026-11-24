@@ -40,3 +40,8 @@ def is_unresolved(component: str) -> bool:
 def is_unhashed(component: str) -> bool:
     """Whether this key component holds :func:`unhashed_nonce`'s nonce."""
     return _UNHASHED in component
+
+
+def run_nonce() -> str:
+    """64 hex digits no other call returns: one run of a cell (``runs``)."""
+    return hashlib.sha256(b"run" + os.urandom(32)).hexdigest()

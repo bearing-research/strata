@@ -205,12 +205,14 @@ def write_snapshot(
 
     The caller adds the committed files; this writes everything the ZIP export lacks.
     """
+    from strata.notebook import runs
     from strata.notebook.runtime_state import load_runtime_state
     from strata.notebook.writer import load_cell_console_output
 
     nb_dir = session.path
     store = session.get_artifact_manager().artifact_store
     runtime = load_runtime_state(nb_dir)
+    last_runs = runs.read(nb_dir)
     index = build_artifact_index(session)
     carry = _artifacts_to_carry(index, include, selected_cells)
     carry |= _loop_iterations_to_carry(session, include, selected_cells)
@@ -244,6 +246,8 @@ def write_snapshot(
             "key_parts": cell_runtime.last_key_parts if cell_runtime else None,
             # A SQL or prompt cell's own cache identity: without it a carried one opens idle.
             "reopen_identity": cell_runtime.last_reopen_identity if cell_runtime else None,
+            # What a cell after this one is keyed on: without it that one opens stale.
+            "last_run": last_runs.get(cell.id),
             "execution_samples": list(cell_runtime.execution_samples) if cell_runtime else [],
             # Without these an imported red cell opens idle, console but no error.
             "error": cell_runtime.last_error if cell_runtime else None,

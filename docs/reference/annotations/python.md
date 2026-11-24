@@ -552,9 +552,9 @@ or a later `# @nocache` settles it.
 
 ### `@after`
 
-Add an ordering-only DAG edge from another cell to this one. Useful when the
-dependency is on a side effect, e.g. a SQL `seed` cell creates the database
-state that subsequent SQL cells query, and no Python variable flows
+Add a DAG edge from another cell to this one that carries no variable. Useful
+when the dependency is on a side effect, e.g. a SQL `seed` cell creates the
+database state that subsequent SQL cells query, and no Python variable flows
 between them.
 
 ```sql
@@ -575,8 +575,26 @@ that names the cell itself adds no edge and is a warning (`after_self`).
 `seed` or `migrate`.
 
 The edge participates in upstream/downstream wiring and the topological
-order, but contributes no variable to `consumed_variables`, so it
-doesn't affect per-variable provenance hashes.
+order, and contributes no variable to `consumed_variables`. The upstream's
+last run is part of this cell's cache key. Each time the upstream's code
+runs, even unchanged, under `@nocache`, or in a run that fails, times out or
+is stopped partway (a rerun rebuilds what it wrote, and drops what a cell
+after it added), this cell is stale and its next run misses its cache, a run
+from another process on the notebook (the CLI, an agent) and a run of the
+upstream's Tests tab, which runs its body again, included; so is a result it
+took while the upstream was still running. A cache hit of the
+upstream, or a run refused before it is sent (an annotation it cannot read),
+keeps it; a run sent to a worker that never started it counts, to be safe.
+A reopen of the notebook or an imported snapshot of it keeps it too. An
+upstream that never ran in this checkout is keyed on a token of the
+checkout's, never shared with another. Runs are the
+notebook's own, so a cell with `@after`, and every cell that reads from it, is
+not reused from a team store. A markdown, prompt, widget or read-only SQL
+upstream changes nothing outside its own output, so it only orders the cell;
+a prompt cell's own `@after` only orders it, as it reads only its template's
+variables. Two
+cells with no edge between them are not told apart: a write that undoes
+another's needs `@after` on the later one.
 
 ## Notebook-level environment (runtime panel)
 

@@ -231,7 +231,7 @@ INSERT INTO products VALUES ('A', 'widgets'), ('B', 'gadgets');
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
-`-- @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering. The upstream's last run is also part of this cell's cache key, unlike a Python cell's `@after`: once the seed runs a different computation and succeeds (a new body or upstream, a new session under `-- @cache session`, any run under `-- @stochastic`), this cell's next run misses its cache, even under `-- @cache forever`, and a `-- @cache snapshot` cell takes a new snapshot. A seed that is a cache hit, or runs the same computation again, keeps it cached. An upstream that records no run (`# @nocache`, an `rw` mount) keeps nothing after it cached. The cell's status does not change when the seed runs, so run it, or Run all, to refresh it.
+`-- @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering. The upstream's last run is also part of this cell's cache key, as for any cell's `@after`: each time the seed's code runs (a new body, a new session under `-- @cache session`, a rerun of the same body, which rebuilds the database, or a run that fails partway), this cell is stale and its next run misses its cache, even under `-- @cache forever`, and a `-- @cache snapshot` cell takes a new snapshot. A seed that is a cache hit runs nothing and keeps it cached. A write cell after the seed runs again too, so a rerun of the seed does not leave its rows missing; two writes with no edge between them are not told apart, so give the later one `-- @after`.
 
 ## Worked example
 
@@ -245,7 +245,7 @@ The [`sql_orders_report`](../../examples/sql_orders_report.md) example notebook 
 | `-- @cache <policy>`                     | Override the default `fingerprint` cache policy       |
 | `-- @nocache`                            | Always re-execute; wins over any `-- @cache` policy    |
 | `-- @name <identifier>`                  | Name the output variable (default: `result`)          |
-| `-- @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
+| `-- @after <cell-id>`                    | An edge from an upstream cell, keyed on its last run  |
 | `-- @mount <name> <uri> ro`              | A mount a DuckDB connection's `mounts` can name       |
 
 These are the only annotations a SQL cell acts on; validation warns about any other.
