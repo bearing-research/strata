@@ -96,7 +96,7 @@ _OPS = {
 def _key(value):
     """Rows compare by value, with NaN equal to itself."""
     if isinstance(value, float) and math.isnan(value):
-        return ("nan",)
+        return ("float", "nan")  # a float never equals the str "nan"
     return (type(value).__name__, value)
 
 
