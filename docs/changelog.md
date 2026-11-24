@@ -794,6 +794,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **Run All gives what running each cell gives when cells share functions.** In a Run
+  All batch, a cell that changed an upstream value without naming it (by calling a
+  function that appends to it, or through a list holding it) passed the change to later
+  cells. A function from a cell run on its own, or from a cached cell, failed with
+  `NameError` when called, and two calls to it shared a change. Each cell now sees the
+  stored values, as it does run alone. (#1660)
 - **A scan filtered on a NaN value plans.** A filter such as `value = NaN` failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)
