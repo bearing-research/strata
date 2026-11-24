@@ -4659,6 +4659,13 @@ exhaustive commit history.</p>
   lists whose <code>cells/</code> file was gone ran with no code and passed <code>strata validate</code>. It is now
   the error <code>cell_file_missing</code> until the file is restored or the cell rewritten, and a REST
   edit refreshes every tab's diagnostics as an editor edit does. (#1667)</li>
+<li><strong>A seed that ran last session reopens ready.</strong> A SQL write cell with no <code>-- @cache</code> was
+  keyed on the session, so every reopen of <code>sql_orders_report</code> showed the seed, and every
+  cell after it, stale, and Run all seeded again. A write cell is now also reused in a
+  later session while it is the only write cell on its SQLite file and the file is exactly
+  as its run left it. A deleted or changed file, a second write cell on it, and any other
+  database run it again in a new session, as before; explicit <code>session</code>, <code>forever</code> and
+  <code>ttl</code> keep their meaning. (#1672)</li>
 <li><strong>A SQL <code>@name</code> must be a variable name.</strong> One that was not (<code>top-orders</code>, <code>Hottest
   stations</code>) fell back to <code>result</code> without a word, so a cell reading the name found nothing.
   It is now the error <code>name_unreadable</code>, as on a prompt cell, and both refuse a keyword such as

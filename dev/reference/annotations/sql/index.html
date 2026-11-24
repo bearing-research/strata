@@ -3211,9 +3211,12 @@ cell does not run.</p>
 </code></pre></div>
 <p>Write cells split the body into individual statements via sqlglot, run each
 in sequence, and emit a per-statement status table (<code>stmt</code>, <code>kind</code>,
-<code>rows_affected</code>). Default cache policy for write cells is <code>session</code>;
-<code>fingerprint</code> and <code>snapshot</code> error early because probe-based invalidation
-has no anchor when the cell mutates state.</p>
+<code>rows_affected</code>). With no <code>-- @cache</code>, a write cell is reused in the
+session that ran it, and as the only write cell on a SQLite file in a
+later session too, while the file is as its run left it (see the
+<a href="../../../guides/cells/sql/">SQL guide</a>). <code>fingerprint</code> and <code>snapshot</code> error
+early because probe-based invalidation has no anchor when the cell mutates
+state.</p>
 <h2 id="cache"><code>@cache</code><a class="headerlink" href="#cache" title="Permanent link">&para;</a></h2>
 <p>Override the default <code>fingerprint</code> cache policy on a SQL cell.</p>
 <table>

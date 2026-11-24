@@ -36,7 +36,7 @@ sensitive) and `-- @cache forever` (reference-data) policies.
 
 | Cell | Language | What it does |
 |---|---|---|
-| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Default `session` cache policy means a re-run inside the same session cache-hits. |
+| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Cached by its body while `analytics.db` is as it left it, so a reopen finds it and the cells after it ready; delete the database and it seeds again. |
 | `threshold` | Python | Defines `min_amount = 50`. Edit and rerun to vary the threshold. |
 | `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `-- @after seed`. |
 | `category_summary` | SQL | Revenue by category with `-- @cache forever`. Declares `-- @after seed`. |
@@ -101,10 +101,11 @@ carries both).
 -- read-only by default: the override is per-cell, not per-
 -- connection.
 --
--- The default cache policy for a write cell is `session`, so this
--- cell runs once per session and dedup's no-op re-runs caused by
--- editing other cells. Edits to this body invalidate the session
--- cache and re-seed.
+-- With no `-- @cache`, a write cell is cached by its body, in its
+-- session and after, while the database is as its run left it: a
+-- reopen probes analytics.db and finds this cell, and the cells after
+-- it, ready. An edit to this body, or a database deleted or changed
+-- since, re-seeds.
 
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS products;

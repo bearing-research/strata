@@ -2442,7 +2442,7 @@ INSERT INTO orders VALUES (1, 'alice', 25.50), (2, 'bob', 199.99);
 
 - The body is split into individual statements on sqlglot's tokenizer (ADBC's cursor runs only the first statement otherwise). Each statement runs as written in the cell, and a trailing comment is not a statement.
 - `:name` bind placeholders work the same as in read cells.
-- The default cache policy is `session` (one execution per session; same body in the same session is a cache hit).
+- With no `-- @cache`, a write cell is cached by its body and reused in the session that ran it. When it is the only write cell on a SQLite file (`path`), it is also reused in a later session while the file is exactly as its run left it: a probe settles it, so a notebook whose seed ran last session opens ready, and running the seed again changes nothing. A database deleted or changed since runs it again; writes from a Python cell, or through another database (a DuckDB `ATTACH`), are not seen as writers, but the change they make is. With a second write cell on the file (any SQLite `uri` counts), which may have moved the file or may undo this one, and on any other database (DuckDB, whose probe can miss a change; one in memory; a server), a new session runs it again. `-- @cache session`, `forever` and `ttl=<seconds>` keep their own meaning.
 - `-- @cache fingerprint` and `-- @cache snapshot` error early on write cells: probe-based invalidation has no anchor when the cell mutates state.
 - The cell still produces an Arrow artifact: a per-statement status table with `stmt`, `kind` (`CREATE TABLE`, `INSERT`, …), and `rows_affected` (nullable; `null` for DDL).
 - Read cells using the same connection stay on the read path; the override is per-cell.
@@ -9246,7 +9246,7 @@ When the same setting is configured at multiple levels, the most specific wins:
 | **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
 | **SQL connection** | `-- @sql connection=X` | (annotation only) | none; required for SQL cells |
-| **Cache policy** | `-- @cache <policy>` | (annotation only) | `fingerprint` (read), `session` (write) |
+| **Cache policy** | `-- @cache <policy>` | (annotation only) | `fingerprint` (read); a write cell is reused in its session, and after while it is the only writer of a SQLite file that is as it left it |
 | **Cache opt-out** | `# @nocache` | (annotation only) | cache on (serve provenance hits) |
 
 Annotations always take priority. This lets you override per-cell behavior without editing `notebook.toml`.
@@ -9938,9 +9938,12 @@ INSERT INTO events VALUES (1, 'alpha'), (2, 'beta');
 
 Write cells split the body into individual statements via sqlglot, run each
 in sequence, and emit a per-statement status table (`stmt`, `kind`,
-`rows_affected`). Default cache policy for write cells is `session`;
-`fingerprint` and `snapshot` error early because probe-based invalidation
-has no anchor when the cell mutates state.
+`rows_affected`). With no `-- @cache`, a write cell is reused in the
+session that ran it, and as the only write cell on a SQLite file in a
+later session too, while the file is as its run left it (see the
+[SQL guide](https://bearingresearch.com/strata/dev/guides/cells/sql/)). `fingerprint` and `snapshot` error
+early because probe-based invalidation has no anchor when the cell mutates
+state.
 
 ## `@cache`
 

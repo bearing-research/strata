@@ -3246,7 +3246,7 @@ anyway would compute, and cache, something other than what the source declares.
 <td><strong>Cache policy</strong></td>
 <td><code>-- @cache &lt;policy&gt;</code></td>
 <td>(annotation only)</td>
-<td><code>fingerprint</code> (read), <code>session</code> (write)</td>
+<td><code>fingerprint</code> (read); a write cell is reused in its session, and after while it is the only writer of a SQLite file that is as it left it</td>
 </tr>
 <tr>
 <td><strong>Cache opt-out</strong></td>

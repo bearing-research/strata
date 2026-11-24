@@ -191,7 +191,7 @@ INSERT INTO orders VALUES (1, 'alice', 25.50), (2, 'bob', 199.99);
 
 - The body is split into individual statements on sqlglot's tokenizer (ADBC's cursor runs only the first statement otherwise). Each statement runs as written in the cell, and a trailing comment is not a statement.
 - `:name` bind placeholders work the same as in read cells.
-- The default cache policy is `session` (one execution per session; same body in the same session is a cache hit).
+- With no `-- @cache`, a write cell is cached by its body and reused in the session that ran it. When it is the only write cell on a SQLite file (`path`), it is also reused in a later session while the file is exactly as its run left it: a probe settles it, so a notebook whose seed ran last session opens ready, and running the seed again changes nothing. A database deleted or changed since runs it again; writes from a Python cell, or through another database (a DuckDB `ATTACH`), are not seen as writers, but the change they make is. With a second write cell on the file (any SQLite `uri` counts), which may have moved the file or may undo this one, and on any other database (DuckDB, whose probe can miss a change; one in memory; a server), a new session runs it again. `-- @cache session`, `forever` and `ttl=<seconds>` keep their own meaning.
 - `-- @cache fingerprint` and `-- @cache snapshot` error early on write cells: probe-based invalidation has no anchor when the cell mutates state.
 - The cell still produces an Arrow artifact: a per-statement status table with `stmt`, `kind` (`CREATE TABLE`, `INSERT`, …), and `rows_affected` (nullable; `null` for DDL).
 - Read cells using the same connection stay on the read path; the override is per-cell.
