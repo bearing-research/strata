@@ -54,7 +54,14 @@ EVENTS_DRAIN_SECONDS = 5.0
 WRITE_WINDOW_MARGIN_SECONDS = 300.0
 RESTORE_DIR = "restore"
 """Under the run directory: the parts ``strata.restore()`` returns."""
-LEASE_OWNER = f"{socket.gethostname()}:{os.getpid()}"
+_PROCESS = f"{socket.gethostname()}:{os.getpid()}"
+
+
+def lease_owner(attempt: str) -> str:
+    """The lease owner of *attempt*: the attempt, so its renewal or close is refused once
+    another attempt holds the build. The process alone repeats: two containers given one
+    hostname both run as pid 1 (SYSTEMS LR-3)."""
+    return f"{_PROCESS}/{attempt}"
 
 
 class RunRefused(RuntimeError):
@@ -147,7 +154,7 @@ class LocalRuns:
                         open_build.build_id,
                         attempt,
                         writable_until=writable_until,
-                        lease_owner=LEASE_OWNER,
+                        lease_owner=lease_owner(attempt),
                         lease_duration_seconds=LEASE_SECONDS,
                         from_release=latest.release_id,
                     )
@@ -240,7 +247,7 @@ class LocalRuns:
             build_id,
             attempt,
             writable_until=writable_until,
-            lease_owner=LEASE_OWNER,
+            lease_owner=lease_owner(attempt),
             lease_duration_seconds=LEASE_SECONDS,
             principal=caller_principal_id(),
         )
@@ -362,7 +369,9 @@ class LocalRuns:
             rows.append((build.artifact_id, build.version))
         for artifact_id, version in rows:
             self.store.fail_artifact(artifact_id, version)
-        self.builds.fail_build(build_id, f"nothing made current: {reason}", lease_owner=LEASE_OWNER)
+        self.builds.fail_build(
+            build_id, f"nothing made current: {reason}", lease_owner=lease_owner(attempt)
+        )
 
     def start_renewing(self, run: LocalRun) -> asyncio.Task[None]:
         """Renew the attempt's lease until cancelled; the caller stops it with :meth:`close`."""
@@ -383,19 +392,19 @@ class LocalRuns:
         lapsed lease stays lapsed, so the run goes on in a new attempt of its build,
         unless another process took the build meanwhile: ``open_attempt`` refuses
         while that one's lease is live. One hold at a time per run: the renewal task
-        and a release both hold, and a renewal is the process's, not the attempt's, so
-        it succeeds between the other thread opening an attempt and assigning it
+        and a release both hold, and between one thread opening an attempt and
+        assigning it, the other's renewal names the old attempt and fails
         (``formal/tla/LocalRun.tla``).
         """
         with run.hold_lock:
-            if self.builds.renew_lease(run.build_id, LEASE_OWNER, LEASE_SECONDS):
+            if self.builds.renew_lease(run.build_id, lease_owner(run.attempt), LEASE_SECONDS):
                 return True
             attempt = uuid.uuid4().hex
             if not self.builds.open_attempt(
                 run.build_id,
                 attempt,
                 writable_until=time.time() + run.writable_seconds,
-                lease_owner=LEASE_OWNER,
+                lease_owner=lease_owner(attempt),
                 lease_duration_seconds=LEASE_SECONDS,
                 principal=caller_principal_id(),
             ):
@@ -436,14 +445,20 @@ class LocalRuns:
         await anyio.to_thread.run_sync(self._end_without_final, run)
 
     def _end_without_final(self, run: LocalRun) -> None:
-        if self.releases.latest_accepted(run.build_id) is not None:
-            # Resumable: the build stays building, its lease dropped now rather than left
-            # to lapse, so the next run of the computation resumes it at once.
-            self.builds.renew_lease(run.build_id, LEASE_OWNER, lease_duration_seconds=0.0)
-            return
-        self.builds.fail_build(
-            run.build_id, "the run ended without a final release", lease_owner=LEASE_OWNER
-        )
+        # Under the hold lock: a hold in flight may be opening the attempt to name.
+        with run.hold_lock:
+            if self.releases.latest_accepted(run.build_id) is not None:
+                # Resumable: the build stays building, its lease dropped now rather than
+                # left to lapse, so the next run of the computation resumes it at once.
+                self.builds.renew_lease(
+                    run.build_id, lease_owner(run.attempt), lease_duration_seconds=0.0
+                )
+                return
+            self.builds.fail_build(
+                run.build_id,
+                "the run ended without a final release",
+                lease_owner=lease_owner(run.attempt),
+            )
 
     # --- Events from the cell ---
 

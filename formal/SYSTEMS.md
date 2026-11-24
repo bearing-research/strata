@@ -216,14 +216,16 @@ its own transaction; `LocalRuns.open` is several, with thread hops between.
 renewal): renew it, or, when it lapsed and no other process took the build,
 go on in a new attempt of the same build. A lapsed lease stays lapsed, and
 `open_attempt` refuses while another attempt's lease is live, so a process
-that took the build keeps it. Holds are serialized per run, because a renewal
-is the process's, not the attempt's.
+that took the build keeps it. The lease owner names the attempt (finding 32),
+so a renewal or a close by an attempt no longer current is refused. Holds are
+still serialized per run: between one thread opening an attempt and assigning
+it, the other's renewal names the old attempt and fails.
 
 | ID | Property | Checked by |
 | --- | --- | --- |
 | LR-1 | A run interrupted after a checkpoint resumes from its newest accepted checkpoint; a rerun starts fresh. | test `tests/notebook/test_local_runs.py` (and on Postgres) |
 | LR-2 | A live run of a key refuses a second. | test `tests/notebook/test_local_runs.py`, sequentially, and `TestAnotherProcessBetweenTheReadAndTheWrite` for a second process that resumes or fails the lapsed build between `open`'s read and its write (FINDINGS 26; SQLite and Postgres). **Open:** two processes that both find no open build each create one; the fix is vestigo's `BuildStore.open_build`, the create and the open in one transaction keyed on the computation (`docs/internal/one-open-execution.md` in its repository). |
-| LR-3 | Only the attempt that holds the lease releases, renews or ends its build. | the ledger's fence for releases (section 7); model `LocalRun_Patched` (`RunAttemptIsOwn`, `OneLiveHolder`). **Lead:** the lease owner is the process (`hostname:pid`), not the attempt, and the close path (`renew_lease(…, 0)`, `fail_build(lease_owner=…)`) is not checked against the attempt; within one process, runs of one computation are serialized, so this needs two processes sharing a pid. |
+| LR-3 | Only the attempt that holds the lease releases, renews or ends its build. | the ledger's fence for releases (section 7); model `LocalRun_Patched` (`RunAttemptIsOwn`, `OneLiveHolder`, `CloseLeavesOthers`, with the rival sharing the run's `hostname:pid`); test `tests/notebook/test_local_runs.py::TestTwoProcessesWithOneHostAndPid`. Finding 32: the lease owner was the process, and the close (`renew_lease(…, 0)`) of a lapsed run dropped the lease of the process that had resumed its build when the two shared a hostname and pid; `LocalRun_SharedOwner` shows it. Within one process the WebSocket, REST and MCP drivers take one reservation per notebook (`_reserve_execution_request`), and a live lease refuses a second run of a computation. The close takes the run's hold lock, so it names the attempt a hold in flight opens (`test_a_close_during_a_hold_names_the_attempt_the_hold_opened`). |
 | LR-6 | A lease that lapses while no other process wants the build never costs the run. | model `LocalRun_Patched` (`NoNeedlessFence`; `LocalRun_Lapse` shows finding 13, `LocalRun_Race` the fix without its lock); test `tests/notebook/test_local_runs.py::TestALapsedLeaseWithNoRival`, also on Postgres. Assumes a hold and its release take far less than the 60 s lease. |
 | LR-4 | A resumed attempt can always release its next checkpoint. | test `tests/notebook/test_local_runs.py::TestAResumeAfterAnUnfinishedCheckpoint` (finding 23). |
 | LR-5 | A cell executes at most once per request. | construction: a fenced, timed-out or failed warm run is never run again cold; only a worker that never got the manifest is a miss. Test `tests/notebook/test_subprocess_line_limits.py::test_an_event_that_fails_is_the_run_s_error_not_a_pool_miss` (#1613). |

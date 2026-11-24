@@ -794,6 +794,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A local run's close no longer ends another process's run of its cell.** A run's
+  lease owner was its process (`hostname:pid`), so two processes on one notebook store
+  with the same hostname and pid (two containers given one hostname, both pid 1) shared
+  it: a run that lapsed and then ended dropped the lease of the process that had resumed
+  its build, and that run was fenced and ran again. The lease owner is now the run's
+  attempt (`hostname:pid/<attempt>` in the ledger) (#1669).
 - **A recreated Hadoop-style table no longer plans as the table it replaced.** The
   Iceberg metadata cache kept every remote `metadata.json` and manifest by location. A
   Hadoop-style table names its metadata `vN.metadata.json` and starts at `v1` again

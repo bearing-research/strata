@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -26,7 +27,7 @@ from vestigo.provenance import (
 from vestigo.releases import ReleaseRejected
 
 from strata.notebook.executor import CellExecutor
-from strata.notebook.local_runs import LEASE_OWNER, LocalRun, LocalRuns, RunFenced, RunRefused
+from strata.notebook.local_runs import LocalRun, LocalRuns, RunFenced, RunRefused, lease_owner
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -748,7 +749,7 @@ class TestAnotherProcessBetweenTheReadAndTheWrite:
             resume=True,
         )
         runs.handle(first, {"event": "checkpoint", "sequence": 1, "parts": {}}, tmp_path)
-        runs.builds.renew_lease(first.build_id, LEASE_OWNER, lease_duration_seconds=0.0)
+        runs.builds.renew_lease(first.build_id, lease_owner(first.attempt), 0.0)
         # A lease is live through its deadline: the ledger's writes come a second after it.
         for store in (runs.builds, runs.releases):
             store._clock = lambda: time.time() + 1.0
@@ -826,6 +827,94 @@ class TestAnotherProcessBetweenTheReadAndTheWrite:
             self._open(runs, resume=True)
         with pytest.raises(RuntimeError, match="could not be failed"):
             self._open(runs, resume=False)
+
+
+class TestTwoProcessesWithOneHostAndPid:
+    """Two processes on one store whose hostname and pid agree, as two containers given one
+    hostname both run as pid 1. Two LocalRuns in this process stand for them.
+
+    A's run lapses after a checkpoint and B resumes the build. A's run then ends without a
+    final release, and its close must leave B's lease alone (SYSTEMS LR-3,
+    ``LocalRun_SharedOwner``).
+    """
+
+    def test_a_lapsed_runs_close_leaves_the_run_that_resumed_its_build(self, tmp_path: Path):
+        session, _ = _notebook(tmp_path)
+        a_runs = LocalRuns(session.get_artifact_manager())
+        b_runs = LocalRuns(session.get_artifact_manager())
+
+        def open_run(runs):
+            return runs.open(
+                cell_id="train",
+                computation_key="k",
+                variant=None,
+                input_versions={},
+                timeout_seconds=60.0,
+                resume=True,
+            )
+
+        a = open_run(a_runs)
+        a_runs.handle(a, {"event": "checkpoint", "sequence": 1, "parts": {}}, tmp_path)
+        a_runs.builds.renew_lease(a.build_id, lease_owner(a.attempt), 0.0)
+        # A lease is live through its deadline: the ledger's writes come a second after it.
+        for store in (a_runs.builds, a_runs.releases):
+            store._clock = lambda: time.time() + 1.0
+        b = open_run(b_runs)
+        assert (b.build_id, b.attempt != a.attempt) == (a.build_id, True), "B resumed it"
+        for store in (a_runs.builds, a_runs.releases):
+            store._clock = time.time
+
+        assert a_runs._hold(a) is False, "A's renewal does not renew B's lease"
+        a_runs._end_without_final(a)
+
+        build = b_runs.builds.get_build(b.build_id)
+        assert build.state == "building"
+        assert build.lease_expires_at > time.time(), "B's lease is still live"
+        with pytest.raises(RunRefused):
+            open_run(a_runs)
+        b_runs.handle(b, {"event": "checkpoint", "sequence": 2, "parts": {}}, tmp_path)
+
+    def test_a_close_during_a_hold_names_the_attempt_the_hold_opened(
+        self, tmp_path: Path, monkeypatch
+    ):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        run = runs.open(
+            cell_id="train",
+            computation_key="k",
+            variant=None,
+            input_versions={},
+            timeout_seconds=60.0,
+            resume=True,
+        )
+        runs.handle(run, {"event": "checkpoint", "sequence": 1, "parts": {}}, tmp_path)
+        runs.builds.renew_lease(run.build_id, lease_owner(run.attempt), 0.0)
+        for store in (runs.builds, runs.releases):
+            store._clock = lambda: time.time() + 1.0
+        opened, go_on = threading.Event(), threading.Event()
+        open_attempt = runs.builds.open_attempt
+
+        def open_then_wait(*args, **kwargs):
+            took = open_attempt(*args, **kwargs)
+            opened.set()
+            go_on.wait(5)
+            return took
+
+        monkeypatch.setattr(runs.builds, "open_attempt", open_then_wait)
+        hold = threading.Thread(target=runs._hold, args=(run,))
+        hold.start()
+        assert opened.wait(5)
+        # The run ends while the hold has opened its new attempt and not yet named it.
+        close = threading.Thread(target=runs._end_without_final, args=(run,))
+        close.start()
+        close.join(0.2)
+        go_on.set()
+        hold.join(5)
+        close.join(5)
+
+        build = runs.builds.get_build(run.build_id)
+        assert build.attempt == run.attempt
+        assert build.lease_expires_at <= time.time() + 1.0, "the close dropped that lease"
 
 
 class TestAbandonedRuns:

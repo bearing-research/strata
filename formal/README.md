@@ -38,9 +38,10 @@ the replay becomes the fix's regression test.
 | `tla/Staleness_ApiEdit.cfg` | A REST or MCP edit during a run. Violates `RunningShown` (finding 15) |
 | `tla/Staleness_BatchEdit.cfg` | A Run All cell edited while it waits. Violates `ReadyMeansCurrent` (finding 14) |
 | `tla/Staleness_Patched.cfg` | The code as it is. All invariants hold |
-| `tla/LocalRun.tla` | A local cell run holding its build's lease: releases, the renewal task, lapses, a rival process that resumes the build (SYSTEMS 10) |
+| `tla/LocalRun.tla` | A local cell run holding its build's lease: releases, the renewal task, lapses, a rival process that resumes the build, the run's close (SYSTEMS 10) |
 | `tla/LocalRun_Lapse.cfg` | The code before the fix. Violates `NoNeedlessFence` (finding 13) |
 | `tla/LocalRun_Race.cfg` | The fix without its lock. Violates `NoNeedlessFence` |
+| `tla/LocalRun_SharedOwner.cfg` | The rival shares the run's `hostname:pid` and the owner is the process. Violates `CloseLeavesOthers` (finding 32) |
 | `tla/LocalRun_Patched.cfg` | The code as it is. All invariants hold |
 | `tla/Streams.tla` | One stream-mode miss: GETs waiting for admission, 429s and cancels, the background build, the cleanup timer and expiry (SYSTEMS 2) |
 | `tla/Streams_Retry.cfg` | The code before the fix. Violates `NoFailedServe` (finding 17) |

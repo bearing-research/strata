@@ -75,7 +75,11 @@ in [`README.md`](README.md).
   metadata cache served the old table. The replay needs a FileIO that keeps `s3://`
   locations while storing locally (override `parse_location` and `fs_by_scheme`):
   rewriting the location instead writes `file://` paths into the manifest list, and
-  nothing is cached.
+  nothing is cached. LR-3 held as finding 32, fixed: the lease owner was the process, and
+  a lapsed run's close dropped the lease of a process with the same hostname and pid that
+  had resumed its build. `LocalRun.tla` now has the close and a `SharedOwner` rival; the
+  lease owner names the attempt. Within one process a notebook runs one execution at a
+  time, so only a shared hostname and pid reaches it.
 
 ## Conventions
 
@@ -146,7 +150,6 @@ property, the replays of what it finds, then the fixes.
 3. **Done: a wider Run All property** (BAT-1, BAT-2). Module state, `@nocache`, `@loop`
    and `@timeout` (a worker's single-run path) in the generator; findings 28, 29, 30. A
    real remote worker is not covered.
-4. **Smaller open items.** MD-1 done (finding 31). LR-3 (the close path checked
-   against the process, not the attempt); the passthrough stream path and multi-node
-   ownership (outside `Streams.tla`); the `scan@v1` identity hash (PROV-3, a decision:
-   encoding its fields as JSON re-keys every stored scan once).
+4. **Smaller open items.** MD-1 and LR-3 done (findings 31, 32). The passthrough
+   stream path and multi-node ownership (outside `Streams.tla`); the `scan@v1` identity
+   hash (PROV-3, a decision: encoding its fields as JSON re-keys every stored scan once).
