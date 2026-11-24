@@ -807,6 +807,10 @@ exhaustive commit history.
   lists whose `cells/` file was gone ran with no code and passed `strata validate`. It is now
   the error `cell_file_missing` until the file is restored or the cell rewritten, and a REST
   edit refreshes every tab's diagnostics as an editor edit does. (#1667)
+- **A SQL `@name` must be a variable name.** One that was not (`top-orders`, `Hottest
+  stations`) fell back to `result` without a word, so a cell reading the name found nothing.
+  It is now the error `name_unreadable`, as on a prompt cell, and both refuse a keyword such as
+  `class`. A notebook whose SQL `@name` is a label needs an identifier there. (#1665)
 - **The shared-object warning names only outputs that are stored.** `fig, ax =
   plt.subplots()` in a cell nobody reads warned that the two share a Figure, though neither
   is kept. A run now checks only what it stores: what other cells read, a scratchpad's
