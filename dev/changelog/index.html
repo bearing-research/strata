@@ -4618,6 +4618,13 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A recreated Hadoop-style table no longer plans as the table it replaced.</strong> The
+  Iceberg metadata cache kept every remote <code>metadata.json</code> and manifest by location. A
+  Hadoop-style table names its metadata <code>vN.metadata.json</code> and starts at <code>v1</code> again
+  when dropped and created at the same location, so the new table loaded the old one's
+  schema and snapshots from the cache. Only files named with a uuid, as Iceberg's
+  writers name them, are cached now; such a table is read from the store each time and
+  no longer plans while the store is down (#1668).</li>
 <li><strong>Run All gives what running each cell gives when cells share functions.</strong> In a Run
   All batch, a cell that changed an upstream value without naming it (by calling a
   function that appends to it, or through a list holding it) passed the change to later

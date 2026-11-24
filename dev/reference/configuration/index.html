@@ -3765,7 +3765,7 @@ authentication. This is a startup error, not a warning:</p>
 <tr>
 <td><code>STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES</code></td>
 <td><code>1073741824</code> (1 GiB)</td>
-<td>Iceberg <code>metadata.json</code> files, manifest lists and manifests read from an object store are kept under <code>iceberg-metadata/</code> in the cache directory, so a snapshot already planned plans again while the store is down. Iceberg never rewrites these files, so a copy stays correct; past this size the least recently read are removed. Writes do not fill it.</td>
+<td>Iceberg <code>metadata.json</code> files, manifest lists and manifests read from an object store are kept under <code>iceberg-metadata/</code> in the cache directory, so a snapshot already planned plans again while the store is down. Iceberg's writers give each of these files a name with its own uuid and never rewrite it, so a copy stays correct. A Hadoop-style table is the exception: its <code>vN.metadata.json</code> starts at <code>v1</code> again when the table is recreated, so a name without a uuid is read from the store every time, and such a table does not plan while the store is down; past this size the least recently read are removed. Writes do not fill it.</td>
 </tr>
 </tbody>
 </table>
