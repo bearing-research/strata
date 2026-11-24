@@ -36,7 +36,7 @@
 
 </div>
 
-R cells take a subset of these: see [R annotations](r.md). SQL cells take six of them,
+R cells take a subset of these: see [R annotations](r.md). SQL cells take eight of them,
 written as SQL comments (`-- @key value`): see [What a SQL cell reads](sql.md#what-a-sql-cell-reads).
 
 ## How annotations are read

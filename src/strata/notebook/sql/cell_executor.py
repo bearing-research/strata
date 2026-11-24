@@ -16,12 +16,13 @@ import json
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from vestigo.provenance import derive_subkey
+from vestigo.provenance import derive_subkey, run_output_key
 
-from strata.notebook.annotations import parse_annotations
+from strata.notebook.annotations import CellAnnotations, parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.models import CellLanguage
 from strata.notebook.mounts import DIGESTS_FILE
@@ -379,7 +380,7 @@ async def execute_sql_cell(
         variable_name=output_name,
         blob_data=blob,
         content_type="arrow/ipc",
-        provenance_hash=var_provenance,
+        provenance_hash=_stored_key(annotations, provenance_hash, var_provenance, output_name),
         source_hash=provenance_hash,  # cell-level provenance for staleness
         source=source,
         # Bound variables, so lineage continues past the query.
@@ -571,7 +572,7 @@ async def _execute_write_cell(
         variable_name=output_name,
         blob_data=blob,
         content_type="arrow/ipc",
-        provenance_hash=var_provenance,
+        provenance_hash=_stored_key(annotations, provenance_hash, var_provenance, output_name),
         source_hash=provenance_hash,
         source=source,
         input_versions=input_refs,
@@ -885,6 +886,16 @@ def _run_identity(
     if freshness is not None and freshness.is_session_only:
         return None
     return _reopen_identity(connection_id, policy, probes)
+
+
+def _stored_key(
+    annotations: CellAnnotations, provenance_hash: str, var_provenance: str, output_name: str
+) -> str:
+    """The key a run's result is stored under: a ``-- @stochastic`` run's is its own, so
+    every sample is kept and none is a cache hit (as a Python cell's)."""
+    if annotations.stochastic:
+        return run_output_key(provenance_hash, uuid.uuid4().hex, output_name)
+    return var_provenance
 
 
 def sql_reopen_identity(cell: Any, session: Any, *, probe: bool = False) -> str | None:

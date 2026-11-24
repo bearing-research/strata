@@ -68,5 +68,6 @@ several cells can fill the same slot in the DAG. See
 ## `@per_variant`
 
 `# @per_variant` runs a downstream cell once per variant, bound to that variant's
-value instead of the whole `{variant: value}` dict. See
+value instead of the whole `{variant: value}` dict. Only a Python cell fans out:
+on a SQL, R or prompt cell it is the error `per_variant_not_python`. See
 [Fan-out](../../guides/cells/loops-and-variants.md#fan-out-run-a-downstream-cell-once-per-variant).

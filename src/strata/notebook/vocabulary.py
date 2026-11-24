@@ -528,6 +528,18 @@ def _validate_stochastic(_nocache: bool, context: cg.ValidationContext) -> list[
 
 def _validate_per_variant(group: Any, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     source = context.cell.source
+    if context.cell.language != CellLanguage.PYTHON.value:
+        # Only the Python path fans out; elsewhere a reader would get an empty dict.
+        return [
+            cg.Diagnostic(
+                "per_variant_not_python",
+                cg.Severity.ERROR,
+                "`@per_variant` fans out Python cells only.",
+                context.cell.id,
+                "per_variant",
+                _find_annotation_line(source, "per_variant", language=context.cell.language),
+            )
+        ]
     writes = parse_annotations(source, context.cell.language).table_writes
     mode = next((w.mode for w in writes if w.mode in ("overwrite", "sync")), None)
     if mode is None:
