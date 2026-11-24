@@ -26,11 +26,15 @@ from strata.fetcher import create_fetcher
 from strata.notebook.models import TableSpec
 from strata.notebook.tables import resolve_table_snapshot
 from strata.planner import ReadPlanner
-from tests.conftest import MINIO_IMAGE, make_azurite, start_container_or_skip
-from tests.docker_helpers import docker_daemon_reachable
+from tests.conftest import MINIO_IMAGE, make_azurite
+from tests.docker_helpers import (
+    backend_unavailable,
+    docker_daemon_reachable,
+    start_container_or_skip,
+)
 
 if not docker_daemon_reachable():
-    pytest.skip("Docker daemon is not running", allow_module_level=True)
+    backend_unavailable("Docker daemon is not running", module=True)
 
 from testcontainers.community.minio import MinioContainer  # noqa: E402
 from testcontainers.core.container import DockerContainer  # noqa: E402
@@ -389,7 +393,7 @@ def java_equality_writer(request, tmp_path_factory) -> tuple[Path, str]:
                 f"https://repo1.maven.org/maven2/{path}", root / path.rsplit("/", 1)[1]
             )
     except Exception as exc:
-        pytest.skip(f"Java writer unavailable (image or Maven Central unreachable): {exc}")
+        backend_unavailable(f"Java writer unavailable (image or Maven Central unreachable): {exc}")
     fixture = client.containers.create(REST_IMAGE)
     try:
         archive, _ = fixture.get_archive("/usr/lib/iceberg-rest/iceberg-rest-adapter.jar")

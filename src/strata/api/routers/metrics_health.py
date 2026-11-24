@@ -8,6 +8,7 @@ leaf; those helpers stay in ``server.py`` because the shutdown path also uses th
 from __future__ import annotations
 
 import functools
+import os
 
 import anyio.to_thread
 import pyarrow as pa
@@ -43,8 +44,12 @@ def _prom_label(value: object) -> str:
 
 @router.get("/health")
 async def health():
-    """Liveness probe: 200 while the process is running; see ``/health/ready`` for readiness."""
-    return {"status": "ok"}
+    """Liveness probe: 200 while the process is running; see ``/health/ready`` for readiness.
+
+    ``pid`` names the process, so a client that started a server can tell it from another
+    one holding the port it was given.
+    """
+    return {"status": "ok", "pid": os.getpid()}
 
 
 @router.get("/health/busy")

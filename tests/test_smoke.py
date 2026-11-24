@@ -24,6 +24,7 @@ from strata.cache.disk import CachedFetcher, DiskCache
 from strata.config import StrataConfig
 from strata.planner import ReadPlanner
 from strata.types import CacheKey, Filter, FilterOp, TableIdentity
+from tests.server_helpers import stop_strata_server
 
 
 @pytest.fixture
@@ -339,11 +340,12 @@ class TestEndToEnd:
         }
 
         client.close()
-        server.should_exit = True
-        server_thread.join(timeout=5)
-        server_module._state = original_state
-        reset_caches()
-        reset_artifact_store()
+        try:
+            stop_strata_server(server, server_thread, port)
+        finally:
+            server_module._state = original_state
+            reset_caches()
+            reset_artifact_store()
 
     def test_fetch_and_cache_hit(self, server_with_client):
         """The second fetch is a cache hit."""

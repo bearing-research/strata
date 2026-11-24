@@ -76,6 +76,9 @@ jobs:
             -v --tb=short -p no:cacheprovider
 
       - name: Run emulator-backed mount integration tests
+        env:
+          # A container that cannot start fails the test here, rather than skip it.
+          STRATA_TESTS_REQUIRE_CONTAINERS: "1"
         run: |
           set -o pipefail
           uv run pytest \

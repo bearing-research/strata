@@ -6,12 +6,14 @@ Each test starts real servers, so each stops what it started.
 from __future__ import annotations
 
 import contextlib
+import http.server
 import json
 import os
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -169,7 +171,7 @@ def test_a_daemon_another_version_started_is_replaced(project):
     second = scratch.ensure_daemon(project)
     assert _started(second)
     # Stopped, not left beside the new one: one session writes the directory.
-    assert not scratch._healthy(first.url)
+    assert scratch._health_pid(first.url) != first.pid
     assert json.loads(record_path.read_text())["version"] == second.version != "0.0.0"
 
 
@@ -193,7 +195,7 @@ def test_a_busy_daemon_another_version_started_is_kept_until_idle(project):
             time.sleep(0.05)
         kept = scratch.ensure_daemon(project)
         assert (kept.pid, kept.version) == (first.pid, "0.0.0")
-        assert scratch._healthy(first.url)
+        assert scratch._health_pid(first.url) == first.pid
 
     deadline = time.monotonic() + 30
     while scratch._busy(first.url):
@@ -201,7 +203,7 @@ def test_a_busy_daemon_another_version_started_is_kept_until_idle(project):
         time.sleep(0.05)
     replaced = scratch.ensure_daemon(project)
     assert _started(replaced)
-    assert not scratch._healthy(first.url)
+    assert scratch._health_pid(first.url) != first.pid
 
 
 @pytest.mark.parametrize(
@@ -434,7 +436,7 @@ def test_a_daemon_dying_as_it_is_asked_is_replaced(project, monkeypatch):
 
 
 def _stopping(monkeypatch, alive, timeout: float = 30.0) -> None:
-    monkeypatch.setattr(scratch, "_healthy", lambda url: False)
+    monkeypatch.setattr(scratch, "_health_pid", lambda url: None)
     monkeypatch.setattr(scratch, "_alive", alive)
     monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
     daemon = scratch.Daemon(url="http://127.0.0.1:1", session_id="s", pid=12345)
@@ -566,3 +568,121 @@ def test_the_scratchpad_keeps_every_value(project):
 
     scratch._scaffold(project)
     assert parse_notebook(scratch.scratch_dir(project)).scratchpad
+
+
+@pytest.fixture
+def taken_port():
+    """A port another Strata server holds: its ``/health`` names its own pid."""
+
+    class Health(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({"status": "ok", "pid": os.getpid()}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Health)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    yield server.server_address[1]
+    server.shutdown()
+    server.server_close()
+    thread.join()
+
+
+def _spawned(monkeypatch) -> list[int]:
+    pids: list[int] = []
+    spawn = scratch._spawn
+
+    def recorded(anchor, port, python=None):
+        pids.append(spawn(anchor, port, python))
+        return pids[-1]
+
+    monkeypatch.setattr(scratch, "_spawn", recorded)
+    return pids
+
+
+def _gone(pid: int) -> bool:
+    deadline = time.monotonic() + 30
+    while scratch._alive(pid):
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def test_a_port_taken_before_the_daemon_binds_it_is_given_up_for_another(
+    project, monkeypatch, taken_port
+):
+    """Another process can take the port between ``_free_port`` and the daemon's bind;
+    the setup then opened the scratchpad on that server, and failed."""
+    ports = iter([taken_port])
+    free_port = scratch._free_port
+    monkeypatch.setattr(scratch, "_free_port", lambda: next(ports, None) or free_port())
+    spawned = _spawned(monkeypatch)
+
+    daemon = scratch.ensure_daemon(project)
+
+    assert daemon.url != f"http://127.0.0.1:{taken_port}"
+    assert spawned == [spawned[0], daemon.pid]
+    assert scratch._health_pid(daemon.url) == daemon.pid
+    # The daemon given the taken port is not left running beside the one recorded.
+    assert _gone(spawned[0])
+
+
+def test_a_port_held_by_what_answers_no_http_is_given_up_for_another(project, monkeypatch):
+    """Its daemon's bind fails and it exits, with nothing answering its health check."""
+    with socket.create_server(("127.0.0.1", 0)) as held:
+        ports = iter([held.getsockname()[1]])
+        free_port = scratch._free_port
+        monkeypatch.setattr(scratch, "_free_port", lambda: next(ports, None) or free_port())
+        spawned = _spawned(monkeypatch)
+
+        daemon = scratch.ensure_daemon(project)
+
+    assert spawned == [spawned[0], daemon.pid]
+    assert scratch._health_pid(daemon.url) == daemon.pid
+
+
+@pytest.mark.parametrize(
+    ("answer", "pid"),
+    [
+        (httpx.Response(200, json={"status": "ok", "pid": 41}), 41),
+        # Healthy, naming no pid: another server, or a daemon from an older install.
+        (httpx.Response(200, json={"status": "ok"}), 0),
+        (httpx.Response(200, text="<html>ok</html>"), 0),
+        # Not healthy: perhaps the daemon itself, not up yet; waited on, not given up.
+        (httpx.Response(503, json={"status": "starting"}), None),
+    ],
+)
+def test_what_a_health_answer_names(monkeypatch, answer, pid):
+    monkeypatch.setattr(scratch.httpx, "get", lambda url, **kwargs: answer)
+
+    assert scratch._health_pid("http://127.0.0.1:1") == pid
+
+
+def test_a_port_taken_every_time_fails_the_setup_and_ends_each_daemon(
+    project, monkeypatch, taken_port
+):
+    monkeypatch.setattr(scratch, "_free_port", lambda: taken_port)
+    spawned = _spawned(monkeypatch)
+
+    with pytest.raises(scratch.ScratchError, match="took the scratchpad's port 3 times"):
+        scratch.ensure_daemon(project)
+
+    assert len(spawned) == 3
+    assert all(_gone(pid) for pid in spawned)
+    assert scratch.find_daemon(project) is None
+
+
+def test_a_stop_does_not_wait_on_another_server_at_its_port(monkeypatch, taken_port):
+    """Its port given to another server once it exited: the stop is done, not timed out."""
+    monkeypatch.setattr(scratch, "_alive", lambda pid: False)
+    monkeypatch.setattr(scratch.os, "kill", lambda pid, sig: None)
+    daemon = scratch.Daemon(url=f"http://127.0.0.1:{taken_port}", session_id="s", pid=12345)
+
+    scratch._stop(daemon, timeout=1.0)
