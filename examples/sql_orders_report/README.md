@@ -33,7 +33,7 @@ sensitive) and `-- @cache forever` (reference-data) policies.
 
 | Cell | Language | What it does |
 |---|---|---|
-| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Default `session` cache policy means a re-run inside the same session cache-hits. |
+| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Cached by its body while `analytics.db` is as it left it, so a reopen finds it and the cells after it ready; delete the database and it seeds again. |
 | `threshold` | Python | Defines `min_amount = 50`. Edit and rerun to vary the threshold. |
 | `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `-- @after seed`. |
 | `category_summary` | SQL | Revenue by category with `-- @cache forever`. Declares `-- @after seed`. |

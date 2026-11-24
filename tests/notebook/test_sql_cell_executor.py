@@ -735,7 +735,7 @@ async def test_sql_write_cell_creates_table_and_inserts_rows(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sql_write_cell_caches_within_session(tmp_path):
-    """Write cells default to ``session`` caching, so a re-run in the same session hits."""
+    """A write cell is reused in the session that ran it, so a re-run there hits."""
     db_path = tmp_path / "cache.db"
     nb_dir = _build_notebook_with_sql_cell(
         tmp_path,

@@ -80,9 +80,12 @@ INSERT INTO events VALUES (1, 'alpha'), (2, 'beta');
 
 Write cells split the body into individual statements via sqlglot, run each
 in sequence, and emit a per-statement status table (`stmt`, `kind`,
-`rows_affected`). Default cache policy for write cells is `session`;
-`fingerprint` and `snapshot` error early because probe-based invalidation
-has no anchor when the cell mutates state.
+`rows_affected`). With no `-- @cache`, a write cell is reused in the
+session that ran it, and as the only write cell on a SQLite file in a
+later session too, while the file is as its run left it (see the
+[SQL guide](../../guides/cells/sql.md)). `fingerprint` and `snapshot` error
+early because probe-based invalidation has no anchor when the cell mutates
+state.
 
 ## `@cache`
 

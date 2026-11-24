@@ -8,10 +8,11 @@
 -- read-only by default: the override is per-cell, not per-
 -- connection.
 --
--- The default cache policy for a write cell is `session`, so this
--- cell runs once per session and dedup's no-op re-runs caused by
--- editing other cells. Edits to this body invalidate the session
--- cache and re-seed.
+-- With no `-- @cache`, a write cell is cached by its body, in its
+-- session and after, while the database is as its run left it: a
+-- reopen probes analytics.db and finds this cell, and the cells after
+-- it, ready. An edit to this body, or a database deleted or changed
+-- since, re-seeds.
 
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS products;
