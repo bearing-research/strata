@@ -165,6 +165,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
   "build_id": "notebook-3f2a9c1b7e04",
   "origin": "notebook",
   "cell_id": "ba3b7451",
+  "stored_vars": ["result"],
   "transform": {
     "ref": "notebook_cell@v1",
     "params": {
@@ -195,6 +196,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | `protocol_version` | string (required) | Must be `"v1"`. |
 | `origin` | string | `"notebook"` for a cell run from an open notebook, `"run"` for a headless `strata run`. A dispatcher can queue interactive cells first; a worker can ignore it. |
 | `cell_id` | string | The cell being run. The reference worker compiles the source as `<cell {cell_id}>`, so a traceback says which cell a frame is from. |
+| `stored_vars` | array of string | The cell's variables Strata stores from this run: those another cell reads, and in a scratchpad or under `strata run` the unread ones it keeps. The reference worker checks only these for outputs that share a mutable object, which decouple once stored apart. Absent, every output is checked; not a list of names, a `400`. Outside `params`, so it does not change what is cached. |
 | `transform.ref` | string (required) | Must be `"notebook_cell@v1"` for the notebook executor. |
 | `transform.params.source` | string (required) | The cell Python source to execute. |
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
@@ -302,6 +304,7 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
     "tenant": "team-a",
     "notebook_id": "9c7e22e3-8ed7-452c-885c-49574d7aa02f",
     "cell_id": "ba3b7451",
+    "stored_vars": ["result"],
     "cell_provenance_hash": "5f2c…",
     "origin": "notebook",
     "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
@@ -363,7 +366,11 @@ authenticated caller dispatched the cell, as on a personal server.
 `cell_provenance_hash` is the cell's own cache key: two submissions of the same
 computation share it. They sit outside `params` deliberately, since `params` is
 hashed into the build's transport provenance and who ran a cell must not change
-what is cached. A worker can ignore them.
+what is cached. A worker can ignore them. `stored_vars` is as in the
+[push model's metadata](#post-v1execute-push-model-recommended): the outputs a
+worker need check for a shared object. Two runs of one cell can differ in it
+(`strata run` keeps a leaf's outputs, an open notebook does not), so a
+dispatcher that dedupes on `cell_provenance_hash` should compare it too.
 
 `origin` is `"notebook"` when the cell was run from an open notebook and `"run"`
 for a headless `strata run`, so a dispatcher that orders a shared queue can put
