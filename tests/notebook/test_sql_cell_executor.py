@@ -130,7 +130,7 @@ async def test_a_duckdb_bind_in_the_select_list_runs(tmp_path, monkeypatch, body
     monkeypatch.setattr(
         cell_executor,
         "_load_upstream_variables",
-        lambda session, cell_id, references: ({"x": 41}, {"x": "upstream"}, {}),
+        lambda session, cell_id, references, after: ({"x": 41}, {"x": "upstream"}, {}),
     )
     nb_dir = create_notebook(tmp_path, "duckdb_bind")
     add_cell_to_notebook(nb_dir, "c1", language="sql")

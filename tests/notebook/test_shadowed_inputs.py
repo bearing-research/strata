@@ -133,7 +133,7 @@ async def test_sql_binds_the_wired_producer(tmp_path: Path, other: str):
     await _run_upstreams(session, other)
 
     cell = session.notebook_state.get_cell("c2")
-    namespace, hashes, _ = _load_upstream_variables(session, "c2", list(cell.references))
+    namespace, hashes, _ = _load_upstream_variables(session, "c2", list(cell.references), [])
     assert namespace == {"state": 2, other: 10}
     assert hashes["state"] == _c1_state_hash(session)
 

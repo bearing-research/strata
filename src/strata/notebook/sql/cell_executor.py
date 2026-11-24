@@ -147,7 +147,7 @@ async def execute_sql_cell(
 
     # ---- bind params -----------------------------------------------
     namespace, upstream_input_hashes, input_refs = _load_upstream_variables(
-        session, cell_id, analysis.references
+        session, cell_id, analysis.references, annotations.after
     )
     try:
         params = resolve_bind_params(analysis.placeholder_positions, namespace)
@@ -494,7 +494,7 @@ async def _execute_write_cell(
 
     # Upstream hashes in provenance, so a changed input invalidates the cache.
     namespace, upstream_input_hashes, input_refs = _load_upstream_variables(
-        session, cell_id, analysis.references
+        session, cell_id, analysis.references, annotations.after
     )
     try:
         params = resolve_bind_params(analysis.placeholder_positions, namespace)
@@ -1371,13 +1371,16 @@ def _load_upstream_variables(
     session: ExecutorHost,
     cell_id: str,
     references: list[str],
+    after: list[str],
 ) -> tuple[dict[str, Any], dict[str, str], dict[str, str]]:
     """Load upstream values, their artifact hashes, and their refs.
 
     Returns ``(namespace, upstream_input_hashes, input_refs)``. Hashes feed
-    provenance. Refs (``{strata://artifact/<id>@v=<n>: <id>@v=<n>}``) feed
-    lineage, since a hash names no artifact and a bound variable would
-    otherwise be missing from the chain.
+    provenance, with each ``-- @after`` upstream's last run (``_after_run``): it binds
+    nothing, but what it wrote is what this cell reads. Its artifacts are not refs, which
+    staleness compares with the wired inputs (``_upstream_moved_under``). Refs
+    (``{strata://artifact/<id>@v=<n>: <id>@v=<n>}``) feed lineage, since a hash names
+    no artifact and a bound variable would otherwise be missing from the chain.
     """
     namespace: dict[str, Any] = {}
     hashes: dict[str, str] = {}
@@ -1389,6 +1392,12 @@ def _load_upstream_variables(
     artifact_mgr = session.get_artifact_manager()
     notebook_id = session.notebook_state.id
     references_set = set(references)
+
+    for after_id in after:
+        run = _after_run(session, after_id) if after_id != cell_id else None
+        if run is not None:
+            # ``@`` starts no variable name, so it cannot meet a bound one.
+            hashes[f"@after:{after_id}"] = run
 
     for upstream_id in cell.upstream_ids:
         upstream_cell = next(
@@ -1414,6 +1423,30 @@ def _load_upstream_variables(
             namespace[var_name] = _deserialize_blob(blob, content_type)
 
     return namespace, hashes, refs
+
+
+def _after_run(session: ExecutorHost, cell_id: str) -> str | None:
+    """Which run of *cell_id* a cell after it reads: the provenance of its outputs and
+    its console record, which the same computation keeps and a salted or stochastic run
+    changes. ``None`` for no such cell.
+
+    One that recorded neither (``nocache``, an rw mount, a variant, never run) gives a
+    new value each time: its runs cannot be told apart, so nothing after it is reused.
+    """
+    upstream = session.notebook_state.get_cell(cell_id)
+    if upstream is None:
+        return None
+    manager = session.get_artifact_manager()
+    ids = [manager.cell_artifact_id(cell_id, name) for name in sorted(upstream.defines)]
+    ids.append(manager.cell_artifact_id(cell_id, "__console__"))
+    runs = [
+        f"{artifact.id}:{artifact.provenance_hash}"
+        for artifact_id in ids
+        if (artifact := manager.artifact_store.get_latest_version(artifact_id)) is not None
+    ]
+    if not runs:
+        return uuid.uuid4().hex
+    return hashlib.sha256("\n".join(runs).encode()).hexdigest()
 
 
 def _content_type_of(artifact: Any) -> str:
