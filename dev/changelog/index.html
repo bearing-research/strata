@@ -4618,6 +4618,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Two processes that start one cell at once no longer both run it.</strong> A local run read
+  the computation's open build and, finding none, created and opened one in two more
+  transactions, so two processes on one store (a CLI run beside the server) that both
+  found nothing could each run the cell. The run now opens its build with vestigo
+  0.8.0's <code>BuildStore.open_build</code>, one transaction under the computation's lock, and the
+  second process is refused as when the run was already going (#1674).</li>
 <li><strong>Two different scans no longer share a cache entry by construction of their key.</strong> The
   <code>scan@v1</code> identity hash joined its fields with no separator, so text in one field
   could stand in for the next, and the filter fingerprint could not tell a string that
