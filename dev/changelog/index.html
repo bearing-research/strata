@@ -4618,6 +4618,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A local run's close no longer ends another process's run of its cell.</strong> A run's
+  lease owner was its process (<code>hostname:pid</code>), so two processes on one notebook store
+  with the same hostname and pid (two containers given one hostname, both pid 1) shared
+  it: a run that lapsed and then ended dropped the lease of the process that had resumed
+  its build, and that run was fenced and ran again. The lease owner is now the run's
+  attempt (<code>hostname:pid/&lt;attempt&gt;</code> in the ledger) (#1669).</li>
 <li><strong>A recreated Hadoop-style table no longer plans as the table it replaced.</strong> The
   Iceberg metadata cache kept every remote <code>metadata.json</code> and manifest by location. A
   Hadoop-style table names its metadata <code>vN.metadata.json</code> and starts at <code>v1</code> again
