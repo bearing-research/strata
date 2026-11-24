@@ -231,7 +231,7 @@ INSERT INTO products VALUES ('A', 'widgets'), ('B', 'gadgets');
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
-`-- @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.
+`-- @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering. The upstream's last run is also part of this cell's cache key, unlike a Python cell's `@after`: once the seed runs a different computation and succeeds (a new body or upstream, a new session under `-- @cache session`, any run under `-- @stochastic`), this cell's next run misses its cache, even under `-- @cache forever`, and a `-- @cache snapshot` cell takes a new snapshot. A seed that is a cache hit, or runs the same computation again, keeps it cached. An upstream that records no run (`# @nocache`, an `rw` mount) keeps nothing after it cached. The cell's status does not change when the seed runs, so run it, or Run all, to refresh it.
 
 ## Worked example
 
