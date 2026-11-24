@@ -6,7 +6,9 @@ Annotations do not affect the cell's ``defines``/``references`` analysis.
 from __future__ import annotations
 
 import functools
+import keyword
 import re
+import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
@@ -164,6 +166,16 @@ ANNOTATION_KEYS = frozenset(
         "write_table",
     }
 )
+
+
+def is_output_name(value: str) -> bool:
+    """Whether ``@name`` *value* can name a SQL or prompt cell's output variable: one Python
+    code spells the same way, so no keyword and nothing NFKC rewrites (``ﬁle`` is ``file``)."""
+    return (
+        value.isidentifier()
+        and not keyword.iskeyword(value)
+        and unicodedata.normalize("NFKC", value) == value
+    )
 
 
 def iter_annotation_block(

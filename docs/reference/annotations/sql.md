@@ -168,3 +168,6 @@ FROM orders GROUP BY customer ORDER BY total DESC LIMIT 5
 
 A downstream Python cell can then reference `top_customers` directly as a
 `pyarrow.Table`; call `.to_pandas()` for a pandas DataFrame.
+
+The name must be a Python identifier that is not a keyword: `top-customers`,
+`1st` or `class` is the error `name_unreadable`, and the cell does not run.

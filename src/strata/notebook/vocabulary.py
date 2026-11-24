@@ -63,6 +63,7 @@ from strata.notebook.annotations import (
     _parse_variant_annotation,
     _parse_write_table_annotation,
     app_hides,
+    is_output_name,
     parse_annotations,
 )
 from strata.notebook.models import CellLanguage, CellState, MountMode, MountSpec
@@ -454,12 +455,17 @@ def _validate_output_schema(schema: Any, context: cg.ValidationContext) -> list[
     ]
 
 
+# Where ``@name`` is the output variable, not a label; the analyzers fall back to ``result``.
+_NAMES_OUTPUT = {CellLanguage.PROMPT.value: "a prompt", CellLanguage.SQL.value: "a SQL"}
+
+
 def _validate_name(name: str, context: cg.ValidationContext) -> list[cg.Diagnostic]:
-    """A prompt cell's name is its output variable, so every ``@name`` line must be one."""
+    """A prompt or SQL cell's name is its output variable, so every ``@name`` line must be one."""
     cell = context.cell
-    if cell.language != CellLanguage.PROMPT.value:
+    kind = _NAMES_OUTPUT.get(cell.language)
+    if kind is None:
         return []
-    why = "a prompt cell's name is its output variable, so a Python identifier"
+    why = f"{kind} cell's name is its output variable, so a Python identifier"
     return [
         cg.Diagnostic(
             "name_unreadable",
@@ -470,7 +476,7 @@ def _validate_name(name: str, context: cg.ValidationContext) -> list[cg.Diagnost
             d.line,
         )
         for d in _directives(cell)
-        if d.key == "name" and d.value and not d.value.isidentifier()
+        if d.key == "name" and d.value and not is_output_name(d.value)
     ]
 
 
