@@ -135,14 +135,30 @@ class LocalRuns:
         writable_until = now + writable_seconds
         attempt = uuid.uuid4().hex
 
-        # Another process may resume or fail the build between this read and the write
+        # Another process may resume, fail or open a build between this read and the write
         # below; each write is pinned to what was read, and on a miss the build is read
-        # again (a resume now holds a live lease, so the next pass refuses). A miss with
-        # the claim unchanged is not that race, and raises.
+        # again (a resume or an open now holds a live lease, so the next pass refuses). A
+        # miss with the claim unchanged is not that race, and raises.
         missed: tuple[tuple[Any, ...], Exception] | None = None
-        while (
-            open_build := self.builds.find_open_build(computation_key, occurrence=occurrence)
-        ) is not None:
+        while True:
+            open_build = self.builds.find_open_build(computation_key, occurrence=occurrence)
+            if open_build is None:
+                build_id = self._new_build(
+                    cell_id, computation_key, variant, attempt, writable_until, init=init
+                )
+                if build_id is not None:
+                    return LocalRun(
+                        build_id=build_id,
+                        attempt=attempt,
+                        cell_id=cell_id,
+                        computation_key=computation_key,
+                        variant=variant,
+                        input_versions=input_versions,
+                        init=init,
+                        writable_seconds=writable_seconds,
+                    )
+                now = time.time()
+                continue
             claim = (open_build.build_id, open_build.lease_owner, open_build.lease_expires_at)
             if missed is not None and missed[0] == claim:
                 raise missed[1]
@@ -186,23 +202,9 @@ class LocalRuns:
                 lease_owner=open_build.lease_owner,
                 lease_expires_at=open_build.lease_expires_at,
             ):
-                break
+                continue
             missed = (claim, RuntimeError(f"build {open_build.build_id} could not be failed"))
             now = time.time()
-
-        build_id = self._new_build(
-            cell_id, computation_key, variant, attempt, writable_until, init=init
-        )
-        return LocalRun(
-            build_id=build_id,
-            attempt=attempt,
-            cell_id=cell_id,
-            computation_key=computation_key,
-            variant=variant,
-            input_versions=input_versions,
-            init=init,
-            writable_seconds=writable_seconds,
-        )
 
     def _new_build(
         self,
@@ -213,8 +215,11 @@ class LocalRuns:
         writable_until: float,
         *,
         init: str | None = None,
-    ) -> str:
-        """Create a build of the computation with *attempt* open on it; its id."""
+        beside: bool = False,
+    ) -> str | None:
+        """Create a build of the computation with *attempt* open on it; its id, or None when
+        another process opened a build of it first (SYSTEMS LR-2). With *beside*, it opens
+        whatever else of the computation is open."""
         occurrence = f"variant={variant}" if variant else None
         build_id = uuid.uuid4().hex
         # A build references a version, so a run whose outputs do not exist yet targets a
@@ -232,25 +237,40 @@ class LocalRuns:
             minted=True,
             computation_key=computation_key,
         )
-        self.builds.create_build(
-            build_id,
-            placeholder_id,
-            version,
-            executor_ref=LOCAL_CELL_EXECUTOR_REF,
-            principal_id=caller_principal_id(),
-            params={"init": init} if init else None,
-            occurrence=occurrence,
-            computation_key=computation_key,
-            dispatch="external",
-        )
-        self.builds.open_attempt(
-            build_id,
-            attempt,
-            writable_until=writable_until,
-            lease_owner=lease_owner(attempt),
-            lease_duration_seconds=LEASE_SECONDS,
-            principal=caller_principal_id(),
-        )
+        try:
+            # One transaction under the computation's lock, so of two processes that both
+            # found nothing open, one opens a build and the other gets it back.
+            opened = self.builds.open_build(
+                build_id,
+                placeholder_id,
+                version,
+                attempt,
+                computation_key=computation_key,
+                executor_ref=LOCAL_CELL_EXECUTOR_REF,
+                writable_until=writable_until,
+                lease_owner=lease_owner(attempt),
+                lease_duration_seconds=LEASE_SECONDS,
+                occurrence=occurrence,
+                principal_id=caller_principal_id(),
+                params={"init": init} if init else None,
+                principal=caller_principal_id(),
+                beside=beside,
+            )
+        except BaseException as exc:
+            # The open may have committed with its reply lost: its live lease would refuse
+            # every run for a minute, so fail it. The open's error is the one raised.
+            try:
+                if self.builds.get_build(build_id) is not None:
+                    self.builds.fail_build(
+                        build_id, f"its open raised: {exc!r}", lease_owner=lease_owner(attempt)
+                    )
+                self.store.fail_artifact(placeholder_id, version)
+            except Exception as cleanup:
+                exc.add_note(f"Failing the run's placeholder raised too: {cleanup!r}")
+            raise
+        if opened.build_id != build_id:
+            self.store.fail_artifact(placeholder_id, version)
+            return None
         return build_id
 
     def refuse_if_running(self, cell_id: str, computation_key: str) -> None:
@@ -325,13 +345,19 @@ class LocalRuns:
             logger.info("Cell %s's %s waits for its run, build %s", cell_id, what, running.build_id)
             return None
         attempt = uuid.uuid4().hex
+        # Beside a lapsed build (a run that died); with none open, a run that opens
+        # meanwhile comes back and this waits for it.
         build_id = self._new_build(
             cell_id,
             computation_key,
             variant,
             attempt,
             time.time() + WRITE_WINDOW_MARGIN_SECONDS,
+            beside=running is not None,
         )
+        if build_id is None:
+            logger.info("Cell %s's %s waits for a run that just opened", cell_id, what)
+            return None
         release = self.releases.prepare(build_id, attempt, "final")
         staged: list[StagedVersion] = []
         try:

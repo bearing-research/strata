@@ -43,6 +43,8 @@ MODELS: dict[tuple[str, str], str | None] = {
     ("LocalRun", "LocalRun_Race"): "NoNeedlessFence",
     ("LocalRun", "LocalRun_SharedOwner"): "CloseLeavesOthers",
     ("LocalRun", "LocalRun_Patched"): None,
+    ("LocalOpen", "LocalOpen_Split"): "OneOpenBuild",
+    ("LocalOpen", "LocalOpen_Patched"): None,
     ("Streams", "Streams_Retry"): "NoFailedServe",
     ("Streams", "Streams_Patched"): None,
 }

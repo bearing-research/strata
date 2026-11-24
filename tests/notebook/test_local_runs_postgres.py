@@ -69,6 +69,12 @@ class TestAnotherProcessBetweenTheReadAndTheWriteOnPostgres(
     """open's writes pinned to the claim it read, on the second backend."""
 
 
+class TestTwoProcessesThatBothFindNoOpenBuildOnPostgres(
+    test_local_runs.TestTwoProcessesThatBothFindNoOpenBuild
+):
+    """The second open gets the first's build back, on the second backend."""
+
+
 class TestTwoProcessesWithOneHostAndPidOnPostgres(
     test_local_runs.TestTwoProcessesWithOneHostAndPid
 ):

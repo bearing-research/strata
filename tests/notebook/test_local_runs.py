@@ -829,6 +829,135 @@ class TestAnotherProcessBetweenTheReadAndTheWrite:
             self._open(runs, resume=False)
 
 
+class TestTwoProcessesThatBothFindNoOpenBuild:
+    """Both processes read no open build of the computation; B opens one before A writes.
+
+    A gets B's build back from the open and is refused, as if it had read it, and opens
+    no build of its own: one run of the computation, not two. SYSTEMS LR-2.
+    """
+
+    @staticmethod
+    def _open(runs: LocalRuns):
+        return runs.open(
+            cell_id="train",
+            computation_key="k",
+            variant=None,
+            input_versions={},
+            timeout_seconds=60.0,
+            resume=True,
+        )
+
+    def _race(self, tmp_path: Path, monkeypatch):
+        session, _ = _notebook(tmp_path)
+        a_runs = LocalRuns(session.get_artifact_manager())
+        b_runs = LocalRuns(session.get_artifact_manager())
+        find = a_runs.builds.find_open_build
+        opened = []
+
+        def read_then_b_opens(*args, **kwargs):
+            found = find(*args, **kwargs)
+            # The store is shared: undo the patch first, so B reads as itself.
+            monkeypatch.setattr(a_runs.builds, "find_open_build", find)
+            opened.append(self._open(b_runs))
+            return found
+
+        monkeypatch.setattr(a_runs.builds, "find_open_build", read_then_b_opens)
+        return a_runs, opened
+
+    def test_the_second_open_is_refused_and_opens_no_build(self, tmp_path: Path, monkeypatch):
+        a_runs, opened = self._race(tmp_path, monkeypatch)
+
+        with pytest.raises(RunRefused):
+            self._open(a_runs)
+
+        (b,) = opened
+        assert a_runs.builds.find_open_build("k").build_id == b.build_id, "B's run goes on"
+        building = [
+            v
+            for v in a_runs.store.list_versions_by_id_prefix(
+                a_runs._manager.run_placeholder_id("train")
+            )
+            if v.state == "building"
+        ]
+        assert len(building) == 1, "A's placeholder is failed, and only B's targets a build"
+
+    def test_a_revert_that_meets_a_run_just_opened_waits_for_it(self, tmp_path: Path, monkeypatch):
+        a_runs, opened = self._race(tmp_path, monkeypatch)
+
+        def stage(release_id, staged):
+            raise AssertionError("staged beside a live run")
+
+        made = a_runs.release(
+            cell_id="train", computation_key="k", variant=None, what="revert", stage=stage
+        )
+
+        assert made is None
+        (b,) = opened
+        assert a_runs.builds.find_open_build("k").build_id == b.build_id
+
+    def test_an_open_that_raises_fails_its_placeholder(self, tmp_path: Path, monkeypatch):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+
+        def lost(*args, **kwargs):
+            raise RuntimeError("the database went away")
+
+        monkeypatch.setattr(runs.builds, "open_build", lost)
+        with pytest.raises(RuntimeError, match="went away"):
+            self._open(runs)
+
+        versions = runs.store.list_versions_by_id_prefix(runs._manager.run_placeholder_id("train"))
+        assert versions and all(v.state == "failed" for v in versions)
+
+    def test_an_open_whose_reply_was_lost_leaves_no_live_build(self, tmp_path: Path, monkeypatch):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        open_build = runs.builds.open_build
+
+        def committed_then_lost(*args, **kwargs):
+            open_build(*args, **kwargs)
+            raise RuntimeError("the reply was lost")
+
+        monkeypatch.setattr(runs.builds, "open_build", committed_then_lost)
+        with pytest.raises(RuntimeError, match="reply was lost"):
+            self._open(runs)
+        monkeypatch.setattr(runs.builds, "open_build", open_build)
+
+        assert runs.builds.find_open_build("k") is None, "its lease would refuse a minute"
+        self._open(runs)
+
+    def test_a_cleanup_that_raises_keeps_the_opens_error(self, tmp_path: Path, monkeypatch):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+
+        def gone(*args, **kwargs):
+            raise RuntimeError("the database went away")
+
+        monkeypatch.setattr(runs.builds, "open_build", gone)
+        monkeypatch.setattr(runs.builds, "get_build", lambda *a, **k: gone())
+        with pytest.raises(RuntimeError, match="went away") as raised:
+            self._open(runs)
+        assert any("placeholder raised too" in note for note in raised.value.__notes__)
+
+    def test_a_revert_beside_a_run_that_died_is_made(self, tmp_path: Path):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        died = self._open(runs)
+        runs.builds.renew_lease(died.build_id, lease_owner(died.attempt), 0.0)
+        for store in (runs.builds, runs.releases):
+            store._clock = lambda: time.time() + 1.0
+
+        made = runs.release(
+            cell_id="train",
+            computation_key="k",
+            variant=None,
+            what="revert",
+            stage=lambda release_id, staged: None,
+        )
+
+        assert made == [], "made current (nothing staged), not left waiting"
+
+
 class TestTwoProcessesWithOneHostAndPid:
     """Two processes on one store whose hostname and pid agree, as two containers given one
     hostname both run as pid 1. Two LocalRuns in this process stand for them.

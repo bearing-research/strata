@@ -4195,7 +4195,7 @@ requires-dist = [
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uv", specifier = ">=0.12,<0.14" },
     { name = "uvicorn", specifier = ">=0.35.0" },
-    { name = "vestigo", specifier = "==0.7.0" },
+    { name = "vestigo", specifier = "==0.8.0" },
     { name = "websockets", specifier = ">=17.1" },
 ]
 provides-extras = ["otel", "azure", "s3", "gcs", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp", "infisical"]
@@ -4481,11 +4481,11 @@ wheels = [
 
 [[package]]
 name = "vestigo"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c4/61/6e4c2223314394c44c9a4912889ec662f242094b3ad8c746fbe1ea7b3eb7/vestigo-0.7.0.tar.gz", hash = "sha256:e9dfa4b71971aaa319002d5acfd4ed5585db3ebf39a301ca460e6cf4d3c8cb9b", size = 176071, upload-time = "2026-11-21T21:58:48.737Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/c2/a35c236c4ca7354e1ac5dc7c519c3f7c104b71999e27f743cd3066797dbc/vestigo-0.8.0.tar.gz", hash = "sha256:1c90a1c80e28500082de7dc4b11451c57d3879b3abfddaba0946cc13bac827ed", size = 178227, upload-time = "2026-11-24T22:58:54.582Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/50/f4/7764ff9d336f0cdcf24cf8e310f7e3106e332cd8d8598c02ff3461c25dec/vestigo-0.7.0-py3-none-any.whl", hash = "sha256:cf1c7f9a911e640d23ad49421786a363c37b2bf8f1d0db6a9278848c1cb8fa9d", size = 181815, upload-time = "2026-11-21T21:58:47.318Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/c2/4c1b3a1ebfa7cb8f4e33c79fc353a3c213f3a43d9e25f6babb8cde9a6410/vestigo-0.8.0-py3-none-any.whl", hash = "sha256:7aa91510f36e686f7ce309ee924042406505b1f8bb18404f42fb2a2c5a6a8cc0", size = 183941, upload-time = "2026-11-24T22:58:52.882Z" },
 ]
 
 [[package]]
