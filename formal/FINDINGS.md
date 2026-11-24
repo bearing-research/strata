@@ -854,6 +854,25 @@ failed left the data without its sidecar, and the bytes of the entry it replaced
 counted toward the cache's size. Such a put now removes the data it placed. Regression
 tests: `tests/test_cache_optimized.py::TestAFailedCacheWriteIsAMiss`.
 
+### 26. A rerun fails a build another process has just resumed
+
+**Survey lead** (SYSTEMS 10, LR-2), replayed. `LocalRuns.open` reads the computation's
+open build, checks its lease and then acts, in separate transactions. With the lease
+lapsed, a second process on the store (a CLI run beside the server) resumed the build
+between the read and the write. A rerun then failed the build anyway, since
+`fail_build` was not pinned to the lease it had read, and the second process's live
+run was fenced at its next release. A normal run instead raised vestigo's `ValueError`
+from `resume`, where one process alone gives `RunRefused`. Severity: medium (another
+process's run killed; two processes on one store).
+
+**Fixed.** `open` pins the fail to the claim it read (`lease_owner`,
+`lease_expires_at`). When the fail or the resume misses, `open` reads the build again,
+so a build resumed elsewhere refuses this run. Regression tests:
+`tests/notebook/test_local_runs.py::TestAnotherProcessBetweenTheReadAndTheWrite`, also
+run on Postgres. Still open: two processes that both find no open build each create
+one. That needs a computation-keyed open in vestigo; the handoff is
+`docs/internal/one-open-execution.md` in vestigo's checkout, item 8 of its HANDOFF.
+
 ### 27. A NaN filter value fails planning on a cold cache
 
 **Property:** `test_bounds_pruning_properties.py` (SYSTEMS 5, PR-2). A scan filtered

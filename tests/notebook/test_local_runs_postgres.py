@@ -61,3 +61,9 @@ class TestAResumeAfterAnUnfinishedCheckpointOnPostgres(
     test_local_runs.TestAResumeAfterAnUnfinishedCheckpoint
 ):
     """A resume numbers past an abandoned checkpoint, on the second backend."""
+
+
+class TestAnotherProcessBetweenTheReadAndTheWriteOnPostgres(
+    test_local_runs.TestAnotherProcessBetweenTheReadAndTheWrite
+):
+    """open's writes pinned to the claim it read, on the second backend."""

@@ -115,9 +115,14 @@ property, the replays of what it finds, then the fixes.
 
 1. **Done: pruning over strings and NaN** (PR-2), `test_bounds_pruning_properties.py`;
    finding 27.
-2. **Two processes on one store** (LR-2, EACH-2). Extend `LocalRun.tla` with `open`
-   split into its transactions and two processes; replay on SQLite and Postgres.
-   EACH-2's guard against collecting during a run is a process-local counter.
+2. **Two processes on one store** (LR-2, EACH-2). Half of LR-2 is fixed (finding
+   26, #1653): a rerun no longer fails a build another process just resumed. The other
+   half, two processes that both find no open build each creating one, waits on a
+   computation-keyed open in vestigo (`open_first_attempt`; the handoff is
+   `docs/internal/one-open-execution.md` in vestigo's checkout, its HANDOFF item 8).
+   After that release, extend `LocalRun.tla` with `open` split into its transactions
+   and two processes. EACH-2's guard against collecting during a run is a
+   process-local counter.
 3. **A wider Run All property** (BAT-1). Module state, `@nocache`, `@loop` cells and
    worker routing in the generator.
 4. **Smaller open items.** MD-1 (a catalog that writes `vN.metadata.json`, dropped

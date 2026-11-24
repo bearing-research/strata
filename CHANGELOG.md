@@ -795,6 +795,10 @@ exhaustive commit history.
 - **A scan filtered on a NaN value plans.** A filter such as `value = NaN` failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)
+- **A rerun no longer fails a run another process has just resumed.** With two processes
+  on one notebook's store, a rerun of a cell whose interrupted run another process resumed
+  a moment earlier failed that build and killed its run. The rerun is now refused, as it
+  would be on one process. (#1653)
 - **A resumed run keeps its first checkpoint.** A run that died while a checkpoint was
   being written, or whose checkpoint failed to write, numbered its next attempt's
   checkpoints from the one it resumed, so the first collided with the abandoned one and
