@@ -281,8 +281,8 @@ def _pair(draw):
             other = draw(_scan())
             field = draw(st.sampled_from(list(vars(first))))
             return first, SimpleNamespace(**{**vars(first), field: getattr(other, field)})
-        case _:
-            return first, draw(_scan())
+    # "fresh", or "spelled" with no tagged value to spell.
+    return first, draw(_scan())
 
 
 def _scans(*fields):
