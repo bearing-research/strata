@@ -4629,6 +4629,10 @@ exhaustive commit history.</p>
   shadowed Hugging Face <code>datasets</code> and PyTables, and transformers' <code>Trainer</code> failed to
   import. They start with <code>python -P</code> now; a script a cell test starts imports its
   neighbours again. (#1659)</li>
+<li><strong>A cell whose file is missing is an error, not an empty cell.</strong> A cell <code>notebook.toml</code>
+  lists whose <code>cells/</code> file was gone ran with no code and passed <code>strata validate</code>. It is now
+  the error <code>cell_file_missing</code> until the file is restored or the cell rewritten, and a REST
+  edit refreshes every tab's diagnostics as an editor edit does. (#1667)</li>
 <li><strong>The shared-object warning names only outputs that are stored.</strong> <code>fig, ax =
   plt.subplots()</code> in a cell nobody reads warned that the two share a Figure, though neither
   is kept. A run now checks only what it stores: what other cells read, a scratchpad's

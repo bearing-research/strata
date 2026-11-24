@@ -149,7 +149,8 @@ subprocesses, no LLM calls:
 strata validate <notebook_dir> [--format human|json]
 ```
 
-- `notebook.toml` parses and the cell files load
+- `notebook.toml` parses and the cell files load: a cell whose file is gone is
+  `cell_file_missing`, not an empty cell, and does not run either
 - the DAG builds without cycles
 - per-cell annotation diagnostics - the **same validation the server runs
   on open / reload** (`worker_unknown`, `loop_missing_carry`,

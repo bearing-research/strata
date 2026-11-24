@@ -3552,7 +3552,8 @@ subprocesses, no LLM calls:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>validate<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span><span class="o">[</span>--format<span class="w"> </span>human<span class="p">|</span>json<span class="o">]</span>
 </code></pre></div>
 <ul>
-<li><code>notebook.toml</code> parses and the cell files load</li>
+<li><code>notebook.toml</code> parses and the cell files load: a cell whose file is gone is
+  <code>cell_file_missing</code>, not an empty cell, and does not run either</li>
 <li>the DAG builds without cycles</li>
 <li>per-cell annotation diagnostics - the <strong>same validation the server runs
   on open / reload</strong> (<code>worker_unknown</code>, <code>loop_missing_carry</code>,
