@@ -1691,7 +1691,13 @@ class TestR:
 
     @staticmethod
     def _prov(annotations=None, **overrides):
-        fields = {"datasets": [], "tables": [], "nocache": False, "table_writes": []}
+        fields = {
+            "datasets": [],
+            "tables": [],
+            "nocache": False,
+            "table_writes": [],
+            "stochastic": False,
+        }
         prov = SimpleNamespace(
             source_hash="source",
             runtime_env={"K": "V"},
