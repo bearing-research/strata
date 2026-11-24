@@ -873,10 +873,9 @@ def test_e_holds_while_nothing_it_was_probed_from_changes(project, monkeypatch):
 def test_e_is_probed_on_the_path_a_cell_finds(project):
     """Started with -P, as a cell is: Strata's own directory, whose datasets.py would
     shadow the user's, is not on it, so nothing there is watched."""
-    import strata.notebook
     from strata.notebook.project_env import environment_record
 
-    package = str(Path(strata.notebook.__file__).parent)
+    package = str(Path(mcp_server.__file__).parent)
     record = environment_record(_attached(project))
 
     assert record is not None

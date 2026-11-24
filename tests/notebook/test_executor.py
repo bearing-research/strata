@@ -362,14 +362,24 @@ z = [1, 2, 3]
         assert result.outputs["z"]["preview"] == [1, 2, 3]
 
     @pytest.mark.asyncio
-    async def test_shared_mutable_outputs_warns_through_real_execution(self, sample_notebook):
-        """Two outputs sharing a mutable object warn through real subprocess execution into
-        ``result.mutation_warnings``, which `strata run` prints.
+    async def test_shared_mutable_outputs_warns_through_real_execution(self, tmp_path):
+        """Two stored outputs sharing a mutable object warn through real subprocess
+        execution into ``result.mutation_warnings``, which `strata run` prints.
         """
-        executor = CellExecutor(sample_notebook)
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
         # params and trainer share the same list object → decouple once stored.
         source = "params = [1.0, 2.0, 3.0]\ntrainer = {'params': params}"
+        notebook_dir = create_notebook(tmp_path, "Shared")
+        add_cell_to_notebook(notebook_dir, "cell1", None)
+        write_cell(notebook_dir, "cell1", source)
+        # Both stored: a downstream cell reads both.
+        add_cell_to_notebook(notebook_dir, "cell2", "cell1")
+        write_cell(notebook_dir, "cell2", "n = len(params) + len(trainer)")
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
+        executor = CellExecutor(session)
+
         result = await executor.execute_cell("cell1", source)
 
         assert result.success is True
@@ -2614,11 +2624,13 @@ class Person:
             pytest.param("x = 1", "del x\ny = 2", ["x"], id="a deleted input"),
             # Exported, so downstream gets the mutated list: nothing to warn.
             pytest.param("xs = [1, 2]", "xs[0] = 9", [], id="an exported mutated input"),
+            # A leaf: neither is stored, so nothing decouples (test_shared_outputs.py has
+            # the stored case on every path).
             pytest.param(
                 "x = 1",
                 "params = [1.0, 2.0]\ntrainer = {'params': params}",
-                ["params"],
-                id="two outputs sharing a list",
+                [],
+                id="two outputs sharing a list that no cell reads",
             ),
         ],
     )

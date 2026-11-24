@@ -799,6 +799,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   shadowed Hugging Face `datasets` and PyTables, and transformers' `Trainer` failed to
   import. They start with `python -P` now; a script a cell test starts imports its
   neighbours again. (#1659)
+- **The shared-object warning names only outputs that are stored.** `fig, ax =
+  plt.subplots()` in a cell nobody reads warned that the two share a Figure, though neither
+  is kept. A run now checks only what it stores: what other cells read, a scratchpad's
+  unread outputs, a leaf's under `strata run`, and a loop's carry. Workers receive the list
+  as `stored_vars`. (#1661)
 - **A scan filtered on a NaN value plans.** A filter such as `value = NaN` failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)

@@ -90,9 +90,12 @@ break here. The run still goes green in both:
    Stored as two separate artifacts and reloaded into a later cell, they become
    two *different* tensor sets - so `optimizer.step()` updates the optimizer's
    private copies and the `model` you evaluate/save never changes. Training is a
-   no-op. When Strata can see that two of a cell's outputs share an object, the
-   cell's console warns that they "share a mutable ... object" and will become
-   independent copies downstream.
+   no-op. When Strata can see that two of a cell's stored outputs share an
+   object, the cell's console warns that they "share a mutable ... object" and
+   will become independent copies downstream. A notebook stores what other
+   cells read (a scratchpad, and `strata run` for a cell no other cell reads,
+   keep the rest too), so `fig, ax = plt.subplots()` in a notebook cell that
+   only draws does not warn.
 
 Both are the same root: **shared, mutable state doesn't survive a boundary where
 each variable is an independent immutable artifact.** Strata deliberately does
