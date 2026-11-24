@@ -5758,7 +5758,8 @@ but viewers can still drive widgets - combined with **⚡ Live** that's the
 "tweak a parameter, see the result" dashboard you hand to a stakeholder.
 
 Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
-whose output is noise). Run the notebook's cells once in the editor so the app
+whose output is noise). Like any annotation it goes in the cell's leading comment
+block, before its code or prose, and a SQL cell spells it `-- @app hide`. Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.
 
 Under each cell's outputs is one quiet line, such as `Computed Nov 4, 2026, 9:33 AM
@@ -6392,8 +6393,8 @@ produced.
 
 Widget cells render as a compact line of `control: value` chips - the
 parameter settings that produced the outputs below them - read from the
-notebook's persisted control values. Cells marked `# @app hide` are
-omitted, matching the live app view; prompt-cell responses stay excluded
+notebook's persisted control values. Cells marked
+[`@app hide`](https://bearingresearch.com/strata/dev/reference/annotations/widget/#app-hide) are omitted, matching the live app view; prompt-cell responses stay excluded
 for the same privacy reason as a regular export.
 
 Each cell's outputs carry the app view's quiet line, read from the notebook's
@@ -10229,8 +10230,9 @@ auto-run the cheap downstream cells instead of only marking them stale.
 ## `@app hide`
 
 `# @app hide` keeps a cell out of the read-only [app view](https://bearingresearch.com/strata/dev/guides/share/app-view/#app-view),
-for a setup cell whose output is noise. It applies to any cell.
-In a markdown cell it is the only annotation read: a heading such as
+for a setup cell whose output is noise. It applies to any cell, and like any
+annotation it sits in the cell's leading comment block: `-- @app hide` in a SQL
+cell. In a markdown cell it is the only annotation read: a heading such as
 `# @after` there is prose.
 
 <!-- https://bearingresearch.com/strata/dev/notebook/cli/index.md -->
@@ -13391,7 +13393,7 @@ A cell run as an upstream inside another cell's run may get its console and resu
 
 | Type         | Payload                                               | Description                 |
 | ------------ | ----------------------------------------------------- | --------------------------- |
-| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. Each `cells` entry carries `id`, `defines`, `references`, `upstream_ids`, `downstream_ids`, `is_leaf`, `annotation_diagnostics`, `variant_group` / `variant_name` / `variant_active`, `is_module_cell` / `module_exports`, and `created_by` / `updated_by`. After a `cell_source_update`, the edited cell's entry also carries its new `source` on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere `source` is null |
+| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. Each `cells` entry carries `id`, `defines`, `references`, `upstream_ids`, `downstream_ids`, `is_leaf`, `annotation_diagnostics`, `variant_group` / `variant_name` / `variant_active`, `annotations` (as on a cell's payload, `app_hidden` among them), `is_module_cell` / `module_exports`, and `created_by` / `updated_by`. After a `cell_source_update`, the edited cell's entry also carries its new `source` on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere `source` is null |
 
 ### State
 

@@ -132,7 +132,7 @@ A cell run as an upstream inside another cell's run may get its console and resu
 
 | Type         | Payload                                               | Description                 |
 | ------------ | ----------------------------------------------------- | --------------------------- |
-| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. Each `cells` entry carries `id`, `defines`, `references`, `upstream_ids`, `downstream_ids`, `is_leaf`, `annotation_diagnostics`, `variant_group` / `variant_name` / `variant_active`, `is_module_cell` / `module_exports`, and `created_by` / `updated_by`. After a `cell_source_update`, the edited cell's entry also carries its new `source` on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere `source` is null |
+| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. Each `cells` entry carries `id`, `defines`, `references`, `upstream_ids`, `downstream_ids`, `is_leaf`, `annotation_diagnostics`, `variant_group` / `variant_name` / `variant_active`, `annotations` (as on a cell's payload, `app_hidden` among them), `is_module_cell` / `module_exports`, and `created_by` / `updated_by`. After a `cell_source_update`, the edited cell's entry also carries its new `source` on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere `source` is null |
 
 ### State
 

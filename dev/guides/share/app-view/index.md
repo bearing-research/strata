@@ -8,7 +8,8 @@ but viewers can still drive widgets - combined with **⚡ Live** that's the
 "tweak a parameter, see the result" dashboard you hand to a stakeholder.
 
 Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
-whose output is noise). Run the notebook's cells once in the editor so the app
+whose output is noise). Like any annotation it goes in the cell's leading comment
+block, before its code or prose, and a SQL cell spells it `-- @app hide`. Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.
 
 Under each cell's outputs is one quiet line, such as `Computed Nov 4, 2026, 9:33 AM

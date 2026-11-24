@@ -815,6 +815,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   warns; `@stochastic` now keeps every run's result under its own run, as in Python;
   `@per_variant`, which never fanned out outside Python and left its reader an empty dict, is
   the error `per_variant_not_python` on SQL, R and prompt cells. (#1662)
+- **`@app hide` is read from the cell's annotation block, in any language.** The app view and
+  export matched `# @app hide` anywhere in the source, a string included, and never saw a SQL
+  cell's `-- @app hide`. Both read the parsed annotation now, a live app view follows an edit,
+  and an `@app` line after the code warns (`app_outside_annotations`) that it is not read.
+  (#1663)
 - **A scan filtered on a NaN value plans.** A filter such as `value = NaN` failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)

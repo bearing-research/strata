@@ -4639,6 +4639,11 @@ exhaustive commit history.</p>
   warns; <code>@stochastic</code> now keeps every run's result under its own run, as in Python;
   <code>@per_variant</code>, which never fanned out outside Python and left its reader an empty dict, is
   the error <code>per_variant_not_python</code> on SQL, R and prompt cells. (#1662)</li>
+<li><strong><code>@app hide</code> is read from the cell's annotation block, in any language.</strong> The app view and
+  export matched <code># @app hide</code> anywhere in the source, a string included, and never saw a SQL
+  cell's <code>-- @app hide</code>. Both read the parsed annotation now, a live app view follows an edit,
+  and an <code>@app</code> line after the code warns (<code>app_outside_annotations</code>) that it is not read.
+  (#1663)</li>
 <li><strong>A scan filtered on a NaN value plans.</strong> A filter such as <code>value = NaN</code> failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)</li>

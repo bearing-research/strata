@@ -3984,7 +3984,7 @@
 <tr>
 <td><code>dag_update</code></td>
 <td><code>{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }</code></td>
-<td>DAG changed after cell edit. Each <code>cells</code> entry carries <code>id</code>, <code>defines</code>, <code>references</code>, <code>upstream_ids</code>, <code>downstream_ids</code>, <code>is_leaf</code>, <code>annotation_diagnostics</code>, <code>variant_group</code> / <code>variant_name</code> / <code>variant_active</code>, <code>is_module_cell</code> / <code>module_exports</code>, and <code>created_by</code> / <code>updated_by</code>. After a <code>cell_source_update</code>, the edited cell's entry also carries its new <code>source</code> on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere <code>source</code> is null</td>
+<td>DAG changed after cell edit. Each <code>cells</code> entry carries <code>id</code>, <code>defines</code>, <code>references</code>, <code>upstream_ids</code>, <code>downstream_ids</code>, <code>is_leaf</code>, <code>annotation_diagnostics</code>, <code>variant_group</code> / <code>variant_name</code> / <code>variant_active</code>, <code>annotations</code> (as on a cell's payload, <code>app_hidden</code> among them), <code>is_module_cell</code> / <code>module_exports</code>, and <code>created_by</code> / <code>updated_by</code>. After a <code>cell_source_update</code>, the edited cell's entry also carries its new <code>source</code> on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere <code>source</code> is null</td>
 </tr>
 </tbody>
 </table>

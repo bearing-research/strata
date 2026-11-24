@@ -3054,8 +3054,9 @@ auto-run the cheap downstream cells instead of only marking them stale.
 <code># @live off</code> turns it back off. See <a href="../../../guides/cells/widget/#live-mode">Live mode</a>.</p>
 <h2 id="app-hide"><code>@app hide</code><a class="headerlink" href="#app-hide" title="Permanent link">&para;</a></h2>
 <p><code># @app hide</code> keeps a cell out of the read-only <a href="../../../guides/share/app-view/#app-view">app view</a>,
-for a setup cell whose output is noise. It applies to any cell.
-In a markdown cell it is the only annotation read: a heading such as
+for a setup cell whose output is noise. It applies to any cell, and like any
+annotation it sits in the cell's leading comment block: <code>-- @app hide</code> in a SQL
+cell. In a markdown cell it is the only annotation read: a heading such as
 <code># @after</code> there is prose.</p>
 
 
