@@ -3,7 +3,7 @@
 This is the notebook from the
 [`strata agent`](https://bearingresearch.com/strata/latest/notebook/agent/)
 demo: a coding agent (Claude Code) builds it live while you watch in the
-terminal UI. It's a plain, runnable notebook, the agent-driven part is just how
+terminal UI. It's a plain, runnable notebook; the agent-driven part is just how
 it gets written.
 
 ## What it shows
@@ -35,5 +35,5 @@ uv run strata run examples/agent_demo --force   # run every cell
 ## Reproducing the demo
 
 To watch a coding agent build this notebook from scratch, see `RECORDING.md` in
-this directory, it has the exact `strata agent` command and the two prompts,
+this directory: it has the exact `strata agent` command and the two prompts,
 plus the screen-capture settings.

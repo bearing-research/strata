@@ -177,17 +177,18 @@ Summarize {{ findings }} as a verdict.
 ```
 
 `{{ var }}` interpolates upstream variables. `strata validate` checks
-annotation syntax (`loop_missing_carry`, malformed `@output_schema`,
-unknown workers, …) without calling any LLM.
+annotation syntax (`loop_missing_carry`, malformed `@output_schema`, …)
+and warns about unknown workers, without calling any LLM.
 
 ## What validate catches vs. what run catches
 
 | Failure | Caught by |
 | --- | --- |
 | Malformed `notebook.toml` (with TOML line numbers) | `validate` |
-| Missing / unreadable cell file | `validate` |
+| Missing cell file | not caught: a missing file reads as an empty cell |
 | DAG cycle | `validate` |
-| Bad annotation (`@loop` without `carry`, schema typos, unknown worker) | `validate` |
+| Bad annotation (`@loop` without `carry`, schema typos) | `validate` |
+| Unknown worker | `validate` warns (exit `0`); the run fails |
 | Reference that resolves to nothing (import? typo?) | `run` (NameError) |
 | Wrong logic, missing dependency in `pyproject.toml` | `run` |
 
@@ -224,7 +225,7 @@ directly - it's machine-managed runtime state with no stability guarantees.
 ## Comparing two runs
 
 A successful cell also reports its `provenance_hash` and its `outputs` - one
-entry per stored variable, each with `artifact_id`, `version` and
+entry per stored variable, each with `name`, `artifact_id`, `version` and
 `content_sha256`:
 
 ```bash
@@ -320,7 +321,7 @@ $ strata validate ./handwritten && strata run ./handwritten
 ✓ valid: 3 cell(s)
 syncing environment…
 ...
-  load numbers = [1, 2, 3, 4]           ✓ 1.4s
+  load load                             ✓ 1.4s
   doc [markdown] plain prose cell      ✓ cached
   stats total = sum(numbers)             ✓ 1.1s
 

@@ -20,7 +20,7 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 4. The worker runs the cell in a subprocess and returns outputs as a gzipped bundle.
 5. Strata stores the outputs as artifacts; cache hits work identically to local cells.
 
-Cells run in **the notebook's locked environment** on a `strata-worker` of this version or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as `locked_environments` in `/health`, and says `false` when it finds no uv: neither the one installed with `strata-notebook` nor one on its `PATH`. A worker that answers without it (an older `strata-worker`, one without `uv`, or a custom worker; a `404` on `/health` counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a `5xx` on `/health`) is refused for a notebook that has a `uv.lock`, rather than running the cell in an environment its provenance would not describe. Either way the worker runs in any environment - it can be pip-installed into a plain Docker image. See [the `environment` block](../reference/executor-protocol.md#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
+Cells run in **the notebook's locked environment** on a `strata-worker` of 0.8.0 or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as `locked_environments` in `/health`, and says `false` when it finds no uv: neither the one installed with `strata-notebook` nor one on its `PATH`. A worker that answers without it (an older `strata-worker`, one without `uv`, or a custom worker; a `404` on `/health` counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a `5xx` on `/health`) is refused for a notebook that has a `uv.lock`, rather than running the cell in an environment its provenance would not describe. Either way the worker runs in any environment - it can be pip-installed into a plain Docker image. See [the `environment` block](../reference/executor-protocol.md#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
 
 R cells work the same way with the notebook's `renv.lock`: the worker restores it with `renv` into one library per lock and R build, reuses it for every later R cell with that lock, and runs the cell with that library first on R's library path. It advertises this as `locked_r_environments`, `true` when its R can load `renv`; a notebook with an `renv.lock` is refused on a worker that cannot be asked, as above. See [the R `environment` block](../reference/executor-protocol.md#the-r-environment-block).
 
@@ -62,7 +62,7 @@ INFO:     Uvicorn running on http://127.0.0.1:9000
 curl http://localhost:9000/health
 ```
 
-Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, `launch_id` is set only on a worker Strata [launched over SSH](#run-cells-on-a-machine-you-can-ssh-to), and `hardware` lists what the machine reports). `output_dirs` says the worker returns a cell's `# @output_dir` folders and `folder_inputs` that it takes another cell's folder as an input; `mount_cache_probe` says it answers `POST /v1/mount-cache/cached` (behind the same bearer token as `/v1/execute`) with how much of each read-only mount its cache already holds, so the server can tell what a run would download:
+Expected response (`locked_environments` is `false` when the worker finds no uv: a `STRATA_UV` naming no file, or an install without the bundled uv and none on `PATH`; `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, `launch_id` is set only on a worker Strata [launched over SSH](#run-cells-on-a-machine-you-can-ssh-to), and `hardware` lists what the machine reports). `output_dirs` says the worker returns a cell's `# @output_dir` folders and `folder_inputs` that it takes another cell's folder as an input; `mount_cache_probe` says it answers `POST /v1/mount-cache/cached` (behind the same bearer token as `/v1/execute`) with how much of each read-only mount its cache already holds, so the server can tell what a run would download:
 
 ```json
 {
@@ -438,6 +438,7 @@ Workers live in `notebook.toml` under `[[workers]]`. You can add them through th
 | `config.transport` | `"direct"` for direct push (the default), `"signed"` for the pull-model with signed URLs |
 | `config.token` | Literal bearer token (dev only) - see [Authentication](#authentication) |
 | `config.token_env` | Env var name holding the bearer token (preferred for prod) |
+| `config.strata_url` | `signed` only: the server address the manifest's URLs use, when the worker cannot reach the server's default URL |
 
 A typical multi-worker notebook ends up with:
 
@@ -530,7 +531,9 @@ same shape whether it comes from the admin routes or from
 `[tool.strata.transforms] notebook_workers`. `POST /v1/admin/notebook-workers`
 adds one, `PUT /v1/admin/notebook-workers/{name}` replaces it, `PATCH` takes
 `{"enabled": false}`, and `PUT /v1/admin/notebook-workers` replaces the whole
-registry with `{"workers": [...]}`. Under principal auth (service mode) they
+registry with `{"workers": [...]}`. `GET /v1/admin/notebook-workers` lists it,
+`DELETE /v1/admin/notebook-workers/{name}` removes one, and
+`POST /v1/admin/notebook-workers/{name}/refresh` probes one's health again. Under principal auth (service mode) they
 need the `admin:notebook-workers` scope. A personal server has no principal
 auth, so they answer whoever can reach it, the same callers that can already
 run cells there: loopback by default, behind the cross-origin and `Host`
@@ -701,7 +704,7 @@ If you don't set `runtime_id`, the identity is the backend, the name and a hash 
 
 ## Health checks
 
-Every worker exposes `GET /health`. The notebook UI polls this and shows a green/red badge next to cells that use the worker. The badge is advisory: execution does not consult it, so a cell dispatched to a worker that has gone down fails when the connection does, not before.
+Every worker exposes `GET /health`. The notebook UI checks it when the notebook opens, when its workers change and on the Workers panel's **Refresh health**, and a dispatch's result updates it; there is no polling. Cells on that worker show its state as a label (healthy, unknown, missing or attention). The label is advisory. For a notebook with a `uv.lock`, a dispatch asks `/health` first and refuses a worker it cannot reach; otherwise a cell sent to a worker that has gone down fails when the connection does.
 
 ```bash
 curl https://my-worker.example.com/health
@@ -724,7 +727,7 @@ The cell ran in the worker's own Python env, which is missing the dependency. Th
 Cold start. Modal scales the function to zero after `scaledown_window` seconds idle; the first request after a scale-down has to provision a fresh container. Either bump `scaledown_window`, set `min_containers=1` on the `@app.function`, or just expect the latency on the first cell after idle.
 
 **`413 Payload Too Large` from the worker.**
-A cell input is larger than the worker's max-input limit. Default is 2 GiB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Inputs are written to disk as they arrive, so the limit to size against is the worker's disk, not its memory. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
+On a `signed` worker, a cell input is larger than the worker's max-input limit (a `direct` upload has no cap). Default is 2 GiB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Inputs are written to disk as they arrive, so the limit to size against is the worker's disk, not its memory. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
 
 **Fly build fails with `error: failed to fetch wheel` from a workload dep.**
 Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall back to building from source. If your worker needs one, add `build-essential` (plus the dep-specific toolchain) to the Dockerfile via `RUN apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*` before the `uv pip install` step.

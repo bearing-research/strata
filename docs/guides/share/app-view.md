@@ -38,7 +38,7 @@ copy a ready-to-paste snippet, or build it yourself:
 
 `?embed=1` drops the standalone chrome (the title bar and **← Edit** link) so the
 view blends into the host page, and the embedded app posts its content height to
-the parent frame (`{ type: 'strata:embed:resize', height }`) so the optional
+the parent frame (`{ type: 'strata:embed:resize', height, sessionId }`) so the optional
 listener above sizes the iframe with no inner scrollbar. The listener accepts
 heights only from the Strata server's origin, so another frame on the page
 cannot resize it, and sizes only the iframe that sent the height, so several

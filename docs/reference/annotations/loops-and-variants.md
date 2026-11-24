@@ -35,6 +35,12 @@ Key/value parameters:
   Parameters are split on whitespace, so the expression cannot contain a
   space (`until=acc["loss"]<0.05`); use `@loop_until` for anything longer.
 
+A loop with no positive `max_iter` (`loop_missing_max_iter`), no `carry`
+(`loop_missing_carry`) or a `@loop_until` (or `until=`) that is not a Python expression
+(`loop_until_syntax_error`) is an error, and the cell does not run. A `carry`
+that no top-level assignment in the cell rebinds is a warning
+(`loop_carry_unknown`).
+
 ## `@loop_until`
 
 Python expression evaluated after each iteration in the cell's namespace. When

@@ -27,8 +27,10 @@ mode = "ro"
 options = { anon = true }
 ```
 
-Inside a cell, `jfk_weather` is a `pathlib.Path`; the CSV is
-materialized locally by fsspec on first read.
+Inside a cell, `jfk_weather` is a `pathlib.Path` to a local directory
+that holds the mounted file, so `load` reads
+`jfk_weather / "72503014732.csv"`; the CSV is materialized locally by
+fsspec on first read.
 
 ## Cells
 
@@ -42,10 +44,10 @@ materialized locally by fsspec on first read.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Then open `examples/s3_mount` from the Strata home page.
+Then open **S3 Mount (Public Bucket)** from the notebook list on the Strata home page.
 
 Strata reads the bucket in its own process, so an installed Strata
 needs the `s3` extra (`s3fs`): `uv tool install "strata-notebook[s3]"`.

@@ -20,15 +20,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
 import time
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -764,11 +768,261 @@ def capture_web(work_dir: Path) -> None:
 
 
 # --------------------------------------------------------------------------
+# Example thumbnails (WebP, one pair per examples/ notebook)
+# --------------------------------------------------------------------------
+
+EXAMPLES_DIR = REPO_ROOT / "examples"
+EXAMPLE_THUMBS = ASSETS / "examples"
+# Gallery cards show them about 320 CSS px wide; twice that stays sharp on 2x screens.
+THUMB_WIDTH = 640
+
+
+@dataclass(frozen=True)
+class ExampleShot:
+    """How to photograph one example.
+
+    ``focus`` is text in the cell to frame; without it the browser centres the
+    first plot, else table, else markdown. ``needs`` names what a run requires
+    beyond the notebook's own venv (keys of ``NEEDS``). ``in_session`` runs the
+    cells in the server's session rather than with ``strata run``, for a notebook
+    whose results a reopened session does not keep (a write SQL cell's).
+    """
+
+    focus: str | None = None
+    needs: tuple[str, ...] = ()
+    in_session: bool = False
+
+
+def _llm_env() -> dict[str, str]:
+    """A provider key from this shell, as the server's ``STRATA_AI_*`` settings.
+
+    A prompt cell reads its key from the notebook's env or the server's
+    settings; the shell's ``OPENAI_API_KEY`` alone reaches neither.
+    """
+    from strata.notebook.llm.config import _PROVIDER_DEFAULTS
+
+    for env_var, (base_url, model) in _PROVIDER_DEFAULTS.items():
+        if os.environ.get(env_var):
+            return {
+                "STRATA_AI_API_KEY": os.environ[env_var],
+                "STRATA_AI_BASE_URL": base_url,
+                "STRATA_AI_MODEL": model,
+            }
+    return {}
+
+
+NEEDS = {
+    "r": lambda: shutil.which("Rscript") is not None,
+    "llm": lambda: bool(_llm_env()),
+    "docker": lambda: shutil.which("docker") is not None,
+    "alpaca": lambda: bool(os.environ.get("ALPACA_API_KEY")),
+}
+
+# Every notebook under examples/ needs an entry, so a new one cannot ship
+# without a card image by accident.
+EXAMPLE_SHOTS = {
+    "agent_demo": ExampleShot(),
+    "arxiv_classifier": ExampleShot(needs=("llm",)),
+    "caching": ExampleShot(),
+    "data_viewer": ExampleShot(),
+    "each_pipeline": ExampleShot(needs=("docker",)),
+    "iris_classification": ExampleShot(),
+    "library_cells": ExampleShot(),
+    "loop_hill_climb": ExampleShot(),
+    "markdown_showcase": ExampleShot(focus="Two surfaces are tested"),
+    "model_variants": ExampleShot(),
+    "model_variants_sweep": ExampleShot(),
+    "news_alpha_trader": ExampleShot(needs=("llm", "alpaca")),
+    "pandas_basics": ExampleShot(),
+    "r_lm_vs_sklearn": ExampleShot(needs=("r",)),
+    "r_mtcars_analysis": ExampleShot(needs=("r",)),
+    "review_triage": ExampleShot(needs=("llm",)),
+    "s3_mount": ExampleShot(),
+    "sql_orders_report": ExampleShot(focus="Combine the two SQL results", in_session=True),
+    "titanic_ml": ExampleShot(),
+    "widget_playground": ExampleShot(focus="Controls"),
+}
+
+
+def _env_file(path: Path) -> dict[str, str]:
+    """The ``export KEY=VALUE`` lines of a file a README has you ``source``."""
+    env = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("export "):
+            key, _, value = line.removeprefix("export ").partition("=")
+            env[key] = shlex.split(value)[0]
+    return env
+
+
+def _example_services(name: str, notebook: Path, stack: contextlib.ExitStack) -> dict[str, str]:
+    """Start what an example's README has you start, returning the env it exports.
+
+    The arxiv workers stop after the run (the shot needs no worker, and its
+    df-cluster port is MinIO's); each_pipeline's catalog stays up on ``stack``
+    because the server checks the table when it opens the notebook.
+    """
+    if name == "each_pipeline":
+        compose = ["docker", "compose", "-f", str(notebook / "docker-compose.yml")]
+        subprocess.run([*compose, "up", "-d", "--wait", "catalog"], check=True)
+        stack.callback(subprocess.run, [*compose, "down", "-v"], check=True)
+        return _env_file(notebook / "lake.env")
+    if name == "arxiv_classifier":
+        log = notebook / "workers.log"
+        with log.open("wb") as handle:
+            # The ports notebook.toml names, started the way the README says.
+            workers = subprocess.Popen(
+                [str(notebook / "run_local_workers.sh")],
+                cwd=REPO_ROOT,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+        def stop() -> None:
+            os.killpg(workers.pid, signal.SIGINT)
+            workers.wait(timeout=30)
+
+        stack.callback(stop)
+        for port in (9000, 9001):
+            _wait_for_port(workers, port, log, f"worker on {port}")
+    return {}
+
+
+def _copy_tracked(src: Path, dest: Path) -> None:
+    """Copy what git tracks under *src*: what a fresh clone has, without local
+    state such as ``.strata/``, a venv or an ``renv`` library."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", str(src)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout.split(b"\0")
+    for raw in filter(None, listed):
+        file = REPO_ROOT / raw.decode()
+        target = dest / file.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file, target)
+
+
+def _to_thumb(png: Path, dest: Path) -> None:
+    from PIL import Image
+
+    with Image.open(png) as image:
+        height = round(image.height * THUMB_WIDTH / image.width)
+        resized = image.convert("RGB").resize((THUMB_WIDTH, height), Image.Resampling.LANCZOS)
+        resized.save(dest, "WEBP", quality=82, method=6)
+
+
+def capture_examples(work_dir: Path, names: list[str] | None) -> list[Path]:
+    """Run each example in a scratch copy, then photograph it in both themes.
+
+    An example whose requirements are missing, or whose run fails, keeps its
+    previous thumbnail: a card should never show an error.
+    """
+    check_bundle_is_current()
+    available = sorted(p.parent.name for p in EXAMPLES_DIR.glob("*/notebook.toml"))
+    unlisted = sorted(set(available) - EXAMPLE_SHOTS.keys())
+    if unlisted:
+        raise SystemExit(f"add an EXAMPLE_SHOTS entry for: {', '.join(unlisted)}")
+    unknown = sorted(set(names or ()) - set(available))
+    if unknown:
+        raise SystemExit(f"no example named: {', '.join(unknown)}")
+
+    root = work_dir / "examples"
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    raw = work_dir / "example-pngs"
+    shutil.rmtree(raw, ignore_errors=True)
+    raw.mkdir(parents=True)
+    manifest, skipped = [], {}
+    written: list[Path] = []
+    server_env: dict[str, str] = {}
+    with contextlib.ExitStack() as services:
+        for name in names or available:
+            shot = EXAMPLE_SHOTS[name]
+            missing = [need for need in shot.needs if not NEEDS[need]()]
+            if missing:
+                skipped[name] = f"needs {', '.join(missing)}"
+                continue
+            notebook = root / name
+            _copy_tracked(EXAMPLES_DIR / name, notebook)
+            with contextlib.ExitStack() as run_only:
+                try:
+                    env = _example_services(name, notebook, run_only)
+                except (subprocess.CalledProcessError, SystemExit) as exc:
+                    skipped[name] = f"its services did not start: {exc}"
+                    continue
+                if "llm" in shot.needs or shot.in_session:
+                    # A headless `strata run` reads no server settings, so an LLM key
+                    # would have to sit in the notebook's env on disk. The server
+                    # takes it from its environment: run these cells there.
+                    server_env.update(env)
+                    if "llm" in shot.needs:
+                        server_env.update(_llm_env())
+                    manifest.append(
+                        {"name": name, "path": str(notebook), "focus": shot.focus, "run": True}
+                    )
+                    continue
+                if name == "each_pipeline":
+                    # Its catalog outlives the run: hand the teardown to the outer stack.
+                    services.push(run_only.pop_all())
+                run = subprocess.run(
+                    [sys.executable, "-m", "strata.cli", "run", str(notebook)],
+                    cwd=REPO_ROOT,
+                    env={**os.environ, **env},
+                )
+            server_env.update(env)
+            if run.returncode != 0:
+                skipped[name] = f"`strata run` exited {run.returncode}"
+                continue
+            manifest.append({"name": name, "path": str(notebook), "focus": shot.focus})
+
+        manifest_path = work_dir / "examples.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        if manifest:
+            port = _free_port()
+            proc = serve(root, port, server_env)
+            try:
+                subprocess.run(
+                    [
+                        "node",
+                        "scripts/capture-example-thumbs.mjs",
+                        "--base-url",
+                        f"http://127.0.0.1:{port}",
+                        "--manifest",
+                        str(manifest_path),
+                        "--out",
+                        str(raw),
+                    ],
+                    cwd=REPO_ROOT / "frontend",
+                    check=True,
+                )
+            finally:
+                proc.terminate()
+                proc.wait(timeout=30)
+    EXAMPLE_THUMBS.mkdir(parents=True, exist_ok=True)
+    for png in sorted(raw.glob("*.png")):
+        dest = EXAMPLE_THUMBS / f"{png.stem}.webp"
+        _to_thumb(png, dest)
+        written.append(dest)
+
+    for name, reason in skipped.items():
+        print(f"skipped {name}: {reason}", file=sys.stderr)
+    return written
+
+
+# --------------------------------------------------------------------------
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", choices=("all", "tui", "web", "anim"), default="all")
+    parser.add_argument("--only", choices=("all", "tui", "web", "anim", "examples"), default="all")
+    parser.add_argument(
+        "--example",
+        action="append",
+        dest="examples",
+        help="With --only examples: photograph just this one (repeatable)",
+    )
     parser.add_argument(
         "--work-dir",
         default="/tmp/strata-docs-shots",
@@ -785,6 +1039,8 @@ def main() -> None:
         written += sorted(ASSETS.glob("*.png"))
     if args.only in ("all", "anim"):
         written += capture_animations(Path(args.work_dir) / "frames")
+    if args.only in ("all", "examples"):
+        written += capture_examples(Path(args.work_dir), args.examples)
 
     for path in written:
         print(f"{path.relative_to(REPO_ROOT)}  {path.stat().st_size // 1024} KB")

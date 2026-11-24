@@ -49,11 +49,11 @@ token in `STRATA_DF_CLUSTER_TOKEN` when that is set.
 ./examples/arxiv_classifier/run_local_workers.sh
 
 # Terminal 2: start Strata
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 
 # Terminal 3: open the notebook in the UI
 # http://localhost:8765
-# Click "Open Notebook" and select examples/arxiv_classifier
+# Under "Open Notebook", pick "arXiv Paper Classifier (distributed)"
 ```
 
 Once the notebook is open, run all cells. You should see:

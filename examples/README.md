@@ -35,9 +35,9 @@ strata run examples/iris_classification
 | Notebook | What it shows |
 |---|---|
 | [`caching/`](caching/) | A two-minute tutorial: what the cache saves, and what an edit runs again. |
-| [`pandas_basics/`](pandas_basics/) | Linear Pandas pipeline: load, select, group, summarize. Smallest end-to-end notebook. |
+| [`pandas_basics/`](pandas_basics/) | Core pandas operations, one cell per concept: a small fan-out from one dataset through select, group, pivot, merge and summarize, with per-cell unit tests. |
 | [`iris_classification/`](iris_classification/) | sklearn classifier on the Iris dataset. Shows how artifacts flow between cells. |
-| [`titanic_ml/`](titanic_ml/) | Survival prediction end-to-end: load, feature-engineer, train, score. |
+| [`titanic_ml/`](titanic_ml/) | Survival prediction end-to-end: load, feature-engineer, train three classifiers, evaluate the best. |
 
 ### Feature showcases
 
@@ -45,12 +45,12 @@ strata run examples/iris_classification
 |---|---|
 | [`markdown_showcase/`](markdown_showcase/) | Markdown cells, prose-and-code interleaving. |
 | [`data_viewer/`](data_viewer/) | Interactive DataFrame viewer: paging and click-to-sort over a 2,000-row frame. |
-| [`widget_playground/`](widget_playground/) | `# widget` cell: a slider/number/dropdown control panel driving a DataFrame. |
+| [`widget_playground/`](widget_playground/) | A widget cell (`controls.widget`): a slider/number/dropdown control panel driving a DataFrame and a chart. |
 | [`library_cells/`](library_cells/) | A cell exports `def`s/`class`es as a shared library across the notebook. |
 | [`model_variants/`](model_variants/) | `# @variant` annotation: three classifiers sharing one DAG slot. |
 | [`model_variants_sweep/`](model_variants_sweep/) | Sweep mode: every variant runs and one downstream cell compares them, plus a `# @per_variant` fan-out. |
 | [`loop_hill_climb/`](loop_hill_climb/) | `# @loop` annotation: iterative refinement with carried state. |
-| [`each_pipeline/`](each_pipeline/) | `# @each` and `# @write_table ... sync`: run once per file and keep a table in a REST catalog in step. Needs Docker. |
+| [`each_pipeline/`](each_pipeline/) | `# @each` and `# @write_table ... sync`: run once per file and keep a table in a REST catalog in step. Needs Docker and the `s3` and `sql` extras. |
 | [`s3_mount/`](s3_mount/) | `# @mount` annotation: read data from an S3 bucket as a local `Path`. |
 | [`sql_orders_report/`](sql_orders_report/) | SQL cells over a local SQLite file; SQL and Python interleave through the same DAG. Needs the `sql` and `sql-sqlite` extras. |
 | [`review_triage/`](review_triage/) | Prompt cell with `@output_schema`: structured LLM output validated against JSON Schema. |
@@ -63,7 +63,7 @@ strata run examples/iris_classification
 | Notebook | What it shows |
 |---|---|
 | [`news_alpha_trader/`](news_alpha_trader/) | Multi-cell finance pipeline: news, sentiment, signals, trades. |
-| [`arxiv_classifier/`](arxiv_classifier/) | Distributed embedding + clustering over arXiv abstracts. Larger DAG. |
+| [`arxiv_classifier/`](arxiv_classifier/) | Distributed pipeline over arXiv abstracts: DataFusion aggregation, GPU embeddings, a topic classifier and two prompt cells. Needs two workers and an LLM key. |
 
 ---
 

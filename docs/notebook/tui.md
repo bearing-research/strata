@@ -214,7 +214,8 @@ If the viewer knows the notebook's path (you passed `--notebook`, or it
 attached a session from the list or the picker), press `r` to reopen it as a
 new session and keep watching. Attached with `--session ID`, it does not know
 the path: run `strata watch PATH` (or open the notebook in the web UI) to start
-a new session.
+a new session. The viewer [`strata agent`](agent.md) attaches is attached by id
+too, so there `r` cannot reopen it: run `strata agent` again.
 
 ## Options
 
