@@ -4618,6 +4618,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell imports its own <code>datasets</code> and <code>tables</code>.</strong> Every process that ran a cell put
+  Strata's notebook package first on <code>sys.path</code>, so its <code>datasets.py</code> and <code>tables.py</code>
+  shadowed Hugging Face <code>datasets</code> and PyTables, and transformers' <code>Trainer</code> failed to
+  import. They start with <code>python -P</code> now; a script a cell test starts imports its
+  neighbours again. (#1659)</li>
 <li><strong>A scan filtered on a NaN value plans.</strong> A filter such as <code>value = NaN</code> failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)</li>
