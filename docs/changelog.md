@@ -835,6 +835,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   lists whose `cells/` file was gone ran with no code and passed `strata validate`. It is now
   the error `cell_file_missing` until the file is restored or the cell rewritten, and a REST
   edit refreshes every tab's diagnostics as an editor edit does. (#1667)
+- **A seed that ran last session reopens ready.** A SQL write cell with no `-- @cache` was
+  keyed on the session, so every reopen of `sql_orders_report` showed the seed, and every
+  cell after it, stale, and Run all seeded again. A write cell is now also reused in a
+  later session while it is the only write cell on its SQLite file and the file is exactly
+  as its run left it. A deleted or changed file, a second write cell on it, and any other
+  database run it again in a new session, as before; explicit `session`, `forever` and
+  `ttl` keep their meaning. (#1672)
 - **A SQL `@name` must be a variable name.** One that was not (`top-orders`, `Hottest
   stations`) fell back to `result` without a word, so a cell reading the name found nothing.
   It is now the error `name_unreadable`, as on a prompt cell, and both refuse a keyword such as
