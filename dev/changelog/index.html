@@ -4618,6 +4618,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Run All gives what running each cell gives when cells share functions.</strong> In a Run
+  All batch, a cell that changed an upstream value without naming it (by calling a
+  function that appends to it, or through a list holding it) passed the change to later
+  cells. A function from a cell run on its own, or from a cached cell, failed with
+  <code>NameError</code> when called, and two calls to it shared a change. Each cell now sees the
+  stored values, as it does run alone. (#1660)</li>
 <li><strong>A cell imports its own <code>datasets</code> and <code>tables</code>.</strong> Every process that ran a cell put
   Strata's notebook package first on <code>sys.path</code>, so its <code>datasets.py</code> and <code>tables.py</code>
   shadowed Hugging Face <code>datasets</code> and PyTables, and transformers' <code>Trainer</code> failed to
