@@ -36,7 +36,7 @@
 
 </div>
 
-R cells take a subset of these: see [R annotations](https://bearingresearch.com/strata/dev/reference/annotations/r/). SQL cells take six of them,
+R cells take a subset of these: see [R annotations](https://bearingresearch.com/strata/dev/reference/annotations/r/). SQL cells take eight of them,
 written as SQL comments (`-- @key value`): see [What a SQL cell reads](https://bearingresearch.com/strata/dev/reference/annotations/sql/#what-a-sql-cell-reads).
 
 ## How annotations are read

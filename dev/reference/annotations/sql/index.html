@@ -3164,12 +3164,22 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 <td><a href="../python/#mount"><code>-- @mount &lt;name&gt; &lt;uri&gt; ro</code></a></td>
 <td>A mount a DuckDB connection's <code>mounts</code> can name, read-only.</td>
 </tr>
+<tr>
+<td><a href="../../../guides/cells/loops-and-variants/#variant-cells"><code>-- @variant &lt;group&gt; &lt;name&gt;</code></a></td>
+<td>A member of a variant group, beside cells of any kind.</td>
+</tr>
+<tr>
+<td><a href="../python/#stochastic"><code>-- @stochastic</code></a></td>
+<td>Always run, and keep every run's result under its own run.</td>
+</tr>
 </tbody>
 </table>
-<p>These six are the only ones a SQL cell acts on. Any other annotation, such as
+<p>These eight are the only ones a SQL cell acts on. Any other annotation, such as
 <code>-- @worker</code> or <code>-- @timeout</code>, does nothing on a SQL cell, and validation warns
 about it (<code>annotation_not_for_sql</code>). A SQL cell runs in the server, so it has no
-worker, timeout or environment of its own.</p>
+worker, timeout or environment of its own. <code>-- @each</code> and <code>-- @per_variant</code> run
+Python cells only: on a SQL cell each is an error (<code>each_not_python</code>,
+<code>per_variant_not_python</code>), and the cell does not run.</p>
 <h2 id="sql"><code>@sql</code><a class="headerlink" href="#sql" title="Permanent link">&para;</a></h2>
 <p>Binds a SQL cell to a named connection. The cell is SQL by its kind (<code>language = "sql"</code>), not by this line.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">-- @sql connection=warehouse</span>

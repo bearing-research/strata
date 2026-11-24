@@ -804,6 +804,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   is kept. A run now checks only what it stores: what other cells read, a scratchpad's
   unread outputs, a leaf's under `strata run`, and a loop's carry. Workers receive the list
   as `stored_vars`. (#1661)
+- **SQL annotation validation says what a SQL cell reads.** It warned that `-- @variant`,
+  `-- @per_variant` and `-- @stochastic` do nothing there. `@variant` works and no longer
+  warns; `@stochastic` now keeps every run's result under its own run, as in Python;
+  `@per_variant`, which never fanned out outside Python and left its reader an empty dict, is
+  the error `per_variant_not_python` on SQL, R and prompt cells. (#1662)
 - **A scan filtered on a NaN value plans.** A filter such as `value = NaN` failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)

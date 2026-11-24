@@ -4628,6 +4628,11 @@ exhaustive commit history.</p>
   is kept. A run now checks only what it stores: what other cells read, a scratchpad's
   unread outputs, a leaf's under <code>strata run</code>, and a loop's carry. Workers receive the list
   as <code>stored_vars</code>. (#1661)</li>
+<li><strong>SQL annotation validation says what a SQL cell reads.</strong> It warned that <code>-- @variant</code>,
+  <code>-- @per_variant</code> and <code>-- @stochastic</code> do nothing there. <code>@variant</code> works and no longer
+  warns; <code>@stochastic</code> now keeps every run's result under its own run, as in Python;
+  <code>@per_variant</code>, which never fanned out outside Python and left its reader an empty dict, is
+  the error <code>per_variant_not_python</code> on SQL, R and prompt cells. (#1662)</li>
 <li><strong>A scan filtered on a NaN value plans.</strong> A filter such as <code>value = NaN</code> failed the
   scan while the planner pruned files, unless an unfiltered scan of the snapshot had run
   first. The filter now prunes row groups only. (#1657)</li>

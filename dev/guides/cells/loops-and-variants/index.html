@@ -3629,11 +3629,11 @@ supported. The validator warns about the mistakes: <code>per_variant_no_sweep_so
 (nothing to fan out over), <code>per_variant_ambiguous_group</code> (bare form, ≥2 groups),
 <code>per_variant_unknown_group</code> (the named group is not a sweep the cell reads),
 <code>per_variant_on_variant_member</code> (a cell can't both be a variant and fan out). A
-group of one variant is a note (<code>per_variant_group_of_one</code>). Two are errors that
-keep the cell from running: <code>per_variant_write_table_overwrite</code> and
-<code>per_variant_write_table_sync</code> (each variant would remove the rows of the one
-before it). The named group is part of the cell's cache key, so switching it runs the
-instances again.</p>
+group of one variant is a note (<code>per_variant_group_of_one</code>). Three are errors that
+keep the cell from running: <code>per_variant_not_python</code> (only a Python cell fans out),
+<code>per_variant_write_table_overwrite</code> and <code>per_variant_write_table_sync</code> (each variant
+would remove the rows of the one before it). The named group is part of the cell's
+cache key, so switching it runs the instances again.</p>
 <h3 id="defines-contract">Defines contract<a class="headerlink" href="#defines-contract" title="Permanent link">&para;</a></h3>
 <p>All variants in a group must produce the same set of top-level
 bindings. The validator compares each variant's <code>defines</code> against its

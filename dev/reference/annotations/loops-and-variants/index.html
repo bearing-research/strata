@@ -3146,7 +3146,8 @@ several cells can fill the same slot in the DAG. See
 <a href="../../../guides/cells/loops-and-variants/#variant-cells">Variant Cells</a>.</p>
 <h2 id="per_variant"><code>@per_variant</code><a class="headerlink" href="#per_variant" title="Permanent link">&para;</a></h2>
 <p><code># @per_variant</code> runs a downstream cell once per variant, bound to that variant's
-value instead of the whole <code>{variant: value}</code> dict. See
+value instead of the whole <code>{variant: value}</code> dict. Only a Python cell fans out:
+on a SQL, R or prompt cell it is the error <code>per_variant_not_python</code>. See
 <a href="../../../guides/cells/loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant">Fan-out</a>.</p>
 
 

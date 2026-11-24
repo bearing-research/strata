@@ -33,11 +33,15 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 | [`-- @name <identifier>`](#name) | The output variable (default `result`). |
 | [`-- @after <cell-id>`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An ordering-only edge from another cell, such as the one that writes the database this cell reads. |
 | [`-- @mount <name> <uri> ro`](https://bearingresearch.com/strata/dev/reference/annotations/python/#mount) | A mount a DuckDB connection's `mounts` can name, read-only. |
+| [`-- @variant <group> <name>`](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells) | A member of a variant group, beside cells of any kind. |
+| [`-- @stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic) | Always run, and keep every run's result under its own run. |
 
-These six are the only ones a SQL cell acts on. Any other annotation, such as
+These eight are the only ones a SQL cell acts on. Any other annotation, such as
 `-- @worker` or `-- @timeout`, does nothing on a SQL cell, and validation warns
 about it (`annotation_not_for_sql`). A SQL cell runs in the server, so it has no
-worker, timeout or environment of its own.
+worker, timeout or environment of its own. `-- @each` and `-- @per_variant` run
+Python cells only: on a SQL cell each is an error (`each_not_python`,
+`per_variant_not_python`), and the cell does not run.
 
 ## `@sql`
 
