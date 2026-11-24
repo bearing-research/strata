@@ -805,6 +805,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   shadowed Hugging Face `datasets` and PyTables, and transformers' `Trainer` failed to
   import. They start with `python -P` now; a script a cell test starts imports its
   neighbours again. (#1659)
+- **A cell whose file is missing is an error, not an empty cell.** A cell `notebook.toml`
+  lists whose `cells/` file was gone ran with no code and passed `strata validate`. It is now
+  the error `cell_file_missing` until the file is restored or the cell rewritten, and a REST
+  edit refreshes every tab's diagnostics as an editor edit does. (#1667)
 - **The shared-object warning names only outputs that are stored.** `fig, ax =
   plt.subplots()` in a cell nobody reads warned that the two share a Figure, though neither
   is kept. A run now checks only what it stores: what other cells read, a scratchpad's

@@ -677,6 +677,10 @@ class CellState(BaseModel):
 
     id: str = Field(..., description="Cell ID")
     source: str = Field(default="", description="Cell source code")
+    file_missing: str | None = Field(
+        default=None,
+        description="The source file notebook.toml names when it was not there to read",
+    )
     test_source: str = Field(
         default="",
         description="pytest source for this cell's unit tests (cells/{id}.test.py)",

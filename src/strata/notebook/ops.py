@@ -106,6 +106,8 @@ class CellView(BaseModel):
     references: list[str] = Field(default_factory=list)
     upstream_ids: list[str]
     downstream_ids: list[str]
+    # ``cells/<file>`` when notebook.toml names a file that is not there: no empty cell.
+    file_missing: str | None = None
     outputs: list[OutputView]
     console_stdout: str
     console_stderr: str
@@ -1341,6 +1343,7 @@ def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
         references=list(data.get("references") or []),
         upstream_ids=list(data.get("upstream_ids") or []),
         downstream_ids=list(data.get("downstream_ids") or []),
+        file_missing=data.get("file_missing"),
         outputs=[_output_view_from_wire(output) for output in data.get("display_outputs") or []],
         console_stdout=data.get("console_stdout") or "",
         console_stderr=data.get("console_stderr") or "",

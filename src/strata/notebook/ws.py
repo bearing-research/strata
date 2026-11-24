@@ -1974,6 +1974,7 @@ async def _handle_cell_source_update(
                 cell_in_session.source, cell_in_session.language
             ) != _weighed_inputs(source, cell_in_session.language)
             cell_in_session.source = source
+            cell_in_session.file_missing = None  # written just now
             # Else broadcasts name the previous author until the next reload.
             cell_in_session.updated_by = author
 

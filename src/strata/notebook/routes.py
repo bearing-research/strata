@@ -2208,10 +2208,13 @@ async def update_cell_source(
         cell_in_session = session.notebook_state.get_cell(cell_id)
         if cell_in_session:
             cell_in_session.source = req.source
+            cell_in_session.file_missing = None  # written just now
             # Or every read until the next reload reports the previous author.
             cell_in_session.updated_by = author
 
         session.re_analyze_cell(cell_id)
+        # As a WS edit does: else every tab keeps the diagnostics of the text before.
+        session._run_annotation_validation()
 
         # Without this, cells keep "ready" and the cascade planner won't trigger.
         await session.compute_staleness_async(executing=running)
