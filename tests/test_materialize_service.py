@@ -322,6 +322,12 @@ class TestComputeIdentityProvenance:
         empty = service.compute_identity_provenance("cat.ns.t", 42, [], [], 0, "r")
         assert star != empty
 
+    def test_one_fields_text_cannot_run_into_the_next(self, service):
+        # Joined with labels and no separator, these two scans hashed alike (PROV-3).
+        a = service.compute_identity_provenance("t", 1, None, [], None, "A@5schema:0reading:B")
+        b = service.compute_identity_provenance("t@1schema:Nonereading:A", 5, None, [], 0, "B")
+        assert a != b
+
 
 class TestRebuildArtifactId:
     def test_fresh_miss_uses_new_id(self, service):

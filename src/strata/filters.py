@@ -87,7 +87,8 @@ class Filter:
 # type-distinguishing.
 #
 # Edge case: a genuine string starting with one of these tags round-trips to
-# the richer type. Accepted, since such literals are rare.
+# the richer type. Accepted, since such literals are rare. The fingerprint tells
+# the two apart, but a request's string arrives as the richer type already.
 _FILTER_VALUE_DECODERS = {
     "__datetime__": datetime.fromisoformat,
     "__date__": date.fromisoformat,
@@ -135,24 +136,42 @@ def deserialize_filter_value(value: str | bool | int | float) -> FilterValue:
     return value
 
 
+# The types serialize_filter_value encodes, bool before int and datetime before date.
+_VALUE_TYPES = (bool, int, float, str, datetime, date, time_of_day, Decimal, uuid.UUID, bytes)
+
+
+def _value_type(value: FilterValue) -> str:
+    """The type a value is encoded as: a subclass (numpy.float64, a StrEnum) is its base."""
+    for kind in _VALUE_TYPES:
+        if isinstance(value, kind):
+            return kind.__name__
+    raise TypeError(f"Unsupported filter value type: {type(value).__name__}")
+
+
 def compute_filter_fingerprint(filters: list[Filter] | None) -> str:
     """Compute an order-independent fingerprint for cache keys and provenance.
 
     Returns:
-        16-character hex string, or ``"nofilter"`` for None or empty.
+        A SHA-256 hex digest, or ``"nofilter"`` for None or empty.
     """
     if not filters:
         return "nofilter"
 
     # Canonical JSON over explicit fields, so distinct (column, op, value)
     # triples can't collide: concatenation maps both (column='a>', op='=') and
-    # (column='a', op='>=') to 'a>='. The value encoding keeps str '1' != int 1.
+    # (column='a', op='>=') to 'a>='. The value's type is a field of its own, so
+    # str '1' != int 1, and a string spelling a tagged value is not that value.
     items = sorted(
         (
-            {"column": f.column, "op": f.op.value, "value": serialize_filter_value(f.value)}
+            {
+                "column": f.column,
+                "op": f.op.value,
+                "type": _value_type(f.value),
+                "value": serialize_filter_value(f.value),
+            }
             for f in filters
         ),
         key=lambda d: json.dumps(d, sort_keys=True),
     )
     combined = json.dumps(items, separators=(",", ":"), sort_keys=True)
-    return hashlib.md5(combined.encode()).hexdigest()[:16]
+    return hashlib.sha256(combined.encode()).hexdigest()

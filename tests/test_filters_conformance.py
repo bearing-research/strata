@@ -82,6 +82,27 @@ def test_fingerprint_distinguishes_value_type(mod):
 
 
 @BOTH
+def test_fingerprint_a_string_spelling_a_tagged_value_is_not_that_value(mod):
+    spelled = mod.compute_filter_fingerprint(
+        [mod.Filter("d", mod.FilterOp.EQ, "__date__:2024-01-01")]
+    )
+    assert spelled != mod.compute_filter_fingerprint(
+        [mod.Filter("d", mod.FilterOp.EQ, date(2024, 1, 1))]
+    )
+
+
+@BOTH
+def test_fingerprint_types_a_subclass_value_as_its_base(mod):
+    # numpy.float64 is a float, a StrEnum a str: sent as the base, decoded as the base.
+    class Measured(float):
+        pass
+
+    assert mod.compute_filter_fingerprint(
+        [mod.Filter("x", mod.FilterOp.EQ, Measured(1.5))]
+    ) == mod.compute_filter_fingerprint([mod.Filter("x", mod.FilterOp.EQ, 1.5)])
+
+
+@BOTH
 def test_fingerprint_order_independent(mod):
     f1 = mod.Filter("x", mod.FilterOp.EQ, 1)
     f2 = mod.Filter("y", mod.FilterOp.LT, 2)

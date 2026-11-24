@@ -42,7 +42,8 @@ in [`README.md`](README.md).
 - **Phase 6 (encodings and naming):** `test_encoding_properties.py` checks PROV-3 for
   transform specs and ACL-2 against an oracle of which URIs load one table. It found
   finding 22 (a deny matched one spelling of a name, and Glue and Hive resolve names
-  case-insensitively); fixed. The `scan@v1` identity hash is a lead (PROV-3).
+  case-insensitively); fixed. The `scan@v1` identity hash was a lead then (PROV-3),
+  finding 34 since.
 - **Phase 7 (replays):** four leads replayed against the real code. LR-4, BAT-2 and
   CK-4 held (findings 23, 24 and 25), all fixed; MD-1's short read did not (both S3
   readers raise on a truncated body). `test_bounds_pruning_properties.py` then checked
@@ -83,6 +84,10 @@ in [`README.md`](README.md).
   by construction (STR-4). Multi-node ownership held as finding 33, fixed: a stream's
   claim lapsed a TTL after it was created while its GETs kept the stream alive, so a
   retry on another node got 404; each node now renews its live streams' claims.
+  PROV-3 held as finding 34, fixed: the `scan@v1` identity hash joined its fields with
+  no separator, and the filter fingerprint could not tell a string spelling a date from
+  the date. Random scans never build a boundary collision, so the property pins both
+  pairs as examples; a "spelled" pair mode finds the second unaided.
 
 ## Conventions
 
@@ -153,6 +158,5 @@ property, the replays of what it finds, then the fixes.
 3. **Done: a wider Run All property** (BAT-1, BAT-2). Module state, `@nocache`, `@loop`
    and `@timeout` (a worker's single-run path) in the generator; findings 28, 29, 30. A
    real remote worker is not covered.
-4. **Smaller open items.** MD-1, LR-3, the passthrough path (STR-4) and multi-node
-   ownership (STR-5) done (findings 31, 32, 33). Left: the `scan@v1` identity hash
-   (PROV-3, a decision: encoding its fields as JSON re-keys every stored scan once).
+4. **Done: smaller open items.** MD-1, LR-3, the passthrough path (STR-4), multi-node
+   ownership (STR-5) and the `scan@v1` identity hash (PROV-3): findings 31 to 34.

@@ -298,7 +298,7 @@ class CacheKey:
         """
         if columns is None:
             return "*"
-        return hashlib.sha256(json.dumps(columns).encode()).hexdigest()[:16]
+        return hashlib.sha256(json.dumps(columns).encode()).hexdigest()
 
 
 @dataclass
