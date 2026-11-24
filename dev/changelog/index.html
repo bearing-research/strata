@@ -4618,6 +4618,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>In a multi-node deployment, a stream stays reachable from every node while it lives.</strong>
+  A node's claim on a stream expired one <code>STRATA_STREAM_STATE_TTL_SECONDS</code> after the
+  stream was created, while the stream lived on as its GETs re-armed it, so a retry
+  routed to another node got <code>404</code>. Each node now renews its live streams' claims three
+  times per TTL and removes expired ones (#1670).</li>
 <li><strong>A local run's close no longer ends another process's run of its cell.</strong> A run's
   lease owner was its process (<code>hostname:pid</code>), so two processes on one notebook store
   with the same hostname and pid (two containers given one hostname, both pid 1) shared

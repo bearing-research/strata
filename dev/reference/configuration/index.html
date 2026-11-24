@@ -4539,8 +4539,9 @@ database, and a node asked for a sibling's stream answers <code>307</code> point
 owner instead of <code>404</code>. This removes the need for session affinity on the
 stream-fetch step; the URL must be one clients can actually reach.</p>
 <p>Leave it unset for a single-node deployment: nothing is written or read, so
-there is no cost. Claims expire with <code>STRATA_STREAM_STATE_TTL_SECONDS</code>, which
-is what stops a node that died from being advertised indefinitely.</p>
+there is no cost. A node renews the claims of the streams it holds three times
+per <code>STRATA_STREAM_STATE_TTL_SECONDS</code>, and a claim expires a TTL after its last
+renewal, which is what stops a node that died from being advertised indefinitely.</p>
 <p>Note this makes stream <em>fetches</em> routable, not stream <em>survival</em>. A node lost
 mid-stream still ends that stream; the artifact behind it is durable and its
 build is reclaimable by another node, so the client re-requests and gets a
