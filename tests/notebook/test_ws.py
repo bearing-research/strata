@@ -1904,6 +1904,29 @@ async def test_cell_source_update(notebook_session):
 
 
 @pytest.mark.asyncio
+async def test_an_edit_tells_a_live_app_view_the_cell_is_hidden(notebook_session):
+    """The app view filters on ``app_hidden``, so the edit's frame must carry it."""
+    from strata.notebook.ws import _handle_cell_source_update
+
+    _, session = notebook_session
+    cell_id = session.notebook_state.cells[0].id
+    editor, execution_state = _make_fake_ws(session)
+    viewer, _ = _make_fake_ws(session)
+
+    await _handle_cell_source_update(
+        cast(WebSocket, editor),
+        session,
+        {"cell_id": cell_id, "source": "# @app hide\nx = 2"},
+        execution_state,
+        session.id,
+    )
+
+    [frame] = viewer.frames_of("dag_update")
+    cells = {c["id"]: c for c in frame["payload"]["cells"]}
+    assert cells[cell_id]["annotations"]["app_hidden"] is True
+
+
+@pytest.mark.asyncio
 async def test_cell_source_update_carries_the_text_to_other_tabs(notebook_session):
     """A second tab on the session gets the edited text; the editing tab does not.
 

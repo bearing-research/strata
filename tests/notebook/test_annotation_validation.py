@@ -792,8 +792,7 @@ class TestUnknownAnnotation:
         read = set(strata_vocabulary().keys) | set(
             re.findall(r'key == "(\w+)"', inspect.getsource(analyze_prompt_cell))
         )
-        # Readers that match their own directive, like ``@app hide`` in export.py and
-        # AppView.vue, or ``@live`` in WidgetCell.vue.
+        # Readers that match their own directive, like ``@live`` in WidgetCell.vue.
         root = Path(__file__).resolve().parents[2]
         sources = [
             *(root / "src/strata/notebook").rglob("*.py"),
@@ -803,7 +802,7 @@ class TestUnknownAnnotation:
         own_regex = {
             key for source in sources for key in re.findall(r"#\\s\*@(\w+)", source.read_text())
         }
-        assert {"app", "live"} <= own_regex
+        assert "live" in own_regex
         assert read | own_regex == ANNOTATION_KEYS
 
     def test_app_hide_is_not_flagged(self):

@@ -400,6 +400,7 @@ class CellAnalysisModel(WsPayload):
     variant_group: str | None = None
     variant_name: str | None = None
     variant_active: bool | None = None
+    annotations: AnnotationsWirePayload | None = None
     is_module_cell: bool = False
     module_exports: list[ModuleExportModel] | None = None
     # Carried on the edit frame, else the browser shows the previous author until reload.

@@ -853,6 +853,34 @@ def test_app_view_snapshot_hides_app_hidden_cell(tmp_path: Path) -> None:
     assert "should_not_appear" not in rendered
 
 
+@pytest.mark.parametrize(
+    ("language", "source", "hidden"),
+    [
+        ("sql", "-- @sql connection=db\n-- @app hide\nSELECT 1\n", True),
+        ("python", "x = 1\n# @app hide\n", False),
+        ("python", 's = """\n# @app hide\n"""\n', False),
+        ("markdown", "# @app hide\n# A heading\n", True),
+        ("markdown", "# @app hide (setup notes)\n", True),
+        ("python", "# @app show\nx = 1\n", False),
+    ],
+)
+def test_app_hide_is_read_from_the_annotation_block(language, source, hidden) -> None:
+    """As every annotation: in the cell's own comment marker, before its code."""
+    from strata.notebook.annotations import parse_annotations
+    from strata.notebook.export import _is_app_cell
+    from strata.notebook.models import CellState
+
+    cell = CellState(
+        id="c",
+        source=source,
+        language=language,
+        display_outputs=[{"content_type": "text/markdown", "markdown": "m"}],
+    )
+
+    assert parse_annotations(source, language).to_wire_payload()["app_hidden"] is hidden
+    assert _is_app_cell(cell) is not hidden
+
+
 def test_app_view_snapshot_excludes_prompt_cells(tmp_path: Path) -> None:
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "p1", language="prompt")
@@ -885,3 +913,28 @@ def test_export_hides_an_unnamed_pandas_index(tmp_path: Path) -> None:
         {"region": "e", "units": 3},
         {"region": "w", "units": 4},
     ]
+
+
+@pytest.mark.parametrize(
+    ("language", "source", "line"),
+    [
+        ("python", "x = 1\n# @app hide\n", 2),
+        ("sql", "-- @sql connection=db\nSELECT 1\n-- @app hide\n", 3),
+        ("markdown", "Internal notes\n# @app hide\n", 2),
+    ],
+)
+def test_an_app_line_after_the_code_warns_that_it_is_not_read(language, source, line) -> None:
+    """Read anywhere before, so a cell that relied on it is told rather than shown."""
+    from strata.notebook.annotation_validation import validate_cell_annotations
+    from strata.notebook.models import CellState, ConnectionSpec, NotebookState
+
+    cell = CellState(id="c", source=source, language=language)
+    state = NotebookState(
+        id="nb", cells=[cell], connections=[ConnectionSpec(name="db", driver="sqlite")]
+    )
+
+    stray = [
+        d for d in validate_cell_annotations(cell, state) if d.code == "app_outside_annotations"
+    ]
+
+    assert [(d.severity, d.line) for d in stray] == [("warn", line)]

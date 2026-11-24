@@ -2005,6 +2005,8 @@ async def _handle_cell_source_update(
                 "variant_active": cell.variant_active,
                 "created_by": cell.created_by,
                 "updated_by": cell.updated_by,
+                # As a cell's payload carries them; the app view reads ``app_hidden``.
+                "annotations": parse_annotations(cell.source, cell.language).to_wire_payload(),
             }
             if cell.language == CellLanguage.PYTHON:
                 plan = build_module_export_plan(cell.source)
@@ -2107,6 +2109,8 @@ async def _handle_variant_set_active(
                 "variant_active": cell.variant_active,
                 "created_by": cell.created_by,
                 "updated_by": cell.updated_by,
+                # As a cell's payload carries them; the app view reads ``app_hidden``.
+                "annotations": parse_annotations(cell.source, cell.language).to_wire_payload(),
             }
             if cell.language == CellLanguage.PYTHON:
                 plan = build_module_export_plan(cell.source)

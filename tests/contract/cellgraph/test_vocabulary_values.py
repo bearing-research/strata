@@ -7,6 +7,7 @@ which ``parse_annotations`` reads leniently (``@nocache maybe`` is on).
 
 from __future__ import annotations
 
+import dataclasses
 import os
 
 import pytest
@@ -97,7 +98,9 @@ def _corpus():
 
 def _check(language, source):
     values, directives = parse_values(source, language)
-    assert annotations_from(values, directives) == parse_annotations(source, language), (
+    # ``app_hidden`` came after the legacy parser, whose readers had their own regex.
+    read = dataclasses.replace(annotations_from(values, directives), app_hidden=False)
+    assert read == parse_annotations(source, language), (
         language,
         source,
     )

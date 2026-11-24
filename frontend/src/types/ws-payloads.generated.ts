@@ -29,6 +29,7 @@ export interface AnnotationsWirePayload {
   tables: Record<string, unknown>[]
   loop?: LoopWirePayload | null
   variant?: VariantWirePayload | null
+  app_hidden: boolean
 }
 
 export interface CascadeProgressPayload {
@@ -64,6 +65,7 @@ export interface CellAnalysisModel {
   variant_group?: string | null
   variant_name?: string | null
   variant_active?: boolean | null
+  annotations?: AnnotationsWirePayload | null
   is_module_cell: boolean
   module_exports?: ModuleExportModel[] | null
   created_by?: string | null

@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { useNotebook } from '../stores/notebook'
 import WidgetCell from '../components/WidgetCell.vue'
 import DataTable from '../components/DataTable.vue'
+import { appCells as shownInApp } from '../utils/appCells'
 import { parseArtifactRef } from '../utils/artifactRef'
 import { renderMarkdownToHtml } from '../utils/markdown'
 import { provenanceLine } from '../utils/provenanceLine'
@@ -72,20 +73,7 @@ onUnmounted(() => {
 
 const notebookName = computed(() => notebook.name || 'Notebook')
 
-// Shown: widgets, markdown, and cells with a display output, unless marked
-// `# @app hide`.
-function isAppHidden(source: string): boolean {
-  return source.split('\n').some((line) => /^#\s*@app\s+hide\b/.test(line.trim()))
-}
-const appCells = computed(() =>
-  orderedCells.value.filter(
-    (c) =>
-      !isAppHidden(c.source) &&
-      (c.language === 'widget' ||
-        c.language === 'markdown' ||
-        (c.displayOutputs && c.displayOutputs.length > 0)),
-  ),
-)
+const appCells = computed(() => shownInApp(orderedCells.value))
 
 function cellTitle(cell: Cell): string {
   return cell.annotations?.name || ''
