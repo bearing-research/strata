@@ -25,12 +25,13 @@ _CASES = diagnostics_corpus.cases()
 # Codes added since the recording; every other report stays as recorded. The corpus's
 # prompts name inputs for the wiring, with no cell defining them, so they report
 # ``prompt_input_undefined``; two are SQL's ``--`` checks, and a cell of another language
-# that fans out reports ``per_variant_not_python``.
+# that fans out reports ``per_variant_not_python``, one that loops ``loop_not_python``.
 _NEWER_CODES = {
     "prompt_input_undefined",
     "sql_annotation_hash",
     "annotation_not_for_sql",
     "per_variant_not_python",
+    "loop_not_python",
 }
 
 

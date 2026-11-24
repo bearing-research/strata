@@ -110,7 +110,9 @@ def validate_cell_annotations(
             + _validate_import_env(cell, notebook_state)
         )
     analysis = analysis_with(cell, notebook_state, analysis)
-    if cell.language == CellLanguage.PROMPT and not analysis.structural_errors:
+    # A loop's carry is no template input: ``loop_not_python`` refuses the cell instead.
+    looped = parse_annotations(cell.source, cell.language).loop is not None
+    if cell.language == CellLanguage.PROMPT and not analysis.structural_errors and not looped:
         language_checks = _validate_prompt_inputs(analysis, cell.id)
     diagnostics = strata_diagnostics(
         analysis.cells[cell.id], language_checks, without_dag=bool(analysis.structural_errors)
@@ -599,7 +601,7 @@ SQL_ANNOTATION_KEYS = frozenset(
     {"sql", "cache", "nocache", "name", "after", "mount", "variant", "stochastic"}
 )
 # Refused on a SQL cell by an error of their own, which says why.
-_REFUSED_ON_SQL = frozenset({"each", "per_variant"})
+_REFUSED_ON_SQL = frozenset({"each", "per_variant", "loop", "loop_until"})
 
 
 def sql_annotation_diagnostics(source: str) -> list[AnnotationDiagnostic]:

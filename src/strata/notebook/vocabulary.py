@@ -283,11 +283,23 @@ def _loop_effects(loop: Any) -> list[cg.Effect]:
 def _validate_loop(loop: Any, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     """The checks that block a loop, after the mount and table checks."""
     cell = context.cell
-    if cell.language in _NO_INPUT_CHECKS:
-        return []
     # ``_find_annotation_line(source, "loop")``: the first line whose key starts with it.
     line = _find_annotation_line(cell.source, "loop", language=cell.language)
     diagnostics: list[cg.Diagnostic] = []
+    if cell.language != CellLanguage.PYTHON.value:
+        # The loop path runs the source in the Python harness, so no other cell gets there.
+        diagnostics.append(
+            cg.Diagnostic(
+                "loop_not_python",
+                cg.Severity.ERROR,
+                "`@loop` and `@loop_until` run Python cells only.",
+                cell.id,
+                "loop",
+                line,
+            )
+        )
+    if cell.language in _NO_INPUT_CHECKS:
+        return diagnostics
     if loop.max_iter <= 0:
         diagnostics.append(
             cg.Diagnostic(
@@ -343,7 +355,8 @@ def _validate_loop(loop: Any, context: cg.ValidationContext) -> list[cg.Diagnost
     return diagnostics
 
 
-# The cells ``validate_cell_annotations`` ran no mount, table or loop checks on.
+# The cells ``validate_cell_annotations`` ran no mount, table or loop checks on; a loop on
+# one is ``loop_not_python``.
 _NO_INPUT_CHECKS = {
     CellLanguage.MARKDOWN.value,
     CellLanguage.PROMPT.value,
