@@ -131,6 +131,7 @@ class WarmProcessPool:
                 worker_script = Path(__file__).parent / "pool_worker.py"
                 command = [
                     self.python_executable,
+                    "-P",  # as run_harness: no shadowing by this package's modules
                     str(worker_script),
                     str(self.notebook_dir),
                 ]

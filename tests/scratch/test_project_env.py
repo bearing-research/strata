@@ -870,6 +870,36 @@ def test_e_holds_while_nothing_it_was_probed_from_changes(project, monkeypatch):
     assert probes == []
 
 
+def test_e_is_probed_on_the_path_a_cell_finds(project):
+    """Started with -P, as a cell is: Strata's own directory, whose datasets.py would
+    shadow the user's, is not on it, so nothing there is watched."""
+    import strata.notebook
+    from strata.notebook.project_env import environment_record
+
+    package = str(Path(strata.notebook.__file__).parent)
+    record = environment_record(_attached(project))
+
+    assert record is not None
+    assert [p for p in record["observed"] if p.startswith(package)] == []
+
+
+def test_a_record_from_an_older_probe_is_probed_again(project, monkeypatch):
+    """One probed before -P listed Strata's directory on the path, with nothing observed
+    that would change."""
+    from strata.notebook.project_env import current_identity
+
+    notebook = _attached(project)
+    observed = notebook / OVERLAY_DIR / ".strata-observed.json"
+    record = json.loads(observed.read_text())
+    del record["probe"]
+    observed.write_text(json.dumps(record))
+    probes = _probes(monkeypatch)
+
+    current_identity(notebook)
+
+    assert probes == [notebook]
+
+
 def test_a_module_in_the_project_that_would_shadow_a_preloaded_one_changes_e(project, monkeypatch):
     """The harness loaded orjson before the cell; under `python -c` here the project's
     would win, and no import of the cell's would record it."""

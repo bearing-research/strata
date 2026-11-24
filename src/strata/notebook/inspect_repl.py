@@ -84,6 +84,7 @@ class InspectSession:
 
         cmd = [
             str(python_executable),
+            "-P",  # as run_harness: no shadowing by this package's modules
             str(_HARNESS_PATH),
             str(manifest_path),
         ]

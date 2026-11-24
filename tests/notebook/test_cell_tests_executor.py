@@ -249,6 +249,26 @@ async def test_a_module_in_the_notebook_directory_is_not_importable():
 
 
 @pytest.mark.asyncio
+async def test_a_script_a_test_starts_finds_its_own_directory(tmp_path):
+    """Only pytest's process keeps the start directory off the path: a script it starts
+    imports its neighbours, as one a cell starts does."""
+    session = _session_with([("cell1", "x = 1\n", None)])
+    (tmp_path / "helper.py").write_text("VALUE = 7\n")
+    (tmp_path / "script.py").write_text("import helper\nprint(helper.VALUE)\n")
+
+    result = await CellExecutor(session).run_cell_tests(
+        "cell1",
+        "import subprocess, sys\n"
+        "def test_cell(cell):\n"
+        f"    done = subprocess.run([sys.executable, {str(tmp_path / 'script.py')!r}],\n"
+        "                          capture_output=True, text=True)\n"
+        "    assert done.stdout.strip() == '7', done.stderr\n",
+    )
+
+    assert (result.passed, result.failed, result.errored) == (1, 0, 0), result.tests
+
+
+@pytest.mark.asyncio
 async def test_a_cell_that_uses_strata_is_told_its_tests_have_no_client():
     session = _session_with([("cell1", "rows = strata.materialize(inputs=[])\n", None)])
 

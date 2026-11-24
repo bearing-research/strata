@@ -3136,7 +3136,7 @@ class TestRunBatch:
                 await asyncio.sleep(0)
 
         async def create_subprocess_exec(*cmd, **kwargs):
-            manifest = Path(cmd[3])
+            manifest = Path(cmd[-1])
             seen.spawned.append((cmd, kwargs))
             seen.tmpdir = manifest.parent
             seen.manifest = json.loads(manifest.read_text())
@@ -3209,7 +3209,7 @@ class TestRunBatch:
 
         assert ran.completed is True
         ((cmd, kwargs),) = harness.spawned
-        assert cmd[1:3] == ("harness.py", "--batch")
+        assert cmd[1:4] == ("-P", "harness.py", "--batch")
         assert harness.tmpdir.parent == tmp_path / ".strata"
         assert harness.manifest["work_dir"] == "work"
         assert harness.manifest["run_token_on_stdin"] is True
@@ -4648,7 +4648,8 @@ class TestPythonHarness:
 
         cmd, kwargs = spawned.spawn
         # The interpreter itself: ``uv run`` would sync the environment before the cell.
-        assert cmd == ("py", "harness.py", str(tmp_path / "manifest.json"))
+        # -P: the harness directory, with its datasets.py, stays off sys.path.
+        assert cmd == ("py", "-P", "harness.py", str(tmp_path / "manifest.json"))
         assert spawned.handed == [(tmp_path, self.USER)]
         assert kwargs["env"] == {"env": {"extra": {"LIFE": "1"}}, "user": self.USER}
         assert kwargs["spawned_as"] is self.USER

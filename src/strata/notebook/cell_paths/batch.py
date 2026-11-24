@@ -264,6 +264,7 @@ async def run_batch(
                 proc = scope.own(
                     await asyncio.create_subprocess_exec(
                         str(venv_python),
+                        "-P",  # as run_harness: no shadowing by this package's modules
                         str(context.harness_path),
                         "--batch",
                         str(manifest_path),

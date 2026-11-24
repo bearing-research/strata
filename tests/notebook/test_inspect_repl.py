@@ -90,7 +90,9 @@ async def test_inspect_repl_uses_session_python(monkeypatch, tmp_path):
 
     assert status == "ready"
     assert spawned[0] == "/custom/notebook/python"
-    assert spawned[1].endswith("inspect_harness.py")
+    # -P keeps the package directory, with its datasets.py, off the REPL's sys.path.
+    assert spawned[1] == "-P"
+    assert spawned[2].endswith("inspect_harness.py")
 
     await inspect.close()
 
