@@ -353,9 +353,14 @@ While a Python cell runs, `STRATA_CELL_ID` holds its id, in the cell and in any 
 | `# @dataset …`     | Bind a registry name as a recorded input; its version joins the provenance |
 | `# @write_table …` | Write a variable into an Iceberg table when the run succeeds (see [`@write_table`](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table)) |
 | `# @output_dir X`  | Give the cell a folder whose contents are an output (see [`@output_dir`](https://bearingresearch.com/strata/dev/reference/annotations/python/#output_dir)) |
+| `# @each …`        | Run once per file or row, each cached on its own (see [`@each`](https://bearingresearch.com/strata/dev/reference/annotations/python/#each)) |
 | `# @nocache`       | Always re-execute; never serve a cache hit       |
 | `# @stochastic`    | Every run persists beside the cache and never serves it (see [`@stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic)) |
+| `# @after <id>`    | Add an ordering-only edge from another cell (see [`@after`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after)) |
 | `# @loop …`        | Turn the cell into a [loop cell](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#loop-cells)    |
+| `# @loop_until …`  | End a loop cell early when an expression is true |
+| `# @variant <group> <name>` | Make the cell one alternative in a [variant group](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells) |
+| `# @per_variant`   | Run once per variant of an upstream sweep group ([fan-out](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant)) |
 
 See [Cell Annotations][a] for the full reference.
 

@@ -1,5 +1,8 @@
 # Notebook: Markdown Showcase
 
+![The Notebook: Markdown Showcase notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)
+![The Notebook: Markdown Showcase notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)
+
 # Markdown Showcase
 
 This notebook exercises every markdown rendering path in Strata. It's

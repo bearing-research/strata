@@ -3510,7 +3510,7 @@ once you've thrown away the intermediates.</p>
 <li>Loops where intermediate state is genuinely disposable: store only the final answer in a regular Python cell.</li>
 <li>Anything that needs to branch out into multiple parallel runs: loop cells are sequential by design. Use separate cells, or model the fan-out in Python.</li>
 </ul>
-<p>A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare <code>@fetch</code> or <code>@dataset</code>; read those in an upstream cell. Its <code>@table</code> names are bound in every iteration, at the snapshot its provenance records. A <code>@write_table</code> on a loop cell writes the final value once, after the last iteration.</p>
+<p>A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare <code>@fetch</code>, <code>@dataset</code> or a read-write <code>@mount</code>; read or write those in an upstream cell. Its <code>@table</code> names are bound in every iteration, at the snapshot its provenance records. A <code>@write_table</code> on a loop cell writes the final value once, after the last iteration.</p>
 <p>A loop cell runs on the notebook's own server, never on a <a href="../../../notebook/workers/">remote worker</a>: one whose <code># @worker</code>, or the notebook's default worker, names another fails before it starts. Add <code># @worker local</code> to the loop cell, or put the work that needs the worker in an ordinary cell upstream.</p>
 <p>Reach for loop cells when <strong>being able to inspect or fork from iteration k matters</strong>. That's the feature you're paying for.</p>
 <h2 id="variant-cells">Variant cells<a class="headerlink" href="#variant-cells" title="Permanent link">&para;</a></h2>
@@ -3625,11 +3625,14 @@ defined, so after a plain cell redefines <code>preds</code> there is no sweep le
 out over. If it reads from two or more, name the one
 to fan out over - <code># @per_variant model</code> - and the others collapse to dicts. A
 cell fans out over <strong>one</strong> group; comparing across two groups (cartesian) isn't
-supported. The validator flags the mistakes: <code>per_variant_no_sweep_source</code>
+supported. The validator warns about the mistakes: <code>per_variant_no_sweep_source</code>
 (nothing to fan out over), <code>per_variant_ambiguous_group</code> (bare form, ≥2 groups),
-<code>per_variant_on_variant_member</code> (a cell can't both be a variant and fan out),
-<code>per_variant_write_table_overwrite</code> (every variant would overwrite the same
-table). The named group is part of the cell's cache key, so switching it runs the
+<code>per_variant_unknown_group</code> (the named group is not a sweep the cell reads),
+<code>per_variant_on_variant_member</code> (a cell can't both be a variant and fan out). A
+group of one variant is a note (<code>per_variant_group_of_one</code>). Two are errors that
+keep the cell from running: <code>per_variant_write_table_overwrite</code> and
+<code>per_variant_write_table_sync</code> (each variant would remove the rows of the one
+before it). The named group is part of the cell's cache key, so switching it runs the
 instances again.</p>
 <h3 id="defines-contract">Defines contract<a class="headerlink" href="#defines-contract" title="Permanent link">&para;</a></h3>
 <p>All variants in a group must produce the same set of top-level

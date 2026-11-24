@@ -69,12 +69,12 @@ cell that produced it**.
 A compact strip appears **right below the cell** that published:
 
 ```
-⬡ taxi/tip-model  v1   [Promote ▾]   [View lineage]
+⬡ taxi/tip-model  v1   [Promote ▾]   [lineage icon]
 ```
 
 - `⬡ taxi/tip-model v1` - the name and version your cell put.
 - `[Promote ▾]` - promote this artifact (next step).
-- **View lineage** - open its lineage.
+- The lineage icon (tooltip **View lineage**) - open its lineage.
 
 Promote where you trained the model, without scrolling anywhere.
 
@@ -114,8 +114,8 @@ top to bottom:
    queued, with **Approve / Reject** buttons (the human gate, in the UI).
 2. **Names table** - every registry name, each row showing its **alias chips**
    (`★champion=v1`, `candidate=v2`), latest version, **tags**, the cells
-   that read it (**Read by**), a **`[Promote ▾]`** menu, and a **View lineage**
-   button. This is the same data on the per-cell strip, but for
+   that read it (**Read by**), a **`[Promote ▾]`** menu, and a lineage icon
+   (tooltip **View lineage**). This is the same data on the per-cell strip, but for
    *all* names - not just what the current notebook published.
 3. **Audit timeline** (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.
@@ -153,7 +153,7 @@ Unprotected aliases (`candidate`) still apply immediately.
 
 ## 7. View lineage
 
-Click the **View lineage** button on the strip or any names-table row. The **lineage
+Click the lineage icon (tooltip **View lineage**) on the strip or any names-table row. The **lineage
 view** renders the provenance chain:
 
 ```
@@ -179,7 +179,7 @@ root.](https://bearingresearch.com/strata/dev/assets/registry-lineage-dark.png#o
 | **The registry looks empty on a machine that has published things** | Check `STRATA_NOTEBOOK_REMOTE_STORE_URL`. The dashboard describes the store the cells write to, so an unset URL on a server whose cells publish elsewhere - or a set one pointing at a store nobody publishes to - shows an empty registry rather than an error. |
 | **The tab reports a 502** | The team store could not be reached. That is deliberately not an empty registry: "nobody has published anything" and "I could not ask" are different facts. |
 | **Registry tab is empty** | Nothing's been published with a name yet. Run a cell with `strata.put(inputs=[], transform=…, data=…, name="…")`. |
-| **A cell ran but no per-cell strip** | The strip only shows artifacts a cell published via the ambient `strata` client (a *named* `put` / `materialize`). Artifacts created another way still appear in the **names table**, just not as a per-cell strip. |
+| **A cell ran but no per-cell strip** | The strip only shows artifacts a cell published via the ambient `strata` client (a *named* `put` / `materialize`), plus a **Promote to team…** row when a team store is configured and the cell has stored outputs. Artifacts created another way still appear in the **names table**, just not as a per-cell strip. |
 | **Promote said "pending" unexpectedly** | That alias is in `STRATA_REGISTRY_PROTECTED_ALIASES` - approve it from the pending banner. |
 | **Promote did nothing** | Setting an alias to the version it already points at is an idempotent **no-op** (the toast ends in `(no change)`). |
 

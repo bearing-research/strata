@@ -3000,6 +3000,18 @@
 <td><code># @worker gpu-box</code></td>
 <td>Runs the cell on an executor worker with R (see below).</td>
 </tr>
+<tr>
+<td><code># @write_table df lake:lab.t append</code></td>
+<td>Writes a variable into an Iceberg table when the run succeeds, as on a <a href="../python/#write_table">Python cell</a>.</td>
+</tr>
+<tr>
+<td><code># @after seed</code></td>
+<td>An ordering-only edge from another cell, as on a <a href="../python/#after">Python cell</a>.</td>
+</tr>
+<tr>
+<td><code># @variant &lt;group&gt; &lt;name&gt;</code></td>
+<td>Makes the cell one alternative in a <a href="../loops-and-variants/#variant">variant group</a>.</td>
+</tr>
 </tbody>
 </table>
 <p>An R cell with a worker runs <code>harness.R</code> on that worker (a <code>strata-worker</code> of

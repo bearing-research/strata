@@ -1,5 +1,8 @@
 # Model Variants Sweep
 
+![The Model Variants Sweep notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)
+![The Model Variants Sweep notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)
+
 A minimal example of variant **sweep mode**: run every variant of a group and
 compare them all in one downstream cell.
 
@@ -28,7 +31,7 @@ best model: always_one
 ```
 
 Same numbers as `compare`, produced by fanning the scoring out first. See
-[Variant Cells → Fan-out](https://bearingresearch.com/strata/latest/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant).
+[Variant Cells → Fan-out](https://bearingresearch.com/strata/latest/guides/cells/loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant).
 
 ## Run it
 
@@ -36,9 +39,10 @@ Same numbers as `compare`, produced by fanning the scoring out first. See
 strata run examples/model_variants_sweep
 ```
 
-Or open it in the UI (`python -m strata`), the `model` group renders as a tab
-strip with a **sweep** badge; clicking a tab shows that variant's source (all
-of them still run), and the group has a run-all button + a readiness rollup.
+Or open it in the UI (`uv run strata-notebook --notebook-dir examples` from
+the repo root), where the `model` group renders as a tab strip with a
+**sweep** badge; clicking a tab shows that variant's source (all of them still
+run), and the group has a run-all button + a readiness rollup.
 
 ## Switch vs sweep
 

@@ -3190,8 +3190,8 @@ next teammate hits.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># On each researcher's notebook server, alongside the two settings above:</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
 </code></pre></div>
-<p>It works because a cell's provenance key -
-<code>sha256(sorted_input_hashes + source_hash + env_hash)</code> - contains no notebook id
+<p>It works because a cell's provenance key, a digest over its definition, its
+environment, its upstream outputs and its inputs, contains no notebook id
 and no cell id, and <code>env_hash</code> leaves out the notebook's own project name in
 <code>uv.lock</code>. Two people running the same source over the same inputs in the
 same environment already arrive at the same hash; the store just had no way to

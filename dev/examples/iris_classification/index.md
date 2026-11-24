@@ -1,5 +1,8 @@
 # Iris Classification: end-to-end ML in seven cells
 
+![The Iris Classification: end-to-end ML in seven cells notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)
+![The Iris Classification: end-to-end ML in seven cells notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)
+
 Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
 what the graph looks like for a realistic ML pipeline: load → explore
 → split → train → evaluate → visualize.
@@ -31,16 +34,16 @@ what the graph looks like for a realistic ML pipeline: load → explore
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Then open `examples/iris_classification` from the Strata home page.
+Then open **Iris Classification** from the notebook list on the Strata home page.
 
 ## Try this
 
 - Change the `test_size` in `train_test`. Cells downstream go stale;
   `scatter_plot` stays ready (it doesn't depend on the split).
-- Re-run `evaluate` without re-training, the trained model is cached,
+- Re-run `evaluate` without re-training: the trained model is cached,
   so only evaluation runs.
 
 ## Load iris dataset

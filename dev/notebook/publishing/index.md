@@ -460,7 +460,7 @@ larger artifacts.
 | `GET /p/{token}` | **no** | The page. |
 | `GET /p/{token}/data` | **no** | The published bytes. |
 | `GET /p/{token}/archive.zip` | **no** | The archived bundle as a zip, with a `Content-Digest` header. |
-| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. `?sha256=` also says which bundle file (Arrow or Parquet) a digest names. |
+| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. `?sha256=` also says which bundle file (Arrow, Parquet or an `output_dir` file) a digest names. |
 | `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
 | `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
 | `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |

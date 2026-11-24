@@ -3370,7 +3370,9 @@ invariant, and an aggregation - a good template for the common shapes:</p>
 </code></pre></div>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Python cells only</strong> (not prompt, SQL, R, or markdown cells).</li>
+<li><strong>Python cells only</strong> (not prompt, SQL, R, widget or markdown cells).</li>
+<li>An <code>@each</code> cell's tests, and an inactive variant's, are refused: the run
+  reports one errored result saying why.</li>
 <li><code>pytest</code> must be installable into the notebook environment (it is added to
   the dev dependencies on the first run if missing).</li>
 <li>Tests run the cell's source, so they run as the same OS user a cell does. A

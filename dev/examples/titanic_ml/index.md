@@ -1,5 +1,8 @@
 # Titanic: feature engineering + model comparison
 
+![The Titanic: feature engineering + model comparison notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-light.webp#only-light)
+![The Titanic: feature engineering + model comparison notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-dark.webp#only-dark)
+
 A canonical "first Kaggle notebook" rewritten for Strata. A
 feature-engineering stage feeds three classifiers; the best one is
 evaluated and its feature weights plotted.
@@ -32,10 +35,10 @@ evaluated and its feature weights plotted.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Then open `examples/titanic_ml` from the Strata home page.
+Then open **Titanic Survival Prediction** from the notebook list on the Strata home page.
 
 ## Try this
 

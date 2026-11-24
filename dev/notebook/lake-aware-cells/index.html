@@ -3309,8 +3309,8 @@ reads the same way, with no <code>@table</code> line.</p>
 <ul>
 <li>A running Strata server: <code>strata-notebook</code> (personal mode, the default)
   serves the notebook UI on <code>http://localhost:8765</code>.</li>
-<li><code>pyiceberg</code> for the two setup scripts below. It is a core Strata dependency,
-  so <code>uv run python</code> in the Strata project has it. The notebook's own
+<li><code>pyiceberg</code> for the two setup scripts below. <code>uv run --with
+  "pyiceberg[sql-sqlite,pyarrow]"</code> provides it wherever Strata is installed. The notebook's own
   environment does not need it: the server resolves the snapshot and runs the
   scan.</li>
 </ul>
@@ -3347,7 +3347,7 @@ SQL catalog under that name (see
 <a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"snapshot S1:"</span><span class="p">,</span> <span class="n">table</span><span class="o">.</span><span class="n">current_snapshot</span><span class="p">()</span><span class="o">.</span><span class="n">snapshot_id</span><span class="p">)</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>/tmp/strata-demo/warehouse
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>setup_warehouse.py
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>run<span class="w"> </span>--with<span class="w"> </span><span class="s2">"pyiceberg[sql-sqlite,pyarrow]"</span><span class="w"> </span>python<span class="w"> </span>setup_warehouse.py
 </code></pre></div>
 <p>The <strong>table URI</strong> is <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code> - here
 <code>file:///tmp/strata-demo/warehouse#shop.orders</code>. This is the same URI format
@@ -3407,10 +3407,10 @@ bound to the server. The <code>@table</code> annotation injects two variables: <
 <a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">table</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pa</span><span class="o">.</span><span class="n">table</span><span class="p">({</span><span class="s2">"order_id"</span><span class="p">:</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">],</span> <span class="s2">"amount"</span><span class="p">:</span> <span class="p">[</span><span class="mi">40</span><span class="p">,</span> <span class="mi">50</span><span class="p">]}))</span>  <span class="c1"># snapshot S2</span>
 <a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"snapshot S2:"</span><span class="p">,</span> <span class="n">table</span><span class="o">.</span><span class="n">current_snapshot</span><span class="p">()</span><span class="o">.</span><span class="n">snapshot_id</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>append_month2.py
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>--with<span class="w"> </span><span class="s2">"pyiceberg[sql-sqlite,pyarrow]"</span><span class="w"> </span>python<span class="w"> </span>append_month2.py
 </code></pre></div>
-<p>Back in the notebook, the <code>@table</code> cell now reads <strong>stale · input changed</strong> - its
-snapshot id moved from S1 to S2, so its provenance changed and no stored result
+<p>Back in the notebook, the <code>@table</code> cell turns stale (hover its status dot:
+<strong>stale · input changed</strong>). Its snapshot id moved from S1 to S2, so its provenance changed and no stored result
 matches it. The cells downstream of it that ran before read <strong>stale</strong> too. The
 badges do not update live: the notebook looks up the current snapshot only when
 it recomputes staleness, which happens when you reopen the notebook, edit a
@@ -3427,15 +3427,13 @@ add <code>snapshot=&lt;id&gt;</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @table orders file:///tmp/strata-demo/warehouse#shop.orders snapshot=1292033279574548405</span>
 </code></pre></div>
 <p>A pinned cell reads that snapshot regardless of new data and <strong>never goes
-out of date</strong> on appends - the lake-side analog of a mount <code>pin</code>. Drop the
+out of date</strong> on appends - the lake-side analog of a mount's
+<a href="../../reference/notebook-toml/#mounts-filesystem-mounts"><code>pin</code></a>. Drop the
 <code>snapshot=</code> to return to tracking the current snapshot.</p>
 <h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<p>The snapshot id is part of the cell's <strong>provenance hash</strong>, alongside the
-source hash, environment hash, and input hashes:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>provenance = hash(input_hashes + mount_fingerprints + table_fingerprints
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                  + fetch_fingerprints + dataset_fingerprints,
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>                  source_hash, env_hash)
-</code></pre></div>
+<p>The snapshot id is part of the cell's <strong>provenance hash</strong>: a digest over the
+cell's definition, its environment, its upstream outputs and its inputs
+(mounts, tables, fetches, datasets).</p>
 <p>A table fingerprint is <code>"&lt;name&gt;:table:&lt;uri&gt;:&lt;snapshot_id&gt;"</code>. Because the
 snapshot id is immutable and content-addressed, a cached result for a given
 provenance is valid forever - and a moved snapshot is a different provenance,
@@ -3447,16 +3445,16 @@ inputs change; <code>@table</code> adds the lake snapshot to the mix.</p>
 last successful run (a cache hit included) and the snapshot of each. A SQL
 cell's catalog tables are listed too. A tool that shows a table's readers
 reads this file rather than parsing cell sources:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">"c1a2b3c4"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">      </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"file:///tmp/strata-demo/warehouse#shop.orders"</span><span class="p">,</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">"catalog"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="s2">"shop.orders"</span><span class="p">,</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="nt">"snapshot_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1292033279574548405</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span><span class="p">]</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">"c1a2b3c4"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">      </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"file:///tmp/strata-demo/warehouse#shop.orders"</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="nt">"catalog"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">      </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="s2">"shop.orders"</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">      </span><span class="nt">"snapshot_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1292033279574548405</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>uri</code> is as the cell wrote it; a SQL cell's table appears as
 <code>&lt;catalog&gt;:&lt;namespace&gt;.&lt;table&gt;</code>. <code>catalog</code> is the configured catalog the URI
@@ -3470,17 +3468,17 @@ deleted, drops out.</p>
 run moved onto the machine for each <code>@mount</code>, <code>@table</code> and <code>@fetch</code> input, and
 the machine it ran on (<code>local</code> for the server itself), so a host can count the
 data a notebook moved:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">"c1a2b3c4"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">"machine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"local"</span><span class="p">,</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">"ran_at"</span><span class="p">:</span><span class="w"> </span><span class="mi">1760889600000</span><span class="p">,</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">      </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mount"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"data"</span><span class="p">,</span><span class="w"> </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"s3://bucket/data"</span><span class="p">,</span><span class="w"> </span><span class="nt">"credential"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"bytes_moved"</span><span class="p">:</span><span class="w"> </span><span class="mi">5368709120</span><span class="p">},</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">      </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"table"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"orders"</span><span class="p">,</span><span class="w"> </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"file:///tmp/strata-demo/warehouse#shop.orders"</span><span class="p">,</span><span class="w"> </span><span class="nt">"credential"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"bytes_moved"</span><span class="p">:</span><span class="w"> </span><span class="mi">41943040</span><span class="p">},</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">      </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fetch"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"zones"</span><span class="p">,</span><span class="w"> </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://example.com/zones.csv"</span><span class="p">,</span><span class="w"> </span><span class="nt">"credential"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"bytes_moved"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">    </span><span class="p">]</span>
-<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">"c1a2b3c4"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">"machine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"local"</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="nt">"ran_at"</span><span class="p">:</span><span class="w"> </span><span class="mi">1760889600000</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mount"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"data"</span><span class="p">,</span><span class="w"> </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"s3://bucket/data"</span><span class="p">,</span><span class="w"> </span><span class="nt">"credential"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"bytes_moved"</span><span class="p">:</span><span class="w"> </span><span class="mi">5368709120</span><span class="p">},</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"table"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"orders"</span><span class="p">,</span><span class="w"> </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"file:///tmp/strata-demo/warehouse#shop.orders"</span><span class="p">,</span><span class="w"> </span><span class="nt">"credential"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"bytes_moved"</span><span class="p">:</span><span class="w"> </span><span class="mi">41943040</span><span class="p">},</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">      </span><span class="p">{</span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fetch"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"zones"</span><span class="p">,</span><span class="w"> </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://example.com/zones.csv"</span><span class="p">,</span><span class="w"> </span><span class="nt">"credential"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"bytes_moved"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">}</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="p">]</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>bytes_moved</code> is 0 for an input already on the machine, a cache hit included,
 and <code>null</code> where it is not known: a mount on a worker that does not report what

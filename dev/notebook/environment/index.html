@@ -3313,7 +3313,7 @@
 <p>A cell sent to a <a href="../workers/">remote worker</a> runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.</p>
 <h2 id="python-version">Python version<a class="headerlink" href="#python-version" title="Permanent link">&para;</a></h2>
 <p>At notebook creation time, you can select a Python version from the versions configured on the server. The first one listed is the default.</p>
-<p>To change it later, click <strong>Requested Python</strong> in the Environment panel. Strata rewrites <code>requires-python</code>, rebuilds <code>.venv/</code> with <code>uv sync</code>, and restores the old version if the sync fails.</p>
+<p>To change it later, click the version next to <strong>Requested Python</strong> in the Environment panel. Strata rewrites <code>requires-python</code>, rebuilds <code>.venv/</code> with <code>uv sync</code>, and restores the old version if the sync fails.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The available versions come from the server's <code>STRATA_NOTEBOOK_PYTHON_VERSIONS</code>. Unset, they are the Python versions <code>uv</code> reports as installed on the server that Strata supports, with the server's own version included. A <code>UV_PYTHON</code> set in the server's environment does not apply to a notebook's <code>uv</code> commands; <code>requires-python</code> decides its interpreter.</p>
@@ -3328,7 +3328,7 @@
 <p>The operation runs asynchronously, you can continue editing cells while it installs.</p>
 <p>On a server in service mode, packages install from wheels only: a package with no wheel for the notebook's Python fails to resolve, and the message says a wheel is required. R packages are not added from the notebook there, nor on a personal-mode server with <code>STRATA_NOTEBOOK_HARNESS_USER</code> set: the server restores the notebook's committed <code>renv.lock</code> as the harness user when the notebook opens. See <a href="../../deployment/service-mode/">Service mode</a>.</p>
 <h3 id="import-from-requirementstxt">Import from requirements.txt<a class="headerlink" href="#import-from-requirementstxt" title="Permanent link">&para;</a></h3>
-<p>In the Environment panel, click <strong>Import</strong> and paste a <code>requirements.txt</code>:</p>
+<p>In the Environment panel, click <strong>Import requirements</strong> and paste a <code>requirements.txt</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pandas&gt;=2.0
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>numpy&gt;=2.0
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>scikit-learn&gt;=1.5

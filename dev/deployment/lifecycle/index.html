@@ -3486,7 +3486,7 @@ hour.</p>
 </code></pre></div>
 <p>Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; service mode requires the <code>admin:cache</code> scope. Safe to run at any time - the worst case is the next read repopulates from Parquet.</p>
 <h2 id="disk-usage-budgeting">Disk-usage budgeting<a class="headerlink" href="#disk-usage-budgeting" title="Permanent link">&para;</a></h2>
-<p>There are <strong>three</strong> caps to understand, and they don't cover everything.</p>
+<p>These caps bound what Strata stores, and they don't cover everything.</p>
 <table>
 <thead>
 <tr>
@@ -3502,6 +3502,18 @@ hour.</p>
 <td>10 GB</td>
 <td>The Iceberg row-group cache (<code>~/.strata/cache/</code>) - LRU-evicted to stay under the cap</td>
 <td>Anything else</td>
+</tr>
+<tr>
+<td><code>STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES</code></td>
+<td>1 GiB</td>
+<td>The Iceberg metadata files kept under <code>iceberg-metadata/</code> in the cache directory, least recently read first</td>
+<td>The row-group cache beside it</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_SCRATCH_GC_SOFT_LIMIT_BYTES</code></td>
+<td>5 GiB</td>
+<td>A project scratchpad's store, swept by its daemon at start and hourly, least recently used first</td>
+<td>Values live cells still use, which stay whatever the limit</td>
 </tr>
 <tr>
 <td><code>STRATA_ARTIFACT_GC_MAX_BYTES</code></td>

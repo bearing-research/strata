@@ -3063,7 +3063,7 @@
 </button>
 
 <h1 id="cell-kinds">Cell kinds<a class="headerlink" href="#cell-kinds" title="Permanent link">&para;</a></h1>
-<p>Strata Notebook has seven cell kinds:</p>
+<p>Strata Notebook has six cell kinds, plus loop cells (a Python cell with a <code># @loop</code> annotation):</p>
 <table>
 <thead>
 <tr>
@@ -3110,10 +3110,10 @@
 </tr>
 </tbody>
 </table>
-<p>Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; each has its own page.</p>
+<p>Compute cells participate in the DAG and cache by provenance hash. Python and R cells can be routed to remote workers; SQL, prompt and loop cells run on the server. Widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; each has its own page.</p>
 <p>See <a href="../../concepts/dag-and-staleness/">The DAG and staleness</a> for the execution model; see <a href="../../reference/annotations/">Annotations</a> for the full per-annotation reference.</p>
 <h2 id="markdown-cells">Markdown cells<a class="headerlink" href="#markdown-cells" title="Permanent link">&para;</a></h2>
-<p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.</p>
+<p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG - they don't produce artifacts, don't participate in cascade execution, and have no variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gu">## Stage 1: Load + Clean</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>The next two cells pull last quarter's events and drop rows with
@@ -3154,7 +3154,7 @@
 </tbody>
 </table>
 <p>Mixing is encouraged: a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.</p>
-<p>Any kind of cell can also live inside a <a href="loops-and-variants/#variant-cells">variant group</a>: a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.</p>
+<p>Any compute cell (not a markdown cell) can also live inside a <a href="loops-and-variants/#variant-cells">variant group</a>: a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.</p>
 
 
 

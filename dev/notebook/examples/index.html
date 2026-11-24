@@ -728,10 +728,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#loop-cells" class="md-nav__link">
+  <a href="#loops-widgets-and-library-cells" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Loop cells
+        Loops, widgets and library cells
       
     </span>
   </a>
@@ -739,10 +739,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#widget-cells" class="md-nav__link">
+  <a href="#mounts-and-tables" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Widget cells
+        Mounts and tables
       
     </span>
   </a>
@@ -750,32 +750,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#library-cells" class="md-nav__link">
+  <a href="#markdown" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Library cells
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mounts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mounts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#markdown-rendering" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Markdown rendering
+        Markdown
       
     </span>
   </a>
@@ -3132,10 +3110,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#loop-cells" class="md-nav__link">
+  <a href="#loops-widgets-and-library-cells" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Loop cells
+        Loops, widgets and library cells
       
     </span>
   </a>
@@ -3143,10 +3121,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#widget-cells" class="md-nav__link">
+  <a href="#mounts-and-tables" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Widget cells
+        Mounts and tables
       
     </span>
   </a>
@@ -3154,32 +3132,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#library-cells" class="md-nav__link">
+  <a href="#markdown" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Library cells
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mounts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mounts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#markdown-rendering" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Markdown rendering
+        Markdown
       
     </span>
   </a>
@@ -3218,213 +3174,180 @@
 
 <h1 id="example-gallery">Example gallery<a class="headerlink" href="#example-gallery" title="Permanent link">&para;</a></h1>
 <p>Every notebook under <code>examples/</code> in the repo demonstrates a specific
-Strata capability. Each example is also rendered into the docs site
-automatically: click through to read the cell sources and any cached
-outputs without cloning the repo.</p>
-<p>To run examples locally, point the server's storage root at the
-repo's <code>examples/</code> directory and start in personal mode:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">STRATA_NOTEBOOK_STORAGE_DIR</span><span class="o">=</span><span class="nv">$PWD</span>/examples<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+Strata capability. A card's picture is that notebook in the editor
+after a real run. Click through for its cell sources and its README,
+rendered into this site without cloning the repo.</p>
+<p>To run the examples, start the server on the repo's <code>examples/</code> directory
+from a clone:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>examples
 </code></pre></div>
-<p>Every example then appears on the Strata home page. No copying
-required: open the notebook, click Run, edit, watch the cascade.</p>
-<p>(If you'd rather keep examples separate from your own work, copy
-the directory you want under your existing storage root instead:
-<code>cp -R examples/iris_classification ~/.strata/notebooks/</code>.)</p>
+<p>Every example then appears under <strong>Open Notebook</strong> on the Strata home page:
+open one, click <strong>Run All</strong>, edit a cell and watch only what depends on it
+run again. To keep the examples apart from your own work, copy the one you
+want under your storage root instead:
+<code>cp -R examples/iris_classification ~/.strata/notebooks/</code>.</p>
 <h2 id="walkthroughs-start-here">Walkthroughs: start here<a class="headerlink" href="#walkthroughs-start-here" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/caching/"><code>caching</code></a></td>
-<td>A two-minute tutorial: what the cache saves, and what an edit runs again. <code>strata tutorial caching</code> opens a copy.</td>
-</tr>
-<tr>
-<td><a href="../../examples/iris_classification/"><code>iris_classification</code></a></td>
-<td>End-to-end ML in seven cells: load → split → train → evaluate → plot. The canonical "multi-cell DAG with caching" demo.</td>
-</tr>
-<tr>
-<td><a href="../../examples/pandas_basics/"><code>pandas_basics</code></a></td>
-<td>Core DataFrame operations and rich display outputs.</td>
-</tr>
-<tr>
-<td><a href="../../examples/titanic_ml/"><code>titanic_ml</code></a></td>
-<td>Feature engineering plus comparison of two classifiers, closer to a real ML workflow.</td>
-</tr>
-<tr>
-<td><a href="../../examples/data_viewer/"><code>data_viewer</code></a></td>
-<td>A DataFrame larger than the inline preview, in the interactive viewer: page through and sort the full cached artifact.</td>
-</tr>
-<tr>
-<td><a href="../../examples/agent_demo/"><code>agent_demo</code></a></td>
-<td>The notebook a coding agent builds live in the <code>strata agent</code> demo: an expensive training cell stays cached while only the evaluation re-runs.</td>
-</tr>
-</tbody>
-</table>
+<div class="grid cards">
+<ul>
+<li>
+<p><a href="../../examples/caching/"><img alt="The caching tutorial: a bar chart of revenue by region under the cell that plots it." src="../../assets/examples/caching-light.webp#only-light" /><img alt="The caching tutorial: a bar chart of revenue by region under the cell that plots it." src="../../assets/examples/caching-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/caching/">caching</a></strong>: a two-minute tutorial on what the
+cache saves and what an edit runs again. <code>strata tutorial caching</code> opens
+a copy.</p>
+</li>
+<li>
+<p><a href="../../examples/iris_classification/"><img alt="Iris classification: a pairplot of the four flower measurements, coloured by species." src="../../assets/examples/iris_classification-light.webp#only-light" /><img alt="Iris classification: a pairplot of the four flower measurements, coloured by species." src="../../assets/examples/iris_classification-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/iris_classification/">iris_classification</a></strong>: end-to-end
+ML in seven cells (load, split, train, evaluate, plot). The canonical
+multi-cell DAG with caching.</p>
+</li>
+<li>
+<p><a href="../../examples/pandas_basics/"><img alt="Pandas basics: a sales DataFrame in the notebook's table viewer." src="../../assets/examples/pandas_basics-light.webp#only-light" /><img alt="Pandas basics: a sales DataFrame in the notebook's table viewer." src="../../assets/examples/pandas_basics-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/pandas_basics/">pandas_basics</a></strong>: core DataFrame
+operations fanning out from one dataset, with per-cell unit tests.</p>
+</li>
+<li>
+<p><a href="../../examples/titanic_ml/"><img alt="Titanic: a bar chart of feature importance for the best of three classifiers." src="../../assets/examples/titanic_ml-light.webp#only-light" /><img alt="Titanic: a bar chart of feature importance for the best of three classifiers." src="../../assets/examples/titanic_ml-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/titanic_ml/">titanic_ml</a></strong>: feature engineering, then
+three classifiers trained and the best one evaluated. Closer to a real
+ML workflow.</p>
+</li>
+<li>
+<p><a href="../../examples/data_viewer/"><img alt="Data viewer: a 2,000-row transactions table with search, filter, CSV and Parquet buttons and paging." src="../../assets/examples/data_viewer-light.webp#only-light" /><img alt="Data viewer: a 2,000-row transactions table with search, filter, CSV and Parquet buttons and paging." src="../../assets/examples/data_viewer-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/data_viewer/">data_viewer</a></strong>: a DataFrame larger than
+the inline preview, in the interactive viewer. Page through and sort the
+full cached artifact.</p>
+</li>
+<li>
+<p><a href="../../examples/agent_demo/"><img alt="Agent demo: the notebook's introduction above the cell that trains a random forest." src="../../assets/examples/agent_demo-light.webp#only-light" /><img alt="Agent demo: the notebook's introduction above the cell that trains a random forest." src="../../assets/examples/agent_demo-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/agent_demo/">agent_demo</a></strong>: the notebook a coding agent
+builds live in the <code>strata agent</code> demo. The expensive training cell stays
+cached while only the evaluation runs again.</p>
+</li>
+</ul>
+</div>
 <h2 id="variant-cells">Variant cells<a class="headerlink" href="#variant-cells" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/model_variants/"><code>model_variants</code></a></td>
-<td>Three classifier variants (logistic regression, random forest, gradient boosting) sharing one DAG slot. Switch tabs, re-cascade downstream; the others stay cached.</td>
-</tr>
-<tr>
-<td><a href="../../examples/model_variants_sweep/"><code>model_variants_sweep</code></a></td>
-<td>Sweep mode: every variant runs and one downstream cell compares them as a <code>{variant: value}</code> dict, plus a <code># @per_variant</code> fan-out.</td>
-</tr>
-</tbody>
-</table>
+<div class="grid cards">
+<ul>
+<li>
+<p><a href="../../examples/model_variants/"><img alt="Model variants: a confusion matrix for the active logistic-regression variant." src="../../assets/examples/model_variants-light.webp#only-light" /><img alt="Model variants: a confusion matrix for the active logistic-regression variant." src="../../assets/examples/model_variants-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/model_variants/">model_variants</a></strong>: three classifier
+variants (logistic regression, random forest, gradient boosting) sharing
+one DAG slot. Switch tabs and the downstream cells run again; the other
+variants stay cached.</p>
+</li>
+<li>
+<p><a href="../../examples/model_variants_sweep/"><img alt="Model variants sweep: three variant cells and the cell that compares their accuracy." src="../../assets/examples/model_variants_sweep-light.webp#only-light" /><img alt="Model variants sweep: three variant cells and the cell that compares their accuracy." src="../../assets/examples/model_variants_sweep-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/model_variants_sweep/">model_variants_sweep</a></strong>: sweep
+mode. Every variant runs and one downstream cell compares them as a
+<code>{variant: value}</code> dict, plus a <code># @per_variant</code> fan-out.</p>
+</li>
+</ul>
+</div>
 <h2 id="prompt-cells-and-ai">Prompt cells and AI<a class="headerlink" href="#prompt-cells-and-ai" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/arxiv_classifier/"><code>arxiv_classifier</code></a></td>
-<td>AI-powered paper classification: prompt cells + distributed workers in one pipeline.</td>
-</tr>
-<tr>
-<td><a href="../../examples/review_triage/"><code>review_triage</code></a></td>
-<td>Structured-output prompt cells with <code>@output_schema</code> + the validate-and-retry loop.</td>
-</tr>
-<tr>
-<td><a href="../../examples/news_alpha_trader/"><code>news_alpha_trader</code></a></td>
-<td>Secret manager + AI pricing lookup + multi-cell DAG.</td>
-</tr>
-</tbody>
-</table>
+<p>These call an LLM: set <code>ANTHROPIC_API_KEY</code> or <code>OPENAI_API_KEY</code> in the
+notebook's <strong>Runtime</strong> panel first.</p>
+<div class="grid cards">
+<ul>
+<li>
+<p><a href="../../examples/review_triage/"><img alt="Review triage: a structured JSON verdict from a prompt cell." src="../../assets/examples/review_triage-light.webp#only-light" /><img alt="Review triage: a structured JSON verdict from a prompt cell." src="../../assets/examples/review_triage-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/review_triage/">review_triage</a></strong>: a prompt cell with
+<code>@output_schema</code>, validated against JSON Schema and retried on a bad
+answer.</p>
+</li>
+<li>
+<p><strong><a href="../../examples/arxiv_classifier/">arxiv_classifier</a></strong>: arXiv papers
+    aggregated on a DataFusion worker, embedded on a GPU worker, classified,
+    and summarized by prompt cells. Needs two local workers
+    (<code>run_local_workers.sh</code>) and an LLM key.</p>
+</li>
+<li>
+<p><strong><a href="../../examples/news_alpha_trader/">news_alpha_trader</a></strong>: a secret
+    manager, an AI pricing lookup and a multi-cell DAG over market news.
+    Needs Alpaca keys and an LLM key.</p>
+</li>
+</ul>
+</div>
 <h2 id="sql-cells">SQL cells<a class="headerlink" href="#sql-cells" title="Permanent link">&para;</a></h2>
 <p>The server needs the <code>sql</code> and <code>sql-sqlite</code> extras for this one
-(<code>uv tool install "strata-notebook[sql,sql-sqlite]"</code>); the Docker image
-carries both.</p>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/sql_orders_report/"><code>sql_orders_report</code></a></td>
-<td>Named connections, bind parameters from Python upstream, schema-aware caching.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="loop-cells">Loop cells<a class="headerlink" href="#loop-cells" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/loop_hill_climb/"><code>loop_hill_climb</code></a></td>
-<td><code># @loop</code> with carry state and an early-termination predicate.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="widget-cells">Widget cells<a class="headerlink" href="#widget-cells" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/widget_playground/"><code>widget_playground</code></a></td>
-<td>A widget cell (slider, number, dropdown) driving a downstream DataFrame, with <code># @live</code> recomputing on every change.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="library-cells">Library cells<a class="headerlink" href="#library-cells" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/library_cells/"><code>library_cells</code></a></td>
-<td>Cross-cell <code>def</code> / <code>class</code> sharing via the synthetic-module slicing path.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="mounts">Mounts<a class="headerlink" href="#mounts" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/each_pipeline/"><code>each_pipeline</code></a></td>
-<td><code># @each</code> over 287 real files from a public bucket, each cached on its own, and <code># @write_table ... sync</code> keeping a table in a REST catalog in step. Needs Docker.</td>
-</tr>
-<tr>
-<td><a href="../../examples/s3_mount/"><code>s3_mount</code></a></td>
-<td><code># @mount</code> annotation makes an S3 prefix available as a local <code>pathlib.Path</code> inside the cell.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="markdown-rendering">Markdown rendering<a class="headerlink" href="#markdown-rendering" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/markdown_showcase/"><code>markdown_showcase</code></a></td>
-<td>Every markdown rendering path: headings, lists, tables, code blocks, security guards, dynamic <code>Markdown(...)</code> output.</td>
-</tr>
-</tbody>
-</table>
+(<code>uv tool install "strata-notebook[sql,sql-sqlite]"</code>); the development
+environment and the Docker image carry both.</p>
+<div class="grid cards">
+<ul>
+<li>
+<p><a href="../../examples/sql_orders_report/"><img alt="SQL orders report: the Python cell that combines two SQL results, above the report it prints." src="../../assets/examples/sql_orders_report-light.webp#only-light" /><img alt="SQL orders report: the Python cell that combines two SQL results, above the report it prints." src="../../assets/examples/sql_orders_report-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/sql_orders_report/">sql_orders_report</a></strong>: named
+connections, bind parameters from a Python cell upstream, and
+schema-aware caching.</p>
+</li>
+</ul>
+</div>
+<h2 id="loops-widgets-and-library-cells">Loops, widgets and library cells<a class="headerlink" href="#loops-widgets-and-library-cells" title="Permanent link">&para;</a></h2>
+<div class="grid cards">
+<ul>
+<li>
+<p><a href="../../examples/loop_hill_climb/"><img alt="Hill climb loop: the loop's final state as JSON, above the markdown that explains the loop cell." src="../../assets/examples/loop_hill_climb-light.webp#only-light" /><img alt="Hill climb loop: the loop's final state as JSON, above the markdown that explains the loop cell." src="../../assets/examples/loop_hill_climb-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/loop_hill_climb/">loop_hill_climb</a></strong>: <code># @loop</code> with
+carried state and an early-termination predicate.</p>
+</li>
+<li>
+<p><a href="../../examples/widget_playground/"><img alt="Widget playground: a slider, number and dropdown above the table they drive." src="../../assets/examples/widget_playground-light.webp#only-light" /><img alt="Widget playground: a slider, number and dropdown above the table they drive." src="../../assets/examples/widget_playground-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/widget_playground/">widget_playground</a></strong>: a widget cell
+(slider, number, dropdown) driving a downstream DataFrame and plot, with
+<code># @live</code> recomputing on every change.</p>
+</li>
+<li>
+<p><a href="../../examples/library_cells/"><img alt="Library cells: helper functions defined in one cell and called from others." src="../../assets/examples/library_cells-light.webp#only-light" /><img alt="Library cells: helper functions defined in one cell and called from others." src="../../assets/examples/library_cells-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/library_cells/">library_cells</a></strong>: <code>def</code> and <code>class</code>
+shared across cells through the synthetic-module slicing path, and the
+diagnostic when a helper closes over a runtime value.</p>
+</li>
+</ul>
+</div>
+<h2 id="mounts-and-tables">Mounts and tables<a class="headerlink" href="#mounts-and-tables" title="Permanent link">&para;</a></h2>
+<div class="grid cards">
+<ul>
+<li>
+<p><a href="../../examples/s3_mount/"><img alt="S3 mount: LaGuardia weather rows read from a public bucket, with the mount listed in the notebook settings." src="../../assets/examples/s3_mount-light.webp#only-light" /><img alt="S3 mount: LaGuardia weather rows read from a public bucket, with the mount listed in the notebook settings." src="../../assets/examples/s3_mount-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/s3_mount/">s3_mount</a></strong>: a <code>[[mounts]]</code> entry makes a
+public S3 prefix a local <code>pathlib.Path</code> inside the cell. Needs the <code>s3</code>
+extra.</p>
+</li>
+<li>
+<p><strong><a href="../../examples/each_pipeline/">each_pipeline</a></strong>: <code># @each</code> over 287
+    real files from a public bucket, each cached on its own, and
+    <code># @write_table ... sync</code> keeping a table in a REST catalog in step.
+    Needs Docker and the <code>s3</code> and <code>sql</code> extras.</p>
+</li>
+</ul>
+</div>
+<h2 id="markdown">Markdown<a class="headerlink" href="#markdown" title="Permanent link">&para;</a></h2>
+<div class="grid cards">
+<ul>
+<li>
+<p><a href="../../examples/markdown_showcase/"><img alt="Markdown showcase: the notebook's rendered introduction." src="../../assets/examples/markdown_showcase-light.webp#only-light" /><img alt="Markdown showcase: the notebook's rendered introduction." src="../../assets/examples/markdown_showcase-dark.webp#only-dark" /></a></p>
+<p><strong><a href="../../examples/markdown_showcase/">markdown_showcase</a></strong>: every
+markdown rendering path: headings, lists, tables, code blocks, the
+security guards, and dynamic <code>Markdown(...)</code> output.</p>
+</li>
+</ul>
+</div>
 <h2 id="r-cells">R cells<a class="headerlink" href="#r-cells" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Notebook</th>
-<th>What you'll see</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="../../examples/r_mtcars_analysis/"><code>r_mtcars_analysis</code></a></td>
-<td>A pure-R notebook - <code>lm()</code>, <code>aggregate()</code>, and inline ggplot2 + base-graphics plots, with <code>data.frame</code> and R-only (RDS) handoff between R cells.</td>
-</tr>
-<tr>
-<td><a href="../../examples/r_lm_vs_sklearn/"><code>r_lm_vs_sklearn</code></a></td>
-<td>Mixed Python + R: fit a model with R's <code>lm()</code> and compare side-by-side with scikit-learn over a cross-language Arrow handoff.</td>
-</tr>
-</tbody>
-</table>
+<p>These need R (<code>Rscript</code> on the server's <code>PATH</code>).</p>
+<div class="grid cards">
+<ul>
+<li>
+<p><strong><a href="../../examples/r_mtcars_analysis/">r_mtcars_analysis</a></strong>: a pure-R
+    notebook: <code>lm()</code>, <code>aggregate()</code>, and inline ggplot2 and base-graphics
+    plots, with <code>data.frame</code> and R-only (RDS) handoff between R cells.</p>
+</li>
+<li>
+<p><strong><a href="../../examples/r_lm_vs_sklearn/">r_lm_vs_sklearn</a></strong>: Python and R in
+    one graph. Fit a model with R's <code>lm()</code> and compare it with scikit-learn
+    over a cross-language Arrow handoff.</p>
+</li>
+</ul>
+</div>
 
 
 

@@ -170,10 +170,11 @@ different Strata commits:
 ## Where it lives
 
 - `.strata-scratch/` at the project's root (the nearest `pyproject.toml`, bounded
-  by the git root): cells, values, and the digest the hooks read. Add it to
-  `.gitignore`; deleting it costs reruns only.
-- Cells run in the project's environment when it has one (`.venv`, or a uv
-  project's), else in the scratchpad's own. Their cwd is the scratchpad's `work/`
+  by the git root or your home directory): cells, values, and the digest the hooks
+  read. It carries its own `.gitignore` (`*`), so git never sees it and your
+  `.gitignore` needs no entry; deleting it costs reruns only.
+- Cells run in the project's environment when it has one (a uv project's, else
+  `$VIRTUAL_ENV`, else `.venv`), else in the scratchpad's own. Their cwd is the scratchpad's `work/`
   directory, so the agent uses absolute paths for project files.
 - One daemon per scratchpad, started by the first call and stopped after 30 idle
   minutes; agents in the same project share it.

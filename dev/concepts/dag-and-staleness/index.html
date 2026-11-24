@@ -3130,7 +3130,7 @@
 
 <h1 id="the-dag-and-staleness">The DAG and staleness<a class="headerlink" href="#the-dag-and-staleness" title="Permanent link">&para;</a></h1>
 <h2 id="dag-and-variable-analysis">DAG and variable analysis<a class="headerlink" href="#dag-and-variable-analysis" title="Permanent link">&para;</a></h2>
-<p>Each cell's source code is analyzed via Python's AST to extract:</p>
+<p>Each cell's source code is analyzed by <a href="https://github.com/bearing-research/cellgraph">cellgraph</a> (Python's AST and <code>symtable</code> for Python cells, its own analyzers for R and SQL) to extract:</p>
 <ul>
 <li><strong>Defines</strong>: top-level variable assignments (<code>x = 1</code>, <code>df = pd.read_csv(...)</code>)</li>
 <li><strong>References</strong>: free variables used but not defined in this cell</li>
@@ -3145,7 +3145,7 @@
 <h2 id="cell-execution-flow">Cell execution flow<a class="headerlink" href="#cell-execution-flow" title="Permanent link">&para;</a></h2>
 <p>When you run a cell, this happens:</p>
 <ol>
-<li><strong>Compute provenance hash</strong>: <code>sha256(sorted_input_hashes + source_hash + env_hash)</code></li>
+<li><strong>Compute provenance hash</strong>: a digest over the cell's definition key (its source with whitespace and comments dropped), the environment hash, the outputs of the upstream cells it reads, and its declared outside inputs (mounts, tables, fetches, datasets); see <a href="../caching/#caching-and-provenance">How caching works</a></li>
 <li><strong>Cache check</strong>: Look up the hash in the artifact store → return immediately on hit</li>
 <li><strong>Resolve inputs</strong>: Load upstream variable artifacts into a temp directory</li>
 <li><strong>Execute</strong>: Spawn a subprocess running the cell harness in the notebook's
@@ -3168,7 +3168,7 @@
 </ol>
 <p>This means you can edit an early cell and run a downstream cell, and Strata will re-execute the pipeline up to it. Within one run each cell executes at most once, even when two branches of the DAG both need it.</p>
 <h2 id="run-all">Run All<a class="headerlink" href="#run-all" title="Permanent link">&para;</a></h2>
-<p>Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout, a read-write mount, <code>@loop</code>, <code>@fetch</code>, <code>@dataset</code> or <code>@output_dir</code>, a sweep variant or a consumer of one, and every non-Python cell runs on its own.</p>
+<p>Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout (its own or the notebook's), a read-write mount, <code>@loop</code>, <code>@each</code>, <code>@fetch</code>, <code>@dataset</code> or <code>@output_dir</code>, a sweep variant or a consumer of one, a consumer of an <code>@each</code> output, a cell an annotation error keeps from running, and every non-Python cell runs on its own. In a scratchpad notebook every cell runs on its own.</p>
 <p>When a cell fails, Run All carries on, but not through the failure: every cell that reads from a failed cell, directly or further down, is skipped and marked stale with the reason that an upstream failed. Cells the failure does not reach run as normal. Rerun All does the same while bypassing the cache.</p>
 <h2 id="staleness">Staleness<a class="headerlink" href="#staleness" title="Permanent link">&para;</a></h2>
 <p>A cell is out of date when no stored result matches its current provenance. This happens when:</p>

@@ -5329,7 +5329,7 @@
 <td><code>notebook:read</code></td>
 </tr>
 <tr>
-<td>Content and configuration changes that run nothing: <code>/open</code>, <code>/create</code>, <code>/import</code>, <code>/import-snapshot</code>, <code>/recents/validate</code>, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote</td>
+<td>Content and configuration changes that run nothing: <code>/open</code>, <code>/create</code>, <code>/samples/{name}/open</code>, <code>/import</code>, <code>/import-snapshot</code>, <code>/recents/validate</code>, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote</td>
 <td><code>notebook:write</code></td>
 </tr>
 <tr>
@@ -5395,7 +5395,7 @@
 </tbody>
 </table>
 <p><code>notebook:execute</code> is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is <code>src/strata/notebook/scopes.py</code>, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.</p>
-<p>Without principal auth (personal mode, or <code>auth_mode="none"</code>), the scope gate returns immediately and none of this applies.</p>
+<p>Without principal auth (personal mode; service mode refuses <code>auth_mode="none"</code> at startup), the scope gate returns immediately and none of this applies.</p>
 <p>Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a <a href="../../deployment/modes/">trust-model decision</a>; see <a href="../../deployment/fly/#trust-model">Fly.io deployment</a> for the load-bearing details.</p>
 <h3 id="error-shape">Error shape<a class="headerlink" href="#error-shape" title="Permanent link">&para;</a></h3>
 <p>Most <code>4xx</code> and <code>5xx</code> responses use FastAPI's standard JSON shape:</p>
@@ -5493,7 +5493,7 @@ store is a JSON <code>503</code> with <code>Retry-After</code>.</p>
 <h3 id="request-ids">Request IDs<a class="headerlink" href="#request-ids" title="Permanent link">&para;</a></h3>
 <p>Every request gets an <code>X-Request-ID</code> response header (and the same value is echoed if the client sent one in). Log lines and traces include this ID - copy it when filing bugs.</p>
 <h3 id="tenancy">Tenancy<a class="headerlink" href="#tenancy" title="Permanent link">&para;</a></h3>
-<p>In multi-tenant deployments, the <code>X-Tenant-ID</code> header (1–64 alphanumeric, <code>_</code>, <code>-</code>) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is <strong>deny-first</strong>: explicit denies cannot be overridden by allows. See <a href="../../deployment/service-mode/">Service mode</a> for the full contract.</p>
+<p>In multi-tenant deployments, the <code>X-Tenant-ID</code> header (1–64 alphanumeric, <code>_</code>, <code>-</code>, starting with a letter or digit) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into row-group cache keys and cache directories and selects the QoS limiter pools; artifact rows record their tenant, and reads are filtered by it. ACL evaluation is <strong>deny-first</strong>: explicit denies cannot be overridden by allows. See <a href="../../deployment/service-mode/">Service mode</a> for the full contract.</p>
 <h2 id="notebook-lifecycle">Notebook lifecycle<a class="headerlink" href="#notebook-lifecycle" title="Permanent link">&para;</a></h2>
 <h3 id="create-notebook">Create notebook<a class="headerlink" href="#create-notebook" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>POST /v1/notebooks/create
@@ -6391,6 +6391,18 @@ by that team store, after this server's own gate.</p>
 <td>Delete one tag</td>
 </tr>
 <tr>
+<td><code>POST</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}/pin</code></td>
+<td><code>artifacts:pin</code></td>
+<td>Hold a version and its chain against garbage collection under a <code>reason</code>; pinning again under the same reason refreshes it (see <a href="../../deployment/lifecycle/#pins">Pins</a>)</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}/pin</code></td>
+<td><code>artifacts:pin</code></td>
+<td>Release the pin placed under <code>?reason=</code>; no such pin is a <code>404</code></td>
+</tr>
+<tr>
 <td><code>GET</code></td>
 <td><code>/v1/artifacts/by-provenance/{hash}</code></td>
 <td>read</td>
@@ -6535,6 +6547,18 @@ by that team store, after this server's own gate.</p>
 <td>Warm the cache for some tables and wait until every row group is fetched</td>
 </tr>
 <tr>
+<td><code>POST</code></td>
+<td><code>/v1/cache/warm/async</code></td>
+<td>table ACL</td>
+<td>Start a background warming job and return its id at once; it can target a snapshot</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/cache/warm/jobs</code></td>
+<td>caller's tenant</td>
+<td>Pending and running warming jobs; <code>include_completed=true</code> adds finished ones</td>
+</tr>
+<tr>
 <td><code>GET</code></td>
 <td><code>/v1/cache/warm/jobs/{job_id}</code></td>
 <td>caller's tenant</td>
@@ -6602,8 +6626,12 @@ by that team store, after this server's own gate.</p>
 </tr>
 </tbody>
 </table>
-<p>The <code>admin:*</code>, <code>admin:cache</code> and <code>admin:registry</code> gates apply under principal auth; without it
+<p>The <code>admin:*</code>, <code>admin:cache</code>, <code>admin:registry</code> and <code>artifacts:pin</code> gates apply under principal auth; without it
 those routes are open.</p>
+<p>The signed build-transport routes (<code>GET /v1/artifacts/download</code>, <code>POST /v1/artifacts/upload</code>,
+<code>GET /v1/builds/{build_id}</code> and its <code>manifest</code>, <code>finalize</code>, <code>log</code> and <code>output-file</code>) are called by
+workers through the URLs a build manifest carries; see the
+<a href="../executor-protocol/#post-v1execute-manifest-pull-model">pull model</a>.</p>
 
 
 

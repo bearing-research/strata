@@ -3399,7 +3399,8 @@ command run in its <code>src/</code> serves <code>services/api/</code>'s scratch
 <code>pyproject.toml</code> found, the repository is the project (never your home directory,
 should it be one), or outside one the directory itself. A command run inside a
 notebook, <code>.strata-scratch/</code> included, serves the project the notebook is in.
-<code>--root DIR</code> on any <code>strata scratch</code> command or on <code>strata mcp</code>, or
+<code>--root DIR</code> on every <code>strata scratch</code> command but <code>ls</code> (on <code>gc</code>, <code>--all</code> sweeps
+every one instead) or on <code>strata mcp</code>, or
 <code>STRATA_SCRATCH_ROOT</code> for a config that cannot pass arguments, names the project
 instead.</p>
 <p><code>strata scratch start</code> in a project creates <code>.strata-scratch/</code> at its root, a
@@ -3456,7 +3457,7 @@ installed in the project's environment as the environment and does not warn abou
 installed packages syncs it again, once no cell is running; whether a project has an environment at all is
 decided again when the scratchpad opens, and recorded in
 <code>.strata-scratch/.strata/scratchpad_environment.json</code>. <code>--python PATH</code> on <code>strata
-mcp</code> or <code>strata scratch start</code>, or <code>STRATA_SCRATCH_PYTHON</code>, names the interpreter
+mcp</code> or <code>strata scratch start</code>, <code>run</code> or <code>show</code>, or <code>STRATA_SCRATCH_PYTHON</code>, names the interpreter
 instead. A client asking for another than the daemon's replaces it once idle, and
 while it is busy is refused with both named; a client asking for none keeps the
 daemon's. A scratchpad cell's <code># @env</code> may not set <code>PYTHONPATH</code>, <code>PYTHONHOME</code>,
@@ -3608,7 +3609,7 @@ Needs the <code>[mcp]</code> extra.</p>
 </tr>
 <tr>
 <td><code>save_cell_output(session_id, cell_id, index=-1)</code></td>
-<td>Write a display output (a plot, an image) to the notebook's <code>.strata/outputs/</code> and return the path, so the agent can open it. The path is on the <strong>server's</strong> machine: an agent on another host should use <code>strata cell output --server … --session …</code>, which downloads and writes the file locally.</td>
+<td>Write a display output (a plot, an image) to the notebook's <code>.strata/outputs/</code> and return the path, so the agent can open it. The path is on the <strong>server's</strong> machine: an agent on another host should use <code>strata cell output --server … --session … &lt;cell_id&gt; --out plot.png</code>, which downloads and writes the file locally.</td>
 </tr>
 <tr>
 <td><code>get_variable(session_id, name)</code></td>
@@ -3648,7 +3649,7 @@ Needs the <code>[mcp]</code> extra.</p>
 </tr>
 <tr>
 <td><code>run_snippet(session_id, source, after?, language?, author?)</code></td>
-<td>Add a cell <strong>and run it</strong> in one call; returns the cell view with the run outcome nested under <code>run</code>. The scratchpad primitive.</td>
+<td>Add a cell <strong>and run it</strong> in one call; returns the cell view with the run outcome nested under <code>run</code>. The scratchpad profile's <code>run</code> is the form that takes no <code>session_id</code>.</td>
 </tr>
 <tr>
 <td><code>edit_cell(session_id, cell_id, source, author?)</code></td>

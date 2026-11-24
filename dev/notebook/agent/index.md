@@ -95,8 +95,12 @@ Claude Code finds the `.mcp.json` that step 1 wrote, connects to the
     ```bash
     SID=$(curl -s -X POST http://127.0.0.1:8765/v1/notebooks/open \
       -H 'content-type: application/json' \
-      -d '{"path": "./my-notebook"}' | jq -r .session_id)
+      -d "{\"path\": \"$PWD/my-notebook\"}" | jq -r .session_id)
     ```
+
+    Give an absolute path: a relative one resolves against the server's storage
+    root, not your shell's directory. Either way the notebook must live under
+    that root.
 
     Then either point the agent's MCP client at `http://127.0.0.1:8765/mcp`
     (streamable HTTP, the same endpoint `.mcp.json` names), or drive the

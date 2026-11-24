@@ -102,7 +102,7 @@ Workers can be anything that speaks HTTP: a GPU box on RunPod, a DataFusion clus
 strata-worker --host 127.0.0.1 --port 9000
 ```
 
-If no `@worker` is set, the cell runs locally in the notebook's Python environment.
+If no `@worker` is set, the cell runs on the worker its `notebook.toml` entry or the notebook's default names (see [Precedence rules](https://bearingresearch.com/strata/dev/reference/annotations/#precedence-rules)), and with neither, locally in the notebook's Python environment.
 
 ## @timeout
 
@@ -469,6 +469,15 @@ for a first run of thousands of items. An `@each` cell cannot also be a `@loop`,
 `@dataset`, `strata artifact pull` and a publication bundle over its output are not
 supported yet and are refused; a cell that reads the output can do the last three.
 A snapshot carries the output and every item it names.
+
+Each of these is an error, and the cell does not run: a line that does not read
+as `<name> in <source>` (`each_malformed`), a cell that is not Python
+(`each_not_python`), one that is also a `@loop` (`each_with_loop`) or a variant
+(`each_on_variant_member`), a `@write_table` mode other than `sync`
+(`each_write_table_mode`), a source that comes from a sweep (`each_over_sweep`)
+or that is neither a mount of the cell nor defined by an earlier cell
+(`each_unknown_source`), and a cell that reads
+the source whole as well as item by item (`each_reads_source`).
 
 A prune keeps each instance a kept manifest names, and what it displayed, and drops
 the rest, so a removed item's value goes once no manifest left names it. A copy to

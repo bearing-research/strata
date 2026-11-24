@@ -3051,10 +3051,10 @@
 <h1 id="r-lm-vs-scikit-learn-side-by-side-linear-regression">R <code>lm()</code> vs scikit-learn: side-by-side linear regression<a class="headerlink" href="#r-lm-vs-scikit-learn-side-by-side-linear-regression" title="Permanent link">&para;</a></h1>
 <p>Fit the same housing-price model with R's <code>lm()</code> and Python's
 <code>scikit-learn</code>. Hand the coefficients + held-out predictions back to
-a Python cell over Arrow IPC and read them side by side. This is the
-mixed-language notebook that #59 (the R Phase 1 capstone) was
-designed for, Python data prep, R modeling, Python comparison +
-viz, with the artifact store gluing everything together.</p>
+a Python cell over Arrow IPC and read them side by side. It is a
+mixed-language notebook end to end: Python data prep, R modeling,
+Python comparison + viz, with the artifact store gluing everything
+together.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>R's formula syntax in one line.</strong> <code>lm(price ~ sqft + bedrooms +
@@ -3069,7 +3069,7 @@ viz, with the artifact store gluing everything together.</p>
   pandas). The numbers should match to ~1e-12; the demo's value is
   <em>how</em> each toolkit expresses the fit, not which is more accurate.</li>
 <li><strong>R surfaces stats Python doesn't.</strong> Std-errors, t-statistics,
-  p-values for every coefficient, sklearn's <code>LinearRegression</code>
+  p-values for every coefficient; sklearn's <code>LinearRegression</code>
   ships none of that. The comparison cell leaves those columns NaN
   on the sklearn side.</li>
 </ul>
@@ -3112,7 +3112,7 @@ viz, with the artifact store gluing everything together.</p>
   project-scoped library automatically; no system installs beyond R
   itself. On macOS: <code>brew install r</code>. On Ubuntu: see
   <a href="https://cran.r-project.org/">CRAN</a>. The strata-notebook server
-  surfaces a clean skip / error if R is missing, no crash.</li>
+  surfaces a clean skip or error if R is missing, not a crash.</li>
 <li><strong>Python deps</strong> declared in this notebook's <code>pyproject.toml</code>
   (<code>pandas</code>, <code>numpy</code>, <code>scikit-learn</code>). Strata's per-notebook <code>uv
   sync</code> handles them automatically the first time you open the
@@ -3120,9 +3120,9 @@ viz, with the artifact store gluing everything together.</p>
 </ul>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
 <p>From the project root:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>examples
 </code></pre></div>
-<p>Then open <code>examples/r_lm_vs_sklearn</code> from the Strata home page and
+<p>Then open <strong>R lm() vs scikit-learn</strong> from the notebook list on the Strata home page and
 run the cells top-to-bottom.</p>
 <h2 id="expected-output">Expected output<a class="headerlink" href="#expected-output" title="Permanent link">&para;</a></h2>
 <p>The <code>compare</code> cell prints something like:</p>
@@ -3149,7 +3149,7 @@ solution; the <code>lm_p_value</code> column is R-only.</p>
 <ol>
 <li><strong>Edit the model.</strong> Drop <code>bedrooms</code> from the R formula
    (<code>lm(price ~ sqft + age + location)</code>) and watch the comparison
-   reshape, <code>compare</code> shows the row dropping out.</li>
+   reshape: <code>compare</code> shows the row dropping out.</li>
 <li><strong>Misalign the baseline level.</strong> In <code>fit-sklearn</code>, replace the
    <code>sorted(...)</code> in <code>location_levels = sorted(...)</code> with an unsorted
    list, <code>list(housing_train["location"].unique())</code>. When the first

@@ -1,6 +1,6 @@
 # Cell kinds
 
-Strata Notebook has seven cell kinds:
+Strata Notebook has six cell kinds, plus loop cells (a Python cell with a `# @loop` annotation):
 
 | Kind         | What it runs                                     | Created by                                                    |
 | ------------ | ------------------------------------------------ | ------------------------------------------------------------- |
@@ -12,13 +12,13 @@ Strata Notebook has seven cell kinds:
 | **Markdown** | Prose between cells, rendered as markdown        | Pick **Markdown** from the **+ Add cell** menu                |
 | [**Loop**](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/)     | A Python cell executed N times in a row          | Add a Python cell, then put a `# @loop` annotation at the top |
 
-Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; each has its own page.
+Compute cells participate in the DAG and cache by provenance hash. Python and R cells can be routed to remote workers; SQL, prompt and loop cells run on the server. Widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; each has its own page.
 
 See [The DAG and staleness](https://bearingresearch.com/strata/dev/concepts/dag-and-staleness/) for the execution model; see [Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) for the full per-annotation reference.
 
 ## Markdown cells
 
-Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.
+Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG - they don't produce artifacts, don't participate in cascade execution, and have no variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.
 
 ```markdown
 ## Stage 1: Load + Clean
@@ -44,4 +44,4 @@ See [Markdown showcase](https://bearingresearch.com/strata/dev/examples/markdown
 
 Mixing is encouraged: a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.
 
-Any kind of cell can also live inside a [variant group](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells): a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.
+Any compute cell (not a markdown cell) can also live inside a [variant group](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells): a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.

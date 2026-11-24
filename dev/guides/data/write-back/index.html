@@ -2988,6 +2988,7 @@ exactly what it produces.</p>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">current</span> <span class="o">=</span> <span class="n">latest_per_sample</span><span class="p">()</span>
 </code></pre></div>
 <p>Format: <code># @write_table &lt;var&gt; &lt;table&gt; append|overwrite|merge|sync [on=&lt;col&gt;,...]</code>.
+Python and R cells take it; SQL and prompt cells do not.
 The table is one of the forms <code>@table</code> takes, written with the server's
 catalogs and credentials (a catalog's <code>strata_credential</code> resolves against the
 notebook's environment first). The mode is required:</p>
@@ -3001,7 +3002,8 @@ notebook's environment first). The mode is required:</p>
   data files with no changed row stay. A table Strata did not write is refused,
   as for <code>overwrite</code>.</li>
 </ul>
-<p>For <code>merge</code> and <code>sync</code> each row needs one key of its own, so a null or a repeated
+<p><code>on=</code> is required for <code>merge</code> and <code>sync</code> and refused for <code>append</code> and
+<code>overwrite</code>; either mistake blocks the run. For <code>merge</code> and <code>sync</code> each row needs one key of its own, so a null or a repeated
 key fails the write. The change commits at once (as more than one snapshot, each
 naming the run), and nothing is committed when nothing differs.</p>
 <p>The variable must be an Arrow-representable table (a pandas, polars or pyarrow

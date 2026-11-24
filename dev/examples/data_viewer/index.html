@@ -3005,13 +3005,17 @@
 </button>
 
 <h1 id="data-viewer-paging-and-sorting-a-large-dataframe">Data Viewer: paging and sorting a large DataFrame<a class="headerlink" href="#data-viewer-paging-and-sorting-a-large-dataframe" title="Permanent link">&para;</a></h1>
-<p>A two-cell notebook that produces DataFrames larger than the inline
-preview, so the notebook's <strong>interactive data viewer</strong> switches on.</p>
+<p><img alt="The Data Viewer: paging and sorting a large DataFrame notebook in the editor after a run" src="../../assets/examples/data_viewer-light.webp#only-light" />
+<img alt="The Data Viewer: paging and sorting a large DataFrame notebook in the editor after a run" src="../../assets/examples/data_viewer-dark.webp#only-dark" /></p>
+<p>A two-cell notebook that produces DataFrames larger than the 20-row
+inline preview, so the notebook's <strong>interactive data viewer</strong> pages
+through the full frame.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
 <ul>
-<li>A cell whose displayed output is a <strong>2,000-row</strong> DataFrame. Instead of
-  a static 20-row table, the output renders as a scrollable grid with a
-  footer showing <code>1–50 of 2,000 rows</code> and <strong>Prev / Next</strong> paging.</li>
+<li>A cell whose displayed output is a <strong>2,000-row</strong> DataFrame. Every
+  table-shaped output renders in the grid; one larger than the preview
+  also gets a footer showing <code>1–50 of 2,000 rows</code> and <strong>Prev / Next</strong>
+  paging.</li>
 <li><strong>Click a column header to sort</strong>: ascending, then descending, then
   clear. Sorting runs server-side over the whole frame (not just the
   visible page), reading the cached Arrow artifact directly.</li>
@@ -3043,9 +3047,9 @@ Tensors and scalars keep their existing display.</p>
 </table>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
 <p>From the project root:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>examples
 </code></pre></div>
-<p>Then open <code>examples/data_viewer</code> from the Strata home page and run both
+<p>Then open <strong>Data Viewer</strong> from the notebook list on the Strata home page and run both
 cells.</p>
 <h2 id="try-this">Try this<a class="headerlink" href="#try-this" title="Permanent link">&para;</a></h2>
 <ol>

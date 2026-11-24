@@ -3027,6 +3027,8 @@
 </button>
 
 <h1 id="model-variants-sweep">Model Variants Sweep<a class="headerlink" href="#model-variants-sweep" title="Permanent link">&para;</a></h1>
+<p><img alt="The Model Variants Sweep notebook in the editor after a run" src="../../assets/examples/model_variants_sweep-light.webp#only-light" />
+<img alt="The Model Variants Sweep notebook in the editor after a run" src="../../assets/examples/model_variants_sweep-dark.webp#only-dark" /></p>
 <p>A minimal example of variant <strong>sweep mode</strong>: run every variant of a group and
 compare them all in one downstream cell.</p>
 <p>The <code>model</code> group has three variant cells, <code>always_one</code>, <code>alternating</code>,
@@ -3047,13 +3049,14 @@ per-variant <code>accuracy</code> back to a dict and picks the winner:</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>best model: always_one
 </code></pre></div>
 <p>Same numbers as <code>compare</code>, produced by fanning the scoring out first. See
-<a href="https://bearingresearch.com/strata/latest/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant">Variant Cells → Fan-out</a>.</p>
+<a href="https://bearingresearch.com/strata/latest/guides/cells/loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant">Variant Cells → Fan-out</a>.</p>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>run<span class="w"> </span>examples/model_variants_sweep
 </code></pre></div>
-<p>Or open it in the UI (<code>python -m strata</code>), the <code>model</code> group renders as a tab
-strip with a <strong>sweep</strong> badge; clicking a tab shows that variant's source (all
-of them still run), and the group has a run-all button + a readiness rollup.</p>
+<p>Or open it in the UI (<code>uv run strata-notebook --notebook-dir examples</code> from
+the repo root), where the <code>model</code> group renders as a tab strip with a
+<strong>sweep</strong> badge; clicking a tab shows that variant's source (all of them still
+run), and the group has a run-all button + a readiness rollup.</p>
 <h2 id="switch-vs-sweep">Switch vs sweep<a class="headerlink" href="#switch-vs-sweep" title="Permanent link">&para;</a></h2>
 <p>Flip <code>mode = "sweep"</code> to <code>mode = "switch"</code> (or drop the line) in
 <code>notebook.toml</code> and only the active variant runs; <code>compare</code> would then see a

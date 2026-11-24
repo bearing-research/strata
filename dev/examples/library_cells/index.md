@@ -1,5 +1,8 @@
 # library_cells
 
+![The library_cells notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)
+![The library_cells notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)
+
 Walks through cross-cell library code in Strata Notebook: pure module
 cells, mixed runtime+library cells, PEP 563 type annotations, and the
 limitations slicing keeps in place.
@@ -22,8 +25,8 @@ uv run python -m strata
 ```
 
 Then open the notebook UI and pick **Library Cells** from the discover
-list. Run the cells top-to-bottom; the `blocked` cell is meant to fail
-so you can see the new diagnostic.
+list. Run the cells top-to-bottom. The `blocked` cell carries the
+export diagnostic, and `try_blocked` shows the `NameError` its call raises.
 
 # Library cells
 
@@ -230,9 +233,10 @@ variable.
 # the slice. ``is_outlier`` references it as a free variable, which
 # leaves the synthetic module unable to resolve the name at call time.
 #
-# Running this cell errors at execution time. The diagnostic message
-# names both the function (``is_outlier``) and the unresolved variable
-# (``runtime_threshold``), pointing the user straight at the fix.
+# The cell itself runs; the diagnostic on it names both the function
+# (``is_outlier``) and the unresolved variable (``runtime_threshold``),
+# pointing the user straight at the fix. The consumer below shows the
+# NameError the call would raise.
 #
 # To unblock: move ``runtime_threshold`` into its own cell so the slice
 # only contains ``is_outlier``, and let the threshold flow through the
@@ -258,6 +262,13 @@ def is_outlier(value: float) -> bool:
 # helper and the planner would let it slide. Naming ``is_outlier``
 # here is what tells Strata "this is meant to be shared," and is
 # what makes the export-blocked diagnostic fire on the cell above.
+#
+# The helper never reaches this cell, so the call raises NameError.
+# Catching it keeps the notebook runnable end to end and shows the error.
 
-would_be_outliers = is_outlier(7)
+try:
+    would_be_outliers = is_outlier(7)
+except NameError as exc:
+    would_be_outliers = f"blocked: {exc}"
+would_be_outliers
 ```

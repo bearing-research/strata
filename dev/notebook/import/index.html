@@ -3482,10 +3482,14 @@ statement of an indented block leaves a <code>pass</code> behind.</p>
 <li><strong>REPL-inspection magics</strong> (<code>%who</code>, <code>%whos</code>, <code>%lsmagic</code>, <code>%history</code>,
   <code>%alias</code>, etc.). Dropped; no Strata equivalent.</li>
 </ul>
-<p>Everything that's "dropped" is listed in the import report
-(<code>&lt;notebook_dir&gt;/import_report.md</code>), and the cell source carries a
-<code># strata: ...</code> marker comment where it was, so there's no silent
-data loss.</p>
+<p>Everything above is listed in the import report
+(<code>&lt;notebook_dir&gt;/import_report.md</code>). Line magics with nothing to do in
+Strata (<code>%matplotlib</code>, <code>%load_ext</code>, the REPL-inspection ones and the
+rest of the drop rows in the <a href="#magic-translation-table">table below</a>)
+are removed without a trace in the cell and listed under <em>Magics
+translated</em>. Cell magics, shell commands and unrecognized magics leave
+a <code># strata: ...</code> marker comment where they were and are listed under
+<em>Magics dropped</em> or <em>Shell commands dropped</em>.</p>
 <h2 id="when-to-use-it">When to use it<a class="headerlink" href="#when-to-use-it" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>You arrived from Jupyter</strong> and want to try Strata on a notebook
@@ -3616,8 +3620,8 @@ adjacent comment) and appends a <code>pass</code> so the harness skips display.
 The cell still runs. As in IPython, only a <code>;</code> that ends the last
 statement counts: one inside a comment or a string does not.</p>
 <h3 id="magic-translation-table">Magic translation table<a class="headerlink" href="#magic-translation-table" title="Permanent link">&para;</a></h3>
-<p>Single dict in <code>strata.notebook.jupyter_import</code>. Adding a row
-extends support; rows can be:</p>
+<p>Two dicts in <code>strata.notebook.jupyter_import</code>, <code>_LINE_MAGIC_TABLE</code>
+and <code>_CELL_MAGIC_TABLE</code>. Adding a row extends support; rows can be:</p>
 <table>
 <thead>
 <tr>
@@ -3680,7 +3684,7 @@ extends support; rows can be:</p>
 </tr>
 <tr>
 <td>Anything unrecognized</td>
-<td>Dropped with a <code># strata: unsupported magic '&lt;name&gt;' dropped</code> comment at the original location.</td>
+<td>Dropped with a <code># strata: unsupported magic '%&lt;name&gt;' dropped</code> comment at the original location (<code>unsupported cell magic '%%&lt;name&gt;'</code> for a cell magic).</td>
 </tr>
 </tbody>
 </table>
@@ -3752,9 +3756,11 @@ Sections that surface when applicable:</p>
 <li><strong>Counts</strong>: markdown / code cells, <code>;</code>-suppression instances,
   skipped cell types.</li>
 <li><strong>Magics translated</strong>: list of every magic the converter rewrote
-  or absorbed.</li>
-<li><strong>Magics dropped</strong>: magics with no Strata equivalent; the source
-  carries a marker comment where each one used to live.</li>
+  or absorbed, including the no-op line magics it removed without a
+  marker (<code>%matplotlib</code>, <code>%load_ext</code>, <code>%who</code>, ...).</li>
+<li><strong>Magics dropped</strong>: cell magics and unrecognized magics with no
+  Strata equivalent, plus <code>%pip</code> / <code>%conda</code> other than <code>install</code> and
+  <code>%env</code> / <code>%run</code> lines with nothing to act on; the source carries a marker comment where each one used to live.</li>
 <li><strong>Shell commands dropped</strong>: <code>!cmd</code> lines (except <code>!pip install</code>)
   and shell cell magics that the converter removed.</li>
 <li><strong>Dependencies captured</strong>: what landed in <code>pyproject.toml</code>,

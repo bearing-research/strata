@@ -3171,7 +3171,7 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 about it (<code>annotation_not_for_sql</code>). A SQL cell runs in the server, so it has no
 worker, timeout or environment of its own.</p>
 <h2 id="sql"><code>@sql</code><a class="headerlink" href="#sql" title="Permanent link">&para;</a></h2>
-<p>Marks the cell as SQL and binds it to a named connection.</p>
+<p>Binds a SQL cell to a named connection. The cell is SQL by its kind (<code>language = "sql"</code>), not by this line.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1">-- @sql connection=warehouse</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="p">:</span><span class="n">min_amount</span>
 </code></pre></div>
@@ -3183,7 +3183,7 @@ worker, timeout or environment of its own.</p>
   directly.</li>
 <li><code>write=true</code>, opt the cell into writable execution. Without this flag the
   cell may only read: <code>SELECT</code>, set operations, <code>VALUES</code>, <code>TABLE</code>,
-  <code>SUMMARIZE</code>, <code>PIVOT</code>, <code>DESCRIBE</code>, <code>SHOW</code> and plain <code>EXPLAIN</code>. Anything else
+  <code>SUMMARIZE</code>, <code>PIVOT</code>, <code>UNPIVOT</code>, <code>DESCRIBE</code>, <code>SHOW</code> and plain <code>EXPLAIN</code>. Anything else
   (DDL, DML, <code>COPY</code>, <code>ATTACH</code>, <code>USE</code>, <code>CALL</code>, <code>SET</code>, <code>PRAGMA</code>, and <code>EXPLAIN
   ANALYZE</code>, which runs the statement it describes) is refused before the
   statement reaches the driver, naming it. The connection is still opened

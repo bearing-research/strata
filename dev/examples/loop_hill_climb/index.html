@@ -3016,17 +3016,19 @@
 </button>
 
 <h1 id="loop-hill-climb-demo-for-the-loop-cell-primitive">Loop Hill Climb: demo for the <code>@loop</code> cell primitive<a class="headerlink" href="#loop-hill-climb-demo-for-the-loop-cell-primitive" title="Permanent link">&para;</a></h1>
+<p><img alt="The Loop Hill Climb: demo for the @loop cell primitive notebook in the editor after a run" src="../../assets/examples/loop_hill_climb-light.webp#only-light" />
+<img alt="The Loop Hill Climb: demo for the @loop cell primitive notebook in the editor after a run" src="../../assets/examples/loop_hill_climb-dark.webp#only-dark" /></p>
 <p>Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop
 cell feature: the <code>@loop</code> / <code>@loop_until</code> annotations, per-iteration
 artifacts, the progress badge, the iteration picker, and the
 <code>@loop start_from</code> fork. The cell body is greedy hill climbing on
-<a href="https://en.wikipedia.org/wiki/Himmelblau%27s_function">Himmelblau's function</a> , 
+<a href="https://en.wikipedia.org/wiki/Himmelblau%27s_function">Himmelblau's function</a>,
 small enough to reason about and visually interesting because there
 are four equal-valued minima, so different seeds (and different forks)
 converge to different basins.</p>
 <h2 id="what-to-look-at">What to look at<a class="headerlink" href="#what-to-look-at" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>helpers</code></strong> is a module cell, imports (<code>random</code>) and a
+<li><strong><code>helpers</code></strong> is a module cell: imports (<code>random</code>) and a
   reusable function (<code>himmelblau</code>). It declares no top-level
   runtime state, so Strata treats it as a shareable module whose
   names are directly referenceable from every downstream cell.</li>
@@ -3044,7 +3046,7 @@ converge to different basins.</p>
     keeps the move if it improves the score. The step size shrinks on
     every accepted move so the search sharpens.</li>
 <li><code>random</code> and <code>himmelblau</code> come from the <code>helpers</code> cell via
-    the DAG, no duplicate imports or redefinitions here.</li>
+    the DAG, with no duplicate imports or redefinitions here.</li>
 <li>Every iteration stores the full <code>state</code> as its own artifact
     (<code>nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}</code>).</li>
 <li><strong><code>summary</code></strong> is a regular downstream cell. It reads the final
@@ -3052,9 +3054,10 @@ converge to different basins.</p>
   convergence table.</li>
 </ul>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<p>From the project root:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>examples
 </code></pre></div>
-<p>Open the notebook from the Strata home page, then run the four code
+<p>Open <strong>Hill Climb Loop</strong> from the notebook list on the Strata home page, then run the four code
 cells in order. While <code>evolve</code> is running you should see:</p>
 <ul>
 <li>A <code>iter k/40</code> progress badge next to the cell title, with a spinner
@@ -3123,8 +3126,9 @@ prefix (iters 0..K) and diverge after.</p>
   each on this machine). For agentic LLM loops the per-iteration
   network call dwarfs that; for tight numerical loops the pool reuse
   is a future optimization.</li>
-<li>The loop cell runs only on the <code>local</code> worker in Phase 1. Remote
-  worker support is a later phase.</li>
+<li>A loop cell runs on the notebook's own server, never on a remote
+  worker: one whose <code># @worker</code> (or the notebook's default worker) names
+  another fails before it starts.</li>
 </ul>
 <h2 id="helpers">Helpers<a class="headerlink" href="#helpers" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>

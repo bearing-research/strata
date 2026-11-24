@@ -2961,6 +2961,8 @@
 </button>
 
 <h1 id="library_cells">library_cells<a class="headerlink" href="#library_cells" title="Permanent link">&para;</a></h1>
+<p><img alt="The library_cells notebook in the editor after a run" src="../../assets/examples/library_cells-light.webp#only-light" />
+<img alt="The library_cells notebook in the editor after a run" src="../../assets/examples/library_cells-dark.webp#only-dark" /></p>
 <p>Walks through cross-cell library code in Strata Notebook: pure module
 cells, mixed runtime+library cells, PEP 563 type annotations, and the
 limitations slicing keeps in place.</p>
@@ -2997,8 +2999,8 @@ limitations slicing keeps in place.</p>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
 </code></pre></div>
 <p>Then open the notebook UI and pick <strong>Library Cells</strong> from the discover
-list. Run the cells top-to-bottom; the <code>blocked</code> cell is meant to fail
-so you can see the new diagnostic.</p>
+list. Run the cells top-to-bottom. The <code>blocked</code> cell carries the
+export diagnostic, and <code>try_blocked</code> shows the <code>NameError</code> its call raises.</p>
 <h1 id="library-cells">Library cells<a class="headerlink" href="#library-cells" title="Permanent link">&para;</a></h1>
 <p>A <em>library cell</em> is one that defines reusable Python: functions, classes,
 constants, code that other cells will import and call. Strata Notebook
@@ -3165,21 +3167,22 @@ variable.</p>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># the slice. ``is_outlier`` references it as a free variable, which</span>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># leaves the synthetic module unable to resolve the name at call time.</span>
 <a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1">#</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># Running this cell errors at execution time. The diagnostic message</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># names both the function (``is_outlier``) and the unresolved variable</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># (``runtime_threshold``), pointing the user straight at the fix.</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1">#</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="c1"># To unblock: move ``runtime_threshold`` into its own cell so the slice</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="c1"># only contains ``is_outlier``, and let the threshold flow through the</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="c1"># regular artifact path.</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>
-<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="n">runtime_threshold</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">9</span><span class="p">)</span>
-<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># The cell itself runs; the diagnostic on it names both the function</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># (``is_outlier``) and the unresolved variable (``runtime_threshold``),</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># pointing the user straight at the fix. The consumer below shows the</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># NameError the call would raise.</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="c1">#</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="c1"># To unblock: move ``runtime_threshold`` into its own cell so the slice</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="c1"># only contains ``is_outlier``, and let the threshold flow through the</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="c1"># regular artifact path.</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="n">runtime_threshold</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">9</span><span class="p">)</span>
 <a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>
-<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="k">def</span><span class="w"> </span><span class="nf">is_outlier</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>    <span class="k">return</span> <span class="n">value</span> <span class="o">&gt;</span> <span class="n">runtime_threshold</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="k">def</span><span class="w"> </span><span class="nf">is_outlier</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>    <span class="k">return</span> <span class="n">value</span> <span class="o">&gt;</span> <span class="n">runtime_threshold</span>
 </code></pre></div>
 <h2 id="downstream-consumer-would-call-is_outlier">Downstream consumer (would call is_outlier)<a class="headerlink" href="#downstream-consumer-would-call-is_outlier" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>
@@ -3189,8 +3192,15 @@ variable.</p>
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># helper and the planner would let it slide. Naming ``is_outlier``</span>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># here is what tells Strata "this is meant to be shared," and is</span>
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1"># what makes the export-blocked diagnostic fire on the cell above.</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">would_be_outliers</span> <span class="o">=</span> <span class="n">is_outlier</span><span class="p">(</span><span class="mi">7</span><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1">#</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># The helper never reaches this cell, so the call raises NameError.</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># Catching it keeps the notebook runnable end to end and shows the error.</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">would_be_outliers</span> <span class="o">=</span> <span class="n">is_outlier</span><span class="p">(</span><span class="mi">7</span><span class="p">)</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="k">except</span> <span class="ne">NameError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="n">would_be_outliers</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"blocked: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">"</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="n">would_be_outliers</span>
 </code></pre></div>
 
 

@@ -3091,7 +3091,7 @@ separate run; fetch in an upstream cell instead.</p>
   you: it sets <code>sha256=</code> on each named fetch (all of the cell's by default) to
   the digest of the bytes the notebook last downloaded, keeping the line's other
   options. Run the cell first so there are bytes to pin. After a mismatch,
-  running it again accepts what the URL serves now.</li>
+  running <code>pin-fetch</code> again pins what the URL serves now.</li>
 <li><strong><code>refetch=stale</code></strong> (default) checks the URL with a conditional GET
   (<code>ETag</code> / <code>Last-Modified</code>): at most once a minute while staleness is being
   recomputed, and always right before the cell runs, so what a run records is
@@ -3129,7 +3129,7 @@ than in a batch.</p>
 <p>On a remote worker the server does the fetching: the bytes travel with the
 cell's other inputs, uploaded on the direct transport and staged behind a
 signed URL on the signed one, so the worker never contacts the URL and needs no
-route to it. The worker must be running this version of Strata or later. An
+route to it. The worker must be running Strata 0.8.0 or later. An
 older one does not recognise the input and the cell fails with a <code>NameError</code>
 on <code>&lt;name&gt;</code>.</p>
 <h2 id="dataset">@dataset<a class="headerlink" href="#dataset" title="Permanent link">&para;</a></h2>
@@ -3147,9 +3147,10 @@ in the source hash and the version is in nothing.</p>
 <li><strong><code>taxi/model@champion</code></strong> follows the alias. The cell goes out of date when
   the alias points somewhere else.</li>
 <li><strong><code>taxi/model</code></strong> follows the name pointer the same way.</li>
-<li><strong><code>taxi/model@v=3</code></strong> pins version 3 of the artifact the name points at. A
-  pinned dataset never makes the cell out of date, as <code>snapshot=</code> does for
-  <code>@table</code>.</li>
+<li><strong><code>taxi/model@v=3</code></strong> pins version 3 of the artifact the name points at. New
+  versions of that artifact never make the cell out of date, as <code>snapshot=</code>
+  does for <code>@table</code>. Pointing the name at a different artifact does: the pin
+  then names that artifact's version 3, and the cell fails if it has none.</li>
 </ul>
 <p>The server resolves the name in its own registry, or in the team store when
 <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> is set. The version is copied into the

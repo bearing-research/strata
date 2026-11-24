@@ -3690,6 +3690,10 @@ checked: its files are on the worker.</p>
 <td>Give the cell a folder whose contents are an output (see <a href="../../../reference/annotations/python/#output_dir"><code>@output_dir</code></a>)</td>
 </tr>
 <tr>
+<td><code># @each …</code></td>
+<td>Run once per file or row, each cached on its own (see <a href="../../../reference/annotations/python/#each"><code>@each</code></a>)</td>
+</tr>
+<tr>
 <td><code># @nocache</code></td>
 <td>Always re-execute; never serve a cache hit</td>
 </tr>
@@ -3698,8 +3702,24 @@ checked: its files are on the worker.</p>
 <td>Every run persists beside the cache and never serves it (see <a href="../../../reference/annotations/python/#stochastic"><code>@stochastic</code></a>)</td>
 </tr>
 <tr>
+<td><code># @after &lt;id&gt;</code></td>
+<td>Add an ordering-only edge from another cell (see <a href="../../../reference/annotations/python/#after"><code>@after</code></a>)</td>
+</tr>
+<tr>
 <td><code># @loop …</code></td>
 <td>Turn the cell into a <a href="../loops-and-variants/#loop-cells">loop cell</a></td>
+</tr>
+<tr>
+<td><code># @loop_until …</code></td>
+<td>End a loop cell early when an expression is true</td>
+</tr>
+<tr>
+<td><code># @variant &lt;group&gt; &lt;name&gt;</code></td>
+<td>Make the cell one alternative in a <a href="../loops-and-variants/#variant-cells">variant group</a></td>
+</tr>
+<tr>
+<td><code># @per_variant</code></td>
+<td>Run once per variant of an upstream sweep group (<a href="../loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant">fan-out</a>)</td>
 </tr>
 </tbody>
 </table>

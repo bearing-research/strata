@@ -3019,7 +3019,7 @@ kept in <code>.strata/hashes.sqlite</code> while the file's stat holds, so an un
 costs a <code>stat</code> per file. A file written less than 2 s before it was read is read again
 next time. The staleness check reads at most 64 MiB of files it holds no digest for.
 Past that the server hashes the mount in the background, and the cell shows stale
-("Checking mount <code>raw</code>", with how much is hashed) until it is done; a cell whose files did not change is then
+("Checking mount <code>raw</code>: its files aren't hashed yet", with a progress line such as "hashing raw · 120 of 400") until it is done; a cell whose files did not change is then
 ready again, and a run in the meantime waits for that hash rather than starting its own.
 Links to files are followed,
 links to folders are not, and a file that cannot be read is keyed as unreadable. A
@@ -3081,7 +3081,11 @@ hit or a run-all batch too), or the cell's deletion, drops it. A <code># @per_va
 cell's entry lists every variant's files, merged per mount, once every variant has
 succeeded; a path two variants wrote keeps the later one's. Loop, SQL and prompt
 cells do not record writes, so a successful run of one drops the entry too.</p>
-<p>Format: <code># @mount &lt;name&gt; &lt;uri&gt; [ro|rw] [credential=&lt;name&gt;]</code>. Defaults to <code>ro</code> (read-only) if the mode is omitted. <code>credential=</code> names a <a href="../../../reference/notebook-toml/#named-credentials">server-defined credential</a> instead of putting a secret in the cell. On a server that sets <code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code>, an <code>rw</code> mount of <code>s3://</code>, <code>gs://</code> or <code>az://</code> must write through a credential its run's principal is listed for (its <code>credential=</code>, or the server's default for that scheme), or the cell fails before it runs; a credential that <code>STRATA_NOTEBOOK_CREDENTIAL_PATHS</code> restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).</p>
+<p>Format: <code># @mount &lt;name&gt; &lt;uri&gt; [ro|rw] [credential=&lt;name&gt;]</code>. Defaults to <code>ro</code> (read-only) if the mode is omitted. <code>credential=</code> names a <a href="../../../reference/notebook-toml/#named-credentials">server-defined credential</a> instead of putting a secret in the cell. On a server that sets <code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code>, an <code>rw</code> mount of <code>s3://</code>, <code>gs://</code> or <code>az://</code> must write through credentials its run's principal is listed for (its <code>credential=</code> and the server's default for that scheme, each when set), or the cell fails before it runs; a remote <code>rw</code> mount with neither is refused; a credential that <code>STRATA_NOTEBOOK_CREDENTIAL_PATHS</code> restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).</p>
+<p>The annotation takes nothing else. A mount every cell can name, a <code>pin</code> and fsspec
+<code>options</code> (such as <code>anon</code> or <code>endpoint_url</code>) go in <code>notebook.toml</code> under
+<a href="../../../reference/notebook-toml/#mounts-filesystem-mounts"><code>[[mounts]]</code></a>. A pinned
+mount is keyed on its pin, not its files.</p>
 
 
 

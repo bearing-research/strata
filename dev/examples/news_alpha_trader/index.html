@@ -3034,7 +3034,7 @@
 
 <h1 id="news-alpha-trader">News Alpha Trader<a class="headerlink" href="#news-alpha-trader" title="Permanent link">&para;</a></h1>
 <p><strong>An end-to-end LLM-driven trading notebook.</strong> Overnight news → structured sentiment signals → paper (or live) orders via Alpaca → cost-adjusted P&amp;L, all persisted to a local DuckDB so the data accumulates across sessions.</p>
-<p>This example is the opposite of the toy notebooks in this directory, it talks to real APIs, spends real tokens, and (if you opt in) places real orders.</p>
+<p>This example is the opposite of the toy notebooks in this directory: it talks to real APIs, spends real tokens, and (if you opt in) places real orders.</p>
 <h2 id="what-it-does">What it does<a class="headerlink" href="#what-it-does" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Pulls overnight news for a watchlist (Alpaca Market Data, Benzinga feed)</li>
@@ -3085,7 +3085,7 @@
 <li>Edit <code>helpers.py</code> → set <code>Config.I_UNDERSTAND_THIS_IS_REAL_MONEY = True</code></li>
 <li>Your Alpaca account must be funded</li>
 </ol>
-<p>The <code>place_orders</code> cell refuses to run live without both flags set. This is intentional, two edits on purpose.</p>
+<p>The <code>place_orders</code> cell refuses to run live without both flags set. This is intentional: two edits, on purpose.</p>
 <h2 id="risk-limits-hard-enforced-in-code">Risk limits (hard, enforced in code)<a class="headerlink" href="#risk-limits-hard-enforced-in-code" title="Permanent link">&para;</a></h2>
 <p>Change in <code>helpers.py</code> → <code>Config</code> class:</p>
 <ul>
@@ -3106,14 +3106,15 @@
 <li><code>costs</code>: every dollar spent: LLM tokens, market data, commissions, TAF fees, slippage</li>
 </ul>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>sync
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Open the notebook in Strata, set API keys in the Runtime panel, run-all.</span>
+<p>From the project root:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>examples
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Open "News Alpha Trader" from the home page, set API keys in the Runtime panel, run all.</span>
 </code></pre></div>
-<p>Re-run tomorrow, <code>fetch_news</code> only pulls new articles, <code>place_orders</code> is idempotent by <code>signal_id</code>. The DB grows over time; so does the history you can analyze.</p>
+<p>Re-run tomorrow: <code>fetch_news</code> only pulls new articles, <code>place_orders</code> is idempotent by <code>signal_id</code>. The DB grows over time; so does the history you can analyze.</p>
 <h2 id="disclaimers">Disclaimers<a class="headerlink" href="#disclaimers" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>This is not financial advice.</strong> The strategy is a demo. It may lose money. Backtest thoroughly before live trading.</li>
-<li>LLM outputs are non-deterministic even with <code>temperature=0.0</code>. A prompt injection in a news headline could theoretically shift a signal, the ticker whitelist is the hard backstop.</li>
+<li>LLM outputs are non-deterministic even with <code>temperature=0.0</code>. A prompt injection in a news headline could theoretically shift a signal; the ticker whitelist is the hard backstop.</li>
 <li>Paper fills are instantaneous and slippage-free. Live fills are not. The cost model applies estimated slippage to both modes so the numbers stay honest.</li>
 <li>You are responsible for understanding every line of <code>place_orders.py</code> before flipping to live.</li>
 </ul>
@@ -3592,46 +3593,47 @@ matching price data, and run risk checks before any orders go out.</p>
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>#
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a># Extracts structured sentiment for each article in the unprocessed
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a># batch. The schema enums are deliberately narrow: a tighter enum
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a># means cleaner aggregation SQL downstream. The validate-and-retry
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a># loop kicks in when the provider falls back to json_object mode
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a># (Anthropic, Gemini, Mistral) and the response doesn't quite match.
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>#
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a># Prompt-design note: earlier prompts told the model to "err toward
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a># low confidence on ambiguous headlines." Models read that as "omit
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a># the row" and returned empty arrays on unglamorous news batches.
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a># The current phrasing is explicit: return one row per article,
-<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a># encode uncertainty in the confidence score, don't drop articles.
-<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a># Config.MIN_CONFIDENCE + MIN_ABS_SENTIMENT at the risk layer are
-<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a># where the actual trading threshold lives.
-<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>
-<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>Return exactly one signal per input article; do NOT omit rows. Encode
-<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>uncertainty in the `confidence` field. The downstream risk filter
-<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>drops low-confidence rows before any trade is placed, so your job
-<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>here is just to characterize every headline we fetched.
-<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>
-<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>For each article, emit:
-<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>
-<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>- `article_id` and `ticker`: copied verbatim from the input row.
-<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a>- `sentiment` in [-1, 1]: -1 = clearly bearish for this ticker,
-<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>  +1 = clearly bullish, 0 = neutral / not directionally relevant.
-<a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a>- `confidence` in [0, 1]:
-<a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a>  - &gt; 0.8 for clear-cut material news (earnings beat, explicit
-<a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a>    guidance, confirmed M&amp;A, major product launch, regulatory
-<a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a>    action with a named target).
-<a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a>  - 0.5–0.8 for solid analyst coverage, sector news with clear
-<a id="__codelineno-4-37" name="__codelineno-4-37" href="#__codelineno-4-37"></a>    ticker impact, leadership moves with stated effect.
-<a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a>  - 0.2–0.5 for rumors, side mentions, ambiguous macro.
-<a id="__codelineno-4-39" name="__codelineno-4-39" href="#__codelineno-4-39"></a>  - &lt; 0.2 for headlines that aren't really about this ticker
-<a id="__codelineno-4-40" name="__codelineno-4-40" href="#__codelineno-4-40"></a>    (cross-references, generic market commentary). Still return
-<a id="__codelineno-4-41" name="__codelineno-4-41" href="#__codelineno-4-41"></a>    the row; use 0 sentiment and explain in `reasoning`.
-<a id="__codelineno-4-42" name="__codelineno-4-42" href="#__codelineno-4-42"></a>- `theme`: pick the single best enum value.
-<a id="__codelineno-4-43" name="__codelineno-4-43" href="#__codelineno-4-43"></a>- `reasoning`: one short sentence explaining the score.
-<a id="__codelineno-4-44" name="__codelineno-4-44" href="#__codelineno-4-44"></a>
-<a id="__codelineno-4-45" name="__codelineno-4-45" href="#__codelineno-4-45"></a>Do NOT infer signals for tickers other than the one on each row.
-<a id="__codelineno-4-46" name="__codelineno-4-46" href="#__codelineno-4-46"></a>
-<a id="__codelineno-4-47" name="__codelineno-4-47" href="#__codelineno-4-47"></a>Articles:
-<a id="__codelineno-4-48" name="__codelineno-4-48" href="#__codelineno-4-48"></a>
-<a id="__codelineno-4-49" name="__codelineno-4-49" href="#__codelineno-4-49"></a>{{ unprocessed }}
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a># means cleaner aggregation SQL downstream. Anthropic gets the schema as
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a># a native tool and OpenAI-compatible endpoints as json_schema; the
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a># validate-and-retry loop matters most when another endpoint falls back
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a># to json_object mode and the response doesn't quite match.
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>#
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a># Prompt-design note: earlier prompts told the model to "err toward
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a># low confidence on ambiguous headlines." Models read that as "omit
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a># the row" and returned empty arrays on unglamorous news batches.
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a># The current phrasing is explicit: return one row per article,
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a># encode uncertainty in the confidence score, don't drop articles.
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a># Config.MIN_CONFIDENCE + MIN_ABS_SENTIMENT at the risk layer are
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a># where the actual trading threshold lives.
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>Return exactly one signal per input article; do NOT omit rows. Encode
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>uncertainty in the `confidence` field. The downstream risk filter
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>drops low-confidence rows before any trade is placed, so your job
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>here is just to characterize every headline we fetched.
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a>For each article, emit:
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>
+<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a>- `article_id` and `ticker`: copied verbatim from the input row.
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>- `sentiment` in [-1, 1]: -1 = clearly bearish for this ticker,
+<a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a>  +1 = clearly bullish, 0 = neutral / not directionally relevant.
+<a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a>- `confidence` in [0, 1]:
+<a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a>  - &gt; 0.8 for clear-cut material news (earnings beat, explicit
+<a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a>    guidance, confirmed M&amp;A, major product launch, regulatory
+<a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a>    action with a named target).
+<a id="__codelineno-4-37" name="__codelineno-4-37" href="#__codelineno-4-37"></a>  - 0.5–0.8 for solid analyst coverage, sector news with clear
+<a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a>    ticker impact, leadership moves with stated effect.
+<a id="__codelineno-4-39" name="__codelineno-4-39" href="#__codelineno-4-39"></a>  - 0.2–0.5 for rumors, side mentions, ambiguous macro.
+<a id="__codelineno-4-40" name="__codelineno-4-40" href="#__codelineno-4-40"></a>  - &lt; 0.2 for headlines that aren't really about this ticker
+<a id="__codelineno-4-41" name="__codelineno-4-41" href="#__codelineno-4-41"></a>    (cross-references, generic market commentary). Still return
+<a id="__codelineno-4-42" name="__codelineno-4-42" href="#__codelineno-4-42"></a>    the row; use 0 sentiment and explain in `reasoning`.
+<a id="__codelineno-4-43" name="__codelineno-4-43" href="#__codelineno-4-43"></a>- `theme`: pick the single best enum value.
+<a id="__codelineno-4-44" name="__codelineno-4-44" href="#__codelineno-4-44"></a>- `reasoning`: one short sentence explaining the score.
+<a id="__codelineno-4-45" name="__codelineno-4-45" href="#__codelineno-4-45"></a>
+<a id="__codelineno-4-46" name="__codelineno-4-46" href="#__codelineno-4-46"></a>Do NOT infer signals for tickers other than the one on each row.
+<a id="__codelineno-4-47" name="__codelineno-4-47" href="#__codelineno-4-47"></a>
+<a id="__codelineno-4-48" name="__codelineno-4-48" href="#__codelineno-4-48"></a>Articles:
+<a id="__codelineno-4-49" name="__codelineno-4-49" href="#__codelineno-4-49"></a>
+<a id="__codelineno-4-50" name="__codelineno-4-50" href="#__codelineno-4-50"></a>{{ unprocessed }}
 </code></pre></div>
 <h2 id="persist-signals">Persist signals<a class="headerlink" href="#persist-signals" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>

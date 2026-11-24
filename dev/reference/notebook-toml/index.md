@@ -424,6 +424,10 @@ When the same piece of metadata is declared in multiple places, the most specifi
 
 Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See [Annotations](https://bearingresearch.com/strata/dev/reference/annotations/).
 
+## `[r]` (legacy)
+
+A `[r]` block from an older release is written back as it was read and otherwise ignored. The R runtime state (lockfile hash, last sync, R version) lives in `.strata/runtime.json`.
+
 ## What lives elsewhere
 
 | Belongs in `.strata/` (runtime state, gitignored) | Belongs in `notebook.toml` |

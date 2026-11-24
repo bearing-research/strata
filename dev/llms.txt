@@ -14,7 +14,7 @@
 
 ## Guides
 
-- [Cell kinds](https://bearingresearch.com/strata/dev/guides/cells/index.md): Strata Notebook has seven cell kinds:
+- [Cell kinds](https://bearingresearch.com/strata/dev/guides/cells/index.md): Strata Notebook has six cell kinds, plus loop cells (a Python cell with a `# @loop` annotation):
 - [Python cells](https://bearingresearch.com/strata/dev/guides/cells/python/index.md): The default.
 - [SQL cells](https://bearingresearch.com/strata/dev/guides/cells/sql/index.md): A SQL cell sends a query to a connected database via ADBC (DuckDB through its own driver) and stores the result as an Arrow Table artifact.
 - [R cells](https://bearingresearch.com/strata/dev/guides/cells/r/index.md): R is a first-class notebook language alongside Python.
@@ -45,7 +45,7 @@
 ## Concepts
 
 - [How caching works](https://bearingresearch.com/strata/dev/concepts/caching/index.md): *Edit one cell in `strata tutorial`: only the cells that read it run again, and the cell above keeps what it saved.
-- [The DAG and staleness](https://bearingresearch.com/strata/dev/concepts/dag-and-staleness/index.md): Each cell's source code is analyzed via Python's AST to extract:
+- [The DAG and staleness](https://bearingresearch.com/strata/dev/concepts/dag-and-staleness/index.md): Each cell's source code is analyzed by cellgraph (Python's AST and `symtable` for Python cells, its own analyzers for R and SQL) to extract:
 - [Artifacts and lineage](https://bearingresearch.com/strata/dev/concepts/artifacts-and-lineage/index.md): Strata Notebook is a content-addressed compute graph over Python.
 - [File format and git](https://bearingresearch.com/strata/dev/concepts/file-format-and-git/index.md): Each notebook is a directory on disk:
 - [How Strata compares](https://bearingresearch.com/strata/dev/notebook/comparison/index.md): Strata is closest in spirit to the new generation of reactive notebooks (marimo, Pluto.jl) - it shares the "your DAG comes from your variable references" idea.
@@ -87,7 +87,7 @@
 - [Agent Demo: a coding agent builds this notebook](https://bearingresearch.com/strata/dev/examples/agent_demo/index.md): This is the notebook from the `strata agent` demo: a coding agent (Claude Code) builds it live while you watch in the terminal UI.
 - [arXiv Paper Classifier (distributed demo)](https://bearingresearch.com/strata/dev/examples/arxiv_classifier/index.md): A full ML workflow that exercises every differentiated feature of Strata Notebook at once:
 - [Tutorial: what the cache saves](https://bearingresearch.com/strata/dev/examples/caching/index.md): A two-minute tour of caching.
-- [Data Viewer: paging and sorting a large DataFrame](https://bearingresearch.com/strata/dev/examples/data_viewer/index.md): A two-cell notebook that produces DataFrames larger than the inline preview, so the notebook's interactive data viewer switches on.
+- [Data Viewer: paging and sorting a large DataFrame](https://bearingresearch.com/strata/dev/examples/data_viewer/index.md): A two-cell notebook that produces DataFrames larger than the 20-row inline preview, so the notebook's interactive data viewer pages through the full frame.
 - [Pipeline over files: `@each` and a synced table](https://bearingresearch.com/strata/dev/examples/each_pipeline/index.md): A cell that runs once per file, caches each file separately, and keeps an Iceberg table in step with the results.
 - [Iris Classification: end-to-end ML in seven cells](https://bearingresearch.com/strata/dev/examples/iris_classification/index.md): Classic scikit-learn tutorial, rewritten as a Strata notebook.
 - [library_cells](https://bearingresearch.com/strata/dev/examples/library_cells/index.md): Walks through cross-cell library code in Strata Notebook: pure module cells, mixed runtime+library cells, PEP 563 type annotations, and the limitations slicing…

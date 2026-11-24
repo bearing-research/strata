@@ -3409,8 +3409,8 @@ this is blocking you.</p>
 <p>Editing any of these invalidates the cache. In particular, tweaking <code>@output_schema</code> on a cached cell forces a fresh call, which is what you want when iterating on the response shape.</p>
 <div class="admonition tip">
 <p class="admonition-title">Keep temperature at 0.0 for prompt cells</p>
-</div>
 <p>With <code>temperature=0.0</code> the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling.</p>
+</div>
 <h2 id="provider-configuration">Provider configuration<a class="headerlink" href="#provider-configuration" title="Permanent link">&para;</a></h2>
 <p>Set an API key in the <strong>Runtime panel</strong>, under <strong>Notebook settings</strong> in the sidebar, in Environment Variables. The key determines which provider is used:</p>
 <table>

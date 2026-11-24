@@ -32,18 +32,10 @@ my_notebook/
 ```toml
 notebook_id = "f7bd9094-..."
 name = "my_analysis"
-
-[[cells]]
-id = "a1b2c3d4"
-file = "a1b2c3d4.py"
-language = "python"
-order = 0
-
-[[cells]]
-id = "e5f6g7h8"
-file = "e5f6g7h8.py"
-language = "python"
-order = 1
+cells = [
+    { id = "a1b2c3d4", file = "a1b2c3d4.py", language = "python", order = 0 },
+    { id = "e5f6g7h8", file = "e5f6g7h8.py", language = "python", order = 1 },
+]
 ```
 
 ## Version control
@@ -53,8 +45,9 @@ files, which co-mingle source, outputs, and execution counts in one
 JSON blob and produce a multi-kilobyte diff every time a cell is
 re-run, a Strata notebook is just a directory of plain text:
 
-- **Cells are plain text files.** Python, prompt and SQL cells are `.py`,
-  R cells `.r`, markdown cells `.md` and widget cells `.widget`. Normal
+- **Cells are plain text files.** Python cells are `.py`, prompt cells
+  `.prompt`, SQL cells `.sql`, R cells `.r`, markdown cells `.md` and
+  widget cells `.widget`. Normal
   `git diff`, `git blame`, code review on a pull request, syntax highlighting in every IDE. Reordering a cell
   edits one number in `notebook.toml`, not a giant JSON re-serialize.
 - **`notebook.toml` is the manifest.** Stable config only: cell list,

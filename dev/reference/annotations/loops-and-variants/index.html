@@ -3122,6 +3122,11 @@ iteration.</p>
   Parameters are split on whitespace, so the expression cannot contain a
   space (<code>until=acc["loss"]&lt;0.05</code>); use <code>@loop_until</code> for anything longer.</li>
 </ul>
+<p>A loop with no positive <code>max_iter</code> (<code>loop_missing_max_iter</code>), no <code>carry</code>
+(<code>loop_missing_carry</code>) or a <code>@loop_until</code> (or <code>until=</code>) that is not a Python expression
+(<code>loop_until_syntax_error</code>) is an error, and the cell does not run. A <code>carry</code>
+that no top-level assignment in the cell rebinds is a warning
+(<code>loop_carry_unknown</code>).</p>
 <h2 id="loop_until"><code>@loop_until</code><a class="headerlink" href="#loop_until" title="Permanent link">&para;</a></h2>
 <p>Python expression evaluated after each iteration in the cell's namespace. When
 it returns truthy, the loop exits early. A name it reads that the body does not

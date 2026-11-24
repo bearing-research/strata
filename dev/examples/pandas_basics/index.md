@@ -1,5 +1,8 @@
 # Pandas Basics: the core DataFrame operations
 
+![The Pandas Basics: the core DataFrame operations notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-light.webp#only-light)
+![The Pandas Basics: the core DataFrame operations notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-dark.webp#only-dark)
+
 A guided tour of the pandas operations you reach for every day, split
 into one cell per concept. Each cell re-uses its upstream cell's
 artifact, so edits stay fast and the DAG stays honest.
@@ -10,7 +13,7 @@ artifact, so edits stay fast and the DAG stays honest.
   `add_columns` feeds `groupby`, `pivot`, `merge` and `summary`.
 - Cache-hit behavior: re-running a cell after its upstream hasn't
   changed finishes in a few milliseconds.
-- How Strata's **staleness propagation** works, edit `add_columns` and
+- How Strata's **staleness propagation** works: edit `add_columns` and
   the four cells it feeds turn yellow automatically, while
   `select_filter` stays ready.
 
@@ -58,10 +61,10 @@ WS request. A cell with no tests simply carries no `.test.py` file.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Then open `examples/pandas_basics` from the Strata home page.
+Then open **Pandas Basics** from the notebook list on the Strata home page.
 
 ## Try this
 

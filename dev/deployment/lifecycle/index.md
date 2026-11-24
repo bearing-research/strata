@@ -276,11 +276,13 @@ Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; ser
 
 ## Disk-usage budgeting
 
-There are **three** caps to understand, and they don't cover everything.
+These caps bound what Strata stores, and they don't cover everything.
 
 | Knob | Default | What it caps | What it doesn't cap |
 | --- | --- | --- | --- |
 | `STRATA_MAX_CACHE_SIZE_BYTES` | 10 GB | The Iceberg row-group cache (`~/.strata/cache/`) - LRU-evicted to stay under the cap | Anything else |
+| `STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES` | 1 GiB | The Iceberg metadata files kept under `iceberg-metadata/` in the cache directory, least recently read first | The row-group cache beside it |
+| `STRATA_NOTEBOOK_SCRATCH_GC_SOFT_LIMIT_BYTES` | 5 GiB | A project scratchpad's store, swept by its daemon at start and hourly, least recently used first | Values live cells still use, which stay whatever the limit |
 | `STRATA_ARTIFACT_GC_MAX_BYTES` | 20 GiB in personal mode, off in service mode | The Core artifact store (`~/.strata/artifacts/`), least recently used first, on the hourly sweep | The notebook-scoped artifact stores, and anything named, pinned or published |
 | `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES` | 20 GiB | The mount cache (`~/.strata/mount_cache/`), least recently used views first; views unused for `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS` (30) go too | Read-write mounts, which are not cached |
 

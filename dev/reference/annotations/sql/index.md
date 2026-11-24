@@ -41,7 +41,7 @@ worker, timeout or environment of its own.
 
 ## `@sql`
 
-Marks the cell as SQL and binds it to a named connection.
+Binds a SQL cell to a named connection. The cell is SQL by its kind (`language = "sql"`), not by this line.
 
 ```sql
 -- @sql connection=warehouse
@@ -56,7 +56,7 @@ Key/value parameters:
   directly.
 - `write=true`, opt the cell into writable execution. Without this flag the
   cell may only read: `SELECT`, set operations, `VALUES`, `TABLE`,
-  `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else
+  `SUMMARIZE`, `PIVOT`, `UNPIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else
   (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN
   ANALYZE`, which runs the statement it describes) is refused before the
   statement reaches the driver, naming it. The connection is still opened

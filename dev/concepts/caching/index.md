@@ -12,7 +12,8 @@ The provenance hash determines cache identity. It includes:
 
 | Component | In hash? | Why |
 |-----------|----------|-----|
-| Source code | Yes | Different code = different result |
+| Source code, without whitespace or comments | Yes | Different code = different result |
+| Annotations that change the computation (`@loop`, `@write_table`, `@output_dir`, `@per_variant`) | Yes | They change what the cell does, though they are comments |
 | Upstream artifact hashes | Yes | Different inputs = different result |
 | Environment lockfile hash | Yes | Different packages = different result |
 | Env vars the cell declares (`@env`) or reads by name | Yes | A different setting can change the result |

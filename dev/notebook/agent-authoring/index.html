@@ -3427,8 +3427,8 @@ surface is <a href="../../reference/annotations/">Annotations</a>; the most comm
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">Summarize</span> <span class="p">{{</span> <span class="n">findings</span> <span class="p">}}</span> <span class="k">as</span> <span class="n">a</span> <span class="n">verdict</span><span class="o">.</span>
 </code></pre></div>
 <p><code>{{ var }}</code> interpolates upstream variables. <code>strata validate</code> checks
-annotation syntax (<code>loop_missing_carry</code>, malformed <code>@output_schema</code>,
-unknown workers, …) without calling any LLM.</p>
+annotation syntax (<code>loop_missing_carry</code>, malformed <code>@output_schema</code>, …)
+and warns about unknown workers, without calling any LLM.</p>
 <h2 id="what-validate-catches-vs-what-run-catches">What validate catches vs. what run catches<a class="headerlink" href="#what-validate-catches-vs-what-run-catches" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3443,16 +3443,20 @@ unknown workers, …) without calling any LLM.</p>
 <td><code>validate</code></td>
 </tr>
 <tr>
-<td>Missing / unreadable cell file</td>
-<td><code>validate</code></td>
+<td>Missing cell file</td>
+<td>not caught: a missing file reads as an empty cell</td>
 </tr>
 <tr>
 <td>DAG cycle</td>
 <td><code>validate</code></td>
 </tr>
 <tr>
-<td>Bad annotation (<code>@loop</code> without <code>carry</code>, schema typos, unknown worker)</td>
+<td>Bad annotation (<code>@loop</code> without <code>carry</code>, schema typos)</td>
 <td><code>validate</code></td>
+</tr>
+<tr>
+<td>Unknown worker</td>
+<td><code>validate</code> warns (exit <code>0</code>); the run fails</td>
 </tr>
 <tr>
 <td>Reference that resolves to nothing (import? typo?)</td>
@@ -3488,7 +3492,7 @@ includes the console: <code>stdout</code> is what the run behind that result pri
 directly - it's machine-managed runtime state with no stability guarantees.</p>
 <h2 id="comparing-two-runs">Comparing two runs<a class="headerlink" href="#comparing-two-runs" title="Permanent link">&para;</a></h2>
 <p>A successful cell also reports its <code>provenance_hash</code> and its <code>outputs</code> - one
-entry per stored variable, each with <code>artifact_id</code>, <code>version</code> and
+entry per stored variable, each with <code>name</code>, <code>artifact_id</code>, <code>version</code> and
 <code>content_sha256</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.cells[] | {id, provenance_hash, outputs}'</span>
 </code></pre></div>
@@ -3561,7 +3565,7 @@ what that run stored, so pass <code>--force</code> once before comparing.</p>
 <a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>✓<span class="w"> </span>valid:<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
 <a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>syncing<span class="w"> </span>environment…
 <a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>...
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">  </span>load<span class="w"> </span><span class="nv">numbers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="m">1</span>,<span class="w"> </span><span class="m">2</span>,<span class="w"> </span><span class="m">3</span>,<span class="w"> </span><span class="m">4</span><span class="o">]</span><span class="w">           </span>✓<span class="w"> </span><span class="m">1</span>.4s
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">  </span>load<span class="w"> </span>load<span class="w">                             </span>✓<span class="w"> </span><span class="m">1</span>.4s
 <a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">  </span>doc<span class="w"> </span><span class="o">[</span>markdown<span class="o">]</span><span class="w"> </span>plain<span class="w"> </span>prose<span class="w"> </span>cell<span class="w">      </span>✓<span class="w"> </span>cached
 <a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">  </span>stats<span class="w"> </span><span class="nv">total</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>sum<span class="o">(</span>numbers<span class="o">)</span><span class="w">             </span>✓<span class="w"> </span><span class="m">1</span>.1s
 <a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>

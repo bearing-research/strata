@@ -32,9 +32,14 @@ where `uv run` already has the client.
 
 ## 1. Start the server
 
+From the checkout:
+
 ```bash
 uv run strata-notebook
 ```
+
+With Strata installed as a tool (see [Install](https://bearingresearch.com/strata/dev/getting-started/installation/)), run `strata-notebook`
+instead. Your own project needs only the client.
 
 ## 2. Run the demo
 
@@ -60,7 +65,7 @@ Table URIs use the form `<scheme>://<warehouse-path>#<namespace>.<table>`:
 - `<warehouse-path>` is the path to the warehouse root (the directory containing Iceberg metadata).
 - The fragment after `#` names the Iceberg table inside the warehouse, as `<namespace>.<table>`.
 
-A table URI is `<warehouse>#<namespace>.<table>`. The demo prints the exact one it created when it runs, because it builds its warehouse in a temporary directory rather than at a fixed path; copy that line rather than the shape below.
+A table URI is `<warehouse>#<namespace>.<table>`. The demo builds its warehouse in `strata-demo-warehouse` under your system's temp directory (or at `--warehouse DIR`), with the table `analytics.events`, and prints the exact URI on its `Table URI:` line. Copy that line rather than the shape below.
 
 ```python
 from strata_client import StrataClient

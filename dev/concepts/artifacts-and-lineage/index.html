@@ -3240,7 +3240,7 @@ Strata is a <strong>value-semantics</strong> engine: a cell receives <em>copies<
 (deserialized from artifacts), not the caller's live objects. A linear Jupyter
 kernel shares one memory space, so a model trained in one cell is visible
 everywhere; Strata's cells are isolated, so two patterns that work in Jupyter
-break here - both silently, because the run still goes green:</p>
+break here. The run still goes green in both:</p>
 <ol>
 <li>
 <p><strong>In-place mutation that isn't exported.</strong> A cell that trains a model with
@@ -3248,7 +3248,9 @@ break here - both silently, because the run still goes green:</p>
    <code>model</code> <em>in place</em>. Strata's data-flow only treats a variable as a cell's
    output if it's assigned, subscripted, attr-set or passed <code>inplace=True</code>, so
    the trained <code>model</code> is never re-exported, and downstream cells read the
-   <strong>pre-training</strong> version.</p>
+   <strong>pre-training</strong> version. Usually nothing warns about this one: the runtime
+   mutation check fingerprints pandas, numpy, torch tensors and builtin
+   containers, not a model object.</p>
 </li>
 <li>
 <p><strong>Shared mutable references split across cells.</strong> <code>optimizer = Adam(model.parameters())</code>
@@ -3256,7 +3258,9 @@ break here - both silently, because the run still goes green:</p>
    Stored as two separate artifacts and reloaded into a later cell, they become
    two <em>different</em> tensor sets - so <code>optimizer.step()</code> updates the optimizer's
    private copies and the <code>model</code> you evaluate/save never changes. Training is a
-   silent no-op.</p>
+   no-op. When Strata can see that two of a cell's outputs share an object, the
+   cell's console warns that they "share a mutable ... object" and will become
+   independent copies downstream.</p>
 </li>
 </ol>
 <p>Both are the same root: <strong>shared, mutable state doesn't survive a boundary where
@@ -3290,33 +3294,30 @@ explicit <code>map_location</code> - see the device/placement guidance in
 <tr>
 <th>Type</th>
 <th>Format</th>
-<th>File extension</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>PyArrow tables, pandas and polars frames and series, numpy arrays and scalars, torch and jax tensors, <code>datetime</code> / <code>Decimal</code> / <code>UUID</code> / <code>bytes</code> / <code>complex</code> values</td>
 <td>Arrow IPC</td>
-<td><code>.arrow</code></td>
 </tr>
 <tr>
 <td>Any other type exporting <code>__arrow_c_stream__</code> or <code>__dlpack__</code></td>
 <td>Arrow IPC</td>
-<td><code>.arrow</code></td>
 </tr>
 <tr>
 <td>Dicts, lists, scalars (int, float, str, bool, None)</td>
 <td>JSON</td>
-<td><code>.json</code></td>
 </tr>
 <tr>
 <td>Everything else</td>
 <td>Pickle</td>
-<td><code>.pickle</code></td>
 </tr>
 </tbody>
 </table>
-<p>The content type is stored in the artifact metadata so the read side knows how to deserialize.</p>
+<p>The content type is stored in the artifact metadata so the read side knows how
+to deserialize. The blob file does not say: every version is stored as
+<code>&lt;artifact_id&gt;@v=&lt;N&gt;.arrow</code> whatever its format.</p>
 <h3 id="jax-and-64-bit-values">JAX and 64-bit values<a class="headerlink" href="#jax-and-64-bit-values" title="Permanent link">&para;</a></h3>
 <p>JAX defaults to 32 bits: it turns a <code>float64</code> into a <code>float32</code> when it builds
 an array, unless <code>jax_enable_x64</code> is on. Every other library here keeps the

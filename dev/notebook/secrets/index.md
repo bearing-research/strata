@@ -57,7 +57,7 @@ The credentials only live in the server process, never in `notebook.toml`, `.str
 Open the notebook, open **Notebook settings** in the sidebar, and use the **Secret manager** section in the Runtime panel:
 
 1. Pick the provider (`infisical`).
-2. Fill in `project_id`, `environment` (`dev` / `staging` / `prod`), and `path` (defaults to `/`). Base URL is optional: the server accepts only its own `INFISICAL_HOST` there (or the public default when that is unset), so a self-hosted deployment is set with `INFISICAL_HOST` where the server starts.
+2. Fill in `project_id`, `environment` (`dev` / `staging` / `prod`), and `path` (defaults to `/`). A field left blank falls back to the server's `INFISICAL_PROJECT_ID`, `INFISICAL_ENVIRONMENT` (default `dev`) or `INFISICAL_PATH`. Base URL is optional: the server accepts only its own `INFISICAL_HOST` there (or the public default when that is unset), so a self-hosted deployment is set with `INFISICAL_HOST` where the server starts.
 3. Save.
 
 The result lands in `notebook.toml` as:
@@ -100,7 +100,7 @@ Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run 
 
 ## Fetch errors
 
-When a fetch fails, bad credentials, network error, wrong project, the notebook still opens. The error surfaces in the Runtime panel's Secret manager block. A manager that does not answer within 20 seconds counts as a failed fetch. Common messages:
+When a fetch fails, bad credentials, network error, wrong project, the notebook still opens. The error surfaces in the Runtime panel's Secret manager block. Each request to the manager (a fetch is a login plus a list) times out after 20 seconds, and a timeout counts as a failed fetch. Common messages:
 
 > No Infisical credentials in the process environment. Set either `INFISICAL_CLIENT_ID` + `INFISICAL_CLIENT_SECRET` (Machine Identity / Universal Auth, recommended) or `INFISICAL_TOKEN` (service token, legacy) in the shell that launched Strata.
 

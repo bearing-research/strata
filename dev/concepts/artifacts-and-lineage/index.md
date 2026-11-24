@@ -74,21 +74,25 @@ Strata is a **value-semantics** engine: a cell receives *copies* of its inputs
 (deserialized from artifacts), not the caller's live objects. A linear Jupyter
 kernel shares one memory space, so a model trained in one cell is visible
 everywhere; Strata's cells are isolated, so two patterns that work in Jupyter
-break here - both silently, because the run still goes green:
+break here. The run still goes green in both:
 
 1. **In-place mutation that isn't exported.** A cell that trains a model with
    `optimizer.step()` (a method call, no `model = …` reassignment) mutates
    `model` *in place*. Strata's data-flow only treats a variable as a cell's
    output if it's assigned, subscripted, attr-set or passed `inplace=True`, so
    the trained `model` is never re-exported, and downstream cells read the
-   **pre-training** version.
+   **pre-training** version. Usually nothing warns about this one: the runtime
+   mutation check fingerprints pandas, numpy, torch tensors and builtin
+   containers, not a model object.
 
 2. **Shared mutable references split across cells.** `optimizer = Adam(model.parameters())`
    makes the optimizer hold references to the *same tensors* as the model.
    Stored as two separate artifacts and reloaded into a later cell, they become
    two *different* tensor sets - so `optimizer.step()` updates the optimizer's
    private copies and the `model` you evaluate/save never changes. Training is a
-   silent no-op.
+   no-op. When Strata can see that two of a cell's outputs share an object, the
+   cell's console warns that they "share a mutable ... object" and will become
+   independent copies downstream.
 
 Both are the same root: **shared, mutable state doesn't survive a boundary where
 each variable is an independent immutable artifact.** Strata deliberately does
@@ -124,14 +128,16 @@ explicit `map_location` - see the device/placement guidance in
 
 Cell outputs are serialized based on their Python type:
 
-| Type | Format | File extension |
-|------|--------|---------------|
-| PyArrow tables, pandas and polars frames and series, numpy arrays and scalars, torch and jax tensors, `datetime` / `Decimal` / `UUID` / `bytes` / `complex` values | Arrow IPC | `.arrow` |
-| Any other type exporting `__arrow_c_stream__` or `__dlpack__` | Arrow IPC | `.arrow` |
-| Dicts, lists, scalars (int, float, str, bool, None) | JSON | `.json` |
-| Everything else | Pickle | `.pickle` |
+| Type | Format |
+|------|--------|
+| PyArrow tables, pandas and polars frames and series, numpy arrays and scalars, torch and jax tensors, `datetime` / `Decimal` / `UUID` / `bytes` / `complex` values | Arrow IPC |
+| Any other type exporting `__arrow_c_stream__` or `__dlpack__` | Arrow IPC |
+| Dicts, lists, scalars (int, float, str, bool, None) | JSON |
+| Everything else | Pickle |
 
-The content type is stored in the artifact metadata so the read side knows how to deserialize.
+The content type is stored in the artifact metadata so the read side knows how
+to deserialize. The blob file does not say: every version is stored as
+`<artifact_id>@v=<N>.arrow` whatever its format.
 
 ### JAX and 64-bit values
 

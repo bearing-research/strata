@@ -50,6 +50,7 @@ its name:
 | **Collapse cell** / **Expand cell** | Collapse / expand cell |
 | **Inspect inputs** | Inspect cell inputs (REPL) |
 | **Unit tests** | Unit tests (Python cells) |
+| **Checkpoints** | Branch a run from a checkpoint (Python cells) |
 
 !!! tip
     The status icon at the top of the gutter shows the cell's current state

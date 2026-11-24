@@ -3345,8 +3345,11 @@ cannot do through the MCP tools, which only see sessions that already
 exist:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">SID</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://127.0.0.1:8765/v1/notebooks/open<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">'content-type: application/json'</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"path": "./my-notebook"}'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.session_id<span class="k">)</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s2">"{\"path\": \"</span><span class="nv">$PWD</span><span class="s2">/my-notebook\"}"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.session_id<span class="k">)</span>
 </code></pre></div>
+<p>Give an absolute path: a relative one resolves against the server's storage
+root, not your shell's directory. Either way the notebook must live under
+that root.</p>
 <p>Then either point the agent's MCP client at <code>http://127.0.0.1:8765/mcp</code>
 (streamable HTTP, the same endpoint <code>.mcp.json</code> names), or drive the
 session from the CLI with the selectors the

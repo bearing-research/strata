@@ -3035,8 +3035,9 @@ store, running on your machine.</p>
 run</code> says where it is as it goes. Run it again and nothing runs: the summary cell is
 one lookup, after listing the bucket to see that nothing changed.</p>
 <p>Strata reads the bucket in its own process, so an installed Strata needs the <code>s3</code>
-extra (<code>s3fs</code>): <code>uv tool install "strata-notebook[s3]"</code>. The development environment
-already has it.</p>
+extra (<code>s3fs</code>), and the <code>hottest</code> SQL cell needs the <code>sql</code> extra (DuckDB itself is a
+core dependency): <code>uv tool install "strata-notebook[s3,sql]"</code>. The development
+environment already has both.</p>
 <h2 id="try-it">Try it<a class="headerlink" href="#try-it" title="Permanent link">&para;</a></h2>
 <p>Change <code>glob=725*.csv</code> to <code>glob=7250*.csv</code> in <code>cells/summarize.py</code> and run again. The
 table goes from 287 rows to 41 in one new snapshot, and the SQL cell runs again because

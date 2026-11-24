@@ -1,5 +1,8 @@
 # SQL Orders Report
 
+![The SQL Orders Report notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)
+![The SQL Orders Report notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)
+
 A small five-cell notebook that demonstrates Strata's SQL cell support
 against a local SQLite warehouse. The cells span three languages
 (Python → SQL → Python) and exercise both `-- @cache fingerprint` (data-
@@ -12,7 +15,7 @@ sensitive) and `-- @cache forever` (reference-data) policies.
   reference it by name via `-- @sql connection=warehouse`.
 - **Bind parameters from upstream Python.** `top_orders` resolves
   `:min_amount` from the `threshold` cell's variable. No string
-  substitution happens, the value flows through ADBC's parameter
+  substitution happens: the value flows through ADBC's parameter
   binding API, so adversarial strings round-trip as data.
 - **Two cache policies side by side.** `top_orders` uses `fingerprint`
   (folds SQLite's `PRAGMA data_version` + `schema_version` into the
@@ -52,19 +55,24 @@ both see the link.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Then open `examples/sql_orders_report` from the Strata home page. Run
+Then open **SQL Orders Report** from the notebook list on the Strata home page. Run
 `seed` first to create the SQLite file, then run the other cells in
 order (or hit "Run all").
+
+SQL cells need the `sql` and `sql-sqlite` extras. The development
+environment has them; an installed Strata needs
+`uv tool install "strata-notebook[sql,sql-sqlite]"` (the Docker image
+carries both).
 
 ## Try this
 
 - **Change the threshold.** Edit `threshold` to `min_amount = 100`.
   `top_orders` re-executes (different bind value → different
   provenance hash). Run `top_orders` again without changing
-  anything, it cache-hits, because the canonical artifact's
+  anything and it cache-hits, because the canonical artifact's
   provenance still matches the current threshold.
 - **Mutate the schema.** From a separate shell:
 
@@ -76,7 +84,7 @@ order (or hit "Run all").
   freshness token changes, and the cell re-executes with a new schema.
 - **Try a write from a SQL cell.** Add a cell with `INSERT INTO orders
   VALUES (...)`. The executor returns an error and the database row
-  count is unchanged, read-only mode is the security boundary.
+  count is unchanged: read-only mode is the security boundary.
 
 ## seed
 

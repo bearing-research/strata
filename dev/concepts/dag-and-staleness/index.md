@@ -2,7 +2,7 @@
 
 ## DAG and variable analysis
 
-Each cell's source code is analyzed via Python's AST to extract:
+Each cell's source code is analyzed by [cellgraph](https://github.com/bearing-research/cellgraph) (Python's AST and `symtable` for Python cells, its own analyzers for R and SQL) to extract:
 
 - **Defines**: top-level variable assignments (`x = 1`, `df = pd.read_csv(...)`)
 - **References**: free variables used but not defined in this cell
@@ -19,7 +19,7 @@ The DAG is rebuilt automatically on every cell source change.
 
 When you run a cell, this happens:
 
-1. **Compute provenance hash**: `sha256(sorted_input_hashes + source_hash + env_hash)`
+1. **Compute provenance hash**: a digest over the cell's definition key (its source with whitespace and comments dropped), the environment hash, the outputs of the upstream cells it reads, and its declared outside inputs (mounts, tables, fetches, datasets); see [How caching works](https://bearingresearch.com/strata/dev/concepts/caching/#caching-and-provenance)
 2. **Cache check**: Look up the hash in the artifact store → return immediately on hit
 3. **Resolve inputs**: Load upstream variable artifacts into a temp directory
 4. **Execute**: Spawn a subprocess running the cell harness in the notebook's
@@ -45,7 +45,7 @@ This means you can edit an early cell and run a downstream cell, and Strata will
 
 ## Run All
 
-Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout, a read-write mount, `@loop`, `@fetch`, `@dataset` or `@output_dir`, a sweep variant or a consumer of one, and every non-Python cell runs on its own.
+Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout (its own or the notebook's), a read-write mount, `@loop`, `@each`, `@fetch`, `@dataset` or `@output_dir`, a sweep variant or a consumer of one, a consumer of an `@each` output, a cell an annotation error keeps from running, and every non-Python cell runs on its own. In a scratchpad notebook every cell runs on its own.
 
 When a cell fails, Run All carries on, but not through the failure: every cell that reads from a failed cell, directly or further down, is skipped and marked stale with the reason that an upstream failed. Cells the failure does not reach run as normal. Rerun All does the same while bypassing the cache.
 

@@ -17,6 +17,7 @@ current = latest_per_sample()
 ```
 
 Format: `# @write_table <var> <table> append|overwrite|merge|sync [on=<col>,...]`.
+Python and R cells take it; SQL and prompt cells do not.
 The table is one of the forms `@table` takes, written with the server's
 catalogs and credentials (a catalog's `strata_credential` resolves against the
 notebook's environment first). The mode is required:
@@ -30,7 +31,8 @@ notebook's environment first). The mode is required:
   data files with no changed row stay. A table Strata did not write is refused,
   as for `overwrite`.
 
-For `merge` and `sync` each row needs one key of its own, so a null or a repeated
+`on=` is required for `merge` and `sync` and refused for `append` and
+`overwrite`; either mistake blocks the run. For `merge` and `sync` each row needs one key of its own, so a null or a repeated
 key fails the write. The change commits at once (as more than one snapshot, each
 naming the run), and nothing is committed when nothing differs.
 

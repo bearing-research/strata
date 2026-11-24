@@ -14,8 +14,8 @@ with **no runtime dependency** on the recipient's end.
 - **Archive a notebook's state at a moment in time.** Re-runs change
   outputs; an exported file captures what *this* run produced.
 - **Auto-generate documentation.** The docs site you're reading right
-  now generates the [Examples catalog](https://bearingresearch.com/strata/dev/notebook/examples/) by running
-  `strata export` against every `examples/*/` at mkdocs build time.
+  now generates the [Examples catalog](https://bearingresearch.com/strata/dev/notebook/examples/) by rendering every
+  `examples/*/` the way `strata export` does, at mkdocs build time.
 
 For exports inside the notebook UI itself, click the **Export** button
 in the notebook header, same engine, browser triggers a file download.
@@ -83,15 +83,15 @@ own files: when the result was computed, in UTC, and how long it took or what a
 hit saved. The snapshot has no **lineage** link, since nothing behind it could answer one.
 
 In the UI, the notebook's **Export** menu offers **App snapshot**
-alongside Markdown and HTML.
+alongside Markdown and HTML, and **Embed** for an iframe snippet.
 
 ## What gets rendered
 
 For each cell, the exporter emits in order:
 
 1. **Banner**: the cell's `# @name` (if set) or its ID, plus small
-   chips for the cell's language, `# @worker`, `# @variant`, `# @loop`
-   and `# @mount`.
+   chips: `kind` (the cell's language), `variant`, `worker`, `loop`
+   (`max_iter` / `carry`) and `mounts`.
 2. **Source**: fenced code block in the cell's language. The fence
    length auto-grows to cover embedded triple-backticks safely.
 3. **Cached display outputs**: per content type:

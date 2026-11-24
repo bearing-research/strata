@@ -3650,8 +3650,8 @@ fails; rotate it between runs and give every replica the same value.</p>
 <li><strong>No default artifact dir.</strong> The artifact store exists only when
   <code>STRATA_ARTIFACT_DIR</code> is set, even when its metadata and blobs live
   elsewhere. Service mode refuses to start with a DSN, a non-local blob
-  backend or <code>STRATA_SERVICE_WRITES_ENABLED</code> and no
-  <code>STRATA_ARTIFACT_DIR</code>. Without any of those it runs scan-only, with no
+  backend, <code>STRATA_SERVICE_WRITES_ENABLED</code>, <code>STRATA_AUTH_MODE=api_key</code> or
+  enabled transforms and no <code>STRATA_ARTIFACT_DIR</code>. Without any of those it runs scan-only, with no
   artifact store.</li>
 <li><strong>What is durable, and where.</strong> The <em>metadata store</em> (Postgres with
   <code>STRATA_ARTIFACT_METADATA_DSN</code>, otherwise <code>artifacts.sqlite</code> in the

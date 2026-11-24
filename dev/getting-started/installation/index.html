@@ -3381,8 +3381,9 @@ macOS/Linux; WSL2 is the better-trodden path.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>strata-notebook
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>strata-notebook
 </code></pre></div>
-<p>This puts <code>strata-notebook</code>, <code>strata</code>, <code>strata-notebook-tui</code> and
-<code>strata-worker</code> on <code>PATH</code> in a tool environment of their own. The wheel
+<p>This puts <code>strata-notebook</code>, <code>strata</code>, <code>strata-notebook-tui</code>,
+<code>strata-worker</code> and <code>strata-agent-hook</code> on <code>PATH</code> in a tool environment of
+their own. The wheel
 is pure Python and ships the frontend prebuilt.</p>
 <h3 id="pipx-pip-or-conda">pipx, pip or conda<a class="headerlink" href="#pipx-pip-or-conda" title="Permanent link">&para;</a></h3>
 <p>Any other installer works too. Strata depends on uv (0.12 or 0.13), so every
@@ -3451,7 +3452,7 @@ command (<code>pip install -U strata-notebook uv</code>) to take it as well.</p>
 <tbody>
 <tr>
 <td><code>mcp</code></td>
-<td>The <code>/mcp</code> endpoint a coding agent connects to. <code>strata agent</code> needs it.</td>
+<td>The <code>/mcp</code> endpoint a coding agent connects to. It is off until the server starts with <code>STRATA_MCP_ENABLED=true</code>, which <code>strata agent</code> sets for the server it starts. <code>strata agent</code> needs it.</td>
 </tr>
 <tr>
 <td><code>tui</code></td>
@@ -3492,12 +3493,13 @@ command (<code>pip install -U strata-notebook uv</code>) to take it as well.</p>
 </tbody>
 </table>
 <h2 id="github-codespaces-zero-setup">GitHub Codespaces (zero setup)<a class="headerlink" href="#github-codespaces-zero-setup" title="Permanent link">&para;</a></h2>
-<p>Click <strong>"Open in Codespaces"</strong> on the <a href="https://github.com/bearing-research/strata">repo</a>
-and the server is running by the time the browser tab opens. No local
+<p>On the <a href="https://github.com/bearing-research/strata">repo</a>, click
+<strong>Code → Codespaces → Create codespace on main</strong>, and the server is running by the time the browser tab opens. No local
 toolchain needed. See <a href="../../deployment/codespaces/">Codespaces</a> for what
 the devcontainer provisions.</p>
 <h2 id="docker-easiest">Docker (easiest)<a class="headerlink" href="#docker-easiest" title="Permanent link">&para;</a></h2>
-<p>No local toolchain required:</p>
+<p>No local toolchain required beyond Docker. From a clone of the
+<a href="https://github.com/bearing-research/strata">repo</a>, which holds the compose file:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
 </code></pre></div>
 <p>Open <a href="http://localhost:8765">http://localhost:8765</a> in your browser.</p>
@@ -3653,8 +3655,11 @@ you can drop the prefix too.</p>
 <a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1"># Type check (scope is set in pyproject.toml, as in CI)</span>
 <a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>uv<span class="w"> </span>run<span class="w"> </span>ty<span class="w"> </span>check
 <a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># Start frontend dev server (hot reload, proxies to backend)</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># Frontend dev server with hot reload. Vite does not proxy to the</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="c1"># backend: point the UI at the server, and let the server accept</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="c1"># Vite's origin. The server in one terminal, Vite in another:</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="nv">STRATA_CORS_ALLOW_ORIGINS</span><span class="o">=</span><span class="s1">'["http://localhost:5173"]'</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">VITE_STRATA_URL</span><span class="o">=</span>http://localhost:8765<span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev
 </code></pre></div>
 <h3 id="integration-test-dependencies">Integration test dependencies<a class="headerlink" href="#integration-test-dependencies" title="Permanent link">&para;</a></h3>
 <p>The end-to-end integration script needs a real PostgreSQL instance for

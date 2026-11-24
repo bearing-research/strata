@@ -3364,8 +3364,8 @@ with <strong>no runtime dependency</strong> on the recipient's end.</p>
 <li><strong>Archive a notebook's state at a moment in time.</strong> Re-runs change
   outputs; an exported file captures what <em>this</em> run produced.</li>
 <li><strong>Auto-generate documentation.</strong> The docs site you're reading right
-  now generates the <a href="../examples/">Examples catalog</a> by running
-  <code>strata export</code> against every <code>examples/*/</code> at mkdocs build time.</li>
+  now generates the <a href="../examples/">Examples catalog</a> by rendering every
+  <code>examples/*/</code> the way <code>strata export</code> does, at mkdocs build time.</li>
 </ul>
 <p>For exports inside the notebook UI itself, click the <strong>Export</strong> button
 in the notebook header, same engine, browser triggers a file download.</p>
@@ -3454,13 +3454,13 @@ for the same privacy reason as a regular export.</p>
 own files: when the result was computed, in UTC, and how long it took or what a
 hit saved. The snapshot has no <strong>lineage</strong> link, since nothing behind it could answer one.</p>
 <p>In the UI, the notebook's <strong>Export</strong> menu offers <strong>App snapshot</strong>
-alongside Markdown and HTML.</p>
+alongside Markdown and HTML, and <strong>Embed</strong> for an iframe snippet.</p>
 <h2 id="what-gets-rendered">What gets rendered<a class="headerlink" href="#what-gets-rendered" title="Permanent link">&para;</a></h2>
 <p>For each cell, the exporter emits in order:</p>
 <ol>
 <li><strong>Banner</strong>: the cell's <code># @name</code> (if set) or its ID, plus small
-   chips for the cell's language, <code># @worker</code>, <code># @variant</code>, <code># @loop</code>
-   and <code># @mount</code>.</li>
+   chips: <code>kind</code> (the cell's language), <code>variant</code>, <code>worker</code>, <code>loop</code>
+   (<code>max_iter</code> / <code>carry</code>) and <code>mounts</code>.</li>
 <li><strong>Source</strong>: fenced code block in the cell's language. The fence
    length auto-grows to cover embedded triple-backticks safely.</li>
 <li><strong>Cached display outputs</strong>: per content type:<ul>

@@ -26,7 +26,7 @@ A cell sent to a [remote worker](https://bearingresearch.com/strata/dev/notebook
 
 At notebook creation time, you can select a Python version from the versions configured on the server. The first one listed is the default.
 
-To change it later, click **Requested Python** in the Environment panel. Strata rewrites `requires-python`, rebuilds `.venv/` with `uv sync`, and restores the old version if the sync fails.
+To change it later, click the version next to **Requested Python** in the Environment panel. Strata rewrites `requires-python`, rebuilds `.venv/` with `uv sync`, and restores the old version if the sync fails.
 
 !!! note
     The available versions come from the server's `STRATA_NOTEBOOK_PYTHON_VERSIONS`. Unset, they are the Python versions `uv` reports as installed on the server that Strata supports, with the server's own version included. A `UV_PYTHON` set in the server's environment does not apply to a notebook's `uv` commands; `requires-python` decides its interpreter.
@@ -49,7 +49,7 @@ On a server in service mode, packages install from wheels only: a package with n
 
 ### Import from requirements.txt
 
-In the Environment panel, click **Import** and paste a `requirements.txt`:
+In the Environment panel, click **Import requirements** and paste a `requirements.txt`:
 
 ```
 pandas>=2.0

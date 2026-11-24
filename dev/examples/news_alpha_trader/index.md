@@ -2,7 +2,7 @@
 
 **An end-to-end LLM-driven trading notebook.** Overnight news → structured sentiment signals → paper (or live) orders via Alpaca → cost-adjusted P&L, all persisted to a local DuckDB so the data accumulates across sessions.
 
-This example is the opposite of the toy notebooks in this directory, it talks to real APIs, spends real tokens, and (if you opt in) places real orders.
+This example is the opposite of the toy notebooks in this directory: it talks to real APIs, spends real tokens, and (if you opt in) places real orders.
 
 ## What it does
 
@@ -47,7 +47,7 @@ The provider needs the `infisical` extra (`uv tool install "strata-notebook[infi
 2. Edit `helpers.py` → set `Config.I_UNDERSTAND_THIS_IS_REAL_MONEY = True`
 3. Your Alpaca account must be funded
 
-The `place_orders` cell refuses to run live without both flags set. This is intentional, two edits on purpose.
+The `place_orders` cell refuses to run live without both flags set. This is intentional: two edits, on purpose.
 
 ## Risk limits (hard, enforced in code)
 
@@ -72,17 +72,19 @@ One file: `work/trading.db` in the notebook's directory. Tables:
 
 ## Running
 
+From the project root:
+
 ```bash
-uv sync
-# Open the notebook in Strata, set API keys in the Runtime panel, run-all.
+uv run strata-notebook --notebook-dir examples
+# Open "News Alpha Trader" from the home page, set API keys in the Runtime panel, run all.
 ```
 
-Re-run tomorrow, `fetch_news` only pulls new articles, `place_orders` is idempotent by `signal_id`. The DB grows over time; so does the history you can analyze.
+Re-run tomorrow: `fetch_news` only pulls new articles, `place_orders` is idempotent by `signal_id`. The DB grows over time; so does the history you can analyze.
 
 ## Disclaimers
 
 - **This is not financial advice.** The strategy is a demo. It may lose money. Backtest thoroughly before live trading.
-- LLM outputs are non-deterministic even with `temperature=0.0`. A prompt injection in a news headline could theoretically shift a signal, the ticker whitelist is the hard backstop.
+- LLM outputs are non-deterministic even with `temperature=0.0`. A prompt injection in a news headline could theoretically shift a signal; the ticker whitelist is the hard backstop.
 - Paper fills are instantaneous and slippage-free. Live fills are not. The cost model applies estimated slippage to both modes so the numbers stay honest.
 - You are responsible for understanding every line of `place_orders.py` before flipping to live.
 
@@ -572,9 +574,10 @@ matching price data, and run risk checks before any orders go out.
 #
 # Extracts structured sentiment for each article in the unprocessed
 # batch. The schema enums are deliberately narrow: a tighter enum
-# means cleaner aggregation SQL downstream. The validate-and-retry
-# loop kicks in when the provider falls back to json_object mode
-# (Anthropic, Gemini, Mistral) and the response doesn't quite match.
+# means cleaner aggregation SQL downstream. Anthropic gets the schema as
+# a native tool and OpenAI-compatible endpoints as json_schema; the
+# validate-and-retry loop matters most when another endpoint falls back
+# to json_object mode and the response doesn't quite match.
 #
 # Prompt-design note: earlier prompts told the model to "err toward
 # low confidence on ambiguous headlines." Models read that as "omit

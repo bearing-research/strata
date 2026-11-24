@@ -3191,14 +3191,14 @@ as first-class cell behaviors rather than escape hatches.</p>
 <td>Per-notebook Python environment</td>
 <td>Separate <code>pyproject.toml</code> + <code>uv.lock</code> per notebook</td>
 <td>PEP 723 inline script metadata at the top of the <code>.py</code> file (<code># /// script</code> block); <code>marimo edit --sandbox</code> provisions the venv via uv (or pip/poetry/pixi/rye)</td>
-<td>Julia project / Project.toml</td>
+<td>Built-in package manager embeds <code>Project.toml</code> and <code>Manifest.toml</code> in the <code>.jl</code> file</td>
 <td>Manual (venv / conda / kernel spec)</td>
 </tr>
 <tr>
 <td>Headless / CI runner</td>
 <td><code>strata run</code> (executes the cascade in topological order)</td>
 <td>Notebooks runnable as <code>python file.py</code></td>
-<td>None first-class - <code>.jl</code> file works ad-hoc via <code>julia notebook.jl</code>, otherwise via PlutoUtils.jl</td>
+<td>No dedicated CLI: PlutoSliderServer.jl's <code>export_directory</code> runs notebooks and exports HTML (used in CI), or <code>julia notebook.jl</code> runs the file as a plain script</td>
 <td><code>nbconvert --execute</code></td>
 </tr>
 </tbody>
@@ -3256,10 +3256,11 @@ cell 3 from rebasing on top of changes to cell 7.</p>
   Julia, Scala, Bash, etc.), and integrations is unmatched. Strata runs
   Python, R, SQL, prompt, markdown and widget cells in one DAG, which covers
   a narrower range than Jupyter's kernels.</li>
-<li><strong>Reactive evaluation at the keystroke level:</strong> Pluto and marimo
-  immediately re-run dependent cells on edit. Strata is reactive about
-  <em>staleness</em> (the DAG updates, downstream cells flip to stale on every
-  source change) and execution is explicit, you press Run. The exception is
+<li><strong>Automatic re-execution of dependents:</strong> in Pluto, and in marimo's
+  default mode, running an edited cell re-runs every cell that depends on
+  it (marimo's lazy mode marks them stale instead). Strata is reactive about
+  <em>staleness</em> (the DAG updates and downstream cells flip to stale on every
+  source change), but execution is explicit: you press Run. The exception is
   a widget cell with Live on, where moving a control re-runs its dependents
   immediately.</li>
 <li><strong>Hosted offerings:</strong> Google Colab, Deepnote, Hex, and Databricks
@@ -3303,13 +3304,15 @@ notebook runtime itself:</p>
 <tr>
 <td>Databricks Notebooks</td>
 <td>Custom UI on IPython kernel</td>
-<td><code>.ipynb</code> (default), <code>.dbc</code> legacy</td>
+<td><code>.ipynb</code> (default) or source files (<code>.py</code>, <code>.sql</code>, <code>.scala</code>, <code>.r</code>); <code>.dbc</code> is an export archive</td>
 </tr>
 </tbody>
 </table>
-<p>None of them have automatic content-addressed caching, per-cell remote
-dispatch, or first-class AI cells, because the underlying Jupyter
-runtime doesn't.</p>
+<p>None of them caches cell outputs by content or dispatches a single cell
+to remote compute. Several now ship AI features (Gemini in Colab,
+Databricks Assistant and the <code>ai_query</code> SQL function, the SageMaker Data
+Agent), but these generate code or answer one-shot prompts; none makes an
+LLM response a cached DAG node keyed on its template, inputs and model.</p>
 <p>The smaller "we-rejected-Jupyter" cohort (marimo, Observable, Deepnote,
 Hex) explicitly stepped away from <code>.ipynb</code> to redesign the runtime:
 reactive execution, real-time collaboration, multi-language cells, app

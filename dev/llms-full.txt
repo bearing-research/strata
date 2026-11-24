@@ -62,6 +62,8 @@ session updates. Captured from a real run, not a mock-up.*
 
 === "Docker"
 
+    From a clone of the [repo](https://github.com/bearing-research/strata):
+
     ```bash
     docker compose up -d --build
     ```
@@ -140,8 +142,9 @@ uv tool install strata-notebook
 strata-notebook
 ```
 
-This puts `strata-notebook`, `strata`, `strata-notebook-tui` and
-`strata-worker` on `PATH` in a tool environment of their own. The wheel
+This puts `strata-notebook`, `strata`, `strata-notebook-tui`,
+`strata-worker` and `strata-agent-hook` on `PATH` in a tool environment of
+their own. The wheel
 is pure Python and ships the frontend prebuilt.
 
 ### pipx, pip or conda
@@ -193,7 +196,7 @@ Add extras in brackets with any installer, for example
 
 | Extra | Enables |
 | --- | --- |
-| `mcp` | The `/mcp` endpoint a coding agent connects to. `strata agent` needs it. |
+| `mcp` | The `/mcp` endpoint a coding agent connects to. It is off until the server starts with `STRATA_MCP_ENABLED=true`, which `strata agent` sets for the server it starts. `strata agent` needs it. |
 | `tui` | The terminal viewer: `strata watch`, `strata-notebook-tui`, and `strata agent` unless you pass `--no-tui`. |
 | `sql` | SQL cells. Add a driver extra for each database you connect to: `sql-duckdb`, `sql-sqlite`, `sql-postgres`, `sql-snowflake`, `sql-bigquery`. |
 | `postgres` | A Postgres metadata database for the artifact store (`STRATA_ARTIFACT_METADATA_DSN`), for several nodes sharing one store. |
@@ -206,14 +209,15 @@ Add extras in brackets with any installer, for example
 
 ## GitHub Codespaces (zero setup)
 
-Click **"Open in Codespaces"** on the [repo](https://github.com/bearing-research/strata)
-and the server is running by the time the browser tab opens. No local
+On the [repo](https://github.com/bearing-research/strata), click
+**Code → Codespaces → Create codespace on main**, and the server is running by the time the browser tab opens. No local
 toolchain needed. See [Codespaces](https://bearingresearch.com/strata/dev/deployment/codespaces/) for what
 the devcontainer provisions.
 
 ## Docker (easiest)
 
-No local toolchain required:
+No local toolchain required beyond Docker. From a clone of the
+[repo](https://github.com/bearing-research/strata), which holds the compose file:
 
 ```bash
 docker compose up -d --build
@@ -327,8 +331,11 @@ uv run pre-commit run --all-files
 # Type check (scope is set in pyproject.toml, as in CI)
 uv run ty check
 
-# Start frontend dev server (hot reload, proxies to backend)
-cd frontend && npm run dev
+# Frontend dev server with hot reload. Vite does not proxy to the
+# backend: point the UI at the server, and let the server accept
+# Vite's origin. The server in one terminal, Vite in another:
+STRATA_CORS_ALLOW_ORIGINS='["http://localhost:5173"]' uv run strata-notebook
+cd frontend && npm ci && VITE_STRATA_URL=http://localhost:8765 npm run dev
 ```
 
 ### Integration test dependencies
@@ -406,6 +413,8 @@ Start with the two-minute one on what the cache saves.
 
 === "Docker"
 
+    From a clone of the repo:
+
     ```bash
     docker compose up -d --build
     ```
@@ -453,8 +462,9 @@ directory under the notebook storage root, and a Python version.
 Strata creates a directory containing `notebook.toml`, a per-notebook
 `pyproject.toml`, and a `cells/` folder.
 
-The notebook opens empty - click **+ Add cell** and pick a kind to
-write the first one.
+The notebook opens empty, with buttons for a first **Python**, **SQL**,
+**Prompt** or **Markdown** cell. **+ Add cell** below them offers every
+kind.
 
 By default the storage root is `~/.strata/notebooks` - **not** the
 directory you launched from - so new notebooks land there regardless of
@@ -471,8 +481,9 @@ location on startup.
 
 Each notebook gets its own Python environment, managed by `uv`, so
 installing pandas in one notebook doesn't touch another. Everything
-autosaves: source goes to `cells/`, runtime state to `.strata/`.
-Both diff cleanly in git, no JSON blobs in commits.
+autosaves: source goes to `cells/` and diffs cleanly in git, no JSON
+blobs in commits. Runtime state goes to `.strata/`, which the default
+`.gitignore` keeps out.
 
 ### Cell types
 
@@ -623,8 +634,8 @@ Strata re-analyzes the source and computes a new provenance hash, so
 the loader's cached result no longer matches its source and the cell
 flips **stale**. So do the summary and plot cells: they referenced
 `df`, which is no longer the cached value. (Hover **Why stale?** on
-any of them to see the reason: `source changed` on the loader,
-`upstream changed` on the others.)
+any of them to see the reason: `source of "load" changed` on the loader,
+`upstream "load" changed` on the others.)
 
 Now press ++shift+enter++ on the plot cell. Strata walks back through
 the stale upstream cells and runs loader → summary → plot in
@@ -821,8 +832,12 @@ Claude Code finds the `.mcp.json` that step 1 wrote, connects to the
     ```bash
     SID=$(curl -s -X POST http://127.0.0.1:8765/v1/notebooks/open \
       -H 'content-type: application/json' \
-      -d '{"path": "./my-notebook"}' | jq -r .session_id)
+      -d "{\"path\": \"$PWD/my-notebook\"}" | jq -r .session_id)
     ```
+
+    Give an absolute path: a relative one resolves against the server's storage
+    root, not your shell's directory. Either way the notebook must live under
+    that root.
 
     Then either point the agent's MCP client at `http://127.0.0.1:8765/mcp`
     (streamable HTTP, the same endpoint `.mcp.json` names), or drive the
@@ -1211,7 +1226,8 @@ If the viewer knows the notebook's path (you passed `--notebook`, or it
 attached a session from the list or the picker), press `r` to reopen it as a
 new session and keep watching. Attached with `--session ID`, it does not know
 the path: run `strata watch PATH` (or open the notebook in the web UI) to start
-a new session.
+a new session. The viewer [`strata agent`](https://bearingresearch.com/strata/dev/notebook/agent/) attaches is attached by id
+too, so there `r` cannot reopen it: run `strata agent` again.
 
 ## Options
 
@@ -1293,10 +1309,14 @@ statement of an indented block leaves a `pass` behind.
 - **REPL-inspection magics** (`%who`, `%whos`, `%lsmagic`, `%history`,
   `%alias`, etc.). Dropped; no Strata equivalent.
 
-Everything that's "dropped" is listed in the import report
-(`<notebook_dir>/import_report.md`), and the cell source carries a
-`# strata: ...` marker comment where it was, so there's no silent
-data loss.
+Everything above is listed in the import report
+(`<notebook_dir>/import_report.md`). Line magics with nothing to do in
+Strata (`%matplotlib`, `%load_ext`, the REPL-inspection ones and the
+rest of the drop rows in the [table below](#magic-translation-table))
+are removed without a trace in the cell and listed under *Magics
+translated*. Cell magics, shell commands and unrecognized magics leave
+a `# strata: ...` marker comment where they were and are listed under
+*Magics dropped* or *Shell commands dropped*.
 
 ## When to use it
 
@@ -1395,8 +1415,8 @@ statement counts: one inside a comment or a string does not.
 
 ### Magic translation table
 
-Single dict in `strata.notebook.jupyter_import`. Adding a row
-extends support; rows can be:
+Two dicts in `strata.notebook.jupyter_import`, `_LINE_MAGIC_TABLE`
+and `_CELL_MAGIC_TABLE`. Adding a row extends support; rows can be:
 
 | Magic | Action |
 |---|---|
@@ -1413,7 +1433,7 @@ extends support; rows can be:
 | `%%timeit`, `%%time`, `%%capture` | Recurse on body as plain code. |
 | `%%javascript`, `%%js`, `%%html`, `%%latex`, `%%svg`, `%%markdown` | Dropped. Strata has no equivalent renderer. |
 | `%%R`, `%%ruby`, `%%perl`, `%%cython`, `%%fortran`, `%%sql` | Dropped (non-Python languages and embedded SQL aren't auto-translatable; use Strata's SQL cell type for `%%sql` content). |
-| Anything unrecognized | Dropped with a `# strata: unsupported magic '<name>' dropped` comment at the original location. |
+| Anything unrecognized | Dropped with a `# strata: unsupported magic '%<name>' dropped` comment at the original location (`unsupported cell magic '%%<name>'` for a cell magic). |
 
 ### `!shell` commands
 
@@ -1489,9 +1509,11 @@ Sections that surface when applicable:
 - **Counts**: markdown / code cells, `;`-suppression instances,
   skipped cell types.
 - **Magics translated**: list of every magic the converter rewrote
-  or absorbed.
-- **Magics dropped**: magics with no Strata equivalent; the source
-  carries a marker comment where each one used to live.
+  or absorbed, including the no-op line magics it removed without a
+  marker (`%matplotlib`, `%load_ext`, `%who`, ...).
+- **Magics dropped**: cell magics and unrecognized magics with no
+  Strata equivalent, plus `%pip` / `%conda` other than `install` and
+  `%env` / `%run` lines with nothing to act on; the source carries a marker comment where each one used to live.
 - **Shell commands dropped**: `!cmd` lines (except `!pip install`)
   and shell cell magics that the converter removed.
 - **Dependencies captured**: what landed in `pyproject.toml`,
@@ -1620,105 +1642,196 @@ error naming the cell, so a cloned notebook can't read or rewrite other files.
 # Example gallery
 
 Every notebook under `examples/` in the repo demonstrates a specific
-Strata capability. Each example is also rendered into the docs site
-automatically: click through to read the cell sources and any cached
-outputs without cloning the repo.
+Strata capability. A card's picture is that notebook in the editor
+after a real run. Click through for its cell sources and its README,
+rendered into this site without cloning the repo.
 
-To run examples locally, point the server's storage root at the
-repo's `examples/` directory and start in personal mode:
+To run the examples, start the server on the repo's `examples/` directory
+from a clone:
 
 ```bash
-STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples \
-STRATA_DEPLOYMENT_MODE=personal \
-  uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Every example then appears on the Strata home page. No copying
-required: open the notebook, click Run, edit, watch the cascade.
-
-(If you'd rather keep examples separate from your own work, copy
-the directory you want under your existing storage root instead:
-`cp -R examples/iris_classification ~/.strata/notebooks/`.)
+Every example then appears under **Open Notebook** on the Strata home page:
+open one, click **Run All**, edit a cell and watch only what depends on it
+run again. To keep the examples apart from your own work, copy the one you
+want under your storage root instead:
+`cp -R examples/iris_classification ~/.strata/notebooks/`.
 
 ## Walkthroughs: start here
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`caching`](https://bearingresearch.com/strata/dev/examples/caching/) | A two-minute tutorial: what the cache saves, and what an edit runs again. `strata tutorial caching` opens a copy. |
-| [`iris_classification`](https://bearingresearch.com/strata/dev/examples/iris_classification/) | End-to-end ML in seven cells: load → split → train → evaluate → plot. The canonical "multi-cell DAG with caching" demo. |
-| [`pandas_basics`](https://bearingresearch.com/strata/dev/examples/pandas_basics/) | Core DataFrame operations and rich display outputs. |
-| [`titanic_ml`](https://bearingresearch.com/strata/dev/examples/titanic_ml/) | Feature engineering plus comparison of two classifiers, closer to a real ML workflow. |
-| [`data_viewer`](https://bearingresearch.com/strata/dev/examples/data_viewer/) | A DataFrame larger than the inline preview, in the interactive viewer: page through and sort the full cached artifact. |
-| [`agent_demo`](https://bearingresearch.com/strata/dev/examples/agent_demo/) | The notebook a coding agent builds live in the `strata agent` demo: an expensive training cell stays cached while only the evaluation re-runs. |
+<div class="grid cards" markdown>
+
+-   [![The caching tutorial: a bar chart of revenue by region under the cell that plots it.](https://bearingresearch.com/strata/dev/assets/examples/caching-light.webp#only-light)![The caching tutorial: a bar chart of revenue by region under the cell that plots it.](https://bearingresearch.com/strata/dev/assets/examples/caching-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/caching/)
+
+    **[caching](https://bearingresearch.com/strata/dev/examples/caching/)**: a two-minute tutorial on what the
+    cache saves and what an edit runs again. `strata tutorial caching` opens
+    a copy.
+
+-   [![Iris classification: a pairplot of the four flower measurements, coloured by species.](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)![Iris classification: a pairplot of the four flower measurements, coloured by species.](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/iris_classification/)
+
+    **[iris_classification](https://bearingresearch.com/strata/dev/examples/iris_classification/)**: end-to-end
+    ML in seven cells (load, split, train, evaluate, plot). The canonical
+    multi-cell DAG with caching.
+
+-   [![Pandas basics: a sales DataFrame in the notebook's table viewer.](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-light.webp#only-light)![Pandas basics: a sales DataFrame in the notebook's table viewer.](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/pandas_basics/)
+
+    **[pandas_basics](https://bearingresearch.com/strata/dev/examples/pandas_basics/)**: core DataFrame
+    operations fanning out from one dataset, with per-cell unit tests.
+
+-   [![Titanic: a bar chart of feature importance for the best of three classifiers.](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-light.webp#only-light)![Titanic: a bar chart of feature importance for the best of three classifiers.](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/titanic_ml/)
+
+    **[titanic_ml](https://bearingresearch.com/strata/dev/examples/titanic_ml/)**: feature engineering, then
+    three classifiers trained and the best one evaluated. Closer to a real
+    ML workflow.
+
+-   [![Data viewer: a 2,000-row transactions table with search, filter, CSV and Parquet buttons and paging.](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-light.webp#only-light)![Data viewer: a 2,000-row transactions table with search, filter, CSV and Parquet buttons and paging.](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/data_viewer/)
+
+    **[data_viewer](https://bearingresearch.com/strata/dev/examples/data_viewer/)**: a DataFrame larger than
+    the inline preview, in the interactive viewer. Page through and sort the
+    full cached artifact.
+
+-   [![Agent demo: the notebook's introduction above the cell that trains a random forest.](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-light.webp#only-light)![Agent demo: the notebook's introduction above the cell that trains a random forest.](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/agent_demo/)
+
+    **[agent_demo](https://bearingresearch.com/strata/dev/examples/agent_demo/)**: the notebook a coding agent
+    builds live in the `strata agent` demo. The expensive training cell stays
+    cached while only the evaluation runs again.
+
+</div>
 
 ## Variant cells
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`model_variants`](https://bearingresearch.com/strata/dev/examples/model_variants/) | Three classifier variants (logistic regression, random forest, gradient boosting) sharing one DAG slot. Switch tabs, re-cascade downstream; the others stay cached. |
-| [`model_variants_sweep`](https://bearingresearch.com/strata/dev/examples/model_variants_sweep/) | Sweep mode: every variant runs and one downstream cell compares them as a `{variant: value}` dict, plus a `# @per_variant` fan-out. |
+<div class="grid cards" markdown>
+
+-   [![Model variants: a confusion matrix for the active logistic-regression variant.](https://bearingresearch.com/strata/dev/assets/examples/model_variants-light.webp#only-light)![Model variants: a confusion matrix for the active logistic-regression variant.](https://bearingresearch.com/strata/dev/assets/examples/model_variants-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/model_variants/)
+
+    **[model_variants](https://bearingresearch.com/strata/dev/examples/model_variants/)**: three classifier
+    variants (logistic regression, random forest, gradient boosting) sharing
+    one DAG slot. Switch tabs and the downstream cells run again; the other
+    variants stay cached.
+
+-   [![Model variants sweep: three variant cells and the cell that compares their accuracy.](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)![Model variants sweep: three variant cells and the cell that compares their accuracy.](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/model_variants_sweep/)
+
+    **[model_variants_sweep](https://bearingresearch.com/strata/dev/examples/model_variants_sweep/)**: sweep
+    mode. Every variant runs and one downstream cell compares them as a
+    `{variant: value}` dict, plus a `# @per_variant` fan-out.
+
+</div>
 
 ## Prompt cells and AI
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`arxiv_classifier`](https://bearingresearch.com/strata/dev/examples/arxiv_classifier/) | AI-powered paper classification: prompt cells + distributed workers in one pipeline. |
-| [`review_triage`](https://bearingresearch.com/strata/dev/examples/review_triage/) | Structured-output prompt cells with `@output_schema` + the validate-and-retry loop. |
-| [`news_alpha_trader`](https://bearingresearch.com/strata/dev/examples/news_alpha_trader/) | Secret manager + AI pricing lookup + multi-cell DAG. |
+These call an LLM: set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the
+notebook's **Runtime** panel first.
+
+<div class="grid cards" markdown>
+
+-   [![Review triage: a structured JSON verdict from a prompt cell.](https://bearingresearch.com/strata/dev/assets/examples/review_triage-light.webp#only-light)![Review triage: a structured JSON verdict from a prompt cell.](https://bearingresearch.com/strata/dev/assets/examples/review_triage-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/review_triage/)
+
+    **[review_triage](https://bearingresearch.com/strata/dev/examples/review_triage/)**: a prompt cell with
+    `@output_schema`, validated against JSON Schema and retried on a bad
+    answer.
+
+-   **[arxiv_classifier](https://bearingresearch.com/strata/dev/examples/arxiv_classifier/)**: arXiv papers
+    aggregated on a DataFusion worker, embedded on a GPU worker, classified,
+    and summarized by prompt cells. Needs two local workers
+    (`run_local_workers.sh`) and an LLM key.
+
+-   **[news_alpha_trader](https://bearingresearch.com/strata/dev/examples/news_alpha_trader/)**: a secret
+    manager, an AI pricing lookup and a multi-cell DAG over market news.
+    Needs Alpaca keys and an LLM key.
+
+</div>
 
 ## SQL cells
 
 The server needs the `sql` and `sql-sqlite` extras for this one
-(`uv tool install "strata-notebook[sql,sql-sqlite]"`); the Docker image
-carries both.
+(`uv tool install "strata-notebook[sql,sql-sqlite]"`); the development
+environment and the Docker image carry both.
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`sql_orders_report`](https://bearingresearch.com/strata/dev/examples/sql_orders_report/) | Named connections, bind parameters from Python upstream, schema-aware caching. |
+<div class="grid cards" markdown>
 
-## Loop cells
+-   [![SQL orders report: the Python cell that combines two SQL results, above the report it prints.](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)![SQL orders report: the Python cell that combines two SQL results, above the report it prints.](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/sql_orders_report/)
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`loop_hill_climb`](https://bearingresearch.com/strata/dev/examples/loop_hill_climb/) | `# @loop` with carry state and an early-termination predicate. |
+    **[sql_orders_report](https://bearingresearch.com/strata/dev/examples/sql_orders_report/)**: named
+    connections, bind parameters from a Python cell upstream, and
+    schema-aware caching.
 
-## Widget cells
+</div>
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`widget_playground`](https://bearingresearch.com/strata/dev/examples/widget_playground/) | A widget cell (slider, number, dropdown) driving a downstream DataFrame, with `# @live` recomputing on every change. |
+## Loops, widgets and library cells
 
-## Library cells
+<div class="grid cards" markdown>
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`library_cells`](https://bearingresearch.com/strata/dev/examples/library_cells/) | Cross-cell `def` / `class` sharing via the synthetic-module slicing path. |
+-   [![Hill climb loop: the loop's final state as JSON, above the markdown that explains the loop cell.](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-light.webp#only-light)![Hill climb loop: the loop's final state as JSON, above the markdown that explains the loop cell.](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/loop_hill_climb/)
 
-## Mounts
+    **[loop_hill_climb](https://bearingresearch.com/strata/dev/examples/loop_hill_climb/)**: `# @loop` with
+    carried state and an early-termination predicate.
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`each_pipeline`](https://bearingresearch.com/strata/dev/examples/each_pipeline/) | `# @each` over 287 real files from a public bucket, each cached on its own, and `# @write_table ... sync` keeping a table in a REST catalog in step. Needs Docker. |
-| [`s3_mount`](https://bearingresearch.com/strata/dev/examples/s3_mount/) | `# @mount` annotation makes an S3 prefix available as a local `pathlib.Path` inside the cell. |
+-   [![Widget playground: a slider, number and dropdown above the table they drive.](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-light.webp#only-light)![Widget playground: a slider, number and dropdown above the table they drive.](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/widget_playground/)
 
-## Markdown rendering
+    **[widget_playground](https://bearingresearch.com/strata/dev/examples/widget_playground/)**: a widget cell
+    (slider, number, dropdown) driving a downstream DataFrame and plot, with
+    `# @live` recomputing on every change.
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`markdown_showcase`](https://bearingresearch.com/strata/dev/examples/markdown_showcase/) | Every markdown rendering path: headings, lists, tables, code blocks, security guards, dynamic `Markdown(...)` output. |
+-   [![Library cells: helper functions defined in one cell and called from others.](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)![Library cells: helper functions defined in one cell and called from others.](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/library_cells/)
+
+    **[library_cells](https://bearingresearch.com/strata/dev/examples/library_cells/)**: `def` and `class`
+    shared across cells through the synthetic-module slicing path, and the
+    diagnostic when a helper closes over a runtime value.
+
+</div>
+
+## Mounts and tables
+
+<div class="grid cards" markdown>
+
+-   [![S3 mount: LaGuardia weather rows read from a public bucket, with the mount listed in the notebook settings.](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-light.webp#only-light)![S3 mount: LaGuardia weather rows read from a public bucket, with the mount listed in the notebook settings.](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/s3_mount/)
+
+    **[s3_mount](https://bearingresearch.com/strata/dev/examples/s3_mount/)**: a `[[mounts]]` entry makes a
+    public S3 prefix a local `pathlib.Path` inside the cell. Needs the `s3`
+    extra.
+
+-   **[each_pipeline](https://bearingresearch.com/strata/dev/examples/each_pipeline/)**: `# @each` over 287
+    real files from a public bucket, each cached on its own, and
+    `# @write_table ... sync` keeping a table in a REST catalog in step.
+    Needs Docker and the `s3` and `sql` extras.
+
+</div>
+
+## Markdown
+
+<div class="grid cards" markdown>
+
+-   [![Markdown showcase: the notebook's rendered introduction.](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)![Markdown showcase: the notebook's rendered introduction.](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/markdown_showcase/)
+
+    **[markdown_showcase](https://bearingresearch.com/strata/dev/examples/markdown_showcase/)**: every
+    markdown rendering path: headings, lists, tables, code blocks, the
+    security guards, and dynamic `Markdown(...)` output.
+
+</div>
 
 ## R cells
 
-| Notebook | What you'll see |
-| --- | --- |
-| [`r_mtcars_analysis`](https://bearingresearch.com/strata/dev/examples/r_mtcars_analysis/) | A pure-R notebook - `lm()`, `aggregate()`, and inline ggplot2 + base-graphics plots, with `data.frame` and R-only (RDS) handoff between R cells. |
-| [`r_lm_vs_sklearn`](https://bearingresearch.com/strata/dev/examples/r_lm_vs_sklearn/) | Mixed Python + R: fit a model with R's `lm()` and compare side-by-side with scikit-learn over a cross-language Arrow handoff. |
+These need R (`Rscript` on the server's `PATH`).
+
+<div class="grid cards" markdown>
+
+-   **[r_mtcars_analysis](https://bearingresearch.com/strata/dev/examples/r_mtcars_analysis/)**: a pure-R
+    notebook: `lm()`, `aggregate()`, and inline ggplot2 and base-graphics
+    plots, with `data.frame` and R-only (RDS) handoff between R cells.
+
+-   **[r_lm_vs_sklearn](https://bearingresearch.com/strata/dev/examples/r_lm_vs_sklearn/)**: Python and R in
+    one graph. Fit a model with R's `lm()` and compare it with scikit-learn
+    over a cross-language Arrow handoff.
+
+</div>
 
 <!-- https://bearingresearch.com/strata/dev/guides/cells/index.md -->
 
 # Cell kinds
 
-Strata Notebook has seven cell kinds:
+Strata Notebook has six cell kinds, plus loop cells (a Python cell with a `# @loop` annotation):
 
 | Kind         | What it runs                                     | Created by                                                    |
 | ------------ | ------------------------------------------------ | ------------------------------------------------------------- |
@@ -1730,13 +1843,13 @@ Strata Notebook has seven cell kinds:
 | **Markdown** | Prose between cells, rendered as markdown        | Pick **Markdown** from the **+ Add cell** menu                |
 | [**Loop**](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/)     | A Python cell executed N times in a row          | Add a Python cell, then put a `# @loop` annotation at the top |
 
-Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; each has its own page.
+Compute cells participate in the DAG and cache by provenance hash. Python and R cells can be routed to remote workers; SQL, prompt and loop cells run on the server. Widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation; each has its own page.
 
 See [The DAG and staleness](https://bearingresearch.com/strata/dev/concepts/dag-and-staleness/) for the execution model; see [Annotations](https://bearingresearch.com/strata/dev/reference/annotations/) for the full per-annotation reference.
 
 ## Markdown cells
 
-Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.
+Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG - they don't produce artifacts, don't participate in cascade execution, and have no variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.
 
 ```markdown
 ## Stage 1: Load + Clean
@@ -1762,7 +1875,7 @@ See [Markdown showcase](https://bearingresearch.com/strata/dev/examples/markdown
 
 Mixing is encouraged: a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.
 
-Any kind of cell can also live inside a [variant group](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells): a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.
+Any compute cell (not a markdown cell) can also live inside a [variant group](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells): a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.
 
 <!-- https://bearingresearch.com/strata/dev/guides/cells/python/index.md -->
 
@@ -2121,9 +2234,14 @@ While a Python cell runs, `STRATA_CELL_ID` holds its id, in the cell and in any 
 | `# @dataset …`     | Bind a registry name as a recorded input; its version joins the provenance |
 | `# @write_table …` | Write a variable into an Iceberg table when the run succeeds (see [`@write_table`](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table)) |
 | `# @output_dir X`  | Give the cell a folder whose contents are an output (see [`@output_dir`](https://bearingresearch.com/strata/dev/reference/annotations/python/#output_dir)) |
+| `# @each …`        | Run once per file or row, each cached on its own (see [`@each`](https://bearingresearch.com/strata/dev/reference/annotations/python/#each)) |
 | `# @nocache`       | Always re-execute; never serve a cache hit       |
 | `# @stochastic`    | Every run persists beside the cache and never serves it (see [`@stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic)) |
+| `# @after <id>`    | Add an ordering-only edge from another cell (see [`@after`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after)) |
 | `# @loop …`        | Turn the cell into a [loop cell](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#loop-cells)    |
+| `# @loop_until …`  | End a loop cell early when an expression is true |
+| `# @variant <group> <name>` | Make the cell one alternative in a [variant group](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells) |
+| `# @per_variant`   | Run once per variant of an upstream sweep group ([fan-out](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant)) |
 
 See [Cell Annotations][a] for the full reference.
 
@@ -2199,7 +2317,7 @@ GROUP BY t.zone
 
 Each mount is a view by its name over its Parquet, CSV or JSON files, read with the mount's storage options. `file`, `s3`, `gs` and `az` mounts work; GCS and Azure ones are read through the same fsspec filesystem (gcsfs, adlfs) a Python cell's mount uses, so a connection's mounts on one of those schemes must share their storage options. Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. With [`-- @cache snapshot`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache) the cell instead keeps reading the snapshots its first run read until it is rerun. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. A REST catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends. A catalog that vends nothing (its store has no STS) sets `header.X-Iceberg-Access-Delegation` to something other than `vended-credentials`, usually empty: DuckDB then asks it for no credentials, and its `s3.*` keys read the tables, under its `s3://` warehouse or, when the warehouse is a name, under the locations of the tables the query names. A table named only at run time is outside those, so its files are read without the keys. So are data files outside a table's location (added with `add_files` from another prefix, or a `write.data.path` elsewhere): in personal mode they are read without the keys and fail with the store's 403, and service mode refuses them already. A Glue catalog is attached through Glue's Iceberg REST endpoint in its `glue.region` for the account `glue.id`, both required; its `glue.*` keys (or `client.*`, or `s3.*`) sign the catalog's requests and read its tables' files, and without keys the AWS credential chain (environment, profile, instance role) does.
 
-A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `-- @sql connection=<name> write=true` for a cell that changes a database.
+A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `UNPIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `-- @sql connection=<name> write=true` for a cell that changes a database.
 
 ## Schema discovery
 
@@ -2374,7 +2492,7 @@ The [`sql_orders_report`](https://bearingresearch.com/strata/dev/examples/sql_or
 
 | Annotation                              | What it does                                          |
 | --------------------------------------- | ----------------------------------------------------- |
-| `-- @sql connection=<name> [write=true]` | Mark the cell as SQL; reference a declared connection |
+| `-- @sql connection=<name> [write=true]` | Name the declared connection the cell runs on, and whether it may write |
 | `-- @cache <policy>`                     | Override the default `fingerprint` cache policy       |
 | `-- @nocache`                            | Always re-execute; wins over any `-- @cache` policy    |
 | `-- @name <identifier>`                  | Name the output variable (default: `result`)          |
@@ -2634,7 +2752,7 @@ A prompt cell's provenance hash mixes together:
 Editing any of these invalidates the cache. In particular, tweaking `@output_schema` on a cached cell forces a fresh call, which is what you want when iterating on the response shape.
 
 !!! tip "Keep temperature at 0.0 for prompt cells"
-With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling.
+    With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling.
 
 ## Provider configuration
 
@@ -2712,7 +2830,7 @@ report
 | `text` | string | `text(default=)` |
 
 Arguments must be literals. Omit `default=` and it's inferred (a slider's `min`,
-a dropdown's first option, `False`, `""`). Omit a slider's `step=` and it's
+a dropdown's first option, `False`, `""`); a `number` without one is `None`. Omit a slider's `step=` and it's
 derived from the range - roughly `(max - min) / 100`, snapped to a readable
 `1`/`2`/`5` × 10ⁿ increment (so `slider(0, 1)` steps by `0.01`, `slider(0, 100)`
 by `1`). Pass `step=` explicitly to override.
@@ -2865,7 +2983,7 @@ once you've thrown away the intermediates.
 - Loops where intermediate state is genuinely disposable: store only the final answer in a regular Python cell.
 - Anything that needs to branch out into multiple parallel runs: loop cells are sequential by design. Use separate cells, or model the fan-out in Python.
 
-A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch` or `@dataset`; read those in an upstream cell. Its `@table` names are bound in every iteration, at the snapshot its provenance records. A `@write_table` on a loop cell writes the final value once, after the last iteration.
+A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch`, `@dataset` or a read-write `@mount`; read or write those in an upstream cell. Its `@table` names are bound in every iteration, at the snapshot its provenance records. A `@write_table` on a loop cell writes the final value once, after the last iteration.
 
 A loop cell runs on the notebook's own server, never on a [remote worker](https://bearingresearch.com/strata/dev/notebook/workers/): one whose `# @worker`, or the notebook's default worker, names another fails before it starts. Add `# @worker local` to the loop cell, or put the work that needs the worker in an ordinary cell upstream.
 
@@ -3013,11 +3131,14 @@ defined, so after a plain cell redefines `preds` there is no sweep left to fan
 out over. If it reads from two or more, name the one
 to fan out over - `# @per_variant model` - and the others collapse to dicts. A
 cell fans out over **one** group; comparing across two groups (cartesian) isn't
-supported. The validator flags the mistakes: `per_variant_no_sweep_source`
+supported. The validator warns about the mistakes: `per_variant_no_sweep_source`
 (nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),
-`per_variant_on_variant_member` (a cell can't both be a variant and fan out),
-`per_variant_write_table_overwrite` (every variant would overwrite the same
-table). The named group is part of the cell's cache key, so switching it runs the
+`per_variant_unknown_group` (the named group is not a sweep the cell reads),
+`per_variant_on_variant_member` (a cell can't both be a variant and fan out). A
+group of one variant is a note (`per_variant_group_of_one`). Two are errors that
+keep the cell from running: `per_variant_write_table_overwrite` and
+`per_variant_write_table_sync` (each variant would remove the rows of the one
+before it). The named group is part of the cell's cache key, so switching it runs the
 instances again.
 
 ### Defines contract
@@ -3229,7 +3350,9 @@ def test_predicate_holds_for_every_row(cell):
 
 ## Limitations
 
-- **Python cells only** (not prompt, SQL, R, or markdown cells).
+- **Python cells only** (not prompt, SQL, R, widget or markdown cells).
+- An `@each` cell's tests, and an inactive variant's, are refused: the run
+  reports one errored result saying why.
 - `pytest` must be installable into the notebook environment (it is added to
   the dev dependencies on the first run if missing).
 - Tests run the cell's source, so they run as the same OS user a cell does. A
@@ -3302,7 +3425,7 @@ kept in `.strata/hashes.sqlite` while the file's stat holds, so an unchanged mou
 costs a `stat` per file. A file written less than 2 s before it was read is read again
 next time. The staleness check reads at most 64 MiB of files it holds no digest for.
 Past that the server hashes the mount in the background, and the cell shows stale
-("Checking mount `raw`", with how much is hashed) until it is done; a cell whose files did not change is then
+("Checking mount `raw`: its files aren't hashed yet", with a progress line such as "hashing raw · 120 of 400") until it is done; a cell whose files did not change is then
 ready again, and a run in the meantime waits for that hash rather than starting its own.
 Links to files are followed,
 links to folders are not, and a file that cannot be read is keyed as unreadable. A
@@ -3374,7 +3497,12 @@ cell's entry lists every variant's files, merged per mount, once every variant h
 succeeded; a path two variants wrote keeps the later one's. Loop, SQL and prompt
 cells do not record writes, so a successful run of one drops the entry too.
 
-Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials) instead of putting a secret in the cell. On a server that sets `STRATA_NOTEBOOK_CREDENTIAL_WRITERS`, an `rw` mount of `s3://`, `gs://` or `az://` must write through a credential its run's principal is listed for (its `credential=`, or the server's default for that scheme), or the cell fails before it runs; a credential that `STRATA_NOTEBOOK_CREDENTIAL_PATHS` restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).
+Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](https://bearingresearch.com/strata/dev/reference/notebook-toml/#named-credentials) instead of putting a secret in the cell. On a server that sets `STRATA_NOTEBOOK_CREDENTIAL_WRITERS`, an `rw` mount of `s3://`, `gs://` or `az://` must write through credentials its run's principal is listed for (its `credential=` and the server's default for that scheme, each when set), or the cell fails before it runs; a remote `rw` mount with neither is refused; a credential that `STRATA_NOTEBOOK_CREDENTIAL_PATHS` restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).
+
+The annotation takes nothing else. A mount every cell can name, a `pin` and fsspec
+`options` (such as `anon` or `endpoint_url`) go in `notebook.toml` under
+[`[[mounts]]`](https://bearingresearch.com/strata/dev/reference/notebook-toml/#mounts-filesystem-mounts). A pinned
+mount is keyed on its pin, not its files.
 
 <!-- https://bearingresearch.com/strata/dev/notebook/lake-aware-cells/index.md -->
 
@@ -3411,8 +3539,8 @@ reads the same way, with no `@table` line.
 
 - A running Strata server: `strata-notebook` (personal mode, the default)
   serves the notebook UI on `http://localhost:8765`.
-- `pyiceberg` for the two setup scripts below. It is a core Strata dependency,
-  so `uv run python` in the Strata project has it. The notebook's own
+- `pyiceberg` for the two setup scripts below. `uv run --with
+  "pyiceberg[sql-sqlite,pyarrow]"` provides it wherever Strata is installed. The notebook's own
   environment does not need it: the server resolves the snapshot and runs the
   scan.
 
@@ -3454,7 +3582,7 @@ print("snapshot S1:", table.current_snapshot().snapshot_id)
 
 ```bash
 mkdir -p /tmp/strata-demo/warehouse
-uv run python setup_warehouse.py
+uv run --with "pyiceberg[sql-sqlite,pyarrow]" python setup_warehouse.py
 ```
 
 The **table URI** is `<warehouse>#<namespace>.<table>` - here
@@ -3530,11 +3658,11 @@ print("snapshot S2:", table.current_snapshot().snapshot_id)
 ```
 
 ```bash
-uv run python append_month2.py
+uv run --with "pyiceberg[sql-sqlite,pyarrow]" python append_month2.py
 ```
 
-Back in the notebook, the `@table` cell now reads **stale · input changed** - its
-snapshot id moved from S1 to S2, so its provenance changed and no stored result
+Back in the notebook, the `@table` cell turns stale (hover its status dot:
+**stale · input changed**). Its snapshot id moved from S1 to S2, so its provenance changed and no stored result
 matches it. The cells downstream of it that ran before read **stale** too. The
 badges do not update live: the notebook looks up the current snapshot only when
 it recomputes staleness, which happens when you reopen the notebook, edit a
@@ -3557,19 +3685,15 @@ add `snapshot=<id>`:
 ```
 
 A pinned cell reads that snapshot regardless of new data and **never goes
-out of date** on appends - the lake-side analog of a mount `pin`. Drop the
+out of date** on appends - the lake-side analog of a mount's
+[`pin`](https://bearingresearch.com/strata/dev/reference/notebook-toml/#mounts-filesystem-mounts). Drop the
 `snapshot=` to return to tracking the current snapshot.
 
 ## How it works
 
-The snapshot id is part of the cell's **provenance hash**, alongside the
-source hash, environment hash, and input hashes:
-
-```
-provenance = hash(input_hashes + mount_fingerprints + table_fingerprints
-                  + fetch_fingerprints + dataset_fingerprints,
-                  source_hash, env_hash)
-```
+The snapshot id is part of the cell's **provenance hash**: a digest over the
+cell's definition, its environment, its upstream outputs and its inputs
+(mounts, tables, fetches, datasets).
 
 A table fingerprint is `"<name>:table:<uri>:<snapshot_id>"`. Because the
 snapshot id is immutable and content-addressed, a cached result for a given
@@ -3770,7 +3894,7 @@ Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
   you: it sets `sha256=` on each named fetch (all of the cell's by default) to
   the digest of the bytes the notebook last downloaded, keeping the line's other
   options. Run the cell first so there are bytes to pin. After a mismatch,
-  running it again accepts what the URL serves now.
+  running `pin-fetch` again pins what the URL serves now.
 - **`refetch=stale`** (default) checks the URL with a conditional GET
   (`ETag` / `Last-Modified`): at most once a minute while staleness is being
   recomputed, and always right before the cell runs, so what a run records is
@@ -3813,7 +3937,7 @@ than in a batch.
 On a remote worker the server does the fetching: the bytes travel with the
 cell's other inputs, uploaded on the direct transport and staged behind a
 signed URL on the signed one, so the worker never contacts the URL and needs no
-route to it. The worker must be running this version of Strata or later. An
+route to it. The worker must be running Strata 0.8.0 or later. An
 older one does not recognise the input and the cell fails with a `NameError`
 on `<name>`.
 
@@ -3836,9 +3960,10 @@ Format: `# @dataset <name> <registry-name>[@<alias>|@v=<n>]`.
 - **`taxi/model@champion`** follows the alias. The cell goes out of date when
   the alias points somewhere else.
 - **`taxi/model`** follows the name pointer the same way.
-- **`taxi/model@v=3`** pins version 3 of the artifact the name points at. A
-  pinned dataset never makes the cell out of date, as `snapshot=` does for
-  `@table`.
+- **`taxi/model@v=3`** pins version 3 of the artifact the name points at. New
+  versions of that artifact never make the cell out of date, as `snapshot=`
+  does for `@table`. Pointing the name at a different artifact does: the pin
+  then names that artifact's version 3, and the cell fails if it has none.
 
 The server resolves the name in its own registry, or in the team store when
 `STRATA_NOTEBOOK_REMOTE_STORE_URL` is set. The version is copied into the
@@ -3884,6 +4009,7 @@ current = latest_per_sample()
 ```
 
 Format: `# @write_table <var> <table> append|overwrite|merge|sync [on=<col>,...]`.
+Python and R cells take it; SQL and prompt cells do not.
 The table is one of the forms `@table` takes, written with the server's
 catalogs and credentials (a catalog's `strata_credential` resolves against the
 notebook's environment first). The mode is required:
@@ -3897,7 +4023,8 @@ notebook's environment first). The mode is required:
   data files with no changed row stay. A table Strata did not write is refused,
   as for `overwrite`.
 
-For `merge` and `sync` each row needs one key of its own, so a null or a repeated
+`on=` is required for `merge` and `sync` and refused for `append` and
+`overwrite`; either mistake blocks the run. For `merge` and `sync` each row needs one key of its own, so a null or a repeated
 key fails the write. The change commits at once (as more than one snapshot, each
 naming the run), and nothing is committed when nothing differs.
 
@@ -3971,7 +4098,7 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 4. The worker runs the cell in a subprocess and returns outputs as a gzipped bundle.
 5. Strata stores the outputs as artifacts; cache hits work identically to local cells.
 
-Cells run in **the notebook's locked environment** on a `strata-worker` of this version or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as `locked_environments` in `/health`, and says `false` when it finds no uv: neither the one installed with `strata-notebook` nor one on its `PATH`. A worker that answers without it (an older `strata-worker`, one without `uv`, or a custom worker; a `404` on `/health` counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a `5xx` on `/health`) is refused for a notebook that has a `uv.lock`, rather than running the cell in an environment its provenance would not describe. Either way the worker runs in any environment - it can be pip-installed into a plain Docker image. See [the `environment` block](https://bearingresearch.com/strata/dev/reference/executor-protocol/#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
+Cells run in **the notebook's locked environment** on a `strata-worker` of 0.8.0 or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as `locked_environments` in `/health`, and says `false` when it finds no uv: neither the one installed with `strata-notebook` nor one on its `PATH`. A worker that answers without it (an older `strata-worker`, one without `uv`, or a custom worker; a `404` on `/health` counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a `5xx` on `/health`) is refused for a notebook that has a `uv.lock`, rather than running the cell in an environment its provenance would not describe. Either way the worker runs in any environment - it can be pip-installed into a plain Docker image. See [the `environment` block](https://bearingresearch.com/strata/dev/reference/executor-protocol/#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
 
 R cells work the same way with the notebook's `renv.lock`: the worker restores it with `renv` into one library per lock and R build, reuses it for every later R cell with that lock, and runs the cell with that library first on R's library path. It advertises this as `locked_r_environments`, `true` when its R can load `renv`; a notebook with an `renv.lock` is refused on a worker that cannot be asked, as above. See [the R `environment` block](https://bearingresearch.com/strata/dev/reference/executor-protocol/#the-r-environment-block).
 
@@ -4013,7 +4140,7 @@ INFO:     Uvicorn running on http://127.0.0.1:9000
 curl http://localhost:9000/health
 ```
 
-Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, `launch_id` is set only on a worker Strata [launched over SSH](#run-cells-on-a-machine-you-can-ssh-to), and `hardware` lists what the machine reports). `output_dirs` says the worker returns a cell's `# @output_dir` folders and `folder_inputs` that it takes another cell's folder as an input; `mount_cache_probe` says it answers `POST /v1/mount-cache/cached` (behind the same bearer token as `/v1/execute`) with how much of each read-only mount its cache already holds, so the server can tell what a run would download:
+Expected response (`locked_environments` is `false` when the worker finds no uv: a `STRATA_UV` naming no file, or an install without the bundled uv and none on `PATH`; `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, `launch_id` is set only on a worker Strata [launched over SSH](#run-cells-on-a-machine-you-can-ssh-to), and `hardware` lists what the machine reports). `output_dirs` says the worker returns a cell's `# @output_dir` folders and `folder_inputs` that it takes another cell's folder as an input; `mount_cache_probe` says it answers `POST /v1/mount-cache/cached` (behind the same bearer token as `/v1/execute`) with how much of each read-only mount its cache already holds, so the server can tell what a run would download:
 
 ```json
 {
@@ -4389,6 +4516,7 @@ Workers live in `notebook.toml` under `[[workers]]`. You can add them through th
 | `config.transport` | `"direct"` for direct push (the default), `"signed"` for the pull-model with signed URLs |
 | `config.token` | Literal bearer token (dev only) - see [Authentication](#authentication) |
 | `config.token_env` | Env var name holding the bearer token (preferred for prod) |
+| `config.strata_url` | `signed` only: the server address the manifest's URLs use, when the worker cannot reach the server's default URL |
 
 A typical multi-worker notebook ends up with:
 
@@ -4481,7 +4609,9 @@ same shape whether it comes from the admin routes or from
 `[tool.strata.transforms] notebook_workers`. `POST /v1/admin/notebook-workers`
 adds one, `PUT /v1/admin/notebook-workers/{name}` replaces it, `PATCH` takes
 `{"enabled": false}`, and `PUT /v1/admin/notebook-workers` replaces the whole
-registry with `{"workers": [...]}`. Under principal auth (service mode) they
+registry with `{"workers": [...]}`. `GET /v1/admin/notebook-workers` lists it,
+`DELETE /v1/admin/notebook-workers/{name}` removes one, and
+`POST /v1/admin/notebook-workers/{name}/refresh` probes one's health again. Under principal auth (service mode) they
 need the `admin:notebook-workers` scope. A personal server has no principal
 auth, so they answer whoever can reach it, the same callers that can already
 run cells there: loopback by default, behind the cross-origin and `Host`
@@ -4652,7 +4782,7 @@ If you don't set `runtime_id`, the identity is the backend, the name and a hash 
 
 ## Health checks
 
-Every worker exposes `GET /health`. The notebook UI polls this and shows a green/red badge next to cells that use the worker. The badge is advisory: execution does not consult it, so a cell dispatched to a worker that has gone down fails when the connection does, not before.
+Every worker exposes `GET /health`. The notebook UI checks it when the notebook opens, when its workers change and on the Workers panel's **Refresh health**, and a dispatch's result updates it; there is no polling. Cells on that worker show its state as a label (healthy, unknown, missing or attention). The label is advisory. For a notebook with a `uv.lock`, a dispatch asks `/health` first and refuses a worker it cannot reach; otherwise a cell sent to a worker that has gone down fails when the connection does.
 
 ```bash
 curl https://my-worker.example.com/health
@@ -4675,7 +4805,7 @@ The cell ran in the worker's own Python env, which is missing the dependency. Th
 Cold start. Modal scales the function to zero after `scaledown_window` seconds idle; the first request after a scale-down has to provision a fresh container. Either bump `scaledown_window`, set `min_containers=1` on the `@app.function`, or just expect the latency on the first cell after idle.
 
 **`413 Payload Too Large` from the worker.**
-A cell input is larger than the worker's max-input limit. Default is 2 GiB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Inputs are written to disk as they arrive, so the limit to size against is the worker's disk, not its memory. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
+On a `signed` worker, a cell input is larger than the worker's max-input limit (a `direct` upload has no cap). Default is 2 GiB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Inputs are written to disk as they arrive, so the limit to size against is the worker's disk, not its memory. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
 
 **Fly build fails with `error: failed to fetch wheel` from a workload dep.**
 Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall back to building from source. If your worker needs one, add `build-essential` (plus the dep-specific toolchain) to the Dockerfile via `RUN apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*` before the `uv pip install` step.
@@ -5258,6 +5388,8 @@ You: use ssh user@gpu-box for the training cells
 Agent → connect_ssh_worker(session_id, "user@gpu-box")
 ```
 
+`disconnect_ssh_worker(session_id, name, stop_remote=False)` closes the tunnel and drops the registration.
+
 The agent's working agreement already tells it to reach for this when you hand it an SSH target, and to keep light cells local with `# @worker local`. To wire the worker up as the session opens instead, pass it to the on-ramp:
 
 ```bash
@@ -5277,7 +5409,9 @@ strata worker rm-ssh gpu-box --server http://localhost:8765 --session <session-i
 **What to know:**
 
 - **Key-based SSH only.** Strata runs `ssh` in batch mode and never handles passwords, so the target must authenticate non-interactively (an agent/key that works when you run `ssh user@gpu-box` yourself). A `user@host`, a bare `host`, or an `~/.ssh/config` alias all work.
-- **The first connect can take a minute** while it installs `strata-worker` on the box (via `uv tool install`); a reconnect skips the install, but it starts a fresh worker rather than adopting one already running.
+- **The first connect can take a minute** while it installs `strata-worker` on the box (via `uv tool install`); a reconnect skips the install, but it starts a fresh worker rather than adopting one already running. Installing needs `uv` on the box: with neither `strata-worker` nor `uv` there, the connect fails.
+- **The installed worker is the latest release, unpinned.** It is `strata-notebook[notebook]` from PyPI, and a `strata-worker` already on the box is used whatever its version. A worker should be the same release as the server ([Remote workers](https://bearingresearch.com/strata/dev/notebook/workers/)), so pin one through the REST route's `pin` field, or install the matching release on the box yourself.
+- **The registration outlives the tunnel.** Connecting writes a `[[workers]]` entry into `notebook.toml`, pointing at the tunnel's local port; `strata worker add-ssh` also makes it the default unless you pass `--no-default`. When the server stops, the tunnel closes but the entry stays, so after a restart that worker points at a dead port. Run `add-ssh` again, remove it with `strata worker rm-ssh`, or pick another default with `strata worker default`.
 - **Security.** The worker binds the box's `127.0.0.1` (never a public port) and is reachable only through the authenticated SSH tunnel. A per-worker bearer token is generated for defense-in-depth; it's held in the notebook server's memory and **never written to `notebook.toml`**. Each launch also hands the worker a one-off `launch_id` (over stdin, like the token), and Strata connects only when `/health` through the tunnel reports it, so another process already listening on the box's port never receives the token.
 - **A remote cell runs on the box's filesystem.** Absolute paths in the cell resolve there, not on your machine, and a `file://` mount is refused on any remote worker, and cloud mounts use the box's own credentials. A mount's `options` may set only the [non-secret keys a shared server allows](https://bearingresearch.com/strata/dev/reference/notebook-toml/#mount-options-on-a-shared-server), so an endpoint or a profile goes in the box's `STRATA_NOTEBOOK_CREDENTIALS`. The box keeps its read-only mount copies across jobs, in `STRATA_NOTEBOOK_MOUNT_CACHE_DIR` (default `~/.strata/mount_cache`), bounded by the same two settings as the server's. Results are cached under the remote environment's identity, so they don't collide with local runs.
 
@@ -5311,7 +5445,7 @@ A cell sent to a [remote worker](https://bearingresearch.com/strata/dev/notebook
 
 At notebook creation time, you can select a Python version from the versions configured on the server. The first one listed is the default.
 
-To change it later, click **Requested Python** in the Environment panel. Strata rewrites `requires-python`, rebuilds `.venv/` with `uv sync`, and restores the old version if the sync fails.
+To change it later, click the version next to **Requested Python** in the Environment panel. Strata rewrites `requires-python`, rebuilds `.venv/` with `uv sync`, and restores the old version if the sync fails.
 
 !!! note
     The available versions come from the server's `STRATA_NOTEBOOK_PYTHON_VERSIONS`. Unset, they are the Python versions `uv` reports as installed on the server that Strata supports, with the server's own version included. A `UV_PYTHON` set in the server's environment does not apply to a notebook's `uv` commands; `requires-python` decides its interpreter.
@@ -5334,7 +5468,7 @@ On a server in service mode, packages install from wheels only: a package with n
 
 ### Import from requirements.txt
 
-In the Environment panel, click **Import** and paste a `requirements.txt`:
+In the Environment panel, click **Import requirements** and paste a `requirements.txt`:
 
 ```
 pandas>=2.0
@@ -5545,7 +5679,7 @@ The credentials only live in the server process, never in `notebook.toml`, `.str
 Open the notebook, open **Notebook settings** in the sidebar, and use the **Secret manager** section in the Runtime panel:
 
 1. Pick the provider (`infisical`).
-2. Fill in `project_id`, `environment` (`dev` / `staging` / `prod`), and `path` (defaults to `/`). Base URL is optional: the server accepts only its own `INFISICAL_HOST` there (or the public default when that is unset), so a self-hosted deployment is set with `INFISICAL_HOST` where the server starts.
+2. Fill in `project_id`, `environment` (`dev` / `staging` / `prod`), and `path` (defaults to `/`). A field left blank falls back to the server's `INFISICAL_PROJECT_ID`, `INFISICAL_ENVIRONMENT` (default `dev`) or `INFISICAL_PATH`. Base URL is optional: the server accepts only its own `INFISICAL_HOST` there (or the public default when that is unset), so a self-hosted deployment is set with `INFISICAL_HOST` where the server starts.
 3. Save.
 
 The result lands in `notebook.toml` as:
@@ -5588,7 +5722,7 @@ Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run 
 
 ## Fetch errors
 
-When a fetch fails, bad credentials, network error, wrong project, the notebook still opens. The error surfaces in the Runtime panel's Secret manager block. A manager that does not answer within 20 seconds counts as a failed fetch. Common messages:
+When a fetch fails, bad credentials, network error, wrong project, the notebook still opens. The error surfaces in the Runtime panel's Secret manager block. Each request to the manager (a fetch is a login plus a list) times out after 20 seconds, and a timeout counts as a failed fetch. Common messages:
 
 > No Infisical credentials in the process environment. Set either `INFISICAL_CLIENT_ID` + `INFISICAL_CLIENT_SECRET` (Machine Identity / Universal Auth, recommended) or `INFISICAL_TOKEN` (service token, legacy) in the shell that launched Strata.
 
@@ -5654,7 +5788,7 @@ copy a ready-to-paste snippet, or build it yourself:
 
 `?embed=1` drops the standalone chrome (the title bar and **← Edit** link) so the
 view blends into the host page, and the embedded app posts its content height to
-the parent frame (`{ type: 'strata:embed:resize', height }`) so the optional
+the parent frame (`{ type: 'strata:embed:resize', height, sessionId }`) so the optional
 listener above sizes the iframe with no inner scrollbar. The listener accepts
 heights only from the Strata server's origin, so another frame on the page
 cannot resize it, and sizes only the iframe that sent the height, so several
@@ -6162,7 +6296,7 @@ larger artifacts.
 | `GET /p/{token}` | **no** | The page. |
 | `GET /p/{token}/data` | **no** | The published bytes. |
 | `GET /p/{token}/archive.zip` | **no** | The archived bundle as a zip, with a `Content-Digest` header. |
-| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. `?sha256=` also says which bundle file (Arrow or Parquet) a digest names. |
+| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. `?sha256=` also says which bundle file (Arrow, Parquet or an `output_dir` file) a digest names. |
 | `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
 | `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
 | `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |
@@ -6198,8 +6332,8 @@ with **no runtime dependency** on the recipient's end.
 - **Archive a notebook's state at a moment in time.** Re-runs change
   outputs; an exported file captures what *this* run produced.
 - **Auto-generate documentation.** The docs site you're reading right
-  now generates the [Examples catalog](https://bearingresearch.com/strata/dev/notebook/examples/) by running
-  `strata export` against every `examples/*/` at mkdocs build time.
+  now generates the [Examples catalog](https://bearingresearch.com/strata/dev/notebook/examples/) by rendering every
+  `examples/*/` the way `strata export` does, at mkdocs build time.
 
 For exports inside the notebook UI itself, click the **Export** button
 in the notebook header, same engine, browser triggers a file download.
@@ -6267,15 +6401,15 @@ own files: when the result was computed, in UTC, and how long it took or what a
 hit saved. The snapshot has no **lineage** link, since nothing behind it could answer one.
 
 In the UI, the notebook's **Export** menu offers **App snapshot**
-alongside Markdown and HTML.
+alongside Markdown and HTML, and **Embed** for an iframe snippet.
 
 ## What gets rendered
 
 For each cell, the exporter emits in order:
 
 1. **Banner**: the cell's `# @name` (if set) or its ID, plus small
-   chips for the cell's language, `# @worker`, `# @variant`, `# @loop`
-   and `# @mount`.
+   chips: `kind` (the cell's language), `variant`, `worker`, `loop`
+   (`max_iter` / `carry`) and `mounts`.
 2. **Source**: fenced code block in the cell's language. The fence
    length auto-grows to cover embedded triple-backticks safely.
 3. **Cached display outputs**: per content type:
@@ -6531,8 +6665,8 @@ next teammate hits.
 STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true
 ```
 
-It works because a cell's provenance key -
-`sha256(sorted_input_hashes + source_hash + env_hash)` - contains no notebook id
+It works because a cell's provenance key, a digest over its definition, its
+environment, its upstream outputs and its inputs, contains no notebook id
 and no cell id, and `env_hash` leaves out the notebook's own project name in
 `uv.lock`. Two people running the same source over the same inputs in the
 same environment already arrive at the same hash; the store just had no way to
@@ -6790,12 +6924,12 @@ cell that produced it**.
 A compact strip appears **right below the cell** that published:
 
 ```
-⬡ taxi/tip-model  v1   [Promote ▾]   [View lineage]
+⬡ taxi/tip-model  v1   [Promote ▾]   [lineage icon]
 ```
 
 - `⬡ taxi/tip-model v1` - the name and version your cell put.
 - `[Promote ▾]` - promote this artifact (next step).
-- **View lineage** - open its lineage.
+- The lineage icon (tooltip **View lineage**) - open its lineage.
 
 Promote where you trained the model, without scrolling anywhere.
 
@@ -6835,8 +6969,8 @@ top to bottom:
    queued, with **Approve / Reject** buttons (the human gate, in the UI).
 2. **Names table** - every registry name, each row showing its **alias chips**
    (`★champion=v1`, `candidate=v2`), latest version, **tags**, the cells
-   that read it (**Read by**), a **`[Promote ▾]`** menu, and a **View lineage**
-   button. This is the same data on the per-cell strip, but for
+   that read it (**Read by**), a **`[Promote ▾]`** menu, and a lineage icon
+   (tooltip **View lineage**). This is the same data on the per-cell strip, but for
    *all* names - not just what the current notebook published.
 3. **Audit timeline** (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.
@@ -6874,7 +7008,7 @@ Unprotected aliases (`candidate`) still apply immediately.
 
 ## 7. View lineage
 
-Click the **View lineage** button on the strip or any names-table row. The **lineage
+Click the lineage icon (tooltip **View lineage**) on the strip or any names-table row. The **lineage
 view** renders the provenance chain:
 
 ```
@@ -6900,7 +7034,7 @@ root.](https://bearingresearch.com/strata/dev/assets/registry-lineage-dark.png#o
 | **The registry looks empty on a machine that has published things** | Check `STRATA_NOTEBOOK_REMOTE_STORE_URL`. The dashboard describes the store the cells write to, so an unset URL on a server whose cells publish elsewhere - or a set one pointing at a store nobody publishes to - shows an empty registry rather than an error. |
 | **The tab reports a 502** | The team store could not be reached. That is deliberately not an empty registry: "nobody has published anything" and "I could not ask" are different facts. |
 | **Registry tab is empty** | Nothing's been published with a name yet. Run a cell with `strata.put(inputs=[], transform=…, data=…, name="…")`. |
-| **A cell ran but no per-cell strip** | The strip only shows artifacts a cell published via the ambient `strata` client (a *named* `put` / `materialize`). Artifacts created another way still appear in the **names table**, just not as a per-cell strip. |
+| **A cell ran but no per-cell strip** | The strip only shows artifacts a cell published via the ambient `strata` client (a *named* `put` / `materialize`), plus a **Promote to team…** row when a team store is configured and the cell has stored outputs. Artifacts created another way still appear in the **names table**, just not as a per-cell strip. |
 | **Promote said "pending" unexpectedly** | That alias is in `STRATA_REGISTRY_PROTECTED_ALIASES` - approve it from the pending banner. |
 | **Promote did nothing** | Setting an alias to the version it already points at is an idempotent **no-op** (the toast ends in `(no change)`). |
 
@@ -7046,7 +7180,8 @@ command run in its `src/` serves `services/api/`'s scratchpad. With no
 `pyproject.toml` found, the repository is the project (never your home directory,
 should it be one), or outside one the directory itself. A command run inside a
 notebook, `.strata-scratch/` included, serves the project the notebook is in.
-`--root DIR` on any `strata scratch` command or on `strata mcp`, or
+`--root DIR` on every `strata scratch` command but `ls` (on `gc`, `--all` sweeps
+every one instead) or on `strata mcp`, or
 `STRATA_SCRATCH_ROOT` for a config that cannot pass arguments, names the project
 instead.
 
@@ -7106,7 +7241,7 @@ installed in the project's environment as the environment and does not warn abou
 installed packages syncs it again, once no cell is running; whether a project has an environment at all is
 decided again when the scratchpad opens, and recorded in
 `.strata-scratch/.strata/scratchpad_environment.json`. `--python PATH` on `strata
-mcp` or `strata scratch start`, or `STRATA_SCRATCH_PYTHON`, names the interpreter
+mcp` or `strata scratch start`, `run` or `show`, or `STRATA_SCRATCH_PYTHON`, names the interpreter
 instead. A client asking for another than the daemon's replaces it once idle, and
 while it is busy is refused with both named; a client asking for none keeps the
 daemon's. A scratchpad cell's `# @env` may not set `PYTHONPATH`, `PYTHONHOME`,
@@ -7261,7 +7396,7 @@ Needs the `[mcp]` extra.
 | `list_notebooks` | The sessions currently open on the server: `session_id`, `name`, `path`. |
 | `get_notebook(session_id)` | Every cell of a session, in order. |
 | `get_cell(session_id, cell_id)` | One cell: source, status, outputs. A failed cell has its `error` and `error_full`, the traceback from the cell's first frame and the one with the harness frames too. For a widget cell, its controls and what each is set to. |
-| `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session …`, which downloads and writes the file locally. |
+| `save_cell_output(session_id, cell_id, index=-1)` | Write a display output (a plot, an image) to the notebook's `.strata/outputs/` and return the path, so the agent can open it. The path is on the **server's** machine: an agent on another host should use `strata cell output --server … --session … <cell_id> --out plot.png`, which downloads and writes the file locally. |
 | `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. For a swept variable, each variant's cell and the name `lineage` takes for it. |
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
@@ -7271,7 +7406,7 @@ Needs the `[mcp]` extra.
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
 | `add_cell(session_id, source, after?, language?, author?)` | Add a cell (server mints the id). `language` is one of `python`, `markdown`, `sql`, `r`, `prompt`, `widget`. |
-| `run_snippet(session_id, source, after?, language?, author?)` | Add a cell **and run it** in one call; returns the cell view with the run outcome nested under `run`. The scratchpad primitive. |
+| `run_snippet(session_id, source, after?, language?, author?)` | Add a cell **and run it** in one call; returns the cell view with the run outcome nested under `run`. The scratchpad profile's `run` is the form that takes no `session_id`. |
 | `edit_cell(session_id, cell_id, source, author?)` | Replace a cell's source. |
 | `remove_cell(session_id, cell_id)` | Delete a cell and its files. |
 | `move_cell(session_id, cell_id, index)` | Reorder a cell. |
@@ -7552,17 +7687,18 @@ Summarize {{ findings }} as a verdict.
 ```
 
 `{{ var }}` interpolates upstream variables. `strata validate` checks
-annotation syntax (`loop_missing_carry`, malformed `@output_schema`,
-unknown workers, …) without calling any LLM.
+annotation syntax (`loop_missing_carry`, malformed `@output_schema`, …)
+and warns about unknown workers, without calling any LLM.
 
 ## What validate catches vs. what run catches
 
 | Failure | Caught by |
 | --- | --- |
 | Malformed `notebook.toml` (with TOML line numbers) | `validate` |
-| Missing / unreadable cell file | `validate` |
+| Missing cell file | not caught: a missing file reads as an empty cell |
 | DAG cycle | `validate` |
-| Bad annotation (`@loop` without `carry`, schema typos, unknown worker) | `validate` |
+| Bad annotation (`@loop` without `carry`, schema typos) | `validate` |
+| Unknown worker | `validate` warns (exit `0`); the run fails |
 | Reference that resolves to nothing (import? typo?) | `run` (NameError) |
 | Wrong logic, missing dependency in `pyproject.toml` | `run` |
 
@@ -7599,7 +7735,7 @@ directly - it's machine-managed runtime state with no stability guarantees.
 ## Comparing two runs
 
 A successful cell also reports its `provenance_hash` and its `outputs` - one
-entry per stored variable, each with `artifact_id`, `version` and
+entry per stored variable, each with `name`, `artifact_id`, `version` and
 `content_sha256`:
 
 ```bash
@@ -7695,7 +7831,7 @@ $ strata validate ./handwritten && strata run ./handwritten
 ✓ valid: 3 cell(s)
 syncing environment…
 ...
-  load numbers = [1, 2, 3, 4]           ✓ 1.4s
+  load load                             ✓ 1.4s
   doc [markdown] plain prose cell      ✓ cached
   stats total = sum(numbers)             ✓ 1.1s
 
@@ -7878,10 +8014,11 @@ different Strata commits:
 ## Where it lives
 
 - `.strata-scratch/` at the project's root (the nearest `pyproject.toml`, bounded
-  by the git root): cells, values, and the digest the hooks read. Add it to
-  `.gitignore`; deleting it costs reruns only.
-- Cells run in the project's environment when it has one (`.venv`, or a uv
-  project's), else in the scratchpad's own. Their cwd is the scratchpad's `work/`
+  by the git root or your home directory): cells, values, and the digest the hooks
+  read. It carries its own `.gitignore` (`*`), so git never sees it and your
+  `.gitignore` needs no entry; deleting it costs reruns only.
+- Cells run in the project's environment when it has one (a uv project's, else
+  `$VIRTUAL_ENV`, else `.venv`), else in the scratchpad's own. Their cwd is the scratchpad's `work/`
   directory, so the agent uses absolute paths for project files.
 - One daemon per scratchpad, started by the first call and stopped after 30 idle
   minutes; agents in the same project share it.
@@ -7953,9 +8090,14 @@ where `uv run` already has the client.
 
 ## 1. Start the server
 
+From the checkout:
+
 ```bash
 uv run strata-notebook
 ```
+
+With Strata installed as a tool (see [Install](https://bearingresearch.com/strata/dev/getting-started/installation/)), run `strata-notebook`
+instead. Your own project needs only the client.
 
 ## 2. Run the demo
 
@@ -7981,7 +8123,7 @@ Table URIs use the form `<scheme>://<warehouse-path>#<namespace>.<table>`:
 - `<warehouse-path>` is the path to the warehouse root (the directory containing Iceberg metadata).
 - The fragment after `#` names the Iceberg table inside the warehouse, as `<namespace>.<table>`.
 
-A table URI is `<warehouse>#<namespace>.<table>`. The demo prints the exact one it created when it runs, because it builds its warehouse in a temporary directory rather than at a fixed path; copy that line rather than the shape below.
+A table URI is `<warehouse>#<namespace>.<table>`. The demo builds its warehouse in `strata-demo-warehouse` under your system's temp directory (or at `--warehouse DIR`), with the table `analytics.events`, and prints the exact URI on its `Table URI:` line. Copy that line rather than the shape below.
 
 ```python
 from strata_client import StrataClient
@@ -8351,7 +8493,8 @@ The provenance hash determines cache identity. It includes:
 
 | Component | In hash? | Why |
 |-----------|----------|-----|
-| Source code | Yes | Different code = different result |
+| Source code, without whitespace or comments | Yes | Different code = different result |
+| Annotations that change the computation (`@loop`, `@write_table`, `@output_dir`, `@per_variant`) | Yes | They change what the cell does, though they are comments |
 | Upstream artifact hashes | Yes | Different inputs = different result |
 | Environment lockfile hash | Yes | Different packages = different result |
 | Env vars the cell declares (`@env`) or reads by name | Yes | A different setting can change the result |
@@ -8389,7 +8532,7 @@ That is what makes the notebook a usable scratchpad. A cell that must always run
 
 ## DAG and variable analysis
 
-Each cell's source code is analyzed via Python's AST to extract:
+Each cell's source code is analyzed by [cellgraph](https://github.com/bearing-research/cellgraph) (Python's AST and `symtable` for Python cells, its own analyzers for R and SQL) to extract:
 
 - **Defines**: top-level variable assignments (`x = 1`, `df = pd.read_csv(...)`)
 - **References**: free variables used but not defined in this cell
@@ -8406,7 +8549,7 @@ The DAG is rebuilt automatically on every cell source change.
 
 When you run a cell, this happens:
 
-1. **Compute provenance hash**: `sha256(sorted_input_hashes + source_hash + env_hash)`
+1. **Compute provenance hash**: a digest over the cell's definition key (its source with whitespace and comments dropped), the environment hash, the outputs of the upstream cells it reads, and its declared outside inputs (mounts, tables, fetches, datasets); see [How caching works](https://bearingresearch.com/strata/dev/concepts/caching/#caching-and-provenance)
 2. **Cache check**: Look up the hash in the artifact store → return immediately on hit
 3. **Resolve inputs**: Load upstream variable artifacts into a temp directory
 4. **Execute**: Spawn a subprocess running the cell harness in the notebook's
@@ -8432,7 +8575,7 @@ This means you can edit an early cell and run a downstream cell, and Strata will
 
 ## Run All
 
-Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout, a read-write mount, `@loop`, `@fetch`, `@dataset` or `@output_dir`, a sweep variant or a consumer of one, and every non-Python cell runs on its own.
+Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout (its own or the notebook's), a read-write mount, `@loop`, `@each`, `@fetch`, `@dataset` or `@output_dir`, a sweep variant or a consumer of one, a consumer of an `@each` output, a cell an annotation error keeps from running, and every non-Python cell runs on its own. In a scratchpad notebook every cell runs on its own.
 
 When a cell fails, Run All carries on, but not through the failure: every cell that reads from a failed cell, directly or further down, is skipped and marked stale with the reason that an upstream failed. Cells the failure does not reach run as normal. Rerun All does the same while bypassing the cache.
 
@@ -8540,21 +8683,25 @@ Strata is a **value-semantics** engine: a cell receives *copies* of its inputs
 (deserialized from artifacts), not the caller's live objects. A linear Jupyter
 kernel shares one memory space, so a model trained in one cell is visible
 everywhere; Strata's cells are isolated, so two patterns that work in Jupyter
-break here - both silently, because the run still goes green:
+break here. The run still goes green in both:
 
 1. **In-place mutation that isn't exported.** A cell that trains a model with
    `optimizer.step()` (a method call, no `model = …` reassignment) mutates
    `model` *in place*. Strata's data-flow only treats a variable as a cell's
    output if it's assigned, subscripted, attr-set or passed `inplace=True`, so
    the trained `model` is never re-exported, and downstream cells read the
-   **pre-training** version.
+   **pre-training** version. Usually nothing warns about this one: the runtime
+   mutation check fingerprints pandas, numpy, torch tensors and builtin
+   containers, not a model object.
 
 2. **Shared mutable references split across cells.** `optimizer = Adam(model.parameters())`
    makes the optimizer hold references to the *same tensors* as the model.
    Stored as two separate artifacts and reloaded into a later cell, they become
    two *different* tensor sets - so `optimizer.step()` updates the optimizer's
    private copies and the `model` you evaluate/save never changes. Training is a
-   silent no-op.
+   no-op. When Strata can see that two of a cell's outputs share an object, the
+   cell's console warns that they "share a mutable ... object" and will become
+   independent copies downstream.
 
 Both are the same root: **shared, mutable state doesn't survive a boundary where
 each variable is an independent immutable artifact.** Strata deliberately does
@@ -8590,14 +8737,16 @@ explicit `map_location` - see the device/placement guidance in
 
 Cell outputs are serialized based on their Python type:
 
-| Type | Format | File extension |
-|------|--------|---------------|
-| PyArrow tables, pandas and polars frames and series, numpy arrays and scalars, torch and jax tensors, `datetime` / `Decimal` / `UUID` / `bytes` / `complex` values | Arrow IPC | `.arrow` |
-| Any other type exporting `__arrow_c_stream__` or `__dlpack__` | Arrow IPC | `.arrow` |
-| Dicts, lists, scalars (int, float, str, bool, None) | JSON | `.json` |
-| Everything else | Pickle | `.pickle` |
+| Type | Format |
+|------|--------|
+| PyArrow tables, pandas and polars frames and series, numpy arrays and scalars, torch and jax tensors, `datetime` / `Decimal` / `UUID` / `bytes` / `complex` values | Arrow IPC |
+| Any other type exporting `__arrow_c_stream__` or `__dlpack__` | Arrow IPC |
+| Dicts, lists, scalars (int, float, str, bool, None) | JSON |
+| Everything else | Pickle |
 
-The content type is stored in the artifact metadata so the read side knows how to deserialize.
+The content type is stored in the artifact metadata so the read side knows how
+to deserialize. The blob file does not say: every version is stored as
+`<artifact_id>@v=<N>.arrow` whatever its format.
 
 ### JAX and 64-bit values
 
@@ -8710,18 +8859,10 @@ my_notebook/
 ```toml
 notebook_id = "f7bd9094-..."
 name = "my_analysis"
-
-[[cells]]
-id = "a1b2c3d4"
-file = "a1b2c3d4.py"
-language = "python"
-order = 0
-
-[[cells]]
-id = "e5f6g7h8"
-file = "e5f6g7h8.py"
-language = "python"
-order = 1
+cells = [
+    { id = "a1b2c3d4", file = "a1b2c3d4.py", language = "python", order = 0 },
+    { id = "e5f6g7h8", file = "e5f6g7h8.py", language = "python", order = 1 },
+]
 ```
 
 ## Version control
@@ -8731,8 +8872,9 @@ files, which co-mingle source, outputs, and execution counts in one
 JSON blob and produce a multi-kilobyte diff every time a cell is
 re-run, a Strata notebook is just a directory of plain text:
 
-- **Cells are plain text files.** Python, prompt and SQL cells are `.py`,
-  R cells `.r`, markdown cells `.md` and widget cells `.widget`. Normal
+- **Cells are plain text files.** Python cells are `.py`, prompt cells
+  `.prompt`, SQL cells `.sql`, R cells `.r`, markdown cells `.md` and
+  widget cells `.widget`. Normal
   `git diff`, `git blame`, code review on a pull request, syntax highlighting in every IDE. Reordering a cell
   edits one number in `notebook.toml`, not a giant JSON re-serialize.
 - **`notebook.toml` is the manifest.** Stable config only: cell list,
@@ -8784,8 +8926,8 @@ as first-class cell behaviors rather than escape hatches.
 | Built-in SQL cells | Yes (named connections, schema discovery, snapshot-aware caching) | Yes (built-in SQL engine) | Community library | Community extensions |
 | Loop / iteration cells | Yes (`# @loop max_iter=N carry=var`), checkpointed per iteration | No | No | No |
 | Variant cells (tabbed alternatives sharing a DAG slot) | Yes | No | No | No |
-| Per-notebook Python environment | Separate `pyproject.toml` + `uv.lock` per notebook | PEP 723 inline script metadata at the top of the `.py` file (`# /// script` block); `marimo edit --sandbox` provisions the venv via uv (or pip/poetry/pixi/rye) | Julia project / Project.toml | Manual (venv / conda / kernel spec) |
-| Headless / CI runner | `strata run` (executes the cascade in topological order) | Notebooks runnable as `python file.py` | None first-class - `.jl` file works ad-hoc via `julia notebook.jl`, otherwise via PlutoUtils.jl | `nbconvert --execute` |
+| Per-notebook Python environment | Separate `pyproject.toml` + `uv.lock` per notebook | PEP 723 inline script metadata at the top of the `.py` file (`# /// script` block); `marimo edit --sandbox` provisions the venv via uv (or pip/poetry/pixi/rye) | Built-in package manager embeds `Project.toml` and `Manifest.toml` in the `.jl` file | Manual (venv / conda / kernel spec) |
+| Headless / CI runner | `strata run` (executes the cascade in topological order) | Notebooks runnable as `python file.py` | No dedicated CLI: PlutoSliderServer.jl's `export_directory` runs notebooks and exports HTML (used in CI), or `julia notebook.jl` runs the file as a plain script | `nbconvert --execute` |
 
 ## Where Strata is distinctive
 
@@ -8846,10 +8988,11 @@ cell 3 from rebasing on top of changes to cell 7.
   Julia, Scala, Bash, etc.), and integrations is unmatched. Strata runs
   Python, R, SQL, prompt, markdown and widget cells in one DAG, which covers
   a narrower range than Jupyter's kernels.
-- **Reactive evaluation at the keystroke level:** Pluto and marimo
-  immediately re-run dependent cells on edit. Strata is reactive about
-  *staleness* (the DAG updates, downstream cells flip to stale on every
-  source change) and execution is explicit, you press Run. The exception is
+- **Automatic re-execution of dependents:** in Pluto, and in marimo's
+  default mode, running an edited cell re-runs every cell that depends on
+  it (marimo's lazy mode marks them stale instead). Strata is reactive about
+  *staleness* (the DAG updates and downstream cells flip to stale on every
+  source change), but execution is explicit: you press Run. The exception is
   a widget cell with Live on, where moving a control re-runs its dependents
   immediately.
 - **Hosted offerings:** Google Colab, Deepnote, Hex, and Databricks
@@ -8869,11 +9012,13 @@ notebook runtime itself:
 | Kaggle Notebooks | Jupyter | `.ipynb` |
 | AWS SageMaker Studio | JupyterLab | `.ipynb` |
 | Azure ML Notebooks | Jupyter / JupyterLab | `.ipynb` |
-| Databricks Notebooks | Custom UI on IPython kernel | `.ipynb` (default), `.dbc` legacy |
+| Databricks Notebooks | Custom UI on IPython kernel | `.ipynb` (default) or source files (`.py`, `.sql`, `.scala`, `.r`); `.dbc` is an export archive |
 
-None of them have automatic content-addressed caching, per-cell remote
-dispatch, or first-class AI cells, because the underlying Jupyter
-runtime doesn't.
+None of them caches cell outputs by content or dispatches a single cell
+to remote compute. Several now ship AI features (Gemini in Colab,
+Databricks Assistant and the `ai_query` SQL function, the SageMaker Data
+Agent), but these generate code or answer one-shot prompts; none makes an
+LLM response a cached DAG node keyed on its template, inputs and model.
 
 The smaller "we-rejected-Jupyter" cohort (marimo, Observable, Deepnote,
 Hex) explicitly stepped away from `.ipynb` to redesign the runtime:
@@ -9208,7 +9353,7 @@ Workers can be anything that speaks HTTP: a GPU box on RunPod, a DataFusion clus
 strata-worker --host 127.0.0.1 --port 9000
 ```
 
-If no `@worker` is set, the cell runs locally in the notebook's Python environment.
+If no `@worker` is set, the cell runs on the worker its `notebook.toml` entry or the notebook's default names (see [Precedence rules](https://bearingresearch.com/strata/dev/reference/annotations/#precedence-rules)), and with neither, locally in the notebook's Python environment.
 
 ## @timeout
 
@@ -9576,6 +9721,15 @@ for a first run of thousands of items. An `@each` cell cannot also be a `@loop`,
 supported yet and are refused; a cell that reads the output can do the last three.
 A snapshot carries the output and every item it names.
 
+Each of these is an error, and the cell does not run: a line that does not read
+as `<name> in <source>` (`each_malformed`), a cell that is not Python
+(`each_not_python`), one that is also a `@loop` (`each_with_loop`) or a variant
+(`each_on_variant_member`), a `@write_table` mode other than `sync`
+(`each_write_table_mode`), a source that comes from a sweep (`each_over_sweep`)
+or that is neither a mount of the cell nor defined by an earlier cell
+(`each_unknown_source`), and a cell that reads
+the source whole as well as item by item (`each_reads_source`).
+
 A prune keeps each instance a kept manifest names, and what it displayed, and drops
 the rest, so a removed item's value goes once no manifest left names it. A copy to
 another store carries the values, not the displays.
@@ -9739,7 +9893,7 @@ worker, timeout or environment of its own.
 
 ## `@sql`
 
-Marks the cell as SQL and binds it to a named connection.
+Binds a SQL cell to a named connection. The cell is SQL by its kind (`language = "sql"`), not by this line.
 
 ```sql
 -- @sql connection=warehouse
@@ -9754,7 +9908,7 @@ Key/value parameters:
   directly.
 - `write=true`, opt the cell into writable execution. Without this flag the
   cell may only read: `SELECT`, set operations, `VALUES`, `TABLE`,
-  `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else
+  `SUMMARIZE`, `PIVOT`, `UNPIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else
   (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN
   ANALYZE`, which runs the statement it describes) is refused before the
   statement reaches the driver, naming it. The connection is still opened
@@ -9879,6 +10033,9 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | `# @output_dir ckpt`       | Gives the cell an empty output folder; `ckpt` is its path as a string. An R cell cannot read another cell's folder yet. |
 | `# @nocache`               | Always re-execute.                                                      |
 | `# @worker gpu-box`        | Runs the cell on an executor worker with R (see below).                 |
+| `# @write_table df lake:lab.t append` | Writes a variable into an Iceberg table when the run succeeds, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table). |
+| `# @after seed`            | An ordering-only edge from another cell, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#after). |
+| `# @variant <group> <name>` | Makes the cell one alternative in a [variant group](https://bearingresearch.com/strata/dev/reference/annotations/loops-and-variants/#variant). |
 
 An R cell with a worker runs `harness.R` on that worker (a `strata-worker` of
 this version or later), under the worker's
@@ -10015,6 +10172,12 @@ Key/value parameters:
   Parameters are split on whitespace, so the expression cannot contain a
   space (`until=acc["loss"]<0.05`); use `@loop_until` for anything longer.
 
+A loop with no positive `max_iter` (`loop_missing_max_iter`), no `carry`
+(`loop_missing_carry`) or a `@loop_until` (or `until=`) that is not a Python expression
+(`loop_until_syntax_error`) is an error, and the cell does not run. A `carry`
+that no top-level assignment in the cell rebinds is a warning
+(`loop_carry_unknown`).
+
 ## `@loop_until`
 
 Python expression evaluated after each iteration in the cell's namespace. When
@@ -10074,7 +10237,8 @@ For rendering a notebook to a shareable markdown or HTML file (without
 executing anything), see [Export and import](https://bearingresearch.com/strata/dev/notebook/export/) and its `strata export`
 sibling command. For converting an existing Jupyter `.ipynb` into a
 Strata notebook directory, see [Coming from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/) and
-its `strata import` sibling.
+its `strata import` sibling. For every `strata` subcommand, see the
+[Commands reference](https://bearingresearch.com/strata/dev/getting-started/installation/#commands-reference).
 
 It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
 execution path is identical, artifact cache hits, cascade ordering, worker
@@ -10912,6 +11076,10 @@ When the same piece of metadata is declared in multiple places, the most specifi
 3. Notebook-level `worker` / `timeout` / `env` in the top-level table
 
 Annotations are the canonical per-cell configuration surface; there's no UI editor for per-cell overrides. See [Annotations](https://bearingresearch.com/strata/dev/reference/annotations/).
+
+## `[r]` (legacy)
+
+A `[r]` block from an older release is written back as it was read and otherwise ignored. The R runtime state (lockfile hash, last sync, R version) lives in `.strata/runtime.json`.
 
 ## What lives elsewhere
 
@@ -11796,7 +11964,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Endpoint | Required scope |
 | --- | --- |
 | Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
-| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, `/recents/validate`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
+| Content and configuration changes that run nothing: `/open`, `/create`, `/samples/{name}/open`, `/import`, `/import-snapshot`, `/recents/validate`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
 | Anything that runs code - execute, cancelling a run, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
@@ -11815,7 +11983,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 
 `notebook:execute` is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is `src/strata/notebook/scopes.py`, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.
 
-Without principal auth (personal mode, or `auth_mode="none"`), the scope gate returns immediately and none of this applies.
+Without principal auth (personal mode; service mode refuses `auth_mode="none"` at startup), the scope gate returns immediately and none of this applies.
 
 Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](https://bearingresearch.com/strata/dev/deployment/modes/); see [Fly.io deployment](https://bearingresearch.com/strata/dev/deployment/fly/#trust-model) for the load-bearing details.
 
@@ -11884,7 +12052,7 @@ Every request gets an `X-Request-ID` response header (and the same value is echo
 
 ### Tenancy
 
-In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) for the full contract.
+In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`, starting with a letter or digit) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into row-group cache keys and cache directories and selects the QoS limiter pools; artifact rows record their tenant, and reads are filtered by it. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service mode](https://bearingresearch.com/strata/dev/deployment/service-mode/) for the full contract.
 
 ## Notebook lifecycle
 
@@ -13031,6 +13199,8 @@ by that team store, after this server's own gate.
 | `GET` | `/v1/artifacts/{id}/v/{n}/tags` | read | The version's tags |
 | `PUT` | `/v1/artifacts/{id}/v/{n}/tags` | write | Set one key/value tag |
 | `DELETE` | `/v1/artifacts/{id}/v/{n}/tags/{key}` | write | Delete one tag |
+| `POST` | `/v1/artifacts/{id}/v/{n}/pin` | `artifacts:pin` | Hold a version and its chain against garbage collection under a `reason`; pinning again under the same reason refreshes it (see [Pins](https://bearingresearch.com/strata/dev/deployment/lifecycle/#pins)) |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}/pin` | `artifacts:pin` | Release the pin placed under `?reason=`; no such pin is a `404` |
 | `GET` | `/v1/artifacts/by-provenance/{hash}` | read | A ready artifact by provenance hash (the team-cache lookup); an `# @output_dir` folder whose files are gone is a miss |
 | `PUT` | `/v1/artifacts` | write | Store a locally computed result (`client.put`) under its inputs and transform, optionally naming it. The name is written in the commit that makes the version ready, so a name that cannot be written fails the request with `500` and leaves nothing ready |
 | `PUT` | `/v1/artifacts/by-provenance/{hash}` | write | Store a result under a provenance key the caller computed; the first writer's result stays the answer, unless it is a folder whose files are gone. An `artifact_id` another tenant holds, at any version, is a `409` |
@@ -13055,6 +13225,8 @@ by that team store, after this server's own gate.
 | `GET` | `/v1/cache/stats` | `admin:cache` | Disk cache statistics, with counts per table across tenants |
 | `GET` | `/v1/cache/evictions` | open | Eviction rate and pressure level; `include_events=true` adds recent events |
 | `POST` | `/v1/cache/warm` | table ACL | Warm the cache for some tables and wait until every row group is fetched |
+| `POST` | `/v1/cache/warm/async` | table ACL | Start a background warming job and return its id at once; it can target a snapshot |
+| `GET` | `/v1/cache/warm/jobs` | caller's tenant | Pending and running warming jobs; `include_completed=true` adds finished ones |
 | `GET` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | A warming job's progress |
 | `DELETE` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | Cancel a warming job; what it cached stays |
 | `GET` | `/v1/metadata/stats` | open | Hit/miss counters and entry counts for the metadata store and its caches |
@@ -13067,8 +13239,13 @@ by that team store, after this server's own gate.
 | `GET` | `/v1/debug/rate-limits` | `admin:*` | Rate limiter allowed and rejected counts |
 | `GET` | `/v1/debug/cache/inspect` | `admin:cache` | Disk cache entries: key hash, file path, size and stored metadata |
 
-The `admin:*`, `admin:cache` and `admin:registry` gates apply under principal auth; without it
+The `admin:*`, `admin:cache`, `admin:registry` and `artifacts:pin` gates apply under principal auth; without it
 those routes are open.
+
+The signed build-transport routes (`GET /v1/artifacts/download`, `POST /v1/artifacts/upload`,
+`GET /v1/builds/{build_id}` and its `manifest`, `finalize`, `log` and `output-file`) are called by
+workers through the URLs a build manifest carries; see the
+[pull model](https://bearingresearch.com/strata/dev/reference/executor-protocol/#post-v1execute-manifest-pull-model).
 
 <!-- https://bearingresearch.com/strata/dev/reference/websocket/index.md -->
 
@@ -14548,6 +14725,7 @@ its name:
 | **Collapse cell** / **Expand cell** | Collapse / expand cell |
 | **Inspect inputs** | Inspect cell inputs (REPL) |
 | **Unit tests** | Unit tests (Python cells) |
+| **Checkpoints** | Branch a run from a checkpoint (Python cells) |
 
 !!! tip
     The status icon at the top of the gutter shows the cell's current state
@@ -15030,8 +15208,8 @@ Compared to personal mode:
 - **No default artifact dir.** The artifact store exists only when
   `STRATA_ARTIFACT_DIR` is set, even when its metadata and blobs live
   elsewhere. Service mode refuses to start with a DSN, a non-local blob
-  backend or `STRATA_SERVICE_WRITES_ENABLED` and no
-  `STRATA_ARTIFACT_DIR`. Without any of those it runs scan-only, with no
+  backend, `STRATA_SERVICE_WRITES_ENABLED`, `STRATA_AUTH_MODE=api_key` or
+  enabled transforms and no `STRATA_ARTIFACT_DIR`. Without any of those it runs scan-only, with no
   artifact store.
 - **What is durable, and where.** The *metadata store* (Postgres with
   `STRATA_ARTIFACT_METADATA_DSN`, otherwise `artifacts.sqlite` in the
@@ -15728,10 +15906,11 @@ The multi-stage Dockerfile:
 1. **Frontend builder** (Node 26) builds the Vue.js UI
 2. **Backend builder** (uv) builds the pure-Python wheel
 3. **Runtime**: minimal image with the wheel, the frontend dist, and
-   the `otel`, `postgres`, `sql`, `sql-sqlite` and `mcp` extras, so OTLP
-   tracing, a Postgres artifact store (`STRATA_ARTIFACT_METADATA_DSN`),
-   SQL cells over DuckDB or SQLite and the `/mcp` endpoint
-   (`STRATA_MCP_ENABLED=true`) work without building your own image
+   the `otel`, `postgres`, `sql`, `sql-sqlite`, `mcp` and `infisical`
+   extras, so OTLP tracing, a Postgres artifact store
+   (`STRATA_ARTIFACT_METADATA_DSN`), SQL cells over DuckDB or SQLite, the
+   `/mcp` endpoint (`STRATA_MCP_ENABLED=true`) and the Infisical secret
+   provider work without building your own image
 
 <!-- https://bearingresearch.com/strata/dev/deployment/fly/index.md -->
 
@@ -16175,11 +16354,13 @@ Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; ser
 
 ## Disk-usage budgeting
 
-There are **three** caps to understand, and they don't cover everything.
+These caps bound what Strata stores, and they don't cover everything.
 
 | Knob | Default | What it caps | What it doesn't cap |
 | --- | --- | --- | --- |
 | `STRATA_MAX_CACHE_SIZE_BYTES` | 10 GB | The Iceberg row-group cache (`~/.strata/cache/`) - LRU-evicted to stay under the cap | Anything else |
+| `STRATA_ICEBERG_METADATA_CACHE_SIZE_BYTES` | 1 GiB | The Iceberg metadata files kept under `iceberg-metadata/` in the cache directory, least recently read first | The row-group cache beside it |
+| `STRATA_NOTEBOOK_SCRATCH_GC_SOFT_LIMIT_BYTES` | 5 GiB | A project scratchpad's store, swept by its daemon at start and hourly, least recently used first | Values live cells still use, which stay whatever the limit |
 | `STRATA_ARTIFACT_GC_MAX_BYTES` | 20 GiB in personal mode, off in service mode | The Core artifact store (`~/.strata/artifacts/`), least recently used first, on the hourly sweep | The notebook-scoped artifact stores, and anything named, pinned or published |
 | `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES` | 20 GiB | The mount cache (`~/.strata/mount_cache/`), least recently used views first; views unused for `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS` (30) go too | Read-write mounts, which are not cached |
 
@@ -16502,6 +16683,7 @@ checks:
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Liveness. Returns `{"status":"ok","pid":...}` if the server is running, `pid` naming its process. Used by Docker / Fly / k8s. |
+| `GET /health/busy` | Whether the server has work besides this request: another request or socket open, or a notebook run, build or warm job in flight. Asked before replacing the server. |
 | `GET /health/ready` | Readiness. `503` while draining, when both QoS tiers have been saturated for over 30s, or when the Parquet metadata cache (SQLite under `STRATA_CACHE_DIR`) or the artifact store's database (SQLite, or Postgres through `STRATA_ARTIFACT_METADATA_DSN`) does not answer a query within 5 seconds. The blob backend is not probed. |
 | `GET /health/dependencies` | Per-check report (disk cache, metadata store, Arrow memory, thread pools, rate limiter, eviction pressure); `503` if any check is unhealthy. |
 | `GET /metrics/prometheus` | Scrape target. Returns Prometheus textfile. |
@@ -16602,7 +16784,8 @@ Notes:
   other tenants, and a multi-tenant server gives each tenant its own
   subdirectory of the storage root. Within a tenant there are no
   per-notebook ACLs: anyone in Alice's tenant with `notebook:read` sees
-  her notebooks listed by `/v1/notebooks/discover` and can open them.
+  her notebooks listed by `/v1/notebooks/discover`, and anyone with
+  `notebook:write` can open them.
 - **Notebook deletion is personal-mode only.** Service mode refuses
   `DELETE /v1/notebooks/{id}` and `delete-by-path`.
 

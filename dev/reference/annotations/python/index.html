@@ -3462,7 +3462,7 @@ UI for renaming a cell ID; a friendly ID is set by editing
 <p>Workers can be anything that speaks HTTP: a GPU box on RunPod, a DataFusion cluster on Fly, a beefy EC2 instance, or a local process on a different port. The built-in <code>remote_executor.py</code> provides a reference implementation:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata-worker<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span>
 </code></pre></div>
-<p>If no <code>@worker</code> is set, the cell runs locally in the notebook's Python environment.</p>
+<p>If no <code>@worker</code> is set, the cell runs on the worker its <code>notebook.toml</code> entry or the notebook's default names (see <a href="../#precedence-rules">Precedence rules</a>), and with neither, locally in the notebook's Python environment.</p>
 <h2 id="timeout">@timeout<a class="headerlink" href="#timeout" title="Permanent link">&para;</a></h2>
 <p>Override the execution timeout for a single cell, in seconds. The default
 is 300 seconds (5 minutes); the value must be a positive number.</p>
@@ -3782,6 +3782,14 @@ for a first run of thousands of items. An <code>@each</code> cell cannot also be
 <code>@dataset</code>, <code>strata artifact pull</code> and a publication bundle over its output are not
 supported yet and are refused; a cell that reads the output can do the last three.
 A snapshot carries the output and every item it names.</p>
+<p>Each of these is an error, and the cell does not run: a line that does not read
+as <code>&lt;name&gt; in &lt;source&gt;</code> (<code>each_malformed</code>), a cell that is not Python
+(<code>each_not_python</code>), one that is also a <code>@loop</code> (<code>each_with_loop</code>) or a variant
+(<code>each_on_variant_member</code>), a <code>@write_table</code> mode other than <code>sync</code>
+(<code>each_write_table_mode</code>), a source that comes from a sweep (<code>each_over_sweep</code>)
+or that is neither a mount of the cell nor defined by an earlier cell
+(<code>each_unknown_source</code>), and a cell that reads
+the source whole as well as item by item (<code>each_reads_source</code>).</p>
 <p>A prune keeps each instance a kept manifest names, and what it displayed, and drops
 the rest, so a removed item's value goes once no manifest left names it. A copy to
 another store carries the values, not the displays.</p>

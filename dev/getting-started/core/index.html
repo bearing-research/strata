@@ -3238,8 +3238,11 @@ the server. Add it to your own project with the extras step 5 uses:</p>
 from a checkout of the <a href="https://github.com/bearing-research/strata">Strata repo</a>,
 where <code>uv run</code> already has the client.</p>
 <h2 id="1-start-the-server">1. Start the server<a class="headerlink" href="#1-start-the-server" title="Permanent link">&para;</a></h2>
+<p>From the checkout:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
+<p>With Strata installed as a tool (see <a href="../installation/">Install</a>), run <code>strata-notebook</code>
+instead. Your own project needs only the client.</p>
 <h2 id="2-run-the-demo">2. Run the demo<a class="headerlink" href="#2-run-the-demo" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/hello_world.py
 </code></pre></div>
@@ -3256,7 +3259,7 @@ where <code>uv run</code> already has the client.</p>
 <li><code>&lt;warehouse-path&gt;</code> is the path to the warehouse root (the directory containing Iceberg metadata).</li>
 <li>The fragment after <code>#</code> names the Iceberg table inside the warehouse, as <code>&lt;namespace&gt;.&lt;table&gt;</code>.</li>
 </ul>
-<p>A table URI is <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code>. The demo prints the exact one it created when it runs, because it builds its warehouse in a temporary directory rather than at a fixed path; copy that line rather than the shape below.</p>
+<p>A table URI is <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code>. The demo builds its warehouse in <code>strata-demo-warehouse</code> under your system's temp directory (or at <code>--warehouse DIR</code>), with the table <code>analytics.events</code>, and prints the exact URI on its <code>Table URI:</code> line. Copy that line rather than the shape below.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">()</span>

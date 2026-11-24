@@ -3066,18 +3066,10 @@
 <p><code>notebook.toml</code> defines the notebook identity and cell ordering:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"f7bd9094-..."</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"my_analysis"</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">[[cells]]</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"a1b2c3d4"</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"a1b2c3d4.py"</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">language</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"python"</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="k">[[cells]]</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"e5f6g7h8"</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"e5f6g7h8.py"</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="n">language</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"python"</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">cells</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"a1b2c3d4"</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"a1b2c3d4.py"</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span><span class="w"> </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"e5f6g7h8"</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"e5f6g7h8.py"</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"python"</span><span class="p">,</span><span class="w"> </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="p">]</span>
 </code></pre></div>
 <h2 id="version-control">Version control<a class="headerlink" href="#version-control" title="Permanent link">&para;</a></h2>
 <p>Strata notebooks are designed to live in git. Unlike Jupyter <code>.ipynb</code>
@@ -3085,8 +3077,9 @@ files, which co-mingle source, outputs, and execution counts in one
 JSON blob and produce a multi-kilobyte diff every time a cell is
 re-run, a Strata notebook is just a directory of plain text:</p>
 <ul>
-<li><strong>Cells are plain text files.</strong> Python, prompt and SQL cells are <code>.py</code>,
-  R cells <code>.r</code>, markdown cells <code>.md</code> and widget cells <code>.widget</code>. Normal
+<li><strong>Cells are plain text files.</strong> Python cells are <code>.py</code>, prompt cells
+  <code>.prompt</code>, SQL cells <code>.sql</code>, R cells <code>.r</code>, markdown cells <code>.md</code> and
+  widget cells <code>.widget</code>. Normal
   <code>git diff</code>, <code>git blame</code>, code review on a pull request, syntax highlighting in every IDE. Reordering a cell
   edits one number in <code>notebook.toml</code>, not a giant JSON re-serialize.</li>
 <li><strong><code>notebook.toml</code> is the manifest.</strong> Stable config only: cell list,

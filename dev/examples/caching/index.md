@@ -1,5 +1,8 @@
 # Tutorial: what the cache saves
 
+![The Tutorial: what the cache saves notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/caching-light.webp#only-light)
+![The Tutorial: what the cache saves notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/caching-dark.webp#only-dark)
+
 A two-minute tour of caching. Run it twice and read what the second run saved,
 edit one cell and watch only what depends on it run again, then open the graph.
 

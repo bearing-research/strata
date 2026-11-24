@@ -8,7 +8,8 @@ For rendering a notebook to a shareable markdown or HTML file (without
 executing anything), see [Export and import](https://bearingresearch.com/strata/dev/notebook/export/) and its `strata export`
 sibling command. For converting an existing Jupyter `.ipynb` into a
 Strata notebook directory, see [Coming from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/) and
-its `strata import` sibling.
+its `strata import` sibling. For every `strata` subcommand, see the
+[Commands reference](https://bearingresearch.com/strata/dev/getting-started/installation/#commands-reference).
 
 It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
 execution path is identical, artifact cache hits, cascade ordering, worker

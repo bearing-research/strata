@@ -3035,9 +3035,14 @@ cell above keeps what it saved. Captured from a real run, not a mock-up.</em></p
 </thead>
 <tbody>
 <tr>
-<td>Source code</td>
+<td>Source code, without whitespace or comments</td>
 <td>Yes</td>
 <td>Different code = different result</td>
+</tr>
+<tr>
+<td>Annotations that change the computation (<code>@loop</code>, <code>@write_table</code>, <code>@output_dir</code>, <code>@per_variant</code>)</td>
+<td>Yes</td>
+<td>They change what the cell does, though they are comments</td>
 </tr>
 <tr>
 <td>Upstream artifact hashes</td>

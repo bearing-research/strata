@@ -1,13 +1,18 @@
 # Data Viewer: paging and sorting a large DataFrame
 
-A two-cell notebook that produces DataFrames larger than the inline
-preview, so the notebook's **interactive data viewer** switches on.
+![The Data Viewer: paging and sorting a large DataFrame notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-light.webp#only-light)
+![The Data Viewer: paging and sorting a large DataFrame notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-dark.webp#only-dark)
+
+A two-cell notebook that produces DataFrames larger than the 20-row
+inline preview, so the notebook's **interactive data viewer** pages
+through the full frame.
 
 ## What it shows
 
-- A cell whose displayed output is a **2,000-row** DataFrame. Instead of
-  a static 20-row table, the output renders as a scrollable grid with a
-  footer showing `1–50 of 2,000 rows` and **Prev / Next** paging.
+- A cell whose displayed output is a **2,000-row** DataFrame. Every
+  table-shaped output renders in the grid; one larger than the preview
+  also gets a footer showing `1–50 of 2,000 rows` and **Prev / Next**
+  paging.
 - **Click a column header to sort**: ascending, then descending, then
   clear. Sorting runs server-side over the whole frame (not just the
   visible page), reading the cached Arrow artifact directly.
@@ -31,10 +36,10 @@ Tensors and scalars keep their existing display.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Then open `examples/data_viewer` from the Strata home page and run both
+Then open **Data Viewer** from the notebook list on the Strata home page and run both
 cells.
 
 ## Try this
