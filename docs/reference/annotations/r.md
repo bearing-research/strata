@@ -29,4 +29,4 @@ library (see [Workers](../../notebook/workers.md)). An `@fetch` on an R cell
 is read on this machine, so an R cell with both `@fetch` and `@worker` fails;
 run it locally, or fetch in an upstream Python cell.
 
-Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells, and an R cell that declares `@dataset` or `@table` fails; read the dataset or table in an upstream Python cell.
+Prompt-cell annotations (`@output_schema` etc.) do not apply to R cells, `@loop` and `@loop_until` are an error there (`loop_not_python`) and the cell does not run, and an R cell that declares `@dataset` or `@table` fails; read the dataset or table in an upstream Python cell.
