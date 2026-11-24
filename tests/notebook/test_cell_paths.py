@@ -3750,6 +3750,7 @@ class TestPython:
             "collect_output_dirs_off_loop": collect,
             "keep_failed_output_dirs": lambda *args, **kwargs: calls.kept.append((args, kwargs)),
             "store_outputs": store_outputs,
+            "stored_vars": lambda *_args, **_kwargs: [],
             "close_open_run": close_open_run,
             "push_to_team_store": push_to_team_store,
             "stage_run_records": stage_run_records,
@@ -4477,6 +4478,7 @@ class TestPythonDispatchLocal:
             {},
             7.0,
             mutation_defines=["defined"],
+            stored_vars=["kept"],
             tables={"t": {}},
             cell_id="c",
             local_run=local_run,
@@ -4492,6 +4494,7 @@ class TestPythonDispatchLocal:
         _args, kwargs = seen.manifests[0]
         assert kwargs == {
             "mutation_defines": ["defined"],
+            "stored_vars": ["kept"],
             "tables": {"t": {}},
             "cell_id": "c",
             "run_token": "token0",

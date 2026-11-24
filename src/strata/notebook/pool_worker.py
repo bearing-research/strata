@@ -365,12 +365,15 @@ def execute_harness(manifest: dict, protocol: Any = None) -> dict:
                 continue
 
         # As the cold harness does: an exported mutated input reaches downstream as published,
-        # and outputs sharing a mutable object decouple once stored apart.
+        # and outputs sharing a mutable object decouple once stored apart, so only those
+        # the run stores are checked (every one, when the manifest does not say).
         mutation_warnings = list(
             _immut.detect_mutations(namespace, input_snapshots, exported_names=set(variables))
         )
+        kept = manifest.get("stored_vars")
+        stored = variables if kept is None else [n for n in variables if n in kept]
         mutation_warnings.extend(
-            _immut.detect_shared_mutable_outputs({name: namespace[name] for name in variables})
+            _immut.detect_shared_mutable_outputs({name: namespace[name] for name in stored})
         )
         read_audit = _audit.report(
             observed,
