@@ -4618,6 +4618,14 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Two different scans no longer share a cache entry by construction of their key.</strong> The
+  <code>scan@v1</code> identity hash joined its fields with no separator, so text in one field
+  could stand in for the next, and the filter fingerprint could not tell a string that
+  spells a date from the date. The identity is now hashed as JSON over named fields, and
+  the filter, projection and reading fingerprints are full SHA-256 digests.
+  <code>strata_client.compute_filter_fingerprint</code> returns 64 hex characters (was 16). Every
+  stored scan result is keyed anew once, and the row-group cache moves to format
+  version 7, removing the old entries at startup (#1671).</li>
 <li><strong>In a multi-node deployment, a stream stays reachable from every node while it lives.</strong>
   A node's claim on a stream expired one <code>STRATA_STREAM_STATE_TTL_SECONDS</code> after the
   stream was created, while the stream lived on as its GETs re-armed it, so a retry
