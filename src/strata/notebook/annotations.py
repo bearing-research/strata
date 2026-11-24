@@ -65,7 +65,9 @@ class CachePolicy:
     ``kind`` is one of: ``fingerprint`` (driver freshness token, the default),
     ``forever`` (static salt), ``session`` (session-unique salt), ``ttl``
     (time-bucketed salt; ``ttl_seconds`` required) or ``snapshot`` (driver must
-    return a real snapshot ID). ``CellAnnotations.cache is None`` means fingerprint.
+    return a real snapshot ID). ``CellAnnotations.cache is None`` means fingerprint, or
+    on a write cell ``write`` (``sql.cell_executor.write_cache_policy``), which no
+    annotation names.
     """
 
     kind: str

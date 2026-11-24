@@ -662,8 +662,9 @@ def _validate_sql_tables(
             adapter = get_adapter(connection.driver)
             sql_analysis = analyze_sql_cell(cell.source, dialect=adapter.sqlglot_dialect)
             # Under the default fingerprint cache, a table the analyzer cannot
-            # name makes the executor re-run the query every time.
-            reruns = sql_analysis.cache_policy.kind == "fingerprint"
+            # name makes the executor re-run the query every time. A write cell's
+            # default is keyed by its body, whatever it reads.
+            reruns = sql_analysis.cache_policy.kind == "fingerprint" and not sql.write
             if sql_analysis.parse_error:
                 # The executor refuses unparseable SQL before connecting, whatever the cache policy.
                 diagnostics.append(

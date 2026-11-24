@@ -17,12 +17,13 @@ import logging
 import os
 import time
 import uuid
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from vestigo.provenance import derive_subkey, run_output_key
 
-from strata.notebook.annotations import CellAnnotations, parse_annotations
+from strata.notebook.annotations import CachePolicy, CellAnnotations, parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.models import CellLanguage
 from strata.notebook.mounts import DIGESTS_FILE
@@ -117,8 +118,7 @@ async def execute_sql_cell(
     if problem is not None:
         return _error_result(f"connection {spec.name!r}: {problem}", start_time)
 
-    # Write cells: no freshness probe (the key is source-derived) and no
-    # read-only enforcement.
+    # Write cells: a source-derived key, no token in it, and no read-only enforcement.
     if annotations.sql.write:
         return await _execute_write_cell(
             session=session,
@@ -460,12 +460,11 @@ async def _execute_write_cell(
     """Run a ``-- @sql connection=... write=true`` cell.
 
     Unlike reads: the connection is writable, the body may be multi-statement
-    (run one by one), and the cache key is source-only with default policy
-    ``session``. The artifact has one row per statement: ``stmt`` (1-indexed),
-    ``kind`` and nullable ``rows_affected``.
+    (run one by one), and the cache key is source-only. With no ``-- @cache``, a hit
+    holds in the session that ran it, or, for the only write cell on a SQLite file, while
+    the file is as that run left it (``_write_holds``). The artifact has one row per
+    statement: ``stmt`` (1-indexed), ``kind`` and nullable ``rows_affected``.
     """
-    from strata.notebook.annotations import CachePolicy
-
     # Same bind/placeholder surface as reads; only execution differs.
     analysis = analyze_sql_cell(source, dialect=adapter.sqlglot_dialect)
     if analysis.parse_error:
@@ -474,7 +473,7 @@ async def _execute_write_cell(
         return _error_result("Write SQL cell body is empty.", start_time)
 
     # Probe-based policies make no sense for writes; say so.
-    cache_annotation = annotations.cache or CachePolicy(kind="session")
+    cache_annotation = write_cache_policy(annotations)
     if cache_annotation.kind in {"fingerprint", "snapshot"}:
         return _error_result(
             f"@cache {cache_annotation.kind} isn't valid on a write cell: "
@@ -523,6 +522,8 @@ async def _execute_write_cell(
         if violation is not None:
             return _error_result(f"connection {spec.name!r}: {violation}", start_time)
     query_normalized = normalize_query(analysis.sql_body, adapter.sqlglot_dialect)
+    # Confined: in service mode its paths are resolved, so a retargeted link is another
+    # database. The key only; a reopen's identity uses ``_write_connection_key``.
     connection_id = _with_credential(
         adapter.canonicalize_connection_id(runtime_spec, read_only=False), spec
     )
@@ -537,6 +538,7 @@ async def _execute_write_cell(
     )
     output_name = analysis.name
     var_provenance = derive_subkey(provenance_hash, output_name)
+    write_key = _write_connection_key(session, adapter, spec)
 
     artifact_mgr = session.get_artifact_manager()
     notebook_id = session.notebook_state.id
@@ -546,8 +548,14 @@ async def _execute_write_cell(
         cached = artifact_mgr.find_cached(var_provenance)
         if cached is not None:
             canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
-            if canonical is not None and canonical.provenance_hash == var_provenance:
-                return _cache_hit_result(
+            if (
+                canonical is not None
+                and canonical.provenance_hash == var_provenance
+                and await _write_holds(
+                    session, cell_id, canonical, adapter, spec, runtime_spec, write_key, policy
+                )
+            ):
+                hit = _cache_hit_result(
                     artifact_mgr,
                     canonical,
                     output_name,
@@ -555,6 +563,10 @@ async def _execute_write_cell(
                     session=session,
                     cell_id=cell_id,
                 )
+                hit["reopen_identity"] = _write_identity(
+                    session, write_key, policy, canonical.params.get(PARAM_WRITE_STATE)
+                )
+                return hit
 
     try:
         stats = await asyncio.to_thread(
@@ -562,6 +574,12 @@ async def _execute_write_cell(
         )
     except Exception as exc:  # noqa: BLE001
         return _error_result(f"SQL execution failed: {_exception_message(exc)}", start_time)
+    # The state it leaves, so a later session can tell the database is as it left it.
+    left = None
+    if policy.kind == "write" and not annotations.nocache and write_key is not None:
+        left = await asyncio.to_thread(
+            _write_state, session, adapter, spec, runtime_spec, write_key, policy
+        )
 
     table = _synthesize_write_result_table(stats)
     blob = _serialize_arrow_ipc(table)
@@ -576,6 +594,14 @@ async def _execute_write_cell(
         source_hash=provenance_hash,
         source=source,
         input_versions=input_refs,
+        extra_params=(
+            {
+                PARAM_WRITE_SESSION: session.id,
+                **({PARAM_WRITE_STATE: left} if left else {}),
+            }
+            if policy.kind == "write"
+            else None
+        ),
     )
     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 
@@ -608,7 +634,160 @@ async def _execute_write_cell(
         "execution_method": "sql",
         "artifact_uri": uri,
         "mutation_warnings": [],
+        "reopen_identity": _write_identity(session, write_key, policy, left),
     }
+
+
+# On a write cell's artifact (``params``, outside its key): the session its run was in,
+# and the database's identity right after it (``_write_state``).
+PARAM_WRITE_SESSION = "sql_write_session"
+PARAM_WRITE_STATE = "sql_write_state"
+
+# The stored write runs (``artifact@v=n``) a run's probe found standing in a session: from
+# then on they hold there as a run made in it does. A staleness pass holds none.
+_held_in: weakref.WeakKeyDictionary[Any, set[str]] = weakref.WeakKeyDictionary()
+
+
+def write_cache_policy(annotations: CellAnnotations) -> CachePolicy:
+    """A write cell's cache policy: its ``-- @cache``, else ``write`` (``_write_holds``)."""
+    return annotations.cache or CachePolicy(kind="write")
+
+
+def _write_probed(spec: ConnectionSpec) -> bool:
+    """Whether a write cell's reuse in a later session is judged by probing its database:
+    a SQLite file named by ``path``. Not DuckDB, whose token can match two states; not a
+    database in memory, which a restart empties under the same token; not a ``uri``,
+    which may be either."""
+    path = getattr(spec, "path", None)
+    return (
+        spec.driver == "sqlite"
+        and not getattr(spec, "uri", None)
+        and isinstance(path, str)
+        and bool(path)
+        and path != ":memory:"
+        and not any(lake_options(spec))
+    )
+
+
+def _write_state(
+    session: Any,
+    adapter: DriverAdapter,
+    spec: ConnectionSpec,
+    runtime_spec: ConnectionSpec,
+    connection_id: str,
+    policy: Any,
+) -> str | None:
+    """The identity of the database as it is now (``_write_probed``); ``None`` for one
+    not probed, or that cannot be."""
+    if not _write_probed(spec):
+        return None
+    try:
+        # The whole database: a SQLite token ignores the tables.
+        probes = _run_probes(
+            adapter, runtime_spec, [], policy, session.path / ".strata" / DIGESTS_FILE
+        )
+    except Exception:  # noqa: BLE001 - not probed is not settled
+        logger.debug("could not probe the database of connection %s", spec.name, exc_info=True)
+        return None
+    return _run_identity(spec, connection_id, policy, probes, reuse=True)
+
+
+async def _write_holds(
+    session: Any,
+    cell_id: str,
+    canonical: Any,
+    adapter: DriverAdapter,
+    spec: ConnectionSpec,
+    runtime_spec: ConnectionSpec,
+    write_key: str | None,
+    policy: Any,
+) -> bool:
+    """Whether a write cell's stored run still stands for its effects.
+
+    Always under an explicit policy. Under ``write``, in the session that ran it, as
+    before; in a later one, while it is the only write cell on its SQLite file and the
+    file is exactly as that run left it (``_may_probe``), and then for the rest of that
+    session.
+    """
+    if policy.kind != "write" or _held(session, canonical):
+        return True
+    left = canonical.params.get(PARAM_WRITE_STATE)
+    if left is None or write_key is None or not _may_probe(session, cell_id, spec):
+        return False
+    now = await asyncio.to_thread(
+        _write_state, session, adapter, spec, runtime_spec, write_key, policy
+    )
+    if now != left:
+        return False
+    _hold(session, canonical)
+    return True
+
+
+def _held(session: Any, canonical: Any) -> bool:
+    """Whether a write cell's stored run stands for this session: it ran here, or a probe
+    here found the file as it left it."""
+    return canonical.params.get(PARAM_WRITE_SESSION) == session.id or (
+        f"{canonical.id}@v={canonical.version}" in _held_in.get(session, ())
+    )
+
+
+def _hold(session: Any, canonical: Any) -> None:
+    _held_in.setdefault(session, set()).add(f"{canonical.id}@v={canonical.version}")
+
+
+def _may_probe(session: Any, cell_id: str, spec: ConnectionSpec) -> bool:
+    """Whether a probe may settle a write cell's stored run: it is the only write cell on
+    its SQLite file, so no other one may have moved the file, or undo it later. A SQLite
+    ``uri`` may name any file, so it counts. Writes from Python, or through another
+    database (a DuckDB ``ATTACH``), are not seen, as in the session that ran it."""
+    target = _sqlite_file(session, spec)
+    for cell in session.notebook_state.cells:
+        if cell.id == cell_id or cell.language != CellLanguage.SQL:
+            continue
+        sql = parse_annotations(cell.source, CellLanguage.SQL).sql
+        if sql is None or not sql.write or not sql.connection:
+            continue
+        other = _find_connection(session, sql.connection)
+        if other is None or other.driver != "sqlite" or getattr(other, "path", None) == ":memory:":
+            continue
+        if not _write_probed(other) or _sqlite_file(session, other) == target:
+            return False
+    return True
+
+
+def _sqlite_file(session: Any, spec: ConnectionSpec) -> str:
+    """The file a SQLite ``path`` names, as the driver opens it (relative to the notebook,
+    no ``~``), links resolved."""
+    path = Path(str(getattr(spec, "path", "")))
+    return os.path.realpath(path if path.is_absolute() else session.path / path)
+
+
+def _write_connection_key(session: Any, adapter: DriverAdapter, spec: ConnectionSpec) -> str | None:
+    """The connection in a write cell's reopen identity, as a run and a reopen both compute
+    it: confined and read-write, with its credential's name but not its values, so a
+    staleness pass reaches no secret manager. ``None`` when it cannot be computed."""
+    try:
+        bare = spec.model_copy(update={"credential": None})
+        runtime_spec = _confined(
+            session, _resolve_runtime_spec(bare, session.path, auth_env=_auth_env(session)), None
+        )
+        return _with_credential(
+            adapter.canonicalize_connection_id(runtime_spec, read_only=False), spec
+        )
+    except (CredentialError, LakeError, ValueError, OSError):
+        return None
+
+
+def _write_identity(
+    session: Any, write_key: str | None, policy: Any, left: str | None
+) -> str | None:
+    """What a write cell's run records for a reopen to compare (``sql_reopen_identity``):
+    under ``write``, its connection and the state its SQLite file was left in, else this
+    session; ``None`` under an explicit policy, which settles its own."""
+    if policy.kind != "write" or write_key is None:
+        return None
+    basis = left or f"session:{session.id}"
+    return hashlib.sha256(f"{write_key}\0{basis}".encode()).hexdigest()
 
 
 def _query_arrow(cursor: Any, query: str, params: tuple[Any, ...]) -> Any:
@@ -904,9 +1083,10 @@ def sql_reopen_identity(cell: Any, session: Any, *, probe: bool = False) -> str 
     The connection and cache policy, which the generic triplet does not see.
     ``forever``, ``session`` and ``ttl`` settle here (this session's salt, this
     moment's ttl bucket). ``fingerprint`` and ``snapshot`` need a query to the
-    source: ``None``. With *probe*, the reverse: the identity those policies give
-    once a local database (``_probed_by_staleness``) is probed, as a run records it
-    (``_run_identity``), and ``None`` for a policy that needs no probe.
+    source: ``None``. With *probe*, the reverse: the identity those policies give once
+    a local database (``_probed_by_staleness``) is probed, as a run records it
+    (``_run_identity``), and ``None`` for a policy that needs no probe. A write cell's
+    ``write`` is ``_write_reopen_identity``'s.
     """
     annotations = parse_annotations(cell.source, CellLanguage.SQL)
     if annotations.sql is None or not annotations.sql.connection:
@@ -922,20 +1102,23 @@ def sql_reopen_identity(cell: Any, session: Any, *, probe: bool = False) -> str 
     if database_problem(spec, session.path, session.lake_config()) is not None:
         return None
     analysis = analyze_sql_cell(cell.source, dialect=adapter.sqlglot_dialect)
+    write = annotations.sql.write
     try:
         policy = resolve_cache_policy(
-            analysis.cache_policy,
+            write_cache_policy(annotations) if write else analysis.cache_policy,
             capabilities=adapter.capabilities,
             session_id=session.id,
         )
     except CachePolicyError:
         return None
+    if policy.kind == "write":
+        return _write_reopen_identity(cell, session, adapter, spec, analysis, policy, probe=probe)
     probed = policy.freshness_required
     if probe != probed:
         return None
     if probed and not (
         _probed_by_staleness(spec)
-        and not annotations.sql.write
+        and not write
         and not annotations.nocache
         and not analysis.unresolved_tables
     ):
@@ -963,6 +1146,48 @@ def sql_reopen_identity(cell: Any, session: Any, *, probe: bool = False) -> str 
         logger.debug("could not probe the database of cell %s", cell.id, exc_info=True)
         return None
     return _run_identity(spec, connection_id, policy, probes, reuse=True)
+
+
+def _write_reopen_identity(
+    cell: Any,
+    session: Any,
+    adapter: DriverAdapter,
+    spec: ConnectionSpec,
+    analysis: Any,
+    policy: Any,
+    *,
+    probe: bool,
+) -> str | None:
+    """A default write cell's reopen identity, as its runs record it (``_write_identity``).
+
+    Without a probe, settled in a session that holds its stored run (``_held``); else
+    ``None``. With *probe*, when a probe may settle it (``_may_probe``), the identity its
+    SQLite file gives now, which is its run's while the file is as the run left it.
+    """
+    write_key = _write_connection_key(session, adapter, spec)
+    if write_key is None:
+        return None
+    canonical = session.get_artifact_manager().artifact_store.get_latest_version(
+        f"nb_{session.notebook_state.id}_cell_{cell.id}_var_{analysis.name}"
+    )
+    left = canonical.params.get(PARAM_WRITE_STATE) if canonical is not None else None
+    if not probe:
+        if canonical is not None and _held(session, canonical):
+            return _write_identity(session, write_key, policy, left)
+        return None
+    if not _write_probed(spec) or canonical is None or left is None:
+        return None
+    if not _may_probe(session, cell.id, spec):
+        return None
+    try:
+        runtime_spec = _confined(
+            session, _resolve_runtime_spec(spec, session.path, auth_env=_auth_env(session)), None
+        )
+    except (CredentialError, LakeError, ValueError, OSError):
+        return None
+    # Not held: a run probes again, so a file changed after this pass is seen.
+    now = _write_state(session, adapter, spec, runtime_spec, write_key, policy)
+    return _write_identity(session, write_key, policy, now) if now is not None else None
 
 
 # The files the server opens for a connection, by driver.

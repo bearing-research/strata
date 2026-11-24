@@ -61,11 +61,13 @@ class ResolvedCachePolicy:
     """The resolver's decision for a cell's cache identity.
 
     Attributes:
-        kind: ``fingerprint`` / ``forever`` / ``session`` / ``ttl`` / ``snapshot``.
-        salt: Bytes folded into the hash; constant for ``forever`` and
-            ``fingerprint``, per session / per time bucket for ``session`` / ``ttl``.
-        freshness_required: Whether ``adapter.probe_freshness`` runs and is folded.
-            False for ``forever`` / ``session`` / ``ttl``.
+        kind: ``fingerprint`` / ``forever`` / ``session`` / ``ttl`` / ``snapshot``, or
+            ``write``, a write cell's default (never written as ``-- @cache``).
+        salt: Bytes folded into the hash; constant for ``forever``, ``fingerprint`` and
+            ``write``, per session / per time bucket for ``session`` / ``ttl``.
+        freshness_required: Whether ``adapter.probe_freshness`` runs. Its token is
+            folded into the hash, except for ``write``, whose probe settles whether a
+            stored run is reused, not its key. False for ``forever`` / ``session`` / ``ttl``.
         schema_required: Whether ``adapter.probe_schema`` runs. Same as
             ``freshness_required``: without it, ADD COLUMN or a type change
             would not invalidate.
@@ -85,6 +87,7 @@ class ResolvedCachePolicy:
 _SALT_FOREVER = b"strata.cache.forever"
 _SALT_FINGERPRINT = b"strata.cache.fingerprint"
 _SALT_SNAPSHOT = b"strata.cache.snapshot"
+_SALT_WRITE = b"strata.cache.write"
 
 
 def resolve_cache_policy(
@@ -147,6 +150,17 @@ def resolve_cache_policy(
             freshness_required=True,
             schema_required=True,
             snapshot_required=True,
+        )
+    if kind == "write":
+        # A write cell's default, never written as ``-- @cache``: keyed by its source, and
+        # a hit holds while the database is as its run left it. The probe settles that,
+        # so the token stays out of the key.
+        return ResolvedCachePolicy(
+            kind="write",
+            salt=_SALT_WRITE,
+            freshness_required=True,
+            schema_required=False,
+            snapshot_required=False,
         )
     if kind == "fingerprint":
         return ResolvedCachePolicy(

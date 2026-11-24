@@ -742,6 +742,12 @@ class TestSqlTablesTheCacheCannotTrack:
         )
         assert "sql_dynamic_table" not in messages
 
+    def test_a_write_cell_is_not_flagged(self):
+        messages = self._messages(
+            "-- @sql connection=db write=true\nINSERT INTO t SELECT * FROM IDENTIFIER($tbl)"
+        )
+        assert "sql_dynamic_table" not in messages
+
     def test_a_literal_identifier_is_not_flagged(self):
         messages = self._messages("-- @sql connection=db\nSELECT * FROM IDENTIFIER('events')")
         assert "sql_dynamic_table" not in messages

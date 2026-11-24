@@ -79,7 +79,7 @@ When the same setting is configured at multiple levels, the most specific wins:
 | **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
 | **SQL connection** | `-- @sql connection=X` | (annotation only) | none; required for SQL cells |
-| **Cache policy** | `-- @cache <policy>` | (annotation only) | `fingerprint` (read), `session` (write) |
+| **Cache policy** | `-- @cache <policy>` | (annotation only) | `fingerprint` (read); a write cell is reused in its session, and after while it is the only writer of a SQLite file that is as it left it |
 | **Cache opt-out** | `# @nocache` | (annotation only) | cache on (serve provenance hits) |
 
 Annotations always take priority. This lets you override per-cell behavior without editing `notebook.toml`.

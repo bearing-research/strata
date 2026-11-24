@@ -30,7 +30,16 @@ CELL_DEFINITIONS_UPGRADE = "cell_definitions_reconstructed"
 
 # What a run records about itself: two runs of one definition differ here.
 _RECORDED_ONLY = frozenset(
-    {"source", "build_env", "build_duration_ms", "hardware", "fetched_at", "loop_run"}
+    {
+        "source",
+        "build_env",
+        "build_duration_ms",
+        "hardware",
+        "fetched_at",
+        "loop_run",
+        "sql_write_session",
+        "sql_write_state",
+    }
 )
 # Which output of the definition a version is: the definition is the same for all of them.
 _OUTPUT_ONLY = frozenset({"variable_name", "content_type", "display", "display_count"})
