@@ -223,3 +223,34 @@ async def test_stored_artifact_carries_the_source_that_produced_it(tmp_path: Pat
     # run that happened, not the source now sitting on disk.
     write_cell(nb_dir, "c1", "rows = [9, 9, 9]")
     assert stored_source("c1", "rows") == "rows = [1, 2, 3]"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["input", "source"])
+async def test_a_stale_cell_points_at_its_outputs_after_a_reopen(tmp_path: Path, change: str):
+    """The session that ran it still points there; a reopen pointed at nothing."""
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "a.txt").write_text("1")
+    nb_dir = create_notebook(tmp_path, "stale_reopen", initialize_environment=False)
+    source = f"# @mount raw file://{data} ro\nnames = sorted(p.name for p in raw.iterdir())\n"
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", source)
+    add_cell_to_notebook(nb_dir, "c2", after_cell_id="c1")
+    write_cell(nb_dir, "c2", "print(names)\n")
+    live = SessionManager().open_notebook(nb_dir)
+    assert (await CellExecutor(live).execute_cell("c1", source)).success
+
+    if change == "input":
+        (data / "b.txt").write_text("2")
+    else:
+        write_cell(nb_dir, "c1", source + "names.append('x')\n")
+    reopened = SessionManager().open_notebook(nb_dir)
+
+    cell = reopened.notebook_state.get_cell("c1")
+    assert cell is not None
+    assert cell.status == "stale"
+    stored = live.notebook_state.get_cell("c1")
+    assert stored is not None
+    assert cell.artifact_uris == stored.artifact_uris != {}
+    assert cell.artifact_uri == stored.artifact_uri

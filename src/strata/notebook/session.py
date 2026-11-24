@@ -770,12 +770,14 @@ class NotebookSession:
             cell.run_diagnostics = list(previous.run_diagnostics)
             cell.widget_values = dict(previous.widget_values)
 
-    def _restore_alternate_scheme_outputs(self, cell: Any) -> None:
+    def _restore_last_stored_outputs(self, cell: Any) -> None:
         """Point a cell at the artifacts its last successful run stored.
 
-        For cell kinds keyed under their own scheme (SQL, prompt, widget) nothing else
-        repopulates ``artifact_uris`` on open, and a downstream cell would otherwise
-        compute a provenance hash that no longer matches its record.
+        For a cell no generic key finds (SQL, prompt and widget cells keyed under their
+        own scheme) and one its key finds nothing for (:meth:`_keep_last_outputs`),
+        nothing else repopulates ``artifact_uris`` on open: a downstream cell would
+        compute a provenance hash that no longer matches its record, and the cell would
+        not show what a live session that ran it does.
 
         A ``# @per_variant`` cell stores one artifact per variant, which its run runs in
         the order of the group's tabs, so it ends pointing at the last one stored.
@@ -796,6 +798,31 @@ class NotebookSession:
                     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
                     cell.artifact_uris[name] = uri
                     cell.artifact_uri = uri
+
+    def _keep_last_outputs(self, cell: Any) -> None:
+        """Point a cell its current key finds nothing for at what its last run left.
+
+        The session that ran it still points there: staleness says the result is out of
+        date, not that it is gone. A hit after an edit is undone makes its version latest
+        again, so the latest is what the last run left. A loop's ``artifact_uri`` is its
+        carry, recorded as a variable only when a cell reads it. Nothing for a cell with
+        no successful run on record, or one that points somewhere (a live session).
+        """
+        if cell.artifact_uris or cell.last_provenance_hash is None:
+            return
+        self._restore_last_stored_outputs(cell)
+        loop = parse_annotations(cell.source, cell.language).loop
+        if loop is None:
+            return
+        consumed = self.dag.consumed_variables.get(cell.id, set()) if self.dag else set()
+        if loop.carry not in consumed:
+            cell.artifact_uris.pop(loop.carry, None)
+        manager = self.get_artifact_manager()
+        carry = manager.artifact_store.get_latest_version(
+            manager.cell_artifact_id(cell.id, loop.carry)
+        )
+        if carry is not None:
+            cell.artifact_uri = f"strata://artifact/{carry.id}@v={carry.version}"
 
     def _restore_loop_carry(self, cell: Any, provenance_hash: str) -> None:
         """Point a loop cell at its final state, as the run that stored it does.
@@ -1206,6 +1233,7 @@ class NotebookSession:
                     self._parts_under_stale_upstream(cell, prefetched.get(cell_id), packages),
                     tuple(uid for uid in cell.upstream_ids if uid in stale_cells),
                 )
+                self._keep_last_outputs(cell)
                 continue
 
             effective_worker = self._effective_worker_name(cell)
@@ -1216,6 +1244,7 @@ class NotebookSession:
             if not worker_supports_notebook_execution(worker_spec):
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
+                self._keep_last_outputs(cell)
                 continue
 
             assert self.analysis is not None  # set with the DAG
@@ -1244,6 +1273,7 @@ class NotebookSession:
             if outside.has_rw_mount:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
+                self._keep_last_outputs(cell)
                 continue
 
             # A scratchpad cell's result is under its key over what its runs read, as last
@@ -1312,7 +1342,7 @@ class NotebookSession:
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                     # Outputs live under a per-language scheme, so artifact uris are still empty
                     # here, and downstream cells read them to build their provenance.
-                    self._restore_alternate_scheme_outputs(cell)
+                    self._restore_last_stored_outputs(cell)
                 elif code.changed is not None and cell.last_provenance_hash is not None:
                     # A file its last run read is not as that run read it.
                     staleness_map[cell_id] = CellStaleness(
@@ -1341,6 +1371,7 @@ class NotebookSession:
                     stale_cells.add(cell_id)
                 if cell_id in stale_cells:
                     to_explain[cell_id] = StaleCell(key.parts)
+                    self._keep_last_outputs(cell)
             else:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 for var_name, (artifact_id, version) in cached_outputs.items():

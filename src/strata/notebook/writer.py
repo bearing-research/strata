@@ -1015,15 +1015,28 @@ def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
 def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
     """Rewrite ``requires-python`` in pyproject.toml as ``==X.Y.*``; return the previous value.
 
-    The previous value lets the caller roll back if the next ``uv sync`` fails.
-    uv.lock and .venv are not touched.
+    The previous value lets the caller roll back (:func:`restore_requires_python`) if the
+    next ``uv sync`` fails. uv.lock and .venv are not touched.
     """
+    return _replace_requires_python(notebook_dir, format_requires_python(new_minor))
+
+
+@refuses_while_held
+def restore_requires_python(notebook_dir: Path, spec: str) -> None:
+    """Put back a ``requires-python`` spec :func:`update_requires_python` returned.
+
+    Only that line changes (rewritten as ``requires-python = "<spec>"``), so an edit
+    made to the rest of the file meanwhile stays.
+    """
+    _replace_requires_python(notebook_dir, spec)
+
+
+def _replace_requires_python(notebook_dir: Path, new_spec: str) -> str:
     pyproject_path = Path(notebook_dir) / "pyproject.toml"
     if not pyproject_path.exists():
         raise FileNotFoundError(f"Notebook pyproject not found: {pyproject_path}")
 
     text = pyproject_path.read_text(encoding="utf-8")
-    new_spec = format_requires_python(new_minor)
     new_line = f'requires-python = "{new_spec}"'
 
     pattern = re.compile(r'^requires-python\s*=\s*"[^"]*"', re.MULTILINE)

@@ -806,6 +806,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   during the write, failed the scan that had just read it. A write that fails halfway no
   longer leaves an entry without its metadata, or one the cache's size still counts.
   (#1646)
+- **A failed change of a notebook's Python puts back the pyproject it had.** When the
+  new interpreter could not be installed, the rollback restored `requires-python` only if
+  it pinned one minor (`==3.12.*`); a hand-written range such as `>=3.12` was left as the
+  failed minor, with the venv already deleted. The spec is now put back as written and
+  the environment synced again. (#1648)
+- **A stale cell keeps its outputs after a reopen.** A cell whose current key finds
+  nothing stored (an input changed, its source was edited, an upstream went stale, it has
+  a read-write mount, or a mount's credential is missing) reopened pointing at nothing,
+  where the session that ran it still pointed at its last outputs, and a cell reading it
+  was keyed as if it had never run. (#1637)
 - **A deny rule refuses a table under every spelling of its name.** Rules matched the
   name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
   served `lake:FINANCE.ledger` past a deny on `*:finance.*`. Deny rules now match in any

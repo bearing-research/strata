@@ -258,6 +258,16 @@ jobs:
         shell: bash
         run: uv sync --all-extras
 
+      # diffcone's recording keeps the command but not its pytest arguments, and
+      # refuses a plan once they change (collected_not_target) until main records
+      # again. Keyed by them, a changed job finds no recording and plans statically.
+      - name: Key the recording by its pytest arguments
+        id: args
+        shell: bash
+        env:
+          ARGS: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
+        run: echo "key=$(printf '%s' "$ARGS" | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
       # diffcone (https://github.com/bearing-research/diffcone). On main this
       # is the full run, recorded per cell: each push's own change is planned
       # from the previous recording and checked against this run, and a new
@@ -269,7 +279,7 @@ jobs:
         if: github.event_name == 'push'
         uses: bearing-research/diffcone/actions/record@cf9dedcf82d4c4da4af7755a3f0a73cd30cbe6dc  # v0.6.0
         with:
-          key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
+          key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}-${{ steps.args.outputs.key }}
           command: uv run pytest
           pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
           source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
@@ -280,7 +290,7 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: bearing-research/diffcone/actions/run@cf9dedcf82d4c4da4af7755a3f0a73cd30cbe6dc  # v0.6.0
         with:
-          key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
+          key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}-${{ steps.args.outputs.key }}
           command: uv run pytest
           pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
           source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
@@ -343,6 +353,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
+      # Keyed by its pytest arguments, as in the unit tests.
+      - name: Key the recording by its pytest arguments
+        id: args
+        shell: bash
+        env:
+          ARGS: ${{ env.E2E_TEST_ARGS }}
+        run: echo "key=$(printf '%s' "$ARGS" | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
       # diffcone, as in the unit tests: the full run recorded and checked on
       # main, the affected tests on pull requests.
       - name: Run E2E tests and record (diffcone, main)
@@ -350,7 +368,7 @@ jobs:
         if: github.event_name == 'push'
         uses: bearing-research/diffcone/actions/record@cf9dedcf82d4c4da4af7755a3f0a73cd30cbe6dc  # v0.6.0
         with:
-          key-prefix: diffcone-e2e
+          key-prefix: diffcone-e2e-${{ steps.args.outputs.key }}
           command: uv run pytest
           pytest-args: ${{ env.E2E_TEST_ARGS }}
           source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
@@ -361,7 +379,7 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: bearing-research/diffcone/actions/run@cf9dedcf82d4c4da4af7755a3f0a73cd30cbe6dc  # v0.6.0
         with:
-          key-prefix: diffcone-e2e
+          key-prefix: diffcone-e2e-${{ steps.args.outputs.key }}
           command: uv run pytest
           pytest-args: ${{ env.E2E_TEST_ARGS }}
           source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
@@ -450,12 +468,20 @@ jobs:
         shell: bash
         run: echo "R_VERSION=$(Rscript -e 'cat(R.version.string)')" >> "$GITHUB_ENV"
 
+      # Keyed by its pytest arguments, as in the unit tests.
+      - name: Key the recording by its pytest arguments
+        id: args
+        shell: bash
+        env:
+          ARGS: ${{ env.R_TEST_ARGS }}
+        run: echo "key=$(printf '%s' "$ARGS" | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
       - name: Run R tests and record (diffcone, main)
         id: record
         if: github.event_name == 'push'
         uses: bearing-research/diffcone/actions/record@cf9dedcf82d4c4da4af7755a3f0a73cd30cbe6dc  # v0.6.0
         with:
-          key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
+          key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}-${{ steps.args.outputs.key }}
           command: uv run pytest
           pytest-args: ${{ env.R_TEST_ARGS }}
           env-vars: R_VERSION
@@ -467,7 +493,7 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: bearing-research/diffcone/actions/run@cf9dedcf82d4c4da4af7755a3f0a73cd30cbe6dc  # v0.6.0
         with:
-          key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
+          key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}-${{ steps.args.outputs.key }}
           command: uv run pytest
           pytest-args: ${{ env.R_TEST_ARGS }}
           source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals

@@ -306,8 +306,14 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-worker_cell_far_var_far@v=1",
+      "artifact_uris": {
+       "far": {
+        "artifact": "nb_cellgraph-worker_cell_far_var_far@v=1",
+        "content_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+        "provenance_hash": "8d358d62b78704b12c7f8170a0c35e140e521f6b0d5b827ea60fad32efe1491e"
+       }
+      },
       "instances": {}
      },
      "resolved": {
@@ -341,10 +347,14 @@
      "keys": {
       "definition_key": "7fe1e762cbf630090ac5d7c02b26d8ecb54aa2f43ca1c5f80922bf71783db613",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "44cef6c627e8c09f1bf23396fbad44e5d5d15610c15a60a96b547b4d2610209b",
-      "input_hashes": [],
+      "execution_key": "3439f24e6b6bb96b3639071d2cc9229a18b1d095f766fe4796e23148782ef82b",
+      "input_hashes": [
+       "[\"provenance\",\"8d358d62b78704b12c7f8170a0c35e140e521f6b0d5b827ea60fad32efe1491e\"]"
+      ],
       "source_hash": "7fe1e762cbf630090ac5d7c02b26d8ecb54aa2f43ca1c5f80922bf71783db613",
-      "upstream_hashes": []
+      "upstream_hashes": [
+       "[\"provenance\",\"8d358d62b78704b12c7f8170a0c35e140e521f6b0d5b827ea60fad32efe1491e\"]"
+      ]
      },
      "language": "python",
      "published": {

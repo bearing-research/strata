@@ -308,3 +308,86 @@ def test_cli_worker_add_ssh_happy(monkeypatch, capsys):
     assert calls["add"][1]["set_default"] is False  # --no-default
     assert calls["closed"] is True
     assert "gpu-box" in capsys.readouterr().out
+
+
+class TestWorkerDefaultCommand:
+    def test_naming_a_worker_makes_it_the_default_on_disk(self, nb, capsys):
+        main(["worker", "add", str(nb), "gpu", "--url", URL])
+        capsys.readouterr()
+
+        assert main(["worker", "default", str(nb), "gpu"]) == 0
+
+        assert json.loads(capsys.readouterr().out)["default"] == "gpu"
+        assert parse_notebook(nb).worker == "gpu"
+
+    @pytest.mark.parametrize("clear", [[], ["local"]])
+    def test_no_name_or_local_clears_it(self, nb, capsys, clear):
+        main(["worker", "add", str(nb), "gpu", "--url", URL, "--default"])
+        capsys.readouterr()
+
+        assert main(["worker", "default", str(nb), *clear]) == 0
+
+        assert json.loads(capsys.readouterr().out)["default"] is None
+        # Cleared, not written as "local": notebook.toml keeps no worker key.
+        assert "worker =" not in (nb / "notebook.toml").read_text()
+
+    def test_an_unknown_worker_is_exit_1_and_changes_nothing(self, nb, capsys):
+        before = (nb / "notebook.toml").read_text()
+
+        assert main(["worker", "default", str(nb), "ghost"]) == 1
+
+        error = json.loads(capsys.readouterr().out)["error"]
+        assert error == "no worker named 'ghost' (add it first, or use 'local')"
+        assert (nb / "notebook.toml").read_text() == before
+
+
+class TestWorkerRmSshCommand:
+    def _fake(self, monkeypatch, *, fail: bool = False) -> dict:
+        calls: dict = {}
+
+        class FakeOps:
+            def __init__(self, server, session):
+                calls["init"] = (server, session)
+
+            def remove_ssh_worker(self, name, *, stop_remote):
+                calls["remove"] = (name, stop_remote)
+                if fail:
+                    raise NotebookOpsError(f"no SSH worker named {name!r}")
+                return {"torn_down": True}
+
+            def close(self):
+                calls["closed"] = True
+
+        monkeypatch.setattr("strata.notebook.ops.RemoteNotebookOps", FakeOps)
+        return calls
+
+    def _argv(self, *extra: str) -> list[str]:
+        return ["worker", "rm-ssh", "gpu-box", "--server", "http://s", "--session", "s1", *extra]
+
+    def test_it_asks_the_server_and_closes_the_client(self, monkeypatch, capsys):
+        calls = self._fake(monkeypatch)
+
+        assert main(self._argv("--stop-remote")) == 0
+
+        assert json.loads(capsys.readouterr().out) == {"torn_down": True}
+        assert calls == {
+            "init": ("http://s", "s1"),
+            "remove": ("gpu-box", True),
+            "closed": True,
+        }
+
+    def test_human_output_says_what_was_torn_down(self, monkeypatch, capsys):
+        calls = self._fake(monkeypatch)
+
+        assert main(self._argv("--format", "human")) == 0
+
+        assert calls["remove"] == ("gpu-box", False)
+        assert capsys.readouterr().out.strip() == "disconnected gpu-box (tunnel torn down: True)"
+
+    def test_a_refusal_is_exit_1_and_still_closes(self, monkeypatch, capsys):
+        calls = self._fake(monkeypatch, fail=True)
+
+        assert main(self._argv()) == 1
+
+        assert json.loads(capsys.readouterr().out) == {"error": "no SSH worker named 'gpu-box'"}
+        assert calls["closed"] is True
