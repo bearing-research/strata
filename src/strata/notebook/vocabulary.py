@@ -62,6 +62,7 @@ from strata.notebook.annotations import (
     _parse_table_annotation,
     _parse_variant_annotation,
     _parse_write_table_annotation,
+    app_hides,
     parse_annotations,
 )
 from strata.notebook.models import CellLanguage, CellState, MountMode, MountSpec
@@ -835,6 +836,7 @@ def annotations_from(values: dict[str, Any], directives: list[cg.Directive]) -> 
         per_variant_group=values.get("per_variant"),
         each=values.get("each"),
         after=values.get("after", []),
+        app_hidden=app_hides(values.get("app")),
     )
 
 

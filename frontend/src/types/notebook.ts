@@ -100,6 +100,8 @@ export interface CellAnnotations {
   loop?: LoopAnnotationInfo | null
   /** Variant grouping, present only when the cell declares ``# @variant``. */
   variant?: VariantAnnotationInfo | null
+  /** ``@app hide``: left out of the app view. */
+  appHidden?: boolean
 }
 
 export interface VariantAnnotationInfo {

@@ -166,19 +166,14 @@ class TableBlock(Block):
 # --- Cell rendering ---
 
 
-def _is_app_hidden(source: str) -> bool:
-    """Whether a cell carries ``# @app hide``, as the app view filters."""
-    import re
-
-    return any(re.match(r"#\s*@app\s+hide\b", line.strip()) for line in source.splitlines())
-
-
 def _is_app_cell(cell: CellState) -> bool:
     """Cells the app view shows: widget, markdown, or with a display output, minus ``@app hide``.
 
     Mirrors ``appCells`` in ``AppView.vue`` so a snapshot matches the live app.
     """
-    if _is_app_hidden(cell.source):
+    from strata.notebook.annotations import parse_annotations
+
+    if parse_annotations(cell.source, cell.language).app_hidden:
         return False
     return cell.language in (CellLanguage.WIDGET, CellLanguage.MARKDOWN) or bool(
         cell.display_outputs

@@ -89,7 +89,7 @@ def validate_cell_annotations(
 
     if cell.language == CellLanguage.MARKDOWN:
         # Pure prose: ``# @worker`` is a heading, and only ``@app`` is read (unchecked).
-        return []
+        return _app_outside_block(cell)
     language_checks: list[AnnotationDiagnostic] = []
     if cell.language == CellLanguage.WIDGET:
         language_checks = _validate_widget_cell_annotations(cell)
@@ -108,7 +108,27 @@ def validate_cell_annotations(
     if cell.language == CellLanguage.SQL:
         # After the connection's, which the SQL analyzer reports.
         diagnostics += _validate_sql_tables(cell, notebook_state)
-    return diagnostics
+    return diagnostics + _app_outside_block(cell)
+
+
+def _app_outside_block(cell: CellState) -> list[AnnotationDiagnostic]:
+    """An ``@app`` line after the leading comment block, which nothing reads: once read
+    anywhere, a cell that relied on it would show in the app view unawares."""
+    block = {lineno for lineno, _ in iter_annotation_block(cell.source, cell.language)}
+    return [
+        AnnotationDiagnostic(
+            severity=DiagnosticSeverity.WARN,
+            code="app_outside_annotations",
+            message=(
+                "This `@app` line is not read: annotations go in the cell's leading "
+                "comment block, before its code or prose. Move it to the top."
+            ),
+            line=lineno,
+        )
+        for lineno, line in enumerate(cell.source.splitlines(), start=1)
+        if lineno not in block
+        and (parse_annotation_directive(line, cell.language) or ("", ""))[0] == "app"
+    ]
 
 
 def _validate_prompt_inputs(analysis: cg.Analysis, cell_id: str) -> list[AnnotationDiagnostic]:

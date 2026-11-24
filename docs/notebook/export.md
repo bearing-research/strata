@@ -74,8 +74,8 @@ produced.
 
 Widget cells render as a compact line of `control: value` chips - the
 parameter settings that produced the outputs below them - read from the
-notebook's persisted control values. Cells marked `# @app hide` are
-omitted, matching the live app view; prompt-cell responses stay excluded
+notebook's persisted control values. Cells marked
+[`@app hide`](../reference/annotations/widget.md#app-hide) are omitted, matching the live app view; prompt-cell responses stay excluded
 for the same privacy reason as a regular export.
 
 Each cell's outputs carry the app view's quiet line, read from the notebook's

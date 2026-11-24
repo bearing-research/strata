@@ -774,6 +774,7 @@ function parseBackendAnnotations(raw: any): CellAnnotations | undefined {
     mounts: Array.isArray(raw.mounts) ? raw.mounts.map(parseMountSpec) : [],
     loop: parseBackendLoopAnnotation(raw.loop),
     variant: parseBackendVariantAnnotation(raw.variant),
+    appHidden: Boolean(raw.app_hidden),
   }
 }
 
@@ -2324,6 +2325,8 @@ function initializeWebSocket() {
           if (typeof sc.variant_active === 'boolean') {
             cell.variantActive = sc.variant_active
           }
+          // An edit can add or remove ``@app hide``, which a live app view follows.
+          if (sc.annotations) cell.annotations = parseBackendAnnotations(sc.annotations)
         }
       }
     })

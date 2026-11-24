@@ -53,6 +53,7 @@ class AnnotationsWirePayload(TypedDict):
     tables: list[dict[str, Any]]
     loop: LoopWirePayload | None
     variant: VariantWirePayload | None
+    app_hidden: bool
 
 
 @dataclass
@@ -128,8 +129,8 @@ def _directive_re(marker: str) -> re.Pattern[str]:
 
 
 # Every directive a cell's parsers read (``parse_annotations``, ``analyze_prompt_cell``, and
-# the readers with their own regex, such as ``@app hide`` in the app view and export):
-# validation warns on any other ``# @key``, which nothing would act on.
+# the readers with their own regex, such as ``@live`` in the widget view): validation warns
+# on any other ``# @key``, which nothing would act on.
 ANNOTATION_KEYS = frozenset(
     {
         "after",
@@ -364,6 +365,9 @@ class CellAnnotations:
     # reading a file a setup cell wrote). Lines stack; each adds edges.
     after: list[str] = field(default_factory=list)
 
+    # ``# @app hide``: left out of the app view and its export. Any language, markdown too.
+    app_hidden: bool = False
+
     def to_wire_payload(self) -> AnnotationsWirePayload:
         """Render the UI-visible subset of the annotations.
 
@@ -393,6 +397,7 @@ class CellAnnotations:
             "tables": [table.model_dump() for table in self.tables],
             "loop": loop_payload,
             "variant": variant_payload,
+            "app_hidden": self.app_hidden,
         }
 
 
@@ -401,18 +406,23 @@ class CellAnnotations:
 MARKDOWN_DIRECTIVE_KEYS = frozenset({"app"})
 
 
+def app_hides(value: str | None) -> bool:
+    """Whether the last ``@app`` line's value hides the cell: ``hide``, then anything."""
+    return (value or "").split()[:1] == ["hide"]
+
+
 def parse_annotations(source: str, language: CellLanguage | str) -> CellAnnotations:
     """Extract annotations from the leading comment block of a cell.
 
     *language* is the cell's: it picks the comment marker (``--`` in SQL), so it has no
-    default a SQL cell could silently get the wrong one from. A markdown cell has none:
-    ``@app``, the one key it reads, is not a field here.
+    default a SQL cell could silently get the wrong one from. A markdown cell reads only
+    ``@app``, into ``app_hidden``.
     """
-    if language == CellLanguage.MARKDOWN:
-        return CellAnnotations()
     from strata.notebook.vocabulary import annotations_from, parse_values
 
     values, directives = parse_values(source, str(language))
+    if language == CellLanguage.MARKDOWN:
+        return CellAnnotations(app_hidden=app_hides(values.get("app")))
     return annotations_from(values, directives) if directives else CellAnnotations()
 
 
