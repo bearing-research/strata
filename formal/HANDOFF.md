@@ -58,6 +58,18 @@ in [`README.md`](README.md).
   `_InclusiveMetricsEvaluationVisitor._contains_nans_only` true on any NaN. All but
   the first are caught through pinned examples, since random search rarely builds
   those layouts.
+- **Phase 7, step 4 (Run All):** `test_run_all_properties.py` gained module state,
+  `@nocache`, `@loop` and cells Run All runs on their own: findings 28 (a batched cell
+  changed an upstream value it never names), 29 (a stored function loaded in a batch
+  without the values it reads) and 30 (that function's own globals kept a change). A
+  cell-by-cell pass runs a `@nocache` producer again for each consumer's cascade, so
+  the counted cell keeps a constant value and only Run All's runs are counted (BAT-2);
+  with finding 24's fix removed the pinned example fails. A function's stored record
+  names its module and the upstream values it uses after the notebook, so the
+  comparison replaces each copy's notebook id. Each copy also has a cell reading the
+  sink, so every value as the last cell sees it is stored and compared. Events from
+  inside a composite strategy are mostly lost: the generator returns its traits and
+  the test records them.
 
 ## Conventions
 
@@ -117,14 +129,17 @@ property, the replays of what it finds, then the fixes.
    finding 27.
 2. **Two processes on one store** (LR-2, EACH-2). Half of LR-2 is fixed (finding
    26, #1653): a rerun no longer fails a build another process just resumed. The other
-   half, two processes that both find no open build each creating one, waits on a
-   computation-keyed open in vestigo (`open_first_attempt`; the handoff is
-   `docs/internal/one-open-execution.md` in vestigo's checkout, its HANDOFF item 8).
-   After that release, extend `LocalRun.tla` with `open` split into its transactions
-   and two processes. EACH-2's guard against collecting during a run is a
+   half, two processes that both find no open build each creating one, waits on
+   vestigo's `BuildStore.open_build`: the create and the first attempt's open in one
+   transaction keyed on the computation, returning the open build when one exists (the
+   handoff is `docs/internal/one-open-execution.md` in vestigo's checkout, its HANDOFF
+   item 8). Strata's `LocalRuns._new_build` then calls it and treats another build as
+   `open` treats one now. After that release, extend `LocalRun.tla` with `open` split
+   into its transactions and two processes. EACH-2's guard against collecting during a run is a
    process-local counter.
-3. **A wider Run All property** (BAT-1). Module state, `@nocache`, `@loop` cells and
-   worker routing in the generator.
+3. **Done: a wider Run All property** (BAT-1, BAT-2). Module state, `@nocache`, `@loop`
+   and `@timeout` (a worker's single-run path) in the generator; findings 28, 29, 30. A
+   real remote worker is not covered.
 4. **Smaller open items.** MD-1 (a catalog that writes `vN.metadata.json`, dropped
    with purge and recreated); LR-3 (the close path checked against the process, not
    the attempt); the passthrough stream path and multi-node ownership (outside

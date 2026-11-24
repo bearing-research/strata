@@ -794,6 +794,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **Run All gives what running each cell gives when cells share functions.** In a Run
+  All batch, a cell that changed an upstream value without naming it (by calling a
+  function that appends to it, or through a list holding it) passed the change to later
+  cells. A function from a cell run on its own, or from a cached cell, failed with
+  `NameError` when called, and two calls to it shared a change. Each cell now sees the
+  stored values, as it does run alone. (#1660)
 - **A cell imports its own `datasets` and `tables`.** Every process that ran a cell put
   Strata's notebook package first on `sys.path`, so its `datasets.py` and `tables.py`
   shadowed Hugging Face `datasets` and PyTables, and transformers' `Trainer` failed to

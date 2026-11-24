@@ -680,17 +680,52 @@ def batch_resolve_upstream_inputs(
                     continue
                 spec_dict = materialize_artifact_to_dir(host, context, uri, upstream_dir, var_name)
                 if spec_dict is not None:
+                    attach_injected(host, context, spec_dict, upstream_dir, var_name)
                     inputs[var_name] = spec_dict
 
     # Paths are relative to batch_tmpdir (the harness deserializes with
     # output_dir=batch_tmpdir).
-    return {
-        name: {
+    def under_upstream(spec: dict[str, Any]) -> dict[str, Any]:
+        moved: dict[str, Any] = {
             "content_type": spec["content_type"],
             "file": f"__upstream__/{spec['file']}",
         }
-        for name, spec in inputs.items()
-    }
+        if "injected" in spec:
+            moved["injected"] = {n: under_upstream(sub) for n, sub in spec["injected"].items()}
+        return moved
+
+    return {name: under_upstream(spec) for name, spec in inputs.items()}
+
+
+def attach_injected(
+    host: ExecutorHost,
+    context: BatchContext,
+    spec: dict[str, Any],
+    target_dir: Path,
+    var_name: str,
+) -> None:
+    """Give a stored function's spec the upstream values it reads, as a single run's
+    inputs carry them; without them, calling it raises NameError."""
+    if spec["content_type"] != "module/cell":
+        return
+    descriptor = json.loads((target_dir / spec["file"]).read_text(encoding="utf-8"))
+    injected: dict[str, dict[str, str]] = {}
+    for name, uri in (descriptor.get("injected") or {}).items():
+        sub = materialize_artifact_to_dir(
+            host, context, uri, target_dir, f"{var_name}__inj__{name}"
+        )
+        if sub is None:
+            # As a single run logs it: calling the function will raise NameError.
+            logger.error(
+                "Injected value '%s' for module export '%s' could not be resolved (%s).",
+                name,
+                var_name,
+                uri,
+            )
+            continue
+        injected[name] = sub
+    if injected:
+        spec["injected"] = injected
 
 
 def materialize_artifact_to_dir(
@@ -769,6 +804,7 @@ def materialize_batch_cache_hit(
             "content_type": content_type,
             "file": file_name,
         }
+        attach_injected(host, context, cached_outputs[var_name], cell_output_dir, var_name)
         # Populate artifact_uris, as single-cell does, so later batch cells key on them.
         uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
         cell.artifact_uris[var_name] = uri

@@ -781,10 +781,10 @@ def test_batch_seeds_upstream_inputs_under_the_shared_env(batch_pipes, monkeypat
     seen: dict[str, str | None] = {}
     real_seed = harness._seed_upstream_namespace
 
-    def _record(upstream_inputs, out_dir, namespace, tainted):
+    def _record(upstream_inputs, out_dir, namespace, tainted, stored_globals):
         seen["shared"] = os.environ.get("STRATA_BATCH_PROBE")
         seen["private"] = os.environ.get("STRATA_CELL_PRIVATE")
-        return real_seed(upstream_inputs, out_dir, namespace, tainted)
+        return real_seed(upstream_inputs, out_dir, namespace, tainted, stored_globals)
 
     monkeypatch.setattr(harness, "_seed_upstream_namespace", _record)
     monkeypatch.delenv("STRATA_BATCH_PROBE", raising=False)
@@ -926,7 +926,9 @@ def test_an_interrupt_in_a_client_close_still_restores_the_names_it_bound(batch_
 
     def run() -> None:
         try:
-            harness._run_one_batched_cell(cell, namespace, output_dir, frame_w, resp_r, {}, {})
+            harness._run_one_batched_cell(
+                cell, namespace, output_dir, frame_w, resp_r, {}, {}, harness._StoredGlobals()
+            )
         except BaseException as exc:
             errors.append(exc)
         finally:

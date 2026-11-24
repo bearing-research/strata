@@ -451,6 +451,42 @@ def _elapsed_ms(started: float) -> float:
     return (time.perf_counter() - started) * 1000
 
 
+class _StoredGlobals:
+    """The upstream values of the stored functions a batch loaded, in their own modules.
+
+    A single run loads a function with the stored values each time; a batched cell that
+    changes one in place (by calling the function) must not pass that on to later cells.
+    """
+
+    def __init__(self) -> None:
+        self._slots: dict[str, tuple[Any, str, dict, Path]] = {}
+
+    def track(self, value: Any, spec: dict, base_dir: Path) -> None:
+        module = sys.modules.get(getattr(value, "__module__", None) or "")
+        if module is None:
+            return
+        for name, injected_spec in (spec.get("injected") or {}).items():
+            self._slots[f"{module.__name__}.{name}"] = (module, name, injected_spec, base_dir)
+
+    def _view(self) -> dict[str, Any]:
+        return {
+            key: module.__dict__[name]
+            for key, (module, name, _, _) in self._slots.items()
+            if name in module.__dict__
+        }
+
+    def snapshot(self) -> list:
+        view = self._view()
+        return _immut.snapshot_inputs(view, list(view))
+
+    def restore_changed(self, snapshots: list) -> None:
+        for warning in _immut.detect_mutations(self._view(), snapshots):
+            module, name, spec, base_dir = self._slots[warning["var_name"]]
+            value = _deserialize_one(name, spec, base_dir)
+            if value is not _MISSING:
+                module.__dict__[name] = value
+
+
 def _run_one_batched_cell(
     cell: dict,
     namespace: dict,
@@ -459,6 +495,7 @@ def _run_one_batched_cell(
     resp_in: Any,
     manifest: dict,
     published: dict[str, tuple[str, Path]],
+    stored_globals: _StoredGlobals,
 ) -> tuple[str, str | None]:
     """Execute one cell within a batch; return ``(status, failed_reason)``.
 
@@ -533,14 +570,17 @@ def _run_one_batched_cell(
                     if not blob_path.exists():
                         continue
                     try:
-                        namespace[var_name] = _ser.deserialize_value(content_type, blob_path)
+                        value = _deserialize_one(var_name, spec, cell_output_dir)
                     except Exception as exc:
                         print(
                             f"Warning: failed to load cached {var_name} for {cell_id}: {exc}",
                             file=sys.stderr,
                         )
                     else:
-                        published[var_name] = (content_type, blob_path)
+                        if value is not _MISSING:
+                            namespace[var_name] = value
+                            published[var_name] = (content_type, blob_path)
+                            stored_globals.track(value, spec, cell_output_dir)
                 _send_frame(
                     frame_out,
                     "cell_output",
@@ -571,7 +611,12 @@ def _run_one_batched_cell(
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
             # An input changed in place is put back from its file after the cell (below).
-            input_snapshots = _immut.snapshot_inputs(namespace, references)
+            # Every value the batch published, not only those the cell names: it can change
+            # one through a function's globals or a container that holds it.
+            input_snapshots = _immut.snapshot_inputs(
+                namespace, sorted(set(references) | set(published))
+            )
+            globals_snapshots = stored_globals.snapshot()
             # What a later hit saves: the body and its serialization, not the cell's
             # share of the batch's setup or the parent's persist.
             started = time.perf_counter()
@@ -607,7 +652,8 @@ def _run_one_batched_cell(
                 input_mutations = _immut.detect_mutations(
                     namespace, input_snapshots, exported_names=mutation_defines
                 )
-                mutation_warnings = list(input_mutations)
+                # A single run warns only about what the cell names.
+                mutation_warnings = [w for w in input_mutations if w["var_name"] in references]
                 mutation_warnings.extend(
                     _immut.detect_shared_mutable_outputs(
                         {vn: namespace[vn] for vn in consumed_vars if vn in namespace}
@@ -680,6 +726,7 @@ def _run_one_batched_cell(
                 stored = published.get(warning["var_name"])
                 if stored is not None:
                     namespace[warning["var_name"]] = _ser.deserialize_value(*stored)
+            stored_globals.restore_changed(globals_snapshots)
             for var_name, meta in outputs.items():
                 if "file" in meta:
                     published[var_name] = (meta["content_type"], cell_output_dir / meta["file"])
@@ -702,6 +749,7 @@ def _seed_upstream_namespace(
     output_dir: Path,
     namespace: dict[str, Any],
     tainted_inputs: dict[str, Exception],
+    stored_globals: _StoredGlobals,
 ) -> None:
     """Load a batch's non-batched upstream artifacts into the shared namespace.
 
@@ -710,27 +758,16 @@ def _seed_upstream_namespace(
     failures surface as a ``cell_error`` on the first cell that references them.
     """
     for var_name, spec in (upstream_inputs or {}).items():
-        content_type = spec.get("content_type", "")
-        file_name = spec.get("file", "")
-        if not file_name:
-            print(f"Warning: no file path for input {var_name}", file=sys.stderr)
-            continue
-        full_path = output_dir / file_name
-        if not full_path.exists():
-            print(f"Warning: input file not found: {full_path}", file=sys.stderr)
-            continue
+        # As a single run's inputs: a stored function gets the values it reads.
         try:
-            namespace[var_name] = _ser.deserialize_value(content_type, full_path)
-        except _ser.StrataPrecisionError as exc:
-            tainted_inputs[var_name] = _ser.StrataPrecisionError(
-                exc.stored_dtype, exc.reconstructed_dtype, variable_name=var_name
-            )
-        except _ser.StrataRArtifactError as exc:
-            tainted_inputs[var_name] = _ser.StrataRArtifactError(
-                exc.file_path, variable_name=var_name
-            )
-        except Exception as exc:
-            print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
+            value = _deserialize_one(var_name, spec, output_dir)
+        except (_ser.StrataPrecisionError, _ser.StrataRArtifactError) as exc:
+            # Already named after the variable.
+            tainted_inputs[var_name] = exc
+            continue
+        if value is not _MISSING:
+            namespace[var_name] = value
+            stored_globals.track(value, spec, output_dir)
 
 
 def execute_batch(
@@ -766,8 +803,11 @@ def execute_batch(
         if all(env.get(key) == value for env in batch_envs)
     }
 
+    stored_globals = _StoredGlobals()
     with apply_env_overrides({"env": shared_env}):
-        _seed_upstream_namespace(upstream_inputs, output_dir, namespace, tainted_inputs)
+        _seed_upstream_namespace(
+            upstream_inputs, output_dir, namespace, tainted_inputs, stored_globals
+        )
     published = {
         var_name: (spec.get("content_type", ""), output_dir / spec["file"])
         for var_name, spec in (upstream_inputs or {}).items()
@@ -786,7 +826,7 @@ def execute_batch(
             return
 
         status, reason = _run_one_batched_cell(
-            cell, namespace, output_dir, frame_out, resp_in, manifest, published
+            cell, namespace, output_dir, frame_out, resp_in, manifest, published, stored_globals
         )
         if status != "ok":
             _send_frame(
