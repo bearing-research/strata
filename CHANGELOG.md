@@ -792,6 +792,14 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Two different scans no longer share a cache entry by construction of their key.** The
+  `scan@v1` identity hash joined its fields with no separator, so text in one field
+  could stand in for the next, and the filter fingerprint could not tell a string that
+  spells a date from the date. The identity is now hashed as JSON over named fields, and
+  the filter, projection and reading fingerprints are full SHA-256 digests.
+  `strata_client.compute_filter_fingerprint` returns 64 hex characters (was 16). Every
+  stored scan result is keyed anew once, and the row-group cache moves to format
+  version 7, removing the old entries at startup (#1671).
 - **In a multi-node deployment, a stream stays reachable from every node while it lives.**
   A node's claim on a stream expired one `STRATA_STREAM_STATE_TTL_SECONDS` after the
   stream was created, while the stream lived on as its GETs re-armed it, so a retry
