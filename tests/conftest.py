@@ -46,6 +46,7 @@ from strata_client.client import StrataClient
 
 from strata.config import StrataConfig
 from strata.fast_io import register_arrow_validator
+from tests.server_helpers import stop_strata_server
 from tests.shim_helpers import write_interpreter_shim
 
 # The server and the CLI register it at startup; tests verify stores directly.
@@ -492,13 +493,14 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     try:
         yield base_url
     finally:
-        # Join generously so the lifespan shutdown (which stops the build runner)
-        # completes; abandoned threads leave runners that starve later servers' startup.
-        server_instance.should_exit = True
-        server_thread.join(timeout=15.0)
-        server_module._state = None
-        reset_artifact_store()
-        _reset_transform_singletons()
+        # Wait out the lifespan shutdown (which stops the build runner); abandoned
+        # threads leave runners that starve later servers' startup.
+        try:
+            stop_strata_server(server_instance, server_thread, config.port)
+        finally:
+            server_module._state = None
+            reset_artifact_store()
+            _reset_transform_singletons()
 
 
 # For raw httpx calls to these servers: httpx's 5 s default read timeout is shorter
@@ -695,8 +697,7 @@ def server_with_client(temp_warehouse, tmp_path):
     }
 
     client.close()
-    server_instance.should_exit = True
-    server_thread.join(timeout=2.0)
+    stop_strata_server(server_instance, server_thread, port)
 
 
 # The placeholder artifact ids the build-store tests build against, plus the
