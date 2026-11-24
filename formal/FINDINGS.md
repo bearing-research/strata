@@ -1032,8 +1032,10 @@ repointing its outputs. Model `LocalOpen_Split` shows it in four steps. Severity
 attempt's open in one transaction under a lock keyed on the computation, returning the
 open build when there is one. `_new_build` calls it; when another build comes back it
 fails its own placeholder and returns None, and `open` reads the build again, as one
-found (a live lease refuses the run), while a revert or a team-cache pull waits for that
-run. An open that raises fails the placeholder too, unless its build committed. Model
+found (a live lease refuses the run). A revert or a team-cache pull that found nothing
+open waits for the run that opened meanwhile; beside a lapsed build (a run that died) it
+opens its own, as before. An open that raises fails its placeholder, and its build too
+when the open committed and only its reply was lost. Model
 `LocalOpen_Patched` (`OneOpenBuild`, the whole `open` loop of two processes with lapses,
 resumes and reruns). Regression tests:
 `tests/notebook/test_local_runs.py::TestTwoProcessesThatBothFindNoOpenBuild`, also run

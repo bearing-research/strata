@@ -909,6 +909,54 @@ class TestTwoProcessesThatBothFindNoOpenBuild:
         versions = runs.store.list_versions_by_id_prefix(runs._manager.run_placeholder_id("train"))
         assert versions and all(v.state == "failed" for v in versions)
 
+    def test_an_open_whose_reply_was_lost_leaves_no_live_build(self, tmp_path: Path, monkeypatch):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        open_build = runs.builds.open_build
+
+        def committed_then_lost(*args, **kwargs):
+            open_build(*args, **kwargs)
+            raise RuntimeError("the reply was lost")
+
+        monkeypatch.setattr(runs.builds, "open_build", committed_then_lost)
+        with pytest.raises(RuntimeError, match="reply was lost"):
+            self._open(runs)
+        monkeypatch.setattr(runs.builds, "open_build", open_build)
+
+        assert runs.builds.find_open_build("k") is None, "its lease would refuse a minute"
+        self._open(runs)
+
+    def test_a_cleanup_that_raises_keeps_the_opens_error(self, tmp_path: Path, monkeypatch):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+
+        def gone(*args, **kwargs):
+            raise RuntimeError("the database went away")
+
+        monkeypatch.setattr(runs.builds, "open_build", gone)
+        monkeypatch.setattr(runs.builds, "get_build", lambda *a, **k: gone())
+        with pytest.raises(RuntimeError, match="went away") as raised:
+            self._open(runs)
+        assert any("placeholder raised too" in note for note in raised.value.__notes__)
+
+    def test_a_revert_beside_a_run_that_died_is_made(self, tmp_path: Path):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        died = self._open(runs)
+        runs.builds.renew_lease(died.build_id, lease_owner(died.attempt), 0.0)
+        for store in (runs.builds, runs.releases):
+            store._clock = lambda: time.time() + 1.0
+
+        made = runs.release(
+            cell_id="train",
+            computation_key="k",
+            variant=None,
+            what="revert",
+            stage=lambda release_id, staged: None,
+        )
+
+        assert made == [], "made current (nothing staged), not left waiting"
+
 
 class TestTwoProcessesWithOneHostAndPid:
     """Two processes on one store whose hostname and pid agree, as two containers given one

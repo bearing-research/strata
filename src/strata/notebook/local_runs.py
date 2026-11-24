@@ -215,9 +215,11 @@ class LocalRuns:
         writable_until: float,
         *,
         init: str | None = None,
+        beside: bool = False,
     ) -> str | None:
         """Create a build of the computation with *attempt* open on it; its id, or None when
-        another process opened a build of it first (SYSTEMS LR-2)."""
+        another process opened a build of it first (SYSTEMS LR-2). With *beside*, it opens
+        whatever else of the computation is open."""
         occurrence = f"variant={variant}" if variant else None
         build_id = uuid.uuid4().hex
         # A build references a version, so a run whose outputs do not exist yet targets a
@@ -252,11 +254,19 @@ class LocalRuns:
                 principal_id=caller_principal_id(),
                 params={"init": init} if init else None,
                 principal=caller_principal_id(),
+                beside=beside,
             )
-        except BaseException:
-            # Unless the open committed and only its reply was lost, nothing targets it.
-            if self.builds.get_build(build_id) is None:
+        except BaseException as exc:
+            # The open may have committed with its reply lost: its live lease would refuse
+            # every run for a minute, so fail it. The open's error is the one raised.
+            try:
+                if self.builds.get_build(build_id) is not None:
+                    self.builds.fail_build(
+                        build_id, f"its open raised: {exc!r}", lease_owner=lease_owner(attempt)
+                    )
                 self.store.fail_artifact(placeholder_id, version)
+            except Exception as cleanup:
+                exc.add_note(f"Failing the run's placeholder raised too: {cleanup!r}")
             raise
         if opened.build_id != build_id:
             self.store.fail_artifact(placeholder_id, version)
@@ -335,12 +345,15 @@ class LocalRuns:
             logger.info("Cell %s's %s waits for its run, build %s", cell_id, what, running.build_id)
             return None
         attempt = uuid.uuid4().hex
+        # Beside a lapsed build (a run that died); with none open, a run that opens
+        # meanwhile comes back and this waits for it.
         build_id = self._new_build(
             cell_id,
             computation_key,
             variant,
             attempt,
             time.time() + WRITE_WINDOW_MARGIN_SECONDS,
+            beside=running is not None,
         )
         if build_id is None:
             logger.info("Cell %s's %s waits for a run that just opened", cell_id, what)
