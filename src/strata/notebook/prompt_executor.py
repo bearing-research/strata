@@ -753,6 +753,7 @@ async def _object_text(
         try:
             process = await asyncio.create_subprocess_exec(
                 str(python_executable),
+                "-P",  # as run_harness: no shadowing by this package's modules
                 str(_OBJECT_TEXT_HARNESS),
                 value.content_type,
                 str(path),

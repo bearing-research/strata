@@ -28,9 +28,10 @@ uv run --with datafusion strata-worker --port 9000 --log-level warning &
 DF_PID=$!
 
 echo "[workers] starting gpu-fly on port 9001..."
-# gpu-fly will eventually run with torch + sentence-transformers pre-installed
-# (matching the cloud GPU worker image). For Day 1 placeholder cells it only
-# needs scikit-learn + numpy, which are already in the base venv.
+# gpu-fly runs `embed`, which imports sentence-transformers (and with it torch).
+# With uv on PATH the worker runs each cell in the notebook's locked environment
+# (its uv.lock, written when the server first syncs the notebook), so those come
+# from the notebook's pyproject.toml rather than this interpreter.
 uv run strata-worker --port 9001 --log-level warning &
 GPU_PID=$!
 

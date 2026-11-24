@@ -26,8 +26,9 @@ uv tool install strata-notebook
 strata-notebook
 ```
 
-This puts `strata-notebook`, `strata`, `strata-notebook-tui` and
-`strata-worker` on `PATH` in a tool environment of their own. The wheel
+This puts `strata-notebook`, `strata`, `strata-notebook-tui`,
+`strata-worker` and `strata-agent-hook` on `PATH` in a tool environment of
+their own. The wheel
 is pure Python and ships the frontend prebuilt.
 
 ### pipx, pip or conda
@@ -79,7 +80,7 @@ Add extras in brackets with any installer, for example
 
 | Extra | Enables |
 | --- | --- |
-| `mcp` | The `/mcp` endpoint a coding agent connects to. `strata agent` needs it. |
+| `mcp` | The `/mcp` endpoint a coding agent connects to. It is off until the server starts with `STRATA_MCP_ENABLED=true`, which `strata agent` sets for the server it starts. `strata agent` needs it. |
 | `tui` | The terminal viewer: `strata watch`, `strata-notebook-tui`, and `strata agent` unless you pass `--no-tui`. |
 | `sql` | SQL cells. Add a driver extra for each database you connect to: `sql-duckdb`, `sql-sqlite`, `sql-postgres`, `sql-snowflake`, `sql-bigquery`. |
 | `postgres` | A Postgres metadata database for the artifact store (`STRATA_ARTIFACT_METADATA_DSN`), for several nodes sharing one store. |
@@ -92,14 +93,15 @@ Add extras in brackets with any installer, for example
 
 ## GitHub Codespaces (zero setup)
 
-Click **"Open in Codespaces"** on the [repo](https://github.com/bearing-research/strata)
-and the server is running by the time the browser tab opens. No local
+On the [repo](https://github.com/bearing-research/strata), click
+**Code → Codespaces → Create codespace on main**, and the server is running by the time the browser tab opens. No local
 toolchain needed. See [Codespaces](../deployment/codespaces.md) for what
 the devcontainer provisions.
 
 ## Docker (easiest)
 
-No local toolchain required:
+No local toolchain required beyond Docker. From a clone of the
+[repo](https://github.com/bearing-research/strata), which holds the compose file:
 
 ```bash
 docker compose up -d --build
@@ -213,8 +215,11 @@ uv run pre-commit run --all-files
 # Type check (scope is set in pyproject.toml, as in CI)
 uv run ty check
 
-# Start frontend dev server (hot reload, proxies to backend)
-cd frontend && npm run dev
+# Frontend dev server with hot reload. Vite does not proxy to the
+# backend: point the UI at the server, and let the server accept
+# Vite's origin. The server in one terminal, Vite in another:
+STRATA_CORS_ALLOW_ORIGINS='["http://localhost:5173"]' uv run strata-notebook
+cd frontend && npm ci && VITE_STRATA_URL=http://localhost:8765 npm run dev
 ```
 
 ### Integration test dependencies

@@ -394,6 +394,9 @@ async def _run_harness(
 
     argv = [
         str(interpreter) if interpreter is not None else sys.executable,
+        # -P: this package's directory stays off sys.path, where its datasets.py and
+        # tables.py would shadow the cell's own packages. Rscript has no such flag.
+        *(() if harness_path.suffix == ".R" else ("-P",)),
         str(harness_path),
         str(manifest_path),
     ]
@@ -817,6 +820,7 @@ def create_notebook_executor_app(
         environment: Any = None,
         language: str = "python",
         mutation_defines: list[str] | None = None,
+        stored_vars: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
@@ -829,6 +833,10 @@ def create_notebook_executor_app(
             raise HTTPException(status_code=400, detail="inputs must be an object")
         if not isinstance(raw_mounts, list):
             raise HTTPException(status_code=400, detail="mounts must be a list")
+        if stored_vars is not None and not (
+            isinstance(stored_vars, list) and all(isinstance(n, str) for n in stored_vars)
+        ):
+            raise HTTPException(status_code=400, detail="stored_vars must be a list of names")
 
         mount_specs = [MountSpec(**mount) for mount in raw_mounts]
         credentials = _worker_credentials()
@@ -875,6 +883,7 @@ def create_notebook_executor_app(
                     environment=environment,
                     language=language,
                     mutation_defines=mutation_defines,
+                    stored_vars=stored_vars,
                     tables=tables,
                 )
         finally:
@@ -897,6 +906,7 @@ def create_notebook_executor_app(
         environment: Any = None,
         language: str = "python",
         mutation_defines: list[str] | None = None,
+        stored_vars: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
@@ -972,6 +982,9 @@ def create_notebook_executor_app(
                 # Same as a local harness manifest: without them the worker skipped mutation
                 # recapture and left @table names undefined.
                 "mutation_defines": list(mutation_defines or []),
+                # What the server stores; older servers do not say, and every output is
+                # checked for sharing an object.
+                **({} if stored_vars is None else {"stored_vars": stored_vars}),
                 "tables": tables or {},
                 "strata_cell_id": cell_id,
                 # Only when a reader forwards it (``_drain`` posts chunks to log_url);
@@ -1135,6 +1148,7 @@ def create_notebook_executor_app(
         environment: Any = None,
         language: str = "python",
         mutation_defines: list[str] | None = None,
+        stored_vars: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
     ) -> Response:
@@ -1168,6 +1182,7 @@ def create_notebook_executor_app(
             environment=environment,
             language=language,
             mutation_defines=mutation_defines,
+            stored_vars=stored_vars,
             tables=tables,
             cell_id=cell_id,
         )
@@ -1319,6 +1334,7 @@ def create_notebook_executor_app(
                 cell_id=str(metadata.get("cell_id") or "") or None,
                 trace_carrier=dict(http_request.headers),
                 mutation_defines=metadata.get("mutation_defines"),
+                stored_vars=metadata.get("stored_vars"),
                 tables=metadata.get("tables"),
                 environment=metadata.get("environment"),
                 language=str(metadata.get("language") or "python"),
@@ -1401,6 +1417,7 @@ def create_notebook_executor_app(
                 environment=params.get("environment"),
                 language=str(params.get("language") or "python"),
                 mutation_defines=params.get("mutation_defines"),
+                stored_vars=metadata.get("stored_vars"),
                 tables=params.get("tables"),
             )
 
@@ -1558,6 +1575,7 @@ def create_notebook_executor_app(
             environment=params.get("environment"),
             language=str(params.get("language") or "python"),
             mutation_defines=params.get("mutation_defines"),
+            stored_vars=metadata.get("stored_vars"),
             tables=params.get("tables"),
         )
         if isinstance(bundle_result, JSONResponse):

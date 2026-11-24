@@ -4,9 +4,10 @@
 # the slice. ``is_outlier`` references it as a free variable, which
 # leaves the synthetic module unable to resolve the name at call time.
 #
-# Running this cell errors at execution time. The diagnostic message
-# names both the function (``is_outlier``) and the unresolved variable
-# (``runtime_threshold``), pointing the user straight at the fix.
+# The cell itself runs; the diagnostic on it names both the function
+# (``is_outlier``) and the unresolved variable (``runtime_threshold``),
+# pointing the user straight at the fix. The consumer below shows the
+# NameError the call would raise.
 #
 # To unblock: move ``runtime_threshold`` into its own cell so the slice
 # only contains ``is_outlier``, and let the threshold flow through the

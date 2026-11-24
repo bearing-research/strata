@@ -52,10 +52,10 @@ of every edge happen to be R.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Open `examples/r_mtcars_analysis` from the Strata home page and run the
+Open **R: mtcars regression + inline plots** from the notebook list on the Strata home page and run the
 cells top to bottom. Or run it headlessly, `strata run` executes R cells
 and restores the notebook's `renv.lock` on the way in:
 

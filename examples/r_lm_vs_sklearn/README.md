@@ -2,10 +2,10 @@
 
 Fit the same housing-price model with R's `lm()` and Python's
 `scikit-learn`. Hand the coefficients + held-out predictions back to
-a Python cell over Arrow IPC and read them side by side. This is the
-mixed-language notebook that #59 (the R Phase 1 capstone) was
-designed for, Python data prep, R modeling, Python comparison +
-viz, with the artifact store gluing everything together.
+a Python cell over Arrow IPC and read them side by side. It is a
+mixed-language notebook end to end: Python data prep, R modeling,
+Python comparison + viz, with the artifact store gluing everything
+together.
 
 ## What it shows
 
@@ -21,7 +21,7 @@ viz, with the artifact store gluing everything together.
   pandas). The numbers should match to ~1e-12; the demo's value is
   *how* each toolkit expresses the fit, not which is more accurate.
 - **R surfaces stats Python doesn't.** Std-errors, t-statistics,
-  p-values for every coefficient, sklearn's `LinearRegression`
+  p-values for every coefficient; sklearn's `LinearRegression`
   ships none of that. The comparison cell leaves those columns NaN
   on the sklearn side.
 
@@ -41,7 +41,7 @@ viz, with the artifact store gluing everything together.
   project-scoped library automatically; no system installs beyond R
   itself. On macOS: `brew install r`. On Ubuntu: see
   [CRAN](https://cran.r-project.org/). The strata-notebook server
-  surfaces a clean skip / error if R is missing, no crash.
+  surfaces a clean skip or error if R is missing, not a crash.
 - **Python deps** declared in this notebook's `pyproject.toml`
   (`pandas`, `numpy`, `scikit-learn`). Strata's per-notebook `uv
   sync` handles them automatically the first time you open the
@@ -52,10 +52,10 @@ viz, with the artifact store gluing everything together.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Then open `examples/r_lm_vs_sklearn` from the Strata home page and
+Then open **R lm() vs scikit-learn** from the notebook list on the Strata home page and
 run the cells top-to-bottom.
 
 ## Expected output
@@ -88,7 +88,7 @@ solution; the `lm_p_value` column is R-only.
 
 1. **Edit the model.** Drop `bedrooms` from the R formula
    (`lm(price ~ sqft + age + location)`) and watch the comparison
-   reshape, `compare` shows the row dropping out.
+   reshape: `compare` shows the row dropping out.
 2. **Misalign the baseline level.** In `fit-sklearn`, replace the
    `sorted(...)` in `location_levels = sorted(...)` with an unsorted
    list, `list(housing_train["location"].unique())`. When the first

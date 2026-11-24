@@ -66,6 +66,8 @@ session updates. Captured from a real run, not a mock-up.*
 
 === "Docker"
 
+    From a clone of the [repo](https://github.com/bearing-research/strata):
+
     ```bash
     docker compose up -d --build
     ```

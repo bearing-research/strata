@@ -141,6 +141,8 @@ class PythonContext:
     collect_output_dirs_off_loop: Callable[..., Awaitable[Any]]
     keep_failed_output_dirs: Callable[..., None]
     store_outputs: Callable[..., bool]
+    # What a run stores, as known before it runs (``CellExecutor._stored_vars``).
+    stored_vars: Callable[..., list[str]]
     close_open_run: Callable[[str], Awaitable[None]]
     push_to_team_store: Callable[..., Awaitable[None]]
     stage_run_records: Callable[..., list[StagedVersion]]
@@ -746,6 +748,12 @@ async def run_python_cell(
                 timeout_seconds,
                 remote_build_id=remote_build_id,
                 mutation_defines=list(getattr(cell, "mutation_defines", []) or []),
+                stored_vars=context.stored_vars(
+                    cell_id,
+                    source,
+                    variant=fanout_variant,
+                    stochastic=prov.annotations.stochastic,
+                ),
                 tables=manifest_tables,
                 cell_id=cell_id,
                 cell_provenance_hash=provenance_hash,
@@ -1046,6 +1054,7 @@ async def dispatch_local(
     runtime_env: dict[str, str],
     timeout_seconds: float,
     mutation_defines: list[str] | None = None,
+    stored_vars: list[str] | None = None,
     tables: dict[str, dict[str, Any]] | None = None,
     cell_id: str | None = None,
     local_run: LocalRun | None = None,
@@ -1070,6 +1079,7 @@ async def dispatch_local(
                 runtime_env,
                 resolved_mounts,
                 mutation_defines=mutation_defines,
+                stored_vars=stored_vars,
                 tables=tables,
                 cell_id=cell_id,
                 run_token=run_token,
@@ -1161,7 +1171,9 @@ async def run_harness(
             "stdout": "",
             "variables": {},
         }
-    cmd = [str(venv_python), str(harness_path), str(manifest_path)]
+    # -P: this package's directory stays off sys.path, where its datasets.py and
+    # tables.py would shadow the cell's own packages.
+    cmd = [str(venv_python), "-P", str(harness_path), str(manifest_path)]
 
     # New process group so cancel can signal the whole descendant tree (DataLoader
     # workers, multiprocessing pools); ``proc.kill()`` alone leaks children.

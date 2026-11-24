@@ -282,6 +282,15 @@ def apply_env_overrides(manifest: dict):
                 os.environ[key] = value
 
 
+def _stored(outputs: dict[str, Any], stored_vars: list[str] | None) -> dict[str, Any]:
+    """The outputs a run stores, when the manifest says; else all of them."""
+    if stored_vars is None:
+        return outputs
+    # In definition order: a warning names the output defined first.
+    kept = set(stored_vars)
+    return {name: value for name, value in outputs.items() if name in kept}
+
+
 def execute_cell(
     source: str,
     inputs: dict,
@@ -291,6 +300,7 @@ def execute_cell(
     stderr_capture: io.StringIO | None = None,
     cell_id: str | None = None,
     around_body: Callable[[], AbstractContextManager[Any]] = nullcontext,
+    stored_vars: list[str] | None = None,
 ) -> tuple[dict, list[Any], str, str, list[dict], dict[str, Any] | None]:
     """Execute a cell; return outputs, displays, captured streams, mutations and loop state.
 
@@ -350,8 +360,12 @@ def execute_cell(
             _immut.detect_mutations(namespace, input_snapshots, exported_names=set(new_vars))
         )
         # Outputs sharing a mutable object decouple once stored as separate artifacts
-        # (e.g. an optimizer over a model's parameters).
-        mutation_warnings.extend(_immut.detect_shared_mutable_outputs(new_vars))
+        # (e.g. an optimizer over a model's parameters). Only what is stored: ``fig, ax``
+        # share a figure, harmlessly, while neither is kept. A manifest that does not
+        # say (an older server's) has every output checked.
+        mutation_warnings.extend(
+            _immut.detect_shared_mutable_outputs(_stored(new_vars, stored_vars))
+        )
         return (
             new_vars,
             display_values,
@@ -1041,6 +1055,7 @@ def main():
                     stderr_capture=stderr_buffer,
                     cell_id=manifest.get("strata_cell_id"),
                     around_body=body,
+                    stored_vars=manifest.get("stored_vars"),
                 )
             read_audit = _audit.report(
                 observed,

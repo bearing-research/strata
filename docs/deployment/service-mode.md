@@ -243,8 +243,8 @@ Compared to personal mode:
 - **No default artifact dir.** The artifact store exists only when
   `STRATA_ARTIFACT_DIR` is set, even when its metadata and blobs live
   elsewhere. Service mode refuses to start with a DSN, a non-local blob
-  backend or `STRATA_SERVICE_WRITES_ENABLED` and no
-  `STRATA_ARTIFACT_DIR`. Without any of those it runs scan-only, with no
+  backend, `STRATA_SERVICE_WRITES_ENABLED`, `STRATA_AUTH_MODE=api_key` or
+  enabled transforms and no `STRATA_ARTIFACT_DIR`. Without any of those it runs scan-only, with no
   artifact store.
 - **What is durable, and where.** The *metadata store* (Postgres with
   `STRATA_ARTIFACT_METADATA_DSN`, otherwise `artifacts.sqlite` in the

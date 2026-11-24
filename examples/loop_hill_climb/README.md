@@ -4,14 +4,14 @@ Four-code-cell notebook (plus a markdown cell) that exercises every moving part 
 cell feature: the `@loop` / `@loop_until` annotations, per-iteration
 artifacts, the progress badge, the iteration picker, and the
 `@loop start_from` fork. The cell body is greedy hill climbing on
-[Himmelblau's function](https://en.wikipedia.org/wiki/Himmelblau%27s_function) , 
+[Himmelblau's function](https://en.wikipedia.org/wiki/Himmelblau%27s_function),
 small enough to reason about and visually interesting because there
 are four equal-valued minima, so different seeds (and different forks)
 converge to different basins.
 
 ## What to look at
 
-- **`helpers`** is a module cell, imports (``random``) and a
+- **`helpers`** is a module cell: imports (``random``) and a
   reusable function (``himmelblau``). It declares no top-level
   runtime state, so Strata treats it as a shareable module whose
   names are directly referenceable from every downstream cell.
@@ -29,7 +29,7 @@ converge to different basins.
     keeps the move if it improves the score. The step size shrinks on
     every accepted move so the search sharpens.
   - ``random`` and ``himmelblau`` come from the ``helpers`` cell via
-    the DAG, no duplicate imports or redefinitions here.
+    the DAG, with no duplicate imports or redefinitions here.
   - Every iteration stores the full `state` as its own artifact
     (`nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}`).
 - **`summary`** is a regular downstream cell. It reads the final
@@ -38,11 +38,13 @@ converge to different basins.
 
 ## Running
 
+From the project root:
+
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Open the notebook from the Strata home page, then run the four code
+Open **Hill Climb Loop** from the notebook list on the Strata home page, then run the four code
 cells in order. While `evolve` is running you should see:
 
 - A `iter k/40` progress badge next to the cell title, with a spinner
@@ -115,5 +117,6 @@ prefix (iters 0..K) and diverge after.
   each on this machine). For agentic LLM loops the per-iteration
   network call dwarfs that; for tight numerical loops the pool reuse
   is a future optimization.
-- The loop cell runs only on the `local` worker in Phase 1. Remote
-  worker support is a later phase.
+- A loop cell runs on the notebook's own server, never on a remote
+  worker: one whose `# @worker` (or the notebook's default worker) names
+  another fails before it starts.

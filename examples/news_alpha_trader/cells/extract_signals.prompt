@@ -7,9 +7,10 @@
 #
 # Extracts structured sentiment for each article in the unprocessed
 # batch. The schema enums are deliberately narrow: a tighter enum
-# means cleaner aggregation SQL downstream. The validate-and-retry
-# loop kicks in when the provider falls back to json_object mode
-# (Anthropic, Gemini, Mistral) and the response doesn't quite match.
+# means cleaner aggregation SQL downstream. Anthropic gets the schema as
+# a native tool and OpenAI-compatible endpoints as json_schema; the
+# validate-and-retry loop matters most when another endpoint falls back
+# to json_object mode and the response doesn't quite match.
 #
 # Prompt-design note: earlier prompts told the model to "err toward
 # low confidence on ambiguous headlines." Models read that as "omit

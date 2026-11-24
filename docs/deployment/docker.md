@@ -168,7 +168,8 @@ The multi-stage Dockerfile:
 1. **Frontend builder** (Node 26) builds the Vue.js UI
 2. **Backend builder** (uv) builds the pure-Python wheel
 3. **Runtime**: minimal image with the wheel, the frontend dist, and
-   the `otel`, `postgres`, `sql`, `sql-sqlite` and `mcp` extras, so OTLP
-   tracing, a Postgres artifact store (`STRATA_ARTIFACT_METADATA_DSN`),
-   SQL cells over DuckDB or SQLite and the `/mcp` endpoint
-   (`STRATA_MCP_ENABLED=true`) work without building your own image
+   the `otel`, `postgres`, `sql`, `sql-sqlite`, `mcp` and `infisical`
+   extras, so OTLP tracing, a Postgres artifact store
+   (`STRATA_ARTIFACT_METADATA_DSN`), SQL cells over DuckDB or SQLite, the
+   `/mcp` endpoint (`STRATA_MCP_ENABLED=true`) and the Infisical secret
+   provider work without building your own image

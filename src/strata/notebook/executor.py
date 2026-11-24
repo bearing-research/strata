@@ -1195,6 +1195,7 @@ class CellExecutor:
             collect_output_dirs_off_loop=self._collect_output_dirs_off_loop,
             keep_failed_output_dirs=self._keep_failed_output_dirs,
             store_outputs=self._store_outputs,
+            stored_vars=self._stored_vars,
             close_open_run=self._close_open_run,
             push_to_team_store=self._push_to_team_store,
             stage_run_records=self._stage_run_records,
@@ -1728,6 +1729,7 @@ class CellExecutor:
         timeout_seconds: float,
         remote_build_id: str | None = None,
         mutation_defines: list[str] | None = None,
+        stored_vars: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
@@ -1754,6 +1756,7 @@ class CellExecutor:
             timeout_seconds,
             remote_build_id=remote_build_id,
             mutation_defines=mutation_defines,
+            stored_vars=stored_vars,
             tables=tables,
             cell_id=cell_id,
             cell_provenance_hash=cell_provenance_hash,
@@ -1772,6 +1775,7 @@ class CellExecutor:
         runtime_env: dict[str, str],
         timeout_seconds: float,
         mutation_defines: list[str] | None = None,
+        stored_vars: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
         local_run: LocalRun | None = None,
@@ -1798,6 +1802,7 @@ class CellExecutor:
             runtime_env,
             timeout_seconds,
             mutation_defines=mutation_defines,
+            stored_vars=stored_vars,
             tables=tables,
             cell_id=cell_id,
             local_run=local_run,
@@ -1816,6 +1821,7 @@ class CellExecutor:
         runtime_env: dict[str, str],
         timeout_seconds: float,
         mutation_defines: list[str] | None = None,
+        stored_vars: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
         resolved_mounts: dict[str, ResolvedMount] | None = None,
@@ -1837,6 +1843,7 @@ class CellExecutor:
             runtime_env,
             timeout_seconds,
             mutation_defines=mutation_defines,
+            stored_vars=stored_vars,
             tables=tables,
             cell_id=cell_id,
             resolved_mounts=resolved_mounts,
@@ -1863,6 +1870,7 @@ class CellExecutor:
         timeout_seconds: float,
         remote_build_id: str | None = None,
         mutation_defines: list[str] | None = None,
+        stored_vars: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
@@ -1881,6 +1889,7 @@ class CellExecutor:
             timeout_seconds,
             remote_build_id=remote_build_id,
             mutation_defines=mutation_defines,
+            stored_vars=stored_vars,
             tables=tables,
             cell_id=cell_id,
             cell_provenance_hash=cell_provenance_hash,
@@ -2699,6 +2708,34 @@ class CellExecutor:
             }
         return tables
 
+    def _unread_kept(self, cell_id: str, *, variant: str | None, stochastic: bool) -> set[str]:
+        """What a run of *cell_id* keeps that no cell reads: a scratchpad's unread
+        defines, best-effort, or a leaf's every define under ``store_leaf_outputs``.
+        Only the cell's own key: an instance's, a variant's or a stochastic run's are
+        found through what is read."""
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None or self.session.dag is None:
+            return set()
+        kept = kept_unread(self.session, cell_id) if variant is None and not stochastic else set()
+        if not kept and self.store_leaf_outputs:
+            if not self.session.dag.consumed_variables.get(cell_id):
+                kept = set(cell.defines)
+        return kept
+
+    def _stored_vars(
+        self, cell_id: str, source: str, *, variant: str | None, stochastic: bool
+    ) -> list[str]:
+        """What a run of *cell_id* stores (``_store_outputs``), as known before it runs:
+        only these are checked for sharing an object. A run whose input moves is kept as
+        stochastic after it ran, so its list errs wide."""
+        dag = self.session.dag
+        if dag is None:
+            return []
+        kept = self._unread_kept(cell_id, variant=variant, stochastic=stochastic)
+        # A def or class is kept only as its module export, never as a shared value.
+        kept -= unshared_code(source)
+        return sorted(dag.consumed_variables.get(cell_id, set()) | kept)
+
     def _write_manifest(
         self,
         source: str,
@@ -2707,6 +2744,7 @@ class CellExecutor:
         runtime_env: dict[str, str],
         resolved_mounts: dict[str, ResolvedMount],
         mutation_defines: list[str] | None = None,
+        stored_vars: list[str] | None = None,
         loop_config: dict[str, Any] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
@@ -2743,6 +2781,8 @@ class CellExecutor:
             "tables": tables or {},
             "env": runtime_env,
             "mutation_defines": list(mutation_defines or []),
+            # What the run stores, so only those are checked for sharing an object.
+            **({} if stored_vars is None else {"stored_vars": list(stored_vars)}),
             "strata_url": self._cell_strata_url(),
             "strata_cell_id": cell_id,
             "strata_promote_url": self._ambient_promote_url(),
@@ -3250,19 +3290,13 @@ class CellExecutor:
         # Nothing reads them yet, so a value that did not serialize is skipped rather than
         # failing the cell; one stored is what a later reader loads. A def or class goes only
         # as its module export: pickled, a reader would get a copy of the class.
-        # Only the cell's own key: an ``@each`` instance's, a variant's or a stochastic
-        # run's are found through what is read.
-        leaf_vars = (
-            kept_unread(self.session, cell_id) if variant is None and not stochastic else set()
-        )
+        leaf_vars = self._unread_kept(cell_id, variant=variant, stochastic=stochastic)
         if leaf_vars:
             leaf_vars -= {
                 name
                 for name in unshared_code(source or cell.source)
                 if not (output_dir / f"{safe_filename_stem(name)}.cell_module.json").exists()
             }
-        elif not consumed_vars and self.store_leaf_outputs:
-            leaf_vars = set(cell.defines)
         if not consumed_vars and not leaf_vars:
             return self._release_nothing(cell_id, local_run, stage_records)
 

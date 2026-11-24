@@ -164,6 +164,7 @@ class TestRoutes:
             **{
                 "remote_build_id": "b1",
                 "mutation_defines": ["d"],
+                "stored_vars": ["s"],
                 "tables": {"t": {}},
                 "cell_id": "c",
                 "cell_provenance_hash": "key",
@@ -192,6 +193,7 @@ class TestRoutes:
         )
         assert kwargs == {
             "mutation_defines": ["d"],
+            "stored_vars": ["s"],
             "tables": {"t": {}},
             "cell_id": "c",
             "local_run": "run",
@@ -209,6 +211,7 @@ class TestRoutes:
         assert args[4] == Path("result")
         assert kwargs == {
             "mutation_defines": ["d"],
+            "stored_vars": ["s"],
             "tables": {"t": {}},
             "cell_id": "c",
             "resolved_mounts": {"m": 1},
@@ -225,6 +228,7 @@ class TestRoutes:
         assert kwargs == {
             "remote_build_id": "b1",
             "mutation_defines": ["d"],
+            "stored_vars": ["s"],
             "tables": {"t": {}},
             "cell_id": "c",
             "cell_provenance_hash": "key",
@@ -279,6 +283,7 @@ class TestEmbedded:
             {"K": "V"},
             7.0,
             mutation_defines=["d"],
+            stored_vars=["s"],
             tables={"t": {}},
             cell_id="c",
             resolved_mounts=resolved_mounts,
@@ -320,6 +325,7 @@ class TestEmbedded:
 
         assert seen.manifest[1] == {
             "mutation_defines": ["d"],
+            "stored_vars": ["s"],
             "tables": {"t": {}},
             "cell_id": "c",
             "run_token": "token",
@@ -518,6 +524,7 @@ class TestDirect:
             input_specs={"x": {"content_type": "pickle/object", "file": "x.pickle"}},
             mounts=[mount],
             mutation_defines=["d"],
+            stored_vars=["c_out"],
             tables={"t": {}},
         )
 
@@ -526,6 +533,9 @@ class TestDirect:
         assert str(request.url) == "http://worker:9/v1/execute"
         assert request.headers[EXECUTOR_PROTOCOL_HEADER] == EXECUTOR_PROTOCOL_VERSION
         assert metadata["origin"] == "run"
+        # What the run stores, beside params: it must not change the transport hash.
+        assert metadata["stored_vars"] == ["c_out"]
+        assert "stored_vars" not in metadata["transform"]["params"]
         # Cached transport hashes key off this exact form.
         assert metadata["provenance_hash"] == derive_subkey("x = 1\n", "['x']")
         assert metadata["inputs"][0] == {
@@ -805,6 +815,7 @@ class TestDirect:
             worker=_worker(transport="signed"),
             remote_build_id="b1",
             mutation_defines=["d"],
+            stored_vars=["s"],
             tables={"t": {}},
             cell_provenance_hash="key",
             language="r",
@@ -814,6 +825,7 @@ class TestDirect:
             {
                 "build_id": "b1",
                 "mutation_defines": ["d"],
+                "stored_vars": ["s"],
                 "tables": {"t": {}},
                 "cell_id": "c",
                 "cell_provenance_hash": "key",
@@ -1725,7 +1737,9 @@ class TestSigned:
         context, _phases = _context(origin="run")
         http.answers.append(httpx.Response(200))
 
-        await self._run(tmp_path, context=context, cell_provenance_hash="key")
+        await self._run(
+            tmp_path, context=context, cell_provenance_hash="key", stored_vars=["c_out"]
+        )
 
         manifest = signed.manifest
         metadata = manifest["metadata"]
@@ -1741,6 +1755,8 @@ class TestSigned:
         assert metadata["notebook_id"] == "nb"
         assert metadata["cell_id"] == "c"
         assert metadata["cell_provenance_hash"] == "key"
+        assert metadata["stored_vars"] == ["c_out"]
+        assert "stored_vars" not in metadata["params"]
         assert metadata["origin"] == "run"
         assert metadata["version"] == 4
         assert metadata["traceparent"] == "tp"

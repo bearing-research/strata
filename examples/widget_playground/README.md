@@ -33,10 +33,10 @@ the grid and the chart update.
 From the project root:
 
 ```bash
-uv run strata-notebook
+uv run strata-notebook --notebook-dir examples
 ```
 
-Open `examples/widget_playground` from the Strata home page.
+Open **Widget Playground** from the notebook list on the Strata home page.
 
 ## Try this
 

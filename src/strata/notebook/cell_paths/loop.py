@@ -497,6 +497,8 @@ async def _run_loop(
                         runtime_env,
                         resolved_mounts,
                         mutation_defines=mutation_defines,
+                        # Each iteration keeps the carry, and the last the consumed rest.
+                        stored_vars=sorted({loop.carry, *extra_consumed}),
                         loop_config=loop_config,
                         tables=loop_tables,
                         cell_id=cell_id,
