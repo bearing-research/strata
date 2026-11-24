@@ -50,6 +50,19 @@ def test_a_loop_until_alone_outside_python_blocks_the_cell():
     assert "`@loop_until`" in diagnostic.message
 
 
+@pytest.mark.parametrize("key", ["loop max_iter=2 carry=x", "loop_until x > 3"])
+def test_a_sql_loop_reports_its_error_alone(key):
+    """Not also ``annotation_not_for_sql``: the error already says why."""
+    cell = CellState(id="c", source=f"-- @sql connection=db\n-- @{key}\nSELECT 1\n", language="sql")
+    state = NotebookState(
+        id="nb", cells=[cell], connections=[ConnectionSpec(name="db", driver="sqlite")]
+    )
+
+    codes = [d.code for d in validate_cell_annotations(cell, state)]
+
+    assert "loop_not_python" in codes and "annotation_not_for_sql" not in codes
+
+
 def test_a_python_loop_is_not_refused():
     cell = CellState(id="c", source="# @loop max_iter=2 carry=x\nx = x + 1\n", language="python")
 

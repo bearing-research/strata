@@ -39,9 +39,10 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 These eight are the only ones a SQL cell acts on. Any other annotation, such as
 `-- @worker` or `-- @timeout`, does nothing on a SQL cell, and validation warns
 about it (`annotation_not_for_sql`). A SQL cell runs in the server, so it has no
-worker, timeout or environment of its own. `-- @each` and `-- @per_variant` run
-Python cells only: on a SQL cell each is an error (`each_not_python`,
-`per_variant_not_python`), and the cell does not run.
+worker, timeout or environment of its own. `-- @each`, `-- @per_variant` and
+`-- @loop` (with `-- @loop_until`) run Python cells only: on a SQL cell each is an
+error (`each_not_python`, `per_variant_not_python`, `loop_not_python`), and the
+cell does not run.
 
 ## `@sql`
 

@@ -601,7 +601,7 @@ SQL_ANNOTATION_KEYS = frozenset(
     {"sql", "cache", "nocache", "name", "after", "mount", "variant", "stochastic"}
 )
 # Refused on a SQL cell by an error of their own, which says why.
-_REFUSED_ON_SQL = frozenset({"each", "per_variant"})
+_REFUSED_ON_SQL = frozenset({"each", "per_variant", "loop", "loop_until"})
 
 
 def sql_annotation_diagnostics(source: str) -> list[AnnotationDiagnostic]:
