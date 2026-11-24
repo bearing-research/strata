@@ -215,10 +215,15 @@ def restore_manifest(
     if bundle is None or bundle.release.state != "accepted":
         raise RuntimeError(f"Release {release_id} is not an accepted release of this notebook")
     (output_dir / RESTORE_DIR).mkdir(exist_ok=True)
-    restore: dict[str, Any] = {
-        "release_id": release_id,
-        "sequence": bundle.release.sequence if run.resumed_from else 0,
-    }
+    sequence = 0
+    if run.resumed_from:
+        # Past every row the build has: a checkpoint the dead attempt began but never
+        # accepted still holds its sequence.
+        sequence = max(
+            r.sequence or 0
+            for r in artifact_mgr.release_store.releases_of(run.build_id, "checkpoint")
+        )
+    restore: dict[str, Any] = {"release_id": release_id, "sequence": sequence}
     files = checkpoint_files.files_of(bundle.outputs)
     if files:
         folder = f"{RESTORE_DIR}/{CHECKPOINTS_DIR}"

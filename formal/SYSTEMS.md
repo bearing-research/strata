@@ -91,7 +91,7 @@ cache directory, eviction to the size limit, `clear()`.
 | CK-1 | Equal keys mean equal cached content: every input that decides a cached row group's bytes is in its key. | property `test_cache_soundness_properties.py` (finding 16): one long-lived planner and fetcher, with restarts on the same cache, under appends, positional and equality deletes, files registered and replaced at a fixed path (omitting their partition column), schema evolution and drop-and-recreate, against a model of the live rows; tests `tests/test_row_group_cache_key.py`. Lead (a), a file registered again under another partition value, was finding 16 and is fixed. Lead (b) rests on an assumption about writers: the delete-row caches (`DeletedRows`, `EqualityDeleteSets`) and the equality part of `deletes` name a delete file by its path alone, which is safe while writers never reuse a delete file's path (they name them by uuid; `add_files` registers data files only). |
 | CK-2 | The projection fingerprint is injective. | test `tests/test_smoke.py::TestCacheKey` (finding 4) |
 | CK-3 | A reader never sees a partial or torn entry. | construction: `put` writes a temp file, fsyncs and `os.replace`s it; an unlinked file stays readable through an open descriptor on POSIX. Not checked on Windows, where replace over an open file fails. |
-| CK-4 | A cache failure is a miss, never a failed scan. | none. **Lead:** `clear()` racing a `put` makes the temp write raise, and `_fetch_from_storage` does not catch it. |
+| CK-4 | A cache failure is a miss, never a failed scan. | test `tests/test_cache_optimized.py::TestAFailedCacheWriteIsAMiss` (finding 25: a `clear()` between a put's mkdir and its write; a full disk fails the write the same way). |
 
 ## 4. Planning metadata
 
@@ -103,7 +103,7 @@ plans by `(catalog, identity, snapshot_id, filter)`.
 
 | ID | Property | Checked by |
 | --- | --- | --- |
-| MD-1 | A cached metadata file holds the bytes its location holds. | test `tests/test_iceberg_metadata_files.py` for the write and read path. **Leads:** a Hadoop-style catalog names metadata `vN.metadata.json`, and drop with purge then recreate reuses `v1.metadata.json`; a short read is cached without a length check. |
+| MD-1 | A cached metadata file holds the bytes its location holds. | test `tests/test_iceberg_metadata_files.py` for the write and read path. **Leads:** a Hadoop-style catalog names metadata `vN.metadata.json`, and drop with purge then recreate reuses `v1.metadata.json`. A short read was a lead too; it does not hold: pyarrow's and fsspec's S3 readers both raise on a body shorter than its `Content-Length` (replayed against a server that closed early), so nothing is cached. |
 | MD-2 | A cached plan belongs to the table it is served for. | property `test_cache_soundness_properties.py` exercises time travel across recreates and restarts. The manifest-plan key has no table uuid, so the property rests on snapshot ids being random 63-bit numbers (as Iceberg writers make them): a recreated table would have to reuse one. |
 
 ## 5. Pruning
@@ -190,7 +190,7 @@ is the sole source of truth".
 | ID | Property | Checked by |
 | --- | --- | --- |
 | BAT-1 | Run All leaves the same stored values and statuses as running each cell in order. | property `test_run_all_properties.py` (findings 19 and 20: the cascade a single-cell run takes marked every step after a failure stale, and a cell blocked behind a failure was called idle by the next run's staleness walk; finding 21: a batched cell read an input the cell before it changed in place, which a single run never sees, and its result was cached under the unchanged input's key). Covers in-place mutation of an upstream list, failing cells and a consumer above its producer (a reference to a variable defined below is unresolved in both paths). Not covered: module state, `@nocache`, workers, loops |
-| BAT-2 | A `@nocache` cell runs at most once per run. | none. **Lead:** batch results are not recorded in the run's at-most-once record, so a later single-cell consumer runs a batched `@nocache` producer again. |
+| BAT-2 | A `@nocache` cell runs at most once per run. | tests `tests/notebook/test_fresh_values.py` (single-cell drivers; `test_run_all_executes_a_batched_fresh_producer_once` for a batch then a single-cell consumer, finding 24). |
 
 ## 10. Local cell runs and the ledger
 
@@ -223,7 +223,7 @@ is the process's, not the attempt's.
 | LR-2 | A live run of a key refuses a second. | test `tests/notebook/test_local_runs.py`, sequentially. **Lead:** `open` checks and acts in separate transactions, so two processes can both find no open build and create two, or one can fail a build the other just resumed. |
 | LR-3 | Only the attempt that holds the lease releases, renews or ends its build. | the ledger's fence for releases (section 7); model `LocalRun_Patched` (`RunAttemptIsOwn`, `OneLiveHolder`). **Lead:** the lease owner is the process (`hostname:pid`), not the attempt, and the close path (`renew_lease(…, 0)`, `fail_build(lease_owner=…)`) is not checked against the attempt; within one process, runs of one computation are serialized, so this needs two processes sharing a pid. |
 | LR-6 | A lease that lapses while no other process wants the build never costs the run. | model `LocalRun_Patched` (`NoNeedlessFence`; `LocalRun_Lapse` shows finding 13, `LocalRun_Race` the fix without its lock); test `tests/notebook/test_local_runs.py::TestALapsedLeaseWithNoRival`, also on Postgres. Assumes a hold and its release take far less than the 60 s lease. |
-| LR-4 | A resumed attempt can always release its next checkpoint. | none. **Lead:** the sequence restarts after the newest *accepted* checkpoint, but the unique `(build, kind, sequence)` also counts abandoned and rejected rows; the colliding checkpoint is logged and skipped (`prepare` raises `ReleaseError`), and a `strata.head` naming its sequence can point at the earlier attempt's release. |
+| LR-4 | A resumed attempt can always release its next checkpoint. | test `tests/notebook/test_local_runs.py::TestAResumeAfterAnUnfinishedCheckpoint` (finding 23). |
 | LR-5 | A cell executes at most once per request. | construction: a fenced, timed-out or failed warm run is never run again cold; only a worker that never got the manifest is a miss. Test `tests/notebook/test_subprocess_line_limits.py::test_an_event_that_fails_is_the_run_s_error_not_a_pool_miss` (#1613). |
 | TOK-1 | A run's token is refused once its run ends, and never carries `admin:` scopes. | test `tests/test_run_tokens.py`, `tests/notebook/test_run_token_cells.py` |
 

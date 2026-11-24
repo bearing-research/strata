@@ -3456,21 +3456,25 @@ class TestPythonInputs:
         bundle = SimpleNamespace(
             release=SimpleNamespace(state=state, sequence=4), outputs=[version]
         )
+        # The restored release is checkpoint 4; the dead attempt began 5 and never accepted it.
+        rows = [SimpleNamespace(sequence=4), SimpleNamespace(sequence=5)]
         return SimpleNamespace(
             get_artifact_manager=lambda: SimpleNamespace(
-                release_store=SimpleNamespace(bundle=lambda _id: bundle)
+                release_store=SimpleNamespace(
+                    bundle=lambda _id: bundle, releases_of=lambda _build, _kind: rows
+                )
             )
         )
 
     def test_a_restore_names_where_each_part_came_from(self, tmp_path):
-        run = SimpleNamespace(restores_from="r1", resumed_from="r1")
+        run = SimpleNamespace(restores_from="r1", resumed_from="r1", build_id="b")
 
         restore = python.restore_manifest(
             self._restore_host("accepted"), lambda *_args: None, run, tmp_path
         )
 
         assert restore["parts"]["x"]["uri"] == "strata://artifact/nb_n_cell_c_var_x@v=2"
-        assert restore["sequence"] == 4
+        assert restore["sequence"] == 5
 
     def test_a_checkpoint_file_is_copied_to_its_place_in_the_folder(self, tmp_path, monkeypatch):
         copied = []
@@ -3480,7 +3484,8 @@ class TestPythonInputs:
                 release_store=SimpleNamespace(
                     bundle=lambda _id: SimpleNamespace(
                         release=SimpleNamespace(state="accepted", sequence=1), outputs=[]
-                    )
+                    ),
+                    releases_of=lambda _build, _kind: [SimpleNamespace(sequence=1)],
                 ),
                 copy_ready_blob=lambda *args: copied.append(args),
             )
@@ -3488,7 +3493,7 @@ class TestPythonInputs:
         monkeypatch.setattr(
             python.checkpoint_files, "files_of", lambda _outputs: {"model/w.bin": version}
         )
-        run = SimpleNamespace(restores_from="r1", resumed_from="r1")
+        run = SimpleNamespace(restores_from="r1", resumed_from="r1", build_id="b")
 
         restore = python.restore_manifest(host, lambda *_args: None, run, tmp_path)
 
