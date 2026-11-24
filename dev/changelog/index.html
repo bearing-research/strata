@@ -4618,22 +4618,30 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p><strong>A scratchpad's daemon starts when another process takes its port first.</strong> Its port
+<li><strong>A resumed run keeps its first checkpoint.</strong> A run that died while a checkpoint was
+  being written, or whose checkpoint failed to write, numbered its next attempt's
+  checkpoints from the one it resumed, so the first collided with the abandoned one and
+  was skipped; a run dying there again never got past it. It now numbers past every
+  checkpoint the build has. (#1646)</li>
+<li><strong>Run All runs a <code>@nocache</code> cell once.</strong> A cell run on its own after a batch (a worker,
+  an explicit timeout) ran a batched <code>@nocache</code> cell it reads again, repeating its side
+  effects and reading a different value than the batch did. (#1646)</li>
+<li><strong>A row group the cache cannot keep is still returned.</strong> A full disk, or a cache clear
+  during the write, failed the scan that had just read it. A write that fails halfway no
+  longer leaves an entry without its metadata, or one the cache's size still counts.
+  (#1646)</li>
+<li><strong>A scratchpad's daemon starts when another process takes its port first.</strong> Its port
   was probed free and closed before the daemon bound it; a server that took it between
   answered the setup's health check, and the setup opened the scratchpad there and failed.
   <code>/health</code> now names the server's <code>pid</code>. The setup waits for the daemon it started and
   gives up a taken port for another, whether what took it answers HTTP or not, and
   <code>strata scratch stop</code> no longer waits 30 seconds on another Strata server that took the
-  port of the daemon it stopped. (#1656)</p>
-</li>
-<li>
-<p><strong>A failed change of a notebook's Python puts back the pyproject it had.</strong> When the
+  port of the daemon it stopped. (#1656)</li>
+<li><strong>A failed change of a notebook's Python puts back the pyproject it had.</strong> When the
   new interpreter could not be installed, the rollback restored <code>requires-python</code> only if
   it pinned one minor (<code>==3.12.*</code>); a hand-written range such as <code>&gt;=3.12</code> was left as the
   failed minor, with the venv already deleted. The spec is now put back as written and
-  the environment synced again. (#1648)</p>
-</li>
+  the environment synced again. (#1648)</li>
 <li><strong>A stale cell keeps its outputs after a reopen.</strong> A cell whose current key finds
   nothing stored (an input changed, its source was edited, an upstream went stale, it has
   a read-write mount, or a mount's credential is missing) reopened pointing at nothing,
