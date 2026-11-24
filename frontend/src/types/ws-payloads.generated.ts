@@ -259,6 +259,8 @@ export interface CellView {
   id: string
   /** Cell source code */
   source: string
+  /** The source file notebook.toml names when it was not there to read */
+  file_missing?: string | null
   /** pytest source for this cell's unit tests (cells/{id}.test.py) */
   test_source: string
   test_result?: CellTestResultView | null

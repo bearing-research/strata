@@ -1927,6 +1927,30 @@ async def test_an_edit_tells_a_live_app_view_the_cell_is_hidden(notebook_session
 
 
 @pytest.mark.asyncio
+async def test_typing_a_cell_whose_file_was_missing_clears_the_error(temp_notebook):
+    """The edit writes the file, so the cell no longer says it is missing."""
+    from strata.notebook.ws import _handle_cell_source_update
+
+    notebook_dir, _ = temp_notebook
+    (notebook_dir / "cells" / "root.py").unlink()
+    session = open_session(notebook_dir)
+    root = session.notebook_state.get_cell("root")
+    assert [d.code for d in root.annotation_diagnostics] == ["cell_file_missing"]
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_cell_source_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "root", "source": "x = 1"},
+        execution_state,
+        session.id,
+    )
+
+    assert (notebook_dir / "cells" / "root.py").read_text() == "x = 1"
+    assert session.notebook_state.get_cell("root").annotation_diagnostics == []
+
+
+@pytest.mark.asyncio
 async def test_cell_source_update_carries_the_text_to_other_tabs(notebook_session):
     """A second tab on the session gets the edited text; the editing tab does not.
 

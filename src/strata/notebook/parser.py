@@ -198,10 +198,13 @@ def parse_notebook(directory: Path) -> NotebookState:
     for cell_meta in notebook_toml.cells:
         cell_file = cell_source_path(directory, cell_meta.id, cell_meta.file)
         source = ""
+        file_missing = None
 
-        if cell_file.exists():
+        if cell_file.is_file():
             with open(cell_file, encoding="utf-8") as f:
                 source = f.read()
+        else:
+            file_missing = f"cells/{cell_meta.file}"
 
         # A hand-edited id with path separators must not escape ``cells/``.
         test_path = os.path.realpath(os.path.join(cells_dir, f"{cell_meta.id}.test.py"))
@@ -247,6 +250,7 @@ def parse_notebook(directory: Path) -> NotebookState:
             CellState(
                 id=cell_meta.id,
                 source=source,
+                file_missing=file_missing,
                 test_source=test_source,
                 test_result=test_result,
                 language=cell_meta.language,

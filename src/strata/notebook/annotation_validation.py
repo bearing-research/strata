@@ -87,6 +87,16 @@ def validate_cell_annotations(
     from strata.notebook.graph import analysis_with
     from strata.notebook.vocabulary import strata_diagnostics
 
+    if cell.file_missing is not None:
+        # Read as empty, the cell would run (and pass validation) with none of its code.
+        return [
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.ERROR,
+                code="cell_file_missing",
+                message=f"`{cell.file_missing}` is missing, so this cell has no source: "
+                "restore the file, or delete the cell.",
+            )
+        ]
     if cell.language == CellLanguage.MARKDOWN:
         # Pure prose: ``# @worker`` is a heading, and only ``@app`` is read (unchecked).
         return _app_outside_block(cell)
