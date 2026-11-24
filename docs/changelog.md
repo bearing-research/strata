@@ -799,7 +799,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   transactions, so two processes on one store (a CLI run beside the server) that both
   found nothing could each run the cell. The run now opens its build with vestigo
   0.8.0's `BuildStore.open_build`, one transaction under the computation's lock, and the
-  second process is refused as when the run was already going (#PR).
+  second process is refused as when the run was already going (#1674).
 - **Two different scans no longer share a cache entry by construction of their key.** The
   `scan@v1` identity hash joined its fields with no separator, so text in one field
   could stand in for the next, and the filter fingerprint could not tell a string that
