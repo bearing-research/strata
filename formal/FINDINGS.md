@@ -872,3 +872,17 @@ so a build resumed elsewhere refuses this run. Regression tests:
 run on Postgres. Still open: two processes that both find no open build each create
 one. That needs a computation-keyed open in vestigo; the handoff is
 `docs/internal/one-open-execution.md` in vestigo's checkout, item 8 of its HANDOFF.
+
+### 27. A NaN filter value fails planning on a cold cache
+
+**Property:** `test_bounds_pruning_properties.py` (SYSTEMS 5, PR-2). A scan filtered
+on `f = NaN` (or any operator, with a NaN value) raised `ValueError: Cannot create
+expression literal from NaN` from pyiceberg while the planner built its file-level
+expression. The same scan succeeded once an unfiltered scan of the snapshot had cached
+its manifest resolution, since a filtered plan reuses that and builds no expression, so
+the outcome hung on what ran before. Severity: low (a client must send a NaN value).
+
+**Fixed.** `filters_to_iceberg_expression` leaves a NaN-valued filter out, as it does a
+nested column's, which only widens the file-level pruning; row-group pruning still
+applies it. Regression test:
+`tests/test_filters.py::TestTwoTierPruning::test_a_nan_filter_plans_on_a_cold_cache`.

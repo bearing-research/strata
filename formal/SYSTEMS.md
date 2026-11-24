@@ -116,7 +116,7 @@ conservative: when safety cannot be proved, read the data.
 | ID | Property | Checked by |
 | --- | --- | --- |
 | PR-1 | A pruned row group holds no row the filter keeps. | property `test_pruning_properties.py` (float64, int64, string, timestamp, decimal, with nulls; finding 3) |
-| PR-2 | A pruned data file holds no row the filter keeps. | property `test_cache_soundness_properties.py`, for integer columns under schema evolution (filtered scans return every live row that matches). Not checked: NaN counts and truncated string bounds. |
+| PR-2 | A pruned data file holds no row the filter keeps. | property `test_cache_soundness_properties.py`, for integer columns under schema evolution (filtered scans return every live row that matches); property `test_bounds_pruning_properties.py` for string bounds truncated to 16 characters (multi-byte, and an upper bound that cannot be incremented) and doubles with NaN and infinities, through pyiceberg's manifest evaluator (files written by pyiceberg, with no NaN counts, and as a JVM writer does, with `nan_value_counts`), row-group statistics, and equality delete files skipped by their bounds (`may_apply`; deletes keyed on the string only, since `may_apply` decodes no double bound). A filtered plan reuses a cached unfiltered resolution, so a filter prunes files only on a cold manifest cache; the property scans filtered first. A NaN filter value builds no file-level expression (FINDINGS 27). |
 
 ## 6. Access control
 

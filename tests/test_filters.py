@@ -364,6 +364,21 @@ class TestFilterMatching:
 class TestTwoTierPruning:
     """Two-tier pruning: Iceberg files, then Parquet row groups."""
 
+    @pytest.mark.parametrize(("op", "kept"), [(FilterOp.EQ, False), (FilterOp.NE, True)])
+    def test_a_nan_filter_plans_on_a_cold_cache(
+        self, temp_warehouse_multi_files, planner, op, kept
+    ):
+        """pyiceberg has no NaN literal: the filter prunes row groups only, not files.
+
+        No value equals NaN, so ``= NaN`` prunes every row group and ``!= NaN`` none.
+        """
+        plan = planner.plan(
+            temp_warehouse_multi_files["table_uri"],
+            filters=[Filter(column="value", op=op, value=float("nan"))],
+        )
+
+        assert bool(plan.tasks) is kept
+
     def test_planning_with_filters_includes_fingerprint(self, temp_warehouse_multi_files, planner):
         """The filter fingerprint is part of the cache key."""
         filters = [Filter(column="value", op=FilterOp.LT, value=150)]
