@@ -94,6 +94,74 @@ class TestRegistryHooks:
         registry.pop("s1")
         assert released == ["s1"]
 
+    async def test_a_live_stream_stays_claimed_past_its_first_ttl(self, owners):
+        # A GET that serves the stream, or is refused 429, re-arms its cleanup for another
+        # TTL; the claim written at register time lapses first.
+        registry = StreamRegistry(
+            ttl_seconds=0.2,
+            on_claim=lambda sid, ttl: owners.claim(sid, "http://node-a", ttl),
+            on_release=owners.release,
+        )
+        registry.register(self._state())
+        await registry.claim("s1")
+        registry.register(self._state("gone"))
+        registry.pop("gone")
+
+        time.sleep(0.25)
+        assert owners.resolve("s1", exclude_node_url="http://node-b") is None
+        await registry.renew_claims()
+
+        assert owners.resolve("s1", exclude_node_url="http://node-b") == "http://node-a"
+        assert owners.resolve("gone", exclude_node_url="http://node-b") is None
+
+    async def test_a_stream_ended_during_its_renewal_is_left_unclaimed(self, owners):
+        registry: StreamRegistry
+
+        def claim_after_the_stream_ends(stream_id, ttl):
+            registry.pop(stream_id)  # released while the renewal's write is in flight
+            owners.claim(stream_id, "http://node-a", ttl)
+
+        registry = StreamRegistry(
+            ttl_seconds=30.0, on_claim=claim_after_the_stream_ends, on_release=owners.release
+        )
+        registry.register(self._state())
+
+        await registry.renew_claims()
+
+        assert owners.resolve("s1", exclude_node_url="http://node-b") is None
+
+    async def test_the_server_renews_claims_and_sweeps_expired_ones(self, owners, monkeypatch):
+        import asyncio
+        from types import SimpleNamespace
+
+        from strata import server
+
+        renewals: list[str] = []
+        sleeps: list[float] = []
+
+        async def renew_claims():
+            renewals.append("renewed")
+
+        async def sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) > 2:
+                raise asyncio.CancelledError
+
+        owners.claim("dead-node-stream", "http://node-c", ttl_seconds=0.0)
+        state = SimpleNamespace(
+            config=SimpleNamespace(stream_state_ttl_seconds=300.0),
+            streams=SimpleNamespace(renew_claims=renew_claims),
+            _ownership_store=lambda: owners,
+        )
+        monkeypatch.setattr(server, "get_state", lambda: state)
+
+        with pytest.raises(asyncio.CancelledError):
+            await server._stream_ownership_loop(sleep)
+
+        assert renewals == ["renewed", "renewed"]
+        assert all(seconds < 300.0 for seconds in sleeps), "a claim never lapses between"
+        assert owners.sweep_expired() == 0, "the loop swept the dead node's claim"
+
     def test_popping_an_absent_stream_releases_nothing(self):
         released: list[str] = []
         registry = StreamRegistry(ttl_seconds=30.0, on_release=released.append)

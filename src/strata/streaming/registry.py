@@ -99,6 +99,18 @@ class StreamRegistry:
             # A database write on a multi-node deployment.
             await anyio.to_thread.run_sync(self._on_claim, stream_id, self._ttl_seconds)
 
+    async def renew_claims(self) -> None:
+        """Claim each live stream again for a TTL: a stream outlives its first claim while a
+        GET serves it or re-arms its cleanup, and a lapsed claim 404s it on other nodes."""
+        if self._on_claim is None:
+            return
+        for stream_id in list(self._streams):
+            if stream_id in self._streams:
+                await anyio.to_thread.run_sync(self._on_claim, stream_id, self._ttl_seconds)
+                if stream_id not in self._streams and self._on_release is not None:
+                    # Ended during the write: its release may have come first.
+                    await anyio.to_thread.run_sync(self._on_release, stream_id)
+
     def pop(self, stream_id: str) -> StreamState | None:
         popped = self._streams.pop(stream_id, None)
         if popped is not None and self._on_release is not None:
