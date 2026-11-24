@@ -567,7 +567,11 @@ def sql_connection_diagnostics(
 
 
 # What a SQL cell acts on; any other ``-- @key`` on one is read by nothing.
-SQL_ANNOTATION_KEYS = frozenset({"sql", "cache", "nocache", "name", "after", "mount"})
+SQL_ANNOTATION_KEYS = frozenset(
+    {"sql", "cache", "nocache", "name", "after", "mount", "variant", "stochastic"}
+)
+# Refused on a SQL cell by an error of their own, which says why.
+_REFUSED_ON_SQL = frozenset({"each", "per_variant"})
 
 
 def sql_annotation_diagnostics(source: str) -> list[AnnotationDiagnostic]:
@@ -587,7 +591,9 @@ def sql_annotation_diagnostics(source: str) -> list[AnnotationDiagnostic]:
     ]
     for lineno, line_text in iter_annotation_block(source, CellLanguage.SQL):
         parsed = parse_annotation_directive(line_text, CellLanguage.SQL)
-        if parsed is None or parsed[0] in SQL_ANNOTATION_KEYS or parsed[0] not in ANNOTATION_KEYS:
+        if parsed is None or parsed[0] not in ANNOTATION_KEYS:
+            continue
+        if parsed[0] in SQL_ANNOTATION_KEYS or parsed[0] in _REFUSED_ON_SQL:
             continue
         supported = ", ".join(f"`@{k}`" for k in sorted(SQL_ANNOTATION_KEYS))
         diagnostics.append(

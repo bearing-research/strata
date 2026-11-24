@@ -267,11 +267,11 @@ supported. The validator warns about the mistakes: `per_variant_no_sweep_source`
 (nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),
 `per_variant_unknown_group` (the named group is not a sweep the cell reads),
 `per_variant_on_variant_member` (a cell can't both be a variant and fan out). A
-group of one variant is a note (`per_variant_group_of_one`). Two are errors that
-keep the cell from running: `per_variant_write_table_overwrite` and
-`per_variant_write_table_sync` (each variant would remove the rows of the one
-before it). The named group is part of the cell's cache key, so switching it runs the
-instances again.
+group of one variant is a note (`per_variant_group_of_one`). Three are errors that
+keep the cell from running: `per_variant_not_python` (only a Python cell fans out),
+`per_variant_write_table_overwrite` and `per_variant_write_table_sync` (each variant
+would remove the rows of the one before it). The named group is part of the cell's
+cache key, so switching it runs the instances again.
 
 ### Defines contract
 

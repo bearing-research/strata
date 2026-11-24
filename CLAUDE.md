@@ -424,7 +424,8 @@ Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
 `loop_until <expr>`.
 
 SQL cells: `sql connection=<name> [write=true]`, `cache <policy>`, `nocache`,
-`name`, `after`, `mount` (read-only); any other key warns (`annotation_not_for_sql`),
+`name`, `after`, `mount` (read-only), `variant`, `stochastic`; `each` and
+`per_variant` are errors (Python only), any other key warns (`annotation_not_for_sql`),
 and a `# @` line errors (`sql_annotation_hash`), since the driver would get it as SQL.
 
 Prompt cells: `name`, `model`, `temperature`, `max_tokens`, `system`,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import CachePolicy, parse_annotations
 from strata.notebook.models import CellState, ConnectionSpec, NotebookState
@@ -359,9 +361,42 @@ def test_every_annotation_a_sql_cell_reads_is_quiet():
 
     cell = _sql_cell(
         "-- @sql connection=db\n-- @cache forever\n-- @nocache\n-- @name t\n"
-        "-- @after c0\n-- @mount m file:///tmp/m ro\nSELECT 1"
+        "-- @after c0\n-- @mount m file:///tmp/m ro\n-- @variant g one\n-- @stochastic\n"
+        "SELECT 1"
     )
     state = _state_with([ConnectionSpec(name="db", driver="sqlite")])
     codes = {d.code for d in validate_cell_annotations(cell, state)}
     assert "annotation_not_for_sql" not in codes
-    assert SQL_ANNOTATION_KEYS == {"sql", "cache", "nocache", "name", "after", "mount"}
+    assert SQL_ANNOTATION_KEYS == {
+        "sql",
+        "cache",
+        "nocache",
+        "name",
+        "after",
+        "mount",
+        "variant",
+        "stochastic",
+    }
+
+
+@pytest.mark.parametrize(
+    ("language", "source"),
+    [
+        ("sql", "-- @sql connection=db\n-- @per_variant\nSELECT 1"),
+        ("r", "# @per_variant\nx <- 1\n"),
+        ("prompt", "# @per_variant\nSay hi.\n"),
+    ],
+)
+def test_per_variant_outside_python_blocks_the_cell(language, source):
+    """Only a Python cell fans out; elsewhere a reader would get an empty dict."""
+    from strata.notebook.annotation_validation import blocking_diagnostic
+
+    cell = CellState(id="c1", source=source, language=language)
+    state = _state_with([ConnectionSpec(name="db", driver="sqlite")])
+    diagnostic = blocking_diagnostic(cell, state)
+
+    assert diagnostic is not None and diagnostic.code == "per_variant_not_python"
+    assert diagnostic.line == 2 if language == "sql" else diagnostic.line == 1
+    # Its own error, not also a warning that it does nothing.
+    codes = [d.code for d in validate_cell_annotations(cell, state)]
+    assert "annotation_not_for_sql" not in codes
