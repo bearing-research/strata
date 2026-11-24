@@ -814,6 +814,46 @@ differed by platform: `fnmatch.fnmatch` folds case on Windows only, so there eve
 and principal pattern, allow rules included, matched any case. Both now use `fnmatchcase`.
 Regression tests: `tests/test_auth.py::TestADenyCoversEverySpellingOfTheName`.
 
+### 23. A resumed run drops its first checkpoint
+
+**Replay** of lead LR-4 (SYSTEMS 10). A run killed while a checkpoint was staging, or
+whose checkpoint failed to stage, leaves that release abandoned, holding its sequence in
+the ledger's unique `(build, kind, sequence)`. The resumed attempt numbered its
+checkpoints from the restored release, so its first one took the same sequence:
+`prepare` raised, the checkpoint was logged "not begun" and skipped, and a
+`strata.head` naming it did not advance. A run that keeps dying in that stretch (a
+preempted instance) resumed from the same checkpoint every time and never got past it.
+Severity: medium (lost progress, and a run that cannot advance).
+
+**Fixed.** A resumed run numbers past every checkpoint row of its build, whatever its
+state. Regression test:
+`tests/notebook/test_local_runs.py::TestAResumeAfterAnUnfinishedCheckpoint`.
+
+### 24. Run All runs a batched `@nocache` producer again
+
+**Replay** of lead BAT-2 (SYSTEMS 9). Run All records each cell it runs so a later
+upstream materialization returns the first result, but a batch's cells were not
+recorded. A cell Run All runs on its own (`@timeout`, a worker) after a batch that
+held a `@nocache` producer materialized the producer again: its side effects ran twice,
+and the batch's consumer and the later one read different values. Severity: medium (a
+repeated side effect, two values of one input in one run).
+
+**Fixed.** Inside a run, each cell a batch ran counts as executed. Regression test:
+`tests/notebook/test_fresh_values.py::test_run_all_executes_a_batched_fresh_producer_once`.
+
+### 25. A failed cache write fails the scan
+
+**Replay** of lead CK-4 (SYSTEMS 3). A `clear()` between a put's `mkdir` and its
+temp-file write removed the directory, and the `FileNotFoundError` reached the scan,
+which had already read its row group. A full disk does the same. Severity: low (a
+visible failure).
+
+**Fixed.** The fetcher logs a failed cache write and returns the row group. Review of the
+fix found the write's own gap: a put whose data rename succeeded and whose sidecar rename
+failed left the data without its sidecar, and the bytes of the entry it replaced still
+counted toward the cache's size. Such a put now removes the data it placed. Regression
+tests: `tests/test_cache_optimized.py::TestAFailedCacheWriteIsAMiss`.
+
 ### 26. A rerun fails a build another process has just resumed
 
 **Survey lead** (SYSTEMS 10, LR-2), replayed. `LocalRuns.open` reads the computation's

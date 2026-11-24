@@ -38,6 +38,8 @@ _DYING_GRACE = 2.0
 # Starting the server, then the scratchpad's first environment sync, can take minutes
 # on a cold uv cache.
 _SETUP_TIMEOUT = 600.0
+# Daemons started in turn when another process takes the port each was given.
+_PORT_ATTEMPTS = 3
 # Windows: OpenProcess access, the error a live process of another user gives, and
 # WaitForSingleObject's "signaled".
 _PROCESS_TERMINATE = 0x0001
@@ -432,11 +434,30 @@ def _kill(pid: int) -> None:
         kernel32.CloseHandle(handle)
 
 
-def _healthy(url: str) -> bool:
+def _health_pid(url: str) -> int | None:
+    """The pid a healthy server at *url* names on ``/health``: ``None`` when none answers
+    healthy there, ``0`` when the one that does names no pid."""
     try:
-        return httpx.get(f"{url}/health", timeout=2.0).is_success
+        response = httpx.get(f"{url}/health", timeout=2.0)
     except httpx.HTTPError:
-        return False
+        return None
+    if not response.is_success:
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return 0
+    pid = body.get("pid") if isinstance(body, dict) else None
+    return pid if isinstance(pid, int) else 0
+
+
+def _port_held(port: int) -> bool:
+    with socket.socket() as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return True
+    return False
 
 
 def _busy(url: str) -> bool:
@@ -498,55 +519,94 @@ def _start(
     if not (scratch_dir(anchor) / "notebook.toml").exists():
         with step("creating the scratchpad"):
             _scaffold(anchor)
-    port = _free_port()
-    url = f"http://127.0.0.1:{port}"
-    if cancel is not None and cancel.is_set():
-        raise _cancelled()
-    pid = _spawn(anchor, port, python)
     log = _log_path(anchor)
-    try:
-        if cancel is not None:
-            # Killed from here on by a cancel: what the steps wait on then fails.
-            cancel.started(pid)
-        with step("starting the scratchpad"):
-            _until(lambda: _healthy(url), pid, "starting", deadline, log)
-        with step("opening the scratchpad"):
-            try:
-                # Open awaits the first environment sync, which on a cold uv cache
-                # takes minutes: the rest of the setup budget, not a request's.
-                opened = httpx.post(
-                    f"{url}/v1/notebooks/open",
-                    json={"path": str(scratch_dir(anchor))},
-                    timeout=max(deadline - time.monotonic(), 1.0),
-                )
-            except httpx.HTTPError as exc:
-                raise ScratchError(
-                    f"the scratchpad's server did not open it ({exc}); see {log}"
-                ) from exc
-            if not opened.is_success:
-                raise ScratchError(
-                    f"the scratchpad's server refused to open it: {opened.text[:300]}"
-                )
-            session_id = opened.json()["session_id"]
-        with step("syncing the scratchpad's environment"):
-            # Its tools refuse to run until then; failed is theirs to report, with the fix.
-            _until(
-                lambda: _environment(url, session_id) not in ("pending", None),
-                pid,
-                "syncing its environment",
-                deadline,
-                log,
+    for _ in range(_PORT_ATTEMPTS):
+        port = _free_port()
+        url = f"http://127.0.0.1:{port}"
+        if cancel is not None and cancel.is_set():
+            raise _cancelled()
+        pid = _spawn(anchor, port, python)
+        try:
+            if cancel is not None:
+                # Killed from here on by a cancel: what the steps wait on then fails.
+                cancel.started(pid)
+            with step("starting the scratchpad"):
+                serving = _until_serving(url, port, pid, deadline, log)
+            if serving:
+                return pid, url, _open(anchor, url, pid, step, deadline, log)
+        except BaseException as exc:
+            # Not left running for nobody: no server.json names it.
+            _kill(pid)
+            if cancel is not None:
+                cancelled = not cancel.finished()
+                if cancelled and isinstance(exc, ScratchError):
+                    # Its wait failed because the cancel killed it, not as a crash.
+                    raise _cancelled() from exc
+            raise
+        # Another process took the port between the probe and this daemon's bind.
+        if cancel is not None and not cancel.finished():
+            raise _cancelled()
+        # One that exited is not killed: its pid may be another process's by now.
+        if _alive(pid):
+            _kill(pid)
+    raise ScratchError(
+        f"another process took the scratchpad's port {_PORT_ATTEMPTS} times in a row; see {log}"
+    )
+
+
+def _until_serving(url: str, port: int, pid: int, deadline: float, log: Path) -> bool:
+    """Wait for daemon *pid* to answer at *url*: ``True`` once it does, ``False`` when
+    another process holds *port* instead."""
+    while (answering := _health_pid(url)) != pid:
+        if answering is not None:
+            # Healthy and not this daemon, which names its pid once it answers.
+            return False
+        if not _alive(pid):
+            # Its bind failed, against a process that does not answer as a server.
+            if _port_held(port):
+                return False
+            raise ScratchError(f"the scratchpad's server exited while starting; see {log}")
+        if time.monotonic() > deadline:
+            raise ScratchError(f"the scratchpad's server timed out starting; see {log}")
+        time.sleep(0.1)
+    return True
+
+
+def _open(
+    anchor: Path,
+    url: str,
+    pid: int,
+    step: Callable[[str], contextlib.AbstractContextManager[None]],
+    deadline: float,
+    log: Path,
+) -> str:
+    """Open *anchor*'s scratchpad on the daemon at *url*; return its session id."""
+    with step("opening the scratchpad"):
+        try:
+            # Open awaits the first environment sync, which on a cold uv cache
+            # takes minutes: the rest of the setup budget, not a request's.
+            opened = httpx.post(
+                f"{url}/v1/notebooks/open",
+                json={"path": str(scratch_dir(anchor))},
+                timeout=max(deadline - time.monotonic(), 1.0),
             )
-    except BaseException as exc:
-        # Not left running for nobody: no server.json names it.
-        _kill(pid)
-        if cancel is not None:
-            cancelled = not cancel.finished()
-            if cancelled and isinstance(exc, ScratchError):
-                # Its wait failed because the cancel killed it, not as a crash.
-                raise _cancelled() from exc
-        raise
-    return pid, url, session_id
+        except httpx.HTTPError as exc:
+            raise ScratchError(
+                f"the scratchpad's server did not open it ({exc}); see {log}"
+            ) from exc
+        if not opened.is_success:
+            raise ScratchError(f"the scratchpad's server refused to open it: {opened.text[:300]}")
+        session_id = opened.json()["session_id"]
+    with step("syncing the scratchpad's environment"):
+        # Its tools refuse to run until then; failed is theirs to report, with the fix.
+        _until(
+            lambda: _environment(url, session_id) not in ("pending", None),
+            pid,
+            "syncing its environment",
+            deadline,
+            log,
+        )
+    return session_id
 
 
 def _interpreter(python: str | None) -> str:
@@ -711,7 +771,9 @@ def _stop(running: Daemon, timeout: float = 30.0) -> None:
     deadline = time.monotonic() + timeout
     # Until its process is gone, not only its port: on POSIX its shutdown still closes the
     # sessions and their stores; on Windows, terminated, it holds their files until it exits.
-    while _healthy(running.url) or _alive(running.pid):
+    # A server naming another pid took the port once it closed; one naming none may be
+    # this daemon, started by an install from before ``/health`` named its pid.
+    while _health_pid(running.url) in (running.pid, 0) or _alive(running.pid):
         if time.monotonic() > deadline:
             raise ScratchError(f"the scratchpad's server (pid {running.pid}) did not stop")
         time.sleep(0.1)

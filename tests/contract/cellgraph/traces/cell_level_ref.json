@@ -382,10 +382,14 @@
      "keys": {
       "definition_key": "555977404d57702851d41367feb15ef0b6eabae5b2f0c90e169c4abdfcfd3992",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "059adbe77506ea776888959ef7b8807a3f103cbda86cb2fa9bf5ccb38d9b03e0",
-      "input_hashes": [],
+      "execution_key": "eeed9734fe0bde5baaa454246c571f4e74ce3ba7111bd4a903478937fed07cfe",
+      "input_hashes": [
+       "[\"provenance\",\"f22b518a51388c60641c0e199b799e2056cb2b1d975b8abcf161031705ae84d6\"]"
+      ],
       "source_hash": "555977404d57702851d41367feb15ef0b6eabae5b2f0c90e169c4abdfcfd3992",
-      "upstream_hashes": []
+      "upstream_hashes": [
+       "[\"provenance\",\"f22b518a51388c60641c0e199b799e2056cb2b1d975b8abcf161031705ae84d6\"]"
+      ]
      },
      "language": "python",
      "published": {
@@ -477,7 +481,7 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
+      "artifact_uri": "strata://artifact/nb_cellgraph-cell_level_ref_cell_lp_var_state@v=1",
       "artifact_uris": {},
       "instances": {}
      },

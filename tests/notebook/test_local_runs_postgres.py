@@ -57,6 +57,12 @@ class TestALapsedLeaseWithNoRivalOnPostgres(test_local_runs.TestALapsedLeaseWith
     """A lapsed lease re-taken in a new attempt, on the second backend."""
 
 
+class TestAResumeAfterAnUnfinishedCheckpointOnPostgres(
+    test_local_runs.TestAResumeAfterAnUnfinishedCheckpoint
+):
+    """A resume numbers past an abandoned checkpoint, on the second backend."""
+
+
 class TestAnotherProcessBetweenTheReadAndTheWriteOnPostgres(
     test_local_runs.TestAnotherProcessBetweenTheReadAndTheWrite
 ):

@@ -797,7 +797,36 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A rerun no longer fails a run another process has just resumed.** With two processes
   on one notebook's store, a rerun of a cell whose interrupted run another process resumed
   a moment earlier failed that build and killed its run. The rerun is now refused, as it
-  would be on one process (#1653).
+  would be on one process. (#1653)
+- **A resumed run keeps its first checkpoint.** A run that died while a checkpoint was
+  being written, or whose checkpoint failed to write, numbered its next attempt's
+  checkpoints from the one it resumed, so the first collided with the abandoned one and
+  was skipped; a run dying there again never got past it. It now numbers past every
+  checkpoint the build has. (#1646)
+- **Run All runs a `@nocache` cell once.** A cell run on its own after a batch (a worker,
+  an explicit timeout) ran a batched `@nocache` cell it reads again, repeating its side
+  effects and reading a different value than the batch did. (#1646)
+- **A row group the cache cannot keep is still returned.** A full disk, or a cache clear
+  during the write, failed the scan that had just read it. A write that fails halfway no
+  longer leaves an entry without its metadata, or one the cache's size still counts.
+  (#1646)
+- **A scratchpad's daemon starts when another process takes its port first.** Its port
+  was probed free and closed before the daemon bound it; a server that took it between
+  answered the setup's health check, and the setup opened the scratchpad there and failed.
+  `/health` now names the server's `pid`. The setup waits for the daemon it started and
+  gives up a taken port for another, whether what took it answers HTTP or not, and
+  `strata scratch stop` no longer waits 30 seconds on another Strata server that took the
+  port of the daemon it stopped. (#1656)
+- **A failed change of a notebook's Python puts back the pyproject it had.** When the
+  new interpreter could not be installed, the rollback restored `requires-python` only if
+  it pinned one minor (`==3.12.*`); a hand-written range such as `>=3.12` was left as the
+  failed minor, with the venv already deleted. The spec is now put back as written and
+  the environment synced again. (#1648)
+- **A stale cell keeps its outputs after a reopen.** A cell whose current key finds
+  nothing stored (an input changed, its source was edited, an upstream went stale, it has
+  a read-write mount, or a mount's credential is missing) reopened pointing at nothing,
+  where the session that ran it still pointed at its last outputs, and a cell reading it
+  was keyed as if it had never run. (#1637)
 - **A deny rule refuses a table under every spelling of its name.** Rules matched the
   name as requested, so a catalog that resolves names case-insensitively (Glue, Hive)
   served `lake:FINANCE.ledger` past a deny on `*:finance.*`. Deny rules now match in any

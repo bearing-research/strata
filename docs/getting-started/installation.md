@@ -154,7 +154,7 @@ The server starts on port 8765 by default. Open [http://localhost:8765](http://l
 
 ```bash
 curl http://localhost:8765/health
-# {"status":"ok"}
+# {"status":"ok","pid":12345}
 ```
 
 ## Commands reference

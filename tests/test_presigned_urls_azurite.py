@@ -8,16 +8,17 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from tests.docker_helpers import docker_daemon_reachable
+from tests.docker_helpers import backend_unavailable, docker_daemon_reachable
 
 if not docker_daemon_reachable():
-    pytest.skip("Docker daemon is not running", allow_module_level=True)
+    backend_unavailable("Docker daemon is not running", module=True)
 
 
 from vestigo.blob_store import AzureBlobStore  # noqa: E402
 
 from strata.config import StrataConfig  # noqa: E402
-from tests.conftest import make_azurite, start_container_or_skip  # noqa: E402
+from tests.conftest import make_azurite  # noqa: E402
+from tests.docker_helpers import start_container_or_skip  # noqa: E402
 from tests.presign_helpers import run_presigned_job  # noqa: E402
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]

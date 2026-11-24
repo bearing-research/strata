@@ -274,6 +274,65 @@ class TestCachedFetcherFetchAsStreamBytes:
         assert batches[0].num_rows == sample_batch.num_rows
 
 
+class TestAFailedCacheWriteIsAMiss:
+    """CK-4: a scan that read its row group returns it, though the cache could not keep it."""
+
+    def test_a_clear_under_the_write_does_not_fail_the_scan(
+        self, strata_config, cache_key, sample_batch, monkeypatch
+    ):
+        from strata.cache import disk
+        from strata.types import Task
+
+        class Storage:
+            def fetch(self, task):
+                return sample_batch
+
+        cache = DiskCache(strata_config)
+        fetcher = CachedFetcher(strata_config, fetcher=Storage(), cache=cache)
+        write = disk._write_durably
+
+        def cleared_first(path, data):
+            # Another request's cache clear lands between the put's mkdir and its write.
+            cache.clear()
+            monkeypatch.setattr(disk, "_write_durably", write)
+            return write(path, data)
+
+        monkeypatch.setattr(disk, "_write_durably", cleared_first)
+        task = Task(
+            file_path="/data/file.parquet",
+            row_group_id=0,
+            columns=None,
+            cache_key=cache_key,
+            num_rows=sample_batch.num_rows,
+        )
+
+        assert fetcher.fetch(task).equals(sample_batch)
+        assert not cache.contains(cache_key)
+
+    def test_a_put_whose_sidecar_fails_leaves_no_entry(
+        self, strata_config, cache_key, sample_batch, monkeypatch
+    ):
+        from strata.cache import disk
+
+        cache = DiskCache(strata_config)
+        cache.put(cache_key, sample_batch)
+        before = cache.get_size_bytes()
+        rename = os.replace
+
+        def sidecar_fails(src, dst):
+            if str(dst).endswith(CACHE_META_EXTENSION):
+                raise OSError(28, "No space left on device")
+            return rename(src, dst)
+
+        monkeypatch.setattr(disk.os, "replace", sidecar_fails)
+        with pytest.raises(OSError):
+            cache.put(cache_key, sample_batch)
+
+        assert not cache.contains(cache_key)
+        assert before > 0
+        assert cache._size_bytes == cache.get_size_bytes() == 0
+
+
 class TestDamagedEntriesSelfHeal:
     """A damaged entry on the zero-parse path must not poison its key forever.
 

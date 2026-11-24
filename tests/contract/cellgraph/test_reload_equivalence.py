@@ -55,13 +55,7 @@ def _differences(live: Any, reopened: Any) -> dict[str, dict[str, Any]]:
 # What a reopen loses today, found by this test when it was written (2026-11-13). Each is
 # a bug to fix in its own PR; a fixed one passes here, and the strict xfail then fails
 # until its entry is removed.
-KNOWN_RELOAD_GAPS = {
-    "credentials": (
-        "a cell whose mount names a credential loses its artifact_uri and artifact_uris "
-        "after a reopen"
-    ),
-    "mounts": "a cell with a read-write mount loses its artifact_uri and artifact_uris",
-}
+KNOWN_RELOAD_GAPS: dict[str, str] = {}
 
 
 def _scenario(name: str) -> object:

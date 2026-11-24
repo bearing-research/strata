@@ -311,6 +311,8 @@ class DiskCache:
         meta_path = self._meta_path(path)
         meta_tmp_path = meta_path.with_suffix(f".{unique_suffix}.tmp")
 
+        placed = False
+        replaced = 0
         try:
             sink = pa.BufferOutputStream()
             writer = ipc.new_stream(sink, batch.schema)
@@ -341,6 +343,7 @@ class DiskCache:
             except FileNotFoundError:
                 replaced = 0
             os.replace(tmp_path, path)
+            placed = True
             os.replace(meta_tmp_path, meta_path)
             with self._size_lock:
                 self._size_bytes += len(stream_bytes) - replaced
@@ -349,6 +352,11 @@ class DiskCache:
         except Exception:
             tmp_path.unlink(missing_ok=True)
             meta_tmp_path.unlink(missing_ok=True)
+            if placed:
+                # The data is in place without its sidecar; the entry it replaced is gone too.
+                path.unlink(missing_ok=True)
+                with self._size_lock:
+                    self._size_bytes -= replaced
             raise
 
         # The entry is in place: failing the put now would fail the scan reading this row group.
@@ -655,7 +663,12 @@ class CachedFetcher:
             table_id=task.cache_key.table_id,
         )
 
-        self.cache.put(task.cache_key, batch)
+        try:
+            self.cache.put(task.cache_key, batch)
+        except OSError as exc:
+            # The row group was read; a full disk or a clear() under the write costs only the
+            # next read of it.
+            logger.warning("Could not cache row group %s: %s", task.cache_key.file_path, exc)
         flight.batch = batch
 
         result_batch = self._project_batch(batch, task.columns)

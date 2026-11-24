@@ -336,6 +336,39 @@ def test_run_all_executes_a_fresh_producer_once(tmp_path: Path):
     assert first == second == 1
 
 
+def test_run_all_executes_a_batched_fresh_producer_once(tmp_path: Path):
+    """A batch's cells count as executed in the run: a later single-cell consumer of a
+    batched ``@nocache`` producer reads what the batch stored, not a second run of it."""
+    from strata.notebook.executor import partition_batchable_runs
+    from strata.notebook.ws import NotebookExecutionState, _execute_run_all
+
+    counter = tmp_path / "count.txt"
+    nb = _build_notebook(
+        tmp_path,
+        cells=[
+            ("p", _producer(counter), None),
+            ("q", "q = run_count\nq\n", "p"),
+            ("c", "# @timeout 60\nc = run_count\nc\n", "q"),
+        ],
+    )
+    session = _session(nb)
+    cells = session.notebook_state.cells
+    partition = partition_batchable_runs(CellExecutor(session), cells)
+    assert [(kind, [c.id for c in run]) for kind, run in partition] == [
+        ("batch", ["p", "q"]),
+        ("single", ["c"]),
+    ]
+
+    asyncio.run(
+        _execute_run_all(None, session, [c.id for c in cells], NotebookExecutionState(), session.id)
+    )
+
+    assert counter.read_text() == "1"
+    q = session.notebook_state.get_cell("q").display_output.preview
+    c = session.notebook_state.get_cell("c").display_output.preview
+    assert q == c == 1
+
+
 def test_a_cascade_executes_a_fresh_producer_once(tmp_path: Path):
     from strata.notebook.cascade import CascadePlanner
     from strata.notebook.ws import NotebookExecutionState, _execute_cascade

@@ -610,8 +610,14 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-mounts_cell_m1_var_from_notebook@v=1",
+      "artifact_uris": {
+       "from_notebook": {
+        "artifact": "nb_cellgraph-mounts_cell_m1_var_from_notebook@v=1",
+        "content_sha256": "aaee599a630c7fcef1bad0ea880a14898f94a2bb2e3dd954befe28a0d3de10c7",
+        "provenance_hash": "802f383cbcfa867ad591f1728dd3efe0b1885402e277ba58292826e21593f57a"
+       }
+      },
       "instances": {}
      },
      "resolved": {
@@ -739,10 +745,14 @@
      "keys": {
       "definition_key": "8a24e061b28630959f5adfa45da8e15229bb088b8794c41c66cc60db18200398",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "4f69bff411fe27857f37be27f35266378efc7cbfdcebed437948fc6e618c1432",
-      "input_hashes": [],
+      "execution_key": "df3754056f4388c7a443dd756cb62d2d2998f5fe5a055cd8e27a84473da13607",
+      "input_hashes": [
+       "[\"nocache\",\"a92fcbb2fffbd5b5e03bbe177624c8332c8f6795f17b684328362ca807bd11a8\",\"a133f329f1ede2f25398a0e89e976e787502a2777f7fe8ed6a98f447d1cb0333\"]"
+      ],
       "source_hash": "8a24e061b28630959f5adfa45da8e15229bb088b8794c41c66cc60db18200398",
-      "upstream_hashes": []
+      "upstream_hashes": [
+       "[\"nocache\",\"a92fcbb2fffbd5b5e03bbe177624c8332c8f6795f17b684328362ca807bd11a8\",\"a133f329f1ede2f25398a0e89e976e787502a2777f7fe8ed6a98f447d1cb0333\"]"
+      ]
      },
      "language": "python",
      "published": {
@@ -784,8 +794,14 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-mounts_cell_w4_var_note@v=1",
+      "artifact_uris": {
+       "note": {
+        "artifact": "nb_cellgraph-mounts_cell_w4_var_note@v=1",
+        "content_sha256": "a133f329f1ede2f25398a0e89e976e787502a2777f7fe8ed6a98f447d1cb0333",
+        "provenance_hash": "a92fcbb2fffbd5b5e03bbe177624c8332c8f6795f17b684328362ca807bd11a8"
+       }
+      },
       "instances": {}
      },
      "resolved": {
@@ -1197,8 +1213,14 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-mounts_cell_m1_var_from_notebook@v=2",
+      "artifact_uris": {
+       "from_notebook": {
+        "artifact": "nb_cellgraph-mounts_cell_m1_var_from_notebook@v=2",
+        "content_sha256": "c5f1a1c70e46329db055438380af1ffbdbdc8ef96d5977e638bf5a9d9dc63f5c",
+        "provenance_hash": "d7a13f748bbc95154f8ccd8d0a2ca089ec45ec8d3d96b0f7aeec50e0353b3680"
+       }
+      },
       "instances": {}
      },
      "resolved": {
@@ -1326,10 +1348,14 @@
      "keys": {
       "definition_key": "8a24e061b28630959f5adfa45da8e15229bb088b8794c41c66cc60db18200398",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "4f69bff411fe27857f37be27f35266378efc7cbfdcebed437948fc6e618c1432",
-      "input_hashes": [],
+      "execution_key": "df3754056f4388c7a443dd756cb62d2d2998f5fe5a055cd8e27a84473da13607",
+      "input_hashes": [
+       "[\"nocache\",\"a92fcbb2fffbd5b5e03bbe177624c8332c8f6795f17b684328362ca807bd11a8\",\"a133f329f1ede2f25398a0e89e976e787502a2777f7fe8ed6a98f447d1cb0333\"]"
+      ],
       "source_hash": "8a24e061b28630959f5adfa45da8e15229bb088b8794c41c66cc60db18200398",
-      "upstream_hashes": []
+      "upstream_hashes": [
+       "[\"nocache\",\"a92fcbb2fffbd5b5e03bbe177624c8332c8f6795f17b684328362ca807bd11a8\",\"a133f329f1ede2f25398a0e89e976e787502a2777f7fe8ed6a98f447d1cb0333\"]"
+      ]
      },
      "language": "python",
      "published": {
@@ -1371,8 +1397,14 @@
      },
      "language": "python",
      "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
+      "artifact_uri": "strata://artifact/nb_cellgraph-mounts_cell_w4_var_note@v=2",
+      "artifact_uris": {
+       "note": {
+        "artifact": "nb_cellgraph-mounts_cell_w4_var_note@v=2",
+        "content_sha256": "a133f329f1ede2f25398a0e89e976e787502a2777f7fe8ed6a98f447d1cb0333",
+        "provenance_hash": "a92fcbb2fffbd5b5e03bbe177624c8332c8f6795f17b684328362ca807bd11a8"
+       }
+      },
       "instances": {}
      },
      "resolved": {

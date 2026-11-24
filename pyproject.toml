@@ -239,7 +239,8 @@ target-version = "py312"
 extend-exclude = ["examples/", "experiments/", "src/strata/notebook/samples/", "tests/contract/cellgraph/scenarios/"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+# B025: a second except for the same exception can never run.
+select = ["E", "F", "I", "UP", "B025"]
 
 [tool.ty.environment]
 python-version = "3.12"

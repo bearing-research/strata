@@ -27,11 +27,15 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
-from tests.conftest import make_azurite, start_container_or_skip
-from tests.docker_helpers import docker_daemon_reachable
+from tests.conftest import make_azurite
+from tests.docker_helpers import (
+    backend_unavailable,
+    docker_daemon_reachable,
+    start_container_or_skip,
+)
 
 if not docker_daemon_reachable():
-    pytest.skip("Docker daemon is not running", allow_module_level=True)
+    backend_unavailable("Docker daemon is not running", module=True)
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
