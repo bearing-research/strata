@@ -77,14 +77,14 @@ def test_a_cancel_during_a_setup_step_fails_the_setup_and_ends_its_daemon(tmp_pa
         started.append(_daemon())
         return started[-1]
 
-    def healthy(url):
+    def health_pid(url):
         # The daemon never answers; the setup waits on it until the cancel.
         if not cancel.is_set():
             threading.Thread(target=cancel.set).start()
-        return False
+        return None
 
     monkeypatch.setattr(scratch, "_spawn", spawn)
-    monkeypatch.setattr(scratch, "_healthy", healthy)
+    monkeypatch.setattr(scratch, "_health_pid", health_pid)
 
     with pytest.raises(scratch.ScratchError, match="cancelled"):
         scratch.ensure_daemon(tmp_path, cancel=cancel)
@@ -119,7 +119,7 @@ def test_a_setup_that_failed_forgets_its_daemon(tmp_path, monkeypatch):
     cancel = scratch.SetupCancel()
     monkeypatch.setattr(scratch, "_spawn", lambda *args: _daemon())
     monkeypatch.setattr(scratch, "_SETUP_TIMEOUT", 0)
-    monkeypatch.setattr(scratch, "_healthy", lambda url: False)
+    monkeypatch.setattr(scratch, "_health_pid", lambda url: None)
     with pytest.raises(scratch.ScratchError, match="timed out"):
         scratch.ensure_daemon(tmp_path, cancel=cancel)
     killed: list[int] = []

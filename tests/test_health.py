@@ -1,6 +1,7 @@
 """Tests for health check functionality."""
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -311,6 +312,8 @@ class TestHealthEndpointIntegration:
                 assert response.status_code == 200
                 data = response.json()
                 assert data["status"] == "ok"
+                # Its process, so a client that started it can tell it from another.
+                assert data["pid"] == os.getpid()
         finally:
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
