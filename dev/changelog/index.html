@@ -4666,6 +4666,11 @@ exhaustive commit history.</p>
   as its run left it. A deleted or changed file, a second write cell on it, and any other
   database run it again in a new session, as before; explicit <code>session</code>, <code>forever</code> and
   <code>ttl</code> keep their meaning. (#1672)</li>
+<li><strong>A SQL cell after a seed runs again once the seed computes something else.</strong> Its key
+  covered only the variables it binds, so a cell <code>-- @after seed</code> under <code>forever</code>, <code>session</code>
+  or <code>ttl</code> kept its old rows after the seed ran with a new body, or again in a new session
+  under <code>@cache session</code>. The key now carries each <code>@after</code> upstream's last run; one that
+  records none (<code># @nocache</code>, an <code>rw</code> mount) keeps nothing after it cached. (#1673)</li>
 <li><strong>A SQL <code>@name</code> must be a variable name.</strong> One that was not (<code>top-orders</code>, <code>Hottest
   stations</code>) fell back to <code>result</code> without a word, so a cell reading the name found nothing.
   It is now the error <code>name_unreadable</code>, as on a prompt cell, and both refuse a keyword such as

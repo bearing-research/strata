@@ -31,7 +31,7 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 | [`-- @cache <policy>`](#cache) | The cache policy: `fingerprint` (the default), `forever`, `session`, `ttl=<seconds>` or `snapshot`. |
 | [`-- @nocache`](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache) | Always run; wins over any `@cache` policy. |
 | [`-- @name <identifier>`](#name) | The output variable (default `result`). |
-| [`-- @after <cell-id>`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An ordering-only edge from another cell, such as the one that writes the database this cell reads. |
+| [`-- @after <cell-id>`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An edge from another cell, such as the one that writes the database this cell reads. Unlike on a Python cell, the upstream's last successful run is part of this cell's cache key. |
 | [`-- @mount <name> <uri> ro`](https://bearingresearch.com/strata/dev/reference/annotations/python/#mount) | A mount a DuckDB connection's `mounts` can name, read-only. |
 | [`-- @variant <group> <name>`](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells) | A member of a variant group, beside cells of any kind. |
 | [`-- @stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic) | Always run, and keep every run's result under its own run. |
