@@ -794,6 +794,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A scratchpad's daemon starts when another process takes its port first.** Its port
+  was probed free and closed before the daemon bound it; a server that took it between
+  answered the setup's health check, and the setup opened the scratchpad there and failed.
+  `/health` now names the server's `pid`. The setup waits for the daemon it started and
+  gives up a taken port for another, whether what took it answers HTTP or not, and
+  `strata scratch stop` no longer waits 30 seconds on another Strata server that took the
+  port of the daemon it stopped. (#1656)
+
 - **A failed change of a notebook's Python puts back the pyproject it had.** When the
   new interpreter could not be installed, the rollback restored `requires-python` only if
   it pinned one minor (`==3.12.*`); a hand-written range such as `>=3.12` was left as the

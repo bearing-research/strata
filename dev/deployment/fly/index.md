@@ -72,7 +72,7 @@ After `fly deploy` reports success:
 curl https://<your-app-name>.fly.dev/health
 ```
 
-Expected response: exactly `{"status":"ok"}`. The detailed views are `/health/dependencies` and `/health/ready`. If you get a
+Expected response: `{"status":"ok","pid":...}`, the pid being the server process's. The detailed views are `/health/dependencies` and `/health/ready`. If you get a
 504 or connection error, run `fly logs` to inspect the startup -
 the most common cause is a cold-start delay on the first request.
 

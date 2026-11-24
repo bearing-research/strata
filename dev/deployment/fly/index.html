@@ -3208,7 +3208,7 @@ so your values stay out of commits):</p>
 <p>After <code>fly deploy</code> reports success:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>https://&lt;your-app-name&gt;.fly.dev/health
 </code></pre></div>
-<p>Expected response: exactly <code>{"status":"ok"}</code>. The detailed views are <code>/health/dependencies</code> and <code>/health/ready</code>. If you get a
+<p>Expected response: <code>{"status":"ok","pid":...}</code>, the pid being the server process's. The detailed views are <code>/health/dependencies</code> and <code>/health/ready</code>. If you get a
 504 or connection error, run <code>fly logs</code> to inspect the startup -
 the most common cause is a cold-start delay on the first request.</p>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>

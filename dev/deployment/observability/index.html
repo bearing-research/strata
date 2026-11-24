@@ -3500,7 +3500,7 @@ checks:</p>
 <tbody>
 <tr>
 <td><code>GET /health</code></td>
-<td>Liveness. Returns <code>{"status":"ok"}</code> if the server is running. Used by Docker / Fly / k8s.</td>
+<td>Liveness. Returns <code>{"status":"ok","pid":...}</code> if the server is running, <code>pid</code> naming its process. Used by Docker / Fly / k8s.</td>
 </tr>
 <tr>
 <td><code>GET /health/ready</code></td>
