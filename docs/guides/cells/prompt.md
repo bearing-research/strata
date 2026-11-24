@@ -180,7 +180,7 @@ A prompt cell's provenance hash mixes together:
 Editing any of these invalidates the cache. In particular, tweaking `@output_schema` on a cached cell forces a fresh call, which is what you want when iterating on the response shape.
 
 !!! tip "Keep temperature at 0.0 for prompt cells"
-    With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling.
+    With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache: future runs return the stored stochastic sample rather than re-sampling. To sample again on every run and keep each response as its own version, add `# @stochastic`.
 
 ## Provider configuration
 

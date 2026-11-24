@@ -471,7 +471,7 @@ async def run_r_cell(
                         build_env=str(result.get("build_env") or ""),
                         hardware=result.get("hardware") or {},
                         collected=collected,
-                        stochastic=moved is not None,
+                        stochastic=prov.annotations.stochastic or moved is not None,
                         run_outputs=exec_result.outputs,
                     )
                 except (UnsafeRunFile, TableWriteError, OutputNotSaved) as exc:

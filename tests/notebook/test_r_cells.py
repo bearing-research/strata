@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 
 import pytest
+from vestigo.provenance import derive_subkey
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.writer import _renv_sync
@@ -662,3 +663,31 @@ class TestFunctionsCrossCells:
 
         assert result.success, result.error
         assert "3" in result.stdout
+
+
+@pytest.mark.asyncio
+async def test_a_stochastic_r_cell_keeps_every_run(r_notebook):
+    """Each run of a ``# @stochastic`` R cell is its own version, as a Python cell's is.
+
+    Stored under the cell's plain output key, the second run took the first one's place.
+    """
+    src = "# @stochastic\nsample <- runif(1)\n"
+    _, session = r_notebook(
+        cells=[("c1", None, src, "r"), ("c2", "c1", "doubled = sample\n", "python")]
+    )
+    executor = CellExecutor(session)
+
+    first = await executor.execute_cell("c1", src)
+    second = await executor.execute_cell("c1", src)
+    assert first.success and second.success, (first.error, second.error)
+    assert second.cache_hit is False
+
+    store = session.get_artifact_manager().artifact_store
+    sample_id = f"nb_{session.notebook_state.id}_cell_c1_var_sample"
+    rows = [store.get_artifact(sample_id, v) for v in (1, 2)]
+    assert all(r is not None for r in rows)
+    assert [r.state for r in rows] == ["ready", "ready"], "both runs persist"
+    assert len({r.provenance_hash for r in rows}) == 2
+    key = session.notebook_state.get_cell("c1").last_provenance_hash
+    assert key is not None
+    assert store.find_by_provenance(derive_subkey(key, "sample")) is None

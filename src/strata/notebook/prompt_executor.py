@@ -15,11 +15,12 @@ import os
 import re
 import tempfile
 import time
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vestigo.provenance import derive_subkey
+from vestigo.provenance import derive_subkey, run_output_key
 
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.llm import (
@@ -208,7 +209,8 @@ async def execute_prompt_cell(
     start_time = time.time()
     analysis = analyze_prompt_cell(source)
     output_name = analysis.name
-    if parse_annotations(source, CellLanguage.PROMPT).nocache:
+    annotations = parse_annotations(source, CellLanguage.PROMPT)
+    if annotations.nocache:
         use_cache = False
 
     model = analysis.model or llm_config.model
@@ -253,6 +255,12 @@ async def execute_prompt_cell(
     notebook_id = session.notebook_state.id
     canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{output_name}"
     var_provenance = derive_subkey(provenance_hash, output_name)
+    # A ``# @stochastic`` run's response is a version of its own (and, nocache, never a hit).
+    stored_key = (
+        run_output_key(provenance_hash, uuid.uuid4().hex, output_name)
+        if annotations.stochastic
+        else var_provenance
+    )
 
     if use_cache:
         cached = artifact_mgr.find_cached(var_provenance)
@@ -440,7 +448,7 @@ async def execute_prompt_cell(
 
         version = artifact_mgr.artifact_store.create_artifact(
             artifact_id=canonical_id,
-            provenance_hash=var_provenance,
+            provenance_hash=stored_key,
             transform_spec=TransformSpec(
                 executor="prompt",
                 params={

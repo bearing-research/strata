@@ -11,6 +11,7 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | `# @fetch data <url>`      | Downloads a URL as a recorded input; `data` is the file's path as a string. |
 | `# @output_dir ckpt`       | Gives the cell an empty output folder; `ckpt` is its path as a string. An R cell cannot read another cell's folder yet. |
 | `# @nocache`               | Always re-execute.                                                      |
+| `# @stochastic`            | Re-execute every time and keep each run's outputs as their own version, as on a [Python cell](python.md#stochastic). |
 | `# @worker gpu-box`        | Runs the cell on an executor worker with R (see below).                 |
 | `# @write_table df lake:lab.t append` | Writes a variable into an Iceberg table when the run succeeds, as on a [Python cell](python.md#write_table). |
 | `# @after seed`            | An ordering-only edge from another cell, as on a [Python cell](python.md#after). |
