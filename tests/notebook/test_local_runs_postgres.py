@@ -67,3 +67,9 @@ class TestAnotherProcessBetweenTheReadAndTheWriteOnPostgres(
     test_local_runs.TestAnotherProcessBetweenTheReadAndTheWrite
 ):
     """open's writes pinned to the claim it read, on the second backend."""
+
+
+class TestTwoProcessesWithOneHostAndPidOnPostgres(
+    test_local_runs.TestTwoProcessesWithOneHostAndPid
+):
+    """A lapsed run's close leaves the run that resumed its build, on the second backend."""
