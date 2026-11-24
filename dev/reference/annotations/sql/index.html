@@ -3300,6 +3300,8 @@ the same way it does for prompt cells.</p>
 </code></pre></div>
 <p>A downstream Python cell can then reference <code>top_customers</code> directly as a
 <code>pyarrow.Table</code>; call <code>.to_pandas()</code> for a pandas DataFrame.</p>
+<p>The name must be a Python identifier that is not a keyword: <code>top-customers</code>,
+<code>1st</code> or <code>class</code> is the error <code>name_unreadable</code>, and the cell does not run.</p>
 
 
 

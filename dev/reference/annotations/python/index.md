@@ -15,7 +15,9 @@ papers = pd.read_parquet("https://...")
 
 For **Python cells**, any non-empty string is accepted: spaces, parentheses, and special characters are fine.
 
-For **prompt cells**, `@name` also sets the output variable name and must be a valid Python identifier:
+For **prompt and SQL cells**, `@name` also sets the output variable name, so it must be a
+Python identifier that is not a keyword; anything else is the error `name_unreadable`, and
+the cell does not run:
 
 ```
 # @name research_themes

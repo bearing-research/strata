@@ -3399,7 +3399,9 @@
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">papers</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"https://..."</span><span class="p">)</span>
 </code></pre></div>
 <p>For <strong>Python cells</strong>, any non-empty string is accepted: spaces, parentheses, and special characters are fine.</p>
-<p>For <strong>prompt cells</strong>, <code>@name</code> also sets the output variable name and must be a valid Python identifier:</p>
+<p>For <strong>prompt and SQL cells</strong>, <code>@name</code> also sets the output variable name, so it must be a
+Python identifier that is not a keyword; anything else is the error <code>name_unreadable</code>, and
+the cell does not run:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a># @name research_themes
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Given these paper counts: {{ category_stats }}
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>Identify 3 research themes.

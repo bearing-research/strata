@@ -94,12 +94,12 @@ summary = pa.table(
 )
 ```
 
-## Hottest stations
+## hottest_stations
 
 <sub>**kind** sql</sub>
 
 ```sql
--- @name Hottest stations
+-- @name hottest_stations
 -- @sql connection=lake
 -- @after summarize
 SELECT station, name, days, hottest_f

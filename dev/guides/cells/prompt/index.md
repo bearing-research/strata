@@ -58,7 +58,7 @@ To write the characters themselves, escape them: `\{{` renders as `{{` and `\{%`
 
 | Annotation               | What it does                                                              | Default              |
 | ------------------------ | ------------------------------------------------------------------------- | -------------------- |
-| `# @name <identifier>`   | Output variable name; must be a Python identifier                         | `result`             |
+| `# @name <identifier>`   | Output variable name; a Python identifier, not a keyword                  | `result`             |
 | `# @model <model_id>`    | Override the notebook-level AI model                                      | From provider config |
 | `# @temperature <float>` | Sampling temperature (0.0 = deterministic; see [Caching](#caching) below) | `0.0`                |
 | `# @max_tokens <int>`    | Response token ceiling                                                    | `4096`               |
