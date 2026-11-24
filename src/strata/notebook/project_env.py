@@ -426,6 +426,11 @@ def _cell_env() -> tuple[dict[str, str], dict[str, Any]]:
     return dict(os.environ if env is None else env), spawn_kwargs(user)
 
 
+# Raised when a probe would find another E with nothing observed changing, so a record
+# from before is probed again. 2: the probe starts with -P, as a cell does.
+_PROBE_FORMAT = 2
+
+
 def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False) -> str:
     """Probe E in the cells' interpreter (the overlay, or an owned scratchpad's ``.venv``),
     as a cell started there would find it, and record it with what proves it. The old
@@ -449,6 +454,7 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
         done = subprocess.run(
             [
                 str(_cell_python(notebook_dir, owned)),
+                "-P",  # the path a cell finds: this package's directory is not on it
                 str(_HARNESS),
                 "--probe-environment",
                 str(notebook_dir.parent),
@@ -471,6 +477,7 @@ def _probe_identity(notebook_dir: Path, sites: list[str], *, owned: bool = False
         warm = probed["warm"]
     identity = hashlib.sha256(json.dumps(probed["identity"], sort_keys=True).encode()).hexdigest()
     record = {
+        "probe": _PROBE_FORMAT,
         "sites": sites,
         "variables": probed["identity"]["variables"],
         "observed": probed["observed"],
@@ -681,6 +688,8 @@ def _holds(notebook_dir: Path, record: dict[str, Any], where: Path, env: dict[st
         watch_state,
     )
 
+    if record.get("probe") != _PROBE_FORMAT:
+        return False
     # The cells' environment, not the server's: an allowlist may leave a variable out.
     if {k: env.get(k) for k in IMPORT_VARIABLES} != record.get("variables"):
         return False

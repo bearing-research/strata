@@ -1161,7 +1161,9 @@ async def run_harness(
             "stdout": "",
             "variables": {},
         }
-    cmd = [str(venv_python), str(harness_path), str(manifest_path)]
+    # -P: this package's directory stays off sys.path, where its datasets.py and
+    # tables.py would shadow the cell's own packages.
+    cmd = [str(venv_python), "-P", str(harness_path), str(manifest_path)]
 
     # New process group so cancel can signal the whole descendant tree (DataLoader
     # workers, multiprocessing pools); ``proc.kill()`` alone leaks children.

@@ -394,6 +394,9 @@ async def _run_harness(
 
     argv = [
         str(interpreter) if interpreter is not None else sys.executable,
+        # -P: this package's directory stays off sys.path, where its datasets.py and
+        # tables.py would shadow the cell's own packages. Rscript has no such flag.
+        *(() if harness_path.suffix == ".R" else ("-P",)),
         str(harness_path),
         str(manifest_path),
     ]
