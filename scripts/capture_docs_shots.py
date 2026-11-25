@@ -1065,9 +1065,50 @@ def capture_examples(work_dir: Path, names: list[str] | None) -> list[Path]:
         if get_sample(name) is not None:
             written.append(Path(shutil.copy2(dest, THUMBNAILS_DIR / dest.name)))
 
+    for entry in manifest:
+        written += record_run(Path(entry["path"]), entry["name"])
+
     for name, reason in skipped.items():
         print(f"skipped {name}: {reason}", file=sys.stderr)
     return written
+
+
+_INLINE_PNG = re.compile(r"\(data:image/png;base64,([A-Za-z0-9+/=]+)\)")
+
+
+def record_run(notebook: Path, name: str) -> list[Path]:
+    """Record a run copy's cells and outputs for its docs page, with its pictures as files.
+
+    The page shows these until the example's cells change (``docs_hooks/export_examples.py``).
+    """
+    import base64
+    import io
+
+    from PIL import Image
+
+    sys.path.insert(0, str(REPO_ROOT / "docs_hooks"))
+    import export_examples as pages
+
+    from strata.notebook.export import ExportOptions, export_notebook
+
+    runs = ASSETS.parent / pages.RUNS_DIR
+    runs.mkdir(parents=True, exist_ok=True)
+    for old in runs.glob(f"{name}-*.webp"):
+        old.unlink()
+    written: list[Path] = []
+
+    def to_file(match: re.Match[str]) -> str:
+        dest = runs / f"{name}-{len(written) + 1}.webp"
+        with Image.open(io.BytesIO(base64.b64decode(match.group(1)))) as image:
+            image.save(dest, "WEBP", quality=90, method=6)
+        written.append(dest)
+        return f"(../{pages.RUNS_DIR.as_posix()}/{dest.name})"
+
+    cells = export_notebook(notebook, ExportOptions(**pages.PAGE_EXPORT))
+    cells = _INLINE_PNG.sub(to_file, cells)
+    page = runs / f"{name}.md"
+    page.write_text(pages.run_header(pages.source_fingerprint(notebook)) + cells, encoding="utf-8")
+    return [page, *written]
 
 
 # --------------------------------------------------------------------------

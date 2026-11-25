@@ -488,6 +488,40 @@ def test_export_falls_back_to_notebook_heading_when_no_readme(tmp_path: Path) ->
     assert "# Notebook: HeadlessNB" in rendered
 
 
+@pytest.mark.parametrize("readme", [True, False])
+def test_an_export_without_the_readme_opens_on_the_first_cell(
+    tmp_path: Path, readme: bool
+) -> None:
+    """The docs give a page its title and place the README; the export brings neither."""
+    nb_dir = _make_notebook(tmp_path, name="HeadlessNB")
+    if readme:
+        (nb_dir / "README.md").write_text("# My Demo\n\nWalks through it.\n", encoding="utf-8")
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "x = 1\n")
+
+    rendered = export_notebook(nb_dir, ExportOptions(include_readme=False))
+
+    assert rendered.startswith("## c1")
+
+
+def test_an_export_shows_as_many_table_rows_as_asked(tmp_path: Path) -> None:
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "df\n")
+    rows = [{"n": i} for i in range(10)]
+    update_cell_display_outputs(
+        nb_dir,
+        "c1",
+        [{"content_type": "arrow/ipc", "rows": 500, "columns": ["n"], "preview": rows, "bytes": 0}],
+    )
+
+    rendered = export_notebook(nb_dir, ExportOptions(max_table_rows=3))
+
+    assert "| 2 |" in rendered
+    assert "| 3 |" not in rendered
+    assert "*…showing 3 of 500 rows*" in rendered
+
+
 def test_export_strips_ansi_escape_codes_from_console(tmp_path: Path) -> None:
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "c1")
