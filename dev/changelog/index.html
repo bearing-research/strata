@@ -4624,6 +4624,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A sweep in another process no longer takes a running <code>@each</code> cell's results.</strong> An
+  <code>@each</code> or <code>@output_dir</code> run stores its items or files before the manifest that keeps
+  them, and the sweep held off only for runs in its own process. A server opening a
+  notebook while a CLI run of it was over an hour in removed what the run had stored,
+  and the run failed at its last step. A running cell now holds a lock file in the
+  notebook's store, which every process's sweep waits for (#1677).</li>
 <li><strong>Two processes that start one cell at once no longer both run it.</strong> A local run read
   the computation's open build and, finding none, created and opened one in two more
   transactions, so two processes on one store (a CLI run beside the server) that both

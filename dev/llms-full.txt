@@ -16373,8 +16373,9 @@ release a failed one. A folder's files are stored one per digest and outlive the
 values that named them, so the same pass then removes each file no kept folder
 version (current, earlier, failed or pinned) still names, once it has gone
 unused for `STRATA_ARTIFACT_GC_MIN_IDLE_SECONDS`. A file a run is still
-assembling is never taken: while any folder cell is running on the server, the
-file pass waits for the next open.
+assembling is never taken: while any folder or `@each` cell is running on the
+notebook, in this process or another (a CLI run beside the server), the file
+pass waits for the next open.
 
 Every sweep, of either store, also removes the temporary files of blob writes
 that died part way (a killed process), once they have gone untouched for an
