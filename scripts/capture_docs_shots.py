@@ -1073,7 +1073,8 @@ def capture_examples(work_dir: Path, names: list[str] | None) -> list[Path]:
     return written
 
 
-_INLINE_PNG = re.compile(r"\(data:image/png;base64,([A-Za-z0-9+/=]+)\)")
+# How the export inlines a picture; a page links a file instead.
+_INLINE_PNG = re.compile(r'<img src="data:image/png;base64,([A-Za-z0-9+/=]+)" alt="([^"]*)">')
 
 
 def record_run(notebook: Path, name: str) -> list[Path]:
@@ -1102,7 +1103,7 @@ def record_run(notebook: Path, name: str) -> list[Path]:
         with Image.open(io.BytesIO(base64.b64decode(match.group(1)))) as image:
             image.save(dest, "WEBP", quality=90, method=6)
         written.append(dest)
-        return f"(../{pages.RUNS_DIR.as_posix()}/{dest.name})"
+        return f"![{match.group(2)}](../{pages.RUNS_DIR.as_posix()}/{dest.name})"
 
     cells = export_notebook(notebook, ExportOptions(**pages.PAGE_EXPORT))
     cells = _INLINE_PNG.sub(to_file, cells)

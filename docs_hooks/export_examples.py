@@ -31,6 +31,9 @@ TABLE_ROWS = 8
 # and places the README itself.
 PAGE_EXPORT = {"include_readme": False, "max_table_rows": TABLE_ROWS}
 _RUN_HEADER = re.compile(r"<!-- strata example run, source ([0-9a-f]{16}) -->\n")
+# A code cell's name: its heading, then its chips, its code or the prompt note. Marked
+# so the page draws it as the editor does a cell's header, apart from the prose's headings.
+_CELL_HEADING = re.compile(r"^(## [^\n]*)(\n\n(?:<sub>|```|\*Prompt cell))", re.M)
 # The cell's kind is plain from its code; the other chips (worker, loop, variant) stay.
 _KIND_CHIP = re.compile(r"<sub>\*\*kind\*\* [a-z]+(?:  ·  )?")
 
@@ -127,8 +130,9 @@ def render_page(readme: str, cells: str, *, ran: bool) -> str:
     lead, _, notes = rest.partition("\n## ")
     cells = _RUN_HEADER.sub("", cells, count=1)
     cells = "\n".join(_tidy_line(line) for line in cells.strip().split("\n"))
-    cells = re.sub(r"\n<sub></sub>\n", "\n", cells)
+    cells = re.sub(r"^<sub></sub>\n\n", "", cells, flags=re.M)
     cells = re.sub(r"\A# [^\n]*\n+", "", cells)
+    cells = _CELL_HEADING.sub(r"\1 { .nb-cell }\2", cells)
     pieces = [title, ""]
     if lead.strip():
         pieces += [lead.strip(), ""]

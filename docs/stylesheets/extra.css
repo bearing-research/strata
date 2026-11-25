@@ -58,3 +58,36 @@
   letter-spacing: -0.02em;
   margin-bottom: 0.25em;
 }
+
+/* An example page's code cell: its name is a header on its code, as in the editor, so
+   it reads apart from the notebook's prose headings. */
+.md-typeset h2.nb-cell {
+  margin: 1.8em 0 0;
+  padding: 0.4em 1.2em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.6;
+  color: var(--md-default-fg-color--light);
+  background: var(--md-code-bg-color);
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.2rem 0.2rem 0 0;
+}
+
+/* Its worker, loop or variant, on the header. */
+.md-typeset h2.nb-cell + p:has(> sub:only-child) {
+  margin: 0;
+  padding: 0 1.2em 0.3em;
+  background: var(--md-code-bg-color);
+}
+
+.md-typeset h2.nb-cell + .highlight pre,
+.md-typeset h2.nb-cell + p:has(> sub:only-child) + .highlight pre {
+  margin-top: 0;
+}
+
+.md-typeset h2.nb-cell + .highlight pre > code,
+.md-typeset h2.nb-cell + p:has(> sub:only-child) + .highlight pre > code {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
