@@ -35,6 +35,12 @@ SAMPLES = (
         warm_imports=("pyarrow", "pandas", "matplotlib.pyplot"),
     ),
     Sample(
+        name="keeling_curve",
+        title="The Keeling curve, with a receipt",
+        description="CO₂ at Mauna Loa since 1958, and a published figure that shows its sources.",
+        warm_imports=("pyarrow", "pandas", "matplotlib.pyplot"),
+    ),
+    Sample(
         name="pandas_basics",
         title="Pandas Basics",
         description="Create, filter, group and merge DataFrames.",

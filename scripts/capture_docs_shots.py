@@ -827,6 +827,7 @@ EXAMPLE_SHOTS = {
     "data_viewer": ExampleShot(),
     "each_pipeline": ExampleShot(needs=("docker",)),
     "iris_classification": ExampleShot(),
+    "keeling_curve": ExampleShot(),
     "library_cells": ExampleShot(),
     "loop_hill_climb": ExampleShot(),
     "markdown_showcase": ExampleShot(focus="Two surfaces are tested"),

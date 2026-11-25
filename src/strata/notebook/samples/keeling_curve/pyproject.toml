@@ -1,0 +1,14 @@
+[project]
+name = "keeling-curve"
+version = "0.1.0"
+description = "Atmospheric CO2 at Mauna Loa since 1958, from NOAA's record, with a published figure that carries its sources"
+requires-python = ">=3.12"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.9.0",
+]
+
+[tool.uv]

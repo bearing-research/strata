@@ -43,6 +43,7 @@ jobs:
       EXAMPLES: >-
         agent_demo
         iris_classification
+        keeling_curve
         pandas_basics
         loop_hill_climb
         markdown_showcase

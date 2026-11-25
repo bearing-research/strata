@@ -28,6 +28,13 @@ want under your storage root instead:
     cache saves and what an edit runs again. `strata tutorial caching` opens
     a copy.
 
+-   [![The Keeling curve: CO₂ at Mauna Loa rising from 315 to over 420 ppm since 1958, beside the average year's cycle.](../assets/examples/keeling_curve-light.webp#only-light)![The Keeling curve: CO₂ at Mauna Loa rising from 315 to over 420 ppm since 1958, beside the average year's cycle.](../assets/examples/keeling_curve-dark.webp#only-dark)](../examples/keeling_curve.md)
+
+    **[keeling_curve](../examples/keeling_curve.md)**: NOAA's Mauna Loa
+    record, downloaded with `# @fetch`, the curve and its yearly cycle, then a
+    published figure whose page shows the code and NOAA's bytes behind it.
+    `strata tutorial keeling_curve` opens a copy.
+
 -   [![Iris classification: a pairplot of the four flower measurements, coloured by species.](../assets/examples/iris_classification-light.webp#only-light)![Iris classification: a pairplot of the four flower measurements, coloured by species.](../assets/examples/iris_classification-dark.webp#only-dark)](../examples/iris_classification.md)
 
     **[iris_classification](../examples/iris_classification.md)**: end-to-end
