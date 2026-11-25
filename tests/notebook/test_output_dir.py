@@ -369,8 +369,13 @@ class TestTheFileSweep:
             assert output_dirs.is_assembling(tmp_path)
         assert not output_dirs.is_assembling(tmp_path)
         assert not list(stale.parent.iterdir()), "a run leaves no lock behind"
-        with pytest.raises(RuntimeError), output_dirs.assembling(tmp_path):
-            raise RuntimeError("the run failed")
+
+        def a_run_that_fails():
+            with output_dirs.assembling(tmp_path):
+                raise RuntimeError("the run failed")
+
+        with pytest.raises(RuntimeError):
+            a_run_that_fails()
         assert not list(stale.parent.iterdir()), "nor does a run that fails"
 
     async def test_nothing_goes_while_a_run_is_assembling_a_folder(self, tmp_path):
