@@ -832,7 +832,7 @@ EXAMPLE_SHOTS = {
     "loop_hill_climb": ExampleShot(),
     "markdown_showcase": ExampleShot(focus="Templated report from a DataFrame"),
     "model_variants": ExampleShot(),
-    "model_variants_sweep": ExampleShot(),
+    "model_variants_sweep": ExampleShot(focus="every variant ran"),
     "news_alpha_trader": ExampleShot(needs=("llm", "alpaca")),
     "pandas_basics": ExampleShot(),
     "r_lm_vs_sklearn": ExampleShot(needs=("r",)),
