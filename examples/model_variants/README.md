@@ -1,4 +1,4 @@
-# Model Variants: switch classifiers without forking the notebook
+# Switch between three classifiers without retraining
 
 The same iris pipeline as `iris_classification`, but with three
 alternative training cells grouped as variants of the same DAG slot.

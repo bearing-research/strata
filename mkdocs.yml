@@ -83,7 +83,37 @@ nav:
     - Use a coding agent: notebook/agent.md
     - Terminal viewer: notebook/tui.md
     - Coming from Jupyter: notebook/import.md
-    - Example gallery: notebook/examples.md
+  - Examples:
+    - Gallery: notebook/examples.md
+    - Walkthroughs:
+      - examples/caching.md
+      - examples/keeling_curve.md
+      - examples/iris_classification.md
+      - examples/pandas_basics.md
+      - examples/titanic_ml.md
+      - examples/data_viewer.md
+      - examples/agent_demo.md
+    - Variant cells:
+      - examples/model_variants.md
+      - examples/model_variants_sweep.md
+    - Prompt cells and AI:
+      - examples/review_triage.md
+      - examples/arxiv_classifier.md
+      - examples/news_alpha_trader.md
+    - SQL cells:
+      - examples/sql_orders_report.md
+    - Loops, widgets and library cells:
+      - examples/loop_hill_climb.md
+      - examples/widget_playground.md
+      - examples/library_cells.md
+    - Mounts and tables:
+      - examples/s3_mount.md
+      - examples/each_pipeline.md
+    - Markdown:
+      - examples/markdown_showcase.md
+    - R cells:
+      - examples/r_mtcars_analysis.md
+      - examples/r_lm_vs_sklearn.md
   - Guides:
     - Cells:
       - Cell kinds: guides/cells/index.md
@@ -157,10 +187,8 @@ exclude_docs: |
   internal/
   assets/README.md
 
-# Rendered from examples/ by the hook above and linked from notebook/examples.md. The
-# changelog is linked from the header and the footer.
+# The changelog is linked from the header and the footer.
 not_in_nav: |
-  /examples/*.md
   /changelog.md
 
 # A link to a heading that is gone fails the strict build.

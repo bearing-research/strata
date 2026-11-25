@@ -1,4 +1,4 @@
-# Pandas Basics: the core DataFrame operations
+# Filter, group, merge and pivot a sales table
 
 A guided tour of the pandas operations you reach for every day, split
 into one cell per concept. Each cell re-uses its upstream cell's

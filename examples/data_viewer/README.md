@@ -1,4 +1,4 @@
-# Data Viewer: paging and sorting a large DataFrame
+# Page through 2,000 transactions
 
 A two-cell notebook that produces DataFrames larger than the 20-row
 inline preview, so the notebook's **interactive data viewer** pages

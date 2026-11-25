@@ -1,4 +1,4 @@
-# SQL Orders Report
+# Report top orders and revenue from SQL and Python
 
 A small five-cell notebook that demonstrates Strata's SQL cell support
 against a local SQLite warehouse. The cells span three languages

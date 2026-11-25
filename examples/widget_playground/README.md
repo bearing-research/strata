@@ -1,4 +1,4 @@
-# Widget Playground: interactive controls driving the DAG
+# Drive a plot with a slider, a number and a dropdown
 
 A three-cell notebook: a **widget cell** (a control panel) feeding two Python
 cells, one that renders a DataFrame and one that draws a chart. The widget
