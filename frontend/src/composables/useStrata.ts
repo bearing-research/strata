@@ -521,6 +521,13 @@ export interface NotebookSample {
   name: string
   title: string
   description: string
+  /** Run All on a fresh copy, once open, measured on a 2-core machine. */
+  first_run_seconds: number
+}
+
+/** The sample's card picture: the docs gallery's, for the given theme. */
+function sampleThumbnailUrl(name: string, theme: 'light' | 'dark'): string {
+  return `${STRATA_BASE}/v1/notebooks/samples/${encodeURIComponent(name)}/thumbnail/${theme}`
 }
 
 async function listSamples(): Promise<NotebookSample[]> {
@@ -1643,6 +1650,7 @@ export function useStrata() {
     openNotebook,
     discoverNotebooks,
     listSamples,
+    sampleThumbnailUrl,
     openSample,
     createNotebook,
     importNotebook,

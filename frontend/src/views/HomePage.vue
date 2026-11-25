@@ -15,9 +15,11 @@ import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '.
 import { storedNotInRecents } from '../utils/storedNotebooks'
 import ImportReportModal from '../components/ImportReportModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
+import { useTheme } from '../composables/useTheme'
 
 const router = useRouter()
 const strata = useStrata()
+const { resolved: theme } = useTheme()
 const { entries: recentNotebooks, record, remove, clear } = useRecentNotebooks()
 
 const FALLBACK_NOTEBOOK_PARENT_PATH = '/tmp/strata-notebooks'
@@ -611,19 +613,31 @@ function formatTime(ts: number): string {
         <h3>Open a sample</h3>
         <p class="form-help sample-help">Opens a copy, so you can edit it freely.</p>
         <div v-if="samplesError" class="discovery-error">{{ samplesError }}</div>
-        <ul v-else class="discovery-list" data-testid="open-sample-list">
-          <li
+        <div v-else class="sample-grid" data-testid="open-sample-list">
+          <button
             v-for="sample in samples"
             :key="sample.name"
-            class="discovery-item"
-            :class="{ disabled: loading }"
+            type="button"
+            class="sample-card"
+            :disabled="loading"
             :data-testid="`open-sample-${sample.name}`"
-            @click="!loading && openSample(sample.name)"
+            @click="openSample(sample.name)"
           >
-            <div class="discovery-name">{{ sample.title }}</div>
-            <div class="sample-description">{{ sample.description }}</div>
-          </li>
-        </ul>
+            <!-- What the sample makes; the title below says it in words. -->
+            <img
+              class="sample-thumb"
+              :src="strata.sampleThumbnailUrl(sample.name, theme)"
+              alt=""
+              width="640"
+              height="400"
+            />
+            <span class="sample-body">
+              <span class="sample-title">{{ sample.title }}</span>
+              <span class="sample-description">{{ sample.description }}</span>
+              <span class="sample-run-time">First run about {{ sample.first_run_seconds }} s</span>
+            </span>
+          </button>
+        </div>
         <div class="form-actions">
           <button class="btn btn-secondary" @click="showSampleForm = false">Cancel</button>
         </div>
@@ -1046,10 +1060,64 @@ function formatTime(ts: number): string {
   font-size: 13px;
   font-weight: 500;
 }
+.sample-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.sample-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+.sample-card:hover:not(:disabled),
+.sample-card:focus-visible {
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+.sample-card:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.sample-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  border-bottom: 1px solid var(--border);
+}
+.sample-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px 12px;
+}
+.sample-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
 .sample-description {
   color: var(--text-secondary);
   font-size: 12px;
-  margin-top: 2px;
+  line-height: 1.4;
+}
+.sample-run-time {
+  margin-top: auto;
+  padding-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 .sample-help {
   margin: -8px 0 12px;

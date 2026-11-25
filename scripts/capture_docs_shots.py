@@ -1053,12 +1053,17 @@ def capture_examples(work_dir: Path, names: list[str] | None) -> list[Path]:
             finally:
                 proc.terminate()
                 proc.wait(timeout=30)
+    from strata.notebook.samples import THUMBNAILS_DIR, get_sample
+
     EXAMPLE_THUMBS.mkdir(parents=True, exist_ok=True)
     for png in sorted(raw.glob("*.png")):
         dest = EXAMPLE_THUMBS / f"{png.stem}.webp"
         name, _, theme = png.stem.rpartition("-")
         _to_thumb(png, dest, name, theme)
         written.append(dest)
+        # A bundled sample's card ships in the wheel too, for the home page's picker.
+        if get_sample(name) is not None:
+            written.append(Path(shutil.copy2(dest, THUMBNAILS_DIR / dest.name)))
 
     for name, reason in skipped.items():
         print(f"skipped {name}: {reason}", file=sys.stderr)

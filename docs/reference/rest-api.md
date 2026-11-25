@@ -337,11 +337,17 @@ instead of typing a filesystem path. Available in both modes; requires
 
 ```
 GET /v1/notebooks/samples
+GET /v1/notebooks/samples/{name}/thumbnail/{theme}
 POST /v1/notebooks/samples/{name}/open
 ```
 
-`GET` returns `{ "samples": [{ "name", "title", "description" }] }`, the notebooks
-bundled with Strata, and requires `notebook:read` under principal auth. `POST` copies
+`GET /samples` returns
+`{ "samples": [{ "name", "title", "description", "first_run_seconds" }] }`, the
+notebooks bundled with Strata; `first_run_seconds` is how long Run All took on a fresh
+copy, measured on a 2-core Linux machine. `GET .../thumbnail/{theme}` returns the
+sample's card from the [example gallery](../notebook/examples.md) as WebP, for `light`
+or `dark`; another theme or name is a 404. Both require `notebook:read` under principal
+auth. `POST` copies
 one into the caller's storage root under a fresh name, as a notebook with its own id,
 and opens the copy. It responds as [Open Notebook](#open-notebook) does, once the
 copy's environment is synced and warmed, and requires `notebook:write`. An unknown name
