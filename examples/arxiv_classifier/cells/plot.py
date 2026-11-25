@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 from sklearn.model_selection import train_test_split
 
+plt.style.use("strata")
+
 X = embeddings
 y = sampled_papers["topic"].to_numpy()
 _, X_test, _, y_test = train_test_split(

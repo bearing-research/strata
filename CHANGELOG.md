@@ -9,6 +9,12 @@ exhaustive commit history.
 
 ### Added
 
+- **`plt.style.use("strata")`.** A matplotlib style that ships with Strata: a
+  transparent background, grey text and the notebook's accents, so a chart reads on the
+  light and the dark theme instead of sitting in a white box. A cell gets it by name once
+  it imports pyplot; nothing is applied unless the cell asks. The examples that plot use
+  it. A cached figure keeps the look it was drawn with, since the style is not part of a
+  cell's key.
 - **Artifacts in a notebook lists that notebook's store.** The link opened the server's
   store, which holds none of a notebook's results; its page now lists them by cell and
   output, through `GET /v1/notebooks/{session_id}/store/artifacts` and `.../store/stats`.
