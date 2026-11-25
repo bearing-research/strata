@@ -357,11 +357,23 @@ class TestTheFileSweep:
 
         assert self._stored(session, b"o")
 
+    def test_a_lock_a_crash_left_holds_nothing_off_and_goes(self, tmp_path):
+        stale = tmp_path / output_dirs.ASSEMBLING_DIR / "crashed.lock"
+        stale.parent.mkdir()
+        stale.touch()
+
+        assert not output_dirs.is_assembling(tmp_path)
+        assert not stale.exists()
+        with output_dirs.assembling(tmp_path):
+            assert output_dirs.is_assembling(tmp_path)
+        assert not output_dirs.is_assembling(tmp_path)
+        assert not list(stale.parent.iterdir()), "a run leaves no lock behind"
+
     async def test_nothing_goes_while_a_run_is_assembling_a_folder(self, tmp_path):
         session, _ = await self._two_runs(tmp_path)
         manager = session.get_artifact_manager()
 
-        with output_dirs.assembling():
+        with output_dirs.assembling(manager.artifact_dir):
             manager.prune(keep_superseded=0, min_idle_seconds=0)
         assert self._stored(session, b"o")
 

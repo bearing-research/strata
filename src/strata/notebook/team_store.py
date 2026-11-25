@@ -382,7 +382,7 @@ async def pull_cell_outputs(
 
     with (
         tempfile.TemporaryDirectory(prefix="strata_team_pull_") as workdir,
-        output_dirs.assembling(),
+        output_dirs.assembling(artifact_mgr.artifact_dir),
     ):
         # Every file of every folder is fetched and checked before anything lands, so no
         # manifest lands naming a file that is not here.

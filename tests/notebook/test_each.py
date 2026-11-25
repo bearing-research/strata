@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import sqlite3
+import subprocess
 import sys
 import zipfile
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -1452,6 +1455,51 @@ class TestListing:
         assert each.instance_name("a") != each.instance_name("b")
 
 
+_SWEEP_ELSEWHERE = """
+import sys
+from pathlib import Path
+from strata.notebook.artifact_integration import NotebookArtifactManager
+manager = NotebookArtifactManager(sys.argv[1], artifact_dir=Path(sys.argv[2]))
+manager.prune(keep_superseded=2, min_idle_seconds=3600)
+manager.close()
+"""
+
+
+class TestASweepInAnotherProcess:
+    """A server opening the notebook sweeps its store while a CLI run of an @each cell is
+    on; the run's instances are over an hour old, past the sweep's idle floor, and no
+    manifest requires them yet. SYSTEMS EACH-2."""
+
+    async def test_it_waits_for_the_run_to_store_its_manifest(self, tmp_path, monkeypatch):
+        from strata.notebook.cell_paths import fanout
+
+        raw, source = _over_files(tmp_path)
+        _touch(raw / "one.txt", "a")
+        _touch(raw / "two.txt", "b")
+        nb = Notebook(tmp_path, source, READER)
+        manager = nb.session.get_artifact_manager()
+        store_manifests = fanout._store_each_manifests
+
+        def swept_elsewhere_first(*args, **kwargs):
+            with closing(sqlite3.connect(manager.artifact_dir / "artifacts.sqlite")) as conn:
+                with conn:
+                    conn.execute(
+                        "UPDATE artifact_versions SET last_used_at = last_used_at - 7200, "
+                        "created_at = created_at - 7200 WHERE id LIKE '%@variant=each-%'"
+                    )
+            subprocess.run(
+                [sys.executable, "-c", _SWEEP_ELSEWHERE, manager.notebook_id, manager.artifact_dir],
+                check=True,
+            )
+            return store_manifests(*args, **kwargs)
+
+        monkeypatch.setattr(fanout, "_store_each_manifests", swept_elsewhere_first)
+        result = await nb.run("a")
+
+        assert result.success, result.error
+        assert set(nb.manifest("a", "out")) == {"one.txt", "two.txt"}
+
+
 class TestTheSweepDuringARun:
     async def test_it_waits_while_a_run_assembles(self, tmp_path):
         raw, source = _over_files(tmp_path)
@@ -1463,5 +1511,5 @@ class TestTheSweepDuringARun:
         manager = nb.session.get_artifact_manager()
 
         assert each.collectable_instances(manager)
-        with output_dirs.assembling():
+        with output_dirs.assembling(manager.artifact_dir):
             assert each.collectable_instances(manager) == []

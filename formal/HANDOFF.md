@@ -145,13 +145,14 @@ property, the replays of what it finds, then the fixes.
 
 1. **Done: pruning over strings and NaN** (PR-2), `test_bounds_pruning_properties.py`;
    finding 27.
-2. **Two processes on one store** (LR-2, EACH-2). LR-2 is done: a rerun no longer
+2. **Done: two processes on one store** (LR-2, EACH-2). LR-2 is done: a rerun no longer
    fails a build another process just resumed (finding 26, #1653), and two processes
    that both find no open build no longer each open one (finding 35): `_new_build`
    calls vestigo 0.8.0's `BuildStore.open_build`. The `open` loop of two processes is
    its own model, `LocalOpen.tla`, not a part of `LocalRun.tla`, which follows one
-   build's lease. Still open: EACH-2's guard against collecting during a run is a
-   process-local counter.
+   build's lease. EACH-2 is done too (finding 36): the guard against collecting during
+   a run was a counter in the run's process; it is a lock file in the store's
+   directory, which a sweep in any process sees.
 3. **Done: a wider Run All property** (BAT-1, BAT-2). Module state, `@nocache`, `@loop`
    and `@timeout` (a worker's single-run path) in the generator; findings 28, 29, 30. A
    real remote worker is not covered.

@@ -794,6 +794,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A sweep in another process no longer takes a running `@each` cell's results.** An
+  `@each` or `@output_dir` run stores its items or files before the manifest that keeps
+  them, and the sweep held off only for runs in its own process. A server opening a
+  notebook while a CLI run of it was over an hour in removed what the run had stored,
+  and the run failed at its last step. A running cell now holds a lock file in the
+  notebook's store, which every process's sweep waits for (#PR).
 - **Two processes that start one cell at once no longer both run it.** A local run read
   the computation's open build and, finding none, created and opened one in two more
   transactions, so two processes on one store (a CLI run beside the server) that both

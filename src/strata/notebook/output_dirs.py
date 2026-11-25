@@ -21,11 +21,13 @@ import re
 import shutil
 import stat
 import tarfile
-import threading
+import uuid
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO
+
+import filelock
 
 from strata.notebook.file_clone import clone_reader
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
@@ -203,29 +205,40 @@ def is_file_id(artifact_id: str) -> bool:
     return _FILE_ID.search(artifact_id) is not None
 
 
-_assembling = 0  # runs in this process whose stored files may not be in a manifest yet
-_assembling_lock = threading.Lock()
+# Under a store's artifact dir: a lock file each run holds while it assembles.
+ASSEMBLING_DIR = "assembling"
 
 
-def is_assembling() -> bool:
-    """Whether a run in this process has stored versions its manifest does not name yet."""
-    return _assembling > 0
+def is_assembling(artifact_dir: Path) -> bool:
+    """Whether a run, in any process, has stored versions in the store at *artifact_dir*
+    its manifest does not name yet. A lock nobody holds a crash left; it goes."""
+    held = False
+    for path in (Path(artifact_dir) / ASSEMBLING_DIR).glob("*.lock"):
+        lock = filelock.FileLock(path)
+        try:
+            lock.acquire(timeout=0)
+        except filelock.Timeout:
+            held = True
+            continue
+        lock.release()
+        path.unlink(missing_ok=True)
+    return held
 
 
 @contextmanager
-def assembling() -> Generator[None]:
-    """Hold off the file sweep while a run stores files ahead of its manifest.
+def assembling(artifact_dir: Path) -> Generator[None]:
+    """Hold off the store's file and instance sweeps while a run stores ahead of its manifest.
 
-    A worker's uploads arrive during the run, hours before its manifest is staged.
+    A worker's uploads arrive during the run, hours before its manifest is staged. A lock
+    file, so a sweep in another process (a server opening the notebook beside a CLI run)
+    holds off too; a counter in this process could not tell it (SYSTEMS EACH-2).
     """
-    global _assembling
-    with _assembling_lock:
-        _assembling += 1
-    try:
+    folder = Path(artifact_dir) / ASSEMBLING_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{uuid.uuid4().hex}.lock"
+    with filelock.FileLock(path):
         yield
-    finally:
-        with _assembling_lock:
-            _assembling -= 1
+    path.unlink(missing_ok=True)
 
 
 def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
@@ -234,7 +247,7 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
     ``None`` while a run is assembling a folder, or when a manifest cannot be read,
     so nothing it might name is taken.
     """
-    if _assembling:
+    if is_assembling(artifact_mgr.artifact_dir):
         return None
     store = artifact_mgr.artifact_store
     versions = store.list_versions_by_id_prefix(f"nb_{artifact_mgr.notebook_id}_cell_")
