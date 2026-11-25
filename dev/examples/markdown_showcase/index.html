@@ -4125,15 +4125,13 @@
 </button>
 
 <h1 id="write-reports-in-markdown-by-hand-or-from-data">Write reports in Markdown, by hand or from data<a class="headerlink" href="#write-reports-in-markdown-by-hand-or-from-data" title="Permanent link">&para;</a></h1>
-<p><img alt="Write reports in Markdown, by hand or from data: what a run of the notebook shows" src="../../assets/examples/markdown_showcase-light.webp#only-light" />
-<img alt="Write reports in Markdown, by hand or from data: what a run of the notebook shows" src="../../assets/examples/markdown_showcase-dark.webp#only-dark" /></p>
 <p>Every way Strata renders Markdown, in one notebook: headings, emphasis, lists, tables,
 code blocks, blockquotes, links, and the sanitizer that keeps script in a cell from
 running. The last two cells are Python cells that show Markdown built at run time with
 <code>Markdown(...)</code>: a short note with the current time, and a report from a DataFrame.</p>
 <p>It runs nothing heavy; use it to check how something renders, or as a reference when you
 write a documentation cell.</p>
-<h1 id="markdown-showcase">Markdown Showcase<a class="headerlink" href="#markdown-showcase" title="Permanent link">&para;</a></h1>
+<hr />
 <p>This notebook exercises every markdown rendering path in Strata. It's
 deliberately content-only, there's no real "computation" to run. Use it
 to verify that the renderer handles the cases listed below, and as a
@@ -4301,7 +4299,7 @@ data, not formatting.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="fenced-code-with-a-language">Fenced code with a language<a class="headerlink" href="#fenced-code-with-a-language" title="Permanent link">&para;</a></h2>
+<h2 class="nb-cell" id="fenced-code-with-a-language">Fenced code with a language<a class="headerlink" href="#fenced-code-with-a-language" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">materialize</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">transform</span><span class="p">):</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="sd">"""The single primitive Strata exposes."""</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">provenance</span> <span class="o">=</span> <span class="n">sha256</span><span class="p">(</span><span class="n">serialize</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span> <span class="o">+</span> <span class="n">serialize</span><span class="p">(</span><span class="n">transform</span><span class="p">))</span>
@@ -4311,7 +4309,7 @@ data, not formatting.</p>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">cache</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">provenance</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">return</span> <span class="n">result</span>
 </code></pre></div>
-<h2 id="fenced-code-without-a-language">Fenced code without a language<a class="headerlink" href="#fenced-code-without-a-language" title="Permanent link">&para;</a></h2>
+<h2 class="nb-cell" id="fenced-code-without-a-language">Fenced code without a language<a class="headerlink" href="#fenced-code-without-a-language" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>$ STRATA_PORT=8765 strata-notebook
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Listening on http://127.0.0.1:8765
 </code></pre></div>
@@ -4409,8 +4407,7 @@ plumb through.</p>
 <h3 id="data-urls">Data URLs<a class="headerlink" href="#data-urls" title="Permanent link">&para;</a></h3>
 <p>Data URLs in links are sanitized too, DOMPurify drops the href:</p>
 <p><a href="#">image data url</a></p>
-<h2 id="dynamic-markdown-via-display">Dynamic Markdown via display()<a class="headerlink" href="#dynamic-markdown-via-display" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="dynamic-markdown-via-display">Dynamic Markdown via display()<a class="headerlink" href="#dynamic-markdown-via-display" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @name Dynamic Markdown via display()</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1">#</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># The Markdown(...) wrapper is auto-injected into every cell namespace,</span>
@@ -4439,8 +4436,18 @@ plumb through.</p>
 <a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>    <span class="p">)</span>
 <a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="p">)</span>
 </code></pre></div>
-<h2 id="templated-report-from-a-dataframe">Templated report from a DataFrame<a class="headerlink" href="#templated-report-from-a-dataframe" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 id="generated-at-runtime">Generated at runtime<a class="headerlink" href="#generated-at-runtime" title="Permanent link">&para;</a></h2>
+<p>This block was rendered from a <strong>Python cell</strong>, not a markdown cell.</p>
+<ul>
+<li>Current time: <code>2026-11-25 07:32:10</code></li>
+<li>Cell language: <code>python</code></li>
+<li>Display path: <code>Markdown(text) → text/markdown artifact → renderer</code></li>
+</ul>
+<blockquote>
+<p>The same renderer powers both surfaces, so anything the markdown
+showcase renders correctly will also work here.</p>
+</blockquote>
+<h2 class="nb-cell" id="templated-report-from-a-dataframe">Templated report from a DataFrame<a class="headerlink" href="#templated-report-from-a-dataframe" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @name Templated report from a DataFrame</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1">#</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># A more realistic dynamic-markdown pattern: take some tabular result</span>
@@ -4505,6 +4512,59 @@ plumb through.</p>
 <a id="__codelineno-6-62" name="__codelineno-6-62" href="#__codelineno-6-62"></a>    <span class="p">)</span>
 <a id="__codelineno-6-63" name="__codelineno-6-63" href="#__codelineno-6-63"></a><span class="p">)</span>
 </code></pre></div>
+<h2 id="mock-leaderboard-report">Mock leaderboard report<a class="headerlink" href="#mock-leaderboard-report" title="Permanent link">&para;</a></h2>
+<p><strong>4 models</strong> scored across <strong>3 evals</strong>. Top
+performer: <code>claude-sonnet-4-6</code> at <code>87.8%</code> mean. Spread
+between best and worst: <strong>9.6 points</strong>.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: center;">Rank</th>
+<th>Model</th>
+<th style="text-align: right;">MMLU</th>
+<th style="text-align: right;">GSM8K</th>
+<th style="text-align: right;">HumanEval</th>
+<th style="text-align: right;">Mean</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;">1</td>
+<td><code>claude-sonnet-4-6</code></td>
+<td style="text-align: right;">84.1%</td>
+<td style="text-align: right;">94.2%</td>
+<td style="text-align: right;">85.2%</td>
+<td style="text-align: right;">87.8%</td>
+</tr>
+<tr>
+<td style="text-align: center;">2</td>
+<td><code>gpt-5.4</code></td>
+<td style="text-align: right;">82.0%</td>
+<td style="text-align: right;">93.9%</td>
+<td style="text-align: right;">82.3%</td>
+<td style="text-align: right;">86.1%</td>
+</tr>
+<tr>
+<td style="text-align: center;">3</td>
+<td><code>gemini-3-flash</code></td>
+<td style="text-align: right;">78.9%</td>
+<td style="text-align: right;">90.1%</td>
+<td style="text-align: right;">78.2%</td>
+<td style="text-align: right;">82.4%</td>
+</tr>
+<tr>
+<td style="text-align: center;">4</td>
+<td><code>mistral-large-latest</code></td>
+<td style="text-align: right;">76.3%</td>
+<td style="text-align: right;">87.2%</td>
+<td style="text-align: right;">71.2%</td>
+<td style="text-align: right;">78.3%</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><em>Report generated dynamically from <code>pd.DataFrame</code> → <code>Markdown</code>,
+exactly the pattern you'd use for "summary at end of notebook" cells.</em></p>
 
 
 

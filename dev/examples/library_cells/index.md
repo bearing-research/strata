@@ -1,34 +1,10 @@
 # Share functions between cells
 
-![Share functions between cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)
-![Share functions between cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)
-
 Walks through cross-cell library code in Strata Notebook: pure module
 cells, mixed runtime+library cells, PEP 563 type annotations, and the
 limitations slicing keeps in place.
 
-## What it covers
-
-| Cell | Demonstrates |
-| ---- | ------------ |
-| `pure_lib` / `use_pure` | Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim. |
-| `mixed_lib` / `use_mixed` | The slicing payoff: a single cell mixes runtime setup (`raw_min`, `raw_max`, a `print`) with reusable helpers (`clamp`, `CLAMP_MIN`). Runtime values still flow through the artifact path; helpers ride the synthetic module. |
-| `typed_lib` / `use_typed` | `from __future__ import annotations` lets a helper reference a type defined elsewhere, `symtable` correctly drops stringified annotations from the free-variable check. |
-| `blocked` / `try_blocked` | Closure over a runtime value blocks export. The diagnostic pinpoints the function (`is_outlier`) and the unresolved name (`runtime_threshold`). |
-
-## Running
-
-```bash
-STRATA_DEPLOYMENT_MODE=personal \
-STRATA_NOTEBOOK_STORAGE_DIR=/path/to/strata/examples \
-uv run python -m strata
-```
-
-Then open the notebook UI and pick **Library Cells** from the discover
-list. Run the cells top-to-bottom. The `blocked` cell carries the
-export diagnostic, and `try_blocked` shows the `NameError` its call raises.
-
-# Library cells
+---
 
 A *library cell* is one that defines reusable Python: functions, classes,
 constants, code that other cells will import and call. Strata Notebook
@@ -46,9 +22,7 @@ the slice is self-contained. Cells that mix runtime work with library code
 can now share the library code cleanly. This notebook walks through what
 works, what's relaxed, and what's still blocked.
 
-## Pure module cell (baseline)
-
-<sub>**kind** python</sub>
+## Pure module cell (baseline) { .nb-cell }
 
 ```python
 # @name Pure module cell (baseline)
@@ -70,9 +44,7 @@ def perimeter(radius: float) -> float:
     return round(2 * math.pi * radius, CIRCLE_PRECISION)
 ```
 
-## Use the pure-cell helpers
-
-<sub>**kind** python</sub>
+## Use the pure-cell helpers { .nb-cell }
 
 ```python
 # @name Use the pure-cell helpers
@@ -100,9 +72,7 @@ After slicing, the planner drops the runtime lines from the synthetic
 module and exports the helper. The runtime variables still flow through
 the regular artifact path, so downstream cells see them too.
 
-## Mixed: setup + helpers in one cell
-
-<sub>**kind** python</sub>
+## Mixed: setup + helpers in one cell { .nb-cell }
 
 ```python
 # @name Mixed: setup + helpers in one cell
@@ -134,9 +104,11 @@ def clamp(value: float) -> float:
     return max(CLAMP_MIN, min(CLAMP_MAX, value))
 ```
 
-## Use the mixed-cell helpers
+```text title="stdout"
+loaded raw bounds: [-43.98, 100.53]
+```
 
-<sub>**kind** python</sub>
+## Use the mixed-cell helpers { .nb-cell }
 
 ```python
 # @name Use the mixed-cell helpers
@@ -165,9 +137,7 @@ the reference set. That makes it easy to write helpers that hint at types
 defined elsewhere (e.g. `pyarrow.Table`) without forcing every consumer
 to import the same names.
 
-## Typed helper using PEP 563 annotations
-
-<sub>**kind** python</sub>
+## Typed helper using PEP 563 annotations { .nb-cell }
 
 ```python
 # @name Typed helper using PEP 563 annotations
@@ -185,9 +155,7 @@ def describe_table(table: Table) -> dict:  # noqa: F821 - PEP 563 stringified
     return {"rows": table.num_rows, "columns": table.num_columns}
 ```
 
-## Use the typed helper
-
-<sub>**kind** python</sub>
+## Use the typed helper { .nb-cell }
 
 ```python
 # @name Use the typed helper
@@ -222,9 +190,7 @@ The next cell triggers the first failure mode on purpose so you can see
 the diagnostic, it should error with a message naming the unresolved
 variable.
 
-## Closure over a runtime value (intentionally blocked)
-
-<sub>**kind** python</sub>
+## Closure over a runtime value (intentionally blocked) { .nb-cell }
 
 ```python
 # @name Closure over a runtime value (intentionally blocked)
@@ -251,9 +217,7 @@ def is_outlier(value: float) -> bool:
     return value > runtime_threshold
 ```
 
-## Downstream consumer (would call is_outlier)
-
-<sub>**kind** python</sub>
+## Downstream consumer (would call is_outlier) { .nb-cell }
 
 ```python
 # @name Downstream consumer (would call is_outlier)
@@ -272,3 +236,32 @@ except NameError as exc:
     would_be_outliers = f"blocked: {exc}"
 would_be_outliers
 ```
+
+```json title="Output"
+"blocked: name 'runtime_threshold' is not defined"
+```
+
+---
+
+## About this example
+
+### What it covers
+
+| Cell | Demonstrates |
+| ---- | ------------ |
+| `pure_lib` / `use_pure` | Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim. |
+| `mixed_lib` / `use_mixed` | The slicing payoff: a single cell mixes runtime setup (`raw_min`, `raw_max`, a `print`) with reusable helpers (`clamp`, `CLAMP_MIN`). Runtime values still flow through the artifact path; helpers ride the synthetic module. |
+| `typed_lib` / `use_typed` | `from __future__ import annotations` lets a helper reference a type defined elsewhere, `symtable` correctly drops stringified annotations from the free-variable check. |
+| `blocked` / `try_blocked` | Closure over a runtime value blocks export. The diagnostic pinpoints the function (`is_outlier`) and the unresolved name (`runtime_threshold`). |
+
+### Running
+
+```bash
+STRATA_DEPLOYMENT_MODE=personal \
+STRATA_NOTEBOOK_STORAGE_DIR=/path/to/strata/examples \
+uv run python -m strata
+```
+
+Then open the notebook UI and pick **Library Cells** from the discover
+list. Run the cells top-to-bottom. The `blocked` cell carries the
+export diagnostic, and `try_blocked` shows the `NameError` its call raises.

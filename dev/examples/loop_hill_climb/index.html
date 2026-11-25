@@ -1464,61 +1464,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-to-look-at" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What to look at
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#try-the-fork" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Try the fork
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-this-demo-verifies" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What this demo verifies
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#helpers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4228,61 +4173,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-to-look-at" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What to look at
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#try-the-fork" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Try the fork
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-this-demo-verifies" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What this demo verifies
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#helpers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4324,8 +4214,6 @@
 </button>
 
 <h1 id="hill-climb-himmelblaus-function-one-cached-step-at-a-time">Hill-climb Himmelblau's function, one cached step at a time<a class="headerlink" href="#hill-climb-himmelblaus-function-one-cached-step-at-a-time" title="Permanent link">&para;</a></h1>
-<p><img alt="Hill-climb Himmelblau's function, one cached step at a time: what a run of the notebook shows" src="../../assets/examples/loop_hill_climb-light.webp#only-light" />
-<img alt="Hill-climb Himmelblau's function, one cached step at a time: what a run of the notebook shows" src="../../assets/examples/loop_hill_climb-dark.webp#only-dark" /></p>
 <p>Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop
 cell feature: the <code>@loop</code> / <code>@loop_until</code> annotations, per-iteration
 artifacts, the progress badge, the iteration picker, and the
@@ -4334,157 +4222,71 @@ artifacts, the progress badge, the iteration picker, and the
 small enough to reason about and visually interesting because there
 are four equal-valued minima, so different seeds (and different forks)
 converge to different basins.</p>
-<h2 id="what-to-look-at">What to look at<a class="headerlink" href="#what-to-look-at" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong><code>helpers</code></strong> is a module cell: imports (<code>random</code>) and a
-  reusable function (<code>himmelblau</code>). It declares no top-level
-  runtime state, so Strata treats it as a shareable module whose
-  names are directly referenceable from every downstream cell.</li>
-<li><strong><code>seed</code></strong> bootstraps the search at a random <code>(x, y)</code> with an initial
-  score, using <code>random</code> and <code>himmelblau</code> from <code>helpers</code>. Its
-  output variable <code>state</code> is the upstream carry for the loop cell
-  below.</li>
-<li><strong><code>evolve</code></strong> is the loop cell.</li>
-<li><code># @loop max_iter=40 carry=state</code> caps the search at 40 iterations
-    and tells Strata that the variable <code>state</code> is threaded between
-    iterations.</li>
-<li><code># @loop_until state["best_score"] &lt; 1e-3</code> terminates the loop
-    early as soon as the cell finds a minimum.</li>
-<li>Each iteration proposes a small random perturbation of <code>(x, y)</code> and
-    keeps the move if it improves the score. The step size shrinks on
-    every accepted move so the search sharpens.</li>
-<li><code>random</code> and <code>himmelblau</code> come from the <code>helpers</code> cell via
-    the DAG, with no duplicate imports or redefinitions here.</li>
-<li>Every iteration stores the full <code>state</code> as its own artifact
-    (<code>nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}</code>).</li>
-<li><strong><code>summary</code></strong> is a regular downstream cell. It reads the final
-  iteration's <code>state</code> via the normal DAG input path and prints the
-  convergence table.</li>
-</ul>
-<h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
-<p>From the project root:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>examples
+<hr />
+<h2 class="nb-cell" id="helpers">Helpers<a class="headerlink" href="#helpers" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># @name Helpers</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># A "module cell": it contains only imports and definitions, no top-level</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># runtime state. Strata treats this kind of cell as a shareable module</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># so downstream cells can ``import random`` / call ``himmelblau`` just</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># by referencing the names. Mixing imports/defs with runtime state</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># (``x = random.uniform(...)``) in the same cell blocks the share.</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="k">def</span><span class="w"> </span><span class="nf">himmelblau</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">    </span><span class="sd">"""The classic Himmelblau function. Four equal-valued minima at</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="sd">    roughly (3, 2), (-2.8, 3.1), (-3.8, -3.3), (3.6, -1.8)."""</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="k">return</span> <span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">y</span> <span class="o">-</span> <span class="mi">11</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">y</span><span class="o">**</span><span class="mi">2</span> <span class="o">-</span> <span class="mi">7</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
 </code></pre></div>
-<p>Open <strong>Hill Climb Loop</strong> from the notebook list on the Strata home page, then run the four code
-cells in order. While <code>evolve</code> is running you should see:</p>
-<ul>
-<li>A <code>iter k/40</code> progress badge next to the cell title, with a spinner
-  while it is still running.</li>
-<li>The badge settles to a green "done" state when <code>@loop_until</code> fires
-  or <code>max_iter</code> is reached.</li>
-</ul>
-<p>Click the inspect icon on <code>evolve</code> to open the inspect panel. The new
-iteration picker lists every stored iteration with its size and
-content type. Copy any iteration's URI to the clipboard for the fork
-demo below.</p>
-<h2 id="try-the-fork">Try the fork<a class="headerlink" href="#try-the-fork" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Add a new cell below <code>evolve</code> (the <code>+</code> button in the UI).</li>
-<li>Paste the following, replacing <code>&lt;iter-K&gt;</code> with a mid-iter iteration
-   you find interesting (e.g., iter 5 if the search is still making
-   progress there):</li>
-</ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># @name Alt Search (forked)</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># @loop max_iter=30 carry=state start_from=evolve@iter=&lt;iter-K&gt;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># @loop_until state["best_score"] &lt; 1e-3</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">next_iter</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Numbers only: hash() of a str changes from one process to the next.</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">rng</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">Random</span><span class="p">(</span><span class="nb">hash</span><span class="p">((</span><span class="n">next_iter</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">],</span> <span class="mi">6</span><span class="p">),</span> <span class="nb">round</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="s2">"y"</span><span class="p">],</span> <span class="mi">6</span><span class="p">),</span> <span class="mi">2</span><span class="p">)))</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Larger exploration step so the fork is meaningfully different.</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">step</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"step"</span><span class="p">]</span> <span class="o">*</span> <span class="mf">3.0</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="n">cx</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">]</span> <span class="o">+</span> <span class="n">rng</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="n">step</span><span class="p">,</span> <span class="n">step</span><span class="p">)</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="n">cy</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"y"</span><span class="p">]</span> <span class="o">+</span> <span class="n">rng</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="n">step</span><span class="p">,</span> <span class="n">step</span><span class="p">)</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="n">cs</span> <span class="o">=</span> <span class="p">(</span><span class="n">cx</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">cy</span> <span class="o">-</span> <span class="mi">11</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">cx</span> <span class="o">+</span> <span class="n">cy</span><span class="o">**</span><span class="mi">2</span> <span class="o">-</span> <span class="mi">7</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="n">accepted</span> <span class="o">=</span> <span class="n">cs</span> <span class="o">&lt;</span> <span class="n">state</span><span class="p">[</span><span class="s2">"best_score"</span><span class="p">]</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="n">entry</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"iter"</span><span class="p">:</span> <span class="n">next_iter</span><span class="p">,</span> <span class="s2">"x"</span><span class="p">:</span> <span class="n">cx</span><span class="p">,</span> <span class="s2">"y"</span><span class="p">:</span> <span class="n">cy</span><span class="p">,</span> <span class="s2">"score"</span><span class="p">:</span> <span class="n">cs</span><span class="p">,</span> <span class="s2">"accepted"</span><span class="p">:</span> <span class="n">accepted</span><span class="p">}</span>
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>    <span class="o">**</span><span class="n">state</span><span class="p">,</span>
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    <span class="s2">"x"</span><span class="p">:</span> <span class="n">cx</span> <span class="k">if</span> <span class="n">accepted</span> <span class="k">else</span> <span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">],</span>
-<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    <span class="s2">"y"</span><span class="p">:</span> <span class="n">cy</span> <span class="k">if</span> <span class="n">accepted</span> <span class="k">else</span> <span class="n">state</span><span class="p">[</span><span class="s2">"y"</span><span class="p">],</span>
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>    <span class="s2">"best_score"</span><span class="p">:</span> <span class="nb">min</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">"best_score"</span><span class="p">]),</span>
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>    <span class="s2">"step"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"step"</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="mf">0.9</span> <span class="k">if</span> <span class="n">accepted</span> <span class="k">else</span> <span class="mf">1.0</span><span class="p">),</span>
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>    <span class="s2">"history"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"history"</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="n">entry</span><span class="p">],</span>
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>    <span class="s2">"iter"</span><span class="p">:</span> <span class="n">next_iter</span><span class="p">,</span>
+<h2 class="nb-cell" id="seed-state">Seed State<a class="headerlink" href="#seed-state" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># @name Seed State</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Seed the hill-climb search from a random point on Himmelblau's</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># surface. ``random`` and ``himmelblau`` come from the helpers cell</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># via the DAG. Reusing them here keeps the example DRY and shows how</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># a module cell's definitions flow through to runtime cells.</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">x</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">y</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">score</span> <span class="o">=</span> <span class="n">himmelblau</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="s2">"x"</span><span class="p">:</span> <span class="n">x</span><span class="p">,</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="s2">"y"</span><span class="p">:</span> <span class="n">y</span><span class="p">,</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="s2">"best_score"</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="c1"># Step size shrinks each accepted move so the search sharpens as</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    <span class="c1"># it approaches a minimum.</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>    <span class="s2">"step"</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>    <span class="c1"># history accumulates every proposal (accepted or rejected) so</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>    <span class="c1"># the summary cell can show the whole trajectory, not just the</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    <span class="c1"># kept moves.</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    <span class="s2">"history"</span><span class="p">:</span> <span class="p">[{</span><span class="s2">"iter"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">"x"</span><span class="p">:</span> <span class="n">x</span><span class="p">,</span> <span class="s2">"y"</span><span class="p">:</span> <span class="n">y</span><span class="p">,</span> <span class="s2">"score"</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">"accepted"</span><span class="p">:</span> <span class="kc">True</span><span class="p">}],</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>    <span class="c1"># iteration counter lets each loop iteration deterministically</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>    <span class="c1"># seed its own RNG, so running the notebook twice reproduces the</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>    <span class="c1"># same trajectory.</span>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>    <span class="s2">"iter"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
 <a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="p">}</span>
-<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"alt iter </span><span class="si">{</span><span class="n">next_iter</span><span class="si">}</span><span class="s2">: score </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'best_score'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Seed at (</span><span class="si">{</span><span class="n">x</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">y</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">) with score </span><span class="si">{</span><span class="n">score</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="n">state</span>
 </code></pre></div>
-<p>The forked cell seeds iter 0 from <code>evolve</code>'s iter K and iterates from
-there with a larger exploration step. The two cells share a history
-prefix (iters 0..K) and diverge after.</p>
-<h2 id="what-this-demo-verifies">What this demo verifies<a class="headerlink" href="#what-this-demo-verifies" title="Permanent link">&para;</a></h2>
-<ul>
-<li><code>@loop</code> dispatching (non-loop cells unaffected).</li>
-<li>Carry seeding from an upstream cell on iter 0.</li>
-<li>Per-iteration carry seeding for k &gt; 0 (each iter sees the previous
-  iter's <code>state</code>, not the original seed).</li>
-<li><code>@loop_until</code> early termination.</li>
-<li>Per-iteration artifacts stored with <code>@iter=k</code> suffix.</li>
-<li>WebSocket <code>cell_iteration_progress</code> messages driving the UI badge.</li>
-<li><code>@loop start_from=&lt;cell&gt;@iter=&lt;k&gt;</code> seed resolution for forking.</li>
-<li>Inspect-panel iteration picker listing iterations and copying URIs.</li>
-</ul>
-<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Each iteration runs in a fresh subprocess (no warm-pool reuse). For
-  a ~40-iteration loop expect ~40 × subprocess-startup cost (~1s
-  each on this machine). For agentic LLM loops the per-iteration
-  network call dwarfs that; for tight numerical loops the pool reuse
-  is a future optimization.</li>
-<li>A loop cell runs on the notebook's own server, never on a remote
-  worker: one whose <code># @worker</code> (or the notebook's default worker) names
-  another fails before it starts.</li>
-</ul>
-<h2 id="helpers">Helpers<a class="headerlink" href="#helpers" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @name Helpers</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># A "module cell": it contains only imports and definitions, no top-level</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># runtime state. Strata treats this kind of cell as a shareable module</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># so downstream cells can ``import random`` / call ``himmelblau`` just</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># by referencing the names. Mixing imports/defs with runtime state</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># (``x = random.uniform(...)``) in the same cell blocks the share.</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="k">def</span><span class="w"> </span><span class="nf">himmelblau</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="sd">"""The classic Himmelblau function. Four equal-valued minima at</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="sd">    roughly (3, 2), (-2.8, 3.1), (-3.8, -3.3), (3.6, -1.8)."""</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="k">return</span> <span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">y</span> <span class="o">-</span> <span class="mi">11</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">y</span><span class="o">**</span><span class="mi">2</span> <span class="o">-</span> <span class="mi">7</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"best_score"</span><span class="p">:</span><span class="w"> </span><span class="mf">478.10046069787757</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">"history"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">"accepted"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">"iter"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">"score"</span><span class="p">:</span><span class="w"> </span><span class="mf">478.10046069787757</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">      </span><span class="nt">"x"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.3942679845788373</span><span class="p">,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">"y"</span><span class="p">:</span><span class="w"> </span><span class="mf">-4.74989244777333</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">"iter"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">  </span><span class="nt">"step"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">  </span><span class="nt">"x"</span><span class="p">:</span><span class="w"> </span><span class="mf">1.3942679845788373</span><span class="p">,</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">  </span><span class="nt">"y"</span><span class="p">:</span><span class="w"> </span><span class="mf">-4.74989244777333</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="p">}</span>
 </code></pre></div>
-<h2 id="seed-state">Seed State<a class="headerlink" href="#seed-state" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># @name Seed State</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># Seed the hill-climb search from a random point on Himmelblau's</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># surface. ``random`` and ``himmelblau`` come from the helpers cell</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># via the DAG. Reusing them here keeps the example DRY and shows how</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># a module cell's definitions flow through to runtime cells.</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">x</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">y</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">score</span> <span class="o">=</span> <span class="n">himmelblau</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="s2">"x"</span><span class="p">:</span> <span class="n">x</span><span class="p">,</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="s2">"y"</span><span class="p">:</span> <span class="n">y</span><span class="p">,</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="s2">"best_score"</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="c1"># Step size shrinks each accepted move so the search sharpens as</span>
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="c1"># it approaches a minimum.</span>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    <span class="s2">"step"</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    <span class="c1"># history accumulates every proposal (accepted or rejected) so</span>
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    <span class="c1"># the summary cell can show the whole trajectory, not just the</span>
-<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>    <span class="c1"># kept moves.</span>
-<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>    <span class="s2">"history"</span><span class="p">:</span> <span class="p">[{</span><span class="s2">"iter"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">"x"</span><span class="p">:</span> <span class="n">x</span><span class="p">,</span> <span class="s2">"y"</span><span class="p">:</span> <span class="n">y</span><span class="p">,</span> <span class="s2">"score"</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">"accepted"</span><span class="p">:</span> <span class="kc">True</span><span class="p">}],</span>
-<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>    <span class="c1"># iteration counter lets each loop iteration deterministically</span>
-<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>    <span class="c1"># seed its own RNG, so running the notebook twice reproduces the</span>
-<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>    <span class="c1"># same trajectory.</span>
-<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>    <span class="s2">"iter"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
-<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="p">}</span>
-<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>
-<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Seed at (</span><span class="si">{</span><span class="n">x</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">y</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">) with score </span><span class="si">{</span><span class="n">score</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a><span class="n">state</span>
+<div class="highlight"><span class="filename">stdout</span><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Seed at (1.394, -4.750) with score 478.100
 </code></pre></div>
 <h1 id="the-loop-cell">The loop cell<a class="headerlink" href="#the-loop-cell" title="Permanent link">&para;</a></h1>
 <p>The cell below carries <code># @loop max_iter=40 carry=state</code>: Strata's
@@ -4500,8 +4302,8 @@ loop primitive. The cell body runs up to 40 times. On each iteration:</p>
 below <code>1e-3</code>, terminating early. Every intermediate iteration stays
 queryable in the inspect panel, and a new loop cell can <code>start_from</code>
 any of them to fork the search without re-running the prefix.</p>
-<h2 id="hill-climb">Hill Climb<a class="headerlink" href="#hill-climb" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python  ·  <strong>loop</strong> max_iter=40 carry=state</sub></p>
+<h2 class="nb-cell" id="hill-climb">Hill Climb<a class="headerlink" href="#hill-climb" title="Permanent link">&para;</a></h2>
+<p><sub><strong>loop</strong> max_iter=40 carry=state</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># @name Hill Climb</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># @loop max_iter=40 carry=state</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># @loop_until state["best_score"] &lt; 1e-3</span>
@@ -4564,40 +4366,213 @@ any of them to fork the search without re-running the prefix.</p>
 <a id="__codelineno-4-60" name="__codelineno-4-60" href="#__codelineno-4-60"></a>        <span class="sa">f</span><span class="s2">"best </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'best_score'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">)"</span>
 <a id="__codelineno-4-61" name="__codelineno-4-61" href="#__codelineno-4-61"></a>    <span class="p">)</span>
 </code></pre></div>
-<h2 id="convergence-summary">Convergence Summary<a class="headerlink" href="#convergence-summary" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @name Convergence Summary</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># Read the loop cell's final state and render a compact convergence</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># table. This is a regular downstream cell: it sees the *final*</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># iteration's carry artifact via the normal DAG input path, identical</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># to how any downstream cell reads any upstream variable.</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">accepted</span> <span class="o">=</span> <span class="p">[</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">state</span><span class="p">[</span><span class="s2">"history"</span><span class="p">]</span> <span class="k">if</span> <span class="n">h</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"accepted"</span><span class="p">)]</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">rejected</span> <span class="o">=</span> <span class="p">[</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">state</span><span class="p">[</span><span class="s2">"history"</span><span class="p">]</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">h</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"accepted"</span><span class="p">)]</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Final (x, y) = (</span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'x'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'y'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">)"</span><span class="p">)</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Final score  = </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'best_score'</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Iterations   = </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'iter'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Accepted     = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">accepted</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Rejected     = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rejected</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="nb">print</span><span class="p">()</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="s1">'iter'</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">'x'</span><span class="si">:</span><span class="s2">&gt;9</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">'y'</span><span class="si">:</span><span class="s2">&gt;9</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">'score'</span><span class="si">:</span><span class="s2">&gt;12</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">'outcome'</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">state</span><span class="p">[</span><span class="s2">"history"</span><span class="p">][</span><span class="o">-</span><span class="mi">10</span><span class="p">:]:</span>
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>    <span class="n">outcome</span> <span class="o">=</span> <span class="s2">"accept"</span> <span class="k">if</span> <span class="n">entry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"accepted"</span><span class="p">)</span> <span class="k">else</span> <span class="s2">"reject"</span>
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>    <span class="nb">print</span><span class="p">(</span>
-<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'iter'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;4d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'x'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;9.3f</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'y'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;9.3f</span><span class="si">}</span><span class="s2"> "</span>
-<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'score'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;12.4f</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">outcome</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2">"</span>
-<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    <span class="p">)</span>
-<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>
-<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="c1"># The last expression becomes the cell's display output.</span>
-<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="p">{</span>
-<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>    <span class="s2">"final_x"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">],</span>
-<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>    <span class="s2">"final_y"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"y"</span><span class="p">],</span>
-<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>    <span class="s2">"final_score"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"best_score"</span><span class="p">],</span>
-<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>    <span class="s2">"iterations"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">],</span>
-<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>    <span class="s2">"accepted"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">accepted</span><span class="p">),</span>
-<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>    <span class="s2">"rejected"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">rejected</span><span class="p">),</span>
-<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="p">}</span>
+<div class="highlight"><span class="filename">stdout</span><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>iter 1: accept → score 318.2285 at (2.284, -4.400)
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>iter 2: accept → score 152.7328 at (2.324, -3.596)
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>iter 3: accept → score 89.7289 at (2.470, -3.099)
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>iter 4: reject (score 166.4612 ≥ best 89.7289)
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>iter 5: accept → score 25.1563 at (3.148, -2.677)
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>iter 6: reject (score 48.2847 ≥ best 25.1563)
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>iter 7: reject (score 25.9849 ≥ best 25.1563)
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>iter 8: reject (score 51.4171 ≥ best 25.1563)
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>iter 9: reject (score 32.0542 ≥ best 25.1563)
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>iter 10: accept → score 12.2973 at (3.760, -2.589)
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>iter 11: reject (score 36.9591 ≥ best 12.2973)
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>iter 12: accept → score 2.0014 at (3.622, -2.189)
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>iter 13: reject (score 6.6491 ≥ best 2.0014)
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>iter 14: reject (score 2.0510 ≥ best 2.0014)
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>iter 15: reject (score 7.4480 ≥ best 2.0014)
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>iter 16: reject (score 6.0646 ≥ best 2.0014)
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>iter 17: reject (score 5.8389 ≥ best 2.0014)
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>iter 18: accept → score 0.3362 at (3.509, -1.887)
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>iter 19: reject (score 5.0110 ≥ best 0.3362)
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>iter 20: reject (score 3.1250 ≥ best 0.3362)
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>iter 21: reject (score 2.1808 ≥ best 0.3362)
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>iter 22: reject (score 17.0027 ≥ best 0.3362)
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>iter 23: reject (score 4.4482 ≥ best 0.3362)
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>iter 24: reject (score 0.8571 ≥ best 0.3362)
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>iter 25: reject (score 1.3200 ≥ best 0.3362)
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>iter 26: reject (score 7.9796 ≥ best 0.3362)
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>iter 27: reject (score 2.2638 ≥ best 0.3362)
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>iter 28: reject (score 0.8615 ≥ best 0.3362)
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>iter 29: reject (score 10.0107 ≥ best 0.3362)
+<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>iter 30: reject (score 3.7942 ≥ best 0.3362)
+<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a>iter 31: reject (score 4.0234 ≥ best 0.3362)
+<a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a>iter 32: reject (score 4.0880 ≥ best 0.3362)
+<a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a>iter 33: accept → score 0.1114 at (3.609, -1.780)
+<a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a>iter 34: reject (score 11.7741 ≥ best 0.1114)
+<a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a>iter 35: reject (score 7.7162 ≥ best 0.1114)
+<a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a>iter 36: reject (score 6.7401 ≥ best 0.1114)
+<a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a>iter 37: reject (score 0.3459 ≥ best 0.1114)
+<a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a>iter 38: reject (score 2.5042 ≥ best 0.1114)
+<a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a>iter 39: reject (score 7.5657 ≥ best 0.1114)
+<a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a>iter 40: reject (score 5.6943 ≥ best 0.1114)
 </code></pre></div>
+<h2 class="nb-cell" id="convergence-summary">Convergence Summary<a class="headerlink" href="#convergence-summary" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @name Convergence Summary</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># Read the loop cell's final state and render a compact convergence</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># table. This is a regular downstream cell: it sees the *final*</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># iteration's carry artifact via the normal DAG input path, identical</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># to how any downstream cell reads any upstream variable.</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">accepted</span> <span class="o">=</span> <span class="p">[</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">state</span><span class="p">[</span><span class="s2">"history"</span><span class="p">]</span> <span class="k">if</span> <span class="n">h</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"accepted"</span><span class="p">)]</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">rejected</span> <span class="o">=</span> <span class="p">[</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">state</span><span class="p">[</span><span class="s2">"history"</span><span class="p">]</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">h</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"accepted"</span><span class="p">)]</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Final (x, y) = (</span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'x'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'y'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">)"</span><span class="p">)</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Final score  = </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'best_score'</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Iterations   = </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'iter'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Accepted     = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">accepted</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Rejected     = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rejected</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="nb">print</span><span class="p">()</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="s1">'iter'</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">'x'</span><span class="si">:</span><span class="s2">&gt;9</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">'y'</span><span class="si">:</span><span class="s2">&gt;9</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">'score'</span><span class="si">:</span><span class="s2">&gt;12</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">'outcome'</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">state</span><span class="p">[</span><span class="s2">"history"</span><span class="p">][</span><span class="o">-</span><span class="mi">10</span><span class="p">:]:</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>    <span class="n">outcome</span> <span class="o">=</span> <span class="s2">"accept"</span> <span class="k">if</span> <span class="n">entry</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"accepted"</span><span class="p">)</span> <span class="k">else</span> <span class="s2">"reject"</span>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>    <span class="nb">print</span><span class="p">(</span>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'iter'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;4d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'x'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;9.3f</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'y'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;9.3f</span><span class="si">}</span><span class="s2"> "</span>
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>        <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">entry</span><span class="p">[</span><span class="s1">'score'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;12.4f</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">outcome</span><span class="si">:</span><span class="s2">&gt;10</span><span class="si">}</span><span class="s2">"</span>
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>    <span class="p">)</span>
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a><span class="c1"># The last expression becomes the cell's display output.</span>
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a><span class="p">{</span>
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>    <span class="s2">"final_x"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">],</span>
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>    <span class="s2">"final_y"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"y"</span><span class="p">],</span>
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>    <span class="s2">"final_score"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"best_score"</span><span class="p">],</span>
+<a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a>    <span class="s2">"iterations"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">],</span>
+<a id="__codelineno-6-29" name="__codelineno-6-29" href="#__codelineno-6-29"></a>    <span class="s2">"accepted"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">accepted</span><span class="p">),</span>
+<a id="__codelineno-6-30" name="__codelineno-6-30" href="#__codelineno-6-30"></a>    <span class="s2">"rejected"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">rejected</span><span class="p">),</span>
+<a id="__codelineno-6-31" name="__codelineno-6-31" href="#__codelineno-6-31"></a><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">"accepted"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">"final_score"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.1114213543102833</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">"final_x"</span><span class="p">:</span><span class="w"> </span><span class="mf">3.6094555292987467</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">"final_y"</span><span class="p">:</span><span class="w"> </span><span class="mf">-1.7797668397786437</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="nt">"iterations"</span><span class="p">:</span><span class="w"> </span><span class="mi">40</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span><span class="nt">"rejected"</span><span class="p">:</span><span class="w"> </span><span class="mi">32</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><span class="filename">stdout</span><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>Final (x, y) = (3.6095, -1.7798)
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>Final score  = 0.111421
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>Iterations   = 40
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>Accepted     = 9
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Rejected     = 32
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>iter         x         y        score    outcome
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>  31     3.852    -1.861       4.0234     reject
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>  32     3.856    -1.904       4.0880     reject
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>  33     3.609    -1.780       0.1114     accept
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>  34     3.981    -1.502      11.7741     reject
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>  35     3.245    -2.158       7.7162     reject
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>  36     3.209    -1.626       6.7401     reject
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>  37     3.646    -1.762       0.3459     reject
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>  38     3.795    -1.827       2.5042     reject
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>  39     3.929    -1.692       7.5657     reject
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>  40     3.330    -2.192       5.6943     reject
+</code></pre></div>
+<hr />
+<h2 id="about-this-example">About this example<a class="headerlink" href="#about-this-example" title="Permanent link">&para;</a></h2>
+<h3 id="what-to-look-at">What to look at<a class="headerlink" href="#what-to-look-at" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>helpers</code></strong> is a module cell: imports (<code>random</code>) and a
+  reusable function (<code>himmelblau</code>). It declares no top-level
+  runtime state, so Strata treats it as a shareable module whose
+  names are directly referenceable from every downstream cell.</li>
+<li><strong><code>seed</code></strong> bootstraps the search at a random <code>(x, y)</code> with an initial
+  score, using <code>random</code> and <code>himmelblau</code> from <code>helpers</code>. Its
+  output variable <code>state</code> is the upstream carry for the loop cell
+  below.</li>
+<li><strong><code>evolve</code></strong> is the loop cell.</li>
+<li><code># @loop max_iter=40 carry=state</code> caps the search at 40 iterations
+    and tells Strata that the variable <code>state</code> is threaded between
+    iterations.</li>
+<li><code># @loop_until state["best_score"] &lt; 1e-3</code> terminates the loop
+    early as soon as the cell finds a minimum.</li>
+<li>Each iteration proposes a small random perturbation of <code>(x, y)</code> and
+    keeps the move if it improves the score. The step size shrinks on
+    every accepted move so the search sharpens.</li>
+<li><code>random</code> and <code>himmelblau</code> come from the <code>helpers</code> cell via
+    the DAG, with no duplicate imports or redefinitions here.</li>
+<li>Every iteration stores the full <code>state</code> as its own artifact
+    (<code>nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}</code>).</li>
+<li><strong><code>summary</code></strong> is a regular downstream cell. It reads the final
+  iteration's <code>state</code> via the normal DAG input path and prints the
+  convergence table.</li>
+</ul>
+<h3 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h3>
+<p>From the project root:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>examples
+</code></pre></div>
+<p>Open <strong>Hill Climb Loop</strong> from the notebook list on the Strata home page, then run the four code
+cells in order. While <code>evolve</code> is running you should see:</p>
+<ul>
+<li>A <code>iter k/40</code> progress badge next to the cell title, with a spinner
+  while it is still running.</li>
+<li>The badge settles to a green "done" state when <code>@loop_until</code> fires
+  or <code>max_iter</code> is reached.</li>
+</ul>
+<p>Click the inspect icon on <code>evolve</code> to open the inspect panel. The new
+iteration picker lists every stored iteration with its size and
+content type. Copy any iteration's URI to the clipboard for the fork
+demo below.</p>
+<h3 id="try-the-fork">Try the fork<a class="headerlink" href="#try-the-fork" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Add a new cell below <code>evolve</code> (the <code>+</code> button in the UI).</li>
+<li>Paste the following, replacing <code>&lt;iter-K&gt;</code> with a mid-iter iteration
+   you find interesting (e.g., iter 5 if the search is still making
+   progress there):</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># @name Alt Search (forked)</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># @loop max_iter=30 carry=state start_from=evolve@iter=&lt;iter-K&gt;</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># @loop_until state["best_score"] &lt; 1e-3</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">next_iter</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="c1"># Numbers only: hash() of a str changes from one process to the next.</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="n">rng</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">Random</span><span class="p">(</span><span class="nb">hash</span><span class="p">((</span><span class="n">next_iter</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">],</span> <span class="mi">6</span><span class="p">),</span> <span class="nb">round</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="s2">"y"</span><span class="p">],</span> <span class="mi">6</span><span class="p">),</span> <span class="mi">2</span><span class="p">)))</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="c1"># Larger exploration step so the fork is meaningfully different.</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="n">step</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"step"</span><span class="p">]</span> <span class="o">*</span> <span class="mf">3.0</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="n">cx</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">]</span> <span class="o">+</span> <span class="n">rng</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="n">step</span><span class="p">,</span> <span class="n">step</span><span class="p">)</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="n">cy</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"y"</span><span class="p">]</span> <span class="o">+</span> <span class="n">rng</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="n">step</span><span class="p">,</span> <span class="n">step</span><span class="p">)</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="n">cs</span> <span class="o">=</span> <span class="p">(</span><span class="n">cx</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">cy</span> <span class="o">-</span> <span class="mi">11</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">cx</span> <span class="o">+</span> <span class="n">cy</span><span class="o">**</span><span class="mi">2</span> <span class="o">-</span> <span class="mi">7</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="n">accepted</span> <span class="o">=</span> <span class="n">cs</span> <span class="o">&lt;</span> <span class="n">state</span><span class="p">[</span><span class="s2">"best_score"</span><span class="p">]</span>
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="n">entry</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"iter"</span><span class="p">:</span> <span class="n">next_iter</span><span class="p">,</span> <span class="s2">"x"</span><span class="p">:</span> <span class="n">cx</span><span class="p">,</span> <span class="s2">"y"</span><span class="p">:</span> <span class="n">cy</span><span class="p">,</span> <span class="s2">"score"</span><span class="p">:</span> <span class="n">cs</span><span class="p">,</span> <span class="s2">"accepted"</span><span class="p">:</span> <span class="n">accepted</span><span class="p">}</span>
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>    <span class="o">**</span><span class="n">state</span><span class="p">,</span>
+<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a>    <span class="s2">"x"</span><span class="p">:</span> <span class="n">cx</span> <span class="k">if</span> <span class="n">accepted</span> <span class="k">else</span> <span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">],</span>
+<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>    <span class="s2">"y"</span><span class="p">:</span> <span class="n">cy</span> <span class="k">if</span> <span class="n">accepted</span> <span class="k">else</span> <span class="n">state</span><span class="p">[</span><span class="s2">"y"</span><span class="p">],</span>
+<a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a>    <span class="s2">"best_score"</span><span class="p">:</span> <span class="nb">min</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">"best_score"</span><span class="p">]),</span>
+<a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>    <span class="s2">"step"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"step"</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="mf">0.9</span> <span class="k">if</span> <span class="n">accepted</span> <span class="k">else</span> <span class="mf">1.0</span><span class="p">),</span>
+<a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>    <span class="s2">"history"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"history"</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="n">entry</span><span class="p">],</span>
+<a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a>    <span class="s2">"iter"</span><span class="p">:</span> <span class="n">next_iter</span><span class="p">,</span>
+<a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a><span class="p">}</span>
+<a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"alt iter </span><span class="si">{</span><span class="n">next_iter</span><span class="si">}</span><span class="s2">: score </span><span class="si">{</span><span class="n">state</span><span class="p">[</span><span class="s1">'best_score'</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+</code></pre></div>
+<p>The forked cell seeds iter 0 from <code>evolve</code>'s iter K and iterates from
+there with a larger exploration step. The two cells share a history
+prefix (iters 0..K) and diverge after.</p>
+<h3 id="what-this-demo-verifies">What this demo verifies<a class="headerlink" href="#what-this-demo-verifies" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>@loop</code> dispatching (non-loop cells unaffected).</li>
+<li>Carry seeding from an upstream cell on iter 0.</li>
+<li>Per-iteration carry seeding for k &gt; 0 (each iter sees the previous
+  iter's <code>state</code>, not the original seed).</li>
+<li><code>@loop_until</code> early termination.</li>
+<li>Per-iteration artifacts stored with <code>@iter=k</code> suffix.</li>
+<li>WebSocket <code>cell_iteration_progress</code> messages driving the UI badge.</li>
+<li><code>@loop start_from=&lt;cell&gt;@iter=&lt;k&gt;</code> seed resolution for forking.</li>
+<li>Inspect-panel iteration picker listing iterations and copying URIs.</li>
+</ul>
+<h3 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Each iteration runs in a fresh subprocess (no warm-pool reuse). For
+  a ~40-iteration loop expect ~40 × subprocess-startup cost (~1s
+  each on this machine). For agentic LLM loops the per-iteration
+  network call dwarfs that; for tight numerical loops the pool reuse
+  is a future optimization.</li>
+<li>A loop cell runs on the notebook's own server, never on a remote
+  worker: one whose <code># @worker</code> (or the notebook's default worker) names
+  another fails before it starts.</li>
+</ul>
 
 
 

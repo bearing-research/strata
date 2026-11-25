@@ -5368,6 +5368,15 @@ exhaustive commit history.</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>An example's docs page is the notebook as it ran.</strong> It opens with the README's
+  first lines, then shows every cell with its outputs (tables, charts, printed text), then
+  the README's notes under "About this example". The outputs come from a run that
+  <code>scripts/capture_docs_shots.py --only examples</code> records in <code>docs/assets/examples/runs/</code>,
+  so the docs build runs nothing; a page whose example changed since, or that needs an API
+  key, R or Docker to run, shows the code only and says so. The export's
+  <code>ExportOptions</code> gains <code>include_readme</code> and <code>max_table_rows</code> for this.</p>
+</li>
+<li>
 <p><strong>The docs have an Examples tab.</strong> It opens on the gallery and lists every example's
   page in its sidebar, grouped as the gallery is; it was one entry under Get started, and
   the example pages were in no menu. Each example's README is titled with its notebook's

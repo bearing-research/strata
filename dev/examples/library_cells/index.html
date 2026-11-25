@@ -1520,10 +1520,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-it-covers" class="md-nav__link">
+  <a href="#pure-module-cell-baseline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What it covers
+        Pure module cell (baseline)
       
     </span>
   </a>
@@ -1531,10 +1531,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
+  <a href="#use-the-pure-cell-helpers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Running
+        Use the pure-cell helpers
       
     </span>
   </a>
@@ -4173,10 +4173,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-it-covers" class="md-nav__link">
+  <a href="#pure-module-cell-baseline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What it covers
+        Pure module cell (baseline)
       
     </span>
   </a>
@@ -4184,10 +4184,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
+  <a href="#use-the-pure-cell-helpers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Running
+        Use the pure-cell helpers
       
     </span>
   </a>
@@ -4214,47 +4214,10 @@
 </button>
 
 <h1 id="share-functions-between-cells">Share functions between cells<a class="headerlink" href="#share-functions-between-cells" title="Permanent link">&para;</a></h1>
-<p><img alt="Share functions between cells: what a run of the notebook shows" src="../../assets/examples/library_cells-light.webp#only-light" />
-<img alt="Share functions between cells: what a run of the notebook shows" src="../../assets/examples/library_cells-dark.webp#only-dark" /></p>
 <p>Walks through cross-cell library code in Strata Notebook: pure module
 cells, mixed runtime+library cells, PEP 563 type annotations, and the
 limitations slicing keeps in place.</p>
-<h2 id="what-it-covers">What it covers<a class="headerlink" href="#what-it-covers" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Cell</th>
-<th>Demonstrates</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>pure_lib</code> / <code>use_pure</code></td>
-<td>Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim.</td>
-</tr>
-<tr>
-<td><code>mixed_lib</code> / <code>use_mixed</code></td>
-<td>The slicing payoff: a single cell mixes runtime setup (<code>raw_min</code>, <code>raw_max</code>, a <code>print</code>) with reusable helpers (<code>clamp</code>, <code>CLAMP_MIN</code>). Runtime values still flow through the artifact path; helpers ride the synthetic module.</td>
-</tr>
-<tr>
-<td><code>typed_lib</code> / <code>use_typed</code></td>
-<td><code>from __future__ import annotations</code> lets a helper reference a type defined elsewhere, <code>symtable</code> correctly drops stringified annotations from the free-variable check.</td>
-</tr>
-<tr>
-<td><code>blocked</code> / <code>try_blocked</code></td>
-<td>Closure over a runtime value blocks export. The diagnostic pinpoints the function (<code>is_outlier</code>) and the unresolved name (<code>runtime_threshold</code>).</td>
-</tr>
-</tbody>
-</table>
-<h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">STRATA_NOTEBOOK_STORAGE_DIR</span><span class="o">=</span>/path/to/strata/examples<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
-</code></pre></div>
-<p>Then open the notebook UI and pick <strong>Library Cells</strong> from the discover
-list. Run the cells top-to-bottom. The <code>blocked</code> cell carries the
-export diagnostic, and <code>try_blocked</code> shows the <code>NameError</code> its call raises.</p>
-<h1 id="library-cells">Library cells<a class="headerlink" href="#library-cells" title="Permanent link">&para;</a></h1>
+<hr />
 <p>A <em>library cell</em> is one that defines reusable Python: functions, classes,
 constants, code that other cells will import and call. Strata Notebook
 re-executes the producing cell's source as a synthetic Python module so
@@ -4268,40 +4231,38 @@ classes, and literal constants, drops everything else, and validates that
 the slice is self-contained. Cells that mix runtime work with library code
 can now share the library code cleanly. This notebook walks through what
 works, what's relaxed, and what's still blocked.</p>
-<h2 id="pure-module-cell-baseline">Pure module cell (baseline)<a class="headerlink" href="#pure-module-cell-baseline" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># @name Pure module cell (baseline)</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1">#</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># This is the classic shape: imports, a literal constant, and a couple</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># of helpers. No runtime work at module scope. The cell is exported</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># verbatim (no slicing), so comments and formatting survive.</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">CIRCLE_PRECISION</span> <span class="o">=</span> <span class="mi">4</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="k">def</span><span class="w"> </span><span class="nf">area</span><span class="p">(</span><span class="n">radius</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="k">return</span> <span class="nb">round</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">radius</span> <span class="o">*</span> <span class="n">radius</span><span class="p">,</span> <span class="n">CIRCLE_PRECISION</span><span class="p">)</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="k">def</span><span class="w"> </span><span class="nf">perimeter</span><span class="p">(</span><span class="n">radius</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>    <span class="k">return</span> <span class="nb">round</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">radius</span><span class="p">,</span> <span class="n">CIRCLE_PRECISION</span><span class="p">)</span>
+<h2 class="nb-cell" id="pure-module-cell-baseline">Pure module cell (baseline)<a class="headerlink" href="#pure-module-cell-baseline" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># @name Pure module cell (baseline)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1">#</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># This is the classic shape: imports, a literal constant, and a couple</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># of helpers. No runtime work at module scope. The cell is exported</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># verbatim (no slicing), so comments and formatting survive.</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">CIRCLE_PRECISION</span> <span class="o">=</span> <span class="mi">4</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="k">def</span><span class="w"> </span><span class="nf">area</span><span class="p">(</span><span class="n">radius</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="k">return</span> <span class="nb">round</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">radius</span> <span class="o">*</span> <span class="n">radius</span><span class="p">,</span> <span class="n">CIRCLE_PRECISION</span><span class="p">)</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="k">def</span><span class="w"> </span><span class="nf">perimeter</span><span class="p">(</span><span class="n">radius</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="k">return</span> <span class="nb">round</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">radius</span><span class="p">,</span> <span class="n">CIRCLE_PRECISION</span><span class="p">)</span>
 </code></pre></div>
-<h2 id="use-the-pure-cell-helpers">Use the pure-cell helpers<a class="headerlink" href="#use-the-pure-cell-helpers" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @name Use the pure-cell helpers</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1">#</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># ``area`` and ``perimeter`` ride the synthetic-module path; running</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># this cell re-executes the slice in a fresh module and pulls out</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># the requested symbols.</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">circle</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="s2">"radius"</span><span class="p">:</span> <span class="mf">7.5</span><span class="p">,</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="s2">"area"</span><span class="p">:</span> <span class="n">area</span><span class="p">(</span><span class="mf">7.5</span><span class="p">),</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="s2">"perimeter"</span><span class="p">:</span> <span class="n">perimeter</span><span class="p">(</span><span class="mf">7.5</span><span class="p">),</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="s2">"precision_used"</span><span class="p">:</span> <span class="n">CIRCLE_PRECISION</span><span class="p">,</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="p">}</span>
+<h2 class="nb-cell" id="use-the-pure-cell-helpers">Use the pure-cell helpers<a class="headerlink" href="#use-the-pure-cell-helpers" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># @name Use the pure-cell helpers</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1">#</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># ``area`` and ``perimeter`` ride the synthetic-module path; running</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># this cell re-executes the slice in a fresh module and pulls out</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># the requested symbols.</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">circle</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="s2">"radius"</span><span class="p">:</span> <span class="mf">7.5</span><span class="p">,</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="s2">"area"</span><span class="p">:</span> <span class="n">area</span><span class="p">(</span><span class="mf">7.5</span><span class="p">),</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="s2">"perimeter"</span><span class="p">:</span> <span class="n">perimeter</span><span class="p">(</span><span class="mf">7.5</span><span class="p">),</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="s2">"precision_used"</span><span class="p">:</span> <span class="n">CIRCLE_PRECISION</span><span class="p">,</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="p">}</span>
 </code></pre></div>
 <h1 id="mixed-cells-the-new-payoff">Mixed cells (the new payoff)<a class="headerlink" href="#mixed-cells-the-new-payoff" title="Permanent link">&para;</a></h1>
 <p>The next cell mixes runtime setup with reusable helpers. Before slicing
@@ -4311,38 +4272,38 @@ to share <code>clamp</code> downstream.</p>
 <p>After slicing, the planner drops the runtime lines from the synthetic
 module and exports the helper. The runtime variables still flow through
 the regular artifact path, so downstream cells see them too.</p>
-<h2 id="mixed-setup-helpers-in-one-cell">Mixed: setup + helpers in one cell<a class="headerlink" href="#mixed-setup-helpers-in-one-cell" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># @name Mixed: setup + helpers in one cell</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1">#</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># Slicing keeps:</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1">#   - the import (math)</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1">#   - the literal constant (CLAMP_MIN, CLAMP_MAX)</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1">#   - the def (clamp)</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1">#</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="c1"># and drops the runtime statements (raw_min, raw_max, the print). The</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="c1"># runtime variables are still visible to downstream cells via the</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="c1"># regular artifact path; the def + constants ride the synthetic module.</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="c1"># --- Runtime setup, dropped from the synthetic module ----------------</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="c1"># (Pre-slicing, these three lines would have blocked the whole cell.)</span>
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="n">raw_min</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="o">-</span><span class="n">math</span><span class="o">.</span><span class="n">tau</span> <span class="o">*</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># function call → not a literal</span>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="n">raw_max</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">tau</span> <span class="o">*</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"loaded raw bounds: [</span><span class="si">{</span><span class="n">raw_min</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">raw_max</span><span class="si">}</span><span class="s2">]"</span><span class="p">)</span>
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>
-<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="c1"># --- Library code, kept in the slice ---------------------------------</span>
-<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="n">CLAMP_MIN</span> <span class="o">=</span> <span class="mf">0.0</span>
-<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="n">CLAMP_MAX</span> <span class="o">=</span> <span class="mf">100.0</span>
-<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>
-<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>
-<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a><span class="k">def</span><span class="w"> </span><span class="nf">clamp</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
-<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="w">    </span><span class="sd">"""Pin *value* into ``[CLAMP_MIN, CLAMP_MAX]``."""</span>
-<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="n">CLAMP_MIN</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">CLAMP_MAX</span><span class="p">,</span> <span class="n">value</span><span class="p">))</span>
+<h2 class="nb-cell" id="mixed-setup-helpers-in-one-cell">Mixed: setup + helpers in one cell<a class="headerlink" href="#mixed-setup-helpers-in-one-cell" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @name Mixed: setup + helpers in one cell</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1">#</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># Slicing keeps:</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1">#   - the import (math)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1">#   - the literal constant (CLAMP_MIN, CLAMP_MAX)</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1">#   - the def (clamp)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1">#</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="c1"># and drops the runtime statements (raw_min, raw_max, the print). The</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># runtime variables are still visible to downstream cells via the</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># regular artifact path; the def + constants ride the synthetic module.</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1"># --- Runtime setup, dropped from the synthetic module ----------------</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="c1"># (Pre-slicing, these three lines would have blocked the whole cell.)</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="n">raw_min</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="o">-</span><span class="n">math</span><span class="o">.</span><span class="n">tau</span> <span class="o">*</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># function call → not a literal</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">raw_max</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">tau</span> <span class="o">*</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"loaded raw bounds: [</span><span class="si">{</span><span class="n">raw_min</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">raw_max</span><span class="si">}</span><span class="s2">]"</span><span class="p">)</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="c1"># --- Library code, kept in the slice ---------------------------------</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="n">CLAMP_MIN</span> <span class="o">=</span> <span class="mf">0.0</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="n">CLAMP_MAX</span> <span class="o">=</span> <span class="mf">100.0</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="k">def</span><span class="w"> </span><span class="nf">clamp</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">    </span><span class="sd">"""Pin *value* into ``[CLAMP_MIN, CLAMP_MAX]``."""</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="n">CLAMP_MIN</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">CLAMP_MAX</span><span class="p">,</span> <span class="n">value</span><span class="p">))</span>
 </code></pre></div>
-<h2 id="use-the-mixed-cell-helpers">Use the mixed-cell helpers<a class="headerlink" href="#use-the-mixed-cell-helpers" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<div class="highlight"><span class="filename">stdout</span><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>loaded raw bounds: [-43.98, 100.53]
+</code></pre></div>
+<h2 class="nb-cell" id="use-the-mixed-cell-helpers">Use the mixed-cell helpers<a class="headerlink" href="#use-the-mixed-cell-helpers" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># @name Use the mixed-cell helpers</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1">#</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># This cell consumes both the library code (``clamp``, ``CLAMP_MIN``)</span>
@@ -4365,8 +4326,7 @@ PEP 563 stringifies annotations and <code>symtable</code> correctly drops them f
 the reference set. That makes it easy to write helpers that hint at types
 defined elsewhere (e.g. <code>pyarrow.Table</code>) without forcing every consumer
 to import the same names.</p>
-<h2 id="typed-helper-using-pep-563-annotations">Typed helper using PEP 563 annotations<a class="headerlink" href="#typed-helper-using-pep-563-annotations" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="typed-helper-using-pep-563-annotations">Typed helper using PEP 563 annotations<a class="headerlink" href="#typed-helper-using-pep-563-annotations" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @name Typed helper using PEP 563 annotations</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1">#</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># ``Table`` is *not* imported in this cell, but the future import keeps</span>
@@ -4381,8 +4341,7 @@ to import the same names.</p>
 <a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">    </span><span class="sd">"""Summarize an Arrow-like table without needing the type at module scope."""</span>
 <a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">"rows"</span><span class="p">:</span> <span class="n">table</span><span class="o">.</span><span class="n">num_rows</span><span class="p">,</span> <span class="s2">"columns"</span><span class="p">:</span> <span class="n">table</span><span class="o">.</span><span class="n">num_columns</span><span class="p">}</span>
 </code></pre></div>
-<h2 id="use-the-typed-helper">Use the typed helper<a class="headerlink" href="#use-the-typed-helper" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="use-the-typed-helper">Use the typed helper<a class="headerlink" href="#use-the-typed-helper" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @name Use the typed helper</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1">#</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># The consumer imports ``pyarrow`` itself (it actually needs the</span>
@@ -4412,8 +4371,7 @@ modes follow from that:</p>
 <p>The next cell triggers the first failure mode on purpose so you can see
 the diagnostic, it should error with a message naming the unresolved
 variable.</p>
-<h2 id="closure-over-a-runtime-value-intentionally-blocked">Closure over a runtime value (intentionally blocked)<a class="headerlink" href="#closure-over-a-runtime-value-intentionally-blocked" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="closure-over-a-runtime-value-intentionally-blocked">Closure over a runtime value (intentionally blocked)<a class="headerlink" href="#closure-over-a-runtime-value-intentionally-blocked" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># @name Closure over a runtime value (intentionally blocked)</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1">#</span>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># ``runtime_threshold`` is computed at runtime, so it gets dropped from</span>
@@ -4437,8 +4395,7 @@ variable.</p>
 <a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="k">def</span><span class="w"> </span><span class="nf">is_outlier</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
 <a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>    <span class="k">return</span> <span class="n">value</span> <span class="o">&gt;</span> <span class="n">runtime_threshold</span>
 </code></pre></div>
-<h2 id="downstream-consumer-would-call-is_outlier">Downstream consumer (would call is_outlier)<a class="headerlink" href="#downstream-consumer-would-call-is_outlier" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="downstream-consumer-would-call-is_outlier">Downstream consumer (would call is_outlier)<a class="headerlink" href="#downstream-consumer-would-call-is_outlier" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># @name Downstream consumer (would call is_outlier)</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1">#</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Without this reference, the producing cell would just be a private</span>
@@ -4455,6 +4412,45 @@ variable.</p>
 <a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="n">would_be_outliers</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"blocked: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">"</span>
 <a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="n">would_be_outliers</span>
 </code></pre></div>
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="s2">"blocked: name 'runtime_threshold' is not defined"</span>
+</code></pre></div>
+<hr />
+<h2 id="about-this-example">About this example<a class="headerlink" href="#about-this-example" title="Permanent link">&para;</a></h2>
+<h3 id="what-it-covers">What it covers<a class="headerlink" href="#what-it-covers" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Cell</th>
+<th>Demonstrates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pure_lib</code> / <code>use_pure</code></td>
+<td>Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim.</td>
+</tr>
+<tr>
+<td><code>mixed_lib</code> / <code>use_mixed</code></td>
+<td>The slicing payoff: a single cell mixes runtime setup (<code>raw_min</code>, <code>raw_max</code>, a <code>print</code>) with reusable helpers (<code>clamp</code>, <code>CLAMP_MIN</code>). Runtime values still flow through the artifact path; helpers ride the synthetic module.</td>
+</tr>
+<tr>
+<td><code>typed_lib</code> / <code>use_typed</code></td>
+<td><code>from __future__ import annotations</code> lets a helper reference a type defined elsewhere, <code>symtable</code> correctly drops stringified annotations from the free-variable check.</td>
+</tr>
+<tr>
+<td><code>blocked</code> / <code>try_blocked</code></td>
+<td>Closure over a runtime value blocks export. The diagnostic pinpoints the function (<code>is_outlier</code>) and the unresolved name (<code>runtime_threshold</code>).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nv">STRATA_NOTEBOOK_STORAGE_DIR</span><span class="o">=</span>/path/to/strata/examples<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
+</code></pre></div>
+<p>Then open the notebook UI and pick <strong>Library Cells</strong> from the discover
+list. Run the cells top-to-bottom. The <code>blocked</code> cell carries the
+export diagnostic, and <code>try_blocked</code> shows the <code>NameError</code> its call raises.</p>
 
 
 

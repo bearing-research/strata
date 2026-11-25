@@ -15,68 +15,13 @@ Notebook at once:
   upstream cell (load, aggregate, embed) still hits cache, only training,
   evaluation and the plot re-execute.
 
-## The workflow
+*No run is recorded for this example, so the page shows its code only.*
 
-| # | Cell | Worker | What it does |
-|---|---|---|---|
-| 1 | `load` | local | Load arXiv metadata |
-| 2 | `aggregate` | df-cluster | Group by category and year via DataFusion |
-| 3 | `themes` | local (LLM) | Prompt: identify research themes from stats |
-| 4 | `sample` | df-cluster | Stratified sample for the training set |
-| 5 | `embed` | gpu-fly | Generate sentence-transformer embeddings |
-| 6 | `clusters` | local (LLM) | Prompt: describe each paper cluster |
-| 7 | `train` | local | Train a classifier on the embeddings |
-| 8 | `evaluate` | local | Compute accuracy and classification report |
-| 9 | `plot` | local | Visualize the confusion matrix |
+---
 
-Cells 1, 3, 6, 7, 8, 9 run on the user's machine. Cells 2 and 4 run on the
-DataFusion worker, close to the data, avoids round-tripping the full
-dataset. Cell 5 runs on the GPU worker; training a logistic regression on
-the embeddings takes under a second on a CPU, so it stays local.
+## Load arXiv Papers { .nb-cell }
 
-## Running it locally
-
-`notebook.toml` points `df-cluster` and `gpu-fly` at two local HTTP
-executors, `http://127.0.0.1:9000/v1/execute` and
-`http://127.0.0.1:9001/v1/execute`, the ports `run_local_workers.sh` binds.
-To run them on hosted machines instead, deploy `df-cluster/` to Fly and
-`modal_gpu_worker.py` to Modal (`MODAL_DEPLOY.md`), then change the `url`
-under each `[workers.config]` to the deployed one. `df-cluster` sends the
-token in `STRATA_DF_CLUSTER_TOKEN` when that is set.
-
-```bash
-# Terminal 1: start the two local worker processes
-./examples/arxiv_classifier/run_local_workers.sh
-
-# Terminal 2: start Strata
-uv run strata-notebook --notebook-dir examples
-
-# Terminal 3: open the notebook in the UI
-# http://localhost:8765
-# Under "Open Notebook", pick "Classify arXiv papers across three workers"
-```
-
-Once the notebook is open, run all cells. You should see:
-
-- The `worker: df-cluster` badge next to cells 2 and 4
-- The `worker: gpu-fly` badge next to cell 5
-- A live `dispatching → df-cluster` or `dispatching → gpu-fly` badge
-  (pulsing yellow) while each remote cell is executing
-- Green `✓` status on every cell after the first run
-- Green `✓ cached` on every cell on the second run
-
-## What it needs
-
-The cells run the real workload: `load` downloads about 20K arXiv abstracts
-from Hugging Face, and `embed` encodes them with the `all-MiniLM-L6-v2`
-sentence-transformer, so the worker running `embed` needs
-`sentence-transformers` (and with it `torch`). The two prompt cells, `themes`
-and `clusters`, need an LLM provider key such as `ANTHROPIC_API_KEY` or
-`OPENAI_API_KEY`, set in the Runtime panel.
-
-## Load arXiv Papers
-
-<sub>**kind** python  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 ```python
 # @name Load arXiv Papers
@@ -121,9 +66,9 @@ print(papers["topic"].value_counts().to_string())
 papers
 ```
 
-## Aggregate by Topic
+## Aggregate by Topic { .nb-cell }
 
-<sub>**kind** python  ·  **worker** df-cluster</sub>
+<sub>**worker** df-cluster</sub>
 
 ```python
 # @name Aggregate by Topic
@@ -154,9 +99,9 @@ print(category_stats.to_string(index=False))
 category_stats
 ```
 
-## research_themes
+## research_themes { .nb-cell }
 
-<sub>**kind** prompt  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 *Prompt cell: response intentionally excluded from export.*
 
@@ -172,9 +117,9 @@ For each topic, write one sentence describing what kinds of papers fall into it
 and why this topic matters for the ML research community. Return as a numbered list.
 ```
 
-## Stratified Sample
+## Stratified Sample { .nb-cell }
 
-<sub>**kind** python  ·  **worker** df-cluster</sub>
+<sub>**worker** df-cluster</sub>
 
 ```python
 # @name Stratified Sample
@@ -215,9 +160,9 @@ print(sampled_papers["topic"].value_counts().to_string())
 sampled_papers
 ```
 
-## Embed Abstracts
+## Embed Abstracts { .nb-cell }
 
-<sub>**kind** python  ·  **worker** gpu-fly</sub>
+<sub>**worker** gpu-fly</sub>
 
 ```python
 # @name Embed Abstracts
@@ -240,9 +185,9 @@ print(f"Generated embeddings: {embeddings.shape} ({embeddings.nbytes / 1e6:.1f} 
 embeddings
 ```
 
-## cluster_descriptions
+## cluster_descriptions { .nb-cell }
 
-<sub>**kind** prompt  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 *Prompt cell: response intentionally excluded from export.*
 
@@ -259,9 +204,9 @@ the practical significance of these themes. Focus on how they relate to each
 other and what trends they suggest for the ML research community.
 ```
 
-## Train Classifier
+## Train Classifier { .nb-cell }
 
-<sub>**kind** python  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 ```python
 # @name Train Classifier
@@ -296,9 +241,9 @@ train_test_split_info = {
 train_test_split_info
 ```
 
-## Evaluate Model
+## Evaluate Model { .nb-cell }
 
-<sub>**kind** python  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 ```python
 # @name Evaluate Model
@@ -325,9 +270,9 @@ eval_results = {"accuracy": round(accuracy, 4), "per_class": report}
 eval_results
 ```
 
-## Confusion Matrix
+## Confusion Matrix { .nb-cell }
 
-<sub>**kind** python  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 ```python
 # @name Confusion Matrix
@@ -358,3 +303,66 @@ ax.grid(False)
 plt.tight_layout()
 fig
 ```
+
+---
+
+## About this example
+
+### The workflow
+
+| # | Cell | Worker | What it does |
+|---|---|---|---|
+| 1 | `load` | local | Load arXiv metadata |
+| 2 | `aggregate` | df-cluster | Group by category and year via DataFusion |
+| 3 | `themes` | local (LLM) | Prompt: identify research themes from stats |
+| 4 | `sample` | df-cluster | Stratified sample for the training set |
+| 5 | `embed` | gpu-fly | Generate sentence-transformer embeddings |
+| 6 | `clusters` | local (LLM) | Prompt: describe each paper cluster |
+| 7 | `train` | local | Train a classifier on the embeddings |
+| 8 | `evaluate` | local | Compute accuracy and classification report |
+| 9 | `plot` | local | Visualize the confusion matrix |
+
+Cells 1, 3, 6, 7, 8, 9 run on the user's machine. Cells 2 and 4 run on the
+DataFusion worker, close to the data, avoids round-tripping the full
+dataset. Cell 5 runs on the GPU worker; training a logistic regression on
+the embeddings takes under a second on a CPU, so it stays local.
+
+### Running it locally
+
+`notebook.toml` points `df-cluster` and `gpu-fly` at two local HTTP
+executors, `http://127.0.0.1:9000/v1/execute` and
+`http://127.0.0.1:9001/v1/execute`, the ports `run_local_workers.sh` binds.
+To run them on hosted machines instead, deploy `df-cluster/` to Fly and
+`modal_gpu_worker.py` to Modal (`MODAL_DEPLOY.md`), then change the `url`
+under each `[workers.config]` to the deployed one. `df-cluster` sends the
+token in `STRATA_DF_CLUSTER_TOKEN` when that is set.
+
+```bash
+# Terminal 1: start the two local worker processes
+./examples/arxiv_classifier/run_local_workers.sh
+
+# Terminal 2: start Strata
+uv run strata-notebook --notebook-dir examples
+
+# Terminal 3: open the notebook in the UI
+# http://localhost:8765
+# Under "Open Notebook", pick "Classify arXiv papers across three workers"
+```
+
+Once the notebook is open, run all cells. You should see:
+
+- The `worker: df-cluster` badge next to cells 2 and 4
+- The `worker: gpu-fly` badge next to cell 5
+- A live `dispatching → df-cluster` or `dispatching → gpu-fly` badge
+  (pulsing yellow) while each remote cell is executing
+- Green `✓` status on every cell after the first run
+- Green `✓ cached` on every cell on the second run
+
+### What it needs
+
+The cells run the real workload: `load` downloads about 20K arXiv abstracts
+from Hugging Face, and `embed` encodes them with the `all-MiniLM-L6-v2`
+sentence-transformer, so the worker running `embed` needs
+`sentence-transformers` (and with it `torch`). The two prompt cells, `themes`
+and `clusters`, need an LLM provider key such as `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`, set in the Runtime panel.

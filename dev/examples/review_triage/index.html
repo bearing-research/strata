@@ -1226,28 +1226,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#cells" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cells
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#reviews" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1277,6 +1255,45 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#about-this-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        About this example
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="About this example">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4206,28 +4223,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#cells" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cells
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#reviews" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4257,6 +4252,45 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#about-this-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        About this example
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="About this example">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4292,18 +4326,9 @@ providers that don't support schemas).</p>
 <p>Because the schema is part of the cell's provenance hash, editing the
 schema invalidates the cached response, exactly what you want when
 you're iterating on the shape of the output.</p>
-<h2 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h2>
-<ol>
-<li><code>reviews.py</code>: hand-picked list of customer reviews</li>
-<li><code>triage.prompt</code>: prompt cell with <code>@output_schema</code> enforcing
-   <code>{sentiment, priority, tags}</code> per review</li>
-<li><code>summary.py</code>: pandas aggregation of the structured results</li>
-</ol>
-<h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
-<p>Set an API key (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, etc.) in the
-notebook's Runtime panel, then run-all.</p>
-<h2 id="reviews">reviews<a class="headerlink" href="#reviews" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<p><em>No run is recorded for this example, so the page shows its code only.</em></p>
+<hr />
+<h2 class="nb-cell" id="reviews">reviews<a class="headerlink" href="#reviews" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># A small hand-picked set of customer reviews. Kept inline so the</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># notebook runs anywhere: no network, no data file, just enough</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># variety to make the triage output interesting.</span>
@@ -4318,8 +4343,7 @@ notebook's Runtime panel, then run-all.</p>
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="s2">"Works as advertised. The interface feels a bit dated but the performance is solid."</span><span class="p">,</span>
 <a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="p">]</span>
 </code></pre></div>
-<h2 id="triage">triage<a class="headerlink" href="#triage" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> prompt</sub></p>
+<h2 class="nb-cell" id="triage">triage<a class="headerlink" href="#triage" title="Permanent link">&para;</a></h2>
 <p><em>Prompt cell: response intentionally excluded from export.</em></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a># @name triage
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a># @temperature 0.0
@@ -4343,8 +4367,7 @@ notebook's Runtime panel, then run-all.</p>
 <a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>Reviews:
 <a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>{{ reviews }}
 </code></pre></div>
-<h2 id="triage_summary">triage_summary<a class="headerlink" href="#triage_summary" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="triage_summary">triage_summary<a class="headerlink" href="#triage_summary" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @name triage_summary</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># Downstream cells consume the LLM output as structured data: no</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># parsing, no fallbacks, no "did the model actually return JSON this</span>
@@ -4380,6 +4403,18 @@ notebook's Runtime panel, then run-all.</p>
 <a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>    <span class="s2">"negative_rate"</span><span class="p">:</span> <span class="nb">float</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="s2">"sentiment"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"negative"</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()),</span>
 <a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="p">}</span>
 </code></pre></div>
+<hr />
+<h2 id="about-this-example">About this example<a class="headerlink" href="#about-this-example" title="Permanent link">&para;</a></h2>
+<h3 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h3>
+<ol>
+<li><code>reviews.py</code>: hand-picked list of customer reviews</li>
+<li><code>triage.prompt</code>: prompt cell with <code>@output_schema</code> enforcing
+   <code>{sentiment, priority, tags}</code> per review</li>
+<li><code>summary.py</code>: pandas aggregation of the structured results</li>
+</ol>
+<h3 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h3>
+<p>Set an API key (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, etc.) in the
+notebook's Runtime panel, then run-all.</p>
 
 
 

@@ -1,8 +1,5 @@
 # Write reports in Markdown, by hand or from data
 
-![Write reports in Markdown, by hand or from data: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)
-![Write reports in Markdown, by hand or from data: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)
-
 Every way Strata renders Markdown, in one notebook: headings, emphasis, lists, tables,
 code blocks, blockquotes, links, and the sanitizer that keeps script in a cell from
 running. The last two cells are Python cells that show Markdown built at run time with
@@ -11,7 +8,7 @@ running. The last two cells are Python cells that show Markdown built at run tim
 It runs nothing heavy; use it to check how something renders, or as a reference when you
 write a documentation cell.
 
-# Markdown Showcase
+---
 
 This notebook exercises every markdown rendering path in Strata. It's
 deliberately content-only, there's no real "computation" to run. Use it
@@ -120,7 +117,7 @@ Edge cases the old renderer was bad at:
 | `provenance_hash` | `str` | ✓ | SHA-256 of the methodology chain |
 | `notes` | `str` | | Optional *human-readable* commentary |
 
-## Fenced code with a language
+## Fenced code with a language { .nb-cell }
 
 ```python
 def materialize(inputs, transform):
@@ -133,7 +130,7 @@ def materialize(inputs, transform):
     return result
 ```
 
-## Fenced code without a language
+## Fenced code without a language { .nb-cell }
 
 ```
 $ STRATA_PORT=8765 strata-notebook
@@ -284,9 +281,7 @@ Data URLs in links are sanitized too, DOMPurify drops the href:
 
 [image data url](#)
 
-## Dynamic Markdown via display()
-
-<sub>**kind** python</sub>
+## Dynamic Markdown via display() { .nb-cell }
 
 ```python
 # @name Dynamic Markdown via display()
@@ -318,9 +313,19 @@ This block was rendered from a **Python cell**, not a markdown cell.
 )
 ```
 
-## Templated report from a DataFrame
 
-<sub>**kind** python</sub>
+## Generated at runtime
+
+This block was rendered from a **Python cell**, not a markdown cell.
+
+- Current time: `2026-11-25 07:32:10`
+- Cell language: `python`
+- Display path: `Markdown(text) → text/markdown artifact → renderer`
+
+> The same renderer powers both surfaces, so anything the markdown
+> showcase renders correctly will also work here.
+
+## Templated report from a DataFrame { .nb-cell }
 
 ```python
 # @name Templated report from a DataFrame
@@ -387,3 +392,22 @@ exactly the pattern you'd use for "summary at end of notebook" cells.*
     )
 )
 ```
+
+
+## Mock leaderboard report
+
+**4 models** scored across **3 evals**. Top
+performer: `claude-sonnet-4-6` at `87.8%` mean. Spread
+between best and worst: **9.6 points**.
+
+| Rank | Model | MMLU | GSM8K | HumanEval | Mean |
+|:----:|-------|-----:|------:|----------:|-----:|
+| 1 | `claude-sonnet-4-6` | 84.1% | 94.2% | 85.2% | 87.8% |
+| 2 | `gpt-5.4` | 82.0% | 93.9% | 82.3% | 86.1% |
+| 3 | `gemini-3-flash` | 78.9% | 90.1% | 78.2% | 82.4% |
+| 4 | `mistral-large-latest` | 76.3% | 87.2% | 71.2% | 78.3% |
+
+---
+
+*Report generated dynamically from `pd.DataFrame` → `Markdown`,
+exactly the pattern you'd use for "summary at end of notebook" cells.*

@@ -1,78 +1,13 @@
 # Switch between three classifiers without retraining
 
-![Switch between three classifiers without retraining: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-light.webp#only-light)
-![Switch between three classifiers without retraining: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-dark.webp#only-dark)
-
 The same iris pipeline as `iris_classification`, but with three
 alternative training cells grouped as variants of the same DAG slot.
 Pick a classifier from the variant tabs and the rest of the notebook
 re-runs against it; switch back and the previous result is a cache hit.
 
-## What it shows
+---
 
-- **Variant cells.** `train_logreg`, `train_rf`, and `train_gbm` all
-  carry `# @variant classifier <name>` and define the same contract
-  (`model`). Only the active variant participates in the DAG.
-- **Switching is cheap.** Each variant has its own provenance hash, so
-  re-running an already-trained variant is a cache hit. Flip-flopping
-  between two variants is free after each has run once.
-- **Strict contract.** All variants must produce the same value
-  bindings (imports don't count, they're scaffolding). If one variant
-  accidentally adds an extra value, you get a
-  `variant_contract_mismatch` diagnostic: the contract is what makes
-  downstream cells correct under any selection.
-
-## Cells
-
-| Cell | What it does |
-|---|---|
-| `load_data` | Loads iris into `df` + `feature_names`. |
-| `train_test` | 80/20 stratified split. |
-| `train_logreg` | **Variant `classifier=logreg`**: `LogisticRegression`. Active by default. |
-| `train_rf` | **Variant `classifier=rf`**: `RandomForestClassifier`. |
-| `train_gbm` | **Variant `classifier=gbm`**: `GradientBoostingClassifier`. |
-| `evaluate` | Test accuracy + per-class precision/recall against whichever `model` is active. |
-| `confusion` | Confusion-matrix heatmap for the active classifier. |
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Open **Model Variants** from the notebook list on the Strata home page. The
-classifier group renders as a tab strip on the train cell; click a
-tab to switch.
-
-## Try this
-
-- Run the notebook on `logreg`, then click the `rf` tab. `evaluate`
-  and `confusion` go stale; re-run them to see the random-forest
-  numbers. Click `logreg` again and both downstream cells become cache
-  hits.
-- Add a fourth variant: click the `+` on the tab strip, which clones
-  the active variant, then change its annotation to
-  `# @variant classifier svc` and its body to `model = SVC(...)`. A
-  file dropped into `cells/` on its own is ignored: only cells listed
-  in `notebook.toml` load, so a hand-made `cells/train_svc.py` also
-  needs an entry in the `cells = [...]` list there.
-- Edit a variant cell to define an extra variable (say,
-  `feature_importance = ...`). The header pill flags
-  `variant_contract_mismatch`: siblings disagree on what they
-  expose. Remove the extra binding to clear it.
-
-## Notes
-
-The active selection is committed in `notebook.toml`'s
-`[[variant_group]]` table, so flipping variants from the UI shows up as a
-git diff on that one line. That's intentional: the notebook records
-which experiment you ran.
-
-## Load iris dataset
-
-<sub>**kind** python</sub>
+## Load iris dataset { .nb-cell }
 
 ```python
 # @name Load iris dataset
@@ -89,9 +24,21 @@ print(f"Loaded {len(df)} samples, {len(feature_names)} features")
 df.head()
 ```
 
-## Train / test split
+**Output**
 
-<sub>**kind** python</sub>
+| sepal length (cm) | sepal width (cm) | petal length (cm) | petal width (cm) | species |
+| --- | --- | --- | --- | --- |
+| 5.1 | 3.5 | 1.4 | 0.2 | setosa |
+| 4.9 | 3 | 1.4 | 0.2 | setosa |
+| 4.7 | 3.2 | 1.3 | 0.2 | setosa |
+| 4.6 | 3.1 | 1.5 | 0.2 | setosa |
+| 5 | 3.6 | 1.4 | 0.2 | setosa |
+
+```text title="stdout"
+Loaded 150 samples, 4 features
+```
+
+## Train / test split { .nb-cell }
 
 ```python
 # @name Train / test split
@@ -109,6 +56,11 @@ print(f"Train: {len(X_train)} samples")
 print(f"Test:  {len(X_test)} samples")
 ```
 
+```text title="stdout"
+Train: 120 samples
+Test:  30 samples
+```
+
 # Pick a classifier
 
 The three cells below are alternatives. They share the same `model`
@@ -122,9 +74,9 @@ hash, so re-running an already-trained variant is a cache hit. The
 downstream cells (`Evaluate active classifier`, `Confusion matrix`)
 re-cascade against whichever variant is active.
 
-## Logistic regression
+## Logistic regression { .nb-cell }
 
-<sub>**kind** python  ·  **variant** logreg of classifier</sub>
+<sub>**variant** logreg of classifier</sub>
 
 ```python
 # @variant classifier logreg
@@ -138,9 +90,11 @@ model.fit(X_train, y_train)
 print(f"Trained {type(model).__name__} (train acc {model.score(X_train, y_train):.3f})")
 ```
 
-## Evaluate active classifier
+```text title="stdout"
+Trained LogisticRegression (train acc 0.975)
+```
 
-<sub>**kind** python</sub>
+## Evaluate active classifier { .nb-cell }
 
 ```python
 # @name Evaluate active classifier
@@ -155,9 +109,22 @@ print(f"Test accuracy: {test_acc:.3f}\n")
 print(classification_report(y_test, y_pred))
 ```
 
-## Confusion matrix
+```text title="stdout"
+=== LogisticRegression ===
+Test accuracy: 0.967
 
-<sub>**kind** python</sub>
+              precision    recall  f1-score   support
+
+      setosa       1.00      1.00      1.00        10
+  versicolor       1.00      0.90      0.95        10
+   virginica       0.91      1.00      0.95        10
+
+    accuracy                           0.97        30
+   macro avg       0.97      0.97      0.97        30
+weighted avg       0.97      0.97      0.97        30
+```
+
+## Confusion matrix { .nb-cell }
 
 ```python
 # @name Confusion matrix
@@ -188,3 +155,71 @@ ax.set_title(f"Confusion Matrix: {type(model).__name__}")
 plt.tight_layout()
 fig
 ```
+
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/model_variants-1.webp)
+
+---
+
+## About this example
+
+### What it shows
+
+- **Variant cells.** `train_logreg`, `train_rf`, and `train_gbm` all
+  carry `# @variant classifier <name>` and define the same contract
+  (`model`). Only the active variant participates in the DAG.
+- **Switching is cheap.** Each variant has its own provenance hash, so
+  re-running an already-trained variant is a cache hit. Flip-flopping
+  between two variants is free after each has run once.
+- **Strict contract.** All variants must produce the same value
+  bindings (imports don't count, they're scaffolding). If one variant
+  accidentally adds an extra value, you get a
+  `variant_contract_mismatch` diagnostic: the contract is what makes
+  downstream cells correct under any selection.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `load_data` | Loads iris into `df` + `feature_names`. |
+| `train_test` | 80/20 stratified split. |
+| `train_logreg` | **Variant `classifier=logreg`**: `LogisticRegression`. Active by default. |
+| `train_rf` | **Variant `classifier=rf`**: `RandomForestClassifier`. |
+| `train_gbm` | **Variant `classifier=gbm`**: `GradientBoostingClassifier`. |
+| `evaluate` | Test accuracy + per-class precision/recall against whichever `model` is active. |
+| `confusion` | Confusion-matrix heatmap for the active classifier. |
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Open **Model Variants** from the notebook list on the Strata home page. The
+classifier group renders as a tab strip on the train cell; click a
+tab to switch.
+
+### Try this
+
+- Run the notebook on `logreg`, then click the `rf` tab. `evaluate`
+  and `confusion` go stale; re-run them to see the random-forest
+  numbers. Click `logreg` again and both downstream cells become cache
+  hits.
+- Add a fourth variant: click the `+` on the tab strip, which clones
+  the active variant, then change its annotation to
+  `# @variant classifier svc` and its body to `model = SVC(...)`. A
+  file dropped into `cells/` on its own is ignored: only cells listed
+  in `notebook.toml` load, so a hand-made `cells/train_svc.py` also
+  needs an entry in the `cells = [...]` list there.
+- Edit a variant cell to define an extra variable (say,
+  `feature_importance = ...`). The header pill flags
+  `variant_contract_mismatch`: siblings disagree on what they
+  expose. Remove the extra binding to clear it.
+
+### Notes
+
+The active selection is committed in `notebook.toml`'s
+`[[variant_group]]` table, so flipping variants from the UI shows up as a
+git diff on that one line. That's intentional: the notebook records
+which experiment you ran.

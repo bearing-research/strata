@@ -848,6 +848,95 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#step-1-run-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: run it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#load-the-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Load the data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-run-it-again" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: run it again
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summarize-by-region" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summarize by region
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-edit-one-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: edit one cell
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plot-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plot it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-open-the-dag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: open the DAG
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#about-this-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        About this example
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="About this example">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#cells" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -855,6 +944,11 @@
       
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4162,6 +4256,95 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#step-1-run-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: run it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#load-the-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Load the data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-run-it-again" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: run it again
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summarize-by-region" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summarize by region
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-edit-one-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: edit one cell
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plot-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plot it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-open-the-dag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: open the DAG
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#about-this-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        About this example
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="About this example">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
   <a href="#cells" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4169,6 +4352,11 @@
       
     </span>
   </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4192,27 +4380,17 @@
 </button>
 
 <h1 id="tutorial-what-the-cache-saves">Tutorial: what the cache saves<a class="headerlink" href="#tutorial-what-the-cache-saves" title="Permanent link">&para;</a></h1>
-<p><img alt="Tutorial: what the cache saves: what a run of the notebook shows" src="../../assets/examples/caching-light.webp#only-light" />
-<img alt="Tutorial: what the cache saves: what a run of the notebook shows" src="../../assets/examples/caching-dark.webp#only-dark" /></p>
 <p>A two-minute tour of caching. Run it twice and read what the second run saved,
 edit one cell and watch only what depends on it run again, then open the graph.</p>
 <p>Open a copy with <code>strata tutorial caching</code>, or from <strong>Open a sample</strong> on the home page.</p>
-<h2 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h2>
-<ol>
-<li><code>load.py</code>: builds a small table, after a two-second wait that stands in for a slow query</li>
-<li><code>summarize.py</code>: revenue by region</li>
-<li><code>plot.py</code>: a bar chart of the summary</li>
-</ol>
-<p>The markdown cells between them are the instructions.</p>
-<h1 id="what-the-cache-saves">What the cache saves<a class="headerlink" href="#what-the-cache-saves" title="Permanent link">&para;</a></h1>
+<hr />
 <p>Strata stores each cell's result under a hash of its source, its inputs and its
 environment. If none of those changed, the cell doesn't run again. This takes about
 two minutes.</p>
 <h2 id="step-1-run-it">Step 1: run it<a class="headerlink" href="#step-1-run-it" title="Permanent link">&para;</a></h2>
 <p>Press <strong>Run All</strong> at the top of the page. The cell below waits two seconds
 on purpose, standing in for a slow query.</p>
-<h2 id="load-the-data">Load the data<a class="headerlink" href="#load-the-data" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="load-the-data">Load the data<a class="headerlink" href="#load-the-data" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># @name Load the data</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
@@ -4229,24 +4407,101 @@ on purpose, standing in for a slow query.</p>
 <a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="p">)</span>
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="n">sales</span>
 </code></pre></div>
+<p><strong>Output</strong></p>
+<table>
+<thead>
+<tr>
+<th>region</th>
+<th>quarter</th>
+<th>revenue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>North</td>
+<td>Q1</td>
+<td>120</td>
+</tr>
+<tr>
+<td>North</td>
+<td>Q2</td>
+<td>135</td>
+</tr>
+<tr>
+<td>South</td>
+<td>Q1</td>
+<td>98</td>
+</tr>
+<tr>
+<td>South</td>
+<td>Q2</td>
+<td>110</td>
+</tr>
+<tr>
+<td>East</td>
+<td>Q1</td>
+<td>143</td>
+</tr>
+<tr>
+<td>East</td>
+<td>Q2</td>
+<td>151</td>
+</tr>
+<tr>
+<td>West</td>
+<td>Q1</td>
+<td>87</td>
+</tr>
+<tr>
+<td>West</td>
+<td>Q2</td>
+<td>95</td>
+</tr>
+</tbody>
+</table>
 <h2 id="step-2-run-it-again">Step 2: run it again<a class="headerlink" href="#step-2-run-it-again" title="Permanent link">&para;</a></h2>
 <p>Press <strong>Run All</strong> again. Nothing runs this time. Every code cell's badge reads <code>cached</code>,
 and the load cell's says how much time that saved. For the total, press <strong>expand</strong> at the
 bottom right of the page and read <strong>Cache savings</strong> in the <strong>Profiling</strong> panel.</p>
-<h2 id="summarize-by-region">Summarize by region<a class="headerlink" href="#summarize-by-region" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="summarize-by-region">Summarize by region<a class="headerlink" href="#summarize-by-region" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># @name Summarize by region</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">by_region</span> <span class="o">=</span> <span class="n">sales</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">"region"</span><span class="p">,</span> <span class="n">as_index</span><span class="o">=</span><span class="kc">False</span><span class="p">)[</span><span class="s2">"revenue"</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">by_region</span>
 </code></pre></div>
+<p><strong>Output</strong></p>
+<table>
+<thead>
+<tr>
+<th>region</th>
+<th>revenue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>East</td>
+<td>294</td>
+</tr>
+<tr>
+<td>North</td>
+<td>255</td>
+</tr>
+<tr>
+<td>South</td>
+<td>208</td>
+</tr>
+<tr>
+<td>West</td>
+<td>182</td>
+</tr>
+</tbody>
+</table>
 <h2 id="step-3-edit-one-cell">Step 3: edit one cell<a class="headerlink" href="#step-3-edit-one-cell" title="Permanent link">&para;</a></h2>
 <p>In the cell above, change <code>.sum()</code> to <code>.mean()</code>. It reads <code>stale</code>, and so does the chart
 below, which uses its result. The load cell stays <code>cached</code>. Press <strong>Run All</strong>: only those
 two run.</p>
 <p>Now change it back to <code>.sum()</code> and press <strong>Run All</strong> once more. Both read <code>cached</code> at once,
 because Strata still has that result.</p>
-<h2 id="plot-it">Plot it<a class="headerlink" href="#plot-it" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
+<h2 class="nb-cell" id="plot-it">Plot it<a class="headerlink" href="#plot-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @name Plot it</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
@@ -4261,10 +4516,20 @@ because Strata still has that result.</p>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">fig</span>
 </code></pre></div>
+<p><img alt="cell output" src="../../assets/examples/runs/caching-1.webp" /></p>
 <h2 id="step-4-open-the-dag">Step 4: open the DAG<a class="headerlink" href="#step-4-open-the-dag" title="Permanent link">&para;</a></h2>
 <p>Press <strong>expand</strong> at the bottom right if the drawer is closed, and look at <strong>Cell DAG</strong>: load,
 then summarize, then plot. Nobody declared those links. They come from the variables each
 cell reads, and they are how Strata knew what your edit in step 3 affected.</p>
+<hr />
+<h2 id="about-this-example">About this example<a class="headerlink" href="#about-this-example" title="Permanent link">&para;</a></h2>
+<h3 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h3>
+<ol>
+<li><code>load.py</code>: builds a small table, after a two-second wait that stands in for a slow query</li>
+<li><code>summarize.py</code>: revenue by region</li>
+<li><code>plot.py</code>: a bar chart of the summary</li>
+</ol>
+<p>The markdown cells between them are the instructions.</p>
 
 
 

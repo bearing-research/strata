@@ -1,54 +1,12 @@
 # Classify iris flowers, from raw data to a confusion matrix
 
-![Classify iris flowers, from raw data to a confusion matrix: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)
-![Classify iris flowers, from raw data to a confusion matrix: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)
-
 Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
 what the graph looks like for a realistic ML pipeline: load → explore
 → split → train → evaluate → visualize.
 
-## What it shows
+---
 
-- **DAG branching.** `scatter_plot` and `train_test` both read from
-  `load_data`, so editing `load_data` invalidates both branches.
-- **Mixed output types.** Cells produce DataFrames (arrow/ipc), trained
-  models (pickle), and matplotlib figures (image/png), all stored
-  natively by Strata's serializer.
-- **Display outputs.** `_` at the end of a cell (or a trailing
-  expression) becomes an inline preview on the cell.
-
-## Cells
-
-| Cell | What it does |
-|---|---|
-| `load_data` | Loads the iris dataset into a DataFrame. |
-| `explore_stats` | Per-feature summary stats. |
-| `scatter_plot` | Pair-plot of the four features, colored by class. |
-| `train_test` | 70/30 train/test split. |
-| `train_model` | Fits a `RandomForestClassifier` (100 trees). |
-| `evaluate` | Accuracy + per-class precision/recall. |
-| `confusion` | Confusion-matrix heatmap. |
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Then open **Iris Classification** from the notebook list on the Strata home page.
-
-## Try this
-
-- Change the `test_size` in `train_test`. Cells downstream go stale;
-  `scatter_plot` stays ready (it doesn't depend on the split).
-- Re-run `evaluate` without re-training: the trained model is cached,
-  so only evaluation runs.
-
-## Load iris dataset
-
-<sub>**kind** python</sub>
+## Load iris dataset { .nb-cell }
 
 ```python
 # @name Load iris dataset
@@ -66,9 +24,22 @@ print(f"Species: {df['species'].unique().tolist()}")
 df.head()
 ```
 
-## Explore per-feature stats
+**Output**
 
-<sub>**kind** python</sub>
+| sepal length (cm) | sepal width (cm) | petal length (cm) | petal width (cm) | species |
+| --- | --- | --- | --- | --- |
+| 5.1 | 3.5 | 1.4 | 0.2 | setosa |
+| 4.9 | 3 | 1.4 | 0.2 | setosa |
+| 4.7 | 3.2 | 1.3 | 0.2 | setosa |
+| 4.6 | 3.1 | 1.5 | 0.2 | setosa |
+| 5 | 3.6 | 1.4 | 0.2 | setosa |
+
+```text title="stdout"
+Loaded 150 samples, 4 features
+Species: ['setosa', 'versicolor', 'virginica']
+```
+
+## Explore per-feature stats { .nb-cell }
 
 ```python
 # @name Explore per-feature stats
@@ -77,9 +48,18 @@ stats = df.groupby("species").agg(["mean", "std"]).round(2)
 print(stats)
 ```
 
-## Pairwise scatter plot
+```text title="stdout"
+           sepal length (cm)        ... petal width (cm)      
+                        mean   std  ...             mean   std
+species                             ...                       
+setosa                  5.01  0.35  ...             0.25  0.11
+versicolor              5.94  0.52  ...             1.33  0.20
+virginica               6.59  0.64  ...             2.03  0.27
 
-<sub>**kind** python</sub>
+[3 rows x 8 columns]
+```
+
+## Pairwise scatter plot { .nb-cell }
 
 ```python
 # @name Pairwise scatter plot
@@ -98,6 +78,8 @@ plt.tight_layout()
 g.figure
 ```
 
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/iris_classification-1.webp)
+
 # Train and evaluate
 
 The exploration cells above don't feed the model directly, they're
@@ -110,9 +92,7 @@ Re-running the *test set* cell after an upstream change cascades the
 whole subtree in topological order, hitting cache for everything that
 hasn't changed.
 
-## Train / test split
-
-<sub>**kind** python</sub>
+## Train / test split { .nb-cell }
 
 ```python
 # @name Train / test split
@@ -130,9 +110,12 @@ print(f"Train: {len(X_train)} samples")
 print(f"Test:  {len(X_test)} samples")
 ```
 
-## Train random forest classifier
+```text title="stdout"
+Train: 105 samples
+Test:  45 samples
+```
 
-<sub>**kind** python</sub>
+## Train random forest classifier { .nb-cell }
 
 ```python
 # @name Train random forest classifier
@@ -149,9 +132,12 @@ print(f"Train accuracy: {train_score:.3f}")
 print(f"Test accuracy:  {test_score:.3f}")
 ```
 
-## Evaluate
+```text title="stdout"
+Train accuracy: 1.000
+Test accuracy:  0.889
+```
 
-<sub>**kind** python</sub>
+## Evaluate { .nb-cell }
 
 ```python
 # @name Evaluate
@@ -163,9 +149,19 @@ report = classification_report(y_test, y_pred)
 print(report)
 ```
 
-## Confusion matrix
+```text title="stdout"
+              precision    recall  f1-score   support
 
-<sub>**kind** python</sub>
+      setosa       1.00      1.00      1.00        15
+  versicolor       0.78      0.93      0.85        15
+   virginica       0.92      0.73      0.81        15
+
+    accuracy                           0.89        45
+   macro avg       0.90      0.89      0.89        45
+weighted avg       0.90      0.89      0.89        45
+```
+
+## Confusion matrix { .nb-cell }
 
 ```python
 # @name Confusion matrix
@@ -196,3 +192,48 @@ ax.set_title("Confusion Matrix")
 plt.tight_layout()
 fig
 ```
+
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/iris_classification-2.webp)
+
+---
+
+## About this example
+
+### What it shows
+
+- **DAG branching.** `scatter_plot` and `train_test` both read from
+  `load_data`, so editing `load_data` invalidates both branches.
+- **Mixed output types.** Cells produce DataFrames (arrow/ipc), trained
+  models (pickle), and matplotlib figures (image/png), all stored
+  natively by Strata's serializer.
+- **Display outputs.** `_` at the end of a cell (or a trailing
+  expression) becomes an inline preview on the cell.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `load_data` | Loads the iris dataset into a DataFrame. |
+| `explore_stats` | Per-feature summary stats. |
+| `scatter_plot` | Pair-plot of the four features, colored by class. |
+| `train_test` | 70/30 train/test split. |
+| `train_model` | Fits a `RandomForestClassifier` (100 trees). |
+| `evaluate` | Accuracy + per-class precision/recall. |
+| `confusion` | Confusion-matrix heatmap. |
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **Iris Classification** from the notebook list on the Strata home page.
+
+### Try this
+
+- Change the `test_size` in `train_test`. Cells downstream go stale;
+  `scatter_plot` stays ready (it doesn't depend on the split).
+- Re-run `evaluate` without re-training: the trained model is cached,
+  so only evaluation runs.

@@ -16,21 +16,11 @@ Because the schema is part of the cell's provenance hash, editing the
 schema invalidates the cached response, exactly what you want when
 you're iterating on the shape of the output.
 
-## Cells
+*No run is recorded for this example, so the page shows its code only.*
 
-1. `reviews.py`: hand-picked list of customer reviews
-2. `triage.prompt`: prompt cell with `@output_schema` enforcing
-   `{sentiment, priority, tags}` per review
-3. `summary.py`: pandas aggregation of the structured results
+---
 
-## Running
-
-Set an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) in the
-notebook's Runtime panel, then run-all.
-
-## reviews
-
-<sub>**kind** python</sub>
+## reviews { .nb-cell }
 
 ```python
 # A small hand-picked set of customer reviews. Kept inline so the
@@ -48,9 +38,7 @@ reviews = [
 ]
 ```
 
-## triage
-
-<sub>**kind** prompt</sub>
+## triage { .nb-cell }
 
 *Prompt cell: response intentionally excluded from export.*
 
@@ -78,9 +66,7 @@ Reviews:
 {{ reviews }}
 ```
 
-## triage_summary
-
-<sub>**kind** python</sub>
+## triage_summary { .nb-cell }
 
 ```python
 # @name triage_summary
@@ -118,3 +104,19 @@ high_priority = df[df["priority"] == "high"]
     "negative_rate": float((df["sentiment"] == "negative").mean()),
 }
 ```
+
+---
+
+## About this example
+
+### Cells
+
+1. `reviews.py`: hand-picked list of customer reviews
+2. `triage.prompt`: prompt cell with `@output_schema` enforcing
+   `{sentiment, priority, tags}` per review
+3. `summary.py`: pandas aggregation of the structured results
+
+### Running
+
+Set an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) in the
+notebook's Runtime panel, then run-all.

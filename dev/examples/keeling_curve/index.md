@@ -1,8 +1,5 @@
 # The Keeling curve, with a receipt
 
-![The Keeling curve, with a receipt: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-light.webp#only-light)
-![The Keeling curve, with a receipt: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-dark.webp#only-dark)
-
 Atmospheric CO₂ at Mauna Loa since 1958, from NOAA's monthly record: the curve, the
 yearly cycle split out, the growth rate by decade, and a published figure whose page
 shows the chart, the code behind it and the exact bytes NOAA served.
@@ -10,35 +7,7 @@ shows the chart, the code behind it and the exact bytes NOAA served.
 Open a copy with `strata tutorial keeling_curve`, or from **Open a sample** on the home
 page. The first run downloads about 40 KB from NOAA.
 
-## What it shows
-
-- **`# @fetch`.** The first cell declares the URL it reads. The bytes' digest is part of
-  the cell's key, so when NOAA adds a month the cell goes stale by itself, and each
-  stored result records the URL, the digest and when it was downloaded.
-- **Caching.** Edit the plot and only the plot runs again; the record is not downloaded
-  again.
-- **Publishing.** `strata artifact publish` turns the figure into a link. The page lists
-  the code of every step behind the figure and NOAA's file under External inputs.
-- **`plt.style.use("strata")`.** The chart reads on the light and the dark theme.
-
-## Cells
-
-1. `load.py`: downloads the record and keeps the monthly mean and NOAA's
-   seasonally adjusted series
-2. `cycle.py`: the average year, the monthly mean minus the adjusted series, by month
-3. `growth.py`: the growth rate in ppm per year, averaged by decade, over complete years
-4. `plot.py`: the curve and the average year, side by side
-
-The markdown cells between them explain each step and how to publish the figure.
-
-## Data
-
-NOAA Global Monitoring Laboratory and Scripps Institution of Oceanography, monthly mean
-CO₂ at Mauna Loa: <https://gml.noaa.gov/ccgg/trends/data.html>. From December 2022 to
-July 2023, after the eruption of Mauna Loa, measurements came from Maunakea, about 21
-miles north.
-
-# The Keeling curve, with a receipt
+---
 
 In 1958 Charles David Keeling began measuring carbon dioxide in the air at Mauna Loa,
 Hawaii. The record has run every month since, and it is the clearest picture there is
@@ -51,9 +20,7 @@ behind it, and the exact bytes NOAA served.
 
 Press **Run All** at the top of the page. The first run downloads about 40 KB.
 
-## Load the Mauna Loa record
-
-<sub>**kind** python</sub>
+## Load the Mauna Loa record { .nb-cell }
 
 ```python
 # @name Load the Mauna Loa record
@@ -73,6 +40,21 @@ monthly = pd.DataFrame(
 monthly
 ```
 
+**Output**
+
+| date | year | month | co2_ppm | trend_ppm |
+| --- | --- | --- | --- | --- |
+| 1958-03-15 00:00:00 | 1958 | 3 | 315.7 | 314.4 |
+| 1958-04-15 00:00:00 | 1958 | 4 | 317.4 | 315.2 |
+| 1958-05-15 00:00:00 | 1958 | 5 | 317.5 | 314.7 |
+| 1958-06-15 00:00:00 | 1958 | 6 | 317.3 | 315.1 |
+| 1958-07-15 00:00:00 | 1958 | 7 | 315.9 | 315.2 |
+| 1958-08-15 00:00:00 | 1958 | 8 | 314.9 | 316.2 |
+| 1958-09-15 00:00:00 | 1958 | 9 | 313.2 | 316.1 |
+| 1958-10-15 00:00:00 | 1958 | 10 | 312.4 | 315.4 |
+
+*…showing 8 of 824 rows*
+
 ## The yearly cycle
 
 Through each northern summer the forests draw carbon dioxide down, and the level
@@ -80,9 +62,7 @@ bottoms out in early autumn; through the winter it comes back, and peaks in May.
 publishes the record with that cycle removed as well, and the difference between the
 two is the cycle itself. Averaged by month, it is the shape the curve repeats every year.
 
-## The average year
-
-<sub>**kind** python</sub>
+## The average year { .nb-cell }
 
 ```python
 # @name The average year
@@ -95,6 +75,21 @@ cycle = (
 cycle
 ```
 
+**Output**
+
+| month | cycle_ppm |
+| --- | --- |
+| 1 | 0.12 |
+| 2 | 0.75 |
+| 3 | 1.49 |
+| 4 | 2.57 |
+| 5 | 3.09 |
+| 6 | 2.31 |
+| 7 | 0.61 |
+| 8 | -1.57 |
+
+*…showing 8 of 12 rows*
+
 ## How fast it is rising
 
 The yearly mean, compared with the year before, gives the growth rate in parts per
@@ -102,9 +97,7 @@ million per year. Averaged by decade, it shows whether the rise is steady or spe
 Only complete years count, so a year joins once NOAA publishes its December, and the
 `years` column says how many each decade has so far.
 
-## Growth per decade
-
-<sub>**kind** python</sub>
+## Growth per decade { .nb-cell }
 
 ```python
 # @name Growth per decade
@@ -122,6 +115,18 @@ growth = (
 growth
 ```
 
+**Output**
+
+| decade | ppm_per_year | years |
+| --- | --- | --- |
+| 1960s | 0.86 | 10 |
+| 1970s | 1.22 | 10 |
+| 1980s | 1.64 | 10 |
+| 1990s | 1.53 | 10 |
+| 2000s | 1.91 | 10 |
+| 2010s | 2.4 | 10 |
+| 2020s | 2.62 | 6 |
+
 ## The curve
 
 The thin line is each month's mean; the thick one has the yearly cycle removed. On the
@@ -131,9 +136,7 @@ September and October.
 Change something here: the title, a color, the size. Only this cell runs again. The
 record is not downloaded again, because nothing the earlier cells read has changed.
 
-## The Keeling curve
-
-<sub>**kind** python</sub>
+## The Keeling curve { .nb-cell }
 
 ```python
 # @name The Keeling curve
@@ -172,6 +175,8 @@ def draw(record, average_year):
 draw(monthly, cycle)
 ```
 
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/keeling_curve-1.webp)
+
 ## The receipt
 
 Every result above is already stored with what produced it: the source of each cell,
@@ -201,3 +206,35 @@ you published keeps the data it was drawn from.
 monthly mean CO₂ at Mauna Loa (gml.noaa.gov/ccgg/trends). From December 2022 to
 July 2023, after the eruption of Mauna Loa, measurements came from Maunakea, about 21
 miles north.*
+
+---
+
+## About this example
+
+### What it shows
+
+- **`# @fetch`.** The first cell declares the URL it reads. The bytes' digest is part of
+  the cell's key, so when NOAA adds a month the cell goes stale by itself, and each
+  stored result records the URL, the digest and when it was downloaded.
+- **Caching.** Edit the plot and only the plot runs again; the record is not downloaded
+  again.
+- **Publishing.** `strata artifact publish` turns the figure into a link. The page lists
+  the code of every step behind the figure and NOAA's file under External inputs.
+- **`plt.style.use("strata")`.** The chart reads on the light and the dark theme.
+
+### Cells
+
+1. `load.py`: downloads the record and keeps the monthly mean and NOAA's
+   seasonally adjusted series
+2. `cycle.py`: the average year, the monthly mean minus the adjusted series, by month
+3. `growth.py`: the growth rate in ppm per year, averaged by decade, over complete years
+4. `plot.py`: the curve and the average year, side by side
+
+The markdown cells between them explain each step and how to publish the figure.
+
+### Data
+
+NOAA Global Monitoring Laboratory and Scripps Institution of Oceanography, monthly mean
+CO₂ at Mauna Loa: <https://gml.noaa.gov/ccgg/trends/data.html>. From December 2022 to
+July 2023, after the eruption of Mauna Loa, measurements came from Maunakea, about 21
+miles north.

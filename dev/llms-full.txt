@@ -1648,8 +1648,8 @@ error naming the cell, so a cloned notebook can't read or rewrite other files.
 
 Every notebook under `examples/` in the repo demonstrates a specific
 Strata capability. A card's picture is what that notebook makes, taken
-from a real run. Click through for its cell sources and its README,
-rendered into this site without cloning the repo.
+from a real run. Click through for the notebook as it ran: every cell
+with its outputs, without cloning the repo.
 
 To run the examples, start the server on the repo's `examples/` directory
 from a clone:
@@ -1843,23 +1843,12 @@ These need R (`Rscript` on the server's `PATH`).
 
 # Tutorial: what the cache saves
 
-![Tutorial: what the cache saves: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/caching-light.webp#only-light)
-![Tutorial: what the cache saves: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/caching-dark.webp#only-dark)
-
 A two-minute tour of caching. Run it twice and read what the second run saved,
 edit one cell and watch only what depends on it run again, then open the graph.
 
 Open a copy with `strata tutorial caching`, or from **Open a sample** on the home page.
 
-## Cells
-
-1. `load.py`: builds a small table, after a two-second wait that stands in for a slow query
-2. `summarize.py`: revenue by region
-3. `plot.py`: a bar chart of the summary
-
-The markdown cells between them are the instructions.
-
-# What the cache saves
+---
 
 Strata stores each cell's result under a hash of its source, its inputs and its
 environment. If none of those changed, the cell doesn't run again. This takes about
@@ -1870,9 +1859,7 @@ two minutes.
 Press **Run All** at the top of the page. The cell below waits two seconds
 on purpose, standing in for a slow query.
 
-## Load the data
-
-<sub>**kind** python</sub>
+## Load the data { .nb-cell }
 
 ```python
 # @name Load the data
@@ -1892,21 +1879,41 @@ sales = pd.DataFrame(
 sales
 ```
 
+**Output**
+
+| region | quarter | revenue |
+| --- | --- | --- |
+| North | Q1 | 120 |
+| North | Q2 | 135 |
+| South | Q1 | 98 |
+| South | Q2 | 110 |
+| East | Q1 | 143 |
+| East | Q2 | 151 |
+| West | Q1 | 87 |
+| West | Q2 | 95 |
+
 ## Step 2: run it again
 
 Press **Run All** again. Nothing runs this time. Every code cell's badge reads `cached`,
 and the load cell's says how much time that saved. For the total, press **expand** at the
 bottom right of the page and read **Cache savings** in the **Profiling** panel.
 
-## Summarize by region
-
-<sub>**kind** python</sub>
+## Summarize by region { .nb-cell }
 
 ```python
 # @name Summarize by region
 by_region = sales.groupby("region", as_index=False)["revenue"].sum()
 by_region
 ```
+
+**Output**
+
+| region | revenue |
+| --- | --- |
+| East | 294 |
+| North | 255 |
+| South | 208 |
+| West | 182 |
 
 ## Step 3: edit one cell
 
@@ -1917,9 +1924,7 @@ two run.
 Now change it back to `.sum()` and press **Run All** once more. Both read `cached` at once,
 because Strata still has that result.
 
-## Plot it
-
-<sub>**kind** python</sub>
+## Plot it { .nb-cell }
 
 ```python
 # @name Plot it
@@ -1937,18 +1942,29 @@ plt.tight_layout()
 fig
 ```
 
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/caching-1.webp)
+
 ## Step 4: open the DAG
 
 Press **expand** at the bottom right if the drawer is closed, and look at **Cell DAG**: load,
 then summarize, then plot. Nobody declared those links. They come from the variables each
 cell reads, and they are how Strata knew what your edit in step 3 affected.
 
+---
+
+## About this example
+
+### Cells
+
+1. `load.py`: builds a small table, after a two-second wait that stands in for a slow query
+2. `summarize.py`: revenue by region
+3. `plot.py`: a bar chart of the summary
+
+The markdown cells between them are the instructions.
+
 <!-- https://bearingresearch.com/strata/dev/examples/keeling_curve/index.md -->
 
 # The Keeling curve, with a receipt
-
-![The Keeling curve, with a receipt: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-light.webp#only-light)
-![The Keeling curve, with a receipt: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-dark.webp#only-dark)
 
 Atmospheric CO₂ at Mauna Loa since 1958, from NOAA's monthly record: the curve, the
 yearly cycle split out, the growth rate by decade, and a published figure whose page
@@ -1957,35 +1973,7 @@ shows the chart, the code behind it and the exact bytes NOAA served.
 Open a copy with `strata tutorial keeling_curve`, or from **Open a sample** on the home
 page. The first run downloads about 40 KB from NOAA.
 
-## What it shows
-
-- **`# @fetch`.** The first cell declares the URL it reads. The bytes' digest is part of
-  the cell's key, so when NOAA adds a month the cell goes stale by itself, and each
-  stored result records the URL, the digest and when it was downloaded.
-- **Caching.** Edit the plot and only the plot runs again; the record is not downloaded
-  again.
-- **Publishing.** `strata artifact publish` turns the figure into a link. The page lists
-  the code of every step behind the figure and NOAA's file under External inputs.
-- **`plt.style.use("strata")`.** The chart reads on the light and the dark theme.
-
-## Cells
-
-1. `load.py`: downloads the record and keeps the monthly mean and NOAA's
-   seasonally adjusted series
-2. `cycle.py`: the average year, the monthly mean minus the adjusted series, by month
-3. `growth.py`: the growth rate in ppm per year, averaged by decade, over complete years
-4. `plot.py`: the curve and the average year, side by side
-
-The markdown cells between them explain each step and how to publish the figure.
-
-## Data
-
-NOAA Global Monitoring Laboratory and Scripps Institution of Oceanography, monthly mean
-CO₂ at Mauna Loa: <https://gml.noaa.gov/ccgg/trends/data.html>. From December 2022 to
-July 2023, after the eruption of Mauna Loa, measurements came from Maunakea, about 21
-miles north.
-
-# The Keeling curve, with a receipt
+---
 
 In 1958 Charles David Keeling began measuring carbon dioxide in the air at Mauna Loa,
 Hawaii. The record has run every month since, and it is the clearest picture there is
@@ -1998,9 +1986,7 @@ behind it, and the exact bytes NOAA served.
 
 Press **Run All** at the top of the page. The first run downloads about 40 KB.
 
-## Load the Mauna Loa record
-
-<sub>**kind** python</sub>
+## Load the Mauna Loa record { .nb-cell }
 
 ```python
 # @name Load the Mauna Loa record
@@ -2020,6 +2006,21 @@ monthly = pd.DataFrame(
 monthly
 ```
 
+**Output**
+
+| date | year | month | co2_ppm | trend_ppm |
+| --- | --- | --- | --- | --- |
+| 1958-03-15 00:00:00 | 1958 | 3 | 315.7 | 314.4 |
+| 1958-04-15 00:00:00 | 1958 | 4 | 317.4 | 315.2 |
+| 1958-05-15 00:00:00 | 1958 | 5 | 317.5 | 314.7 |
+| 1958-06-15 00:00:00 | 1958 | 6 | 317.3 | 315.1 |
+| 1958-07-15 00:00:00 | 1958 | 7 | 315.9 | 315.2 |
+| 1958-08-15 00:00:00 | 1958 | 8 | 314.9 | 316.2 |
+| 1958-09-15 00:00:00 | 1958 | 9 | 313.2 | 316.1 |
+| 1958-10-15 00:00:00 | 1958 | 10 | 312.4 | 315.4 |
+
+*…showing 8 of 824 rows*
+
 ## The yearly cycle
 
 Through each northern summer the forests draw carbon dioxide down, and the level
@@ -2027,9 +2028,7 @@ bottoms out in early autumn; through the winter it comes back, and peaks in May.
 publishes the record with that cycle removed as well, and the difference between the
 two is the cycle itself. Averaged by month, it is the shape the curve repeats every year.
 
-## The average year
-
-<sub>**kind** python</sub>
+## The average year { .nb-cell }
 
 ```python
 # @name The average year
@@ -2042,6 +2041,21 @@ cycle = (
 cycle
 ```
 
+**Output**
+
+| month | cycle_ppm |
+| --- | --- |
+| 1 | 0.12 |
+| 2 | 0.75 |
+| 3 | 1.49 |
+| 4 | 2.57 |
+| 5 | 3.09 |
+| 6 | 2.31 |
+| 7 | 0.61 |
+| 8 | -1.57 |
+
+*…showing 8 of 12 rows*
+
 ## How fast it is rising
 
 The yearly mean, compared with the year before, gives the growth rate in parts per
@@ -2049,9 +2063,7 @@ million per year. Averaged by decade, it shows whether the rise is steady or spe
 Only complete years count, so a year joins once NOAA publishes its December, and the
 `years` column says how many each decade has so far.
 
-## Growth per decade
-
-<sub>**kind** python</sub>
+## Growth per decade { .nb-cell }
 
 ```python
 # @name Growth per decade
@@ -2069,6 +2081,18 @@ growth = (
 growth
 ```
 
+**Output**
+
+| decade | ppm_per_year | years |
+| --- | --- | --- |
+| 1960s | 0.86 | 10 |
+| 1970s | 1.22 | 10 |
+| 1980s | 1.64 | 10 |
+| 1990s | 1.53 | 10 |
+| 2000s | 1.91 | 10 |
+| 2010s | 2.4 | 10 |
+| 2020s | 2.62 | 6 |
+
 ## The curve
 
 The thin line is each month's mean; the thick one has the yearly cycle removed. On the
@@ -2078,9 +2102,7 @@ September and October.
 Change something here: the title, a color, the size. Only this cell runs again. The
 record is not downloaded again, because nothing the earlier cells read has changed.
 
-## The Keeling curve
-
-<sub>**kind** python</sub>
+## The Keeling curve { .nb-cell }
 
 ```python
 # @name The Keeling curve
@@ -2119,6 +2141,8 @@ def draw(record, average_year):
 draw(monthly, cycle)
 ```
 
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/keeling_curve-1.webp)
+
 ## The receipt
 
 Every result above is already stored with what produced it: the source of each cell,
@@ -2149,59 +2173,49 @@ monthly mean CO₂ at Mauna Loa (gml.noaa.gov/ccgg/trends). From December 2022 t
 July 2023, after the eruption of Mauna Loa, measurements came from Maunakea, about 21
 miles north.*
 
+---
+
+## About this example
+
+### What it shows
+
+- **`# @fetch`.** The first cell declares the URL it reads. The bytes' digest is part of
+  the cell's key, so when NOAA adds a month the cell goes stale by itself, and each
+  stored result records the URL, the digest and when it was downloaded.
+- **Caching.** Edit the plot and only the plot runs again; the record is not downloaded
+  again.
+- **Publishing.** `strata artifact publish` turns the figure into a link. The page lists
+  the code of every step behind the figure and NOAA's file under External inputs.
+- **`plt.style.use("strata")`.** The chart reads on the light and the dark theme.
+
+### Cells
+
+1. `load.py`: downloads the record and keeps the monthly mean and NOAA's
+   seasonally adjusted series
+2. `cycle.py`: the average year, the monthly mean minus the adjusted series, by month
+3. `growth.py`: the growth rate in ppm per year, averaged by decade, over complete years
+4. `plot.py`: the curve and the average year, side by side
+
+The markdown cells between them explain each step and how to publish the figure.
+
+### Data
+
+NOAA Global Monitoring Laboratory and Scripps Institution of Oceanography, monthly mean
+CO₂ at Mauna Loa: <https://gml.noaa.gov/ccgg/trends/data.html>. From December 2022 to
+July 2023, after the eruption of Mauna Loa, measurements came from Maunakea, about 21
+miles north.
+
 <!-- https://bearingresearch.com/strata/dev/examples/iris_classification/index.md -->
 
 # Classify iris flowers, from raw data to a confusion matrix
-
-![Classify iris flowers, from raw data to a confusion matrix: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)
-![Classify iris flowers, from raw data to a confusion matrix: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)
 
 Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
 what the graph looks like for a realistic ML pipeline: load → explore
 → split → train → evaluate → visualize.
 
-## What it shows
+---
 
-- **DAG branching.** `scatter_plot` and `train_test` both read from
-  `load_data`, so editing `load_data` invalidates both branches.
-- **Mixed output types.** Cells produce DataFrames (arrow/ipc), trained
-  models (pickle), and matplotlib figures (image/png), all stored
-  natively by Strata's serializer.
-- **Display outputs.** `_` at the end of a cell (or a trailing
-  expression) becomes an inline preview on the cell.
-
-## Cells
-
-| Cell | What it does |
-|---|---|
-| `load_data` | Loads the iris dataset into a DataFrame. |
-| `explore_stats` | Per-feature summary stats. |
-| `scatter_plot` | Pair-plot of the four features, colored by class. |
-| `train_test` | 70/30 train/test split. |
-| `train_model` | Fits a `RandomForestClassifier` (100 trees). |
-| `evaluate` | Accuracy + per-class precision/recall. |
-| `confusion` | Confusion-matrix heatmap. |
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Then open **Iris Classification** from the notebook list on the Strata home page.
-
-## Try this
-
-- Change the `test_size` in `train_test`. Cells downstream go stale;
-  `scatter_plot` stays ready (it doesn't depend on the split).
-- Re-run `evaluate` without re-training: the trained model is cached,
-  so only evaluation runs.
-
-## Load iris dataset
-
-<sub>**kind** python</sub>
+## Load iris dataset { .nb-cell }
 
 ```python
 # @name Load iris dataset
@@ -2219,9 +2233,22 @@ print(f"Species: {df['species'].unique().tolist()}")
 df.head()
 ```
 
-## Explore per-feature stats
+**Output**
 
-<sub>**kind** python</sub>
+| sepal length (cm) | sepal width (cm) | petal length (cm) | petal width (cm) | species |
+| --- | --- | --- | --- | --- |
+| 5.1 | 3.5 | 1.4 | 0.2 | setosa |
+| 4.9 | 3 | 1.4 | 0.2 | setosa |
+| 4.7 | 3.2 | 1.3 | 0.2 | setosa |
+| 4.6 | 3.1 | 1.5 | 0.2 | setosa |
+| 5 | 3.6 | 1.4 | 0.2 | setosa |
+
+```text title="stdout"
+Loaded 150 samples, 4 features
+Species: ['setosa', 'versicolor', 'virginica']
+```
+
+## Explore per-feature stats { .nb-cell }
 
 ```python
 # @name Explore per-feature stats
@@ -2230,9 +2257,18 @@ stats = df.groupby("species").agg(["mean", "std"]).round(2)
 print(stats)
 ```
 
-## Pairwise scatter plot
+```text title="stdout"
+           sepal length (cm)        ... petal width (cm)      
+                        mean   std  ...             mean   std
+species                             ...                       
+setosa                  5.01  0.35  ...             0.25  0.11
+versicolor              5.94  0.52  ...             1.33  0.20
+virginica               6.59  0.64  ...             2.03  0.27
 
-<sub>**kind** python</sub>
+[3 rows x 8 columns]
+```
+
+## Pairwise scatter plot { .nb-cell }
 
 ```python
 # @name Pairwise scatter plot
@@ -2251,6 +2287,8 @@ plt.tight_layout()
 g.figure
 ```
 
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/iris_classification-1.webp)
+
 # Train and evaluate
 
 The exploration cells above don't feed the model directly, they're
@@ -2263,9 +2301,7 @@ Re-running the *test set* cell after an upstream change cascades the
 whole subtree in topological order, hitting cache for everything that
 hasn't changed.
 
-## Train / test split
-
-<sub>**kind** python</sub>
+## Train / test split { .nb-cell }
 
 ```python
 # @name Train / test split
@@ -2283,9 +2319,12 @@ print(f"Train: {len(X_train)} samples")
 print(f"Test:  {len(X_test)} samples")
 ```
 
-## Train random forest classifier
+```text title="stdout"
+Train: 105 samples
+Test:  45 samples
+```
 
-<sub>**kind** python</sub>
+## Train random forest classifier { .nb-cell }
 
 ```python
 # @name Train random forest classifier
@@ -2302,9 +2341,12 @@ print(f"Train accuracy: {train_score:.3f}")
 print(f"Test accuracy:  {test_score:.3f}")
 ```
 
-## Evaluate
+```text title="stdout"
+Train accuracy: 1.000
+Test accuracy:  0.889
+```
 
-<sub>**kind** python</sub>
+## Evaluate { .nb-cell }
 
 ```python
 # @name Evaluate
@@ -2316,9 +2358,19 @@ report = classification_report(y_test, y_pred)
 print(report)
 ```
 
-## Confusion matrix
+```text title="stdout"
+              precision    recall  f1-score   support
 
-<sub>**kind** python</sub>
+      setosa       1.00      1.00      1.00        15
+  versicolor       0.78      0.93      0.85        15
+   virginica       0.92      0.73      0.81        15
+
+    accuracy                           0.89        45
+   macro avg       0.90      0.89      0.89        45
+weighted avg       0.90      0.89      0.89        45
+```
+
+## Confusion matrix { .nb-cell }
 
 ```python
 # @name Confusion matrix
@@ -2350,18 +2402,277 @@ plt.tight_layout()
 fig
 ```
 
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/iris_classification-2.webp)
+
+---
+
+## About this example
+
+### What it shows
+
+- **DAG branching.** `scatter_plot` and `train_test` both read from
+  `load_data`, so editing `load_data` invalidates both branches.
+- **Mixed output types.** Cells produce DataFrames (arrow/ipc), trained
+  models (pickle), and matplotlib figures (image/png), all stored
+  natively by Strata's serializer.
+- **Display outputs.** `_` at the end of a cell (or a trailing
+  expression) becomes an inline preview on the cell.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `load_data` | Loads the iris dataset into a DataFrame. |
+| `explore_stats` | Per-feature summary stats. |
+| `scatter_plot` | Pair-plot of the four features, colored by class. |
+| `train_test` | 70/30 train/test split. |
+| `train_model` | Fits a `RandomForestClassifier` (100 trees). |
+| `evaluate` | Accuracy + per-class precision/recall. |
+| `confusion` | Confusion-matrix heatmap. |
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **Iris Classification** from the notebook list on the Strata home page.
+
+### Try this
+
+- Change the `test_size` in `train_test`. Cells downstream go stale;
+  `scatter_plot` stays ready (it doesn't depend on the split).
+- Re-run `evaluate` without re-training: the trained model is cached,
+  so only evaluation runs.
+
 <!-- https://bearingresearch.com/strata/dev/examples/pandas_basics/index.md -->
 
 # Filter, group, merge and pivot a sales table
-
-![Filter, group, merge and pivot a sales table: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-light.webp#only-light)
-![Filter, group, merge and pivot a sales table: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-dark.webp#only-dark)
 
 A guided tour of the pandas operations you reach for every day, split
 into one cell per concept. Each cell re-uses its upstream cell's
 artifact, so edits stay fast and the DAG stays honest.
 
-## What it shows
+---
+
+## Create sample sales dataset { .nb-cell }
+
+```python
+# @name Create sample sales dataset
+import numpy as np
+import pandas as pd
+
+np.random.seed(42)
+n = 200
+
+sales = pd.DataFrame(
+    {
+        "date": pd.date_range("2025-01-01", periods=n, freq="D"),
+        "region": np.random.choice(["North", "South", "East", "West"], n),
+        "product": np.random.choice(["Widget", "Gadget", "Doohickey"], n),
+        "units": np.random.randint(1, 50, n),
+        "price": np.round(np.random.uniform(5, 100, n), 2),
+    }
+)
+
+print(f"Created {len(sales)} rows")
+sales.head(10)
+```
+
+**Output**
+
+| date | region | product | units | price |
+| --- | --- | --- | --- | --- |
+| 2025-01-01 00:00:00 | East | Doohickey | 49 | 21.86 |
+| 2025-01-02 00:00:00 | West | Doohickey | 46 | 76.31 |
+| 2025-01-03 00:00:00 | North | Widget | 31 | 81.65 |
+| 2025-01-04 00:00:00 | East | Widget | 35 | 99.1 |
+| 2025-01-05 00:00:00 | East | Gadget | 33 | 44.2 |
+| 2025-01-06 00:00:00 | West | Widget | 21 | 40.34 |
+| 2025-01-07 00:00:00 | North | Doohickey | 32 | 78.76 |
+| 2025-01-08 00:00:00 | North | Doohickey | 23 | 37.38 |
+
+*…showing 8 of 10 rows*
+
+```text title="stdout"
+Created 200 rows
+```
+
+## Filter high-value orders { .nb-cell }
+
+```python
+# @name Filter high-value orders
+# Filter to high-value orders (units > 20 and price > 30).
+high_value = sales[(sales["units"] > 20) & (sales["price"] > 30)].copy()
+
+print(
+    f"High-value orders: {len(high_value)} / {len(sales)} ({100 * len(high_value) / len(sales):.1f}%)"
+)
+high_value.head()
+```
+
+**Output**
+
+| date | region | product | units | price |
+| --- | --- | --- | --- | --- |
+| 2025-01-02 00:00:00 | West | Doohickey | 46 | 76.31 |
+| 2025-01-03 00:00:00 | North | Widget | 31 | 81.65 |
+| 2025-01-04 00:00:00 | East | Widget | 35 | 99.1 |
+| 2025-01-05 00:00:00 | East | Gadget | 33 | 44.2 |
+| 2025-01-06 00:00:00 | West | Widget | 21 | 40.34 |
+
+```text title="stdout"
+High-value orders: 103 / 200 (51.5%)
+```
+
+## Add computed columns { .nb-cell }
+
+```python
+# @name Add computed columns
+orders = sales.copy()
+orders["revenue"] = orders["units"] * orders["price"]
+orders["month"] = orders["date"].dt.to_period("M").astype(str)
+
+print(f"Total revenue: ${orders['revenue'].sum():,.2f}")
+orders[["date", "region", "product", "units", "price", "revenue", "month"]].head()
+```
+
+**Output**
+
+| date | region | product | units | price | revenue | month |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2025-01-01 00:00:00 | East | Doohickey | 49 | 21.86 | 1071 | 2025-01 |
+| 2025-01-02 00:00:00 | West | Doohickey | 46 | 76.31 | 3510 | 2025-01 |
+| 2025-01-03 00:00:00 | North | Widget | 31 | 81.65 | 2531 | 2025-01 |
+| 2025-01-04 00:00:00 | East | Widget | 35 | 99.1 | 3468 | 2025-01 |
+| 2025-01-05 00:00:00 | East | Gadget | 33 | 44.2 | 1459 | 2025-01 |
+
+```text title="stdout"
+Total revenue: $286,921.78
+```
+
+## Revenue by region and product { .nb-cell }
+
+```python
+# @name Revenue by region and product
+region_product = (
+    orders.groupby(["region", "product"])["revenue"]
+    .agg(["sum", "mean", "count"])
+    .round(2)
+    .sort_values("sum", ascending=False)
+)
+
+print(region_product)
+```
+
+```text title="stdout"
+                       sum     mean  count
+region product                            
+West   Gadget     39380.61  1575.22     25
+East   Widget     36094.93  1640.68     22
+North  Doohickey  35274.73  1959.71     18
+       Widget     25560.20  1345.27     19
+South  Widget     24480.51  1440.03     17
+West   Doohickey  23145.00  1653.21     14
+South  Doohickey  21616.88  1271.58     17
+East   Doohickey  19491.84  1146.58     17
+West   Widget     19245.32  1283.02     15
+East   Gadget     18097.29  1206.49     15
+South  Gadget     12689.33  1057.44     12
+North  Gadget     11845.14  1316.13      9
+```
+
+## Monthly revenue pivot { .nb-cell }
+
+```python
+# @name Monthly revenue pivot
+monthly_pivot = orders.pivot_table(
+    values="revenue",
+    index="month",
+    columns="region",
+    aggfunc="sum",
+).round(2)
+
+print(monthly_pivot)
+```
+
+```text title="stdout"
+region       East     North     South      West
+month                                          
+2025-01  17464.80  10450.42   3262.09  20146.13
+2025-02   9788.52   7223.75   8998.66   9319.29
+2025-03  11563.50   9816.40   6487.70  15958.12
+2025-04   3531.57   4690.82  22618.98  12097.91
+2025-05   7846.12  24564.89   4670.42  12955.69
+2025-06   8771.83  13358.63   6983.45   9664.54
+2025-07  14717.72   2575.16   5765.42   1629.25
+```
+
+## Merge with region metadata { .nb-cell }
+
+```python
+# @name Merge with region metadata
+region_info = pd.DataFrame(
+    {
+        "region": ["North", "South", "East", "West"],
+        "manager": ["Alice", "Bob", "Carol", "Dave"],
+        "target_revenue": [50000, 45000, 55000, 40000],
+    }
+)
+
+region_summary = (
+    orders.groupby("region")["revenue"].sum().reset_index().merge(region_info, on="region")
+)
+
+region_summary["pct_of_target"] = (
+    100 * region_summary["revenue"] / region_summary["target_revenue"]
+).round(1)
+
+print(region_summary)
+```
+
+```text title="stdout"
+  region   revenue manager  target_revenue  pct_of_target
+0   East  73684.06   Carol           55000          134.0
+1  North  72680.07   Alice           50000          145.4
+2  South  58786.72     Bob           45000          130.6
+3   West  81770.93    Dave           40000          204.4
+```
+
+## Top product per region { .nb-cell }
+
+```python
+# @name Top product per region
+# Top product by revenue in each region.
+top_products = (
+    orders.groupby(["region", "product"])["revenue"]
+    .sum()
+    .reset_index()
+    .sort_values("revenue", ascending=False)
+    .drop_duplicates(subset="region")
+    .sort_values("region")
+)
+
+print("Top product by revenue per region:")
+print(top_products.to_string(index=False))
+```
+
+```text title="stdout"
+Top product by revenue per region:
+region   product  revenue
+  East    Widget 36094.93
+ North Doohickey 35274.73
+ South    Widget 24480.51
+  West    Gadget 39380.61
+```
+
+---
+
+## About this example
+
+### What it shows
 
 - A fan-out: `create_data` feeds `select_filter` and `add_columns`, and
   `add_columns` feeds `groupby`, `pivot`, `merge` and `summary`.
@@ -2371,7 +2682,7 @@ artifact, so edits stay fast and the DAG stays honest.
   the four cells it feeds turn yellow automatically, while
   `select_filter` stays ready.
 
-## Cells
+### Cells
 
 | Cell | What it does |
 |---|---|
@@ -2383,7 +2694,7 @@ artifact, so edits stay fast and the DAG stays honest.
 | `merge` | Join two DataFrames. |
 | `summary` | Describe and basic stats. |
 
-## Per-cell unit tests
+### Per-cell unit tests
 
 Four cells ship with pytest tests next to them
 (`cells/<cell-id>.test.py`), a worked example of Strata's built-in
@@ -2410,7 +2721,7 @@ def test_revenue_is_units_times_price(cell):
 Open the Tests panel on a cell to run them, or send the `cell_run_tests`
 WS request. A cell with no tests simply carries no `.test.py` file.
 
-## Running
+### Running
 
 From the project root:
 
@@ -2420,7 +2731,7 @@ uv run strata-notebook --notebook-dir examples
 
 Then open **Pandas Basics** from the notebook list on the Strata home page.
 
-## Try this
+### Try this
 
 1. Run all cells top-to-bottom.
 2. Edit `create_data` (for example, change a price).
@@ -2429,191 +2740,17 @@ Then open **Pandas Basics** from the notebook list on the Strata home page.
    `create_data` and `add_columns`, and leaves `select_filter`,
    `groupby`, `pivot` and `merge` stale until you run them.
 
-## Create sample sales dataset
-
-<sub>**kind** python</sub>
-
-```python
-# @name Create sample sales dataset
-import numpy as np
-import pandas as pd
-
-np.random.seed(42)
-n = 200
-
-sales = pd.DataFrame(
-    {
-        "date": pd.date_range("2025-01-01", periods=n, freq="D"),
-        "region": np.random.choice(["North", "South", "East", "West"], n),
-        "product": np.random.choice(["Widget", "Gadget", "Doohickey"], n),
-        "units": np.random.randint(1, 50, n),
-        "price": np.round(np.random.uniform(5, 100, n), 2),
-    }
-)
-
-print(f"Created {len(sales)} rows")
-sales.head(10)
-```
-
-## Filter high-value orders
-
-<sub>**kind** python</sub>
-
-```python
-# @name Filter high-value orders
-# Filter to high-value orders (units > 20 and price > 30).
-high_value = sales[(sales["units"] > 20) & (sales["price"] > 30)].copy()
-
-print(
-    f"High-value orders: {len(high_value)} / {len(sales)} ({100 * len(high_value) / len(sales):.1f}%)"
-)
-high_value.head()
-```
-
-## Add computed columns
-
-<sub>**kind** python</sub>
-
-```python
-# @name Add computed columns
-orders = sales.copy()
-orders["revenue"] = orders["units"] * orders["price"]
-orders["month"] = orders["date"].dt.to_period("M").astype(str)
-
-print(f"Total revenue: ${orders['revenue'].sum():,.2f}")
-orders[["date", "region", "product", "units", "price", "revenue", "month"]].head()
-```
-
-## Revenue by region and product
-
-<sub>**kind** python</sub>
-
-```python
-# @name Revenue by region and product
-region_product = (
-    orders.groupby(["region", "product"])["revenue"]
-    .agg(["sum", "mean", "count"])
-    .round(2)
-    .sort_values("sum", ascending=False)
-)
-
-print(region_product)
-```
-
-## Monthly revenue pivot
-
-<sub>**kind** python</sub>
-
-```python
-# @name Monthly revenue pivot
-monthly_pivot = orders.pivot_table(
-    values="revenue",
-    index="month",
-    columns="region",
-    aggfunc="sum",
-).round(2)
-
-print(monthly_pivot)
-```
-
-## Merge with region metadata
-
-<sub>**kind** python</sub>
-
-```python
-# @name Merge with region metadata
-region_info = pd.DataFrame(
-    {
-        "region": ["North", "South", "East", "West"],
-        "manager": ["Alice", "Bob", "Carol", "Dave"],
-        "target_revenue": [50000, 45000, 55000, 40000],
-    }
-)
-
-region_summary = (
-    orders.groupby("region")["revenue"].sum().reset_index().merge(region_info, on="region")
-)
-
-region_summary["pct_of_target"] = (
-    100 * region_summary["revenue"] / region_summary["target_revenue"]
-).round(1)
-
-print(region_summary)
-```
-
-## Top product per region
-
-<sub>**kind** python</sub>
-
-```python
-# @name Top product per region
-# Top product by revenue in each region.
-top_products = (
-    orders.groupby(["region", "product"])["revenue"]
-    .sum()
-    .reset_index()
-    .sort_values("revenue", ascending=False)
-    .drop_duplicates(subset="region")
-    .sort_values("region")
-)
-
-print("Top product by revenue per region:")
-print(top_products.to_string(index=False))
-```
-
 <!-- https://bearingresearch.com/strata/dev/examples/titanic_ml/index.md -->
 
 # Predict Titanic survival with three classifiers
-
-![Predict Titanic survival with three classifiers: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-light.webp#only-light)
-![Predict Titanic survival with three classifiers: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-dark.webp#only-dark)
 
 A canonical "first Kaggle notebook" rewritten for Strata. A
 feature-engineering stage feeds three classifiers; the best one is
 evaluated and its feature weights plotted.
 
-## What it shows
+---
 
-- **Two branches off one load**: `explore` and `features` both read
-  `load_data`'s DataFrame, so editing `features` leaves `explore` ready.
-- **One upstream feeding several cells**: `features` produces the split,
-  which `train_model` and `evaluate` read, and `feature_cols`, which
-  `compare` reads, so editing it invalidates all three.
-- **Objects that need pickle**: `results` holds the fitted scikit-learn
-  models next to their accuracies, so it is stored with pickle rather than
-  as Arrow or JSON.
-
-## Cells
-
-| Cell | What it does |
-|---|---|
-| `load_data` | Loads the Titanic dataset bundled with seaborn and prints missing-value counts. |
-| `explore` | Prints the survival rate grouped by class and sex, and the overall rate. |
-| `features` | Keeps six columns, drops rows with missing values, encodes `sex` as 0/1 and makes a stratified 75/25 train/test split. |
-| `modeling_intro` | Markdown introducing the modeling cells. |
-| `train_model` | Fits logistic regression, random forest and gradient boosting, and keeps each model with its train and test accuracy in `results`. |
-| `evaluate` | Picks the model with the best test accuracy and prints its classification report. |
-| `compare` | Plots the best model's feature importances (or absolute coefficients for logistic regression). |
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Then open **Titanic Survival Prediction** from the notebook list on the Strata home page.
-
-## Try this
-
-- Add a feature in `features` (e.g. `fare_per_person`). `train_model`,
-  `evaluate` and `compare` go stale but `explore` stays ready.
-- Run `evaluate` alone. Strata re-runs only the chain that's changed.
-
-## Load Titanic dataset
-
-<sub>**kind** python</sub>
+## Load Titanic dataset { .nb-cell }
 
 ```python
 # @name Load Titanic dataset
@@ -2628,9 +2765,29 @@ print(f"\nMissing values:\n{df.isnull().sum()[df.isnull().sum() > 0]}")
 df.head()
 ```
 
-## Survival rates by class and sex
+**Output**
 
-<sub>**kind** python</sub>
+| survived | pclass | sex | age | sibsp | parch | fare | embarked | class | who | adult_male | deck | embark_town | alive | alone |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 3 | male | 22 | 1 | 0 | 7.25 | S | Third | man | True |  | Southampton | no | False |
+| 1 | 1 | female | 38 | 1 | 0 | 71.28 | C | First | woman | False | C | Cherbourg | yes | False |
+| 1 | 3 | female | 26 | 0 | 0 | 7.925 | S | Third | woman | False |  | Southampton | yes | True |
+| 1 | 1 | female | 35 | 1 | 0 | 53.1 | S | First | woman | False | C | Southampton | yes | False |
+| 0 | 3 | male | 35 | 0 | 0 | 8.05 | S | Third | man | True |  | Southampton | no | True |
+
+```text title="stdout"
+Loaded 891 passengers
+Survival rate: 38.4%
+
+Missing values:
+age            177
+embarked         2
+deck           688
+embark_town      2
+dtype: int64
+```
+
+## Survival rates by class and sex { .nb-cell }
 
 ```python
 # @name Survival rates by class and sex
@@ -2639,9 +2796,20 @@ print(survival_rates)
 print(f"\nOverall: {df['survived'].mean():.3f}")
 ```
 
-## Feature engineering
+```text title="stdout"
+pclass  sex   
+1       female    0.968
+        male      0.369
+2       female    0.921
+        male      0.157
+3       female    0.500
+        male      0.135
+Name: survived, dtype: float64
 
-<sub>**kind** python</sub>
+Overall: 0.384
+```
+
+## Feature engineering { .nb-cell }
 
 ```python
 # @name Feature engineering
@@ -2665,6 +2833,12 @@ print(f"Train: {len(X_train)}, Test: {len(X_test)}")
 print(f"Dropped {len(df) - len(clean)} rows with missing values")
 ```
 
+```text title="stdout"
+Features: ['pclass', 'sex', 'age', 'sibsp', 'parch', 'fare']
+Train: 535, Test: 179
+Dropped 177 rows with missing values
+```
+
 # Model the survivors
 
 We've engineered features from the raw passenger data. Now train
@@ -2676,9 +2850,7 @@ Each classifier runs once and gets cached. Tweaking
 provenance hash on each training cell changes because its `X_train`
 input changed.
 
-## Train classifiers
-
-<sub>**kind** python</sub>
+## Train classifiers { .nb-cell }
 
 ```python
 # @name Train classifiers
@@ -2701,9 +2873,13 @@ for name, model in models.items():
     print(f"{name:25s}  train={train_acc:.3f}  test={test_acc:.3f}")
 ```
 
-## Evaluate best model
+```text title="stdout"
+Logistic Regression        train=0.807  test=0.810
+Random Forest              train=0.991  test=0.771
+Gradient Boosting          train=0.925  test=0.793
+```
 
-<sub>**kind** python</sub>
+## Evaluate best model { .nb-cell }
 
 ```python
 # @name Evaluate best model
@@ -2718,9 +2894,20 @@ print(f"Best model: {best_name} (test accuracy: {results[best_name]['test']:.3f}
 print(classification_report(y_test, y_pred, target_names=["Did not survive", "Survived"]))
 ```
 
-## Feature importance from the best model
+```text title="stdout"
+Best model: Logistic Regression (test accuracy: 0.810)
 
-<sub>**kind** python</sub>
+                 precision    recall  f1-score   support
+
+Did not survive       0.84      0.84      0.84       106
+       Survived       0.77      0.77      0.77        73
+
+       accuracy                           0.81       179
+      macro avg       0.80      0.80      0.80       179
+   weighted avg       0.81      0.81      0.81       179
+```
+
+## Feature importance from the best model { .nb-cell }
 
 ```python
 # @name Feature importance from the best model
@@ -2756,42 +2943,46 @@ print(importance.sort_values(ascending=False))
 fig
 ```
 
-<!-- https://bearingresearch.com/strata/dev/examples/data_viewer/index.md -->
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/titanic_ml-1.webp)
 
-# Page through 2,000 transactions
+```text title="stdout"
+sex       2.419319
+pclass    1.232228
+sibsp     0.227804
+parch     0.102860
+age       0.044134
+fare      0.001285
+dtype: float64
+```
 
-![Page through 2,000 transactions: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-light.webp#only-light)
-![Page through 2,000 transactions: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-dark.webp#only-dark)
+---
 
-A two-cell notebook that produces DataFrames larger than the 20-row
-inline preview, so the notebook's **interactive data viewer** pages
-through the full frame.
+## About this example
 
-## What it shows
+### What it shows
 
-- A cell whose displayed output is a **2,000-row** DataFrame. Every
-  table-shaped output renders in the grid; one larger than the preview
-  also gets a footer showing `1–50 of 2,000 rows` and **Prev / Next**
-  paging.
-- **Click a column header to sort**: ascending, then descending, then
-  clear. Sorting runs server-side over the whole frame (not just the
-  visible page), reading the cached Arrow artifact directly.
-- A **page-size** selector (25 / 50 / 100 / 250).
-- Columns of every dtype: integer (`id`), datetime (`ts`), string
-  (`region`, `product`), and float (`unit_price`, `revenue`).
+- **Two branches off one load**: `explore` and `features` both read
+  `load_data`'s DataFrame, so editing `features` leaves `explore` ready.
+- **One upstream feeding several cells**: `features` produces the split,
+  which `train_model` and `evaluate` read, and `feature_cols`, which
+  `compare` reads, so editing it invalidates all three.
+- **Objects that need pickle**: `results` holds the fitted scikit-learn
+  models next to their accuracies, so it is stored with pickle rather than
+  as Arrow or JSON.
 
-The viewer only appears for table-shaped outputs (pandas / polars
-DataFrames + Series, pyarrow Tables, and SQL / R tabular results).
-Tensors and scalars keep their existing display.
-
-## Cells
+### Cells
 
 | Cell | What it does |
 |---|---|
-| `generate` | Builds a 2,000-row transactions frame and displays it. |
-| `ranked` | Sorts by revenue into a derived frame, also gets the grid. |
+| `load_data` | Loads the Titanic dataset bundled with seaborn and prints missing-value counts. |
+| `explore` | Prints the survival rate grouped by class and sex, and the overall rate. |
+| `features` | Keeps six columns, drops rows with missing values, encodes `sex` as 0/1 and makes a stratified 75/25 train/test split. |
+| `modeling_intro` | Markdown introducing the modeling cells. |
+| `train_model` | Fits logistic regression, random forest and gradient boosting, and keeps each model with its train and test accuracy in `results`. |
+| `evaluate` | Picks the model with the best test accuracy and prints its classification report. |
+| `compare` | Plots the best model's feature importances (or absolute coefficients for logistic regression). |
 
-## Running
+### Running
 
 From the project root:
 
@@ -2799,22 +2990,25 @@ From the project root:
 uv run strata-notebook --notebook-dir examples
 ```
 
-Then open **Data Viewer** from the notebook list on the Strata home page and run both
-cells.
+Then open **Titanic Survival Prediction** from the notebook list on the Strata home page.
 
-## Try this
+### Try this
 
-1. Run `generate`. Scroll the grid; click **Next** to page through all
-   2,000 rows.
-2. Click the `revenue` header twice to sort descending, the top row is
-   now the largest revenue in the *entire* frame, not just this page.
-3. Change the page size to 250 and page again.
-4. Run `ranked` and sort it by `ts`: the server re-sorts the derived
-   frame on demand.
+- Add a feature in `features` (e.g. `fare_per_person`). `train_model`,
+  `evaluate` and `compare` go stale but `explore` stays ready.
+- Run `evaluate` alone. Strata re-runs only the chain that's changed.
 
-## Generate transactions
+<!-- https://bearingresearch.com/strata/dev/examples/data_viewer/index.md -->
 
-<sub>**kind** python</sub>
+# Page through 2,000 transactions
+
+A two-cell notebook that produces DataFrames larger than the 20-row
+inline preview, so the notebook's **interactive data viewer** pages
+through the full frame.
+
+---
+
+## Generate transactions { .nb-cell }
 
 ```python
 # @name Generate transactions
@@ -2843,9 +3037,26 @@ print(f"{len(transactions):,} transactions across {transactions['region'].nuniqu
 transactions
 ```
 
-## Rank by revenue
+**Output**
 
-<sub>**kind** python</sub>
+| id | ts | region | product | units | unit_price | revenue |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2026-01-01 00:00:00 | West | Doohickey | 56 | 53.75 | 3010 |
+| 2 | 2026-01-01 01:00:00 | East | Sprocket | 23 | 204.3 | 4698 |
+| 3 | 2026-01-01 02:00:00 | East | Gadget | 90 | 180.8 | 1.627e+04 |
+| 4 | 2026-01-01 03:00:00 | West | Sprocket | 49 | 225.2 | 1.104e+04 |
+| 5 | 2026-01-01 04:00:00 | East | Widget | 41 | 231.4 | 9489 |
+| 6 | 2026-01-01 05:00:00 | West | Doohickey | 94 | 62.23 | 5850 |
+| 7 | 2026-01-01 06:00:00 | West | Gadget | 46 | 230.8 | 1.062e+04 |
+| 8 | 2026-01-01 07:00:00 | North | Doohickey | 73 | 103.2 | 7533 |
+
+*…showing 8 of 2000 rows*
+
+```text title="stdout"
+2,000 transactions across 4 regions
+```
+
+## Rank by revenue { .nb-cell }
 
 ```python
 # @name Rank by revenue
@@ -2858,12 +3069,77 @@ print(f"Top revenue: ${ranked['revenue'].iloc[0]:,.2f}")
 ranked
 ```
 
+**Output**
+
+| id | ts | region | product | units | unit_price | revenue |
+| --- | --- | --- | --- | --- | --- | --- |
+| 647 | 2026-01-27 22:00:00 | West | Widget | 99 | 249.8 | 2.473e+04 |
+| 1276 | 2026-02-23 03:00:00 | East | Sprocket | 99 | 249 | 2.465e+04 |
+| 86 | 2026-01-04 13:00:00 | East | Widget | 99 | 244.3 | 2.418e+04 |
+| 1356 | 2026-02-26 11:00:00 | East | Gadget | 98 | 246.6 | 2.417e+04 |
+| 1029 | 2026-02-12 20:00:00 | East | Gadget | 98 | 244.3 | 2.394e+04 |
+| 728 | 2026-01-31 07:00:00 | East | Sprocket | 96 | 249.4 | 2.394e+04 |
+| 1397 | 2026-02-28 04:00:00 | East | Widget | 98 | 243.5 | 2.386e+04 |
+| 1459 | 2026-03-02 18:00:00 | East | Sprocket | 99 | 239.7 | 2.373e+04 |
+
+*…showing 8 of 2000 rows*
+
+```text title="stdout"
+Top revenue: $24,731.19
+```
+
+---
+
+## About this example
+
+### What it shows
+
+- A cell whose displayed output is a **2,000-row** DataFrame. Every
+  table-shaped output renders in the grid; one larger than the preview
+  also gets a footer showing `1–50 of 2,000 rows` and **Prev / Next**
+  paging.
+- **Click a column header to sort**: ascending, then descending, then
+  clear. Sorting runs server-side over the whole frame (not just the
+  visible page), reading the cached Arrow artifact directly.
+- A **page-size** selector (25 / 50 / 100 / 250).
+- Columns of every dtype: integer (`id`), datetime (`ts`), string
+  (`region`, `product`), and float (`unit_price`, `revenue`).
+
+The viewer only appears for table-shaped outputs (pandas / polars
+DataFrames + Series, pyarrow Tables, and SQL / R tabular results).
+Tensors and scalars keep their existing display.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `generate` | Builds a 2,000-row transactions frame and displays it. |
+| `ranked` | Sorts by revenue into a derived frame, also gets the grid. |
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **Data Viewer** from the notebook list on the Strata home page and run both
+cells.
+
+### Try this
+
+1. Run `generate`. Scroll the grid; click **Next** to page through all
+   2,000 rows.
+2. Click the `revenue` header twice to sort descending, the top row is
+   now the largest revenue in the *entire* frame, not just this page.
+3. Change the page size to 250 and page again.
+4. Run `ranked` and sort it by `ts`: the server re-sorts the derived
+   frame on demand.
+
 <!-- https://bearingresearch.com/strata/dev/examples/agent_demo/index.md -->
 
 # Train a model once, re-run only its evaluation
-
-![Train a model once, re-run only its evaluation: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-light.webp#only-light)
-![Train a model once, re-run only its evaluation: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-dark.webp#only-dark)
 
 This is the notebook from the
 [`strata agent`](https://bearingresearch.com/strata/latest/notebook/agent/)
@@ -2871,47 +3147,13 @@ demo: a coding agent (Claude Code) builds it live while you watch in the
 terminal UI. It's a plain, runnable notebook; the agent-driven part is just how
 it gets written.
 
-## What it shows
-
-- A random forest fit **once** in `train.py`: the "expensive" step.
-- An evaluation downstream in `evaluate.py`.
-- The point: because Strata is **content-addressed**, editing the evaluation
-  recomputes **only** that cell. The model above is reused from cache, never
-  retrained. That's the difference from a plain agent + Jupyter, where a rerun
-  redoes everything.
-
-## Cells
-
-| cell | what it does |
-| --- | --- |
-| `intro.md` | Title / one-line framing |
-| `train.py` | Fit a `RandomForestClassifier` on synthetic data → `model` |
-| `evaluate.py` | `accuracy` + `conf_matrix` from `model` |
-
-## Running
-
-From the repository root (the notebook's own venv does not include Strata;
-`strata run` builds it from `pyproject.toml` before the first cell):
-
-```bash
-uv run strata run examples/agent_demo --force   # run every cell
-```
-
-## Reproducing the demo
-
-To watch a coding agent build this notebook from scratch, see `RECORDING.md` in
-this directory: it has the exact `strata agent` command and the two prompts,
-plus the screen-capture settings.
-
-# Agent demo: a coding agent builds this notebook
+---
 
 A random forest, trained once and cached. Because Strata is content-addressed,
 editing the evaluation below recomputes only that cell, the model is never
 retrained.
 
-## train
-
-<sub>**kind** python</sub>
+## train { .nb-cell }
 
 ```python
 # The expensive step: fit the model. Strata caches this by provenance, so a
@@ -2928,9 +3170,7 @@ model = RandomForestClassifier(
 ).fit(X, y)
 ```
 
-## evaluate
-
-<sub>**kind** python</sub>
+## evaluate { .nb-cell }
 
 ```python
 # Downstream of `model`. Edit this cell and only this cell recomputes; the
@@ -2941,83 +3181,54 @@ accuracy = float(model.score(X, y))
 conf_matrix = confusion_matrix(y, model.predict(X))
 ```
 
+---
+
+## About this example
+
+### What it shows
+
+- A random forest fit **once** in `train.py`: the "expensive" step.
+- An evaluation downstream in `evaluate.py`.
+- The point: because Strata is **content-addressed**, editing the evaluation
+  recomputes **only** that cell. The model above is reused from cache, never
+  retrained. That's the difference from a plain agent + Jupyter, where a rerun
+  redoes everything.
+
+### Cells
+
+| cell | what it does |
+| --- | --- |
+| `intro.md` | Title / one-line framing |
+| `train.py` | Fit a `RandomForestClassifier` on synthetic data → `model` |
+| `evaluate.py` | `accuracy` + `conf_matrix` from `model` |
+
+### Running
+
+From the repository root (the notebook's own venv does not include Strata;
+`strata run` builds it from `pyproject.toml` before the first cell):
+
+```bash
+uv run strata run examples/agent_demo --force   # run every cell
+```
+
+### Reproducing the demo
+
+To watch a coding agent build this notebook from scratch, see `RECORDING.md` in
+this directory: it has the exact `strata agent` command and the two prompts,
+plus the screen-capture settings.
+
 <!-- https://bearingresearch.com/strata/dev/examples/model_variants/index.md -->
 
 # Switch between three classifiers without retraining
-
-![Switch between three classifiers without retraining: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-light.webp#only-light)
-![Switch between three classifiers without retraining: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-dark.webp#only-dark)
 
 The same iris pipeline as `iris_classification`, but with three
 alternative training cells grouped as variants of the same DAG slot.
 Pick a classifier from the variant tabs and the rest of the notebook
 re-runs against it; switch back and the previous result is a cache hit.
 
-## What it shows
+---
 
-- **Variant cells.** `train_logreg`, `train_rf`, and `train_gbm` all
-  carry `# @variant classifier <name>` and define the same contract
-  (`model`). Only the active variant participates in the DAG.
-- **Switching is cheap.** Each variant has its own provenance hash, so
-  re-running an already-trained variant is a cache hit. Flip-flopping
-  between two variants is free after each has run once.
-- **Strict contract.** All variants must produce the same value
-  bindings (imports don't count, they're scaffolding). If one variant
-  accidentally adds an extra value, you get a
-  `variant_contract_mismatch` diagnostic: the contract is what makes
-  downstream cells correct under any selection.
-
-## Cells
-
-| Cell | What it does |
-|---|---|
-| `load_data` | Loads iris into `df` + `feature_names`. |
-| `train_test` | 80/20 stratified split. |
-| `train_logreg` | **Variant `classifier=logreg`**: `LogisticRegression`. Active by default. |
-| `train_rf` | **Variant `classifier=rf`**: `RandomForestClassifier`. |
-| `train_gbm` | **Variant `classifier=gbm`**: `GradientBoostingClassifier`. |
-| `evaluate` | Test accuracy + per-class precision/recall against whichever `model` is active. |
-| `confusion` | Confusion-matrix heatmap for the active classifier. |
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Open **Model Variants** from the notebook list on the Strata home page. The
-classifier group renders as a tab strip on the train cell; click a
-tab to switch.
-
-## Try this
-
-- Run the notebook on `logreg`, then click the `rf` tab. `evaluate`
-  and `confusion` go stale; re-run them to see the random-forest
-  numbers. Click `logreg` again and both downstream cells become cache
-  hits.
-- Add a fourth variant: click the `+` on the tab strip, which clones
-  the active variant, then change its annotation to
-  `# @variant classifier svc` and its body to `model = SVC(...)`. A
-  file dropped into `cells/` on its own is ignored: only cells listed
-  in `notebook.toml` load, so a hand-made `cells/train_svc.py` also
-  needs an entry in the `cells = [...]` list there.
-- Edit a variant cell to define an extra variable (say,
-  `feature_importance = ...`). The header pill flags
-  `variant_contract_mismatch`: siblings disagree on what they
-  expose. Remove the extra binding to clear it.
-
-## Notes
-
-The active selection is committed in `notebook.toml`'s
-`[[variant_group]]` table, so flipping variants from the UI shows up as a
-git diff on that one line. That's intentional: the notebook records
-which experiment you ran.
-
-## Load iris dataset
-
-<sub>**kind** python</sub>
+## Load iris dataset { .nb-cell }
 
 ```python
 # @name Load iris dataset
@@ -3034,9 +3245,21 @@ print(f"Loaded {len(df)} samples, {len(feature_names)} features")
 df.head()
 ```
 
-## Train / test split
+**Output**
 
-<sub>**kind** python</sub>
+| sepal length (cm) | sepal width (cm) | petal length (cm) | petal width (cm) | species |
+| --- | --- | --- | --- | --- |
+| 5.1 | 3.5 | 1.4 | 0.2 | setosa |
+| 4.9 | 3 | 1.4 | 0.2 | setosa |
+| 4.7 | 3.2 | 1.3 | 0.2 | setosa |
+| 4.6 | 3.1 | 1.5 | 0.2 | setosa |
+| 5 | 3.6 | 1.4 | 0.2 | setosa |
+
+```text title="stdout"
+Loaded 150 samples, 4 features
+```
+
+## Train / test split { .nb-cell }
 
 ```python
 # @name Train / test split
@@ -3054,6 +3277,11 @@ print(f"Train: {len(X_train)} samples")
 print(f"Test:  {len(X_test)} samples")
 ```
 
+```text title="stdout"
+Train: 120 samples
+Test:  30 samples
+```
+
 # Pick a classifier
 
 The three cells below are alternatives. They share the same `model`
@@ -3067,9 +3295,9 @@ hash, so re-running an already-trained variant is a cache hit. The
 downstream cells (`Evaluate active classifier`, `Confusion matrix`)
 re-cascade against whichever variant is active.
 
-## Logistic regression
+## Logistic regression { .nb-cell }
 
-<sub>**kind** python  ·  **variant** logreg of classifier</sub>
+<sub>**variant** logreg of classifier</sub>
 
 ```python
 # @variant classifier logreg
@@ -3083,9 +3311,11 @@ model.fit(X_train, y_train)
 print(f"Trained {type(model).__name__} (train acc {model.score(X_train, y_train):.3f})")
 ```
 
-## Evaluate active classifier
+```text title="stdout"
+Trained LogisticRegression (train acc 0.975)
+```
 
-<sub>**kind** python</sub>
+## Evaluate active classifier { .nb-cell }
 
 ```python
 # @name Evaluate active classifier
@@ -3100,9 +3330,22 @@ print(f"Test accuracy: {test_acc:.3f}\n")
 print(classification_report(y_test, y_pred))
 ```
 
-## Confusion matrix
+```text title="stdout"
+=== LogisticRegression ===
+Test accuracy: 0.967
 
-<sub>**kind** python</sub>
+              precision    recall  f1-score   support
+
+      setosa       1.00      1.00      1.00        10
+  versicolor       1.00      0.90      0.95        10
+   virginica       0.91      1.00      0.95        10
+
+    accuracy                           0.97        30
+   macro avg       0.97      0.97      0.97        30
+weighted avg       0.97      0.97      0.97        30
+```
+
+## Confusion matrix { .nb-cell }
 
 ```python
 # @name Confusion matrix
@@ -3134,12 +3377,77 @@ plt.tight_layout()
 fig
 ```
 
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/model_variants-1.webp)
+
+---
+
+## About this example
+
+### What it shows
+
+- **Variant cells.** `train_logreg`, `train_rf`, and `train_gbm` all
+  carry `# @variant classifier <name>` and define the same contract
+  (`model`). Only the active variant participates in the DAG.
+- **Switching is cheap.** Each variant has its own provenance hash, so
+  re-running an already-trained variant is a cache hit. Flip-flopping
+  between two variants is free after each has run once.
+- **Strict contract.** All variants must produce the same value
+  bindings (imports don't count, they're scaffolding). If one variant
+  accidentally adds an extra value, you get a
+  `variant_contract_mismatch` diagnostic: the contract is what makes
+  downstream cells correct under any selection.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `load_data` | Loads iris into `df` + `feature_names`. |
+| `train_test` | 80/20 stratified split. |
+| `train_logreg` | **Variant `classifier=logreg`**: `LogisticRegression`. Active by default. |
+| `train_rf` | **Variant `classifier=rf`**: `RandomForestClassifier`. |
+| `train_gbm` | **Variant `classifier=gbm`**: `GradientBoostingClassifier`. |
+| `evaluate` | Test accuracy + per-class precision/recall against whichever `model` is active. |
+| `confusion` | Confusion-matrix heatmap for the active classifier. |
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Open **Model Variants** from the notebook list on the Strata home page. The
+classifier group renders as a tab strip on the train cell; click a
+tab to switch.
+
+### Try this
+
+- Run the notebook on `logreg`, then click the `rf` tab. `evaluate`
+  and `confusion` go stale; re-run them to see the random-forest
+  numbers. Click `logreg` again and both downstream cells become cache
+  hits.
+- Add a fourth variant: click the `+` on the tab strip, which clones
+  the active variant, then change its annotation to
+  `# @variant classifier svc` and its body to `model = SVC(...)`. A
+  file dropped into `cells/` on its own is ignored: only cells listed
+  in `notebook.toml` load, so a hand-made `cells/train_svc.py` also
+  needs an entry in the `cells = [...]` list there.
+- Edit a variant cell to define an extra variable (say,
+  `feature_importance = ...`). The header pill flags
+  `variant_contract_mismatch`: siblings disagree on what they
+  expose. Remove the extra binding to clear it.
+
+### Notes
+
+The active selection is committed in `notebook.toml`'s
+`[[variant_group]]` table, so flipping variants from the UI shows up as a
+git diff on that one line. That's intentional: the notebook records
+which experiment you ran.
+
 <!-- https://bearingresearch.com/strata/dev/examples/model_variants_sweep/index.md -->
 
 # Run every model variant and compare their accuracy
-
-![Run every model variant and compare their accuracy: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)
-![Run every model variant and compare their accuracy: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)
 
 A minimal example of variant **sweep mode**: run every variant of a group and
 compare them all in one downstream cell.
@@ -3154,7 +3462,72 @@ execution, and the downstream `compare` cell receives `preds` as a
 accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
 ```
 
-## Fan-out with `@per_variant`
+---
+
+## data { .nb-cell }
+
+```python
+y_true = [1, 0, 1, 1, 0, 1, 0, 0, 1, 1]
+```
+
+## baseline { .nb-cell }
+
+<sub>**variant** always_one of model</sub>
+
+```python
+# @variant model always_one
+# A trivial baseline "classifier": predict 1 for everything.
+preds = [1] * len(y_true)
+```
+
+## compare { .nb-cell }
+
+```python
+# `preds` is a dict {variant_name: predictions} because the `model` group is in
+# sweep mode: every variant ran, and this cell consumes them all at once.
+accuracy = {
+    name: sum(p == t for p, t in zip(pred, y_true)) / len(y_true)
+    for name, pred in preds.items()
+}
+print("accuracy by variant:", accuracy)
+```
+
+```text title="stdout"
+accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
+```
+
+## score { .nb-cell }
+
+```python
+# @per_variant
+# Fan-out: runs once per model variant. `preds` is bound to THAT variant's
+# predictions (a scalar list), not the whole {variant: preds} dict, so this
+# cell computes a single accuracy. In a real workload each instance could carry
+# `# @worker gpu` and run as an independent job.
+accuracy = sum(p == t for p, t in zip(preds, y_true)) / len(y_true)
+```
+
+## best { .nb-cell }
+
+```python
+# A plain (non-fan-out) downstream cell collapses the per-variant `accuracy`
+# back into a {variant: value} dict, the same shape the `compare` cell gets,
+# but produced by fanning the scoring out first. Pick the winner:
+best_model = max(accuracy, key=accuracy.get)
+print("accuracy by variant:", accuracy)
+print("best model:", best_model)
+```
+
+```text title="stdout"
+accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
+best model: always_one
+```
+
+---
+
+## About this example
+
+### Fan-out with `@per_variant`
 
 The `compare` cell consumes the whole dict at once. The `score` cell shows the
 other option, **fan-out**: `# @per_variant` runs it once per variant with
@@ -3171,7 +3544,7 @@ best model: always_one
 Same numbers as `compare`, produced by fanning the scoring out first. See
 [Variant Cells → Fan-out](https://bearingresearch.com/strata/latest/guides/cells/loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant).
 
-## Run it
+### Run it
 
 ```bash
 strata run examples/model_variants_sweep
@@ -3182,71 +3555,13 @@ the repo root), where the `model` group renders as a tab strip with a
 **sweep** badge; clicking a tab shows that variant's source (all of them still
 run), and the group has a run-all button + a readiness rollup.
 
-## Switch vs sweep
+### Switch vs sweep
 
 Flip `mode = "sweep"` to `mode = "switch"` (or drop the line) in
 `notebook.toml` and only the active variant runs; `compare` would then see a
 single `preds` value instead of the dict. Sweep is for *comparing* variants on
 a shared downstream; switch is for *picking* one. See
 [Variant Cells → Sweep mode](https://bearingresearch.com/strata/latest/notebook/annotations/#sweep-mode-compare-all-variants-at-once).
-
-## data
-
-<sub>**kind** python</sub>
-
-```python
-y_true = [1, 0, 1, 1, 0, 1, 0, 0, 1, 1]
-```
-
-## baseline
-
-<sub>**kind** python  ·  **variant** always_one of model</sub>
-
-```python
-# @variant model always_one
-# A trivial baseline "classifier": predict 1 for everything.
-preds = [1] * len(y_true)
-```
-
-## compare
-
-<sub>**kind** python</sub>
-
-```python
-# `preds` is a dict {variant_name: predictions} because the `model` group is in
-# sweep mode: every variant ran, and this cell consumes them all at once.
-accuracy = {
-    name: sum(p == t for p, t in zip(pred, y_true)) / len(y_true)
-    for name, pred in preds.items()
-}
-print("accuracy by variant:", accuracy)
-```
-
-## score
-
-<sub>**kind** python</sub>
-
-```python
-# @per_variant
-# Fan-out: runs once per model variant. `preds` is bound to THAT variant's
-# predictions (a scalar list), not the whole {variant: preds} dict, so this
-# cell computes a single accuracy. In a real workload each instance could carry
-# `# @worker gpu` and run as an independent job.
-accuracy = sum(p == t for p, t in zip(preds, y_true)) / len(y_true)
-```
-
-## best
-
-<sub>**kind** python</sub>
-
-```python
-# A plain (non-fan-out) downstream cell collapses the per-variant `accuracy`
-# back into a {variant: value} dict, the same shape the `compare` cell gets,
-# but produced by fanning the scoring out first. Pick the winner:
-best_model = max(accuracy, key=accuracy.get)
-print("accuracy by variant:", accuracy)
-print("best model:", best_model)
-```
 
 <!-- https://bearingresearch.com/strata/dev/examples/review_triage/index.md -->
 
@@ -3268,21 +3583,11 @@ Because the schema is part of the cell's provenance hash, editing the
 schema invalidates the cached response, exactly what you want when
 you're iterating on the shape of the output.
 
-## Cells
+*No run is recorded for this example, so the page shows its code only.*
 
-1. `reviews.py`: hand-picked list of customer reviews
-2. `triage.prompt`: prompt cell with `@output_schema` enforcing
-   `{sentiment, priority, tags}` per review
-3. `summary.py`: pandas aggregation of the structured results
+---
 
-## Running
-
-Set an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) in the
-notebook's Runtime panel, then run-all.
-
-## reviews
-
-<sub>**kind** python</sub>
+## reviews { .nb-cell }
 
 ```python
 # A small hand-picked set of customer reviews. Kept inline so the
@@ -3300,9 +3605,7 @@ reviews = [
 ]
 ```
 
-## triage
-
-<sub>**kind** prompt</sub>
+## triage { .nb-cell }
 
 *Prompt cell: response intentionally excluded from export.*
 
@@ -3330,9 +3633,7 @@ Reviews:
 {{ reviews }}
 ```
 
-## triage_summary
-
-<sub>**kind** python</sub>
+## triage_summary { .nb-cell }
 
 ```python
 # @name triage_summary
@@ -3371,6 +3672,22 @@ high_priority = df[df["priority"] == "high"]
 }
 ```
 
+---
+
+## About this example
+
+### Cells
+
+1. `reviews.py`: hand-picked list of customer reviews
+2. `triage.prompt`: prompt cell with `@output_schema` enforcing
+   `{sentiment, priority, tags}` per review
+3. `summary.py`: pandas aggregation of the structured results
+
+### Running
+
+Set an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) in the
+notebook's Runtime panel, then run-all.
+
 <!-- https://bearingresearch.com/strata/dev/examples/arxiv_classifier/index.md -->
 
 # Classify arXiv papers across three workers
@@ -3390,68 +3707,13 @@ Notebook at once:
   upstream cell (load, aggregate, embed) still hits cache, only training,
   evaluation and the plot re-execute.
 
-## The workflow
+*No run is recorded for this example, so the page shows its code only.*
 
-| # | Cell | Worker | What it does |
-|---|---|---|---|
-| 1 | `load` | local | Load arXiv metadata |
-| 2 | `aggregate` | df-cluster | Group by category and year via DataFusion |
-| 3 | `themes` | local (LLM) | Prompt: identify research themes from stats |
-| 4 | `sample` | df-cluster | Stratified sample for the training set |
-| 5 | `embed` | gpu-fly | Generate sentence-transformer embeddings |
-| 6 | `clusters` | local (LLM) | Prompt: describe each paper cluster |
-| 7 | `train` | local | Train a classifier on the embeddings |
-| 8 | `evaluate` | local | Compute accuracy and classification report |
-| 9 | `plot` | local | Visualize the confusion matrix |
+---
 
-Cells 1, 3, 6, 7, 8, 9 run on the user's machine. Cells 2 and 4 run on the
-DataFusion worker, close to the data, avoids round-tripping the full
-dataset. Cell 5 runs on the GPU worker; training a logistic regression on
-the embeddings takes under a second on a CPU, so it stays local.
+## Load arXiv Papers { .nb-cell }
 
-## Running it locally
-
-`notebook.toml` points `df-cluster` and `gpu-fly` at two local HTTP
-executors, `http://127.0.0.1:9000/v1/execute` and
-`http://127.0.0.1:9001/v1/execute`, the ports `run_local_workers.sh` binds.
-To run them on hosted machines instead, deploy `df-cluster/` to Fly and
-`modal_gpu_worker.py` to Modal (`MODAL_DEPLOY.md`), then change the `url`
-under each `[workers.config]` to the deployed one. `df-cluster` sends the
-token in `STRATA_DF_CLUSTER_TOKEN` when that is set.
-
-```bash
-# Terminal 1: start the two local worker processes
-./examples/arxiv_classifier/run_local_workers.sh
-
-# Terminal 2: start Strata
-uv run strata-notebook --notebook-dir examples
-
-# Terminal 3: open the notebook in the UI
-# http://localhost:8765
-# Under "Open Notebook", pick "Classify arXiv papers across three workers"
-```
-
-Once the notebook is open, run all cells. You should see:
-
-- The `worker: df-cluster` badge next to cells 2 and 4
-- The `worker: gpu-fly` badge next to cell 5
-- A live `dispatching → df-cluster` or `dispatching → gpu-fly` badge
-  (pulsing yellow) while each remote cell is executing
-- Green `✓` status on every cell after the first run
-- Green `✓ cached` on every cell on the second run
-
-## What it needs
-
-The cells run the real workload: `load` downloads about 20K arXiv abstracts
-from Hugging Face, and `embed` encodes them with the `all-MiniLM-L6-v2`
-sentence-transformer, so the worker running `embed` needs
-`sentence-transformers` (and with it `torch`). The two prompt cells, `themes`
-and `clusters`, need an LLM provider key such as `ANTHROPIC_API_KEY` or
-`OPENAI_API_KEY`, set in the Runtime panel.
-
-## Load arXiv Papers
-
-<sub>**kind** python  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 ```python
 # @name Load arXiv Papers
@@ -3496,9 +3758,9 @@ print(papers["topic"].value_counts().to_string())
 papers
 ```
 
-## Aggregate by Topic
+## Aggregate by Topic { .nb-cell }
 
-<sub>**kind** python  ·  **worker** df-cluster</sub>
+<sub>**worker** df-cluster</sub>
 
 ```python
 # @name Aggregate by Topic
@@ -3529,9 +3791,9 @@ print(category_stats.to_string(index=False))
 category_stats
 ```
 
-## research_themes
+## research_themes { .nb-cell }
 
-<sub>**kind** prompt  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 *Prompt cell: response intentionally excluded from export.*
 
@@ -3547,9 +3809,9 @@ For each topic, write one sentence describing what kinds of papers fall into it
 and why this topic matters for the ML research community. Return as a numbered list.
 ```
 
-## Stratified Sample
+## Stratified Sample { .nb-cell }
 
-<sub>**kind** python  ·  **worker** df-cluster</sub>
+<sub>**worker** df-cluster</sub>
 
 ```python
 # @name Stratified Sample
@@ -3590,9 +3852,9 @@ print(sampled_papers["topic"].value_counts().to_string())
 sampled_papers
 ```
 
-## Embed Abstracts
+## Embed Abstracts { .nb-cell }
 
-<sub>**kind** python  ·  **worker** gpu-fly</sub>
+<sub>**worker** gpu-fly</sub>
 
 ```python
 # @name Embed Abstracts
@@ -3615,9 +3877,9 @@ print(f"Generated embeddings: {embeddings.shape} ({embeddings.nbytes / 1e6:.1f} 
 embeddings
 ```
 
-## cluster_descriptions
+## cluster_descriptions { .nb-cell }
 
-<sub>**kind** prompt  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 *Prompt cell: response intentionally excluded from export.*
 
@@ -3634,9 +3896,9 @@ the practical significance of these themes. Focus on how they relate to each
 other and what trends they suggest for the ML research community.
 ```
 
-## Train Classifier
+## Train Classifier { .nb-cell }
 
-<sub>**kind** python  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 ```python
 # @name Train Classifier
@@ -3671,9 +3933,9 @@ train_test_split_info = {
 train_test_split_info
 ```
 
-## Evaluate Model
+## Evaluate Model { .nb-cell }
 
-<sub>**kind** python  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 ```python
 # @name Evaluate Model
@@ -3700,9 +3962,9 @@ eval_results = {"accuracy": round(accuracy, 4), "per_class": report}
 eval_results
 ```
 
-## Confusion Matrix
+## Confusion Matrix { .nb-cell }
 
-<sub>**kind** python  ·  **worker** local</sub>
+<sub>**worker** local</sub>
 
 ```python
 # @name Confusion Matrix
@@ -3734,6 +3996,69 @@ plt.tight_layout()
 fig
 ```
 
+---
+
+## About this example
+
+### The workflow
+
+| # | Cell | Worker | What it does |
+|---|---|---|---|
+| 1 | `load` | local | Load arXiv metadata |
+| 2 | `aggregate` | df-cluster | Group by category and year via DataFusion |
+| 3 | `themes` | local (LLM) | Prompt: identify research themes from stats |
+| 4 | `sample` | df-cluster | Stratified sample for the training set |
+| 5 | `embed` | gpu-fly | Generate sentence-transformer embeddings |
+| 6 | `clusters` | local (LLM) | Prompt: describe each paper cluster |
+| 7 | `train` | local | Train a classifier on the embeddings |
+| 8 | `evaluate` | local | Compute accuracy and classification report |
+| 9 | `plot` | local | Visualize the confusion matrix |
+
+Cells 1, 3, 6, 7, 8, 9 run on the user's machine. Cells 2 and 4 run on the
+DataFusion worker, close to the data, avoids round-tripping the full
+dataset. Cell 5 runs on the GPU worker; training a logistic regression on
+the embeddings takes under a second on a CPU, so it stays local.
+
+### Running it locally
+
+`notebook.toml` points `df-cluster` and `gpu-fly` at two local HTTP
+executors, `http://127.0.0.1:9000/v1/execute` and
+`http://127.0.0.1:9001/v1/execute`, the ports `run_local_workers.sh` binds.
+To run them on hosted machines instead, deploy `df-cluster/` to Fly and
+`modal_gpu_worker.py` to Modal (`MODAL_DEPLOY.md`), then change the `url`
+under each `[workers.config]` to the deployed one. `df-cluster` sends the
+token in `STRATA_DF_CLUSTER_TOKEN` when that is set.
+
+```bash
+# Terminal 1: start the two local worker processes
+./examples/arxiv_classifier/run_local_workers.sh
+
+# Terminal 2: start Strata
+uv run strata-notebook --notebook-dir examples
+
+# Terminal 3: open the notebook in the UI
+# http://localhost:8765
+# Under "Open Notebook", pick "Classify arXiv papers across three workers"
+```
+
+Once the notebook is open, run all cells. You should see:
+
+- The `worker: df-cluster` badge next to cells 2 and 4
+- The `worker: gpu-fly` badge next to cell 5
+- A live `dispatching → df-cluster` or `dispatching → gpu-fly` badge
+  (pulsing yellow) while each remote cell is executing
+- Green `✓` status on every cell after the first run
+- Green `✓ cached` on every cell on the second run
+
+### What it needs
+
+The cells run the real workload: `load` downloads about 20K arXiv abstracts
+from Hugging Face, and `embed` encodes them with the `all-MiniLM-L6-v2`
+sentence-transformer, so the worker running `embed` needs
+`sentence-transformers` (and with it `torch`). The two prompt cells, `themes`
+and `clusters`, need an LLM provider key such as `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`, set in the Runtime panel.
+
 <!-- https://bearingresearch.com/strata/dev/examples/news_alpha_trader/index.md -->
 
 # Paper-trade on overnight news sentiment
@@ -3742,91 +4067,9 @@ fig
 
 This example is the opposite of the toy notebooks in this directory: it talks to real APIs, spends real tokens, and (if you opt in) places real orders.
 
-## What it does
+*No run is recorded for this example, so the page shows its code only.*
 
-1. Pulls overnight news for a watchlist (Alpaca Market Data, Benzinga feed)
-2. Extracts structured sentiment per headline via the LLM with `@output_schema` (validated JSON, auto-retried on failure)
-3. Fetches latest prices and computes available capital
-4. Generates a trade plan under hard risk limits (max position size, daily trade cap, ticker whitelist)
-5. Submits orders, paper by default, live only behind a two-key lock
-6. Reconciles fills, records realized costs (slippage, TAF, spread)
-7. Reports **cost-adjusted** P&L, the only number that matters: did the strategy beat its own API and transaction bill?
-8. LLM writes a daily journal entry with the day's lessons
-
-## Required API keys
-
-Set these in the **Runtime panel**:
-
-| Key                   | Used for                              |
-| --------------------- | ------------------------------------- |
-| `ALPACA_API_KEY`      | News + prices + orders                |
-| `ALPACA_API_SECRET`   | Same                                  |
-| `ANTHROPIC_API_KEY` _or_ `OPENAI_API_KEY` | Signal extraction + daily note |
-
-Alpaca free tier gives 200 req/min, 7+ years history, 15-min REST delay. Plenty for daily rebalancing.
-
-### Secret manager
-
-`notebook.toml` also wires a secret manager, so these keys can come from Infisical instead of being typed in:
-
-```toml
-[secret_manager]
-provider = "infisical"
-project_id = "7301e122-565d-491d-9082-056504381782"
-```
-
-The provider needs the `infisical` extra (`uv tool install "strata-notebook[infisical]"`). That `project_id` is the example author's project; replace it with your own Infisical project's id. Strata logs in with credentials from the environment of the shell that starts the server, never from the notebook: export `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET` (a Machine Identity with read access to the project, recommended) or `INFISICAL_TOKEN` (a service token), plus `INFISICAL_HOST` for a self-hosted Infisical. See [Secrets](https://bearingresearch.com/strata/latest/notebook/secrets/) for the full setup. Without those credentials the Runtime panel shows a fetch error; keys typed into the panel still work, or remove the `[secret_manager]` block to stop the fetch.
-
-## Paper vs live
-
-**The notebook ships in `paper` mode.** Every code path is identical between paper and live; only the Alpaca endpoint URL differs. To flip to live you must:
-
-1. Edit `helpers.py` → set `Config.MODE = "live"`
-2. Edit `helpers.py` → set `Config.I_UNDERSTAND_THIS_IS_REAL_MONEY = True`
-3. Your Alpaca account must be funded
-
-The `place_orders` cell refuses to run live without both flags set. This is intentional: two edits, on purpose.
-
-## Risk limits (hard, enforced in code)
-
-Change in `helpers.py` → `Config` class:
-
-- `MAX_POSITION_USD`: per-ticker notional cap (default $500)
-- `MAX_TOTAL_EXPOSURE_USD`: portfolio notional cap (default $2000)
-- `MAX_DAILY_TRADES`: daily trade count cap (default 10)
-- `TICKER_WHITELIST`: the LLM *cannot* place orders in tickers outside this list, even if a headline mentions one
-
-## DuckDB schema
-
-One file: `work/trading.db` in the notebook's directory. Tables:
-
-- `news_raw`: raw headlines (idempotent insert by `article_id`)
-- `signals`: extracted sentiment per article
-- `prices`: daily OHLC per ticker
-- `orders`: every order attempt, expected cost, Alpaca order id
-- `trades`: reconciled fills with realized cost
-- `positions`: current positions (rebuilt from `trades`)
-- `costs`: every dollar spent: LLM tokens, market data, commissions, TAF fees, slippage
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-# Open "Paper-trade on overnight news sentiment" from the home page, set API keys in the Runtime panel, run all.
-```
-
-Re-run tomorrow: `fetch_news` only pulls new articles, `place_orders` is idempotent by `signal_id`. The DB grows over time; so does the history you can analyze.
-
-## Disclaimers
-
-- **This is not financial advice.** The strategy is a demo. It may lose money. Backtest thoroughly before live trading.
-- LLM outputs are non-deterministic even with `temperature=0.0`. A prompt injection in a news headline could theoretically shift a signal; the ticker whitelist is the hard backstop.
-- Paper fills are instantaneous and slippage-free. Live fills are not. The cost model applies estimated slippage to both modes so the numbers stay honest.
-- You are responsible for understanding every line of `place_orders.py` before flipping to live.
-
-# Read before running
+---
 
 This notebook is the first thing you see when you open the project. It does
 nothing computationally, the real work starts in `helpers`.
@@ -3856,9 +4099,7 @@ nothing computationally, the real work starts in `helpers`.
 5. **Nothing here is financial advice.** The strategy is a demo. Backtest on
    historical data (see `pnl_report`) before trusting it with capital.
 
-## Helpers & Config
-
-<sub>**kind** python</sub>
+## Helpers & Config { .nb-cell }
 
 ```python
 # @name Helpers & Config
@@ -4169,9 +4410,7 @@ def watchlist_str() -> str:
     return ",".join(Config.TICKER_WHITELIST)
 ```
 
-## Fetch overnight news
-
-<sub>**kind** python</sub>
+## Fetch overnight news { .nb-cell }
 
 ```python
 # @name Fetch overnight news
@@ -4296,9 +4535,7 @@ extra API call.
 After signal extraction, the next few cells persist them, fetch
 matching price data, and run risk checks before any orders go out.
 
-## signals_batch
-
-<sub>**kind** prompt</sub>
+## signals_batch { .nb-cell }
 
 *Prompt cell: response intentionally excluded from export.*
 
@@ -4355,9 +4592,7 @@ Articles:
 {{ unprocessed }}
 ```
 
-## Persist signals
-
-<sub>**kind** python</sub>
+## Persist signals { .nb-cell }
 
 ```python
 # @name Persist signals
@@ -4455,9 +4690,7 @@ print(f"persisted {persisted} new signals; {len(fresh_signals)} meet risk thresh
 fresh_signals
 ```
 
-## Fetch latest prices
-
-<sub>**kind** python</sub>
+## Fetch latest prices { .nb-cell }
 
 ```python
 # @name Fetch latest prices
@@ -4531,9 +4764,7 @@ print(f"prices: upserted {inserted} bars; latest for {len(latest_prices)} ticker
 latest_prices
 ```
 
-## Risk check & trade plan
-
-<sub>**kind** python</sub>
+## Risk check & trade plan { .nb-cell }
 
 ```python
 # @name Risk check & trade plan
@@ -4653,9 +4884,7 @@ execution cells through provenance, so a re-run never sends stale
 orders. The very last cell is a prompt cell that summarizes the
 day's session for human review.
 
-## Place orders
-
-<sub>**kind** python</sub>
+## Place orders { .nb-cell }
 
 ```python
 # @name Place orders
@@ -4799,9 +5028,7 @@ print(
 submitted
 ```
 
-## Reconcile fills
-
-<sub>**kind** python</sub>
+## Reconcile fills { .nb-cell }
 
 ```python
 # @name Reconcile fills
@@ -4945,9 +5172,7 @@ print(
 positions_snapshot
 ```
 
-## Cost ledger
-
-<sub>**kind** python</sub>
+## Cost ledger { .nb-cell }
 
 ```python
 # @name Cost ledger
@@ -5003,9 +5228,7 @@ cost_summary = {
 cost_summary
 ```
 
-## P&L report
-
-<sub>**kind** python</sub>
+## P&L report { .nb-cell }
 
 ```python
 # @name P&L report
@@ -5094,9 +5317,7 @@ pnl_summary = {
 pnl_summary
 ```
 
-## daily_note
-
-<sub>**kind** prompt</sub>
+## daily_note { .nb-cell }
 
 *Prompt cell: response intentionally excluded from export.*
 
@@ -5144,100 +5365,106 @@ Trading day recap. Produce an honest, structured summary.
 Be terse. No filler.
 ```
 
+---
+
+## About this example
+
+### What it does
+
+1. Pulls overnight news for a watchlist (Alpaca Market Data, Benzinga feed)
+2. Extracts structured sentiment per headline via the LLM with `@output_schema` (validated JSON, auto-retried on failure)
+3. Fetches latest prices and computes available capital
+4. Generates a trade plan under hard risk limits (max position size, daily trade cap, ticker whitelist)
+5. Submits orders, paper by default, live only behind a two-key lock
+6. Reconciles fills, records realized costs (slippage, TAF, spread)
+7. Reports **cost-adjusted** P&L, the only number that matters: did the strategy beat its own API and transaction bill?
+8. LLM writes a daily journal entry with the day's lessons
+
+### Required API keys
+
+Set these in the **Runtime panel**:
+
+| Key                   | Used for                              |
+| --------------------- | ------------------------------------- |
+| `ALPACA_API_KEY`      | News + prices + orders                |
+| `ALPACA_API_SECRET`   | Same                                  |
+| `ANTHROPIC_API_KEY` _or_ `OPENAI_API_KEY` | Signal extraction + daily note |
+
+Alpaca free tier gives 200 req/min, 7+ years history, 15-min REST delay. Plenty for daily rebalancing.
+
+#### Secret manager
+
+`notebook.toml` also wires a secret manager, so these keys can come from Infisical instead of being typed in:
+
+```toml
+[secret_manager]
+provider = "infisical"
+project_id = "7301e122-565d-491d-9082-056504381782"
+```
+
+The provider needs the `infisical` extra (`uv tool install "strata-notebook[infisical]"`). That `project_id` is the example author's project; replace it with your own Infisical project's id. Strata logs in with credentials from the environment of the shell that starts the server, never from the notebook: export `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET` (a Machine Identity with read access to the project, recommended) or `INFISICAL_TOKEN` (a service token), plus `INFISICAL_HOST` for a self-hosted Infisical. See [Secrets](https://bearingresearch.com/strata/latest/notebook/secrets/) for the full setup. Without those credentials the Runtime panel shows a fetch error; keys typed into the panel still work, or remove the `[secret_manager]` block to stop the fetch.
+
+### Paper vs live
+
+**The notebook ships in `paper` mode.** Every code path is identical between paper and live; only the Alpaca endpoint URL differs. To flip to live you must:
+
+1. Edit `helpers.py` → set `Config.MODE = "live"`
+2. Edit `helpers.py` → set `Config.I_UNDERSTAND_THIS_IS_REAL_MONEY = True`
+3. Your Alpaca account must be funded
+
+The `place_orders` cell refuses to run live without both flags set. This is intentional: two edits, on purpose.
+
+### Risk limits (hard, enforced in code)
+
+Change in `helpers.py` → `Config` class:
+
+- `MAX_POSITION_USD`: per-ticker notional cap (default $500)
+- `MAX_TOTAL_EXPOSURE_USD`: portfolio notional cap (default $2000)
+- `MAX_DAILY_TRADES`: daily trade count cap (default 10)
+- `TICKER_WHITELIST`: the LLM *cannot* place orders in tickers outside this list, even if a headline mentions one
+
+### DuckDB schema
+
+One file: `work/trading.db` in the notebook's directory. Tables:
+
+- `news_raw`: raw headlines (idempotent insert by `article_id`)
+- `signals`: extracted sentiment per article
+- `prices`: daily OHLC per ticker
+- `orders`: every order attempt, expected cost, Alpaca order id
+- `trades`: reconciled fills with realized cost
+- `positions`: current positions (rebuilt from `trades`)
+- `costs`: every dollar spent: LLM tokens, market data, commissions, TAF fees, slippage
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+# Open "Paper-trade on overnight news sentiment" from the home page, set API keys in the Runtime panel, run all.
+```
+
+Re-run tomorrow: `fetch_news` only pulls new articles, `place_orders` is idempotent by `signal_id`. The DB grows over time; so does the history you can analyze.
+
+### Disclaimers
+
+- **This is not financial advice.** The strategy is a demo. It may lose money. Backtest thoroughly before live trading.
+- LLM outputs are non-deterministic even with `temperature=0.0`. A prompt injection in a news headline could theoretically shift a signal; the ticker whitelist is the hard backstop.
+- Paper fills are instantaneous and slippage-free. Live fills are not. The cost model applies estimated slippage to both modes so the numbers stay honest.
+- You are responsible for understanding every line of `place_orders.py` before flipping to live.
+
 <!-- https://bearingresearch.com/strata/dev/examples/sql_orders_report/index.md -->
 
 # Report top orders and revenue from SQL and Python
-
-![Report top orders and revenue from SQL and Python: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)
-![Report top orders and revenue from SQL and Python: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)
 
 A small five-cell notebook that demonstrates Strata's SQL cell support
 against a local SQLite warehouse. The cells span three languages
 (Python → SQL → Python) and exercise both `-- @cache fingerprint` (data-
 sensitive) and `-- @cache forever` (reference-data) policies.
 
-## What it shows
+---
 
-- **Connection config in `notebook.toml`.** The `[connections.warehouse]`
-  block declares a SQLite driver with a relative path. SQL cells
-  reference it by name via `-- @sql connection=warehouse`.
-- **Bind parameters from upstream Python.** `top_orders` resolves
-  `:min_amount` from the `threshold` cell's variable. No string
-  substitution happens: the value flows through ADBC's parameter
-  binding API, so adversarial strings round-trip as data.
-- **Two cache policies side by side.** `top_orders` uses `fingerprint`
-  (folds SQLite's `PRAGMA data_version` + `schema_version` into the
-  hash) so a DDL change to the warehouse re-executes it. `category_summary`
-  uses `forever` because the user's asserting the catalog is reference
-  data; only edits to the SQL body itself invalidate it.
-- **Read-only by default, opt-in writes.** SQL cells open the
-  connection with `mode=ro` plus `PRAGMA query_only = ON` so a
-  stray `INSERT` can't mutate the DB. The seed cell explicitly
-  opts into writable execution via `-- @sql connection=warehouse
-  write=true`: that's the per-cell escape hatch for setup
-  scripts. Other cells in the notebook stay read-only.
-- **Cross-language pipeline.** The two SQL results flow back into the
-  `report` Python cell as `pyarrow.Table`s, which it turns into pandas
-  DataFrames with `.to_pandas()`.
-
-## Cells
-
-| Cell | Language | What it does |
-|---|---|---|
-| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Cached by its body while `analytics.db` is as it left it, so a reopen finds it and the cells after it ready; delete the database and it seeds again. |
-| `threshold` | Python | Defines `min_amount = 50`. Edit and rerun to vary the threshold. |
-| `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `-- @after seed`. |
-| `category_summary` | SQL | Revenue by category with `-- @cache forever`. Declares `-- @after seed`. |
-| `report` | Python | Stitches the two SQL outputs into a markdown report. |
-
-## DAG dependencies
-
-`top_orders` and `category_summary` depend on the SQLite file that
-`seed` produces, but no Python variable flows between them, the
-dependency is on a side effect. The `-- @after seed` annotation adds
-an edge to the DAG so cascade execution and staleness both see the
-link, and makes the seed's last run part of each report's cache key:
-once `seed` runs again, even unchanged, the reports are stale.
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Then open **SQL Orders Report** from the notebook list on the Strata home page. Run
-`seed` first to create the SQLite file, then run the other cells in
-order (or hit "Run all").
-
-SQL cells need the `sql` and `sql-sqlite` extras. The development
-environment has them; an installed Strata needs
-`uv tool install "strata-notebook[sql,sql-sqlite]"` (the Docker image
-carries both).
-
-## Try this
-
-- **Change the threshold.** Edit `threshold` to `min_amount = 100`.
-  `top_orders` re-executes (different bind value → different
-  provenance hash). Run `top_orders` again without changing
-  anything and it cache-hits, because the canonical artifact's
-  provenance still matches the current threshold.
-- **Mutate the schema.** From a separate shell:
-
-  ```bash
-  sqlite3 analytics.db 'ALTER TABLE orders ADD COLUMN region TEXT'
-  ```
-
-  Re-run `top_orders`. SQLite's `PRAGMA schema_version` bumps, the
-  freshness token changes, and the cell re-executes with a new schema.
-- **Try a write from a SQL cell.** Add a cell with `INSERT INTO orders
-  VALUES (...)`. The executor returns an error and the database row
-  count is unchanged: read-only mode is the security boundary.
-
-## seed
-
-<sub>**kind** sql</sub>
+## seed { .nb-cell }
 
 ```sql
 -- @sql connection=warehouse write=true
@@ -5292,9 +5519,17 @@ INSERT INTO orders (id, customer, sku, amount, ordered_at) VALUES
     (10, 'carol', 'GADGET-B',    350.00, '2026-04-20');
 ```
 
-## min_amount
+6 rows × 3 cols
+| stmt | kind | rows_affected |
+| --- | --- | --- |
+| 1 | DROP TABLE | NULL |
+| 2 | DROP TABLE | NULL |
+| 3 | CREATE TABLE | NULL |
+| 4 | CREATE TABLE | NULL |
+| 5 | INSERT | 5 |
+| 6 | INSERT | 10 |
 
-<sub>**kind** python</sub>
+## min_amount { .nb-cell }
 
 ```python
 # @name min_amount
@@ -5310,9 +5545,11 @@ min_amount = 50
 min_amount
 ```
 
-## top_orders
+```json title="Output"
+50
+```
 
-<sub>**kind** sql</sub>
+## top_orders { .nb-cell }
 
 ```sql
 -- @sql connection=warehouse
@@ -5333,9 +5570,16 @@ ORDER BY o.amount DESC
 LIMIT 5
 ```
 
-## category_summary
+5 rows × 6 cols
+| id | customer | sku | category | amount | ordered_at |
+| --- | --- | --- | --- | --- | --- |
+| 6 | carol | THINGAMAJIG | misc | 500.0 | 2026-04-10 |
+| 4 | bob | GADGET-B | gadgets | 350.0 | 2026-04-05 |
+| 10 | carol | GADGET-B | gadgets | 350.0 | 2026-04-20 |
+| 2 | alice | GADGET-A | gadgets | 199.99 | 2026-04-02 |
+| 8 | alice | GADGET-A | gadgets | 199.99 | 2026-04-15 |
 
-<sub>**kind** sql</sub>
+## category_summary { .nb-cell }
 
 ```sql
 -- @sql connection=warehouse
@@ -5357,9 +5601,14 @@ GROUP BY p.category
 ORDER BY total_revenue DESC NULLS LAST
 ```
 
-## report
+3 rows × 4 cols
+| category | sku_count | order_count | total_revenue |
+| --- | --- | --- | --- |
+| gadgets | 2 | 4 | 1099.98 |
+| misc | 1 | 1 | 500.0 |
+| widgets | 2 | 5 | 186.0 |
 
-<sub>**kind** python</sub>
+## report { .nb-cell }
 
 ```python
 # @name report
@@ -5403,12 +5652,134 @@ print(report)
 Markdown(report)
 ```
 
+# Orders report
+
+## Top 5 orders above $50
+
+| customer | sku | category | amount | ordered |
+|---|---|---|---:|---|
+| carol | THINGAMAJIG | misc | $500.00 | 2026-04-10 |
+| bob | GADGET-B | gadgets | $350.00 | 2026-04-05 |
+| carol | GADGET-B | gadgets | $350.00 | 2026-04-20 |
+| alice | GADGET-A | gadgets | $199.99 | 2026-04-02 |
+| alice | GADGET-A | gadgets | $199.99 | 2026-04-15 |
+
+## Revenue by product category
+
+| category | SKUs | orders | revenue |
+|---|---:|---:|---:|
+| gadgets | 2 | 4 | $1099.98 |
+| misc | 1 | 1 | $500.00 |
+| widgets | 2 | 5 | $186.00 |
+
+```text title="stdout"
+# Orders report
+
+## Top 5 orders above $50
+
+| customer | sku | category | amount | ordered |
+|---|---|---|---:|---|
+| carol | THINGAMAJIG | misc | $500.00 | 2026-04-10 |
+| bob | GADGET-B | gadgets | $350.00 | 2026-04-05 |
+| carol | GADGET-B | gadgets | $350.00 | 2026-04-20 |
+| alice | GADGET-A | gadgets | $199.99 | 2026-04-02 |
+| alice | GADGET-A | gadgets | $199.99 | 2026-04-15 |
+
+## Revenue by product category
+
+| category | SKUs | orders | revenue |
+|---|---:|---:|---:|
+| gadgets | 2 | 4 | $1099.98 |
+| misc | 1 | 1 | $500.00 |
+| widgets | 2 | 5 | $186.00 |
+```
+
+---
+
+## About this example
+
+### What it shows
+
+- **Connection config in `notebook.toml`.** The `[connections.warehouse]`
+  block declares a SQLite driver with a relative path. SQL cells
+  reference it by name via `-- @sql connection=warehouse`.
+- **Bind parameters from upstream Python.** `top_orders` resolves
+  `:min_amount` from the `threshold` cell's variable. No string
+  substitution happens: the value flows through ADBC's parameter
+  binding API, so adversarial strings round-trip as data.
+- **Two cache policies side by side.** `top_orders` uses `fingerprint`
+  (folds SQLite's `PRAGMA data_version` + `schema_version` into the
+  hash) so a DDL change to the warehouse re-executes it. `category_summary`
+  uses `forever` because the user's asserting the catalog is reference
+  data; only edits to the SQL body itself invalidate it.
+- **Read-only by default, opt-in writes.** SQL cells open the
+  connection with `mode=ro` plus `PRAGMA query_only = ON` so a
+  stray `INSERT` can't mutate the DB. The seed cell explicitly
+  opts into writable execution via `-- @sql connection=warehouse
+  write=true`: that's the per-cell escape hatch for setup
+  scripts. Other cells in the notebook stay read-only.
+- **Cross-language pipeline.** The two SQL results flow back into the
+  `report` Python cell as `pyarrow.Table`s, which it turns into pandas
+  DataFrames with `.to_pandas()`.
+
+### Cells
+
+| Cell | Language | What it does |
+|---|---|---|
+| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Cached by its body while `analytics.db` is as it left it, so a reopen finds it and the cells after it ready; delete the database and it seeds again. |
+| `threshold` | Python | Defines `min_amount = 50`. Edit and rerun to vary the threshold. |
+| `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `-- @after seed`. |
+| `category_summary` | SQL | Revenue by category with `-- @cache forever`. Declares `-- @after seed`. |
+| `report` | Python | Stitches the two SQL outputs into a markdown report. |
+
+### DAG dependencies
+
+`top_orders` and `category_summary` depend on the SQLite file that
+`seed` produces, but no Python variable flows between them, the
+dependency is on a side effect. The `-- @after seed` annotation adds
+an edge to the DAG so cascade execution and staleness both see the
+link, and makes the seed's last run part of each report's cache key:
+once `seed` runs again, even unchanged, the reports are stale.
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **SQL Orders Report** from the notebook list on the Strata home page. Run
+`seed` first to create the SQLite file, then run the other cells in
+order (or hit "Run all").
+
+SQL cells need the `sql` and `sql-sqlite` extras. The development
+environment has them; an installed Strata needs
+`uv tool install "strata-notebook[sql,sql-sqlite]"` (the Docker image
+carries both).
+
+### Try this
+
+- **Change the threshold.** Edit `threshold` to `min_amount = 100`.
+  `top_orders` re-executes (different bind value → different
+  provenance hash). Run `top_orders` again without changing
+  anything and it cache-hits, because the canonical artifact's
+  provenance still matches the current threshold.
+- **Mutate the schema.** From a separate shell:
+
+  ```bash
+  sqlite3 analytics.db 'ALTER TABLE orders ADD COLUMN region TEXT'
+  ```
+
+  Re-run `top_orders`. SQLite's `PRAGMA schema_version` bumps, the
+  freshness token changes, and the cell re-executes with a new schema.
+- **Try a write from a SQL cell.** Add a cell with `INSERT INTO orders
+  VALUES (...)`. The executor returns an error and the database row
+  count is unchanged: read-only mode is the security boundary.
+
 <!-- https://bearingresearch.com/strata/dev/examples/loop_hill_climb/index.md -->
 
 # Hill-climb Himmelblau's function, one cached step at a time
-
-![Hill-climb Himmelblau's function, one cached step at a time: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-light.webp#only-light)
-![Hill-climb Himmelblau's function, one cached step at a time: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-dark.webp#only-dark)
 
 Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop
 cell feature: the `@loop` / `@loop_until` annotations, per-iteration
@@ -5419,121 +5790,9 @@ small enough to reason about and visually interesting because there
 are four equal-valued minima, so different seeds (and different forks)
 converge to different basins.
 
-## What to look at
+---
 
-- **`helpers`** is a module cell: imports (``random``) and a
-  reusable function (``himmelblau``). It declares no top-level
-  runtime state, so Strata treats it as a shareable module whose
-  names are directly referenceable from every downstream cell.
-- **`seed`** bootstraps the search at a random `(x, y)` with an initial
-  score, using ``random`` and ``himmelblau`` from ``helpers``. Its
-  output variable `state` is the upstream carry for the loop cell
-  below.
-- **`evolve`** is the loop cell.
-  - `# @loop max_iter=40 carry=state` caps the search at 40 iterations
-    and tells Strata that the variable `state` is threaded between
-    iterations.
-  - `# @loop_until state["best_score"] < 1e-3` terminates the loop
-    early as soon as the cell finds a minimum.
-  - Each iteration proposes a small random perturbation of `(x, y)` and
-    keeps the move if it improves the score. The step size shrinks on
-    every accepted move so the search sharpens.
-  - ``random`` and ``himmelblau`` come from the ``helpers`` cell via
-    the DAG, with no duplicate imports or redefinitions here.
-  - Every iteration stores the full `state` as its own artifact
-    (`nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}`).
-- **`summary`** is a regular downstream cell. It reads the final
-  iteration's `state` via the normal DAG input path and prints the
-  convergence table.
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Open **Hill Climb Loop** from the notebook list on the Strata home page, then run the four code
-cells in order. While `evolve` is running you should see:
-
-- A `iter k/40` progress badge next to the cell title, with a spinner
-  while it is still running.
-- The badge settles to a green "done" state when `@loop_until` fires
-  or `max_iter` is reached.
-
-Click the inspect icon on `evolve` to open the inspect panel. The new
-iteration picker lists every stored iteration with its size and
-content type. Copy any iteration's URI to the clipboard for the fork
-demo below.
-
-## Try the fork
-
-1. Add a new cell below `evolve` (the `+` button in the UI).
-2. Paste the following, replacing `<iter-K>` with a mid-iter iteration
-   you find interesting (e.g., iter 5 if the search is still making
-   progress there):
-
-```python
-# @name Alt Search (forked)
-# @loop max_iter=30 carry=state start_from=evolve@iter=<iter-K>
-# @loop_until state["best_score"] < 1e-3
-import random
-
-next_iter = state["iter"] + 1
-# Numbers only: hash() of a str changes from one process to the next.
-rng = random.Random(hash((next_iter, round(state["x"], 6), round(state["y"], 6), 2)))
-
-# Larger exploration step so the fork is meaningfully different.
-step = state["step"] * 3.0
-cx = state["x"] + rng.uniform(-step, step)
-cy = state["y"] + rng.uniform(-step, step)
-cs = (cx**2 + cy - 11) ** 2 + (cx + cy**2 - 7) ** 2
-
-accepted = cs < state["best_score"]
-entry = {"iter": next_iter, "x": cx, "y": cy, "score": cs, "accepted": accepted}
-state = {
-    **state,
-    "x": cx if accepted else state["x"],
-    "y": cy if accepted else state["y"],
-    "best_score": min(cs, state["best_score"]),
-    "step": state["step"] * (0.9 if accepted else 1.0),
-    "history": state["history"] + [entry],
-    "iter": next_iter,
-}
-print(f"alt iter {next_iter}: score {state['best_score']:.4f}")
-```
-
-The forked cell seeds iter 0 from `evolve`'s iter K and iterates from
-there with a larger exploration step. The two cells share a history
-prefix (iters 0..K) and diverge after.
-
-## What this demo verifies
-
-- `@loop` dispatching (non-loop cells unaffected).
-- Carry seeding from an upstream cell on iter 0.
-- Per-iteration carry seeding for k > 0 (each iter sees the previous
-  iter's `state`, not the original seed).
-- `@loop_until` early termination.
-- Per-iteration artifacts stored with `@iter=k` suffix.
-- WebSocket `cell_iteration_progress` messages driving the UI badge.
-- `@loop start_from=<cell>@iter=<k>` seed resolution for forking.
-- Inspect-panel iteration picker listing iterations and copying URIs.
-
-## Notes
-
-- Each iteration runs in a fresh subprocess (no warm-pool reuse). For
-  a ~40-iteration loop expect ~40 × subprocess-startup cost (~1s
-  each on this machine). For agentic LLM loops the per-iteration
-  network call dwarfs that; for tight numerical loops the pool reuse
-  is a future optimization.
-- A loop cell runs on the notebook's own server, never on a remote
-  worker: one whose `# @worker` (or the notebook's default worker) names
-  another fails before it starts.
-
-## Helpers
-
-<sub>**kind** python</sub>
+## Helpers { .nb-cell }
 
 ```python
 # @name Helpers
@@ -5551,9 +5810,7 @@ def himmelblau(x: float, y: float) -> float:
     return (x**2 + y - 11) ** 2 + (x + y**2 - 7) ** 2
 ```
 
-## Seed State
-
-<sub>**kind** python</sub>
+## Seed State { .nb-cell }
 
 ```python
 # @name Seed State
@@ -5587,6 +5844,29 @@ print(f"Seed at ({x:.3f}, {y:.3f}) with score {score:.3f}")
 state
 ```
 
+```json title="Output"
+{
+  "best_score": 478.10046069787757,
+  "history": [
+    {
+      "accepted": true,
+      "iter": 0,
+      "score": 478.10046069787757,
+      "x": 1.3942679845788373,
+      "y": -4.74989244777333
+    }
+  ],
+  "iter": 0,
+  "step": 1.0,
+  "x": 1.3942679845788373,
+  "y": -4.74989244777333
+}
+```
+
+```text title="stdout"
+Seed at (1.394, -4.750) with score 478.100
+```
+
 # The loop cell
 
 The cell below carries `# @loop max_iter=40 carry=state`: Strata's
@@ -5603,9 +5883,9 @@ below `1e-3`, terminating early. Every intermediate iteration stays
 queryable in the inspect panel, and a new loop cell can `start_from`
 any of them to fork the search without re-running the prefix.
 
-## Hill Climb
+## Hill Climb { .nb-cell }
 
-<sub>**kind** python  ·  **loop** max_iter=40 carry=state</sub>
+<sub>**loop** max_iter=40 carry=state</sub>
 
 ```python
 # @name Hill Climb
@@ -5671,9 +5951,50 @@ else:
     )
 ```
 
-## Convergence Summary
+```text title="stdout"
+iter 1: accept → score 318.2285 at (2.284, -4.400)
+iter 2: accept → score 152.7328 at (2.324, -3.596)
+iter 3: accept → score 89.7289 at (2.470, -3.099)
+iter 4: reject (score 166.4612 ≥ best 89.7289)
+iter 5: accept → score 25.1563 at (3.148, -2.677)
+iter 6: reject (score 48.2847 ≥ best 25.1563)
+iter 7: reject (score 25.9849 ≥ best 25.1563)
+iter 8: reject (score 51.4171 ≥ best 25.1563)
+iter 9: reject (score 32.0542 ≥ best 25.1563)
+iter 10: accept → score 12.2973 at (3.760, -2.589)
+iter 11: reject (score 36.9591 ≥ best 12.2973)
+iter 12: accept → score 2.0014 at (3.622, -2.189)
+iter 13: reject (score 6.6491 ≥ best 2.0014)
+iter 14: reject (score 2.0510 ≥ best 2.0014)
+iter 15: reject (score 7.4480 ≥ best 2.0014)
+iter 16: reject (score 6.0646 ≥ best 2.0014)
+iter 17: reject (score 5.8389 ≥ best 2.0014)
+iter 18: accept → score 0.3362 at (3.509, -1.887)
+iter 19: reject (score 5.0110 ≥ best 0.3362)
+iter 20: reject (score 3.1250 ≥ best 0.3362)
+iter 21: reject (score 2.1808 ≥ best 0.3362)
+iter 22: reject (score 17.0027 ≥ best 0.3362)
+iter 23: reject (score 4.4482 ≥ best 0.3362)
+iter 24: reject (score 0.8571 ≥ best 0.3362)
+iter 25: reject (score 1.3200 ≥ best 0.3362)
+iter 26: reject (score 7.9796 ≥ best 0.3362)
+iter 27: reject (score 2.2638 ≥ best 0.3362)
+iter 28: reject (score 0.8615 ≥ best 0.3362)
+iter 29: reject (score 10.0107 ≥ best 0.3362)
+iter 30: reject (score 3.7942 ≥ best 0.3362)
+iter 31: reject (score 4.0234 ≥ best 0.3362)
+iter 32: reject (score 4.0880 ≥ best 0.3362)
+iter 33: accept → score 0.1114 at (3.609, -1.780)
+iter 34: reject (score 11.7741 ≥ best 0.1114)
+iter 35: reject (score 7.7162 ≥ best 0.1114)
+iter 36: reject (score 6.7401 ≥ best 0.1114)
+iter 37: reject (score 0.3459 ≥ best 0.1114)
+iter 38: reject (score 2.5042 ≥ best 0.1114)
+iter 39: reject (score 7.5657 ≥ best 0.1114)
+iter 40: reject (score 5.6943 ≥ best 0.1114)
+```
 
-<sub>**kind** python</sub>
+## Convergence Summary { .nb-cell }
 
 ```python
 # @name Convergence Summary
@@ -5709,42 +6030,69 @@ for entry in state["history"][-10:]:
 }
 ```
 
-<!-- https://bearingresearch.com/strata/dev/examples/widget_playground/index.md -->
+```json title="Output"
+{
+  "accepted": 9,
+  "final_score": 0.1114213543102833,
+  "final_x": 3.6094555292987467,
+  "final_y": -1.7797668397786437,
+  "iterations": 40,
+  "rejected": 32
+}
+```
 
-# Drive a plot with a slider, a number and a dropdown
+```text title="stdout"
+Final (x, y) = (3.6095, -1.7798)
+Final score  = 0.111421
+Iterations   = 40
+Accepted     = 9
+Rejected     = 32
 
-![Drive a plot with a slider, a number and a dropdown: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-light.webp#only-light)
-![Drive a plot with a slider, a number and a dropdown: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-dark.webp#only-dark)
+iter         x         y        score    outcome
+  31     3.852    -1.861       4.0234     reject
+  32     3.856    -1.904       4.0880     reject
+  33     3.609    -1.780       0.1114     accept
+  34     3.981    -1.502      11.7741     reject
+  35     3.245    -2.158       7.7162     reject
+  36     3.209    -1.626       6.7401     reject
+  37     3.646    -1.762       0.3459     reject
+  38     3.795    -1.827       2.5042     reject
+  39     3.929    -1.692       7.5657     reject
+  40     3.330    -2.192       5.6943     reject
+```
 
-A three-cell notebook: a **widget cell** (a control panel) feeding two Python
-cells, one that renders a DataFrame and one that draws a chart. The widget
-cell is `# @live`, so dragging a control re-runs both downstream cells and
-the grid and the chart update.
+---
 
-## What it shows
+## About this example
 
-- A **widget cell** with three controls:
-  - `alpha`: a slider (0–1)
-  - `n`: a number input (row count)
-  - `curve`: a dropdown (`linear` / `sqrt` / `square`)
-- A downstream Python cell that reads `alpha`, `n`, `curve` and builds a
-  DataFrame, which renders in the **interactive data viewer**. So the two
-  features compose: a widget drives the grid.
-- A second downstream cell that plots the same curve with matplotlib.
-- **Live mode**: `# @live` on the widget cell makes a control change re-run
-  the cheap downstream cells instead of only marking them stale.
-- **Content-addressed values**: drag `alpha` to a new value and back, the
-  second time is a cache hit, no recompute.
+### What to look at
 
-## Cells
+- **`helpers`** is a module cell: imports (``random``) and a
+  reusable function (``himmelblau``). It declares no top-level
+  runtime state, so Strata treats it as a shareable module whose
+  names are directly referenceable from every downstream cell.
+- **`seed`** bootstraps the search at a random `(x, y)` with an initial
+  score, using ``random`` and ``himmelblau`` from ``helpers``. Its
+  output variable `state` is the upstream carry for the loop cell
+  below.
+- **`evolve`** is the loop cell.
+  - `# @loop max_iter=40 carry=state` caps the search at 40 iterations
+    and tells Strata that the variable `state` is threaded between
+    iterations.
+  - `# @loop_until state["best_score"] < 1e-3` terminates the loop
+    early as soon as the cell finds a minimum.
+  - Each iteration proposes a small random perturbation of `(x, y)` and
+    keeps the move if it improves the score. The step size shrinks on
+    every accepted move so the search sharpens.
+  - ``random`` and ``himmelblau`` come from the ``helpers`` cell via
+    the DAG, with no duplicate imports or redefinitions here.
+  - Every iteration stores the full `state` as its own artifact
+    (`nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}`).
+- **`summary`** is a regular downstream cell. It reads the final
+  iteration's `state` via the normal DAG input path and prints the
+  convergence table.
 
-| Cell | What it does |
-|---|---|
-| `controls` | A `# @live` `widget` cell declaring the slider / number / dropdown. |
-| `preview` | Reads the control values, builds a DataFrame, displays it. |
-| `plot` | Reads the same values and plots `y` against `x`. |
-
-## Running
+### Running
 
 From the project root:
 
@@ -5752,32 +6100,95 @@ From the project root:
 uv run strata-notebook --notebook-dir examples
 ```
 
-Open **Widget Playground** from the notebook list on the Strata home page.
+Open **Hill Climb Loop** from the notebook list on the Strata home page, then run the four code
+cells in order. While `evolve` is running you should see:
 
-## Try this
+- A `iter k/40` progress badge next to the cell title, with a spinner
+  while it is still running.
+- The badge settles to a green "done" state when `@loop_until` fires
+  or `max_iter` is reached.
 
-1. Run `preview` and `plot`. They read the widget defaults: a 20-row table
-   in the data viewer and a straight line.
-2. Drag the `alpha` slider. Both cells re-run on their own, and the `y`
-   column and the chart reflect the new `alpha`.
-3. Switch `curve` to `square`, the shape changes.
-4. Drag `alpha` back to its previous value, a cache hit.
-5. Turn **⚡ Live** off (or change the annotation to `# @live off`) and drag
-   again: now the two cells only turn yellow (stale) until you run them.
+Click the inspect icon on `evolve` to open the inspect panel. The new
+iteration picker lists every stored iteration with its size and
+content type. Copy any iteration's URI to the clipboard for the fork
+demo below.
 
-Widget cells render in the web UI. Edit the control declaration with the
-**✎ Edit controls** toggle on the cell.
+### Try the fork
 
-## Open as an app
+1. Add a new cell below `evolve` (the `+` button in the UI).
+2. Paste the following, replacing `<iter-K>` with a mid-iter iteration
+   you find interesting (e.g., iter 5 if the search is still making
+   progress there):
 
-Click **App** in the notebook header to open this notebook as a read-only
-interactive app, just the controls, the table and the chart, no editor. With
-the widget cell's **⚡ Live** on, as it ships, dragging `alpha` in the app
-updates them live.
+```python
+# @name Alt Search (forked)
+# @loop max_iter=30 carry=state start_from=evolve@iter=<iter-K>
+# @loop_until state["best_score"] < 1e-3
+import random
 
-## Controls
+next_iter = state["iter"] + 1
+# Numbers only: hash() of a str changes from one process to the next.
+rng = random.Random(hash((next_iter, round(state["x"], 6), round(state["y"], 6), 2)))
 
-<sub>**kind** widget</sub>
+# Larger exploration step so the fork is meaningfully different.
+step = state["step"] * 3.0
+cx = state["x"] + rng.uniform(-step, step)
+cy = state["y"] + rng.uniform(-step, step)
+cs = (cx**2 + cy - 11) ** 2 + (cx + cy**2 - 7) ** 2
+
+accepted = cs < state["best_score"]
+entry = {"iter": next_iter, "x": cx, "y": cy, "score": cs, "accepted": accepted}
+state = {
+    **state,
+    "x": cx if accepted else state["x"],
+    "y": cy if accepted else state["y"],
+    "best_score": min(cs, state["best_score"]),
+    "step": state["step"] * (0.9 if accepted else 1.0),
+    "history": state["history"] + [entry],
+    "iter": next_iter,
+}
+print(f"alt iter {next_iter}: score {state['best_score']:.4f}")
+```
+
+The forked cell seeds iter 0 from `evolve`'s iter K and iterates from
+there with a larger exploration step. The two cells share a history
+prefix (iters 0..K) and diverge after.
+
+### What this demo verifies
+
+- `@loop` dispatching (non-loop cells unaffected).
+- Carry seeding from an upstream cell on iter 0.
+- Per-iteration carry seeding for k > 0 (each iter sees the previous
+  iter's `state`, not the original seed).
+- `@loop_until` early termination.
+- Per-iteration artifacts stored with `@iter=k` suffix.
+- WebSocket `cell_iteration_progress` messages driving the UI badge.
+- `@loop start_from=<cell>@iter=<k>` seed resolution for forking.
+- Inspect-panel iteration picker listing iterations and copying URIs.
+
+### Notes
+
+- Each iteration runs in a fresh subprocess (no warm-pool reuse). For
+  a ~40-iteration loop expect ~40 × subprocess-startup cost (~1s
+  each on this machine). For agentic LLM loops the per-iteration
+  network call dwarfs that; for tight numerical loops the pool reuse
+  is a future optimization.
+- A loop cell runs on the notebook's own server, never on a remote
+  worker: one whose `# @worker` (or the notebook's default worker) names
+  another fails before it starts.
+
+<!-- https://bearingresearch.com/strata/dev/examples/widget_playground/index.md -->
+
+# Drive a plot with a slider, a number and a dropdown
+
+A three-cell notebook: a **widget cell** (a control panel) feeding two Python
+cells, one that renders a DataFrame and one that draws a chart. The widget
+cell is `# @live`, so dragging a control re-runs both downstream cells and
+the grid and the chart update.
+
+---
+
+## Controls { .nb-cell }
 
 ```text
 # @live
@@ -5787,9 +6198,7 @@ n     = number(default=20, min=5, max=100)
 curve = dropdown(["linear", "sqrt", "square"], default="linear")
 ```
 
-## Preview
-
-<sub>**kind** python</sub>
+## Preview { .nb-cell }
 
 ```python
 # @name Preview
@@ -5807,9 +6216,26 @@ print(f"alpha={alpha}  n={n}  curve={curve}")
 df
 ```
 
-## Plot
+**Output**
 
-<sub>**kind** python</sub>
+| x | y |
+| --- | --- |
+| 0 | 0 |
+| 1 | 0.5 |
+| 2 | 1 |
+| 3 | 1.5 |
+| 4 | 2 |
+| 5 | 2.5 |
+| 6 | 3 |
+| 7 | 3.5 |
+
+*…showing 8 of 20 rows*
+
+```text title="stdout"
+alpha=0.5  n=20  curve=linear
+```
+
+## Plot { .nb-cell }
 
 ```python
 # @name Plot
@@ -5838,39 +6264,75 @@ fig.tight_layout()
 fig
 ```
 
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/widget_playground-1.webp)
+
+---
+
+## About this example
+
+### What it shows
+
+- A **widget cell** with three controls:
+  - `alpha`: a slider (0–1)
+  - `n`: a number input (row count)
+  - `curve`: a dropdown (`linear` / `sqrt` / `square`)
+- A downstream Python cell that reads `alpha`, `n`, `curve` and builds a
+  DataFrame, which renders in the **interactive data viewer**. So the two
+  features compose: a widget drives the grid.
+- A second downstream cell that plots the same curve with matplotlib.
+- **Live mode**: `# @live` on the widget cell makes a control change re-run
+  the cheap downstream cells instead of only marking them stale.
+- **Content-addressed values**: drag `alpha` to a new value and back, the
+  second time is a cache hit, no recompute.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `controls` | A `# @live` `widget` cell declaring the slider / number / dropdown. |
+| `preview` | Reads the control values, builds a DataFrame, displays it. |
+| `plot` | Reads the same values and plots `y` against `x`. |
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Open **Widget Playground** from the notebook list on the Strata home page.
+
+### Try this
+
+1. Run `preview` and `plot`. They read the widget defaults: a 20-row table
+   in the data viewer and a straight line.
+2. Drag the `alpha` slider. Both cells re-run on their own, and the `y`
+   column and the chart reflect the new `alpha`.
+3. Switch `curve` to `square`, the shape changes.
+4. Drag `alpha` back to its previous value, a cache hit.
+5. Turn **⚡ Live** off (or change the annotation to `# @live off`) and drag
+   again: now the two cells only turn yellow (stale) until you run them.
+
+Widget cells render in the web UI. Edit the control declaration with the
+**✎ Edit controls** toggle on the cell.
+
+### Open as an app
+
+Click **App** in the notebook header to open this notebook as a read-only
+interactive app, just the controls, the table and the chart, no editor. With
+the widget cell's **⚡ Live** on, as it ships, dragging `alpha` in the app
+updates them live.
+
 <!-- https://bearingresearch.com/strata/dev/examples/library_cells/index.md -->
 
 # Share functions between cells
-
-![Share functions between cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)
-![Share functions between cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)
 
 Walks through cross-cell library code in Strata Notebook: pure module
 cells, mixed runtime+library cells, PEP 563 type annotations, and the
 limitations slicing keeps in place.
 
-## What it covers
-
-| Cell | Demonstrates |
-| ---- | ------------ |
-| `pure_lib` / `use_pure` | Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim. |
-| `mixed_lib` / `use_mixed` | The slicing payoff: a single cell mixes runtime setup (`raw_min`, `raw_max`, a `print`) with reusable helpers (`clamp`, `CLAMP_MIN`). Runtime values still flow through the artifact path; helpers ride the synthetic module. |
-| `typed_lib` / `use_typed` | `from __future__ import annotations` lets a helper reference a type defined elsewhere, `symtable` correctly drops stringified annotations from the free-variable check. |
-| `blocked` / `try_blocked` | Closure over a runtime value blocks export. The diagnostic pinpoints the function (`is_outlier`) and the unresolved name (`runtime_threshold`). |
-
-## Running
-
-```bash
-STRATA_DEPLOYMENT_MODE=personal \
-STRATA_NOTEBOOK_STORAGE_DIR=/path/to/strata/examples \
-uv run python -m strata
-```
-
-Then open the notebook UI and pick **Library Cells** from the discover
-list. Run the cells top-to-bottom. The `blocked` cell carries the
-export diagnostic, and `try_blocked` shows the `NameError` its call raises.
-
-# Library cells
+---
 
 A *library cell* is one that defines reusable Python: functions, classes,
 constants, code that other cells will import and call. Strata Notebook
@@ -5888,9 +6350,7 @@ the slice is self-contained. Cells that mix runtime work with library code
 can now share the library code cleanly. This notebook walks through what
 works, what's relaxed, and what's still blocked.
 
-## Pure module cell (baseline)
-
-<sub>**kind** python</sub>
+## Pure module cell (baseline) { .nb-cell }
 
 ```python
 # @name Pure module cell (baseline)
@@ -5912,9 +6372,7 @@ def perimeter(radius: float) -> float:
     return round(2 * math.pi * radius, CIRCLE_PRECISION)
 ```
 
-## Use the pure-cell helpers
-
-<sub>**kind** python</sub>
+## Use the pure-cell helpers { .nb-cell }
 
 ```python
 # @name Use the pure-cell helpers
@@ -5942,9 +6400,7 @@ After slicing, the planner drops the runtime lines from the synthetic
 module and exports the helper. The runtime variables still flow through
 the regular artifact path, so downstream cells see them too.
 
-## Mixed: setup + helpers in one cell
-
-<sub>**kind** python</sub>
+## Mixed: setup + helpers in one cell { .nb-cell }
 
 ```python
 # @name Mixed: setup + helpers in one cell
@@ -5976,9 +6432,11 @@ def clamp(value: float) -> float:
     return max(CLAMP_MIN, min(CLAMP_MAX, value))
 ```
 
-## Use the mixed-cell helpers
+```text title="stdout"
+loaded raw bounds: [-43.98, 100.53]
+```
 
-<sub>**kind** python</sub>
+## Use the mixed-cell helpers { .nb-cell }
 
 ```python
 # @name Use the mixed-cell helpers
@@ -6007,9 +6465,7 @@ the reference set. That makes it easy to write helpers that hint at types
 defined elsewhere (e.g. `pyarrow.Table`) without forcing every consumer
 to import the same names.
 
-## Typed helper using PEP 563 annotations
-
-<sub>**kind** python</sub>
+## Typed helper using PEP 563 annotations { .nb-cell }
 
 ```python
 # @name Typed helper using PEP 563 annotations
@@ -6027,9 +6483,7 @@ def describe_table(table: Table) -> dict:  # noqa: F821 - PEP 563 stringified
     return {"rows": table.num_rows, "columns": table.num_columns}
 ```
 
-## Use the typed helper
-
-<sub>**kind** python</sub>
+## Use the typed helper { .nb-cell }
 
 ```python
 # @name Use the typed helper
@@ -6064,9 +6518,7 @@ The next cell triggers the first failure mode on purpose so you can see
 the diagnostic, it should error with a message naming the unresolved
 variable.
 
-## Closure over a runtime value (intentionally blocked)
-
-<sub>**kind** python</sub>
+## Closure over a runtime value (intentionally blocked) { .nb-cell }
 
 ```python
 # @name Closure over a runtime value (intentionally blocked)
@@ -6093,9 +6545,7 @@ def is_outlier(value: float) -> bool:
     return value > runtime_threshold
 ```
 
-## Downstream consumer (would call is_outlier)
-
-<sub>**kind** python</sub>
+## Downstream consumer (would call is_outlier) { .nb-cell }
 
 ```python
 # @name Downstream consumer (would call is_outlier)
@@ -6115,12 +6565,38 @@ except NameError as exc:
 would_be_outliers
 ```
 
+```json title="Output"
+"blocked: name 'runtime_threshold' is not defined"
+```
+
+---
+
+## About this example
+
+### What it covers
+
+| Cell | Demonstrates |
+| ---- | ------------ |
+| `pure_lib` / `use_pure` | Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim. |
+| `mixed_lib` / `use_mixed` | The slicing payoff: a single cell mixes runtime setup (`raw_min`, `raw_max`, a `print`) with reusable helpers (`clamp`, `CLAMP_MIN`). Runtime values still flow through the artifact path; helpers ride the synthetic module. |
+| `typed_lib` / `use_typed` | `from __future__ import annotations` lets a helper reference a type defined elsewhere, `symtable` correctly drops stringified annotations from the free-variable check. |
+| `blocked` / `try_blocked` | Closure over a runtime value blocks export. The diagnostic pinpoints the function (`is_outlier`) and the unresolved name (`runtime_threshold`). |
+
+### Running
+
+```bash
+STRATA_DEPLOYMENT_MODE=personal \
+STRATA_NOTEBOOK_STORAGE_DIR=/path/to/strata/examples \
+uv run python -m strata
+```
+
+Then open the notebook UI and pick **Library Cells** from the discover
+list. Run the cells top-to-bottom. The `blocked` cell carries the
+export diagnostic, and `try_blocked` shows the `NameError` its call raises.
+
 <!-- https://bearingresearch.com/strata/dev/examples/s3_mount/index.md -->
 
 # Read a NOAA weather file from a public S3 bucket
-
-![Read a NOAA weather file from a public S3 bucket: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-light.webp#only-light)
-![Read a NOAA weather file from a public S3 bucket: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-dark.webp#only-dark)
 
 Demonstrates Strata's **mount** feature: a notebook cell can read a
 remote filesystem path as if it were local, with no custom code inside
@@ -6130,60 +6606,9 @@ The example mounts a single file from NOAA's GSOD (Global Surface
 Summary of Day) dataset, a public, anonymous-readable S3 bucket, and
 runs a small pandas analysis over it.
 
-## What it shows
+---
 
-- Declaring a mount in `notebook.toml` under `[[mounts]]`.
-- Using fsspec `options` to authenticate (here, `anon = true` for a
-  public bucket).
-- Accessing the mounted path as a `pathlib.Path` inside a cell.
-- Zero AWS credentials required, `anon = true` tells fsspec to skip
-  the credential chain.
-
-## Mount declaration
-
-```toml
-[[mounts]]
-name = "jfk_weather"
-uri = "s3://noaa-gsod-pds/2024/72503014732.csv"
-mode = "ro"
-options = { anon = true }
-```
-
-Inside a cell, `jfk_weather` is a `pathlib.Path` to a local directory
-that holds the mounted file, so `load` reads
-`jfk_weather / "72503014732.csv"`; the CSV is materialized locally by
-fsspec on first read.
-
-## Cells
-
-| Cell | What it does |
-|---|---|
-| `load` | Reads the weather CSV into a DataFrame, parses dates, keeps the columns we need. |
-| `summary` | Groups by month and aggregates avg / max / min / total-precip. |
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Then open **S3 Mount (Public Bucket)** from the notebook list on the Strata home page.
-
-Strata reads the bucket in its own process, so an installed Strata
-needs the `s3` extra (`s3fs`): `uv tool install "strata-notebook[s3]"`.
-The development environment already has it.
-
-## Swapping in a private bucket
-
-Drop the `options = { anon = true }` line and configure AWS credentials
-the normal way (`aws configure`, `AWS_PROFILE`, IAM role, etc.). fsspec
-will pick them up automatically.
-
-## Load JFK weather from S3
-
-<sub>**kind** python</sub>
+## Load JFK weather from S3 { .nb-cell }
 
 ```python
 # @name Load JFK weather from S3
@@ -6195,9 +6620,22 @@ weather = weather[["DATE", "NAME", "TEMP", "MAX", "MIN", "PRCP"]]
 weather
 ```
 
-## Monthly weather summary
+**Output**
 
-<sub>**kind** python</sub>
+| DATE | NAME | TEMP | MAX | MIN | PRCP |
+| --- | --- | --- | --- | --- | --- |
+| 2024-01-01 00:00:00 | LAGUARDIA AIRPORT, NY US | 43 | 46.9 | 39.9 | 0 |
+| 2024-01-02 00:00:00 | LAGUARDIA AIRPORT, NY US | 36.7 | 46.9 | 30 | 0.01 |
+| 2024-01-03 00:00:00 | LAGUARDIA AIRPORT, NY US | 39.3 | 43 | 30 | 0 |
+| 2024-01-04 00:00:00 | LAGUARDIA AIRPORT, NY US | 40.7 | 45 | 35.1 | 0 |
+| 2024-01-05 00:00:00 | LAGUARDIA AIRPORT, NY US | 32.1 | 45 | 27 | 0 |
+| 2024-01-06 00:00:00 | LAGUARDIA AIRPORT, NY US | 34.8 | 37.9 | 27 | 0 |
+| 2024-01-07 00:00:00 | LAGUARDIA AIRPORT, NY US | 36.9 | 39.2 | 34 | 0.39 |
+| 2024-01-08 00:00:00 | LAGUARDIA AIRPORT, NY US | 39.3 | 45 | 35.1 | 0.12 |
+
+*…showing 8 of 366 rows*
+
+## Monthly weather summary { .nb-cell }
 
 ```python
 # @name Monthly weather summary
@@ -6215,6 +6653,76 @@ monthly = (
 monthly
 ```
 
+**Output**
+
+| month | avg_temp | max_temp | min_temp | total_precip |
+| --- | --- | --- | --- | --- |
+| 2024-01 | 37.07 | 60.1 | 19 | 6.2 |
+| 2024-02 | 39.3 | 60.1 | 24.1 | 1.92 |
+| 2024-03 | 46.47 | 72 | 28.9 | 9.74 |
+| 2024-04 | 52.9 | 84.9 | 37 | 3.82 |
+| 2024-05 | 63.79 | 86 | 48.9 | 2.97 |
+| 2024-06 | 75.44 | 100.9 | 61 | 1.8 |
+| 2024-07 | 79.2 | 97 | 64.9 | 3.9 |
+| 2024-08 | 76.12 | 96.1 | 59 | 7.92 |
+
+*…showing 8 of 12 rows*
+
+---
+
+## About this example
+
+### What it shows
+
+- Declaring a mount in `notebook.toml` under `[[mounts]]`.
+- Using fsspec `options` to authenticate (here, `anon = true` for a
+  public bucket).
+- Accessing the mounted path as a `pathlib.Path` inside a cell.
+- Zero AWS credentials required, `anon = true` tells fsspec to skip
+  the credential chain.
+
+### Mount declaration
+
+```toml
+[[mounts]]
+name = "jfk_weather"
+uri = "s3://noaa-gsod-pds/2024/72503014732.csv"
+mode = "ro"
+options = { anon = true }
+```
+
+Inside a cell, `jfk_weather` is a `pathlib.Path` to a local directory
+that holds the mounted file, so `load` reads
+`jfk_weather / "72503014732.csv"`; the CSV is materialized locally by
+fsspec on first read.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `load` | Reads the weather CSV into a DataFrame, parses dates, keeps the columns we need. |
+| `summary` | Groups by month and aggregates avg / max / min / total-precip. |
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **S3 Mount (Public Bucket)** from the notebook list on the Strata home page.
+
+Strata reads the bucket in its own process, so an installed Strata
+needs the `s3` extra (`s3fs`): `uv tool install "strata-notebook[s3]"`.
+The development environment already has it.
+
+### Swapping in a private bucket
+
+Drop the `options = { anon = true }` line and configure AWS credentials
+the normal way (`aws configure`, `AWS_PROFILE`, IAM role, etc.). fsspec
+will pick them up automatically.
+
 <!-- https://bearingresearch.com/strata/dev/examples/each_pipeline/index.md -->
 
 # Process weather files one by one into an Iceberg table
@@ -6227,70 +6735,11 @@ store, running on your machine.
 The data is NOAA's daily weather for 2024, one CSV per station. The bucket has
 12,159 files, and the notebook reads the 287 that `glob=725*.csv` names.
 
-## What it shows
+*No run is recorded for this example, so the page shows its code only.*
 
-- `# @each path in gsod glob=725*.csv` runs the cell once per file, and a remote
-  mount downloads only the files the pattern names.
-- Each file's result is cached on its own, so a changed file runs alone.
-- `# @write_table summary lake:gsod.stations sync on=station` makes the table hold
-  what the cell produced, in one commit per run. A file that goes away takes its
-  row with it, and a run that changes nothing commits nothing.
-- A file the cell can't read fails that item alone. The other items stay cached, and
-  the table stays as it was, since a missing row would read as a deletion.
-- A SQL cell reads the table back through the catalog, at the snapshot the cell's
-  key holds. It never touches the bucket: a notebook-level mount reaches only the
-  cells that read it.
+---
 
-## Running
-
-You need Docker, and [uv](https://docs.astral.sh/uv/). From the project root:
-
-```bash
-docker compose -f examples/each_pipeline/docker-compose.yml up -d --wait catalog
-source examples/each_pipeline/lake.env
-uv run strata run examples/each_pipeline
-```
-
-The first run downloads the 287 files, about 25 MB, and takes a few minutes. `strata
-run` says where it is as it goes. Run it again and nothing runs: the summary cell is
-one lookup, after listing the bucket to see that nothing changed.
-
-Strata reads the bucket in its own process, so an installed Strata needs the `s3`
-extra (`s3fs`), and the `hottest` SQL cell needs the `sql` extra (DuckDB itself is a
-core dependency): `uv tool install "strata-notebook[s3,sql]"`. The development
-environment already has both.
-
-## Try it
-
-Change `glob=725*.csv` to `glob=7250*.csv` in `cells/summarize.py` and run again. The
-table goes from 287 rows to 41 in one new snapshot, and the SQL cell runs again because
-the table changed. Change it back and all 287 return. No item runs either time.
-
-## Using your own warehouse
-
-The notebook names the table `lake:gsod.stations`, and `lake` is defined on the
-server, by `STRATA_CATALOGS`. Nothing in the notebook changes when `lake` is your
-organization's catalog instead of the one in `docker-compose.yml`:
-
-```bash
-export STRATA_CATALOGS='{"lake": {"type": "rest", "uri": "https://catalog.example", "warehouse": "prod", "token": "..."}}'
-```
-
-Glue and SQL catalogs work the same way for the write. To keep the keys out of the
-setting, see
-[named credentials](https://bearingresearch.com/strata/latest/reference/notebook-toml/#named-credentials).
-`sync` refuses a table Strata did not write, so point it at a new table or one this
-notebook owns.
-
-To stop the warehouse and delete its data:
-
-```bash
-docker compose -f examples/each_pipeline/docker-compose.yml down -v
-```
-
-## Summarize each station
-
-<sub>**kind** python</sub>
+## Summarize each station { .nb-cell }
 
 ```python
 # @name Summarize each station
@@ -6313,9 +6762,7 @@ summary = pa.table(
 )
 ```
 
-## hottest_stations
-
-<sub>**kind** sql</sub>
+## hottest_stations { .nb-cell }
 
 ```sql
 -- @name hottest_stations
@@ -6327,12 +6774,74 @@ ORDER BY hottest_f DESC
 LIMIT 10
 ```
 
+---
+
+## About this example
+
+### What it shows
+
+- `# @each path in gsod glob=725*.csv` runs the cell once per file, and a remote
+  mount downloads only the files the pattern names.
+- Each file's result is cached on its own, so a changed file runs alone.
+- `# @write_table summary lake:gsod.stations sync on=station` makes the table hold
+  what the cell produced, in one commit per run. A file that goes away takes its
+  row with it, and a run that changes nothing commits nothing.
+- A file the cell can't read fails that item alone. The other items stay cached, and
+  the table stays as it was, since a missing row would read as a deletion.
+- A SQL cell reads the table back through the catalog, at the snapshot the cell's
+  key holds. It never touches the bucket: a notebook-level mount reaches only the
+  cells that read it.
+
+### Running
+
+You need Docker, and [uv](https://docs.astral.sh/uv/). From the project root:
+
+```bash
+docker compose -f examples/each_pipeline/docker-compose.yml up -d --wait catalog
+source examples/each_pipeline/lake.env
+uv run strata run examples/each_pipeline
+```
+
+The first run downloads the 287 files, about 25 MB, and takes a few minutes. `strata
+run` says where it is as it goes. Run it again and nothing runs: the summary cell is
+one lookup, after listing the bucket to see that nothing changed.
+
+Strata reads the bucket in its own process, so an installed Strata needs the `s3`
+extra (`s3fs`), and the `hottest` SQL cell needs the `sql` extra (DuckDB itself is a
+core dependency): `uv tool install "strata-notebook[s3,sql]"`. The development
+environment already has both.
+
+### Try it
+
+Change `glob=725*.csv` to `glob=7250*.csv` in `cells/summarize.py` and run again. The
+table goes from 287 rows to 41 in one new snapshot, and the SQL cell runs again because
+the table changed. Change it back and all 287 return. No item runs either time.
+
+### Using your own warehouse
+
+The notebook names the table `lake:gsod.stations`, and `lake` is defined on the
+server, by `STRATA_CATALOGS`. Nothing in the notebook changes when `lake` is your
+organization's catalog instead of the one in `docker-compose.yml`:
+
+```bash
+export STRATA_CATALOGS='{"lake": {"type": "rest", "uri": "https://catalog.example", "warehouse": "prod", "token": "..."}}'
+```
+
+Glue and SQL catalogs work the same way for the write. To keep the keys out of the
+setting, see
+[named credentials](https://bearingresearch.com/strata/latest/reference/notebook-toml/#named-credentials).
+`sync` refuses a table Strata did not write, so point it at a new table or one this
+notebook owns.
+
+To stop the warehouse and delete its data:
+
+```bash
+docker compose -f examples/each_pipeline/docker-compose.yml down -v
+```
+
 <!-- https://bearingresearch.com/strata/dev/examples/markdown_showcase/index.md -->
 
 # Write reports in Markdown, by hand or from data
-
-![Write reports in Markdown, by hand or from data: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)
-![Write reports in Markdown, by hand or from data: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)
 
 Every way Strata renders Markdown, in one notebook: headings, emphasis, lists, tables,
 code blocks, blockquotes, links, and the sanitizer that keeps script in a cell from
@@ -6342,7 +6851,7 @@ running. The last two cells are Python cells that show Markdown built at run tim
 It runs nothing heavy; use it to check how something renders, or as a reference when you
 write a documentation cell.
 
-# Markdown Showcase
+---
 
 This notebook exercises every markdown rendering path in Strata. It's
 deliberately content-only, there's no real "computation" to run. Use it
@@ -6451,7 +6960,7 @@ Edge cases the old renderer was bad at:
 | `provenance_hash` | `str` | ✓ | SHA-256 of the methodology chain |
 | `notes` | `str` | | Optional *human-readable* commentary |
 
-## Fenced code with a language
+## Fenced code with a language { .nb-cell }
 
 ```python
 def materialize(inputs, transform):
@@ -6464,7 +6973,7 @@ def materialize(inputs, transform):
     return result
 ```
 
-## Fenced code without a language
+## Fenced code without a language { .nb-cell }
 
 ```
 $ STRATA_PORT=8765 strata-notebook
@@ -6615,9 +7124,7 @@ Data URLs in links are sanitized too, DOMPurify drops the href:
 
 [image data url](#)
 
-## Dynamic Markdown via display()
-
-<sub>**kind** python</sub>
+## Dynamic Markdown via display() { .nb-cell }
 
 ```python
 # @name Dynamic Markdown via display()
@@ -6649,9 +7156,19 @@ This block was rendered from a **Python cell**, not a markdown cell.
 )
 ```
 
-## Templated report from a DataFrame
 
-<sub>**kind** python</sub>
+## Generated at runtime
+
+This block was rendered from a **Python cell**, not a markdown cell.
+
+- Current time: `2026-11-25 07:32:10`
+- Cell language: `python`
+- Display path: `Markdown(text) → text/markdown artifact → renderer`
+
+> The same renderer powers both surfaces, so anything the markdown
+> showcase renders correctly will also work here.
+
+## Templated report from a DataFrame { .nb-cell }
 
 ```python
 # @name Templated report from a DataFrame
@@ -6719,6 +7236,25 @@ exactly the pattern you'd use for "summary at end of notebook" cells.*
 )
 ```
 
+
+## Mock leaderboard report
+
+**4 models** scored across **3 evals**. Top
+performer: `claude-sonnet-4-6` at `87.8%` mean. Spread
+between best and worst: **9.6 points**.
+
+| Rank | Model | MMLU | GSM8K | HumanEval | Mean |
+|:----:|-------|-----:|------:|----------:|-----:|
+| 1 | `claude-sonnet-4-6` | 84.1% | 94.2% | 85.2% | 87.8% |
+| 2 | `gpt-5.4` | 82.0% | 93.9% | 82.3% | 86.1% |
+| 3 | `gemini-3-flash` | 78.9% | 90.1% | 78.2% | 82.4% |
+| 4 | `mistral-large-latest` | 76.3% | 87.2% | 71.2% | 78.3% |
+
+---
+
+*Report generated dynamically from `pd.DataFrame` → `Markdown`,
+exactly the pattern you'd use for "summary at end of notebook" cells.*
+
 <!-- https://bearingresearch.com/strata/dev/examples/r_mtcars_analysis/index.md -->
 
 # Model car mileage in R, with plots inline
@@ -6729,78 +7265,11 @@ render inline as PNG. Variables flow cell-to-cell through the same
 content-addressed artifact store the Python cells use; here both ends
 of every edge happen to be R.
 
-## What it shows
+*No run is recorded for this example, so the page shows its code only.*
 
-- **R cells stand on their own.** No Python anywhere. The DAG, the
-  provenance cache, and the cascade all work exactly as they do for
-  Python, language is per-cell, not per-notebook.
-- **Inline plots (0.2.0).** A ggplot scatter and R's base-graphics
-  2×2 `plot(lm)` diagnostic panel both render as PNG in the cell, just
-  like a Python matplotlib figure. A bare trailing ggplot object
-  auto-prints, no explicit `print()`.
-- **Two kinds of R→R handoff.** `data.frame`s (`cars`, `by_cyl`) cross
-  as Arrow IPC. The `lm` object itself isn't tabular, so it's stored as
-  RDS (`r_only`) and read straight back by the diagnostics cell with
-  full fidelity, an R-only object flowing between R cells that the
-  Arrow tier couldn't carry. (A *Python* cell consuming it would get a
-  structured "re-export as a data.frame" error instead of a crash.)
-- **renv, one click.** The plotting cell needs `ggplot2`, which isn't
-  in the harness baseline. It's pinned in `renv.lock` and restored
-  automatically when you open the notebook, or via the Environment
-  panel's **Initialize renv**. A missing package surfaces a structured
-  install hint, not a stack trace.
+---
 
-## Cells
-
-| Cell | What it does |
-|---|---|
-| `prep` | Tidy `mtcars` into a `data.frame` (`cars`), model name column, `cyl` as a factor. |
-| `summarise` | `aggregate()` mean mpg / hp / wt by cylinder count → `by_cyl`. |
-| `fit` | `lm(mpg ~ wt + hp + cyl)`; emit the `model` (RDS), a tidy `coefs` table, and one-row `model_stats`. |
-| `plot-mpg` | ggplot2 scatter of mpg vs weight, coloured by cylinder, with per-group fits → inline PNG. |
-| `diagnostics` | Read `model` back from RDS; base-graphics 2×2 residual diagnostics → inline PNG. |
-
-## What you need
-
-- **R** on `PATH` (`Rscript`). The notebook's `arrow`, `jsonlite`, and
-  `ggplot2` come from `renv.lock`: opening the notebook restores them
-  into a project-scoped library automatically; no system installs
-  beyond R itself.
-- The uv-managed Python venv carries only the notebook harness baseline
-  (`pyarrow` / `orjson` / `cloudpickle`); **no Python runs any cell
-  here**.
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Open **R: mtcars regression + inline plots** from the notebook list on the Strata home page and run the
-cells top to bottom. Or run it headlessly, `strata run` executes R cells
-and restores the notebook's `renv.lock` on the way in:
-
-```bash
-uv run strata run examples/r_mtcars_analysis
-```
-
-## Try this
-
-1. **Swap in another plot.** Replace `plot-mpg` with
-   `ggplot(by_cyl, aes(factor(cyl), mean_mpg)) + geom_col()`: a bar of
-   mean economy by cylinder. Edit, Shift+Enter, watch it re-render.
-2. **Reach a non-tabular object across cells.** Add a cell with
-   `confint(model)`: `model` resolves from the RDS artifact and you get
-   coefficient confidence intervals, no re-fit.
-3. **Break, then fix, the environment.** Delete the `renv/` directory
-   and reopen: the ggplot cell shows the install hint; click **Initialize
-   renv** (or **Install ggplot2**) and re-run.
-
-## Prepare the mtcars data
-
-<sub>**kind** r</sub>
+## Prepare the mtcars data { .nb-cell }
 
 ```text
 # @name Prepare the mtcars data
@@ -6830,9 +7299,7 @@ cat(sprintf(
 ))
 ```
 
-## Summarise by cylinder count
-
-<sub>**kind** r</sub>
+## Summarise by cylinder count { .nb-cell }
 
 ```text
 # @name Summarise by cylinder count
@@ -6854,9 +7321,7 @@ names(by_cyl) <- c("cyl", "mean_mpg", "mean_hp", "mean_wt", "n")
 print(by_cyl)
 ```
 
-## Fit mpg ~ wt + hp + cyl
-
-<sub>**kind** r</sub>
+## Fit mpg ~ wt + hp + cyl { .nb-cell }
 
 ```text
 # @name Fit mpg ~ wt + hp + cyl
@@ -6901,9 +7366,7 @@ cat(sprintf(
 ))
 ```
 
-## Plot mpg vs weight (ggplot2)
-
-<sub>**kind** r</sub>
+## Plot mpg vs weight (ggplot2) { .nb-cell }
 
 ```text
 # @name Plot mpg vs weight (ggplot2)
@@ -6934,9 +7397,7 @@ ggplot(cars, aes(x = wt, y = mpg, colour = cyl)) +
   theme_minimal(base_size = 13)
 ```
 
-## Residual diagnostics (base graphics)
-
-<sub>**kind** r</sub>
+## Residual diagnostics (base graphics) { .nb-cell }
 
 ```text
 # @name Residual diagnostics (base graphics)
@@ -6958,6 +7419,79 @@ plot(model)
 par(op)
 ```
 
+---
+
+## About this example
+
+### What it shows
+
+- **R cells stand on their own.** No Python anywhere. The DAG, the
+  provenance cache, and the cascade all work exactly as they do for
+  Python, language is per-cell, not per-notebook.
+- **Inline plots (0.2.0).** A ggplot scatter and R's base-graphics
+  2×2 `plot(lm)` diagnostic panel both render as PNG in the cell, just
+  like a Python matplotlib figure. A bare trailing ggplot object
+  auto-prints, no explicit `print()`.
+- **Two kinds of R→R handoff.** `data.frame`s (`cars`, `by_cyl`) cross
+  as Arrow IPC. The `lm` object itself isn't tabular, so it's stored as
+  RDS (`r_only`) and read straight back by the diagnostics cell with
+  full fidelity, an R-only object flowing between R cells that the
+  Arrow tier couldn't carry. (A *Python* cell consuming it would get a
+  structured "re-export as a data.frame" error instead of a crash.)
+- **renv, one click.** The plotting cell needs `ggplot2`, which isn't
+  in the harness baseline. It's pinned in `renv.lock` and restored
+  automatically when you open the notebook, or via the Environment
+  panel's **Initialize renv**. A missing package surfaces a structured
+  install hint, not a stack trace.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `prep` | Tidy `mtcars` into a `data.frame` (`cars`), model name column, `cyl` as a factor. |
+| `summarise` | `aggregate()` mean mpg / hp / wt by cylinder count → `by_cyl`. |
+| `fit` | `lm(mpg ~ wt + hp + cyl)`; emit the `model` (RDS), a tidy `coefs` table, and one-row `model_stats`. |
+| `plot-mpg` | ggplot2 scatter of mpg vs weight, coloured by cylinder, with per-group fits → inline PNG. |
+| `diagnostics` | Read `model` back from RDS; base-graphics 2×2 residual diagnostics → inline PNG. |
+
+### What you need
+
+- **R** on `PATH` (`Rscript`). The notebook's `arrow`, `jsonlite`, and
+  `ggplot2` come from `renv.lock`: opening the notebook restores them
+  into a project-scoped library automatically; no system installs
+  beyond R itself.
+- The uv-managed Python venv carries only the notebook harness baseline
+  (`pyarrow` / `orjson` / `cloudpickle`); **no Python runs any cell
+  here**.
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Open **R: mtcars regression + inline plots** from the notebook list on the Strata home page and run the
+cells top to bottom. Or run it headlessly, `strata run` executes R cells
+and restores the notebook's `renv.lock` on the way in:
+
+```bash
+uv run strata run examples/r_mtcars_analysis
+```
+
+### Try this
+
+1. **Swap in another plot.** Replace `plot-mpg` with
+   `ggplot(by_cyl, aes(factor(cyl), mean_mpg)) + geom_col()`: a bar of
+   mean economy by cylinder. Edit, Shift+Enter, watch it re-render.
+2. **Reach a non-tabular object across cells.** Add a cell with
+   `confint(model)`: `model` resolves from the RDS artifact and you get
+   coefficient confidence intervals, no re-fit.
+3. **Break, then fix, the environment.** Delete the `renv/` directory
+   and reopen: the ggplot cell shows the install hint; click **Initialize
+   renv** (or **Install ggplot2**) and re-run.
+
 <!-- https://bearingresearch.com/strata/dev/examples/r_lm_vs_sklearn/index.md -->
 
 # Fit one regression in R and in scikit-learn
@@ -6969,101 +7503,11 @@ mixed-language notebook end to end: Python data prep, R modeling,
 Python comparison + viz, with the artifact store gluing everything
 together.
 
-## What it shows
+*No run is recorded for this example, so the page shows its code only.*
 
-- **R's formula syntax in one line.** `lm(price ~ sqft + bedrooms +
-  age + location, data = ...)`: auto-dummy-encodes `location`,
-  picks a baseline level, fits with std-errors and p-values
-  attached. No ColumnTransformer, no design-matrix construction.
-- **Cross-language Arrow handoff.** R returns three `data.frame`s
-  (`lm_coefs`, `lm_model_stats`, `lm_predictions`); the next Python
-  cell reads them as pandas DataFrames with no glue code.
-- **Apples-to-apples comparison.** Same data, same train/test split,
-  same encoding (we mirror R's `drop_first` factor behaviour in
-  pandas). The numbers should match to ~1e-12; the demo's value is
-  *how* each toolkit expresses the fit, not which is more accurate.
-- **R surfaces stats Python doesn't.** Std-errors, t-statistics,
-  p-values for every coefficient; sklearn's `LinearRegression`
-  ships none of that. The comparison cell leaves those columns NaN
-  on the sklearn side.
+---
 
-## Cells
-
-| Cell | Language | What it does |
-|---|---|---|
-| `build-data` | Python | Synthesize 240 rows of housing data; split 200 train / 40 test. |
-| `fit-lm` | R | `lm(price ~ sqft + bedrooms + age + location)`, return tidy coefficients + model stats + test predictions. |
-| `fit-sklearn` | Python | Same fit with `LinearRegression` + a hand-encoded design matrix; return the same three DataFrame shapes. |
-| `compare` | Python | Merge the R and sklearn outputs, print a side-by-side coefficient + fit-stats table, compute test RMSEs. |
-
-## What you need
-
-- **R** on `PATH` (`Rscript`). The notebook's `arrow` and `jsonlite`
-  come from `renv.lock`: opening the notebook restores them into a
-  project-scoped library automatically; no system installs beyond R
-  itself. On macOS: `brew install r`. On Ubuntu: see
-  [CRAN](https://cran.r-project.org/). The strata-notebook server
-  surfaces a clean skip or error if R is missing, not a crash.
-- **Python deps** declared in this notebook's `pyproject.toml`
-  (`pandas`, `numpy`, `scikit-learn`). Strata's per-notebook `uv
-  sync` handles them automatically the first time you open the
-  notebook.
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Then open **R lm() vs scikit-learn** from the notebook list on the Strata home page and
-run the cells top-to-bottom.
-
-## Expected output
-
-The `compare` cell prints something like:
-
-```
-=== Coefficients ===
-          term  lm_estimate  sklearn_estimate     delta  std_error  lm_p_value
-   (Intercept)     135.56          135.56          -0.00       7.36      0.0000
-           age      -1.20           -1.20          -0.00       0.08      0.0000
-      bedrooms      15.12           15.12           0.00       1.26      0.0000
- locationrural    -137.39         -137.39          -0.00       5.35      0.0000
-locationsuburb     -85.30          -85.30          -0.00       3.93      0.0000
-          sqft       0.18            0.18          -0.00       0.00      0.0000
-
-=== Model fit ===
- source  r_squared  adj_r_squared  f_statistic  df_residual  residual_std_error
- R lm()     0.9698         0.9690    1246.94            194             25.19
-sklearn     0.9698         0.9690    1246.94            194             25.19
-
-Test RMSE, R lm(): 21.97   sklearn: 21.97
-Max |R-sklearn| prediction gap on test set: 0.0000
-```
-
-The 0.00 deltas are the point: both toolkits compute the same OLS
-solution; the `lm_p_value` column is R-only.
-
-## Try this
-
-1. **Edit the model.** Drop `bedrooms` from the R formula
-   (`lm(price ~ sqft + age + location)`) and watch the comparison
-   reshape: `compare` shows the row dropping out.
-2. **Misalign the baseline level.** In `fit-sklearn`, replace the
-   `sorted(...)` in `location_levels = sorted(...)` with an unsorted
-   list, `list(housing_train["location"].unique())`. When the first
-   level seen is not the alphabetical first, the baseline no longer
-   matches R's and the sklearn coefficients will swap signs vs R's, a
-   real risk in any "translate this R analysis to Python" workflow.
-3. **Add interaction terms.** R: `price ~ sqft * location`. sklearn:
-   you'll have to add the interaction columns by hand. The contrast
-   gets sharper.
-
-## Synthesize a small housing dataset
-
-<sub>**kind** python</sub>
+## Synthesize a small housing dataset { .nb-cell }
 
 ```python
 # @name Synthesize a small housing dataset
@@ -7127,9 +7571,7 @@ print(f"train: {len(housing_train)} rows, test: {len(housing_test)} rows")
 print(housing_train.head())
 ```
 
-## Fit lm() with R's formula syntax
-
-<sub>**kind** r</sub>
+## Fit lm() with R's formula syntax { .nb-cell }
 
 ```text
 # @name Fit lm() with R's formula syntax
@@ -7211,9 +7653,7 @@ cat(sprintf(
 ))
 ```
 
-## Fit the same model with scikit-learn
-
-<sub>**kind** python</sub>
+## Fit the same model with scikit-learn { .nb-cell }
 
 ```python
 # @name Fit the same model with scikit-learn
@@ -7317,9 +7757,7 @@ sklearn_predictions = pd.DataFrame(
 print(f"sklearn: R²={r2:.4f}, F={f_stat:.1f} on {n - p - 1} df")
 ```
 
-## Side-by-side comparison: R lm() vs sklearn
-
-<sub>**kind** python</sub>
+## Side-by-side comparison: R lm() vs sklearn { .nb-cell }
 
 ```python
 # @name Side-by-side comparison: R lm() vs sklearn
@@ -7393,6 +7831,102 @@ print(f"\nTest RMSE for R lm(): {rmse_lm:.3f}   sklearn: {rmse_sklearn:.3f}")
 print(f"Max |R-sklearn| prediction gap on test set: "
       f"{predictions_compare['lm_sklearn_diff'].abs().max():.4f}")
 ```
+
+---
+
+## About this example
+
+### What it shows
+
+- **R's formula syntax in one line.** `lm(price ~ sqft + bedrooms +
+  age + location, data = ...)`: auto-dummy-encodes `location`,
+  picks a baseline level, fits with std-errors and p-values
+  attached. No ColumnTransformer, no design-matrix construction.
+- **Cross-language Arrow handoff.** R returns three `data.frame`s
+  (`lm_coefs`, `lm_model_stats`, `lm_predictions`); the next Python
+  cell reads them as pandas DataFrames with no glue code.
+- **Apples-to-apples comparison.** Same data, same train/test split,
+  same encoding (we mirror R's `drop_first` factor behaviour in
+  pandas). The numbers should match to ~1e-12; the demo's value is
+  *how* each toolkit expresses the fit, not which is more accurate.
+- **R surfaces stats Python doesn't.** Std-errors, t-statistics,
+  p-values for every coefficient; sklearn's `LinearRegression`
+  ships none of that. The comparison cell leaves those columns NaN
+  on the sklearn side.
+
+### Cells
+
+| Cell | Language | What it does |
+|---|---|---|
+| `build-data` | Python | Synthesize 240 rows of housing data; split 200 train / 40 test. |
+| `fit-lm` | R | `lm(price ~ sqft + bedrooms + age + location)`, return tidy coefficients + model stats + test predictions. |
+| `fit-sklearn` | Python | Same fit with `LinearRegression` + a hand-encoded design matrix; return the same three DataFrame shapes. |
+| `compare` | Python | Merge the R and sklearn outputs, print a side-by-side coefficient + fit-stats table, compute test RMSEs. |
+
+### What you need
+
+- **R** on `PATH` (`Rscript`). The notebook's `arrow` and `jsonlite`
+  come from `renv.lock`: opening the notebook restores them into a
+  project-scoped library automatically; no system installs beyond R
+  itself. On macOS: `brew install r`. On Ubuntu: see
+  [CRAN](https://cran.r-project.org/). The strata-notebook server
+  surfaces a clean skip or error if R is missing, not a crash.
+- **Python deps** declared in this notebook's `pyproject.toml`
+  (`pandas`, `numpy`, `scikit-learn`). Strata's per-notebook `uv
+  sync` handles them automatically the first time you open the
+  notebook.
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **R lm() vs scikit-learn** from the notebook list on the Strata home page and
+run the cells top-to-bottom.
+
+### Expected output
+
+The `compare` cell prints something like:
+
+```
+=== Coefficients ===
+          term  lm_estimate  sklearn_estimate     delta  std_error  lm_p_value
+   (Intercept)     135.56          135.56          -0.00       7.36      0.0000
+           age      -1.20           -1.20          -0.00       0.08      0.0000
+      bedrooms      15.12           15.12           0.00       1.26      0.0000
+ locationrural    -137.39         -137.39          -0.00       5.35      0.0000
+locationsuburb     -85.30          -85.30          -0.00       3.93      0.0000
+          sqft       0.18            0.18          -0.00       0.00      0.0000
+
+=== Model fit ===
+ source  r_squared  adj_r_squared  f_statistic  df_residual  residual_std_error
+ R lm()     0.9698         0.9690    1246.94            194             25.19
+sklearn     0.9698         0.9690    1246.94            194             25.19
+
+Test RMSE, R lm(): 21.97   sklearn: 21.97
+Max |R-sklearn| prediction gap on test set: 0.0000
+```
+
+The 0.00 deltas are the point: both toolkits compute the same OLS
+solution; the `lm_p_value` column is R-only.
+
+### Try this
+
+1. **Edit the model.** Drop `bedrooms` from the R formula
+   (`lm(price ~ sqft + age + location)`) and watch the comparison
+   reshape: `compare` shows the row dropping out.
+2. **Misalign the baseline level.** In `fit-sklearn`, replace the
+   `sorted(...)` in `location_levels = sorted(...)` with an unsorted
+   list, `list(housing_train["location"].unique())`. When the first
+   level seen is not the alphabetical first, the baseline no longer
+   matches R's and the sklearn coefficients will swap signs vs R's, a
+   real risk in any "translate this R analysis to Python" workflow.
+3. **Add interaction terms.** R: `price ~ sqft * location`. sklearn:
+   you'll have to add the interaction columns by hand. The contrast
+   gets sharper.
 
 <!-- https://bearingresearch.com/strata/dev/guides/cells/index.md -->
 

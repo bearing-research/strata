@@ -1,54 +1,12 @@
 # Predict Titanic survival with three classifiers
 
-![Predict Titanic survival with three classifiers: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-light.webp#only-light)
-![Predict Titanic survival with three classifiers: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-dark.webp#only-dark)
-
 A canonical "first Kaggle notebook" rewritten for Strata. A
 feature-engineering stage feeds three classifiers; the best one is
 evaluated and its feature weights plotted.
 
-## What it shows
+---
 
-- **Two branches off one load**: `explore` and `features` both read
-  `load_data`'s DataFrame, so editing `features` leaves `explore` ready.
-- **One upstream feeding several cells**: `features` produces the split,
-  which `train_model` and `evaluate` read, and `feature_cols`, which
-  `compare` reads, so editing it invalidates all three.
-- **Objects that need pickle**: `results` holds the fitted scikit-learn
-  models next to their accuracies, so it is stored with pickle rather than
-  as Arrow or JSON.
-
-## Cells
-
-| Cell | What it does |
-|---|---|
-| `load_data` | Loads the Titanic dataset bundled with seaborn and prints missing-value counts. |
-| `explore` | Prints the survival rate grouped by class and sex, and the overall rate. |
-| `features` | Keeps six columns, drops rows with missing values, encodes `sex` as 0/1 and makes a stratified 75/25 train/test split. |
-| `modeling_intro` | Markdown introducing the modeling cells. |
-| `train_model` | Fits logistic regression, random forest and gradient boosting, and keeps each model with its train and test accuracy in `results`. |
-| `evaluate` | Picks the model with the best test accuracy and prints its classification report. |
-| `compare` | Plots the best model's feature importances (or absolute coefficients for logistic regression). |
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Then open **Titanic Survival Prediction** from the notebook list on the Strata home page.
-
-## Try this
-
-- Add a feature in `features` (e.g. `fare_per_person`). `train_model`,
-  `evaluate` and `compare` go stale but `explore` stays ready.
-- Run `evaluate` alone. Strata re-runs only the chain that's changed.
-
-## Load Titanic dataset
-
-<sub>**kind** python</sub>
+## Load Titanic dataset { .nb-cell }
 
 ```python
 # @name Load Titanic dataset
@@ -63,9 +21,29 @@ print(f"\nMissing values:\n{df.isnull().sum()[df.isnull().sum() > 0]}")
 df.head()
 ```
 
-## Survival rates by class and sex
+**Output**
 
-<sub>**kind** python</sub>
+| survived | pclass | sex | age | sibsp | parch | fare | embarked | class | who | adult_male | deck | embark_town | alive | alone |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 3 | male | 22 | 1 | 0 | 7.25 | S | Third | man | True |  | Southampton | no | False |
+| 1 | 1 | female | 38 | 1 | 0 | 71.28 | C | First | woman | False | C | Cherbourg | yes | False |
+| 1 | 3 | female | 26 | 0 | 0 | 7.925 | S | Third | woman | False |  | Southampton | yes | True |
+| 1 | 1 | female | 35 | 1 | 0 | 53.1 | S | First | woman | False | C | Southampton | yes | False |
+| 0 | 3 | male | 35 | 0 | 0 | 8.05 | S | Third | man | True |  | Southampton | no | True |
+
+```text title="stdout"
+Loaded 891 passengers
+Survival rate: 38.4%
+
+Missing values:
+age            177
+embarked         2
+deck           688
+embark_town      2
+dtype: int64
+```
+
+## Survival rates by class and sex { .nb-cell }
 
 ```python
 # @name Survival rates by class and sex
@@ -74,9 +52,20 @@ print(survival_rates)
 print(f"\nOverall: {df['survived'].mean():.3f}")
 ```
 
-## Feature engineering
+```text title="stdout"
+pclass  sex   
+1       female    0.968
+        male      0.369
+2       female    0.921
+        male      0.157
+3       female    0.500
+        male      0.135
+Name: survived, dtype: float64
 
-<sub>**kind** python</sub>
+Overall: 0.384
+```
+
+## Feature engineering { .nb-cell }
 
 ```python
 # @name Feature engineering
@@ -100,6 +89,12 @@ print(f"Train: {len(X_train)}, Test: {len(X_test)}")
 print(f"Dropped {len(df) - len(clean)} rows with missing values")
 ```
 
+```text title="stdout"
+Features: ['pclass', 'sex', 'age', 'sibsp', 'parch', 'fare']
+Train: 535, Test: 179
+Dropped 177 rows with missing values
+```
+
 # Model the survivors
 
 We've engineered features from the raw passenger data. Now train
@@ -111,9 +106,7 @@ Each classifier runs once and gets cached. Tweaking
 provenance hash on each training cell changes because its `X_train`
 input changed.
 
-## Train classifiers
-
-<sub>**kind** python</sub>
+## Train classifiers { .nb-cell }
 
 ```python
 # @name Train classifiers
@@ -136,9 +129,13 @@ for name, model in models.items():
     print(f"{name:25s}  train={train_acc:.3f}  test={test_acc:.3f}")
 ```
 
-## Evaluate best model
+```text title="stdout"
+Logistic Regression        train=0.807  test=0.810
+Random Forest              train=0.991  test=0.771
+Gradient Boosting          train=0.925  test=0.793
+```
 
-<sub>**kind** python</sub>
+## Evaluate best model { .nb-cell }
 
 ```python
 # @name Evaluate best model
@@ -153,9 +150,20 @@ print(f"Best model: {best_name} (test accuracy: {results[best_name]['test']:.3f}
 print(classification_report(y_test, y_pred, target_names=["Did not survive", "Survived"]))
 ```
 
-## Feature importance from the best model
+```text title="stdout"
+Best model: Logistic Regression (test accuracy: 0.810)
 
-<sub>**kind** python</sub>
+                 precision    recall  f1-score   support
+
+Did not survive       0.84      0.84      0.84       106
+       Survived       0.77      0.77      0.77        73
+
+       accuracy                           0.81       179
+      macro avg       0.80      0.80      0.80       179
+   weighted avg       0.81      0.81      0.81       179
+```
+
+## Feature importance from the best model { .nb-cell }
 
 ```python
 # @name Feature importance from the best model
@@ -190,3 +198,58 @@ plt.tight_layout()
 print(importance.sort_values(ascending=False))
 fig
 ```
+
+![cell output](https://bearingresearch.com/strata/dev/assets/examples/runs/titanic_ml-1.webp)
+
+```text title="stdout"
+sex       2.419319
+pclass    1.232228
+sibsp     0.227804
+parch     0.102860
+age       0.044134
+fare      0.001285
+dtype: float64
+```
+
+---
+
+## About this example
+
+### What it shows
+
+- **Two branches off one load**: `explore` and `features` both read
+  `load_data`'s DataFrame, so editing `features` leaves `explore` ready.
+- **One upstream feeding several cells**: `features` produces the split,
+  which `train_model` and `evaluate` read, and `feature_cols`, which
+  `compare` reads, so editing it invalidates all three.
+- **Objects that need pickle**: `results` holds the fitted scikit-learn
+  models next to their accuracies, so it is stored with pickle rather than
+  as Arrow or JSON.
+
+### Cells
+
+| Cell | What it does |
+|---|---|
+| `load_data` | Loads the Titanic dataset bundled with seaborn and prints missing-value counts. |
+| `explore` | Prints the survival rate grouped by class and sex, and the overall rate. |
+| `features` | Keeps six columns, drops rows with missing values, encodes `sex` as 0/1 and makes a stratified 75/25 train/test split. |
+| `modeling_intro` | Markdown introducing the modeling cells. |
+| `train_model` | Fits logistic regression, random forest and gradient boosting, and keeps each model with its train and test accuracy in `results`. |
+| `evaluate` | Picks the model with the best test accuracy and prints its classification report. |
+| `compare` | Plots the best model's feature importances (or absolute coefficients for logistic regression). |
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **Titanic Survival Prediction** from the notebook list on the Strata home page.
+
+### Try this
+
+- Add a feature in `features` (e.g. `fare_per_person`). `train_model`,
+  `evaluate` and `compare` go stale but `explore` stays ready.
+- Run `evaluate` alone. Strata re-runs only the chain that's changed.

@@ -1135,39 +1135,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#fan-out-with-per_variant" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fan-out with @per_variant
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run it
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#switch-vs-sweep" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Switch vs sweep
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#data" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1219,6 +1186,56 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#about-this-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        About this example
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="About this example">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fan-out-with-per_variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fan-out with @per_variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#switch-vs-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Switch vs sweep
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -4239,39 +4256,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#fan-out-with-per_variant" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fan-out with @per_variant
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run it
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#switch-vs-sweep" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Switch vs sweep
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#data" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4326,6 +4310,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#about-this-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        About this example
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="About this example">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fan-out-with-per_variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fan-out with @per_variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#switch-vs-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Switch vs sweep
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -4346,8 +4380,6 @@
 </button>
 
 <h1 id="run-every-model-variant-and-compare-their-accuracy">Run every model variant and compare their accuracy<a class="headerlink" href="#run-every-model-variant-and-compare-their-accuracy" title="Permanent link">&para;</a></h1>
-<p><img alt="Run every model variant and compare their accuracy: what a run of the notebook shows" src="../../assets/examples/model_variants_sweep-light.webp#only-light" />
-<img alt="Run every model variant and compare their accuracy: what a run of the notebook shows" src="../../assets/examples/model_variants_sweep-dark.webp#only-dark" /></p>
 <p>A minimal example of variant <strong>sweep mode</strong>: run every variant of a group and
 compare them all in one downstream cell.</p>
 <p>The <code>model</code> group has three variant cells, <code>always_one</code>, <code>alternating</code>,
@@ -4357,69 +4389,73 @@ execution, and the downstream <code>compare</code> cell receives <code>preds</co
 <code>{variant_name: predictions}</code> dict:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
 </code></pre></div>
-<h2 id="fan-out-with-per_variant">Fan-out with <code>@per_variant</code><a class="headerlink" href="#fan-out-with-per_variant" title="Permanent link">&para;</a></h2>
+<hr />
+<h2 class="nb-cell" id="data">data<a class="headerlink" href="#data" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">y_true</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
+</code></pre></div>
+<h2 class="nb-cell" id="baseline">baseline<a class="headerlink" href="#baseline" title="Permanent link">&para;</a></h2>
+<p><sub><strong>variant</strong> always_one of model</sub></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @variant model always_one</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># A trivial baseline "classifier": predict 1 for everything.</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">preds</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
+</code></pre></div>
+<h2 class="nb-cell" id="compare">compare<a class="headerlink" href="#compare" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># `preds` is a dict {variant_name: predictions} because the `model` group is in</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># sweep mode: every variant ran, and this cell consumes them all at once.</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">pred</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">pred</span> <span class="ow">in</span> <span class="n">preds</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">}</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"accuracy by variant:"</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><span class="filename">stdout</span><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
+</code></pre></div>
+<h2 class="nb-cell" id="score">score<a class="headerlink" href="#score" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @per_variant</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># Fan-out: runs once per model variant. `preds` is bound to THAT variant's</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># predictions (a scalar list), not the whole {variant: preds} dict, so this</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># cell computes a single accuracy. In a real workload each instance could carry</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># `# @worker gpu` and run as an independent job.</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
+</code></pre></div>
+<h2 class="nb-cell" id="best">best<a class="headerlink" href="#best" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># A plain (non-fan-out) downstream cell collapses the per-variant `accuracy`</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># back into a {variant: value} dict, the same shape the `compare` cell gets,</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># but produced by fanning the scoring out first. Pick the winner:</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">best_model</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">accuracy</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">accuracy</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"accuracy by variant:"</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">)</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"best model:"</span><span class="p">,</span> <span class="n">best_model</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><span class="filename">stdout</span><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>best model: always_one
+</code></pre></div>
+<hr />
+<h2 id="about-this-example">About this example<a class="headerlink" href="#about-this-example" title="Permanent link">&para;</a></h2>
+<h3 id="fan-out-with-per_variant">Fan-out with <code>@per_variant</code><a class="headerlink" href="#fan-out-with-per_variant" title="Permanent link">&para;</a></h3>
 <p>The <code>compare</code> cell consumes the whole dict at once. The <code>score</code> cell shows the
 other option, <strong>fan-out</strong>: <code># @per_variant</code> runs it once per variant with
 <code>preds</code> bound to that variant's list (a scalar, not the dict), so each variant
 is scored independently (in a real workload, each could carry <code># @worker gpu</code>
 and run as its own job). A plain downstream cell, <code>best</code>, then collapses the
 per-variant <code>accuracy</code> back to a dict and picks the winner:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>best model: always_one
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>best model: always_one
 </code></pre></div>
 <p>Same numbers as <code>compare</code>, produced by fanning the scoring out first. See
 <a href="https://bearingresearch.com/strata/latest/guides/cells/loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant">Variant Cells → Fan-out</a>.</p>
-<h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>run<span class="w"> </span>examples/model_variants_sweep
+<h3 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>strata<span class="w"> </span>run<span class="w"> </span>examples/model_variants_sweep
 </code></pre></div>
 <p>Or open it in the UI (<code>uv run strata-notebook --notebook-dir examples</code> from
 the repo root), where the <code>model</code> group renders as a tab strip with a
 <strong>sweep</strong> badge; clicking a tab shows that variant's source (all of them still
 run), and the group has a run-all button + a readiness rollup.</p>
-<h2 id="switch-vs-sweep">Switch vs sweep<a class="headerlink" href="#switch-vs-sweep" title="Permanent link">&para;</a></h2>
+<h3 id="switch-vs-sweep">Switch vs sweep<a class="headerlink" href="#switch-vs-sweep" title="Permanent link">&para;</a></h3>
 <p>Flip <code>mode = "sweep"</code> to <code>mode = "switch"</code> (or drop the line) in
 <code>notebook.toml</code> and only the active variant runs; <code>compare</code> would then see a
 single <code>preds</code> value instead of the dict. Sweep is for <em>comparing</em> variants on
 a shared downstream; switch is for <em>picking</em> one. See
 <a href="https://bearingresearch.com/strata/latest/notebook/annotations/#sweep-mode-compare-all-variants-at-once">Variant Cells → Sweep mode</a>.</p>
-<h2 id="data">data<a class="headerlink" href="#data" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">y_true</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
-</code></pre></div>
-<h2 id="baseline">baseline<a class="headerlink" href="#baseline" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python  ·  <strong>variant</strong> always_one of model</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># @variant model always_one</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># A trivial baseline "classifier": predict 1 for everything.</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">preds</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
-</code></pre></div>
-<h2 id="compare">compare<a class="headerlink" href="#compare" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># `preds` is a dict {variant_name: predictions} because the `model` group is in</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># sweep mode: every variant ran, and this cell consumes them all at once.</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">name</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">pred</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">pred</span> <span class="ow">in</span> <span class="n">preds</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="p">}</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"accuracy by variant:"</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">)</span>
-</code></pre></div>
-<h2 id="score">score<a class="headerlink" href="#score" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @per_variant</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># Fan-out: runs once per model variant. `preds` is bound to THAT variant's</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># predictions (a scalar list), not the whole {variant: preds} dict, so this</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># cell computes a single accuracy. In a real workload each instance could carry</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># `# @worker gpu` and run as an independent job.</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
-</code></pre></div>
-<h2 id="best">best<a class="headerlink" href="#best" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># A plain (non-fan-out) downstream cell collapses the per-variant `accuracy`</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># back into a {variant: value} dict, the same shape the `compare` cell gets,</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># but produced by fanning the scoring out first. Pick the winner:</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">best_model</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">accuracy</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">accuracy</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"accuracy by variant:"</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">)</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nb">print</span><span class="p">(</span><span class="s2">"best model:"</span><span class="p">,</span> <span class="n">best_model</span><span class="p">)</span>
-</code></pre></div>
 
 
 

@@ -1,95 +1,13 @@
 # Report top orders and revenue from SQL and Python
 
-![Report top orders and revenue from SQL and Python: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)
-![Report top orders and revenue from SQL and Python: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)
-
 A small five-cell notebook that demonstrates Strata's SQL cell support
 against a local SQLite warehouse. The cells span three languages
 (Python → SQL → Python) and exercise both `-- @cache fingerprint` (data-
 sensitive) and `-- @cache forever` (reference-data) policies.
 
-## What it shows
+---
 
-- **Connection config in `notebook.toml`.** The `[connections.warehouse]`
-  block declares a SQLite driver with a relative path. SQL cells
-  reference it by name via `-- @sql connection=warehouse`.
-- **Bind parameters from upstream Python.** `top_orders` resolves
-  `:min_amount` from the `threshold` cell's variable. No string
-  substitution happens: the value flows through ADBC's parameter
-  binding API, so adversarial strings round-trip as data.
-- **Two cache policies side by side.** `top_orders` uses `fingerprint`
-  (folds SQLite's `PRAGMA data_version` + `schema_version` into the
-  hash) so a DDL change to the warehouse re-executes it. `category_summary`
-  uses `forever` because the user's asserting the catalog is reference
-  data; only edits to the SQL body itself invalidate it.
-- **Read-only by default, opt-in writes.** SQL cells open the
-  connection with `mode=ro` plus `PRAGMA query_only = ON` so a
-  stray `INSERT` can't mutate the DB. The seed cell explicitly
-  opts into writable execution via `-- @sql connection=warehouse
-  write=true`: that's the per-cell escape hatch for setup
-  scripts. Other cells in the notebook stay read-only.
-- **Cross-language pipeline.** The two SQL results flow back into the
-  `report` Python cell as `pyarrow.Table`s, which it turns into pandas
-  DataFrames with `.to_pandas()`.
-
-## Cells
-
-| Cell | Language | What it does |
-|---|---|---|
-| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Cached by its body while `analytics.db` is as it left it, so a reopen finds it and the cells after it ready; delete the database and it seeds again. |
-| `threshold` | Python | Defines `min_amount = 50`. Edit and rerun to vary the threshold. |
-| `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `-- @after seed`. |
-| `category_summary` | SQL | Revenue by category with `-- @cache forever`. Declares `-- @after seed`. |
-| `report` | Python | Stitches the two SQL outputs into a markdown report. |
-
-## DAG dependencies
-
-`top_orders` and `category_summary` depend on the SQLite file that
-`seed` produces, but no Python variable flows between them, the
-dependency is on a side effect. The `-- @after seed` annotation adds
-an edge to the DAG so cascade execution and staleness both see the
-link, and makes the seed's last run part of each report's cache key:
-once `seed` runs again, even unchanged, the reports are stale.
-
-## Running
-
-From the project root:
-
-```bash
-uv run strata-notebook --notebook-dir examples
-```
-
-Then open **SQL Orders Report** from the notebook list on the Strata home page. Run
-`seed` first to create the SQLite file, then run the other cells in
-order (or hit "Run all").
-
-SQL cells need the `sql` and `sql-sqlite` extras. The development
-environment has them; an installed Strata needs
-`uv tool install "strata-notebook[sql,sql-sqlite]"` (the Docker image
-carries both).
-
-## Try this
-
-- **Change the threshold.** Edit `threshold` to `min_amount = 100`.
-  `top_orders` re-executes (different bind value → different
-  provenance hash). Run `top_orders` again without changing
-  anything and it cache-hits, because the canonical artifact's
-  provenance still matches the current threshold.
-- **Mutate the schema.** From a separate shell:
-
-  ```bash
-  sqlite3 analytics.db 'ALTER TABLE orders ADD COLUMN region TEXT'
-  ```
-
-  Re-run `top_orders`. SQLite's `PRAGMA schema_version` bumps, the
-  freshness token changes, and the cell re-executes with a new schema.
-- **Try a write from a SQL cell.** Add a cell with `INSERT INTO orders
-  VALUES (...)`. The executor returns an error and the database row
-  count is unchanged: read-only mode is the security boundary.
-
-## seed
-
-<sub>**kind** sql</sub>
+## seed { .nb-cell }
 
 ```sql
 -- @sql connection=warehouse write=true
@@ -144,9 +62,17 @@ INSERT INTO orders (id, customer, sku, amount, ordered_at) VALUES
     (10, 'carol', 'GADGET-B',    350.00, '2026-04-20');
 ```
 
-## min_amount
+6 rows × 3 cols
+| stmt | kind | rows_affected |
+| --- | --- | --- |
+| 1 | DROP TABLE | NULL |
+| 2 | DROP TABLE | NULL |
+| 3 | CREATE TABLE | NULL |
+| 4 | CREATE TABLE | NULL |
+| 5 | INSERT | 5 |
+| 6 | INSERT | 10 |
 
-<sub>**kind** python</sub>
+## min_amount { .nb-cell }
 
 ```python
 # @name min_amount
@@ -162,9 +88,11 @@ min_amount = 50
 min_amount
 ```
 
-## top_orders
+```json title="Output"
+50
+```
 
-<sub>**kind** sql</sub>
+## top_orders { .nb-cell }
 
 ```sql
 -- @sql connection=warehouse
@@ -185,9 +113,16 @@ ORDER BY o.amount DESC
 LIMIT 5
 ```
 
-## category_summary
+5 rows × 6 cols
+| id | customer | sku | category | amount | ordered_at |
+| --- | --- | --- | --- | --- | --- |
+| 6 | carol | THINGAMAJIG | misc | 500.0 | 2026-04-10 |
+| 4 | bob | GADGET-B | gadgets | 350.0 | 2026-04-05 |
+| 10 | carol | GADGET-B | gadgets | 350.0 | 2026-04-20 |
+| 2 | alice | GADGET-A | gadgets | 199.99 | 2026-04-02 |
+| 8 | alice | GADGET-A | gadgets | 199.99 | 2026-04-15 |
 
-<sub>**kind** sql</sub>
+## category_summary { .nb-cell }
 
 ```sql
 -- @sql connection=warehouse
@@ -209,9 +144,14 @@ GROUP BY p.category
 ORDER BY total_revenue DESC NULLS LAST
 ```
 
-## report
+3 rows × 4 cols
+| category | sku_count | order_count | total_revenue |
+| --- | --- | --- | --- |
+| gadgets | 2 | 4 | 1099.98 |
+| misc | 1 | 1 | 500.0 |
+| widgets | 2 | 5 | 186.0 |
 
-<sub>**kind** python</sub>
+## report { .nb-cell }
 
 ```python
 # @name report
@@ -254,3 +194,128 @@ report = "\n".join(lines)
 print(report)
 Markdown(report)
 ```
+
+# Orders report
+
+## Top 5 orders above $50
+
+| customer | sku | category | amount | ordered |
+|---|---|---|---:|---|
+| carol | THINGAMAJIG | misc | $500.00 | 2026-04-10 |
+| bob | GADGET-B | gadgets | $350.00 | 2026-04-05 |
+| carol | GADGET-B | gadgets | $350.00 | 2026-04-20 |
+| alice | GADGET-A | gadgets | $199.99 | 2026-04-02 |
+| alice | GADGET-A | gadgets | $199.99 | 2026-04-15 |
+
+## Revenue by product category
+
+| category | SKUs | orders | revenue |
+|---|---:|---:|---:|
+| gadgets | 2 | 4 | $1099.98 |
+| misc | 1 | 1 | $500.00 |
+| widgets | 2 | 5 | $186.00 |
+
+```text title="stdout"
+# Orders report
+
+## Top 5 orders above $50
+
+| customer | sku | category | amount | ordered |
+|---|---|---|---:|---|
+| carol | THINGAMAJIG | misc | $500.00 | 2026-04-10 |
+| bob | GADGET-B | gadgets | $350.00 | 2026-04-05 |
+| carol | GADGET-B | gadgets | $350.00 | 2026-04-20 |
+| alice | GADGET-A | gadgets | $199.99 | 2026-04-02 |
+| alice | GADGET-A | gadgets | $199.99 | 2026-04-15 |
+
+## Revenue by product category
+
+| category | SKUs | orders | revenue |
+|---|---:|---:|---:|
+| gadgets | 2 | 4 | $1099.98 |
+| misc | 1 | 1 | $500.00 |
+| widgets | 2 | 5 | $186.00 |
+```
+
+---
+
+## About this example
+
+### What it shows
+
+- **Connection config in `notebook.toml`.** The `[connections.warehouse]`
+  block declares a SQLite driver with a relative path. SQL cells
+  reference it by name via `-- @sql connection=warehouse`.
+- **Bind parameters from upstream Python.** `top_orders` resolves
+  `:min_amount` from the `threshold` cell's variable. No string
+  substitution happens: the value flows through ADBC's parameter
+  binding API, so adversarial strings round-trip as data.
+- **Two cache policies side by side.** `top_orders` uses `fingerprint`
+  (folds SQLite's `PRAGMA data_version` + `schema_version` into the
+  hash) so a DDL change to the warehouse re-executes it. `category_summary`
+  uses `forever` because the user's asserting the catalog is reference
+  data; only edits to the SQL body itself invalidate it.
+- **Read-only by default, opt-in writes.** SQL cells open the
+  connection with `mode=ro` plus `PRAGMA query_only = ON` so a
+  stray `INSERT` can't mutate the DB. The seed cell explicitly
+  opts into writable execution via `-- @sql connection=warehouse
+  write=true`: that's the per-cell escape hatch for setup
+  scripts. Other cells in the notebook stay read-only.
+- **Cross-language pipeline.** The two SQL results flow back into the
+  `report` Python cell as `pyarrow.Table`s, which it turns into pandas
+  DataFrames with `.to_pandas()`.
+
+### Cells
+
+| Cell | Language | What it does |
+|---|---|---|
+| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Cached by its body while `analytics.db` is as it left it, so a reopen finds it and the cells after it ready; delete the database and it seeds again. |
+| `threshold` | Python | Defines `min_amount = 50`. Edit and rerun to vary the threshold. |
+| `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `-- @after seed`. |
+| `category_summary` | SQL | Revenue by category with `-- @cache forever`. Declares `-- @after seed`. |
+| `report` | Python | Stitches the two SQL outputs into a markdown report. |
+
+### DAG dependencies
+
+`top_orders` and `category_summary` depend on the SQLite file that
+`seed` produces, but no Python variable flows between them, the
+dependency is on a side effect. The `-- @after seed` annotation adds
+an edge to the DAG so cascade execution and staleness both see the
+link, and makes the seed's last run part of each report's cache key:
+once `seed` runs again, even unchanged, the reports are stale.
+
+### Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **SQL Orders Report** from the notebook list on the Strata home page. Run
+`seed` first to create the SQLite file, then run the other cells in
+order (or hit "Run all").
+
+SQL cells need the `sql` and `sql-sqlite` extras. The development
+environment has them; an installed Strata needs
+`uv tool install "strata-notebook[sql,sql-sqlite]"` (the Docker image
+carries both).
+
+### Try this
+
+- **Change the threshold.** Edit `threshold` to `min_amount = 100`.
+  `top_orders` re-executes (different bind value → different
+  provenance hash). Run `top_orders` again without changing
+  anything and it cache-hits, because the canonical artifact's
+  provenance still matches the current threshold.
+- **Mutate the schema.** From a separate shell:
+
+  ```bash
+  sqlite3 analytics.db 'ALTER TABLE orders ADD COLUMN region TEXT'
+  ```
+
+  Re-run `top_orders`. SQLite's `PRAGMA schema_version` bumps, the
+  freshness token changes, and the cell re-executes with a new schema.
+- **Try a write from a SQL cell.** Add a cell with `INSERT INTO orders
+  VALUES (...)`. The executor returns an error and the database row
+  count is unchanged: read-only mode is the security boundary.
