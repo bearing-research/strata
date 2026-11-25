@@ -52,6 +52,23 @@ def test_inputs_are_injected(tmp_path):
     assert res["passed"] == 1
 
 
+def test_a_cell_using_the_strata_style_runs_under_its_tests(tmp_path):
+    """The cell runs as in a run, so ``plt.style.use("strata")`` finds the style."""
+    pytest.importorskip("matplotlib.pyplot")
+    res = run_cell_tests_in_dir(
+        rundir=tmp_path / "run",
+        venv_python=_PY,
+        cell_source=(
+            "import matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\n\n"
+            "plt.style.use('strata')\nfig, ax = plt.subplots()\nax.bar([1, 2], [3, 4])\n"
+        ),
+        test_source="def test_two_bars(cell):\n    assert len(cell.ax.patches) == 2\n",
+        inputs={},
+        input_dir=tmp_path,
+    )
+    assert (res["passed"], res["failed"], res["errored"]) == (1, 0, 0), res
+
+
 def test_collection_error_becomes_one_error(tmp_path):
     # A syntax error means pytest never reaches sessionfinish, so results.json is
     # absent; the wrapper synthesizes a single error carrying the captured output.

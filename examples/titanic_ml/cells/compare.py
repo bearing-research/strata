@@ -22,6 +22,7 @@ importance = weights.sort_values(ascending=True)
 
 fig, ax = plt.subplots(figsize=(8, 4))
 importance.plot.barh(ax=ax)
+ax.grid(axis="y", visible=False)
 ax.set_title(f"Feature Importance ({best_name})")
 ax.set_xlabel(axis_label)
 plt.tight_layout()

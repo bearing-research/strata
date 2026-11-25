@@ -22,5 +22,6 @@ ConfusionMatrixDisplay(cm, display_labels=classes).plot(
     ax=ax, cmap="Blues", colorbar=False, xticks_rotation=30
 )
 ax.set_title("arXiv Topic Classification: Confusion Matrix")
+ax.grid(False)
 plt.tight_layout()
 fig
