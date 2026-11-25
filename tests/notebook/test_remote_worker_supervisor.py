@@ -18,9 +18,9 @@ from tests.notebook.test_ssh_worker import ScriptedSshRunner, _ok
 
 @pytest.fixture(autouse=True)
 def _no_probe_spacing(monkeypatch):
-    import strata.notebook.remote_worker_supervisor as module
+    from strata.notebook import remote_worker_supervisor
 
-    monkeypatch.setattr(module, "_LIVE_PROBE_SPACING", 0.0)
+    monkeypatch.setattr(remote_worker_supervisor, "_LIVE_PROBE_SPACING", 0.0)
 
 
 def _until(condition) -> None:
@@ -432,9 +432,9 @@ def test_reconcile_never_closes_a_live_tunnel_whose_health_is_slow():
 
 
 def test_a_stopped_worker_gets_one_respawn_not_one_a_cycle(monkeypatch):
-    import strata.notebook.remote_worker_supervisor as module
+    from strata.notebook import remote_worker_supervisor
 
-    monkeypatch.setattr(module, "_RESPAWN_HEALTH_TIMEOUT", 0.0)
+    monkeypatch.setattr(remote_worker_supervisor, "_RESPAWN_HEALTH_TIMEOUT", 0.0)
     gone = {"on": False}
     runner = _runner()
     sup, launcher, _ = _supervisor(
@@ -471,13 +471,13 @@ def test_an_establish_during_a_respawn_takes_over():
     sup, launcher, _ = _supervisor()
     sup.establish("gpu", "user@box", local_port=55001)
     launcher.handles[0].alive = False
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
     spawn = launcher.spawn
 
     def establish() -> None:
         try:
             sup.establish("gpu", "user@box", local_port=55001, token="new")
-        except BaseException as exc:  # noqa: BLE001 - reported by the assertion below
+        except Exception as exc:  # noqa: BLE001 - reported by the assertion below
             errors.append(exc)
 
     other = threading.Thread(target=establish)
