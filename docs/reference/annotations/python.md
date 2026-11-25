@@ -582,7 +582,10 @@ is stopped partway (a rerun rebuilds what it wrote, and drops what a cell
 after it added), this cell is stale and its next run misses its cache, a run
 from another process on the notebook (the CLI, an agent) and a run of the
 upstream's Tests tab, which runs its body again, included; so is a result it
-took while the upstream was still running. A cache hit of the
+took while the upstream was still running, or before its `@write_table`
+tables were written and its read-write mounts synced back. A Tests tab click
+that finds no pytest and cannot install it runs nothing and keeps it. A cache
+hit of the
 upstream, or a run refused before it is sent (an annotation it cannot read),
 keeps it; a run sent to a worker that never started it counts, to be safe.
 A reopen of the notebook or an imported snapshot of it keeps it too. An

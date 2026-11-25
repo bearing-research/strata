@@ -4,9 +4,10 @@
 A cell ``@after`` another is keyed on that one's token (``keys.after_run``): only running
 the upstream's code changes what it left in the world, a run that is stopped or dies
 partway included, and a refusal or a cache hit never starts it. The second token, however
-the run ends, makes stale what was keyed while it ran. The file is apart from
-``runtime.json`` and written under a lock, so a run in another process (the CLI, an
-agent) is read, and no other writer drops it.
+the run ends, makes stale what was keyed while it ran; one more follows what lands after
+the code ends: a run's ``@write_table`` writes and the read-write mounts it syncs back.
+The file is apart from ``runtime.json`` and written under a lock, so a run in another
+process (the CLI, an agent) is read, and no other writer drops it.
 """
 
 from __future__ import annotations
@@ -82,9 +83,14 @@ async def mint_after(notebook_dir: Path, cell_id: str) -> None:
     The run's start was recorded, so a cell after it is keyed on that token, stale from
     the moment the run began.
     """
+    await anyio.to_thread.run_sync(ended, notebook_dir, cell_id)
+
+
+def ended(notebook_dir: Path, cell_id: str) -> None:
+    """:func:`mint_after` in this thread, for an effect that lands after the code ends."""
     try:
         # Even while the notebook is held: a run that drained past its window ends.
-        await anyio.to_thread.run_sync(_record, notebook_dir, cell_id)
+        _record(notebook_dir, cell_id)
     except filelock.Timeout as exc:
         logger.warning("Cell %s's run ended unrecorded: %s", cell_id, exc)
     except OSError as exc:

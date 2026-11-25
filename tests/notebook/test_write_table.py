@@ -21,6 +21,7 @@ from strata.iceberg.catalog import (
     SUMMARY_VERSION,
     IcebergWriter,
 )
+from strata.notebook import runs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import CellStatus, TableWriteSpec
@@ -483,6 +484,7 @@ class TestAWritingCell:
         assert _rows(warehouse) == [(1, 1), (2, 2)]
         shutil.rmtree(warehouse)
         log.unlink()
+        ran = runs.read(session.path)["c"]
 
         again = await CellExecutor(session).execute_cell("c", cell)
 
@@ -490,6 +492,8 @@ class TestAWritingCell:
         assert again.cache_hit
         assert not log.exists()
         assert _rows(warehouse) == [(1, 1), (2, 2)]
+        # Hits only: no run of its code, so a cell after it keeps its result.
+        assert runs.read(session.path)["c"] == ran
 
     async def test_a_per_variant_cell_writes_back_beside_a_variant_that_runs(self, tmp_path):
         warehouse, uri = _warehouse(tmp_path)
@@ -1213,3 +1217,91 @@ class TestWhoMayWrite:
         assert "'lab' is not writable by 'agent:x'" in refused.error
         assert written.success, written.error
         assert _rows(warehouse, "lake") == [(1, 10)]
+
+
+@windows
+class TestTheRunToken:
+    """A cell ``@after`` a writing cell is keyed on its last run: the one that wrote."""
+
+    @staticmethod
+    def _spied(
+        monkeypatch, session: NotebookSession, *, fail: bool = False, cell_id: str = "w"
+    ) -> list[str | None]:
+        during: list[str | None] = []
+        write = IcebergWriter.write
+
+        def spy(self, *args, **kwargs):
+            during.append(runs.read(session.path).get(cell_id))
+            if fail:
+                raise OSError("catalog is read-only")
+            return write(self, *args, **kwargs)
+
+        monkeypatch.setattr(IcebergWriter, "write", spy)
+        return during
+
+    @pytest.mark.parametrize("fail", [False, True], ids=["written", "failed"])
+    @pytest.mark.parametrize("kind", ["plain", "loop", "each"])
+    async def test_a_token_follows_the_write(self, tmp_path, monkeypatch, kind, fail):
+        """A failed write's too: it may have written some tables before it failed."""
+        warehouse, uri = _warehouse(tmp_path)
+        cells: list[tuple[str, str]] = []
+        if kind == "plain":
+            source = _source(uri, '{"id": [1], "v": [1]}')
+        elif kind == "loop":
+            cells = [("s", TestALoopCell.SEED)]
+            source = TestALoopCell._loop(uri, "rows = rows\n")
+        else:
+            raw = tmp_path / "raw"
+            raw.mkdir()
+            (raw / "one.txt").write_text("1")
+            source = (
+                f"# @mount raw {raw.as_uri()} ro\n# @each path in raw\n"
+                f"# @write_table rows {uri} sync on=id\n"
+                "import pyarrow as pa\nrows = pa.table({'id': [1], 'v': [1]})\n"
+            )
+        session = _notebook(tmp_path, [*cells, ("w", source)])
+        if cells:
+            assert (await _run(session, TestALoopCell.SEED, "s")).success
+        during = self._spied(monkeypatch, session, fail=fail)
+
+        result = await _run(session, source)
+
+        assert result.success is not fail, result.error
+        assert during
+        assert runs.read(session.path)["w"] not in during
+
+    async def test_a_token_follows_the_rows_a_hit_variant_writes_back(self, tmp_path, monkeypatch):
+        """Beside a variant that ran: they land after its run ended."""
+        warehouse, uri = _warehouse(tmp_path)
+        cell = (
+            f"# @per_variant\n# @write_table rows {uri} append\n"
+            "import pyarrow as pa\nrows = pa.table({'id': [val], 'v': [val]})\n"
+        )
+        session = _variant_session(tmp_path, cell)
+        assert (await CellExecutor(session).execute_cell("c", cell)).success
+        shutil.rmtree(warehouse)
+        changed = "# @variant g two\nval = 3\n"
+        session.notebook_state.get_cell("b").source = changed
+        session.re_analyze_cell("b")
+        assert (await CellExecutor(session).execute_cell("b", changed)).success
+        during = self._spied(monkeypatch, session, cell_id="c")
+
+        again = await CellExecutor(session).execute_cell("c", cell)
+
+        assert again.success, again.error
+        assert _rows(warehouse) == [(1, 1), (3, 3)]
+        assert len(during) == 2 and runs.read(session.path)["c"] not in during
+
+    async def test_a_hit_that_writes_a_gone_table_back_mints_nothing(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        source = _source(uri, '{"id": [1], "v": [1]}')
+        session = _session(tmp_path, source)
+        assert (await _run(session, source)).success
+        ran = runs.read(session.path)["w"]
+        shutil.rmtree(warehouse)
+
+        again = await _run(session, source)
+
+        assert again.success and again.cache_hit, again.error
+        assert _rows(warehouse) == [(1, 1)]
+        assert runs.read(session.path)["w"] == ran

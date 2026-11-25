@@ -14,6 +14,7 @@ import pytest
 
 from strata.notebook.cell_test_runner import (
     PytestUnavailableError,
+    require_pytest,
     run_cell_tests_in_dir,
 )
 from strata.notebook.serializer import serialize_value
@@ -88,11 +89,4 @@ def test_collection_error_becomes_one_error(tmp_path):
 def test_pytest_unavailable_raises(tmp_path):
     # A nonexistent interpreter can't import pytest → the actionable error.
     with pytest.raises(PytestUnavailableError):
-        run_cell_tests_in_dir(
-            rundir=tmp_path / "run",
-            venv_python=tmp_path / "no-such-python",
-            cell_source="x = 1\n",
-            test_source="def test_x(cell):\n    assert True\n",
-            inputs={},
-            input_dir=tmp_path,
-        )
+        require_pytest(tmp_path / "no-such-python")

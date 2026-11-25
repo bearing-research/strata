@@ -14,7 +14,7 @@ import anyio
 from vestigo.provenance import derive_subkey
 from vestigo.store import ArtifactVersion, StagedVersion
 
-from strata.notebook import each, output_dirs
+from strata.notebook import each, output_dirs, runs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cell_paths.context import _writes_entry
 from strata.notebook.execution_result import CellExecutionResult, hit_console
@@ -121,6 +121,7 @@ async def run_fanout_cell(
     base = await context.compute_provenance(cell_id, source)
     # Before any variant runs: the first to run brings the table back for the rest.
     gone = await context.gone_tables(source) if use_cache else []
+    ran = runs.read(host.path).get(cell_id)
 
     results = await _run_fanout_instances(
         host,
@@ -137,12 +138,19 @@ async def run_fanout_cell(
     # another failed: the next run finds the table there and would never write them.
     error = None
     if gone:
+        wrote = False
         try:
             for name, result in results:
                 if result.success and result.cache_hit:
+                    wrote = True
                     await anyio.to_thread.run_sync(context.write_back, cell_id, gone, name)
         except TableWriteError as exc:
             error = write_back_failed(exc)
+        finally:
+            # Beside a variant that ran, they land after its end token; alone, it is a hit.
+            if wrote and runs.read(host.path).get(cell_id) != ran:
+                with anyio.CancelScope(shield=True):
+                    await runs.mint_after(host.path, cell_id)
     return _finish_fanout(
         host, context, cell_id, results, base, start_time, error=error, shows_displays=True
     )
@@ -704,7 +712,12 @@ def _store_each_manifests(
                     provenance_hash=provenance,
                 )
         if table_writes:
-            context.write_cell_tables(table_writes, outputs)
+            try:
+                context.write_cell_tables(table_writes, outputs)
+            finally:
+                # The writes land after the instances' end tokens, a failed one's partway too.
+                # With none run, a sync still drops the rows of an item that is gone.
+                runs.ended(host.path, cell_id)
         stored = manager.finalize_cell_outputs(staged)
     except Exception:
         manager.discard_cell_outputs(staged)

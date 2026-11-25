@@ -427,9 +427,10 @@ async def test_run_cell_tests_auto_provisions_pytest_then_retries(monkeypatch):
 
     def fake_run(**_kwargs):
         calls["n"] += 1
-        if calls["n"] == 1:
-            raise cell_test_runner.PytestUnavailableError("pytest missing")
         return passed_run
+
+    probes = iter([False, True])
+    monkeypatch.setattr(cell_test_runner, "_pytest_available", lambda _python: next(probes))
 
     installs = {"n": 0}
 
@@ -444,7 +445,7 @@ async def test_run_cell_tests_auto_provisions_pytest_then_retries(monkeypatch):
     result = await executor.run_cell_tests("cell1", "def test_ok(cell):\n    assert True\n")
 
     assert installs["n"] == 1  # provisioned exactly once
-    assert calls["n"] == 2  # retried after the install
+    assert calls["n"] == 1  # ran once, after the install
     assert result.auto_installed == ["pytest"]
     assert result.pytest_unavailable is False
     assert result.passed == 1
@@ -463,7 +464,9 @@ async def test_run_cell_tests_auto_provision_failure_surfaces_unavailable(monkey
 
     def fake_run(**_kwargs):
         calls["n"] += 1
-        raise cell_test_runner.PytestUnavailableError("pytest missing")
+        raise AssertionError("pytest is missing: nothing runs")
+
+    monkeypatch.setattr(cell_test_runner, "_pytest_available", lambda _python: False)
 
     def fake_ensure(notebook_dir, tool, *, timeout=120):
         return DependencyChangeResult(success=False, package=tool, action="add", error="boom")
@@ -473,7 +476,7 @@ async def test_run_cell_tests_auto_provision_failure_surfaces_unavailable(monkey
 
     result = await executor.run_cell_tests("cell1", "def test_ok(cell):\n    assert True\n")
 
-    assert calls["n"] == 1  # no retry when the install fails
+    assert calls["n"] == 0  # no run, and no retry when the install fails
     assert result.pytest_unavailable is True
     assert result.auto_installed == []
 

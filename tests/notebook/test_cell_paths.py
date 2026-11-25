@@ -798,6 +798,7 @@ class TestCellTests:
                 cell_tests, "hand_over", lambda path, user: calls.handed.append(path.name)
             )
             monkeypatch.setattr("strata.notebook.cell_test_runner.run_cell_tests_in_dir", stub)
+            monkeypatch.setattr("strata.notebook.cell_test_runner.require_pytest", lambda _: None)
             monkeypatch.setattr(
                 "strata.notebook.runtime_state.persist_cell_test_result", lambda *args: None
             )
@@ -1372,6 +1373,8 @@ class TestFanout:
         )
         host = SimpleNamespace(
             notebook_state=SimpleNamespace(get_cell=lambda _id: cell),
+            # Read for its run token, never written: a write there fails.
+            path=Path("/nonexistent/notebook"),
             dag=SimpleNamespace(
                 consumed_variables={"c": set(consumed)},
                 read_producer=lambda _cell_id, _source: None,
@@ -1653,12 +1656,15 @@ class TestFanout:
         assert calls.staged == []
         assert calls.discarded == [[]]
 
-    def test_a_write_that_fails_keeps_no_manifest(self):
+    def test_a_write_that_fails_keeps_no_manifest(self, tmp_path, monkeypatch):
         def fails(*_args):
             raise TableWriteError("the catalog is gone")
 
+        ended: list[tuple[Path, str]] = []
+        monkeypatch.setattr(fanout, "runs", SimpleNamespace(ended=lambda *args: ended.append(args)))
         version = SimpleNamespace(id="v", version=2)
         host, context, calls = self._fakes(self._base(), latest=version, write_cell_tables=fails)
+        host.path = tmp_path
 
         with pytest.raises(TableWriteError, match="the catalog is gone"):
             fanout._store_each_manifests(
@@ -1674,6 +1680,8 @@ class TestFanout:
             )
 
         assert calls.discarded == [["staged-out"]]
+        # It may have written some tables before it failed.
+        assert ended == [(tmp_path, "c")]
 
 
 async def test_the_executor_shares_its_run_state_with_the_r_path(tmp_path):
@@ -1776,7 +1784,9 @@ class TestR:
         )
         monkeypatch.setattr(r, "worker_transport", lambda w: w.transport)
         # A run's start and end are recorded in the notebook, which these fakes have none of.
-        monkeypatch.setattr(r, "runs", SimpleNamespace(running=_no_run_record))
+        monkeypatch.setattr(
+            r, "runs", SimpleNamespace(running=_no_run_record, mint_after=_no_run_end)
+        )
 
         def resolve_cached_display_outputs(*args):
             calls.replays.append(args)
@@ -3530,6 +3540,10 @@ async def _no_run_record(_path, _cell_id):
     yield
 
 
+async def _no_run_end(_path, _cell_id):
+    return None
+
+
 class TestPython:
     """The moved path against fakes; the harness-backed behavior is in ``test_executor.py``."""
 
@@ -3638,7 +3652,9 @@ class TestPython:
         )
         monkeypatch.setattr(python, "resolve_worker_spec", lambda *_args: worker)
         # A run's start is recorded in the notebook, which these fakes have none of.
-        monkeypatch.setattr(python, "runs", SimpleNamespace(running=_no_run_record))
+        monkeypatch.setattr(
+            python, "runs", SimpleNamespace(running=_no_run_record, mint_after=_no_run_end)
+        )
         monkeypatch.setattr(
             python, "write_module_export_outputs", lambda *_args: calls.export_error
         )
