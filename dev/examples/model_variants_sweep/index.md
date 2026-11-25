@@ -1,7 +1,7 @@
-# Model Variants Sweep
+# Run every model variant and compare their accuracy
 
-![Model Variants Sweep: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)
-![Model Variants Sweep: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)
+![Run every model variant and compare their accuracy: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)
+![Run every model variant and compare their accuracy: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)
 
 A minimal example of variant **sweep mode**: run every variant of a group and
 compare them all in one downstream cell.

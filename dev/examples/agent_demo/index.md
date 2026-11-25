@@ -1,7 +1,7 @@
-# Agent Demo: a coding agent builds this notebook
+# Train a model once, re-run only its evaluation
 
-![Agent Demo: a coding agent builds this notebook: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-light.webp#only-light)
-![Agent Demo: a coding agent builds this notebook: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-dark.webp#only-dark)
+![Train a model once, re-run only its evaluation: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-light.webp#only-light)
+![Train a model once, re-run only its evaluation: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-dark.webp#only-dark)
 
 This is the notebook from the
 [`strata agent`](https://bearingresearch.com/strata/latest/notebook/agent/)

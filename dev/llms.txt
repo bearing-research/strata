@@ -10,7 +10,31 @@
 - [Use a coding agent](https://bearingresearch.com/strata/dev/notebook/agent/index.md): `strata agent <notebook-dir>` is a one-command on-ramp: it stands up everything a coding agent (Claude Code) needs to drive a live Strata notebook, and attache…
 - [Terminal viewer](https://bearingresearch.com/strata/dev/notebook/tui/index.md): `strata-notebook-tui` is a read-only terminal spectator for a live notebook session.
 - [Coming from Jupyter](https://bearingresearch.com/strata/dev/notebook/import/index.md): `strata import` converts a Jupyter `.ipynb` file into a Strata notebook directory, or unpacks a snapshot back into one.
-- [Example gallery](https://bearingresearch.com/strata/dev/notebook/examples/index.md): Every notebook under `examples/` in the repo demonstrates a specific Strata capability.
+
+## Examples
+
+- [Gallery](https://bearingresearch.com/strata/dev/notebook/examples/index.md): Every notebook under `examples/` in the repo demonstrates a specific Strata capability.
+- [Tutorial: what the cache saves](https://bearingresearch.com/strata/dev/examples/caching/index.md): A two-minute tour of caching.
+- [The Keeling curve, with a receipt](https://bearingresearch.com/strata/dev/examples/keeling_curve/index.md): Atmospheric CO₂ at Mauna Loa since 1958, from NOAA's monthly record: the curve, the yearly cycle split out, the growth rate by decade, and a published figure w…
+- [Classify iris flowers, from raw data to a confusion matrix](https://bearingresearch.com/strata/dev/examples/iris_classification/index.md): Classic scikit-learn tutorial, rewritten as a Strata notebook.
+- [Filter, group, merge and pivot a sales table](https://bearingresearch.com/strata/dev/examples/pandas_basics/index.md): A guided tour of the pandas operations you reach for every day, split into one cell per concept.
+- [Predict Titanic survival with three classifiers](https://bearingresearch.com/strata/dev/examples/titanic_ml/index.md): A canonical "first Kaggle notebook" rewritten for Strata.
+- [Page through 2,000 transactions](https://bearingresearch.com/strata/dev/examples/data_viewer/index.md): A two-cell notebook that produces DataFrames larger than the 20-row inline preview, so the notebook's interactive data viewer pages through the full frame.
+- [Train a model once, re-run only its evaluation](https://bearingresearch.com/strata/dev/examples/agent_demo/index.md): This is the notebook from the `strata agent` demo: a coding agent (Claude Code) builds it live while you watch in the terminal UI.
+- [Switch between three classifiers without retraining](https://bearingresearch.com/strata/dev/examples/model_variants/index.md): The same iris pipeline as `iris_classification`, but with three alternative training cells grouped as variants of the same DAG slot.
+- [Run every model variant and compare their accuracy](https://bearingresearch.com/strata/dev/examples/model_variants_sweep/index.md): A minimal example of variant sweep mode: run every variant of a group and compare them all in one downstream cell.
+- [Triage customer reviews into validated JSON with an LLM](https://bearingresearch.com/strata/dev/examples/review_triage/index.md): Demonstrates `# @output_schema` on a prompt cell.
+- [Classify arXiv papers across three workers](https://bearingresearch.com/strata/dev/examples/arxiv_classifier/index.md): A full ML workflow that exercises every differentiated feature of Strata Notebook at once:
+- [Paper-trade on overnight news sentiment](https://bearingresearch.com/strata/dev/examples/news_alpha_trader/index.md): An end-to-end LLM-driven trading notebook.
+- [Report top orders and revenue from SQL and Python](https://bearingresearch.com/strata/dev/examples/sql_orders_report/index.md): A small five-cell notebook that demonstrates Strata's SQL cell support against a local SQLite warehouse.
+- [Hill-climb Himmelblau's function, one cached step at a time](https://bearingresearch.com/strata/dev/examples/loop_hill_climb/index.md): Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop cell feature: the `@loop` / `@loop_until` annotations, per-ite…
+- [Drive a plot with a slider, a number and a dropdown](https://bearingresearch.com/strata/dev/examples/widget_playground/index.md): A three-cell notebook: a widget cell (a control panel) feeding two Python cells, one that renders a DataFrame and one that draws a chart.
+- [Share functions between cells](https://bearingresearch.com/strata/dev/examples/library_cells/index.md): Walks through cross-cell library code in Strata Notebook: pure module cells, mixed runtime+library cells, PEP 563 type annotations, and the limitations slicing…
+- [Read a NOAA weather file from a public S3 bucket](https://bearingresearch.com/strata/dev/examples/s3_mount/index.md): Demonstrates Strata's mount feature: a notebook cell can read a remote filesystem path as if it were local, with no custom code inside the cell.
+- [Process weather files one by one into an Iceberg table](https://bearingresearch.com/strata/dev/examples/each_pipeline/index.md): A cell that runs once per file, caches each file separately, and keeps an Iceberg table in step with the results.
+- [Write reports in Markdown, by hand or from data](https://bearingresearch.com/strata/dev/examples/markdown_showcase/index.md): Every way Strata renders Markdown, in one notebook: headings, emphasis, lists, tables, code blocks, blockquotes, links, and the sanitizer that keeps script in…
+- [Model car mileage in R, with plots inline](https://bearingresearch.com/strata/dev/examples/r_mtcars_analysis/index.md): A pure-R notebook: every cell is R.
+- [Fit one regression in R and in scikit-learn](https://bearingresearch.com/strata/dev/examples/r_lm_vs_sklearn/index.md): Fit the same housing-price model with R's `lm()` and Python's `scikit-learn`.
 
 ## Guides
 
@@ -84,24 +108,3 @@
 ## Optional
 
 - [Changelog](https://bearingresearch.com/strata/dev/changelog/index.md): All notable changes to Strata will be documented in this file.
-- [Agent Demo: a coding agent builds this notebook](https://bearingresearch.com/strata/dev/examples/agent_demo/index.md): This is the notebook from the `strata agent` demo: a coding agent (Claude Code) builds it live while you watch in the terminal UI.
-- [arXiv Paper Classifier (distributed demo)](https://bearingresearch.com/strata/dev/examples/arxiv_classifier/index.md): A full ML workflow that exercises every differentiated feature of Strata Notebook at once:
-- [Tutorial: what the cache saves](https://bearingresearch.com/strata/dev/examples/caching/index.md): A two-minute tour of caching.
-- [Data Viewer: paging and sorting a large DataFrame](https://bearingresearch.com/strata/dev/examples/data_viewer/index.md): A two-cell notebook that produces DataFrames larger than the 20-row inline preview, so the notebook's interactive data viewer pages through the full frame.
-- [Pipeline over files: `@each` and a synced table](https://bearingresearch.com/strata/dev/examples/each_pipeline/index.md): A cell that runs once per file, caches each file separately, and keeps an Iceberg table in step with the results.
-- [Iris Classification: end-to-end ML in seven cells](https://bearingresearch.com/strata/dev/examples/iris_classification/index.md): Classic scikit-learn tutorial, rewritten as a Strata notebook.
-- [The Keeling curve, with a receipt](https://bearingresearch.com/strata/dev/examples/keeling_curve/index.md): Atmospheric CO₂ at Mauna Loa since 1958, from NOAA's monthly record: the curve, the yearly cycle split out, the growth rate by decade, and a published figure w…
-- [library_cells](https://bearingresearch.com/strata/dev/examples/library_cells/index.md): Walks through cross-cell library code in Strata Notebook: pure module cells, mixed runtime+library cells, PEP 563 type annotations, and the limitations slicing…
-- [Loop Hill Climb: demo for the `@loop` cell primitive](https://bearingresearch.com/strata/dev/examples/loop_hill_climb/index.md): Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop cell feature: the `@loop` / `@loop_until` annotations, per-ite…
-- [Notebook: Write reports in Markdown, by hand or from data](https://bearingresearch.com/strata/dev/examples/markdown_showcase/index.md): This notebook exercises every markdown rendering path in Strata.
-- [Model Variants: switch classifiers without forking the notebook](https://bearingresearch.com/strata/dev/examples/model_variants/index.md): The same iris pipeline as `iris_classification`, but with three alternative training cells grouped as variants of the same DAG slot.
-- [Model Variants Sweep](https://bearingresearch.com/strata/dev/examples/model_variants_sweep/index.md): A minimal example of variant sweep mode: run every variant of a group and compare them all in one downstream cell.
-- [News Alpha Trader](https://bearingresearch.com/strata/dev/examples/news_alpha_trader/index.md): An end-to-end LLM-driven trading notebook.
-- [Pandas Basics: the core DataFrame operations](https://bearingresearch.com/strata/dev/examples/pandas_basics/index.md): A guided tour of the pandas operations you reach for every day, split into one cell per concept.
-- [R `lm()` vs scikit-learn: side-by-side linear regression](https://bearingresearch.com/strata/dev/examples/r_lm_vs_sklearn/index.md): Fit the same housing-price model with R's `lm()` and Python's `scikit-learn`.
-- [R: mtcars regression + inline plots](https://bearingresearch.com/strata/dev/examples/r_mtcars_analysis/index.md): A pure-R notebook: every cell is R.
-- [Review Triage: Structured Prompt Output](https://bearingresearch.com/strata/dev/examples/review_triage/index.md): Demonstrates `# @output_schema` on a prompt cell.
-- [S3 Mount: reading a public bucket from a notebook](https://bearingresearch.com/strata/dev/examples/s3_mount/index.md): Demonstrates Strata's mount feature: a notebook cell can read a remote filesystem path as if it were local, with no custom code inside the cell.
-- [SQL Orders Report](https://bearingresearch.com/strata/dev/examples/sql_orders_report/index.md): A small five-cell notebook that demonstrates Strata's SQL cell support against a local SQLite warehouse.
-- [Titanic: feature engineering + model comparison](https://bearingresearch.com/strata/dev/examples/titanic_ml/index.md): A canonical "first Kaggle notebook" rewritten for Strata.
-- [Widget Playground: interactive controls driving the DAG](https://bearingresearch.com/strata/dev/examples/widget_playground/index.md): A three-cell notebook: a widget cell (a control panel) feeding two Python cells, one that renders a DataFrame and one that draws a chart.

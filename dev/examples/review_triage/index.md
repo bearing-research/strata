@@ -1,7 +1,7 @@
-# Review Triage: Structured Prompt Output
+# Triage customer reviews into validated JSON with an LLM
 
-![Review Triage: Structured Prompt Output: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/review_triage-light.webp#only-light)
-![Review Triage: Structured Prompt Output: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/review_triage-dark.webp#only-dark)
+![Triage customer reviews into validated JSON with an LLM: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/review_triage-light.webp#only-light)
+![Triage customer reviews into validated JSON with an LLM: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/review_triage-dark.webp#only-dark)
 
 Demonstrates `# @output_schema` on a prompt cell.
 

@@ -1,7 +1,7 @@
-# Model Variants: switch classifiers without forking the notebook
+# Switch between three classifiers without retraining
 
-![Model Variants: switch classifiers without forking the notebook: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-light.webp#only-light)
-![Model Variants: switch classifiers without forking the notebook: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-dark.webp#only-dark)
+![Switch between three classifiers without retraining: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-light.webp#only-light)
+![Switch between three classifiers without retraining: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-dark.webp#only-dark)
 
 The same iris pipeline as `iris_classification`, but with three
 alternative training cells grouped as variants of the same DAG slot.

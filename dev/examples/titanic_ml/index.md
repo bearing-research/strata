@@ -1,7 +1,7 @@
-# Titanic: feature engineering + model comparison
+# Predict Titanic survival with three classifiers
 
-![Titanic: feature engineering + model comparison: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-light.webp#only-light)
-![Titanic: feature engineering + model comparison: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-dark.webp#only-dark)
+![Predict Titanic survival with three classifiers: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-light.webp#only-light)
+![Predict Titanic survival with three classifiers: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-dark.webp#only-dark)
 
 A canonical "first Kaggle notebook" rewritten for Strata. A
 feature-engineering stage feeds three classifiers; the best one is

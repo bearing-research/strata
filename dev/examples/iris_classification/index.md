@@ -1,7 +1,7 @@
-# Iris Classification: end-to-end ML in seven cells
+# Classify iris flowers, from raw data to a confusion matrix
 
-![Iris Classification: end-to-end ML in seven cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)
-![Iris Classification: end-to-end ML in seven cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)
+![Classify iris flowers, from raw data to a confusion matrix: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)
+![Classify iris flowers, from raw data to a confusion matrix: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)
 
 Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
 what the graph looks like for a realistic ML pipeline: load → explore

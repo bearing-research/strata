@@ -1,7 +1,7 @@
-# SQL Orders Report
+# Report top orders and revenue from SQL and Python
 
-![SQL Orders Report: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)
-![SQL Orders Report: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)
+![Report top orders and revenue from SQL and Python: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)
+![Report top orders and revenue from SQL and Python: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)
 
 A small five-cell notebook that demonstrates Strata's SQL cell support
 against a local SQLite warehouse. The cells span three languages

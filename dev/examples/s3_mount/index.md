@@ -1,7 +1,7 @@
-# S3 Mount: reading a public bucket from a notebook
+# Read a NOAA weather file from a public S3 bucket
 
-![S3 Mount: reading a public bucket from a notebook: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-light.webp#only-light)
-![S3 Mount: reading a public bucket from a notebook: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-dark.webp#only-dark)
+![Read a NOAA weather file from a public S3 bucket: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-light.webp#only-light)
+![Read a NOAA weather file from a public S3 bucket: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-dark.webp#only-dark)
 
 Demonstrates Strata's **mount** feature: a notebook cell can read a
 remote filesystem path as if it were local, with no custom code inside

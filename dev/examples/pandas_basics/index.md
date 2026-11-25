@@ -1,7 +1,7 @@
-# Pandas Basics: the core DataFrame operations
+# Filter, group, merge and pivot a sales table
 
-![Pandas Basics: the core DataFrame operations: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-light.webp#only-light)
-![Pandas Basics: the core DataFrame operations: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-dark.webp#only-dark)
+![Filter, group, merge and pivot a sales table: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-light.webp#only-light)
+![Filter, group, merge and pivot a sales table: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-dark.webp#only-dark)
 
 A guided tour of the pandas operations you reach for every day, split
 into one cell per concept. Each cell re-uses its upstream cell's

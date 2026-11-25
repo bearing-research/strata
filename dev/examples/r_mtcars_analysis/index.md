@@ -1,4 +1,4 @@
-# R: mtcars regression + inline plots
+# Model car mileage in R, with plots inline
 
 A **pure-R notebook**: every cell is R. Load the built-in `mtcars`
 dataset, summarise it, fit a linear model, and draw two plots that

@@ -1839,6 +1839,5561 @@ These need R (`Rscript` on the server's `PATH`).
 
 </div>
 
+<!-- https://bearingresearch.com/strata/dev/examples/caching/index.md -->
+
+# Tutorial: what the cache saves
+
+![Tutorial: what the cache saves: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/caching-light.webp#only-light)
+![Tutorial: what the cache saves: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/caching-dark.webp#only-dark)
+
+A two-minute tour of caching. Run it twice and read what the second run saved,
+edit one cell and watch only what depends on it run again, then open the graph.
+
+Open a copy with `strata tutorial caching`, or from **Open a sample** on the home page.
+
+## Cells
+
+1. `load.py`: builds a small table, after a two-second wait that stands in for a slow query
+2. `summarize.py`: revenue by region
+3. `plot.py`: a bar chart of the summary
+
+The markdown cells between them are the instructions.
+
+# What the cache saves
+
+Strata stores each cell's result under a hash of its source, its inputs and its
+environment. If none of those changed, the cell doesn't run again. This takes about
+two minutes.
+
+## Step 1: run it
+
+Press **Run All** at the top of the page. The cell below waits two seconds
+on purpose, standing in for a slow query.
+
+## Load the data
+
+<sub>**kind** python</sub>
+
+```python
+# @name Load the data
+import time
+
+import pandas as pd
+
+time.sleep(2)
+
+sales = pd.DataFrame(
+    {
+        "region": ["North", "North", "South", "South", "East", "East", "West", "West"],
+        "quarter": ["Q1", "Q2", "Q1", "Q2", "Q1", "Q2", "Q1", "Q2"],
+        "revenue": [120, 135, 98, 110, 143, 151, 87, 95],
+    }
+)
+sales
+```
+
+## Step 2: run it again
+
+Press **Run All** again. Nothing runs this time. Every code cell's badge reads `cached`,
+and the load cell's says how much time that saved. For the total, press **expand** at the
+bottom right of the page and read **Cache savings** in the **Profiling** panel.
+
+## Summarize by region
+
+<sub>**kind** python</sub>
+
+```python
+# @name Summarize by region
+by_region = sales.groupby("region", as_index=False)["revenue"].sum()
+by_region
+```
+
+## Step 3: edit one cell
+
+In the cell above, change `.sum()` to `.mean()`. It reads `stale`, and so does the chart
+below, which uses its result. The load cell stays `cached`. Press **Run All**: only those
+two run.
+
+Now change it back to `.sum()` and press **Run All** once more. Both read `cached` at once,
+because Strata still has that result.
+
+## Plot it
+
+<sub>**kind** python</sub>
+
+```python
+# @name Plot it
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+plt.style.use("strata")
+
+fig, ax = plt.subplots(figsize=(6, 3))
+ax.bar(by_region["region"], by_region["revenue"])
+ax.set_ylabel("Revenue")
+plt.tight_layout()
+fig
+```
+
+## Step 4: open the DAG
+
+Press **expand** at the bottom right if the drawer is closed, and look at **Cell DAG**: load,
+then summarize, then plot. Nobody declared those links. They come from the variables each
+cell reads, and they are how Strata knew what your edit in step 3 affected.
+
+<!-- https://bearingresearch.com/strata/dev/examples/keeling_curve/index.md -->
+
+# The Keeling curve, with a receipt
+
+![The Keeling curve, with a receipt: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-light.webp#only-light)
+![The Keeling curve, with a receipt: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-dark.webp#only-dark)
+
+Atmospheric CO₂ at Mauna Loa since 1958, from NOAA's monthly record: the curve, the
+yearly cycle split out, the growth rate by decade, and a published figure whose page
+shows the chart, the code behind it and the exact bytes NOAA served.
+
+Open a copy with `strata tutorial keeling_curve`, or from **Open a sample** on the home
+page. The first run downloads about 40 KB from NOAA.
+
+## What it shows
+
+- **`# @fetch`.** The first cell declares the URL it reads. The bytes' digest is part of
+  the cell's key, so when NOAA adds a month the cell goes stale by itself, and each
+  stored result records the URL, the digest and when it was downloaded.
+- **Caching.** Edit the plot and only the plot runs again; the record is not downloaded
+  again.
+- **Publishing.** `strata artifact publish` turns the figure into a link. The page lists
+  the code of every step behind the figure and NOAA's file under External inputs.
+- **`plt.style.use("strata")`.** The chart reads on the light and the dark theme.
+
+## Cells
+
+1. `load.py`: downloads the record and keeps the monthly mean and NOAA's
+   seasonally adjusted series
+2. `cycle.py`: the average year, the monthly mean minus the adjusted series, by month
+3. `growth.py`: the growth rate in ppm per year, averaged by decade, over complete years
+4. `plot.py`: the curve and the average year, side by side
+
+The markdown cells between them explain each step and how to publish the figure.
+
+## Data
+
+NOAA Global Monitoring Laboratory and Scripps Institution of Oceanography, monthly mean
+CO₂ at Mauna Loa: <https://gml.noaa.gov/ccgg/trends/data.html>. From December 2022 to
+July 2023, after the eruption of Mauna Loa, measurements came from Maunakea, about 21
+miles north.
+
+# The Keeling curve, with a receipt
+
+In 1958 Charles David Keeling began measuring carbon dioxide in the air at Mauna Loa,
+Hawaii. The record has run every month since, and it is the clearest picture there is
+of what we have added to the atmosphere.
+
+This notebook downloads that record from NOAA, splits out the yearly breathing of the
+northern forests, measures how fast the level is rising, and draws the curve. Then it
+publishes the figure with a receipt: a link where anyone can see the chart, the code
+behind it, and the exact bytes NOAA served.
+
+Press **Run All** at the top of the page. The first run downloads about 40 KB.
+
+## Load the Mauna Loa record
+
+<sub>**kind** python</sub>
+
+```python
+# @name Load the Mauna Loa record
+# @fetch co2 https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.csv
+import pandas as pd
+
+raw = pd.read_csv(co2, comment="#")
+monthly = pd.DataFrame(
+    {
+        "date": pd.to_datetime(raw[["year", "month"]].assign(day=15)),
+        "year": raw["year"],
+        "month": raw["month"],
+        "co2_ppm": raw["average"],
+        "trend_ppm": raw["deseasonalized"],
+    }
+)
+monthly
+```
+
+## The yearly cycle
+
+Through each northern summer the forests draw carbon dioxide down, and the level
+bottoms out in early autumn; through the winter it comes back, and peaks in May. NOAA
+publishes the record with that cycle removed as well, and the difference between the
+two is the cycle itself. Averaged by month, it is the shape the curve repeats every year.
+
+## The average year
+
+<sub>**kind** python</sub>
+
+```python
+# @name The average year
+cycle = (
+    monthly.assign(cycle_ppm=monthly["co2_ppm"] - monthly["trend_ppm"])
+    .groupby("month", as_index=False)["cycle_ppm"]
+    .mean()
+    .round(2)
+)
+cycle
+```
+
+## How fast it is rising
+
+The yearly mean, compared with the year before, gives the growth rate in parts per
+million per year. Averaged by decade, it shows whether the rise is steady or speeding up.
+Only complete years count, so a year joins once NOAA publishes its December, and the
+`years` column says how many each decade has so far.
+
+## Growth per decade
+
+<sub>**kind** python</sub>
+
+```python
+# @name Growth per decade
+full_years = monthly.groupby("year").filter(lambda year: len(year) == 12)
+yearly = full_years.groupby("year")["co2_ppm"].mean()
+growth = (
+    yearly.diff()
+    .dropna()
+    .groupby(lambda year: f"{year // 10 * 10}s")
+    .agg(ppm_per_year="mean", years="count")
+    .round({"ppm_per_year": 2})
+    .rename_axis("decade")
+    .reset_index()
+)
+growth
+```
+
+## The curve
+
+The thin line is each month's mean; the thick one has the yearly cycle removed. On the
+right, the average year: the drop through each northern summer, lowest in
+September and October.
+
+Change something here: the title, a color, the size. Only this cell runs again. The
+record is not downloaded again, because nothing the earlier cells read has changed.
+
+## The Keeling curve
+
+<sub>**kind** python</sub>
+
+```python
+# @name The Keeling curve
+import matplotlib.pyplot as plt
+
+plt.style.use("strata")
+
+
+def draw(record, average_year):
+    fig, (curve, year) = plt.subplots(
+        1, 2, figsize=(10, 4.5), gridspec_kw={"width_ratios": [4, 1]}
+    )
+
+    curve.plot(record["date"], record["co2_ppm"], linewidth=1, label="monthly mean")
+    curve.plot(record["date"], record["trend_ppm"], linewidth=2.5, label="yearly cycle removed")
+    latest = record.iloc[-1]
+    curve.annotate(
+        f"{latest['co2_ppm']:.1f} ppm\n{latest['date']:%B %Y}",
+        (latest["date"], latest["co2_ppm"]),
+        xytext=(-15, -100),
+        textcoords="offset points",
+        ha="right",
+        arrowprops={"arrowstyle": "-", "color": "0.6", "linewidth": 0.8},
+    )
+    curve.set_title("CO₂ at Mauna Loa, parts per million")
+    curve.legend(loc="upper left")
+
+    year.bar(average_year["month"], average_year["cycle_ppm"], color="C2")
+    year.set_xticks([1, 4, 7, 10], ["Jan", "Apr", "Jul", "Oct"])
+    year.set_title("The average year")
+
+    fig.tight_layout()
+    return fig
+
+
+draw(monthly, cycle)
+```
+
+## The receipt
+
+Every result above is already stored with what produced it: the source of each cell,
+the environment it ran in, and, for the first cell, the URL it read with the digest of
+the bytes NOAA served and when they were downloaded. Publishing the figure makes that
+readable by anyone with the link.
+
+The figure's id is `nb_<notebook id>_cell_plot_var___display__0`, where the notebook id
+is the `notebook_id` on the first line of this notebook's `notebook.toml` (a copy of a
+sample gets its own). From the notebook's folder, which the home page lists under its
+title, with the server running:
+
+```bash
+strata artifact publish nb_<notebook id>_cell_plot_var___display__0 \
+  --title "The Keeling curve" --artifact-dir .strata/artifacts
+```
+
+The page it prints shows the chart, this notebook's code for it and for every step
+behind it, and NOAA's file under **External inputs**.
+
+NOAA rewrites the file about once a month, usually with a new month in it. When it does,
+the first cell turns stale on its own, because the bytes behind its URL changed, and so
+does everything after it. Run All again and the curve takes in the new month; the figure
+you published keeps the data it was drawn from.
+
+*Data: NOAA Global Monitoring Laboratory and Scripps Institution of Oceanography,
+monthly mean CO₂ at Mauna Loa (gml.noaa.gov/ccgg/trends). From December 2022 to
+July 2023, after the eruption of Mauna Loa, measurements came from Maunakea, about 21
+miles north.*
+
+<!-- https://bearingresearch.com/strata/dev/examples/iris_classification/index.md -->
+
+# Classify iris flowers, from raw data to a confusion matrix
+
+![Classify iris flowers, from raw data to a confusion matrix: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)
+![Classify iris flowers, from raw data to a confusion matrix: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)
+
+Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
+what the graph looks like for a realistic ML pipeline: load → explore
+→ split → train → evaluate → visualize.
+
+## What it shows
+
+- **DAG branching.** `scatter_plot` and `train_test` both read from
+  `load_data`, so editing `load_data` invalidates both branches.
+- **Mixed output types.** Cells produce DataFrames (arrow/ipc), trained
+  models (pickle), and matplotlib figures (image/png), all stored
+  natively by Strata's serializer.
+- **Display outputs.** `_` at the end of a cell (or a trailing
+  expression) becomes an inline preview on the cell.
+
+## Cells
+
+| Cell | What it does |
+|---|---|
+| `load_data` | Loads the iris dataset into a DataFrame. |
+| `explore_stats` | Per-feature summary stats. |
+| `scatter_plot` | Pair-plot of the four features, colored by class. |
+| `train_test` | 70/30 train/test split. |
+| `train_model` | Fits a `RandomForestClassifier` (100 trees). |
+| `evaluate` | Accuracy + per-class precision/recall. |
+| `confusion` | Confusion-matrix heatmap. |
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **Iris Classification** from the notebook list on the Strata home page.
+
+## Try this
+
+- Change the `test_size` in `train_test`. Cells downstream go stale;
+  `scatter_plot` stays ready (it doesn't depend on the split).
+- Re-run `evaluate` without re-training: the trained model is cached,
+  so only evaluation runs.
+
+## Load iris dataset
+
+<sub>**kind** python</sub>
+
+```python
+# @name Load iris dataset
+# Load the Iris dataset into a pandas DataFrame.
+import pandas as pd
+from sklearn.datasets import load_iris
+
+iris_bunch = load_iris()
+df = pd.DataFrame(iris_bunch.data, columns=iris_bunch.feature_names)
+df["species"] = pd.Categorical.from_codes(iris_bunch.target, iris_bunch.target_names)
+feature_names = iris_bunch.feature_names
+
+print(f"Loaded {len(df)} samples, {len(feature_names)} features")
+print(f"Species: {df['species'].unique().tolist()}")
+df.head()
+```
+
+## Explore per-feature stats
+
+<sub>**kind** python</sub>
+
+```python
+# @name Explore per-feature stats
+# Summary statistics grouped by species.
+stats = df.groupby("species").agg(["mean", "std"]).round(2)
+print(stats)
+```
+
+## Pairwise scatter plot
+
+<sub>**kind** python</sub>
+
+```python
+# @name Pairwise scatter plot
+# Pairwise scatter plot colored by species.
+import matplotlib
+import seaborn as sns
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+plt.style.use("strata")
+
+g = sns.pairplot(df, hue="species", diag_kind="hist", height=2)
+g.figure.suptitle("Iris Feature Distributions", y=1.02)
+plt.tight_layout()
+g.figure
+```
+
+# Train and evaluate
+
+The exploration cells above don't feed the model directly, they're
+sanity checks. The cells below are the ML pipeline proper: split the
+data, fit a random forest, score it against the held-out test set,
+and visualize the confusion matrix.
+
+Edit any cell in this section and the downstream cells go stale.
+Re-running the *test set* cell after an upstream change cascades the
+whole subtree in topological order, hitting cache for everything that
+hasn't changed.
+
+## Train / test split
+
+<sub>**kind** python</sub>
+
+```python
+# @name Train / test split
+# Split into training and test sets.
+from sklearn.model_selection import train_test_split
+
+X = df[feature_names]
+y = df["species"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42, stratify=y
+)
+
+print(f"Train: {len(X_train)} samples")
+print(f"Test:  {len(X_test)} samples")
+```
+
+## Train random forest classifier
+
+<sub>**kind** python</sub>
+
+```python
+# @name Train random forest classifier
+# Train a Random Forest classifier.
+from sklearn.ensemble import RandomForestClassifier
+
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+train_score = model.score(X_train, y_train)
+test_score = model.score(X_test, y_test)
+
+print(f"Train accuracy: {train_score:.3f}")
+print(f"Test accuracy:  {test_score:.3f}")
+```
+
+## Evaluate
+
+<sub>**kind** python</sub>
+
+```python
+# @name Evaluate
+# Per-class precision, recall, and f1 against the test set.
+from sklearn.metrics import classification_report
+
+y_pred = model.predict(X_test)
+report = classification_report(y_test, y_pred)
+print(report)
+```
+
+## Confusion matrix
+
+<sub>**kind** python</sub>
+
+```python
+# @name Confusion matrix
+# Confusion matrix heatmap.
+import matplotlib
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+plt.style.use("strata")
+
+cm = confusion_matrix(y_test, y_pred, labels=model.classes_)
+fig, ax = plt.subplots(figsize=(6, 5))
+sns.heatmap(
+    cm,
+    annot=True,
+    fmt="d",
+    cmap="Blues",
+    xticklabels=model.classes_,
+    yticklabels=model.classes_,
+    ax=ax,
+)
+ax.set_xlabel("Predicted")
+ax.set_ylabel("Actual")
+ax.set_title("Confusion Matrix")
+plt.tight_layout()
+fig
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/pandas_basics/index.md -->
+
+# Filter, group, merge and pivot a sales table
+
+![Filter, group, merge and pivot a sales table: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-light.webp#only-light)
+![Filter, group, merge and pivot a sales table: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/pandas_basics-dark.webp#only-dark)
+
+A guided tour of the pandas operations you reach for every day, split
+into one cell per concept. Each cell re-uses its upstream cell's
+artifact, so edits stay fast and the DAG stays honest.
+
+## What it shows
+
+- A fan-out: `create_data` feeds `select_filter` and `add_columns`, and
+  `add_columns` feeds `groupby`, `pivot`, `merge` and `summary`.
+- Cache-hit behavior: re-running a cell after its upstream hasn't
+  changed finishes in a few milliseconds.
+- How Strata's **staleness propagation** works: edit `add_columns` and
+  the four cells it feeds turn yellow automatically, while
+  `select_filter` stays ready.
+
+## Cells
+
+| Cell | What it does |
+|---|---|
+| `create_data` | Builds a small sales DataFrame as the root of the chain. |
+| `select_filter` | Column selection + boolean indexing. |
+| `add_columns` | A new frame, `orders`, with derived columns (`revenue = units * price`, `month`). |
+| `groupby` | `groupby` + aggregate. |
+| `pivot` | Pivot from long to wide. |
+| `merge` | Join two DataFrames. |
+| `summary` | Describe and basic stats. |
+
+## Per-cell unit tests
+
+Four cells ship with pytest tests next to them
+(`cells/<cell-id>.test.py`), a worked example of Strata's built-in
+**cell unit tests**:
+
+| Test file | Pins |
+|---|---|
+| `create-data.test.py` | row count, columns, no nulls, value ranges |
+| `add-columns.test.py` | `revenue == units * price`, `month` format |
+| `select-filter.test.py` | the high-value filter invariant holds for every row |
+| `summary.test.py` | exactly one winning product per region |
+
+Tests run in the notebook's own venv and receive a `cell` fixture whose
+attributes are the cell's namespace **after it runs against its real
+upstream input**: so `cell.sales` is the actual DataFrame, `cell.orders`
+a frame it computed, `cell.my_func` a function it defined:
+
+```python
+def test_revenue_is_units_times_price(cell):
+    expected = cell.orders["units"] * cell.orders["price"]
+    assert (cell.orders["revenue"] == expected).all()
+```
+
+Open the Tests panel on a cell to run them, or send the `cell_run_tests`
+WS request. A cell with no tests simply carries no `.test.py` file.
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **Pandas Basics** from the notebook list on the Strata home page.
+
+## Try this
+
+1. Run all cells top-to-bottom.
+2. Edit `create_data` (for example, change a price).
+3. Watch every other cell turn stale automatically.
+4. Run `summary`. Strata re-executes only the cells on its path,
+   `create_data` and `add_columns`, and leaves `select_filter`,
+   `groupby`, `pivot` and `merge` stale until you run them.
+
+## Create sample sales dataset
+
+<sub>**kind** python</sub>
+
+```python
+# @name Create sample sales dataset
+import numpy as np
+import pandas as pd
+
+np.random.seed(42)
+n = 200
+
+sales = pd.DataFrame(
+    {
+        "date": pd.date_range("2025-01-01", periods=n, freq="D"),
+        "region": np.random.choice(["North", "South", "East", "West"], n),
+        "product": np.random.choice(["Widget", "Gadget", "Doohickey"], n),
+        "units": np.random.randint(1, 50, n),
+        "price": np.round(np.random.uniform(5, 100, n), 2),
+    }
+)
+
+print(f"Created {len(sales)} rows")
+sales.head(10)
+```
+
+## Filter high-value orders
+
+<sub>**kind** python</sub>
+
+```python
+# @name Filter high-value orders
+# Filter to high-value orders (units > 20 and price > 30).
+high_value = sales[(sales["units"] > 20) & (sales["price"] > 30)].copy()
+
+print(
+    f"High-value orders: {len(high_value)} / {len(sales)} ({100 * len(high_value) / len(sales):.1f}%)"
+)
+high_value.head()
+```
+
+## Add computed columns
+
+<sub>**kind** python</sub>
+
+```python
+# @name Add computed columns
+orders = sales.copy()
+orders["revenue"] = orders["units"] * orders["price"]
+orders["month"] = orders["date"].dt.to_period("M").astype(str)
+
+print(f"Total revenue: ${orders['revenue'].sum():,.2f}")
+orders[["date", "region", "product", "units", "price", "revenue", "month"]].head()
+```
+
+## Revenue by region and product
+
+<sub>**kind** python</sub>
+
+```python
+# @name Revenue by region and product
+region_product = (
+    orders.groupby(["region", "product"])["revenue"]
+    .agg(["sum", "mean", "count"])
+    .round(2)
+    .sort_values("sum", ascending=False)
+)
+
+print(region_product)
+```
+
+## Monthly revenue pivot
+
+<sub>**kind** python</sub>
+
+```python
+# @name Monthly revenue pivot
+monthly_pivot = orders.pivot_table(
+    values="revenue",
+    index="month",
+    columns="region",
+    aggfunc="sum",
+).round(2)
+
+print(monthly_pivot)
+```
+
+## Merge with region metadata
+
+<sub>**kind** python</sub>
+
+```python
+# @name Merge with region metadata
+region_info = pd.DataFrame(
+    {
+        "region": ["North", "South", "East", "West"],
+        "manager": ["Alice", "Bob", "Carol", "Dave"],
+        "target_revenue": [50000, 45000, 55000, 40000],
+    }
+)
+
+region_summary = (
+    orders.groupby("region")["revenue"].sum().reset_index().merge(region_info, on="region")
+)
+
+region_summary["pct_of_target"] = (
+    100 * region_summary["revenue"] / region_summary["target_revenue"]
+).round(1)
+
+print(region_summary)
+```
+
+## Top product per region
+
+<sub>**kind** python</sub>
+
+```python
+# @name Top product per region
+# Top product by revenue in each region.
+top_products = (
+    orders.groupby(["region", "product"])["revenue"]
+    .sum()
+    .reset_index()
+    .sort_values("revenue", ascending=False)
+    .drop_duplicates(subset="region")
+    .sort_values("region")
+)
+
+print("Top product by revenue per region:")
+print(top_products.to_string(index=False))
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/titanic_ml/index.md -->
+
+# Predict Titanic survival with three classifiers
+
+![Predict Titanic survival with three classifiers: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-light.webp#only-light)
+![Predict Titanic survival with three classifiers: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/titanic_ml-dark.webp#only-dark)
+
+A canonical "first Kaggle notebook" rewritten for Strata. A
+feature-engineering stage feeds three classifiers; the best one is
+evaluated and its feature weights plotted.
+
+## What it shows
+
+- **Two branches off one load**: `explore` and `features` both read
+  `load_data`'s DataFrame, so editing `features` leaves `explore` ready.
+- **One upstream feeding several cells**: `features` produces the split,
+  which `train_model` and `evaluate` read, and `feature_cols`, which
+  `compare` reads, so editing it invalidates all three.
+- **Objects that need pickle**: `results` holds the fitted scikit-learn
+  models next to their accuracies, so it is stored with pickle rather than
+  as Arrow or JSON.
+
+## Cells
+
+| Cell | What it does |
+|---|---|
+| `load_data` | Loads the Titanic dataset bundled with seaborn and prints missing-value counts. |
+| `explore` | Prints the survival rate grouped by class and sex, and the overall rate. |
+| `features` | Keeps six columns, drops rows with missing values, encodes `sex` as 0/1 and makes a stratified 75/25 train/test split. |
+| `modeling_intro` | Markdown introducing the modeling cells. |
+| `train_model` | Fits logistic regression, random forest and gradient boosting, and keeps each model with its train and test accuracy in `results`. |
+| `evaluate` | Picks the model with the best test accuracy and prints its classification report. |
+| `compare` | Plots the best model's feature importances (or absolute coefficients for logistic regression). |
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **Titanic Survival Prediction** from the notebook list on the Strata home page.
+
+## Try this
+
+- Add a feature in `features` (e.g. `fare_per_person`). `train_model`,
+  `evaluate` and `compare` go stale but `explore` stays ready.
+- Run `evaluate` alone. Strata re-runs only the chain that's changed.
+
+## Load Titanic dataset
+
+<sub>**kind** python</sub>
+
+```python
+# @name Load Titanic dataset
+# Bundled with seaborn, so no network fetch is needed.
+import seaborn as sns
+
+df = sns.load_dataset("titanic")
+
+print(f"Loaded {len(df)} passengers")
+print(f"Survival rate: {df['survived'].mean():.1%}")
+print(f"\nMissing values:\n{df.isnull().sum()[df.isnull().sum() > 0]}")
+df.head()
+```
+
+## Survival rates by class and sex
+
+<sub>**kind** python</sub>
+
+```python
+# @name Survival rates by class and sex
+survival_rates = df.groupby(["pclass", "sex"])["survived"].mean().round(3)
+print(survival_rates)
+print(f"\nOverall: {df['survived'].mean():.3f}")
+```
+
+## Feature engineering
+
+<sub>**kind** python</sub>
+
+```python
+# @name Feature engineering
+from sklearn.model_selection import train_test_split
+
+feature_cols = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
+clean = df[feature_cols + ["survived"]].dropna().copy()
+
+# Encode sex as numeric
+clean["sex"] = clean["sex"].map({"male": 0, "female": 1})
+
+X = clean[feature_cols]
+y = clean["survived"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=42, stratify=y
+)
+
+print(f"Features: {feature_cols}")
+print(f"Train: {len(X_train)}, Test: {len(X_test)}")
+print(f"Dropped {len(df) - len(clean)} rows with missing values")
+```
+
+# Model the survivors
+
+We've engineered features from the raw passenger data. Now train
+three classifiers (logistic regression, random forest, gradient
+boosting), evaluate the best one, and compare feature importance.
+
+Each classifier runs once and gets cached. Tweaking
+`features.py` invalidates all three downstream cells; the
+provenance hash on each training cell changes because its `X_train`
+input changed.
+
+## Train classifiers
+
+<sub>**kind** python</sub>
+
+```python
+# @name Train classifiers
+# Train logistic regression, random forest, and gradient boosting; keep all three.
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+
+models = {
+    "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
+    "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42),
+    "Gradient Boosting": GradientBoostingClassifier(n_estimators=100, random_state=42),
+}
+
+results = {}
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    train_acc = model.score(X_train, y_train)
+    test_acc = model.score(X_test, y_test)
+    results[name] = {"train": train_acc, "test": test_acc, "model": model}
+    print(f"{name:25s}  train={train_acc:.3f}  test={test_acc:.3f}")
+```
+
+## Evaluate best model
+
+<sub>**kind** python</sub>
+
+```python
+# @name Evaluate best model
+# Detailed evaluation of the best model.
+from sklearn.metrics import classification_report
+
+best_name = max(results, key=lambda k: results[k]["test"])
+best_model = results[best_name]["model"]
+y_pred = best_model.predict(X_test)
+
+print(f"Best model: {best_name} (test accuracy: {results[best_name]['test']:.3f})\n")
+print(classification_report(y_test, y_pred, target_names=["Did not survive", "Survived"]))
+```
+
+## Feature importance from the best model
+
+<sub>**kind** python</sub>
+
+```python
+# @name Feature importance from the best model
+import matplotlib
+import pandas as pd
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+plt.style.use("strata")
+
+# Which weights a model exposes depends on what it is: the tree ensembles have
+# feature_importances_, logistic regression has coefficients. Reading whichever
+# is there keeps the cell producing a figure whoever wins, rather than printing
+# an apology when the linear model does.
+if hasattr(best_model, "feature_importances_"):
+    weights = pd.Series(best_model.feature_importances_, index=feature_cols)
+    axis_label = "Importance"
+else:
+    weights = pd.Series(best_model.coef_[0], index=feature_cols).abs()
+    axis_label = "|Coefficient|"
+
+importance = weights.sort_values(ascending=True)
+
+fig, ax = plt.subplots(figsize=(8, 4))
+importance.plot.barh(ax=ax)
+ax.grid(axis="y", visible=False)
+ax.set_title(f"Feature Importance ({best_name})")
+ax.set_xlabel(axis_label)
+plt.tight_layout()
+
+print(importance.sort_values(ascending=False))
+fig
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/data_viewer/index.md -->
+
+# Page through 2,000 transactions
+
+![Page through 2,000 transactions: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-light.webp#only-light)
+![Page through 2,000 transactions: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-dark.webp#only-dark)
+
+A two-cell notebook that produces DataFrames larger than the 20-row
+inline preview, so the notebook's **interactive data viewer** pages
+through the full frame.
+
+## What it shows
+
+- A cell whose displayed output is a **2,000-row** DataFrame. Every
+  table-shaped output renders in the grid; one larger than the preview
+  also gets a footer showing `1–50 of 2,000 rows` and **Prev / Next**
+  paging.
+- **Click a column header to sort**: ascending, then descending, then
+  clear. Sorting runs server-side over the whole frame (not just the
+  visible page), reading the cached Arrow artifact directly.
+- A **page-size** selector (25 / 50 / 100 / 250).
+- Columns of every dtype: integer (`id`), datetime (`ts`), string
+  (`region`, `product`), and float (`unit_price`, `revenue`).
+
+The viewer only appears for table-shaped outputs (pandas / polars
+DataFrames + Series, pyarrow Tables, and SQL / R tabular results).
+Tensors and scalars keep their existing display.
+
+## Cells
+
+| Cell | What it does |
+|---|---|
+| `generate` | Builds a 2,000-row transactions frame and displays it. |
+| `ranked` | Sorts by revenue into a derived frame, also gets the grid. |
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **Data Viewer** from the notebook list on the Strata home page and run both
+cells.
+
+## Try this
+
+1. Run `generate`. Scroll the grid; click **Next** to page through all
+   2,000 rows.
+2. Click the `revenue` header twice to sort descending, the top row is
+   now the largest revenue in the *entire* frame, not just this page.
+3. Change the page size to 250 and page again.
+4. Run `ranked` and sort it by `ts`: the server re-sorts the derived
+   frame on demand.
+
+## Generate transactions
+
+<sub>**kind** python</sub>
+
+```python
+# @name Generate transactions
+# The interactive grid keys off the cell's *displayed* value, so the last
+# expression is the full frame (not `.head()`). 2,000 rows > the 20-row
+# inline preview, so the viewer switches on paging + click-to-sort headers.
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(7)
+n = 2000
+
+transactions = pd.DataFrame(
+    {
+        "id": np.arange(1, n + 1),
+        "ts": pd.date_range("2026-01-01", periods=n, freq="h"),
+        "region": rng.choice(["North", "South", "East", "West"], n),
+        "product": rng.choice(["Widget", "Gadget", "Doohickey", "Sprocket"], n),
+        "units": rng.integers(1, 100, n),
+        "unit_price": np.round(rng.uniform(4.0, 250.0, n), 2),
+    }
+)
+transactions["revenue"] = np.round(transactions["units"] * transactions["unit_price"], 2)
+
+print(f"{len(transactions):,} transactions across {transactions['region'].nunique()} regions")
+transactions
+```
+
+## Rank by revenue
+
+<sub>**kind** python</sub>
+
+```python
+# @name Rank by revenue
+# A derived frame gets the same viewer. The grid's column sort is applied
+# server-side over the *whole* frame, so it re-orders independently of this
+# initial sort; click any header to prove it.
+ranked = transactions.sort_values("revenue", ascending=False).reset_index(drop=True)
+
+print(f"Top revenue: ${ranked['revenue'].iloc[0]:,.2f}")
+ranked
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/agent_demo/index.md -->
+
+# Train a model once, re-run only its evaluation
+
+![Train a model once, re-run only its evaluation: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-light.webp#only-light)
+![Train a model once, re-run only its evaluation: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-dark.webp#only-dark)
+
+This is the notebook from the
+[`strata agent`](https://bearingresearch.com/strata/latest/notebook/agent/)
+demo: a coding agent (Claude Code) builds it live while you watch in the
+terminal UI. It's a plain, runnable notebook; the agent-driven part is just how
+it gets written.
+
+## What it shows
+
+- A random forest fit **once** in `train.py`: the "expensive" step.
+- An evaluation downstream in `evaluate.py`.
+- The point: because Strata is **content-addressed**, editing the evaluation
+  recomputes **only** that cell. The model above is reused from cache, never
+  retrained. That's the difference from a plain agent + Jupyter, where a rerun
+  redoes everything.
+
+## Cells
+
+| cell | what it does |
+| --- | --- |
+| `intro.md` | Title / one-line framing |
+| `train.py` | Fit a `RandomForestClassifier` on synthetic data → `model` |
+| `evaluate.py` | `accuracy` + `conf_matrix` from `model` |
+
+## Running
+
+From the repository root (the notebook's own venv does not include Strata;
+`strata run` builds it from `pyproject.toml` before the first cell):
+
+```bash
+uv run strata run examples/agent_demo --force   # run every cell
+```
+
+## Reproducing the demo
+
+To watch a coding agent build this notebook from scratch, see `RECORDING.md` in
+this directory: it has the exact `strata agent` command and the two prompts,
+plus the screen-capture settings.
+
+# Agent demo: a coding agent builds this notebook
+
+A random forest, trained once and cached. Because Strata is content-addressed,
+editing the evaluation below recomputes only that cell, the model is never
+retrained.
+
+## train
+
+<sub>**kind** python</sub>
+
+```python
+# The expensive step: fit the model. Strata caches this by provenance, so a
+# downstream edit reuses the trained model instead of retraining it.
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+
+rng = np.random.default_rng(0)
+X = rng.normal(size=(8_000, 20))
+y = (X[:, 0] + X[:, 1] > 0).astype(int)
+
+model = RandomForestClassifier(
+    n_estimators=100, max_depth=8, n_jobs=-1, random_state=0
+).fit(X, y)
+```
+
+## evaluate
+
+<sub>**kind** python</sub>
+
+```python
+# Downstream of `model`. Edit this cell and only this cell recomputes; the
+# model above stays cached (no retraining).
+from sklearn.metrics import confusion_matrix
+
+accuracy = float(model.score(X, y))
+conf_matrix = confusion_matrix(y, model.predict(X))
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/model_variants/index.md -->
+
+# Switch between three classifiers without retraining
+
+![Switch between three classifiers without retraining: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-light.webp#only-light)
+![Switch between three classifiers without retraining: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants-dark.webp#only-dark)
+
+The same iris pipeline as `iris_classification`, but with three
+alternative training cells grouped as variants of the same DAG slot.
+Pick a classifier from the variant tabs and the rest of the notebook
+re-runs against it; switch back and the previous result is a cache hit.
+
+## What it shows
+
+- **Variant cells.** `train_logreg`, `train_rf`, and `train_gbm` all
+  carry `# @variant classifier <name>` and define the same contract
+  (`model`). Only the active variant participates in the DAG.
+- **Switching is cheap.** Each variant has its own provenance hash, so
+  re-running an already-trained variant is a cache hit. Flip-flopping
+  between two variants is free after each has run once.
+- **Strict contract.** All variants must produce the same value
+  bindings (imports don't count, they're scaffolding). If one variant
+  accidentally adds an extra value, you get a
+  `variant_contract_mismatch` diagnostic: the contract is what makes
+  downstream cells correct under any selection.
+
+## Cells
+
+| Cell | What it does |
+|---|---|
+| `load_data` | Loads iris into `df` + `feature_names`. |
+| `train_test` | 80/20 stratified split. |
+| `train_logreg` | **Variant `classifier=logreg`**: `LogisticRegression`. Active by default. |
+| `train_rf` | **Variant `classifier=rf`**: `RandomForestClassifier`. |
+| `train_gbm` | **Variant `classifier=gbm`**: `GradientBoostingClassifier`. |
+| `evaluate` | Test accuracy + per-class precision/recall against whichever `model` is active. |
+| `confusion` | Confusion-matrix heatmap for the active classifier. |
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Open **Model Variants** from the notebook list on the Strata home page. The
+classifier group renders as a tab strip on the train cell; click a
+tab to switch.
+
+## Try this
+
+- Run the notebook on `logreg`, then click the `rf` tab. `evaluate`
+  and `confusion` go stale; re-run them to see the random-forest
+  numbers. Click `logreg` again and both downstream cells become cache
+  hits.
+- Add a fourth variant: click the `+` on the tab strip, which clones
+  the active variant, then change its annotation to
+  `# @variant classifier svc` and its body to `model = SVC(...)`. A
+  file dropped into `cells/` on its own is ignored: only cells listed
+  in `notebook.toml` load, so a hand-made `cells/train_svc.py` also
+  needs an entry in the `cells = [...]` list there.
+- Edit a variant cell to define an extra variable (say,
+  `feature_importance = ...`). The header pill flags
+  `variant_contract_mismatch`: siblings disagree on what they
+  expose. Remove the extra binding to clear it.
+
+## Notes
+
+The active selection is committed in `notebook.toml`'s
+`[[variant_group]]` table, so flipping variants from the UI shows up as a
+git diff on that one line. That's intentional: the notebook records
+which experiment you ran.
+
+## Load iris dataset
+
+<sub>**kind** python</sub>
+
+```python
+# @name Load iris dataset
+# Load the Iris dataset into a pandas DataFrame.
+import pandas as pd
+from sklearn.datasets import load_iris
+
+iris_bunch = load_iris()
+df = pd.DataFrame(iris_bunch.data, columns=iris_bunch.feature_names)
+df["species"] = pd.Categorical.from_codes(iris_bunch.target, iris_bunch.target_names)
+feature_names = iris_bunch.feature_names
+
+print(f"Loaded {len(df)} samples, {len(feature_names)} features")
+df.head()
+```
+
+## Train / test split
+
+<sub>**kind** python</sub>
+
+```python
+# @name Train / test split
+# 80/20 train-test split, stratified on species.
+from sklearn.model_selection import train_test_split
+
+X = df[feature_names]
+y = df["species"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+print(f"Train: {len(X_train)} samples")
+print(f"Test:  {len(X_test)} samples")
+```
+
+# Pick a classifier
+
+The three cells below are alternatives. They share the same `model`
+defines contract, each one trains a different classifier on the same
+inputs and binds the result to `model`. Only the active variant
+participates in the DAG; the others render as inactive tabs in the
+notebook UI.
+
+Switching variants is cheap. Each variant has its own provenance
+hash, so re-running an already-trained variant is a cache hit. The
+downstream cells (`Evaluate active classifier`, `Confusion matrix`)
+re-cascade against whichever variant is active.
+
+## Logistic regression
+
+<sub>**kind** python  ·  **variant** logreg of classifier</sub>
+
+```python
+# @variant classifier logreg
+# @name Logistic regression
+# Logistic regression baseline.
+from sklearn.linear_model import LogisticRegression
+
+model = LogisticRegression(max_iter=1000, random_state=42)
+model.fit(X_train, y_train)
+
+print(f"Trained {type(model).__name__} (train acc {model.score(X_train, y_train):.3f})")
+```
+
+## Evaluate active classifier
+
+<sub>**kind** python</sub>
+
+```python
+# @name Evaluate active classifier
+# Test-set classification report; works for any classifier.
+from sklearn.metrics import classification_report
+
+y_pred = model.predict(X_test)
+test_acc = model.score(X_test, y_test)
+
+print(f"=== {type(model).__name__} ===")
+print(f"Test accuracy: {test_acc:.3f}\n")
+print(classification_report(y_test, y_pred))
+```
+
+## Confusion matrix
+
+<sub>**kind** python</sub>
+
+```python
+# @name Confusion matrix
+# Confusion-matrix heatmap for the active classifier.
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
+plt.style.use("strata")
+
+cm = confusion_matrix(y_test, y_pred, labels=model.classes_)
+fig, ax = plt.subplots(figsize=(6, 5))
+sns.heatmap(
+    cm,
+    annot=True,
+    fmt="d",
+    cmap="Blues",
+    xticklabels=model.classes_,
+    yticklabels=model.classes_,
+    ax=ax,
+)
+ax.set_xlabel("Predicted")
+ax.set_ylabel("Actual")
+ax.set_title(f"Confusion Matrix: {type(model).__name__}")
+plt.tight_layout()
+fig
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/model_variants_sweep/index.md -->
+
+# Run every model variant and compare their accuracy
+
+![Run every model variant and compare their accuracy: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)
+![Run every model variant and compare their accuracy: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)
+
+A minimal example of variant **sweep mode**: run every variant of a group and
+compare them all in one downstream cell.
+
+The `model` group has three variant cells, `always_one`, `alternating`,
+`majority`: each producing `preds` a different way. Because the group is in
+**sweep mode** (`mode = "sweep"` in `notebook.toml`), all three run on every
+execution, and the downstream `compare` cell receives `preds` as a
+`{variant_name: predictions}` dict:
+
+```
+accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
+```
+
+## Fan-out with `@per_variant`
+
+The `compare` cell consumes the whole dict at once. The `score` cell shows the
+other option, **fan-out**: `# @per_variant` runs it once per variant with
+`preds` bound to that variant's list (a scalar, not the dict), so each variant
+is scored independently (in a real workload, each could carry `# @worker gpu`
+and run as its own job). A plain downstream cell, `best`, then collapses the
+per-variant `accuracy` back to a dict and picks the winner:
+
+```
+accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
+best model: always_one
+```
+
+Same numbers as `compare`, produced by fanning the scoring out first. See
+[Variant Cells → Fan-out](https://bearingresearch.com/strata/latest/guides/cells/loops-and-variants/#fan-out-run-a-downstream-cell-once-per-variant).
+
+## Run it
+
+```bash
+strata run examples/model_variants_sweep
+```
+
+Or open it in the UI (`uv run strata-notebook --notebook-dir examples` from
+the repo root), where the `model` group renders as a tab strip with a
+**sweep** badge; clicking a tab shows that variant's source (all of them still
+run), and the group has a run-all button + a readiness rollup.
+
+## Switch vs sweep
+
+Flip `mode = "sweep"` to `mode = "switch"` (or drop the line) in
+`notebook.toml` and only the active variant runs; `compare` would then see a
+single `preds` value instead of the dict. Sweep is for *comparing* variants on
+a shared downstream; switch is for *picking* one. See
+[Variant Cells → Sweep mode](https://bearingresearch.com/strata/latest/notebook/annotations/#sweep-mode-compare-all-variants-at-once).
+
+## data
+
+<sub>**kind** python</sub>
+
+```python
+y_true = [1, 0, 1, 1, 0, 1, 0, 0, 1, 1]
+```
+
+## baseline
+
+<sub>**kind** python  ·  **variant** always_one of model</sub>
+
+```python
+# @variant model always_one
+# A trivial baseline "classifier": predict 1 for everything.
+preds = [1] * len(y_true)
+```
+
+## compare
+
+<sub>**kind** python</sub>
+
+```python
+# `preds` is a dict {variant_name: predictions} because the `model` group is in
+# sweep mode: every variant ran, and this cell consumes them all at once.
+accuracy = {
+    name: sum(p == t for p, t in zip(pred, y_true)) / len(y_true)
+    for name, pred in preds.items()
+}
+print("accuracy by variant:", accuracy)
+```
+
+## score
+
+<sub>**kind** python</sub>
+
+```python
+# @per_variant
+# Fan-out: runs once per model variant. `preds` is bound to THAT variant's
+# predictions (a scalar list), not the whole {variant: preds} dict, so this
+# cell computes a single accuracy. In a real workload each instance could carry
+# `# @worker gpu` and run as an independent job.
+accuracy = sum(p == t for p, t in zip(preds, y_true)) / len(y_true)
+```
+
+## best
+
+<sub>**kind** python</sub>
+
+```python
+# A plain (non-fan-out) downstream cell collapses the per-variant `accuracy`
+# back into a {variant: value} dict, the same shape the `compare` cell gets,
+# but produced by fanning the scoring out first. Pick the winner:
+best_model = max(accuracy, key=accuracy.get)
+print("accuracy by variant:", accuracy)
+print("best model:", best_model)
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/review_triage/index.md -->
+
+# Triage customer reviews into validated JSON with an LLM
+
+![Triage customer reviews into validated JSON with an LLM: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/review_triage-light.webp#only-light)
+![Triage customer reviews into validated JSON with an LLM: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/review_triage-dark.webp#only-dark)
+
+Demonstrates `# @output_schema` on a prompt cell.
+
+The `triage` cell sends a list of customer reviews to an LLM and gets
+back a **schema-validated JSON array**: not free-form text that a
+downstream cell has to regex. The schema is passed through as native
+structured-output (Anthropic's native tool use, OpenAI's
+`response_format: {type: "json_schema"}`, or `json_object` fallback for
+providers that don't support schemas).
+
+Because the schema is part of the cell's provenance hash, editing the
+schema invalidates the cached response, exactly what you want when
+you're iterating on the shape of the output.
+
+## Cells
+
+1. `reviews.py`: hand-picked list of customer reviews
+2. `triage.prompt`: prompt cell with `@output_schema` enforcing
+   `{sentiment, priority, tags}` per review
+3. `summary.py`: pandas aggregation of the structured results
+
+## Running
+
+Set an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) in the
+notebook's Runtime panel, then run-all.
+
+## reviews
+
+<sub>**kind** python</sub>
+
+```python
+# A small hand-picked set of customer reviews. Kept inline so the
+# notebook runs anywhere: no network, no data file, just enough
+# variety to make the triage output interesting.
+reviews = [
+    "Shipping took two weeks but the product itself works perfectly. Would buy again.",
+    "Absolute disaster. Arrived broken, support ignored three emails. Demanding a refund.",
+    "It's fine. Does what it says on the box.",
+    "Great product and fast shipping, but the packaging was excessive. So much plastic.",
+    "Completely failed after 24 hours of use. Battery overheated. Fire hazard.",
+    "Best purchase of the year! Setup was a breeze and it integrates with everything.",
+    "Missing the power cable. Shop should have caught this before shipping.",
+    "Works as advertised. The interface feels a bit dated but the performance is solid.",
+]
+```
+
+## triage
+
+<sub>**kind** prompt</sub>
+
+*Prompt cell: response intentionally excluded from export.*
+
+```text
+# @name triage
+# @temperature 0.0
+# @output_schema {"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object", "properties": {"review_index": {"type": "integer"}, "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral"]}, "priority": {"type": "string", "enum": ["low", "medium", "high"]}, "tags": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3}}, "required": ["review_index", "sentiment", "priority", "tags"]}}}, "required": ["items"]}
+# @system You are a customer-support triage assistant. Keep tags short (1-2 words).
+#
+# Free-form language models return free-form text: useful for summaries,
+# awkward for pipelines. The `@output_schema` annotation pins the shape
+# of this cell's output so downstream cells can destructure fields
+# without regex-wrangling the response. Schema changes invalidate the
+# cache, so iterating on the schema does what you'd expect.
+
+Triage the following customer reviews. For each one, return:
+- `review_index`: the 0-based position of the review in the input list
+- `sentiment`: positive / negative / neutral
+- `priority`: low / medium / high. "high" means the team should
+  escalate immediately (safety issues, demands for refunds, etc).
+- `tags`: 1–3 short descriptive tags (e.g. "shipping", "hardware
+  failure", "packaging")
+
+Reviews:
+{{ reviews }}
+```
+
+## triage_summary
+
+<sub>**kind** python</sub>
+
+```python
+# @name triage_summary
+# Downstream cells consume the LLM output as structured data: no
+# parsing, no fallbacks, no "did the model actually return JSON this
+# time?" defensive code. The schema guarantees the shape.
+import pandas as pd
+
+rows = triage["items"]
+df = pd.DataFrame(rows)
+
+print("Per-review triage:")
+for row, review in zip(rows, reviews):
+    tags = ", ".join(row["tags"])
+    print(
+        f"  [{row['review_index']}] "
+        f"{row['sentiment']:>8} / {row['priority']:>6} "
+        f"({tags}): {review[:60]}..."
+    )
+
+print()
+print("By priority:")
+print(df["priority"].value_counts().to_string())
+
+print()
+print("Sentiment distribution:")
+print(df["sentiment"].value_counts().to_string())
+
+# The final expression becomes the cell's display value: a compact
+# record of what the triage flagged as high-priority.
+high_priority = df[df["priority"] == "high"]
+{
+    "total_reviews": len(df),
+    "needs_escalation": len(high_priority),
+    "negative_rate": float((df["sentiment"] == "negative").mean()),
+}
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/arxiv_classifier/index.md -->
+
+# Classify arXiv papers across three workers
+
+A full ML workflow that exercises every differentiated feature of Strata
+Notebook at once:
+
+- **Distributed workers.** Nine cells, three different workers: `local`,
+  `df-cluster` (CPU-heavy DataFusion), `gpu-fly` (GPU for embeddings).
+  Each cell declares its target worker with a single annotation;
+  no deployment code.
+- **Content-addressed caching.** Re-run the notebook after an edit; every
+  unchanged cell hits cache instantly regardless of which worker it runs on.
+- **Prompt cells.** Two cells use the LLM assistant with `{{ variable }}`
+  injection to narrate the data at key points.
+- **DAG invalidation.** Change the model in the training cell, and every
+  upstream cell (load, aggregate, embed) still hits cache, only training,
+  evaluation and the plot re-execute.
+
+## The workflow
+
+| # | Cell | Worker | What it does |
+|---|---|---|---|
+| 1 | `load` | local | Load arXiv metadata |
+| 2 | `aggregate` | df-cluster | Group by category and year via DataFusion |
+| 3 | `themes` | local (LLM) | Prompt: identify research themes from stats |
+| 4 | `sample` | df-cluster | Stratified sample for the training set |
+| 5 | `embed` | gpu-fly | Generate sentence-transformer embeddings |
+| 6 | `clusters` | local (LLM) | Prompt: describe each paper cluster |
+| 7 | `train` | local | Train a classifier on the embeddings |
+| 8 | `evaluate` | local | Compute accuracy and classification report |
+| 9 | `plot` | local | Visualize the confusion matrix |
+
+Cells 1, 3, 6, 7, 8, 9 run on the user's machine. Cells 2 and 4 run on the
+DataFusion worker, close to the data, avoids round-tripping the full
+dataset. Cell 5 runs on the GPU worker; training a logistic regression on
+the embeddings takes under a second on a CPU, so it stays local.
+
+## Running it locally
+
+`notebook.toml` points `df-cluster` and `gpu-fly` at two local HTTP
+executors, `http://127.0.0.1:9000/v1/execute` and
+`http://127.0.0.1:9001/v1/execute`, the ports `run_local_workers.sh` binds.
+To run them on hosted machines instead, deploy `df-cluster/` to Fly and
+`modal_gpu_worker.py` to Modal (`MODAL_DEPLOY.md`), then change the `url`
+under each `[workers.config]` to the deployed one. `df-cluster` sends the
+token in `STRATA_DF_CLUSTER_TOKEN` when that is set.
+
+```bash
+# Terminal 1: start the two local worker processes
+./examples/arxiv_classifier/run_local_workers.sh
+
+# Terminal 2: start Strata
+uv run strata-notebook --notebook-dir examples
+
+# Terminal 3: open the notebook in the UI
+# http://localhost:8765
+# Under "Open Notebook", pick "Classify arXiv papers across three workers"
+```
+
+Once the notebook is open, run all cells. You should see:
+
+- The `worker: df-cluster` badge next to cells 2 and 4
+- The `worker: gpu-fly` badge next to cell 5
+- A live `dispatching → df-cluster` or `dispatching → gpu-fly` badge
+  (pulsing yellow) while each remote cell is executing
+- Green `✓` status on every cell after the first run
+- Green `✓ cached` on every cell on the second run
+
+## What it needs
+
+The cells run the real workload: `load` downloads about 20K arXiv abstracts
+from Hugging Face, and `embed` encodes them with the `all-MiniLM-L6-v2`
+sentence-transformer, so the worker running `embed` needs
+`sentence-transformers` (and with it `torch`). The two prompt cells, `themes`
+and `clusters`, need an LLM provider key such as `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`, set in the Runtime panel.
+
+## Load arXiv Papers
+
+<sub>**kind** python  ·  **worker** local</sub>
+
+```python
+# @name Load arXiv Papers
+# @worker local
+# Load arXiv ML papers from Hugging Face and assign topic categories.
+# 118K real papers with titles and abstracts. We sample 20K and assign
+# topics via keyword matching, a common first step when you have text
+# data but no labels.
+import re
+
+import pandas as pd
+
+DATASET_URL = (
+    "https://huggingface.co/api/datasets/CShorten/ML-ArXiv-Papers"
+    "/parquet/default/train/0.parquet"
+)
+SAMPLE_SIZE = 20_000
+
+raw = pd.read_parquet(DATASET_URL, columns=["title", "abstract"])
+papers = raw.dropna(subset=["abstract"]).head(SAMPLE_SIZE).reset_index(drop=True)
+
+TOPIC_RULES = [
+    ("reinforcement-learning", r"reinforcement|reward|policy gradient|Q-learning|MDP"),
+    ("nlp", r"\bNLP\b|language model|translation|transformer|text classif|sentiment"),
+    ("computer-vision", r"image|object detection|segmentation|convolutional|visual"),
+    ("optimization", r"convex|gradient descent|convergence|optimization|stochastic"),
+    ("generative", r"generative|GAN|diffusion|variational|autoencoder|VAE"),
+]
+
+
+def _assign_topic(text: str) -> str:
+    lower = text.lower()
+    for topic, pattern in TOPIC_RULES:
+        if re.search(pattern, lower, re.IGNORECASE):
+            return topic
+    return "other"
+
+
+papers["topic"] = papers["abstract"].apply(_assign_topic)
+print(f"Loaded {len(papers):,} papers, {papers['topic'].nunique()} topics")
+print(papers["topic"].value_counts().to_string())
+papers
+```
+
+## Aggregate by Topic
+
+<sub>**kind** python  ·  **worker** df-cluster</sub>
+
+```python
+# @name Aggregate by Topic
+# @worker df-cluster
+# Aggregate paper counts per topic using DataFusion SQL.
+# Dispatched to the df-cluster worker which has DataFusion installed.
+import pyarrow as pa
+from datafusion import SessionContext
+
+ctx = SessionContext()
+table = pa.Table.from_pandas(papers)
+ctx.register_record_batches("papers", [table.to_batches()])
+
+category_stats = ctx.sql(
+    """
+    SELECT
+        topic,
+        COUNT(*) AS paper_count,
+        ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct
+    FROM papers
+    GROUP BY topic
+    ORDER BY paper_count DESC
+    """
+).to_pandas()
+
+print("Topic distribution (DataFusion SQL):")
+print(category_stats.to_string(index=False))
+category_stats
+```
+
+## research_themes
+
+<sub>**kind** prompt  ·  **worker** local</sub>
+
+*Prompt cell: response intentionally excluded from export.*
+
+```text
+# @name research_themes
+# @worker local
+# Prompt cell: LLM analysis of topic distribution from the DataFusion aggregation.
+Given these arXiv ML paper topic counts derived from keyword classification:
+
+{{ category_stats }}
+
+For each topic, write one sentence describing what kinds of papers fall into it
+and why this topic matters for the ML research community. Return as a numbered list.
+```
+
+## Stratified Sample
+
+<sub>**kind** python  ·  **worker** df-cluster</sub>
+
+```python
+# @name Stratified Sample
+# @worker df-cluster
+# Stratified sample: take up to 500 papers per topic so the embedding
+# step runs in seconds, not minutes. Uses DataFusion window functions.
+import pyarrow as pa
+from datafusion import SessionContext
+
+ctx = SessionContext()
+table = pa.Table.from_pandas(papers)
+ctx.register_record_batches("papers", [table.to_batches()])
+
+PER_TOPIC = 500
+
+sampled_papers = ctx.sql(
+    f"""
+    WITH ranked AS (
+        SELECT
+            title,
+            abstract,
+            topic,
+            ROW_NUMBER() OVER (PARTITION BY topic ORDER BY title) AS rn
+        FROM papers
+    )
+    SELECT title, abstract, topic
+    FROM ranked
+    WHERE rn <= {PER_TOPIC}
+    ORDER BY topic, title
+    """
+).to_pandas()
+
+print(
+    f"Sampled {len(sampled_papers):,} papers across "
+    f"{sampled_papers['topic'].nunique()} topics (DataFusion SQL)"
+)
+print(sampled_papers["topic"].value_counts().to_string())
+sampled_papers
+```
+
+## Embed Abstracts
+
+<sub>**kind** python  ·  **worker** gpu-fly</sub>
+
+```python
+# @name Embed Abstracts
+# @worker gpu-fly
+# @timeout 300
+# Generate sentence-transformer embeddings for each paper's abstract.
+# This is the expensive step: ~3K abstracts × 384-dim on an A10G GPU
+# takes ~5 seconds. On CPU it would take ~90 seconds. On re-run it's
+# instant: the artifact store caches the result keyed by the exact
+# input data + model identity.
+import numpy as np
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("all-MiniLM-L6-v2")
+texts = sampled_papers["abstract"].tolist()
+embeddings = model.encode(texts, show_progress_bar=True, batch_size=256)
+embeddings = np.array(embeddings, dtype="float32")
+
+print(f"Generated embeddings: {embeddings.shape} ({embeddings.nbytes / 1e6:.1f} MB)")
+embeddings
+```
+
+## cluster_descriptions
+
+<sub>**kind** prompt  ·  **worker** local</sub>
+
+*Prompt cell: response intentionally excluded from export.*
+
+```text
+# @name cluster_descriptions
+# @worker local
+# Prompt cell: generate a practical summary of the research themes.
+The following research themes were identified from analyzing {{ category_stats }}:
+
+{{ research_themes }}
+
+Write a short paragraph (4-5 sentences) for a technical audience explaining
+the practical significance of these themes. Focus on how they relate to each
+other and what trends they suggest for the ML research community.
+```
+
+## Train Classifier
+
+<sub>**kind** python  ·  **worker** local</sub>
+
+```python
+# @name Train Classifier
+# @worker local
+# Train a logistic regression classifier: embeddings → topic label.
+# Runs locally. Logistic regression on 3K × 384 takes <1s on CPU, so
+# there is no reason to ship the data to a GPU worker and back.
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+
+X = embeddings
+y = sampled_papers["topic"].to_numpy()
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+classifier = LogisticRegression(max_iter=1000, n_jobs=-1)
+classifier.fit(X_train, y_train)
+
+train_acc = classifier.score(X_train, y_train)
+test_acc = classifier.score(X_test, y_test)
+print(f"Train accuracy: {train_acc:.3f}")
+print(f"Test accuracy:  {test_acc:.3f}")
+print(f"Classes: {list(classifier.classes_)}")
+
+train_test_split_info = {
+    "train_size": len(X_train),
+    "test_size": len(X_test),
+    "train_acc": round(train_acc, 4),
+    "test_acc": round(test_acc, 4),
+}
+train_test_split_info
+```
+
+## Evaluate Model
+
+<sub>**kind** python  ·  **worker** local</sub>
+
+```python
+# @name Evaluate Model
+# @worker local
+# Evaluation on the held-out test set. Small data, runs locally.
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import train_test_split
+
+X = embeddings
+y = sampled_papers["topic"].to_numpy()
+_, X_test, _, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+predictions = classifier.predict(X_test)
+accuracy = accuracy_score(y_test, predictions)
+report = classification_report(y_test, predictions, output_dict=True, zero_division=0)
+
+print(f"Test accuracy: {accuracy:.3f}")
+print()
+print(classification_report(y_test, predictions, zero_division=0))
+
+eval_results = {"accuracy": round(accuracy, 4), "per_class": report}
+eval_results
+```
+
+## Confusion Matrix
+
+<sub>**kind** python  ·  **worker** local</sub>
+
+```python
+# @name Confusion Matrix
+# @worker local
+# Visualize the confusion matrix on the held-out test set.
+import matplotlib.pyplot as plt
+from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+from sklearn.model_selection import train_test_split
+
+plt.style.use("strata")
+
+X = embeddings
+y = sampled_papers["topic"].to_numpy()
+_, X_test, _, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+classes = sorted(set(y))
+predictions = classifier.predict(X_test)
+cm = confusion_matrix(y_test, predictions, labels=classes)
+
+fig, ax = plt.subplots(figsize=(8, 6))
+ConfusionMatrixDisplay(cm, display_labels=classes).plot(
+    ax=ax, cmap="Blues", colorbar=False, xticks_rotation=30
+)
+ax.set_title("arXiv Topic Classification: Confusion Matrix")
+ax.grid(False)
+plt.tight_layout()
+fig
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/news_alpha_trader/index.md -->
+
+# Paper-trade on overnight news sentiment
+
+**An end-to-end LLM-driven trading notebook.** Overnight news → structured sentiment signals → paper (or live) orders via Alpaca → cost-adjusted P&L, all persisted to a local DuckDB so the data accumulates across sessions.
+
+This example is the opposite of the toy notebooks in this directory: it talks to real APIs, spends real tokens, and (if you opt in) places real orders.
+
+## What it does
+
+1. Pulls overnight news for a watchlist (Alpaca Market Data, Benzinga feed)
+2. Extracts structured sentiment per headline via the LLM with `@output_schema` (validated JSON, auto-retried on failure)
+3. Fetches latest prices and computes available capital
+4. Generates a trade plan under hard risk limits (max position size, daily trade cap, ticker whitelist)
+5. Submits orders, paper by default, live only behind a two-key lock
+6. Reconciles fills, records realized costs (slippage, TAF, spread)
+7. Reports **cost-adjusted** P&L, the only number that matters: did the strategy beat its own API and transaction bill?
+8. LLM writes a daily journal entry with the day's lessons
+
+## Required API keys
+
+Set these in the **Runtime panel**:
+
+| Key                   | Used for                              |
+| --------------------- | ------------------------------------- |
+| `ALPACA_API_KEY`      | News + prices + orders                |
+| `ALPACA_API_SECRET`   | Same                                  |
+| `ANTHROPIC_API_KEY` _or_ `OPENAI_API_KEY` | Signal extraction + daily note |
+
+Alpaca free tier gives 200 req/min, 7+ years history, 15-min REST delay. Plenty for daily rebalancing.
+
+### Secret manager
+
+`notebook.toml` also wires a secret manager, so these keys can come from Infisical instead of being typed in:
+
+```toml
+[secret_manager]
+provider = "infisical"
+project_id = "7301e122-565d-491d-9082-056504381782"
+```
+
+The provider needs the `infisical` extra (`uv tool install "strata-notebook[infisical]"`). That `project_id` is the example author's project; replace it with your own Infisical project's id. Strata logs in with credentials from the environment of the shell that starts the server, never from the notebook: export `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET` (a Machine Identity with read access to the project, recommended) or `INFISICAL_TOKEN` (a service token), plus `INFISICAL_HOST` for a self-hosted Infisical. See [Secrets](https://bearingresearch.com/strata/latest/notebook/secrets/) for the full setup. Without those credentials the Runtime panel shows a fetch error; keys typed into the panel still work, or remove the `[secret_manager]` block to stop the fetch.
+
+## Paper vs live
+
+**The notebook ships in `paper` mode.** Every code path is identical between paper and live; only the Alpaca endpoint URL differs. To flip to live you must:
+
+1. Edit `helpers.py` → set `Config.MODE = "live"`
+2. Edit `helpers.py` → set `Config.I_UNDERSTAND_THIS_IS_REAL_MONEY = True`
+3. Your Alpaca account must be funded
+
+The `place_orders` cell refuses to run live without both flags set. This is intentional: two edits, on purpose.
+
+## Risk limits (hard, enforced in code)
+
+Change in `helpers.py` → `Config` class:
+
+- `MAX_POSITION_USD`: per-ticker notional cap (default $500)
+- `MAX_TOTAL_EXPOSURE_USD`: portfolio notional cap (default $2000)
+- `MAX_DAILY_TRADES`: daily trade count cap (default 10)
+- `TICKER_WHITELIST`: the LLM *cannot* place orders in tickers outside this list, even if a headline mentions one
+
+## DuckDB schema
+
+One file: `work/trading.db` in the notebook's directory. Tables:
+
+- `news_raw`: raw headlines (idempotent insert by `article_id`)
+- `signals`: extracted sentiment per article
+- `prices`: daily OHLC per ticker
+- `orders`: every order attempt, expected cost, Alpaca order id
+- `trades`: reconciled fills with realized cost
+- `positions`: current positions (rebuilt from `trades`)
+- `costs`: every dollar spent: LLM tokens, market data, commissions, TAF fees, slippage
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+# Open "Paper-trade on overnight news sentiment" from the home page, set API keys in the Runtime panel, run all.
+```
+
+Re-run tomorrow: `fetch_news` only pulls new articles, `place_orders` is idempotent by `signal_id`. The DB grows over time; so does the history you can analyze.
+
+## Disclaimers
+
+- **This is not financial advice.** The strategy is a demo. It may lose money. Backtest thoroughly before live trading.
+- LLM outputs are non-deterministic even with `temperature=0.0`. A prompt injection in a news headline could theoretically shift a signal; the ticker whitelist is the hard backstop.
+- Paper fills are instantaneous and slippage-free. Live fills are not. The cost model applies estimated slippage to both modes so the numbers stay honest.
+- You are responsible for understanding every line of `place_orders.py` before flipping to live.
+
+# Read before running
+
+This notebook is the first thing you see when you open the project. It does
+nothing computationally, the real work starts in `helpers`.
+
+## Key facts
+
+1. **Real money mode requires two opt-ins.** This notebook can place real
+   orders on your Alpaca account when both `Config.MODE == "live"` and
+   `Config.I_UNDERSTAND_THIS_IS_REAL_MONEY == True`. Both live in
+   `helpers.py` and default to `"paper"` / `False`. You must edit both on
+   purpose to trade live.
+
+2. **Every LLM call costs real money.** Every market-data call counts
+   against your Alpaca rate limit (200/min free tier). The `costs` cell
+   tracks both, check it before you leave the notebook running unattended.
+
+3. **Paper fills aren't realistic.** Paper fills on Alpaca are instantaneous
+   and slippage-free, which is not how real markets work. We apply a modeled
+   slippage cost even in paper mode so the cost-adjusted P&L doesn't lie
+   when you eventually flip to live.
+
+4. **LLM outputs are non-deterministic.** A hostile news headline could in
+   principle influence a signal. We enforce a ticker whitelist
+   (`Config.TICKER_WHITELIST`) at the order layer, the LLM cannot place
+   orders in tickers outside that list regardless of what the signal says.
+
+5. **Nothing here is financial advice.** The strategy is a demo. Backtest on
+   historical data (see `pnl_report`) before trusting it with capital.
+
+## Helpers & Config
+
+<sub>**kind** python</sub>
+
+```python
+# @name Helpers & Config
+# Module cell: pure defs + literal constants. Downstream cells import
+# Config, the DuckDB/Alpaca factories, and the cost estimators by name.
+#
+# Keeping ALL connection and policy knobs in one place is deliberate:
+# flipping paper→live, widening the watchlist, or tightening risk is a
+# single-cell edit. The DB schema also lives here so every downstream
+# cell can assume the tables exist after this cell runs once.
+import datetime as dt
+import json
+import os
+from decimal import Decimal
+from pathlib import Path
+
+
+class Config:
+    # --- Mode gate -----------------------------------------------------
+    # Set MODE="live" AND I_UNDERSTAND_THIS_IS_REAL_MONEY=True to place
+    # real orders. place_orders refuses to trade live without both.
+    MODE = "paper"
+    I_UNDERSTAND_THIS_IS_REAL_MONEY = False
+
+    # --- Universe ------------------------------------------------------
+    # Hard whitelist. place_orders drops any proposed trade whose ticker
+    # is not in this list, regardless of what a signal claims.
+    TICKER_WHITELIST = ("AAPL", "MSFT", "NVDA", "GOOGL", "AMZN")
+
+    # --- Risk limits ---------------------------------------------------
+    MAX_POSITION_USD = 500.0
+    MAX_TOTAL_EXPOSURE_USD = 2000.0
+    MAX_DAILY_TRADES = 10
+    MIN_CONFIDENCE = 0.7
+    MIN_ABS_SENTIMENT = 0.4
+
+    # --- Cost model ----------------------------------------------------
+    # LLM pricing is fetched from LiteLLM's public catalog at runtime;
+    # see _fetch_litellm_pricing() below. Fallback rate used only when
+    # the catalog can't be reached AND the model is unknown; matches
+    # mid-tier Sonnet pricing so we overstate rather than log $0.
+    FALLBACK_LLM_PRICE_USD_PER_M = (3.0, 15.0)
+
+    # Alpaca equities: $0 commission. Regulatory TAF only on sells.
+    TAF_USD_PER_SHARE = 0.000166
+    TAF_MAX_USD_PER_TRADE = 8.30
+    # Assumed half-spread / market impact applied to BOTH paper and
+    # live fills so cost-adjusted P&L stays honest when you flip modes.
+    SLIPPAGE_BPS = 5.0
+
+    # --- Storage -------------------------------------------------------
+    # "." is the cell's working directory, the notebook's work/.
+    DB_FILENAME = "trading.db"
+    LOOKBACK_DAYS = 30
+
+
+def db_path() -> Path:
+    """Where the DuckDB file lives (the notebook's work/)."""
+    return Path(".") / Config.DB_FILENAME
+
+
+def open_db():
+    """Open (or create) the DuckDB file and ensure the schema exists.
+
+    Connection is short-lived: each cell gets its own. DuckDB handles
+    concurrent read-only + single-writer access fine for this scale.
+    """
+    import duckdb
+
+    conn = duckdb.connect(str(db_path()))
+    _ensure_schema(conn)
+    return conn
+
+
+def _ensure_schema(conn) -> None:
+    """Idempotent DDL. Run on every open_db() call (CREATE IF NOT EXISTS)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS news_raw (
+            article_id BIGINT PRIMARY KEY,
+            ticker VARCHAR NOT NULL,
+            headline VARCHAR NOT NULL,
+            summary VARCHAR,
+            url VARCHAR,
+            source VARCHAR,
+            published_at TIMESTAMP NOT NULL,
+            ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS signals (
+            signal_id VARCHAR PRIMARY KEY,
+            article_id BIGINT NOT NULL,
+            ticker VARCHAR NOT NULL,
+            sentiment DOUBLE NOT NULL,
+            confidence DOUBLE NOT NULL,
+            theme VARCHAR,
+            reasoning VARCHAR,
+            extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            model VARCHAR
+        );
+        CREATE TABLE IF NOT EXISTS prices (
+            ticker VARCHAR NOT NULL,
+            ts TIMESTAMP NOT NULL,
+            open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE,
+            volume BIGINT,
+            PRIMARY KEY (ticker, ts)
+        );
+        CREATE TABLE IF NOT EXISTS orders (
+            order_id VARCHAR PRIMARY KEY,
+            signal_id VARCHAR,
+            ticker VARCHAR NOT NULL,
+            side VARCHAR NOT NULL,
+            qty DOUBLE NOT NULL,
+            mode VARCHAR NOT NULL,
+            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status VARCHAR NOT NULL,
+            expected_cost_usd DOUBLE,
+            alpaca_client_order_id VARCHAR
+        );
+        CREATE TABLE IF NOT EXISTS trades (
+            trade_id VARCHAR PRIMARY KEY,
+            order_id VARCHAR NOT NULL,
+            ticker VARCHAR NOT NULL,
+            side VARCHAR NOT NULL,
+            qty DOUBLE NOT NULL,
+            fill_price DOUBLE NOT NULL,
+            fill_ts TIMESTAMP NOT NULL,
+            realized_cost_usd DOUBLE
+        );
+        CREATE TABLE IF NOT EXISTS positions (
+            ticker VARCHAR PRIMARY KEY,
+            qty DOUBLE NOT NULL,
+            avg_cost DOUBLE NOT NULL,
+            last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS costs (
+            cost_id VARCHAR PRIMARY KEY,
+            ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            source VARCHAR NOT NULL,
+            detail_json VARCHAR,
+            usd DOUBLE NOT NULL,
+            signal_id VARCHAR,
+            order_id VARCHAR
+        );
+        """
+    )
+
+
+def alpaca_credentials() -> tuple[str, str]:
+    """Pull Alpaca key + secret from the notebook env. Raises if missing."""
+    key = os.environ.get("ALPACA_API_KEY")
+    secret = os.environ.get("ALPACA_API_SECRET")
+    if not key or not secret:
+        raise RuntimeError(
+            "ALPACA_API_KEY / ALPACA_API_SECRET not set. "
+            "Add them in the Runtime panel before running data/trade cells."
+        )
+    return key, secret
+
+
+def alpaca_trading_client():
+    """Trading client pinned to the current Config.MODE.
+
+    ``paper=True`` routes to paper-api.alpaca.markets; False routes to
+    api.alpaca.markets (live). We never silently swap modes at call
+    time; the caller must own the mode decision.
+    """
+    from alpaca.trading.client import TradingClient
+
+    key, secret = alpaca_credentials()
+    return TradingClient(key, secret, paper=(Config.MODE == "paper"))
+
+
+def alpaca_data_clients() -> tuple:
+    """News + historical bar clients. Data is mode-independent."""
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.historical.news import NewsClient
+
+    key, secret = alpaca_credentials()
+    return StockHistoricalDataClient(key, secret), NewsClient(key, secret)
+
+
+_LITELLM_PRICING_URL = (
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/"
+    "model_prices_and_context_window.json"
+)
+
+
+def _fetch_litellm_pricing() -> dict:
+    """Download LiteLLM's pricing catalog. Cached module-wide after first hit.
+
+    LiteLLM maintains per-token USD rates for ~2000 models. If the fetch
+    fails (offline, 403, etc.) we cache an empty dict so we don't retry
+    on every cost lookup; the fallback rate takes over downstream.
+    """
+    global _litellm_pricing_cache  # noqa: PLW0603
+    if _litellm_pricing_cache is not None:
+        return _litellm_pricing_cache
+    import httpx
+
+    try:
+        _litellm_pricing_cache = httpx.get(_LITELLM_PRICING_URL, timeout=5.0).json()
+    except Exception as exc:
+        print(f"warning: LiteLLM pricing fetch failed ({exc}); using fallback rate")
+        _litellm_pricing_cache = {}
+    return _litellm_pricing_cache
+
+
+_litellm_pricing_cache: dict | None = None
+
+
+def active_llm_model() -> str | None:
+    """The model the Runtime panel last wrote to notebook.toml [ai].model.
+
+    Returns None before the user picks one; callers then fall back to the
+    conservative rate below. Notebook directory is CWD at cell execution
+    time, so plain relative-path tomllib is enough.
+    """
+    import tomllib
+
+    try:
+        with open("notebook.toml", "rb") as f:
+            return tomllib.load(f).get("ai", {}).get("model")
+    except Exception:
+        return None
+
+
+def estimate_llm_cost(
+    input_tokens: int, output_tokens: int, model: str | None = None
+) -> float:
+    """Dollar cost of a single LLM call.
+
+    Pricing comes from LiteLLM's public catalog; the model defaults to
+    whatever the Runtime panel selected. Unknown models fall back to
+    FALLBACK_LLM_PRICE_USD_PER_M so we overstate rather than log $0.
+    """
+    if model is None:
+        model = active_llm_model()
+
+    entry = _fetch_litellm_pricing().get(model or "", {})
+    in_per_token = entry.get("input_cost_per_token")
+    out_per_token = entry.get("output_cost_per_token")
+
+    if in_per_token is None or out_per_token is None:
+        in_m, out_m = Config.FALLBACK_LLM_PRICE_USD_PER_M
+        return (input_tokens / 1_000_000.0) * in_m + (output_tokens / 1_000_000.0) * out_m
+
+    return input_tokens * in_per_token + output_tokens * out_per_token
+
+
+def estimate_trade_cost(qty: float, side: str, price: float) -> dict:
+    """Expected cost of placing an order.
+
+    Three components:
+    - commission (0 on Alpaca equities)
+    - TAF fee (sells only, tiny)
+    - slippage (Config.SLIPPAGE_BPS applied to notional, one-way)
+
+    Applied to paper trades too. That's the point, so the backtest
+    doesn't tell you a pleasant lie.
+    """
+    notional = abs(qty) * price
+    slippage_usd = notional * (Config.SLIPPAGE_BPS / 10_000.0)
+    taf_usd = 0.0
+    if side.lower() == "sell":
+        taf_usd = min(
+            abs(qty) * Config.TAF_USD_PER_SHARE,
+            Config.TAF_MAX_USD_PER_TRADE,
+        )
+    commission_usd = 0.0
+    total = commission_usd + taf_usd + slippage_usd
+    return {
+        "commission_usd": commission_usd,
+        "taf_usd": taf_usd,
+        "slippage_usd": slippage_usd,
+        "total_usd": total,
+    }
+
+
+def record_cost(
+    conn,
+    *,
+    source: str,
+    usd: float,
+    detail: dict,
+    signal_id: str | None = None,
+    order_id: str | None = None,
+) -> None:
+    """Append a single row to the costs ledger."""
+    import uuid as _uuid
+
+    conn.execute(
+        """
+        INSERT INTO costs (cost_id, source, detail_json, usd, signal_id, order_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [_uuid.uuid4().hex, source, json.dumps(detail, default=str), usd, signal_id, order_id],
+    )
+
+
+def today_utc() -> dt.date:
+    return dt.datetime.now(dt.timezone.utc).date()
+
+
+def watchlist_str() -> str:
+    """Alpaca's symbols= param wants a comma-joined list."""
+    return ",".join(Config.TICKER_WHITELIST)
+```
+
+## Fetch overnight news
+
+<sub>**kind** python</sub>
+
+```python
+# @name Fetch overnight news
+# Pulls recent Benzinga headlines for every whitelisted ticker and
+# upserts into the ``news_raw`` table. Idempotent: re-running the
+# cell only inserts articles we haven't seen before, so the DB grows
+# monotonically across sessions.
+import datetime as dt
+
+import pandas as pd
+from alpaca.data.requests import NewsRequest
+
+conn = open_db()
+_stock_client, news_client = alpaca_data_clients()
+
+# Only pull since the newest article we already have for any of the
+# whitelisted tickers. First run pulls Config.LOOKBACK_DAYS back.
+latest_ts_row = conn.execute(
+    "SELECT MAX(published_at) FROM news_raw WHERE ticker IN ({})".format(
+        ",".join(f"'{t}'" for t in Config.TICKER_WHITELIST)
+    )
+).fetchone()
+latest_ts = latest_ts_row[0] if latest_ts_row and latest_ts_row[0] else None
+
+if latest_ts is None:
+    since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=Config.LOOKBACK_DAYS)
+else:
+    # +1 second so we don't re-fetch the boundary article.
+    since = (latest_ts + dt.timedelta(seconds=1)).replace(tzinfo=dt.timezone.utc)
+
+request = NewsRequest(
+    symbols=watchlist_str(),
+    start=since,
+    limit=50,
+    include_content=False,
+)
+response = news_client.get_news(request)
+raw_news = response.data.get("news", []) if hasattr(response, "data") else list(response)
+
+inserted = 0
+for article in raw_news:
+    # alpaca-py returns a NewsSet on some SDK versions and a list on
+    # others, so normalize to the underlying attrs.
+    article_id = getattr(article, "id", None)
+    headline = getattr(article, "headline", "") or ""
+    summary = getattr(article, "summary", "") or ""
+    url = getattr(article, "url", "") or ""
+    source = getattr(article, "source", "") or ""
+    symbols = getattr(article, "symbols", []) or []
+    created_at = getattr(article, "created_at", None) or getattr(article, "published_at", None)
+    if article_id is None or created_at is None:
+        continue
+
+    # An article can mention multiple tickers; explode into one row per
+    # (article, ticker) so downstream joins are natural.
+    for ticker in symbols:
+        if ticker not in Config.TICKER_WHITELIST:
+            continue
+        try:
+            conn.execute(
+                """
+                INSERT INTO news_raw
+                    (article_id, ticker, headline, summary, url, source, published_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [article_id, ticker, headline, summary, url, source, created_at],
+            )
+            inserted += 1
+        except Exception:
+            # Primary key conflict: already have this article. Fine.
+            pass
+
+# Log "ingestion cost" as zero but record the row so the ledger has a
+# complete audit trail of every external call.
+record_cost(
+    conn,
+    source="alpaca_news",
+    usd=0.0,
+    detail={"articles_seen": len(raw_news), "inserted": inserted, "since": str(since)},
+)
+
+# What's unprocessed, used by extract_signals.
+unprocessed = conn.execute(
+    """
+    SELECT n.article_id, n.ticker, n.headline, n.summary, n.published_at
+    FROM news_raw n
+    LEFT JOIN signals s ON s.article_id = n.article_id AND s.ticker = n.ticker
+    WHERE s.signal_id IS NULL
+    ORDER BY n.published_at DESC
+    LIMIT 40
+    """
+).fetchdf()
+
+conn.close()
+
+news_ingest = {
+    "new_rows": inserted,
+    "unprocessed_count": len(unprocessed),
+    "oldest_unprocessed": (
+        str(unprocessed["published_at"].min()) if len(unprocessed) else None
+    ),
+}
+print(
+    f"news_raw: inserted {inserted} new rows; {len(unprocessed)} articles "
+    f"awaiting signal extraction."
+)
+
+# Expose ``unprocessed`` so the prompt cell can reference {{ unprocessed }}.
+unprocessed
+```
+
+# Turn news into signals
+
+We've pulled raw headlines from the news API. The cell below is a
+**prompt cell**: it sends each headline to an LLM with an
+`@output_schema` that forces a structured JSON response (ticker,
+direction, confidence). The schema-validated result becomes a
+content-addressed artifact like any Python cell's output, so
+identical headlines + identical prompt template = cache hit, no
+extra API call.
+
+After signal extraction, the next few cells persist them, fetch
+matching price data, and run risk checks before any orders go out.
+
+## signals_batch
+
+<sub>**kind** prompt</sub>
+
+*Prompt cell: response intentionally excluded from export.*
+
+```text
+# @name signals_batch
+# @temperature 0.0
+# @max_tokens 4096
+# @system You are a quantitative-trading analyst extracting market-impact signals from news headlines. Return a row for every input article: the risk filter downstream drops weak signals, so do not pre-filter here.
+# @output_schema {"type": "object", "properties": {"signals": {"type": "array", "items": {"type": "object", "properties": {"article_id": {"type": "integer"}, "ticker": {"type": "string"}, "sentiment": {"type": "number", "minimum": -1, "maximum": 1}, "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "theme": {"type": "string", "enum": ["earnings", "guidance", "product", "regulatory", "macro", "m_and_a", "legal", "people", "other"]}, "reasoning": {"type": "string"}}, "required": ["article_id", "ticker", "sentiment", "confidence", "theme", "reasoning"]}}}, "required": ["signals"]}
+# @validate_retries 3
+#
+# Extracts structured sentiment for each article in the unprocessed
+# batch. The schema enums are deliberately narrow: a tighter enum
+# means cleaner aggregation SQL downstream. Anthropic gets the schema as
+# a native tool and OpenAI-compatible endpoints as json_schema; the
+# validate-and-retry loop matters most when another endpoint falls back
+# to json_object mode and the response doesn't quite match.
+#
+# Prompt-design note: earlier prompts told the model to "err toward
+# low confidence on ambiguous headlines." Models read that as "omit
+# the row" and returned empty arrays on unglamorous news batches.
+# The current phrasing is explicit: return one row per article,
+# encode uncertainty in the confidence score, don't drop articles.
+# Config.MIN_CONFIDENCE + MIN_ABS_SENTIMENT at the risk layer are
+# where the actual trading threshold lives.
+
+Return exactly one signal per input article; do NOT omit rows. Encode
+uncertainty in the `confidence` field. The downstream risk filter
+drops low-confidence rows before any trade is placed, so your job
+here is just to characterize every headline we fetched.
+
+For each article, emit:
+
+- `article_id` and `ticker`: copied verbatim from the input row.
+- `sentiment` in [-1, 1]: -1 = clearly bearish for this ticker,
+  +1 = clearly bullish, 0 = neutral / not directionally relevant.
+- `confidence` in [0, 1]:
+  - > 0.8 for clear-cut material news (earnings beat, explicit
+    guidance, confirmed M&A, major product launch, regulatory
+    action with a named target).
+  - 0.5–0.8 for solid analyst coverage, sector news with clear
+    ticker impact, leadership moves with stated effect.
+  - 0.2–0.5 for rumors, side mentions, ambiguous macro.
+  - < 0.2 for headlines that aren't really about this ticker
+    (cross-references, generic market commentary). Still return
+    the row; use 0 sentiment and explain in `reasoning`.
+- `theme`: pick the single best enum value.
+- `reasoning`: one short sentence explaining the score.
+
+Do NOT infer signals for tickers other than the one on each row.
+
+Articles:
+
+{{ unprocessed }}
+```
+
+## Persist signals
+
+<sub>**kind** python</sub>
+
+```python
+# @name Persist signals
+# Writes the freshly-extracted batch to the ``signals`` table and logs
+# the LLM call to the ``costs`` ledger so cost-adjusted P&L has
+# something to subtract later.
+import hashlib
+
+conn = open_db()
+batch = signals_batch or {}
+rows = batch.get("signals", []) if isinstance(batch, dict) else []
+
+# Only persist rows whose ticker is in the whitelist. The schema enum
+# doesn't constrain ticker strings (the LLM could return anything),
+# so this is the last layer of defense before the DB has a row that
+# place_orders would try to trade.
+allowed = set(Config.TICKER_WHITELIST)
+persisted = 0
+for row in rows:
+    ticker = row.get("ticker")
+    article_id = row.get("article_id")
+    if ticker not in allowed or article_id is None:
+        continue
+    # Deterministic signal_id so re-running the cell is idempotent.
+    seed = f"{article_id}:{ticker}".encode()
+    signal_id = hashlib.sha256(seed).hexdigest()[:16]
+    try:
+        conn.execute(
+            """
+            INSERT INTO signals
+                (signal_id, article_id, ticker, sentiment, confidence,
+                 theme, reasoning, input_tokens, output_tokens, model)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                signal_id,
+                article_id,
+                ticker,
+                float(row.get("sentiment", 0.0)),
+                float(row.get("confidence", 0.0)),
+                str(row.get("theme", "other")),
+                str(row.get("reasoning", "")),
+                None,  # populated below if transform_spec carries it
+                None,
+                None,
+            ],
+        )
+        persisted += 1
+    except Exception:
+        # Primary-key conflict on re-run: signal already persisted.
+        pass
+
+# LLM cost accounting. The prompt cell doesn't expose tokens to
+# downstream cells directly; we pull them off the signals_batch
+# artifact's transform_spec at reconcile time, so here we just log a
+# placeholder row and let the reconciliation cell fill in the real
+# dollar figure when it inspects the artifact's metadata. For now,
+# estimate from the template+response size so the ledger always has
+# an entry even if reconciliation is skipped.
+approx_in_tokens = int(len(str(unprocessed)) / 4)
+approx_out_tokens = int(
+    len(str(batch)) / 4 if isinstance(batch, dict) else 0
+)
+approx_cost = estimate_llm_cost(approx_in_tokens, approx_out_tokens)
+record_cost(
+    conn,
+    source="llm_signals",
+    usd=approx_cost,
+    detail={
+        "rows_in": len(rows),
+        "persisted": persisted,
+        "approx_input_tokens": approx_in_tokens,
+        "approx_output_tokens": approx_out_tokens,
+        "note": "estimated from template size; exact token counts in artifact",
+    },
+)
+
+# Fresh signals ready for risk_check.
+fresh_signals = conn.execute(
+    """
+    SELECT s.signal_id, s.ticker, s.sentiment, s.confidence, s.theme,
+           s.extracted_at, n.headline
+    FROM signals s
+    JOIN news_raw n USING (article_id, ticker)
+    WHERE s.signal_id NOT IN (SELECT COALESCE(signal_id, '') FROM orders)
+      AND s.confidence >= ?
+      AND ABS(s.sentiment) >= ?
+    ORDER BY s.extracted_at DESC
+    """,
+    [Config.MIN_CONFIDENCE, Config.MIN_ABS_SENTIMENT],
+).fetchdf()
+
+conn.close()
+print(f"persisted {persisted} new signals; {len(fresh_signals)} meet risk thresholds")
+fresh_signals
+```
+
+## Fetch latest prices
+
+<sub>**kind** python</sub>
+
+```python
+# @name Fetch latest prices
+# Pulls daily bars for the watchlist up to "now" and upserts into
+# ``prices``. We need a recent close to size positions; the 15-min
+# REST delay is fine here, since daily rebalancing doesn't need sub-minute
+# precision.
+import datetime as dt
+
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
+
+conn = open_db()
+stock_client, _news = alpaca_data_clients()
+
+start = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=Config.LOOKBACK_DAYS)
+request = StockBarsRequest(
+    symbol_or_symbols=list(Config.TICKER_WHITELIST),
+    timeframe=TimeFrame.Day,
+    start=start,
+)
+bar_response = stock_client.get_stock_bars(request)
+# alpaca-py returns a BarSet; .df is a MultiIndex DataFrame keyed by
+# (symbol, timestamp). Normalize to rows.
+frame = bar_response.df.reset_index()
+
+inserted = 0
+for row in frame.itertuples(index=False):
+    try:
+        conn.execute(
+            """
+            INSERT INTO prices (ticker, ts, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
+            """,
+            [
+                row.symbol,
+                row.timestamp,
+                float(row.open),
+                float(row.high),
+                float(row.low),
+                float(row.close),
+                int(row.volume),
+            ],
+        )
+        inserted += 1
+    except Exception:
+        pass
+
+record_cost(
+    conn,
+    source="alpaca_data",
+    usd=0.0,  # free tier
+    detail={"bars_fetched": len(frame), "inserted": inserted},
+)
+
+# Latest close per ticker, which risk_check uses for sizing.
+latest_prices = conn.execute(
+    """
+    SELECT ticker, close, ts AS as_of
+    FROM prices
+    WHERE (ticker, ts) IN (
+        SELECT ticker, MAX(ts) FROM prices GROUP BY ticker
+    )
+    ORDER BY ticker
+    """
+).fetchdf()
+
+conn.close()
+print(f"prices: upserted {inserted} bars; latest for {len(latest_prices)} tickers.")
+latest_prices
+```
+
+## Risk check & trade plan
+
+<sub>**kind** python</sub>
+
+```python
+# @name Risk check & trade plan
+# Translates fresh signals into a concrete list of orders after
+# applying all hard risk constraints. Nothing here talks to Alpaca;
+# the output is a DataFrame that place_orders either submits or drops
+# on dry-run.
+import pandas as pd
+
+conn = open_db()
+
+# --- Current state -----------------------------------------------------
+current_positions = conn.execute(
+    "SELECT ticker, qty, avg_cost FROM positions WHERE qty != 0"
+).fetchdf()
+open_exposure = 0.0
+if len(current_positions):
+    # Use last known close for exposure math.
+    current_positions = current_positions.merge(
+        latest_prices[["ticker", "close"]], on="ticker", how="left"
+    )
+    current_positions["notional"] = (
+        current_positions["qty"] * current_positions["close"]
+    ).abs()
+    open_exposure = float(current_positions["notional"].sum())
+
+orders_today = conn.execute(
+    """
+    SELECT COUNT(*) FROM orders
+    WHERE CAST(submitted_at AS DATE) = CURRENT_DATE
+    """
+).fetchone()[0]
+trades_budget = max(0, Config.MAX_DAILY_TRADES - int(orders_today))
+
+# --- Signals → trade plan ---------------------------------------------
+#
+# Simple rule: one entry per fresh signal, sized proportionally to
+# signal strength (sentiment × confidence), capped at
+# MAX_POSITION_USD. No pyramiding on existing positions: if we
+# already hold the ticker, skip.
+trade_plan_rows = []
+held = set(current_positions["ticker"]) if len(current_positions) else set()
+price_lookup = dict(zip(latest_prices["ticker"], latest_prices["close"], strict=False))
+headroom_usd = max(0.0, Config.MAX_TOTAL_EXPOSURE_USD - open_exposure)
+
+for signal in fresh_signals.itertuples(index=False):
+    if len(trade_plan_rows) >= trades_budget:
+        break
+    if signal.ticker in held:
+        continue
+    price = price_lookup.get(signal.ticker)
+    if not price or price <= 0:
+        continue
+    strength = float(signal.sentiment) * float(signal.confidence)
+    if abs(strength) < (Config.MIN_CONFIDENCE * Config.MIN_ABS_SENTIMENT):
+        continue
+    # Long on positive, short on negative. Alpaca Basic supports
+    # shorting on margin; set strength positive-only to disable shorts.
+    side = "buy" if strength > 0 else "sell"
+    # Size = |strength| × position cap, further clamped by headroom.
+    target_usd = min(abs(strength) * Config.MAX_POSITION_USD, headroom_usd)
+    if target_usd < price:
+        # Can't afford even one share within limits.
+        continue
+    qty = int(target_usd // price)
+    if qty <= 0:
+        continue
+    expected = estimate_trade_cost(qty, side, price)
+    trade_plan_rows.append(
+        {
+            "signal_id": signal.signal_id,
+            "ticker": signal.ticker,
+            "side": side,
+            "qty": qty,
+            "price_hint": price,
+            "strength": strength,
+            "theme": signal.theme,
+            "expected_cost_usd": expected["total_usd"],
+        }
+    )
+    headroom_usd -= qty * price
+    if headroom_usd <= 0:
+        break
+
+# Empty lists produce a DataFrame with zero columns, which trips up
+# the downstream filters in place_orders. Pin the schema.
+_TRADE_PLAN_COLUMNS = [
+    "signal_id",
+    "ticker",
+    "side",
+    "qty",
+    "price_hint",
+    "strength",
+    "theme",
+    "expected_cost_usd",
+]
+trade_plan = pd.DataFrame(trade_plan_rows, columns=_TRADE_PLAN_COLUMNS)
+
+conn.close()
+
+print(
+    f"risk_check: {len(fresh_signals)} fresh signals → {len(trade_plan)} proposed "
+    f"orders. Open exposure ${open_exposure:.2f}, trades budget left {trades_budget}."
+)
+trade_plan
+```
+
+# Place orders, reconcile, report
+
+Signal extraction and risk checks land cached artifacts upstream.
+Below is the execution side: send the trade plan to the broker,
+reconcile what filled, attribute trading costs, and write the
+end-of-day P&L into a structured report.
+
+Editing any analysis cell above invalidates the downstream
+execution cells through provenance, so a re-run never sends stale
+orders. The very last cell is a prompt cell that summarizes the
+day's session for human review.
+
+## Place orders
+
+<sub>**kind** python</sub>
+
+```python
+# @name Place orders
+# Takes the trade_plan from risk_check and either DRY-RUNs it or
+# submits each row to Alpaca. Re-running is idempotent: if a
+# signal_id is already in ``orders``, we skip it.
+#
+# The live-mode gate is intentionally verbose. Flipping from paper
+# to live takes two separate edits in helpers.py, and this cell enforces
+# the second one at runtime.
+import uuid
+
+from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.trading.requests import MarketOrderRequest
+
+conn = open_db()
+
+# Resolve mode once so logs are consistent even if Config changes
+# mid-run.
+mode = Config.MODE
+
+# Hard gate: refuses to trade live without the second key.
+if mode == "live" and not Config.I_UNDERSTAND_THIS_IS_REAL_MONEY:
+    raise RuntimeError(
+        "Config.MODE is 'live' but Config.I_UNDERSTAND_THIS_IS_REAL_MONEY is False. "
+        "Set both in helpers.py on purpose before placing real orders."
+    )
+
+if mode not in ("paper", "live"):
+    raise ValueError(f"Config.MODE must be 'paper' or 'live', got {mode!r}.")
+
+# Deduplicate against anything already submitted today.
+already_submitted = set(
+    row[0]
+    for row in conn.execute(
+        "SELECT signal_id FROM orders WHERE signal_id IS NOT NULL"
+    ).fetchall()
+)
+if len(trade_plan) == 0 or "signal_id" not in trade_plan.columns:
+    to_submit = trade_plan.iloc[0:0]  # empty but with compatible shape
+    skipped_dupe = 0
+else:
+    to_submit = trade_plan[~trade_plan["signal_id"].isin(already_submitted)]
+    skipped_dupe = len(trade_plan) - len(to_submit)
+
+submitted_rows = []
+if len(to_submit):
+    client = alpaca_trading_client()
+    for row in to_submit.itertuples(index=False):
+        client_order_id = f"strata-{row.signal_id}-{uuid.uuid4().hex[:6]}"
+        request = MarketOrderRequest(
+            symbol=row.ticker,
+            qty=int(row.qty),
+            side=OrderSide.BUY if row.side == "buy" else OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+            client_order_id=client_order_id,
+        )
+        try:
+            alpaca_order = client.submit_order(order_data=request)
+        except Exception as exc:
+            conn.execute(
+                """
+                INSERT INTO orders
+                    (order_id, signal_id, ticker, side, qty, mode,
+                     status, expected_cost_usd, alpaca_client_order_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    uuid.uuid4().hex,
+                    row.signal_id,
+                    row.ticker,
+                    row.side,
+                    float(row.qty),
+                    mode,
+                    f"submit_failed: {type(exc).__name__}",
+                    float(row.expected_cost_usd),
+                    client_order_id,
+                ],
+            )
+            continue
+
+        order_id = str(getattr(alpaca_order, "id", uuid.uuid4().hex))
+        status = str(getattr(alpaca_order, "status", "submitted"))
+        conn.execute(
+            """
+            INSERT INTO orders
+                (order_id, signal_id, ticker, side, qty, mode,
+                 status, expected_cost_usd, alpaca_client_order_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                order_id,
+                row.signal_id,
+                row.ticker,
+                row.side,
+                float(row.qty),
+                mode,
+                status,
+                float(row.expected_cost_usd),
+                client_order_id,
+            ],
+        )
+        # Expected-cost is booked to ``costs`` now; reconcile will
+        # add any delta (realized_cost − expected) after fills land.
+        record_cost(
+            conn,
+            source="trade_expected",
+            usd=float(row.expected_cost_usd),
+            detail={
+                "ticker": row.ticker,
+                "side": row.side,
+                "qty": float(row.qty),
+                "price_hint": float(row.price_hint),
+                "mode": mode,
+            },
+            signal_id=row.signal_id,
+            order_id=order_id,
+        )
+        submitted_rows.append(
+            {
+                "order_id": order_id,
+                "ticker": row.ticker,
+                "side": row.side,
+                "qty": int(row.qty),
+                "status": status,
+                "expected_cost_usd": float(row.expected_cost_usd),
+            }
+        )
+
+conn.close()
+import pandas as pd
+
+# Pin columns so daily_note and reconcile see a consistent schema
+# even on a no-op run.
+_SUBMITTED_COLUMNS = ["order_id", "ticker", "side", "qty", "status", "expected_cost_usd"]
+submitted = pd.DataFrame(submitted_rows, columns=_SUBMITTED_COLUMNS)
+print(
+    f"place_orders ({mode}): {len(submitted)} submitted, "
+    f"{skipped_dupe} skipped (already in orders)."
+)
+submitted
+```
+
+## Reconcile fills
+
+<sub>**kind** python</sub>
+
+```python
+# @name Reconcile fills
+# Pulls the authoritative state from Alpaca for every order we've
+# submitted in the last 24h, records fills to ``trades``, rebuilds
+# ``positions``, and books the slippage delta (realized - expected)
+# to the cost ledger.
+#
+# Depends on ``submitted`` to force DAG ordering after ``place_orders``.
+# Even when there are zero new submissions we still want to
+# reconcile any open orders from prior runs.
+import datetime as dt
+import uuid
+
+from alpaca.trading.requests import GetOrdersRequest
+
+# Reference submitted so the DAG runs us after place_orders. The
+# variable itself is unused: reconcile pulls authoritative state
+# from Alpaca regardless of what we submitted this run.
+_upstream_gate = submitted  # noqa: F841
+
+conn = open_db()
+client = alpaca_trading_client()
+
+# Pull every order we've submitted recently. Alpaca returns status in
+# one canonical string per order; fill_price / fill_qty land on the
+# order object when filled.
+request = GetOrdersRequest(
+    status="all",
+    after=(dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=3)),
+    limit=100,
+)
+alpaca_orders = client.get_orders(filter=request) or []
+
+recorded_fills = 0
+for ao in alpaca_orders:
+    order_id = str(getattr(ao, "id", ""))
+    if not order_id:
+        continue
+    status = str(getattr(ao, "status", ""))
+    filled_qty = float(getattr(ao, "filled_qty", 0) or 0)
+    filled_price = getattr(ao, "filled_avg_price", None)
+    filled_at = getattr(ao, "filled_at", None)
+    ticker = str(getattr(ao, "symbol", ""))
+    side = str(getattr(ao, "side", "")).lower()
+
+    # Update the orders table's status in case the submit happened in
+    # a previous run (e.g. DAY order filled overnight).
+    conn.execute(
+        "UPDATE orders SET status = ? WHERE order_id = ?",
+        [status, order_id],
+    )
+
+    if status not in ("filled", "partially_filled"):
+        continue
+    if filled_qty <= 0 or filled_price is None or filled_at is None:
+        continue
+
+    # Idempotent: one trade row per (order_id, fill_ts).
+    existing = conn.execute(
+        "SELECT 1 FROM trades WHERE order_id = ? AND fill_ts = ?",
+        [order_id, filled_at],
+    ).fetchone()
+    if existing:
+        continue
+
+    fill_price = float(filled_price)
+    realized = estimate_trade_cost(filled_qty, side, fill_price)
+    trade_id = uuid.uuid4().hex
+    conn.execute(
+        """
+        INSERT INTO trades
+            (trade_id, order_id, ticker, side, qty, fill_price, fill_ts, realized_cost_usd)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            trade_id,
+            order_id,
+            ticker,
+            side,
+            filled_qty,
+            fill_price,
+            filled_at,
+            realized["total_usd"],
+        ],
+    )
+
+    # Slippage delta vs the estimate booked by place_orders.
+    expected_row = conn.execute(
+        "SELECT expected_cost_usd FROM orders WHERE order_id = ?", [order_id]
+    ).fetchone()
+    expected = float(expected_row[0]) if expected_row and expected_row[0] else 0.0
+    delta = realized["total_usd"] - expected
+    if abs(delta) > 0.001:
+        record_cost(
+            conn,
+            source="trade_slippage_delta",
+            usd=delta,
+            detail={
+                "ticker": ticker,
+                "side": side,
+                "qty": filled_qty,
+                "fill_price": fill_price,
+                "expected_cost_usd": expected,
+                "realized_cost_usd": realized["total_usd"],
+            },
+            order_id=order_id,
+        )
+
+    recorded_fills += 1
+
+# Rebuild ``positions`` from scratch using signed qty.
+conn.execute("DELETE FROM positions")
+conn.execute(
+    """
+    INSERT INTO positions (ticker, qty, avg_cost, last_update)
+    SELECT
+        ticker,
+        SUM(CASE WHEN side = 'buy' THEN qty ELSE -qty END) AS qty,
+        CASE
+            WHEN SUM(CASE WHEN side = 'buy' THEN qty ELSE 0 END) = 0 THEN 0
+            ELSE SUM(CASE WHEN side = 'buy' THEN qty * fill_price ELSE 0 END)
+                 / SUM(CASE WHEN side = 'buy' THEN qty ELSE 0 END)
+        END AS avg_cost,
+        CURRENT_TIMESTAMP
+    FROM trades
+    GROUP BY ticker
+    HAVING SUM(CASE WHEN side = 'buy' THEN qty ELSE -qty END) != 0
+    """
+)
+
+positions_snapshot = conn.execute(
+    "SELECT ticker, qty, avg_cost FROM positions ORDER BY ticker"
+).fetchdf()
+
+conn.close()
+print(
+    f"reconcile: recorded {recorded_fills} new fills; "
+    f"{len(positions_snapshot)} open positions."
+)
+positions_snapshot
+```
+
+## Cost ledger
+
+<sub>**kind** python</sub>
+
+```python
+# @name Cost ledger
+# Aggregates the ``costs`` table so the next cell can subtract the
+# right number from P&L. Also produces a human-readable per-source
+# breakdown and a running daily total.
+#
+# Depends on ``positions_snapshot`` so the DAG orders us after
+# reconcile; otherwise costs posted during reconciliation
+# (slippage deltas) would miss this aggregation.
+_upstream_gate = positions_snapshot  # noqa: F841
+
+conn = open_db()
+
+cost_by_source = conn.execute(
+    """
+    SELECT source, ROUND(SUM(usd), 4) AS usd, COUNT(*) AS calls
+    FROM costs
+    GROUP BY source
+    ORDER BY usd DESC
+    """
+).fetchdf()
+
+cost_by_day = conn.execute(
+    """
+    SELECT CAST(ts AS DATE) AS day, ROUND(SUM(usd), 4) AS usd
+    FROM costs
+    GROUP BY day
+    ORDER BY day DESC
+    LIMIT 14
+    """
+).fetchdf()
+
+total_cost_usd = float(
+    conn.execute("SELECT COALESCE(SUM(usd), 0) FROM costs").fetchone()[0]
+)
+
+conn.close()
+
+print("=== Cost breakdown by source ===")
+print(cost_by_source.to_string(index=False))
+print()
+print("=== Daily spend (last 14d) ===")
+print(cost_by_day.to_string(index=False))
+print()
+print(f"Total spend to date: ${total_cost_usd:.4f}")
+
+cost_summary = {
+    "total_usd": round(total_cost_usd, 4),
+    "by_source": cost_by_source.to_dict(orient="records"),
+    "by_day": cost_by_day.to_dict(orient="records"),
+}
+cost_summary
+```
+
+## P&L report
+
+<sub>**kind** python</sub>
+
+```python
+# @name P&L report
+# The money number: realized P&L minus everything in ``costs``.
+# Re-running the notebook over time builds up history here.
+#
+# References cost_summary + positions_snapshot to lock DAG order
+# after costs + reconcile.
+_upstream_gate_costs = cost_summary  # noqa: F841
+_upstream_gate_positions = positions_snapshot  # noqa: F841
+
+import pandas as pd
+
+conn = open_db()
+
+# Realized P&L is SUM(sell proceeds) - SUM(buy costs) per ticker,
+# only valid for tickers where quantity has round-tripped back to
+# zero. Mark unrealized P&L separately against the latest close.
+realized_by_ticker = conn.execute(
+    """
+    SELECT
+        ticker,
+        SUM(CASE WHEN side = 'sell' THEN qty * fill_price ELSE 0 END)
+        - SUM(CASE WHEN side = 'buy'  THEN qty * fill_price ELSE 0 END) AS realized_pnl_usd,
+        SUM(qty) AS turnover
+    FROM trades
+    GROUP BY ticker
+    ORDER BY realized_pnl_usd DESC
+    """
+).fetchdf()
+
+unrealized_by_ticker = conn.execute(
+    """
+    WITH latest AS (
+        SELECT ticker, close
+        FROM prices
+        WHERE (ticker, ts) IN (
+            SELECT ticker, MAX(ts) FROM prices GROUP BY ticker
+        )
+    )
+    SELECT p.ticker,
+           p.qty,
+           p.avg_cost,
+           l.close AS mark_price,
+           ROUND(p.qty * (l.close - p.avg_cost), 2) AS unrealized_pnl_usd
+    FROM positions p
+    LEFT JOIN latest l USING (ticker)
+    WHERE p.qty != 0
+    ORDER BY p.ticker
+    """
+).fetchdf()
+
+total_realized = float(realized_by_ticker["realized_pnl_usd"].sum()) if len(realized_by_ticker) else 0.0
+total_unrealized = (
+    float(unrealized_by_ticker["unrealized_pnl_usd"].sum()) if len(unrealized_by_ticker) else 0.0
+)
+total_costs = float(conn.execute("SELECT COALESCE(SUM(usd), 0) FROM costs").fetchone()[0])
+
+# The headline metric: does the strategy pay for itself?
+cost_adjusted_pnl = total_realized + total_unrealized - total_costs
+
+conn.close()
+
+print("=== Realized P&L by ticker ===")
+print(realized_by_ticker.to_string(index=False) if len(realized_by_ticker) else "(no closed trades yet)")
+print()
+print("=== Unrealized P&L (mark-to-last-close) ===")
+print(
+    unrealized_by_ticker.to_string(index=False) if len(unrealized_by_ticker) else "(no open positions)"
+)
+print()
+print("=== Headline ===")
+print(f"  Realized P&L:        ${total_realized:,.2f}")
+print(f"  Unrealized P&L:      ${total_unrealized:,.2f}")
+print(f"  Total costs:         ${total_costs:,.4f}")
+print(f"  Cost-adjusted P&L:   ${cost_adjusted_pnl:,.2f}")
+
+pnl_summary = {
+    "realized_usd": round(total_realized, 2),
+    "unrealized_usd": round(total_unrealized, 2),
+    "costs_usd": round(total_costs, 4),
+    "cost_adjusted_pnl_usd": round(cost_adjusted_pnl, 2),
+    "by_ticker_realized": realized_by_ticker.to_dict(orient="records"),
+    "by_ticker_unrealized": unrealized_by_ticker.to_dict(orient="records"),
+}
+pnl_summary
+```
+
+## daily_note
+
+<sub>**kind** prompt</sub>
+
+*Prompt cell: response intentionally excluded from export.*
+
+```text
+# @name daily_note
+# @temperature 0.2
+# @max_tokens 800
+# @system You are a trading journal assistant. Your job is to produce a concise, honest end-of-day reflection on a small paper-trading strategy. Do not sugarcoat: if the strategy is losing money or being eaten by costs, say so directly.
+# @output_schema {"type": "object", "properties": {"one_liner": {"type": "string"}, "biggest_winner": {"type": "string"}, "biggest_loser": {"type": "string"}, "cost_health": {"type": "string", "enum": ["green", "yellow", "red"]}, "cost_comment": {"type": "string"}, "lessons": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 5}, "tomorrow_watch": {"type": "array", "items": {"type": "string"}}}, "required": ["one_liner", "biggest_winner", "biggest_loser", "cost_health", "cost_comment", "lessons", "tomorrow_watch"]}
+# @validate_retries 2
+#
+# Last cell in the notebook. Produces a structured end-of-day journal
+# entry from the P&L summary and cost ledger, the kind of thing
+# you'd want to read first the next morning.
+
+Trading day recap. Produce an honest, structured summary.
+
+## P&L
+
+{{ pnl_summary }}
+
+## Costs
+
+{{ cost_summary }}
+
+## Today's orders
+
+{{ submitted }}
+
+## Rules for the journal
+
+- `one_liner`: one sentence summarizing the day. Lead with the
+  cost-adjusted P&L sign.
+- `biggest_winner` / `biggest_loser`: name the ticker and amount;
+  use "none" if no closed trades yet.
+- `cost_health`: "green" when costs are < 10% of gross P&L,
+  "yellow" at 10–40%, "red" at >40% or when P&L is negative.
+- `cost_comment`: one sentence explaining the color.
+- `lessons`: 1-5 short imperatives ("cut losers faster", "avoid
+  low-confidence signals", etc.). If the sample size is too small to
+  conclude anything, say so in one of the lessons.
+- `tomorrow_watch`: specific things to look at tomorrow. Can be
+  empty if there's nothing actionable yet.
+
+Be terse. No filler.
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/sql_orders_report/index.md -->
+
+# Report top orders and revenue from SQL and Python
+
+![Report top orders and revenue from SQL and Python: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)
+![Report top orders and revenue from SQL and Python: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)
+
+A small five-cell notebook that demonstrates Strata's SQL cell support
+against a local SQLite warehouse. The cells span three languages
+(Python → SQL → Python) and exercise both `-- @cache fingerprint` (data-
+sensitive) and `-- @cache forever` (reference-data) policies.
+
+## What it shows
+
+- **Connection config in `notebook.toml`.** The `[connections.warehouse]`
+  block declares a SQLite driver with a relative path. SQL cells
+  reference it by name via `-- @sql connection=warehouse`.
+- **Bind parameters from upstream Python.** `top_orders` resolves
+  `:min_amount` from the `threshold` cell's variable. No string
+  substitution happens: the value flows through ADBC's parameter
+  binding API, so adversarial strings round-trip as data.
+- **Two cache policies side by side.** `top_orders` uses `fingerprint`
+  (folds SQLite's `PRAGMA data_version` + `schema_version` into the
+  hash) so a DDL change to the warehouse re-executes it. `category_summary`
+  uses `forever` because the user's asserting the catalog is reference
+  data; only edits to the SQL body itself invalidate it.
+- **Read-only by default, opt-in writes.** SQL cells open the
+  connection with `mode=ro` plus `PRAGMA query_only = ON` so a
+  stray `INSERT` can't mutate the DB. The seed cell explicitly
+  opts into writable execution via `-- @sql connection=warehouse
+  write=true`: that's the per-cell escape hatch for setup
+  scripts. Other cells in the notebook stay read-only.
+- **Cross-language pipeline.** The two SQL results flow back into the
+  `report` Python cell as `pyarrow.Table`s, which it turns into pandas
+  DataFrames with `.to_pandas()`.
+
+## Cells
+
+| Cell | Language | What it does |
+|---|---|---|
+| `seed` | SQL (`write=true`) | Drops + creates `products` and `orders` and inserts ten rows. Cached by its body while `analytics.db` is as it left it, so a reopen finds it and the cells after it ready; delete the database and it seeds again. |
+| `threshold` | Python | Defines `min_amount = 50`. Edit and rerun to vary the threshold. |
+| `top_orders` | SQL | `WHERE amount > :min_amount`, joined to the product catalog, top 5. Declares `-- @after seed`. |
+| `category_summary` | SQL | Revenue by category with `-- @cache forever`. Declares `-- @after seed`. |
+| `report` | Python | Stitches the two SQL outputs into a markdown report. |
+
+## DAG dependencies
+
+`top_orders` and `category_summary` depend on the SQLite file that
+`seed` produces, but no Python variable flows between them, the
+dependency is on a side effect. The `-- @after seed` annotation adds
+an edge to the DAG so cascade execution and staleness both see the
+link, and makes the seed's last run part of each report's cache key:
+once `seed` runs again, even unchanged, the reports are stale.
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **SQL Orders Report** from the notebook list on the Strata home page. Run
+`seed` first to create the SQLite file, then run the other cells in
+order (or hit "Run all").
+
+SQL cells need the `sql` and `sql-sqlite` extras. The development
+environment has them; an installed Strata needs
+`uv tool install "strata-notebook[sql,sql-sqlite]"` (the Docker image
+carries both).
+
+## Try this
+
+- **Change the threshold.** Edit `threshold` to `min_amount = 100`.
+  `top_orders` re-executes (different bind value → different
+  provenance hash). Run `top_orders` again without changing
+  anything and it cache-hits, because the canonical artifact's
+  provenance still matches the current threshold.
+- **Mutate the schema.** From a separate shell:
+
+  ```bash
+  sqlite3 analytics.db 'ALTER TABLE orders ADD COLUMN region TEXT'
+  ```
+
+  Re-run `top_orders`. SQLite's `PRAGMA schema_version` bumps, the
+  freshness token changes, and the cell re-executes with a new schema.
+- **Try a write from a SQL cell.** Add a cell with `INSERT INTO orders
+  VALUES (...)`. The executor returns an error and the database row
+  count is unchanged: read-only mode is the security boundary.
+
+## seed
+
+<sub>**kind** sql</sub>
+
+```sql
+-- @sql connection=warehouse write=true
+-- Seed analytics.db with a small orders dataset.
+--
+-- ``write=true`` opts this cell into writable execution: the
+-- adapter opens the connection without the read-only enforcement
+-- (mode=ro / PRAGMA query_only=ON) so the DROP / CREATE / INSERT
+-- statements below can run. Other SQL cells in the notebook stay
+-- read-only by default: the override is per-cell, not per-
+-- connection.
+--
+-- With no `-- @cache`, a write cell is cached by its body, in its
+-- session and after, while the database is as its run left it: a
+-- reopen probes analytics.db and finds this cell, and the cells after
+-- it, ready. An edit to this body, or a database deleted or changed
+-- since, re-seeds.
+
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS products;
+
+CREATE TABLE products (
+    sku      TEXT PRIMARY KEY,
+    category TEXT NOT NULL
+);
+
+CREATE TABLE orders (
+    id         INTEGER PRIMARY KEY,
+    customer   TEXT NOT NULL,
+    sku        TEXT NOT NULL REFERENCES products(sku),
+    amount     REAL NOT NULL,
+    ordered_at TEXT NOT NULL
+);
+
+INSERT INTO products (sku, category) VALUES
+    ('WIDGET-A',    'widgets'),
+    ('WIDGET-B',    'widgets'),
+    ('GADGET-A',    'gadgets'),
+    ('GADGET-B',    'gadgets'),
+    ('THINGAMAJIG', 'misc');
+
+INSERT INTO orders (id, customer, sku, amount, ordered_at) VALUES
+    (1,  'alice', 'WIDGET-A',    25.50,  '2026-04-01'),
+    (2,  'alice', 'GADGET-A',    199.99, '2026-04-02'),
+    (3,  'bob',   'WIDGET-B',    75.00,  '2026-04-02'),
+    (4,  'bob',   'GADGET-B',    350.00, '2026-04-05'),
+    (5,  'carol', 'WIDGET-A',    42.00,  '2026-04-08'),
+    (6,  'carol', 'THINGAMAJIG', 500.00, '2026-04-10'),
+    (7,  'dave',  'WIDGET-B',    18.00,  '2026-04-12'),
+    (8,  'alice', 'GADGET-A',    199.99, '2026-04-15'),
+    (9,  'bob',   'WIDGET-A',    25.50,  '2026-04-18'),
+    (10, 'carol', 'GADGET-B',    350.00, '2026-04-20');
+```
+
+## min_amount
+
+<sub>**kind** python</sub>
+
+```python
+# @name min_amount
+"""Threshold for the orders SQL query.
+
+Edit this number and the downstream SQL cell will re-execute on the
+next run. ``top_orders`` folds ``min_amount`` into its provenance
+hash, so 50 → 100 produces a different artifact; running again with
+the same value cache-hits.
+"""
+
+min_amount = 50
+min_amount
+```
+
+## top_orders
+
+<sub>**kind** sql</sub>
+
+```sql
+-- @sql connection=warehouse
+-- @name top_orders
+-- @cache fingerprint
+-- @after seed
+SELECT
+    o.id,
+    o.customer,
+    o.sku,
+    p.category,
+    o.amount,
+    o.ordered_at
+FROM orders AS o
+JOIN products AS p USING (sku)
+WHERE o.amount > :min_amount
+ORDER BY o.amount DESC
+LIMIT 5
+```
+
+## category_summary
+
+<sub>**kind** sql</sub>
+
+```sql
+-- @sql connection=warehouse
+-- @name category_summary
+-- @cache forever
+-- @after seed
+-- The product catalog is reference data: it changes rarely and
+-- the user's asserting "treat this as static". `forever` skips the
+-- freshness probe; only an edit to the SQL body itself invalidates
+-- the cache.
+SELECT
+    p.category,
+    COUNT(DISTINCT p.sku) AS sku_count,
+    COUNT(o.id)           AS order_count,
+    ROUND(SUM(o.amount), 2) AS total_revenue
+FROM products AS p
+LEFT JOIN orders AS o USING (sku)
+GROUP BY p.category
+ORDER BY total_revenue DESC NULLS LAST
+```
+
+## report
+
+<sub>**kind** python</sub>
+
+```python
+# @name report
+"""Combine the two SQL results into a markdown report.
+
+The SQL cells return Arrow Tables, which reach this cell as
+``pyarrow.Table``; ``.to_pandas()`` gives the familiar ``.iterrows()``.
+"""
+
+lines = [
+    "# Orders report",
+    "",
+    f"## Top {len(top_orders)} orders above ${min_amount}",
+    "",
+    "| customer | sku | category | amount | ordered |",
+    "|---|---|---|---:|---|",
+]
+for _, row in top_orders.to_pandas().iterrows():
+    lines.append(
+        f"| {row['customer']} | {row['sku']} | {row['category']} | "
+        f"${row['amount']:.2f} | {row['ordered_at']} |"
+    )
+
+lines += [
+    "",
+    "## Revenue by product category",
+    "",
+    "| category | SKUs | orders | revenue |",
+    "|---|---:|---:|---:|",
+]
+for _, row in category_summary.to_pandas().iterrows():
+    revenue = row["total_revenue"]
+    revenue_str = f"${revenue:.2f}" if revenue is not None else "n/a"
+    lines.append(
+        f"| {row['category']} | {int(row['sku_count'])} | "
+        f"{int(row['order_count'])} | {revenue_str} |"
+    )
+
+report = "\n".join(lines)
+print(report)
+Markdown(report)
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/loop_hill_climb/index.md -->
+
+# Hill-climb Himmelblau's function, one cached step at a time
+
+![Hill-climb Himmelblau's function, one cached step at a time: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-light.webp#only-light)
+![Hill-climb Himmelblau's function, one cached step at a time: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-dark.webp#only-dark)
+
+Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop
+cell feature: the `@loop` / `@loop_until` annotations, per-iteration
+artifacts, the progress badge, the iteration picker, and the
+`@loop start_from` fork. The cell body is greedy hill climbing on
+[Himmelblau's function](https://en.wikipedia.org/wiki/Himmelblau%27s_function),
+small enough to reason about and visually interesting because there
+are four equal-valued minima, so different seeds (and different forks)
+converge to different basins.
+
+## What to look at
+
+- **`helpers`** is a module cell: imports (``random``) and a
+  reusable function (``himmelblau``). It declares no top-level
+  runtime state, so Strata treats it as a shareable module whose
+  names are directly referenceable from every downstream cell.
+- **`seed`** bootstraps the search at a random `(x, y)` with an initial
+  score, using ``random`` and ``himmelblau`` from ``helpers``. Its
+  output variable `state` is the upstream carry for the loop cell
+  below.
+- **`evolve`** is the loop cell.
+  - `# @loop max_iter=40 carry=state` caps the search at 40 iterations
+    and tells Strata that the variable `state` is threaded between
+    iterations.
+  - `# @loop_until state["best_score"] < 1e-3` terminates the loop
+    early as soon as the cell finds a minimum.
+  - Each iteration proposes a small random perturbation of `(x, y)` and
+    keeps the move if it improves the score. The step size shrinks on
+    every accepted move so the search sharpens.
+  - ``random`` and ``himmelblau`` come from the ``helpers`` cell via
+    the DAG, with no duplicate imports or redefinitions here.
+  - Every iteration stores the full `state` as its own artifact
+    (`nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}`).
+- **`summary`** is a regular downstream cell. It reads the final
+  iteration's `state` via the normal DAG input path and prints the
+  convergence table.
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Open **Hill Climb Loop** from the notebook list on the Strata home page, then run the four code
+cells in order. While `evolve` is running you should see:
+
+- A `iter k/40` progress badge next to the cell title, with a spinner
+  while it is still running.
+- The badge settles to a green "done" state when `@loop_until` fires
+  or `max_iter` is reached.
+
+Click the inspect icon on `evolve` to open the inspect panel. The new
+iteration picker lists every stored iteration with its size and
+content type. Copy any iteration's URI to the clipboard for the fork
+demo below.
+
+## Try the fork
+
+1. Add a new cell below `evolve` (the `+` button in the UI).
+2. Paste the following, replacing `<iter-K>` with a mid-iter iteration
+   you find interesting (e.g., iter 5 if the search is still making
+   progress there):
+
+```python
+# @name Alt Search (forked)
+# @loop max_iter=30 carry=state start_from=evolve@iter=<iter-K>
+# @loop_until state["best_score"] < 1e-3
+import random
+
+next_iter = state["iter"] + 1
+# Numbers only: hash() of a str changes from one process to the next.
+rng = random.Random(hash((next_iter, round(state["x"], 6), round(state["y"], 6), 2)))
+
+# Larger exploration step so the fork is meaningfully different.
+step = state["step"] * 3.0
+cx = state["x"] + rng.uniform(-step, step)
+cy = state["y"] + rng.uniform(-step, step)
+cs = (cx**2 + cy - 11) ** 2 + (cx + cy**2 - 7) ** 2
+
+accepted = cs < state["best_score"]
+entry = {"iter": next_iter, "x": cx, "y": cy, "score": cs, "accepted": accepted}
+state = {
+    **state,
+    "x": cx if accepted else state["x"],
+    "y": cy if accepted else state["y"],
+    "best_score": min(cs, state["best_score"]),
+    "step": state["step"] * (0.9 if accepted else 1.0),
+    "history": state["history"] + [entry],
+    "iter": next_iter,
+}
+print(f"alt iter {next_iter}: score {state['best_score']:.4f}")
+```
+
+The forked cell seeds iter 0 from `evolve`'s iter K and iterates from
+there with a larger exploration step. The two cells share a history
+prefix (iters 0..K) and diverge after.
+
+## What this demo verifies
+
+- `@loop` dispatching (non-loop cells unaffected).
+- Carry seeding from an upstream cell on iter 0.
+- Per-iteration carry seeding for k > 0 (each iter sees the previous
+  iter's `state`, not the original seed).
+- `@loop_until` early termination.
+- Per-iteration artifacts stored with `@iter=k` suffix.
+- WebSocket `cell_iteration_progress` messages driving the UI badge.
+- `@loop start_from=<cell>@iter=<k>` seed resolution for forking.
+- Inspect-panel iteration picker listing iterations and copying URIs.
+
+## Notes
+
+- Each iteration runs in a fresh subprocess (no warm-pool reuse). For
+  a ~40-iteration loop expect ~40 × subprocess-startup cost (~1s
+  each on this machine). For agentic LLM loops the per-iteration
+  network call dwarfs that; for tight numerical loops the pool reuse
+  is a future optimization.
+- A loop cell runs on the notebook's own server, never on a remote
+  worker: one whose `# @worker` (or the notebook's default worker) names
+  another fails before it starts.
+
+## Helpers
+
+<sub>**kind** python</sub>
+
+```python
+# @name Helpers
+# A "module cell": it contains only imports and definitions, no top-level
+# runtime state. Strata treats this kind of cell as a shareable module
+# so downstream cells can ``import random`` / call ``himmelblau`` just
+# by referencing the names. Mixing imports/defs with runtime state
+# (``x = random.uniform(...)``) in the same cell blocks the share.
+import random
+
+
+def himmelblau(x: float, y: float) -> float:
+    """The classic Himmelblau function. Four equal-valued minima at
+    roughly (3, 2), (-2.8, 3.1), (-3.8, -3.3), (3.6, -1.8)."""
+    return (x**2 + y - 11) ** 2 + (x + y**2 - 7) ** 2
+```
+
+## Seed State
+
+<sub>**kind** python</sub>
+
+```python
+# @name Seed State
+# Seed the hill-climb search from a random point on Himmelblau's
+# surface. ``random`` and ``himmelblau`` come from the helpers cell
+# via the DAG. Reusing them here keeps the example DRY and shows how
+# a module cell's definitions flow through to runtime cells.
+random.seed(42)
+x = random.uniform(-5, 5)
+y = random.uniform(-5, 5)
+score = himmelblau(x, y)
+
+state = {
+    "x": x,
+    "y": y,
+    "best_score": score,
+    # Step size shrinks each accepted move so the search sharpens as
+    # it approaches a minimum.
+    "step": 1.0,
+    # history accumulates every proposal (accepted or rejected) so
+    # the summary cell can show the whole trajectory, not just the
+    # kept moves.
+    "history": [{"iter": 0, "x": x, "y": y, "score": score, "accepted": True}],
+    # iteration counter lets each loop iteration deterministically
+    # seed its own RNG, so running the notebook twice reproduces the
+    # same trajectory.
+    "iter": 0,
+}
+
+print(f"Seed at ({x:.3f}, {y:.3f}) with score {score:.3f}")
+state
+```
+
+# The loop cell
+
+The cell below carries `# @loop max_iter=40 carry=state`: Strata's
+loop primitive. The cell body runs up to 40 times. On each iteration:
+
+1. Strata reads the current `state` from the previous iteration's
+   stored artifact (or from the upstream `seed` cell on iter 0).
+2. The body executes, rebinding `state`.
+3. Strata stores the new `state` as `…@iter=k`, so every step is a
+   first-class artifact you can scrub back to.
+
+The `# @loop_until` predicate fires when `state["best_score"]` drops
+below `1e-3`, terminating early. Every intermediate iteration stays
+queryable in the inspect panel, and a new loop cell can `start_from`
+any of them to fork the search without re-running the prefix.
+
+## Hill Climb
+
+<sub>**kind** python  ·  **loop** max_iter=40 carry=state</sub>
+
+```python
+# @name Hill Climb
+# @loop max_iter=40 carry=state
+# @loop_until state["best_score"] < 1e-3
+#
+# One iteration of greedy hill climbing on Himmelblau's function:
+# perturb (x, y) by a small random step, keep the move if it strictly
+# improves the score, otherwise record the proposal and keep the
+# current best. The step size shrinks after every accepted move so the
+# search naturally sharpens as it approaches a minimum.
+#
+# Every iteration stores the full `state` as its own artifact with an
+# ``@iter=k`` suffix. The inspect panel's iteration picker lets you
+# open any of them, and the returned URI can be pasted into a new
+# loop cell's ``# @loop start_from=<cell>@iter=<k>`` to fork a
+# different search strategy from a promising mid-iter state.
+#
+# `random` and `himmelblau` come from the helpers cell via the DAG, so
+# there is no need to re-import or redefine them here.
+next_iter = state["iter"] + 1
+# Deterministic per-iteration RNG so the whole notebook is reproducible.
+# random.Random only accepts int/str/bytes seeds on Python 3.11+, so we
+# hash a per-iteration tuple down to an int.
+rng = random.Random(hash((next_iter, round(state["x"], 6), round(state["y"], 6))))
+
+step = state["step"]
+candidate_x = state["x"] + rng.uniform(-step, step)
+candidate_y = state["y"] + rng.uniform(-step, step)
+candidate_score = himmelblau(candidate_x, candidate_y)
+
+accepted = candidate_score < state["best_score"]
+
+new_history_entry = {
+    "iter": next_iter,
+    "x": candidate_x,
+    "y": candidate_y,
+    "score": candidate_score,
+    "accepted": accepted,
+}
+
+if accepted:
+    state = {
+        **state,
+        "x": candidate_x,
+        "y": candidate_y,
+        "best_score": candidate_score,
+        # Shrink the step on accepted moves to converge cleanly.
+        "step": step * 0.9,
+        "history": state["history"] + [new_history_entry],
+        "iter": next_iter,
+    }
+    print(f"iter {next_iter}: accept → score {candidate_score:.4f} at ({candidate_x:.3f}, {candidate_y:.3f})")
+else:
+    state = {
+        **state,
+        "history": state["history"] + [new_history_entry],
+        "iter": next_iter,
+    }
+    print(
+        f"iter {next_iter}: reject (score {candidate_score:.4f} ≥ "
+        f"best {state['best_score']:.4f})"
+    )
+```
+
+## Convergence Summary
+
+<sub>**kind** python</sub>
+
+```python
+# @name Convergence Summary
+# Read the loop cell's final state and render a compact convergence
+# table. This is a regular downstream cell: it sees the *final*
+# iteration's carry artifact via the normal DAG input path, identical
+# to how any downstream cell reads any upstream variable.
+accepted = [h for h in state["history"] if h.get("accepted")]
+rejected = [h for h in state["history"] if not h.get("accepted")]
+
+print(f"Final (x, y) = ({state['x']:.4f}, {state['y']:.4f})")
+print(f"Final score  = {state['best_score']:.6f}")
+print(f"Iterations   = {state['iter']}")
+print(f"Accepted     = {len(accepted)}")
+print(f"Rejected     = {len(rejected)}")
+print()
+print(f"{'iter':>4} {'x':>9} {'y':>9} {'score':>12} {'outcome':>10}")
+for entry in state["history"][-10:]:
+    outcome = "accept" if entry.get("accepted") else "reject"
+    print(
+        f"{entry['iter']:>4d} {entry['x']:>9.3f} {entry['y']:>9.3f} "
+        f"{entry['score']:>12.4f} {outcome:>10}"
+    )
+
+# The last expression becomes the cell's display output.
+{
+    "final_x": state["x"],
+    "final_y": state["y"],
+    "final_score": state["best_score"],
+    "iterations": state["iter"],
+    "accepted": len(accepted),
+    "rejected": len(rejected),
+}
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/widget_playground/index.md -->
+
+# Drive a plot with a slider, a number and a dropdown
+
+![Drive a plot with a slider, a number and a dropdown: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-light.webp#only-light)
+![Drive a plot with a slider, a number and a dropdown: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-dark.webp#only-dark)
+
+A three-cell notebook: a **widget cell** (a control panel) feeding two Python
+cells, one that renders a DataFrame and one that draws a chart. The widget
+cell is `# @live`, so dragging a control re-runs both downstream cells and
+the grid and the chart update.
+
+## What it shows
+
+- A **widget cell** with three controls:
+  - `alpha`: a slider (0–1)
+  - `n`: a number input (row count)
+  - `curve`: a dropdown (`linear` / `sqrt` / `square`)
+- A downstream Python cell that reads `alpha`, `n`, `curve` and builds a
+  DataFrame, which renders in the **interactive data viewer**. So the two
+  features compose: a widget drives the grid.
+- A second downstream cell that plots the same curve with matplotlib.
+- **Live mode**: `# @live` on the widget cell makes a control change re-run
+  the cheap downstream cells instead of only marking them stale.
+- **Content-addressed values**: drag `alpha` to a new value and back, the
+  second time is a cache hit, no recompute.
+
+## Cells
+
+| Cell | What it does |
+|---|---|
+| `controls` | A `# @live` `widget` cell declaring the slider / number / dropdown. |
+| `preview` | Reads the control values, builds a DataFrame, displays it. |
+| `plot` | Reads the same values and plots `y` against `x`. |
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Open **Widget Playground** from the notebook list on the Strata home page.
+
+## Try this
+
+1. Run `preview` and `plot`. They read the widget defaults: a 20-row table
+   in the data viewer and a straight line.
+2. Drag the `alpha` slider. Both cells re-run on their own, and the `y`
+   column and the chart reflect the new `alpha`.
+3. Switch `curve` to `square`, the shape changes.
+4. Drag `alpha` back to its previous value, a cache hit.
+5. Turn **⚡ Live** off (or change the annotation to `# @live off`) and drag
+   again: now the two cells only turn yellow (stale) until you run them.
+
+Widget cells render in the web UI. Edit the control declaration with the
+**✎ Edit controls** toggle on the cell.
+
+## Open as an app
+
+Click **App** in the notebook header to open this notebook as a read-only
+interactive app, just the controls, the table and the chart, no editor. With
+the widget cell's **⚡ Live** on, as it ships, dragging `alpha` in the app
+updates them live.
+
+## Controls
+
+<sub>**kind** widget</sub>
+
+```text
+# @live
+# @name Controls
+alpha = slider(0, 1, step=0.05, default=0.5)
+n     = number(default=20, min=5, max=100)
+curve = dropdown(["linear", "sqrt", "square"], default="linear")
+```
+
+## Preview
+
+<sub>**kind** python</sub>
+
+```python
+# @name Preview
+# Downstream of the widget cell: drag `alpha` / change `curve` and re-run
+# (or run in the live cascade) and the table updates. It renders in the
+# interactive data viewer, so widgets drive the grid.
+import numpy as np
+import pandas as pd
+
+x = np.arange(n)
+base = {"linear": x, "sqrt": np.sqrt(x), "square": x**2}[curve]
+df = pd.DataFrame({"x": x, "y": np.round(alpha * base, 3)})
+
+print(f"alpha={alpha}  n={n}  curve={curve}")
+df
+```
+
+## Plot
+
+<sub>**kind** python</sub>
+
+```python
+# @name Plot
+# A second downstream cell: the same controls drive a matplotlib chart.
+# The Controls cell ships with ⚡ Live on, so dragging `alpha` (or changing
+# `curve`) updates this plot live, in the notebook or the app view.
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+plt.style.use("strata")
+
+x = np.arange(n)
+base = {"linear": x, "sqrt": np.sqrt(x), "square": x.astype(float) ** 2}[curve]
+y = alpha * base
+
+fig, ax = plt.subplots(figsize=(6, 3.2))
+(line,) = ax.plot(x, y, marker="o")
+ax.fill_between(x, y, alpha=0.15, color=line.get_color())
+ax.set_title(f"alpha={alpha}  curve={curve}")
+ax.set_xlabel("x")
+ax.set_ylabel("y")
+fig.tight_layout()
+fig
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/library_cells/index.md -->
+
+# Share functions between cells
+
+![Share functions between cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)
+![Share functions between cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)
+
+Walks through cross-cell library code in Strata Notebook: pure module
+cells, mixed runtime+library cells, PEP 563 type annotations, and the
+limitations slicing keeps in place.
+
+## What it covers
+
+| Cell | Demonstrates |
+| ---- | ------------ |
+| `pure_lib` / `use_pure` | Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim. |
+| `mixed_lib` / `use_mixed` | The slicing payoff: a single cell mixes runtime setup (`raw_min`, `raw_max`, a `print`) with reusable helpers (`clamp`, `CLAMP_MIN`). Runtime values still flow through the artifact path; helpers ride the synthetic module. |
+| `typed_lib` / `use_typed` | `from __future__ import annotations` lets a helper reference a type defined elsewhere, `symtable` correctly drops stringified annotations from the free-variable check. |
+| `blocked` / `try_blocked` | Closure over a runtime value blocks export. The diagnostic pinpoints the function (`is_outlier`) and the unresolved name (`runtime_threshold`). |
+
+## Running
+
+```bash
+STRATA_DEPLOYMENT_MODE=personal \
+STRATA_NOTEBOOK_STORAGE_DIR=/path/to/strata/examples \
+uv run python -m strata
+```
+
+Then open the notebook UI and pick **Library Cells** from the discover
+list. Run the cells top-to-bottom. The `blocked` cell carries the
+export diagnostic, and `try_blocked` shows the `NameError` its call raises.
+
+# Library cells
+
+A *library cell* is one that defines reusable Python: functions, classes,
+constants, code that other cells will import and call. Strata Notebook
+re-executes the producing cell's source as a synthetic Python module so
+downstream cells get a fresh, deterministic copy of each definition.
+
+Originally the producing cell had to be **pure**: imports, defs, classes,
+and literal-constant assignments only. A single setup line like
+`df = load_data()` would block every helper in the same cell from being
+shared.
+
+The planner now **slices** the cell instead: it keeps imports, defs,
+classes, and literal constants, drops everything else, and validates that
+the slice is self-contained. Cells that mix runtime work with library code
+can now share the library code cleanly. This notebook walks through what
+works, what's relaxed, and what's still blocked.
+
+## Pure module cell (baseline)
+
+<sub>**kind** python</sub>
+
+```python
+# @name Pure module cell (baseline)
+#
+# This is the classic shape: imports, a literal constant, and a couple
+# of helpers. No runtime work at module scope. The cell is exported
+# verbatim (no slicing), so comments and formatting survive.
+
+import math
+
+CIRCLE_PRECISION = 4
+
+
+def area(radius: float) -> float:
+    return round(math.pi * radius * radius, CIRCLE_PRECISION)
+
+
+def perimeter(radius: float) -> float:
+    return round(2 * math.pi * radius, CIRCLE_PRECISION)
+```
+
+## Use the pure-cell helpers
+
+<sub>**kind** python</sub>
+
+```python
+# @name Use the pure-cell helpers
+#
+# ``area`` and ``perimeter`` ride the synthetic-module path; running
+# this cell re-executes the slice in a fresh module and pulls out
+# the requested symbols.
+
+circle = {
+    "radius": 7.5,
+    "area": area(7.5),
+    "perimeter": perimeter(7.5),
+    "precision_used": CIRCLE_PRECISION,
+}
+```
+
+# Mixed cells (the new payoff)
+
+The next cell mixes runtime setup with reusable helpers. Before slicing
+this whole cell would have been blocked because of the runtime
+assignments, the user would have to split them into separate cells just
+to share `clamp` downstream.
+
+After slicing, the planner drops the runtime lines from the synthetic
+module and exports the helper. The runtime variables still flow through
+the regular artifact path, so downstream cells see them too.
+
+## Mixed: setup + helpers in one cell
+
+<sub>**kind** python</sub>
+
+```python
+# @name Mixed: setup + helpers in one cell
+#
+# Slicing keeps:
+#   - the import (math)
+#   - the literal constant (CLAMP_MIN, CLAMP_MAX)
+#   - the def (clamp)
+#
+# and drops the runtime statements (raw_min, raw_max, the print). The
+# runtime variables are still visible to downstream cells via the
+# regular artifact path; the def + constants ride the synthetic module.
+
+import math
+
+# --- Runtime setup, dropped from the synthetic module ----------------
+# (Pre-slicing, these three lines would have blocked the whole cell.)
+raw_min = round(-math.tau * 7, 2)  # function call → not a literal
+raw_max = round(math.tau * 16, 2)
+print(f"loaded raw bounds: [{raw_min}, {raw_max}]")
+
+# --- Library code, kept in the slice ---------------------------------
+CLAMP_MIN = 0.0
+CLAMP_MAX = 100.0
+
+
+def clamp(value: float) -> float:
+    """Pin *value* into ``[CLAMP_MIN, CLAMP_MAX]``."""
+    return max(CLAMP_MIN, min(CLAMP_MAX, value))
+```
+
+## Use the mixed-cell helpers
+
+<sub>**kind** python</sub>
+
+```python
+# @name Use the mixed-cell helpers
+#
+# This cell consumes both the library code (``clamp``, ``CLAMP_MIN``)
+# *and* a runtime variable (``raw_max``) from the producing cell;
+# the slicer routes each through the right path automatically.
+
+clamped_examples = {
+    "raw_max_clamped": clamp(raw_max),  # raw_max is runtime → artifact path
+    "clamp_at_floor": clamp(-99),
+    "clamp_at_ceil": clamp(999),
+    "clamp_min_constant": CLAMP_MIN,  # CLAMP_MIN is literal → module path
+}
+```
+
+# Typed library cells (PEP 563)
+
+Type annotations participate in the free-variable check by default , 
+`def f(x: SomeType): ...` would block export when `SomeType` isn't
+bound in the slice.
+
+Adding `from __future__ import annotations` to the cell relaxes this:
+PEP 563 stringifies annotations and `symtable` correctly drops them from
+the reference set. That makes it easy to write helpers that hint at types
+defined elsewhere (e.g. `pyarrow.Table`) without forcing every consumer
+to import the same names.
+
+## Typed helper using PEP 563 annotations
+
+<sub>**kind** python</sub>
+
+```python
+# @name Typed helper using PEP 563 annotations
+#
+# ``Table`` is *not* imported in this cell, but the future import keeps
+# the annotation from being evaluated at module load. The function
+# still works at call time because we only access duck-typed
+# attributes (``num_rows``, ``num_columns``).
+
+from __future__ import annotations
+
+
+def describe_table(table: Table) -> dict:  # noqa: F821 - PEP 563 stringified
+    """Summarize an Arrow-like table without needing the type at module scope."""
+    return {"rows": table.num_rows, "columns": table.num_columns}
+```
+
+## Use the typed helper
+
+<sub>**kind** python</sub>
+
+```python
+# @name Use the typed helper
+#
+# The consumer imports ``pyarrow`` itself (it actually needs the
+# concrete class, since it's calling the constructor). The library
+# cell got away with just the *name* in an annotation.
+
+import pyarrow as pa
+
+table = pa.table({"x": [1, 2, 3], "y": ["a", "b", "c"]})
+summary = describe_table(table)
+```
+
+# Limitations
+
+Slicing has a hard rule: the synthetic module is built from **one cell's
+source only**: it can't reach across cells to find names. Three failure
+modes follow from that:
+
+1. **Closures over runtime values.** A helper that references a value
+   computed at runtime in the same cell can't be exported, because
+   that value won't exist when the synthetic module re-executes.
+2. **Cross-cell imports.** `import math` in cell A doesn't make `math`
+   visible inside a helper exported by cell B, each cell that hosts
+   library code has to carry its own imports.
+3. **Cross-cell helpers.** A helper can't call another helper that
+   lives in a different cell. Move them into the same cell, or
+   duplicate the dependency.
+
+The next cell triggers the first failure mode on purpose so you can see
+the diagnostic, it should error with a message naming the unresolved
+variable.
+
+## Closure over a runtime value (intentionally blocked)
+
+<sub>**kind** python</sub>
+
+```python
+# @name Closure over a runtime value (intentionally blocked)
+#
+# ``runtime_threshold`` is computed at runtime, so it gets dropped from
+# the slice. ``is_outlier`` references it as a free variable, which
+# leaves the synthetic module unable to resolve the name at call time.
+#
+# The cell itself runs; the diagnostic on it names both the function
+# (``is_outlier``) and the unresolved variable (``runtime_threshold``),
+# pointing the user straight at the fix. The consumer below shows the
+# NameError the call would raise.
+#
+# To unblock: move ``runtime_threshold`` into its own cell so the slice
+# only contains ``is_outlier``, and let the threshold flow through the
+# regular artifact path.
+
+import math
+
+runtime_threshold = math.sqrt(9)
+
+
+def is_outlier(value: float) -> bool:
+    return value > runtime_threshold
+```
+
+## Downstream consumer (would call is_outlier)
+
+<sub>**kind** python</sub>
+
+```python
+# @name Downstream consumer (would call is_outlier)
+#
+# Without this reference, the producing cell would just be a private
+# helper and the planner would let it slide. Naming ``is_outlier``
+# here is what tells Strata "this is meant to be shared," and is
+# what makes the export-blocked diagnostic fire on the cell above.
+#
+# The helper never reaches this cell, so the call raises NameError.
+# Catching it keeps the notebook runnable end to end and shows the error.
+
+try:
+    would_be_outliers = is_outlier(7)
+except NameError as exc:
+    would_be_outliers = f"blocked: {exc}"
+would_be_outliers
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/s3_mount/index.md -->
+
+# Read a NOAA weather file from a public S3 bucket
+
+![Read a NOAA weather file from a public S3 bucket: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-light.webp#only-light)
+![Read a NOAA weather file from a public S3 bucket: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/s3_mount-dark.webp#only-dark)
+
+Demonstrates Strata's **mount** feature: a notebook cell can read a
+remote filesystem path as if it were local, with no custom code inside
+the cell.
+
+The example mounts a single file from NOAA's GSOD (Global Surface
+Summary of Day) dataset, a public, anonymous-readable S3 bucket, and
+runs a small pandas analysis over it.
+
+## What it shows
+
+- Declaring a mount in `notebook.toml` under `[[mounts]]`.
+- Using fsspec `options` to authenticate (here, `anon = true` for a
+  public bucket).
+- Accessing the mounted path as a `pathlib.Path` inside a cell.
+- Zero AWS credentials required, `anon = true` tells fsspec to skip
+  the credential chain.
+
+## Mount declaration
+
+```toml
+[[mounts]]
+name = "jfk_weather"
+uri = "s3://noaa-gsod-pds/2024/72503014732.csv"
+mode = "ro"
+options = { anon = true }
+```
+
+Inside a cell, `jfk_weather` is a `pathlib.Path` to a local directory
+that holds the mounted file, so `load` reads
+`jfk_weather / "72503014732.csv"`; the CSV is materialized locally by
+fsspec on first read.
+
+## Cells
+
+| Cell | What it does |
+|---|---|
+| `load` | Reads the weather CSV into a DataFrame, parses dates, keeps the columns we need. |
+| `summary` | Groups by month and aggregates avg / max / min / total-precip. |
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **S3 Mount (Public Bucket)** from the notebook list on the Strata home page.
+
+Strata reads the bucket in its own process, so an installed Strata
+needs the `s3` extra (`s3fs`): `uv tool install "strata-notebook[s3]"`.
+The development environment already has it.
+
+## Swapping in a private bucket
+
+Drop the `options = { anon = true }` line and configure AWS credentials
+the normal way (`aws configure`, `AWS_PROFILE`, IAM role, etc.). fsspec
+will pick them up automatically.
+
+## Load JFK weather from S3
+
+<sub>**kind** python</sub>
+
+```python
+# @name Load JFK weather from S3
+import pandas as pd
+
+weather = pd.read_csv(jfk_weather / "72503014732.csv")
+weather["DATE"] = pd.to_datetime(weather["DATE"])
+weather = weather[["DATE", "NAME", "TEMP", "MAX", "MIN", "PRCP"]]
+weather
+```
+
+## Monthly weather summary
+
+<sub>**kind** python</sub>
+
+```python
+# @name Monthly weather summary
+monthly = (
+    weather.assign(month=weather["DATE"].dt.to_period("M").astype(str))
+    .groupby("month", as_index=False)
+    .agg(
+        avg_temp=("TEMP", "mean"),
+        max_temp=("MAX", "max"),
+        min_temp=("MIN", "min"),
+        total_precip=("PRCP", "sum"),
+    )
+    .round(2)
+)
+monthly
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/each_pipeline/index.md -->
+
+# Process weather files one by one into an Iceberg table
+
+A cell that runs once per file, caches each file separately, and keeps an Iceberg
+table in step with the results. It reads a few hundred real files from a public
+bucket and writes to a real warehouse: an Iceberg REST catalog over an object
+store, running on your machine.
+
+The data is NOAA's daily weather for 2024, one CSV per station. The bucket has
+12,159 files, and the notebook reads the 287 that `glob=725*.csv` names.
+
+## What it shows
+
+- `# @each path in gsod glob=725*.csv` runs the cell once per file, and a remote
+  mount downloads only the files the pattern names.
+- Each file's result is cached on its own, so a changed file runs alone.
+- `# @write_table summary lake:gsod.stations sync on=station` makes the table hold
+  what the cell produced, in one commit per run. A file that goes away takes its
+  row with it, and a run that changes nothing commits nothing.
+- A file the cell can't read fails that item alone. The other items stay cached, and
+  the table stays as it was, since a missing row would read as a deletion.
+- A SQL cell reads the table back through the catalog, at the snapshot the cell's
+  key holds. It never touches the bucket: a notebook-level mount reaches only the
+  cells that read it.
+
+## Running
+
+You need Docker, and [uv](https://docs.astral.sh/uv/). From the project root:
+
+```bash
+docker compose -f examples/each_pipeline/docker-compose.yml up -d --wait catalog
+source examples/each_pipeline/lake.env
+uv run strata run examples/each_pipeline
+```
+
+The first run downloads the 287 files, about 25 MB, and takes a few minutes. `strata
+run` says where it is as it goes. Run it again and nothing runs: the summary cell is
+one lookup, after listing the bucket to see that nothing changed.
+
+Strata reads the bucket in its own process, so an installed Strata needs the `s3`
+extra (`s3fs`), and the `hottest` SQL cell needs the `sql` extra (DuckDB itself is a
+core dependency): `uv tool install "strata-notebook[s3,sql]"`. The development
+environment already has both.
+
+## Try it
+
+Change `glob=725*.csv` to `glob=7250*.csv` in `cells/summarize.py` and run again. The
+table goes from 287 rows to 41 in one new snapshot, and the SQL cell runs again because
+the table changed. Change it back and all 287 return. No item runs either time.
+
+## Using your own warehouse
+
+The notebook names the table `lake:gsod.stations`, and `lake` is defined on the
+server, by `STRATA_CATALOGS`. Nothing in the notebook changes when `lake` is your
+organization's catalog instead of the one in `docker-compose.yml`:
+
+```bash
+export STRATA_CATALOGS='{"lake": {"type": "rest", "uri": "https://catalog.example", "warehouse": "prod", "token": "..."}}'
+```
+
+Glue and SQL catalogs work the same way for the write. To keep the keys out of the
+setting, see
+[named credentials](https://bearingresearch.com/strata/latest/reference/notebook-toml/#named-credentials).
+`sync` refuses a table Strata did not write, so point it at a new table or one this
+notebook owns.
+
+To stop the warehouse and delete its data:
+
+```bash
+docker compose -f examples/each_pipeline/docker-compose.yml down -v
+```
+
+## Summarize each station
+
+<sub>**kind** python</sub>
+
+```python
+# @name Summarize each station
+# @each path in gsod glob=725*.csv
+# @write_table summary lake:gsod.stations sync on=station
+import pandas as pd
+import pyarrow as pa
+
+df = pd.read_csv(path, dtype={"STATION": str})
+# GSOD writes a missing reading as 9999.9.
+measured = df[df["MAX"] < 999]
+summary = pa.table(
+    {
+        "station": [df["STATION"].iloc[0]],
+        "name": [str(df["NAME"].iloc[0])],
+        "days": [len(df)],
+        "mean_temp_f": [float(df["TEMP"].mean())],
+        "hottest_f": [float(measured["MAX"].max())],
+    }
+)
+```
+
+## hottest_stations
+
+<sub>**kind** sql</sub>
+
+```sql
+-- @name hottest_stations
+-- @sql connection=lake
+-- @after summarize
+SELECT station, name, days, hottest_f
+FROM lake.gsod.stations
+ORDER BY hottest_f DESC
+LIMIT 10
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/markdown_showcase/index.md -->
+
+# Write reports in Markdown, by hand or from data
+
+![Write reports in Markdown, by hand or from data: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)
+![Write reports in Markdown, by hand or from data: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)
+
+Every way Strata renders Markdown, in one notebook: headings, emphasis, lists, tables,
+code blocks, blockquotes, links, and the sanitizer that keeps script in a cell from
+running. The last two cells are Python cells that show Markdown built at run time with
+`Markdown(...)`: a short note with the current time, and a report from a DataFrame.
+
+It runs nothing heavy; use it to check how something renders, or as a reference when you
+write a documentation cell.
+
+# Markdown Showcase
+
+This notebook exercises every markdown rendering path in Strata. It's
+deliberately content-only, there's no real "computation" to run. Use it
+to verify that the renderer handles the cases listed below, and as a
+reference when you want to write a documentation cell.
+
+**Two surfaces are tested:**
+
+1. **Markdown cells** (this cell, and the next several). Source is raw
+   markdown; preview renders by default; click anywhere on the preview
+   to swap in the editor; blur to render again.
+2. **Dynamic markdown output** from Python cells via `Markdown(...)`
+   (the last two cells). Same rendering pipeline, different entry
+   point, useful when you want a code cell to emit a formatted report.
+
+If anything in the next few cells doesn't render the way you'd expect,
+that's a renderer bug worth filing.
+
+# Heading 1
+
+## Heading 2
+
+### Heading 3
+
+#### Heading 4
+
+##### Heading 5
+
+###### Heading 6
+
+Headings should shrink with each level and stay distinct from body text.
+There should be no `#` characters left in the rendered output, and the
+spacing between adjacent headings should be sane.
+
+## Inline emphasis
+
+This is **bold** and so is __this__. This is *italic* and so is _this_.
+This is ***both*** at once. This is ~~struck through~~ via GFM.
+
+Code spans use backticks: `df.groupby("ticker").agg("sum")`. Inline
+code should keep `_underscores_` and `*asterisks*` literal, they're
+data, not formatting.
+
+Edge cases the old renderer was bad at:
+
+- Mid-word italic shouldn't fire: `snake_case_name` stays as one token.
+- Math-style underscores: `x_1, x_2, x_3` should also stay literal.
+- Asterisks inside code spans: `a * b * c` keeps the stars.
+- A pair of backticks containing a backtick: `` `like_this` ``.
+
+## Unordered
+
+- alpha
+- beta
+- gamma
+
+## Ordered
+
+1. first
+2. second
+3. third
+
+## Nested
+
+- top level
+  - nested level
+    - deeply nested
+  - back to nested
+- another top level
+  1. nested ordered one
+  2. nested ordered two
+
+## Mixed (ordered + unordered, with content)
+
+1. **Step one**: set up the environment.
+   - Install dependencies via `uv sync`.
+   - Verify with `uv run pytest tests/notebook/`.
+2. **Step two**: run the notebook.
+   - Open it via the Strata UI.
+   - Click `Run All` to execute every Python cell in order.
+3. **Step three**: read the output.
+
+## Plain table
+
+| Provider | Model | Pricing tier |
+|----------|-------|--------------|
+| OpenAI | gpt-5.4 | Premium |
+| Anthropic | claude-sonnet-4-6 | Standard |
+| Google | gemini-3-flash | Cheap |
+
+## With column alignment
+
+| Eval | Score | Notes |
+|:-----|------:|:------:|
+| MMLU-redux | 74.2% | macro |
+| GSM8K | 88.1% | exact-match |
+| HumanEval | 71.0% | pass@1 |
+| TruthfulQA | 62.3% | mc1 |
+
+## Table with inline formatting
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `model_id` | `str` | ✓ | Identifier from the **registry** |
+| `score` | `float` | ✓ | Numeric in `[0, 1]` |
+| `provenance_hash` | `str` | ✓ | SHA-256 of the methodology chain |
+| `notes` | `str` | | Optional *human-readable* commentary |
+
+## Fenced code with a language
+
+```python
+def materialize(inputs, transform):
+    """The single primitive Strata exposes."""
+    provenance = sha256(serialize(inputs) + serialize(transform))
+    if cache.has(provenance):
+        return cache.get(provenance)
+    result = transform.apply(inputs)
+    cache.put(provenance, result)
+    return result
+```
+
+## Fenced code without a language
+
+```
+$ STRATA_PORT=8765 strata-notebook
+Listening on http://127.0.0.1:8765
+```
+
+## Inline + fenced together
+
+The runtime injects `Markdown` into every cell namespace:
+
+```python
+display(Markdown("# Live!"))
+```
+
+So you can produce documentation from data without importing anything.
+
+## Edge cases
+
+A fence containing markdown special chars:
+
+```markdown
+# This stays literal
+
+- *no italics here*
+- `no code spans`
+- [no links](http://example.com)
+```
+
+Fenced HTML, should be HTML-escaped, not rendered:
+
+```html
+<script>alert("hi")</script>
+```
+
+## Single-level
+
+> Long-horizon workflows have these properties: expensive, iterative,
+> branching, failure-prone. What breaks first is not compute, it's
+> state. Strata makes state explicit and durable.
+
+## Nested
+
+> Outer layer.
+>
+> > Quoted within the quote, the inner block should render as a
+> > nested blockquote, not lose its prefix.
+>
+> Back to the outer layer.
+
+## With other markdown inside
+
+> ### Methodology
+>
+> Every benchmark score this harness produces is paired with a
+> **provenance hash** covering:
+>
+> 1. Dataset version
+> 2. Prompt template
+> 3. Decoding configuration
+> 4. Model identifier
+> 5. Harness code
+>
+> Same inputs + same harness = same hash.
+
+## Horizontal rule
+
+Above the rule.
+
+---
+
+Below the rule.
+
+***
+
+Triple-asterisk rule above this line.
+
+## Inline links
+
+Standard markdown link: [Strata homepage](https://bearingresearch.com/strata/).
+
+Link with a query string:
+[search](https://example.com/search?q=strata&page=2).
+
+Link to a fragment: [strata install](https://bearingresearch.com/strata/latest/getting-started/installation/#prerequisites).
+
+## Autolinks (CommonMark)
+
+Wrapped in angle brackets: <https://example.com>.
+
+Email autolink: <hello@example.com>.
+
+## Plain URLs (linkify)
+
+A bare URL inside a sentence, like https://example.com/page, should
+auto-detect into a clickable link without explicit markdown syntax.
+The old hand-rolled parser missed this case.
+
+## Reference links
+
+Reference-style: [Strata][nb] uses an artifact store at its core.
+
+[nb]: https://bearingresearch.com/strata/
+
+## Link safety
+
+All rendered links should open in a new tab and carry
+`rel="noreferrer noopener"`. Right-click → Inspect on any link above
+to verify.
+
+## Sanitization checks
+
+Markdown cells (and `Markdown(...)` outputs) are user-controlled and
+rendered via `v-html`, so the renderer runs every output through
+DOMPurify. Each item below should appear as **literal text or a no-op**
+,  never executed, never producing a popup, never with the dangerous
+attribute reaching the DOM.
+
+### Script injection
+
+Below should render as plain text inside a paragraph, not run:
+
+&lt;script>alert('XSS via raw script tag')&lt;/script>
+
+### Inline HTML attempts
+
+The renderer is configured with `html: false`, so any inline HTML
+we accidentally let through still gets sanitized. The next line should
+remain as a paragraph with the angle-bracket text visible:
+
+&lt;img src="x" onerror="alert('attribute XSS')" />
+
+### `javascript:` URLs
+
+A markdown link with a `javascript:` URL should either render as
+inert text or be stripped entirely, never as a clickable executor:
+
+[click here please](#)
+
+### `on*` handler attempts inside markdown
+
+Markdown doesn't have a syntax for HTML attributes, but if a future
+extension allowed `{onclick=...}` style attribute lists, it must not
+plumb through.
+
+### Data URLs
+
+Data URLs in links are sanitized too, DOMPurify drops the href:
+
+[image data url](#)
+
+## Dynamic Markdown via display()
+
+<sub>**kind** python</sub>
+
+```python
+# @name Dynamic Markdown via display()
+#
+# The Markdown(...) wrapper is auto-injected into every cell namespace,
+# so a Python cell can emit formatted prose without importing anything.
+# This is the path that lets a code cell produce a "report" alongside
+# numeric output.
+
+import datetime as _dt
+
+now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+display(
+    Markdown(
+        f"""
+## Generated at runtime
+
+This block was rendered from a **Python cell**, not a markdown cell.
+
+- Current time: `{now}`
+- Cell language: `python`
+- Display path: `Markdown(text) → text/markdown artifact → renderer`
+
+> The same renderer powers both surfaces, so anything the markdown
+> showcase renders correctly will also work here.
+"""
+    )
+)
+```
+
+## Templated report from a DataFrame
+
+<sub>**kind** python</sub>
+
+```python
+# @name Templated report from a DataFrame
+#
+# A more realistic dynamic-markdown pattern: take some tabular result
+# and render a small report. Useful for "summary at the end of a
+# notebook" cells where you want prose + data in one display, not
+# stacked output blocks.
+
+import pandas as pd
+
+df = pd.DataFrame(
+    {
+        "model_id": [
+            "claude-sonnet-4-6",
+            "gpt-5.4",
+            "gemini-3-flash",
+            "mistral-large-latest",
+        ],
+        "mmlu": [0.8412, 0.8205, 0.7891, 0.7634],
+        "gsm8k": [0.9421, 0.9387, 0.9012, 0.8723],
+        "humaneval": [0.8521, 0.8234, 0.7823, 0.7123],
+    }
+)
+
+# Score columns to summarize.
+score_cols = [c for c in df.columns if c != "model_id"]
+df["mean"] = df[score_cols].mean(axis=1)
+ranked = df.sort_values("mean", ascending=False).reset_index(drop=True)
+
+best = ranked.iloc[0]
+worst = ranked.iloc[-1]
+spread = (best["mean"] - worst["mean"]) * 100
+
+# Pretty table: markdown table syntax with right-aligned scores.
+table_lines = [
+    "| Rank | Model | MMLU | GSM8K | HumanEval | Mean |",
+    "|:----:|-------|-----:|------:|----------:|-----:|",
+]
+for i, row in ranked.iterrows():
+    table_lines.append(
+        f"| {i + 1} | `{row['model_id']}` "
+        f"| {row['mmlu']:.1%} | {row['gsm8k']:.1%} "
+        f"| {row['humaneval']:.1%} | {row['mean']:.1%} |"
+    )
+table = "\n".join(table_lines)
+
+display(
+    Markdown(
+        f"""
+## Mock leaderboard report
+
+**{len(ranked)} models** scored across **{len(score_cols)} evals**. Top
+performer: `{best['model_id']}` at `{best['mean']:.1%}` mean. Spread
+between best and worst: **{spread:.1f} points**.
+
+{table}
+
+---
+
+*Report generated dynamically from `pd.DataFrame` → `Markdown`,
+exactly the pattern you'd use for "summary at end of notebook" cells.*
+"""
+    )
+)
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/r_mtcars_analysis/index.md -->
+
+# Model car mileage in R, with plots inline
+
+A **pure-R notebook**: every cell is R. Load the built-in `mtcars`
+dataset, summarise it, fit a linear model, and draw two plots that
+render inline as PNG. Variables flow cell-to-cell through the same
+content-addressed artifact store the Python cells use; here both ends
+of every edge happen to be R.
+
+## What it shows
+
+- **R cells stand on their own.** No Python anywhere. The DAG, the
+  provenance cache, and the cascade all work exactly as they do for
+  Python, language is per-cell, not per-notebook.
+- **Inline plots (0.2.0).** A ggplot scatter and R's base-graphics
+  2×2 `plot(lm)` diagnostic panel both render as PNG in the cell, just
+  like a Python matplotlib figure. A bare trailing ggplot object
+  auto-prints, no explicit `print()`.
+- **Two kinds of R→R handoff.** `data.frame`s (`cars`, `by_cyl`) cross
+  as Arrow IPC. The `lm` object itself isn't tabular, so it's stored as
+  RDS (`r_only`) and read straight back by the diagnostics cell with
+  full fidelity, an R-only object flowing between R cells that the
+  Arrow tier couldn't carry. (A *Python* cell consuming it would get a
+  structured "re-export as a data.frame" error instead of a crash.)
+- **renv, one click.** The plotting cell needs `ggplot2`, which isn't
+  in the harness baseline. It's pinned in `renv.lock` and restored
+  automatically when you open the notebook, or via the Environment
+  panel's **Initialize renv**. A missing package surfaces a structured
+  install hint, not a stack trace.
+
+## Cells
+
+| Cell | What it does |
+|---|---|
+| `prep` | Tidy `mtcars` into a `data.frame` (`cars`), model name column, `cyl` as a factor. |
+| `summarise` | `aggregate()` mean mpg / hp / wt by cylinder count → `by_cyl`. |
+| `fit` | `lm(mpg ~ wt + hp + cyl)`; emit the `model` (RDS), a tidy `coefs` table, and one-row `model_stats`. |
+| `plot-mpg` | ggplot2 scatter of mpg vs weight, coloured by cylinder, with per-group fits → inline PNG. |
+| `diagnostics` | Read `model` back from RDS; base-graphics 2×2 residual diagnostics → inline PNG. |
+
+## What you need
+
+- **R** on `PATH` (`Rscript`). The notebook's `arrow`, `jsonlite`, and
+  `ggplot2` come from `renv.lock`: opening the notebook restores them
+  into a project-scoped library automatically; no system installs
+  beyond R itself.
+- The uv-managed Python venv carries only the notebook harness baseline
+  (`pyarrow` / `orjson` / `cloudpickle`); **no Python runs any cell
+  here**.
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Open **R: mtcars regression + inline plots** from the notebook list on the Strata home page and run the
+cells top to bottom. Or run it headlessly, `strata run` executes R cells
+and restores the notebook's `renv.lock` on the way in:
+
+```bash
+uv run strata run examples/r_mtcars_analysis
+```
+
+## Try this
+
+1. **Swap in another plot.** Replace `plot-mpg` with
+   `ggplot(by_cyl, aes(factor(cyl), mean_mpg)) + geom_col()`: a bar of
+   mean economy by cylinder. Edit, Shift+Enter, watch it re-render.
+2. **Reach a non-tabular object across cells.** Add a cell with
+   `confint(model)`: `model` resolves from the RDS artifact and you get
+   coefficient confidence intervals, no re-fit.
+3. **Break, then fix, the environment.** Delete the `renv/` directory
+   and reopen: the ggplot cell shows the install hint; click **Initialize
+   renv** (or **Install ggplot2**) and re-run.
+
+## Prepare the mtcars data
+
+<sub>**kind** r</sub>
+
+```text
+# @name Prepare the mtcars data
+#
+# A pure-R notebook: every cell is R. Variables flow cell-to-cell
+# through the same content-addressed artifact store the Python cells
+# use: a data.frame crosses as Arrow IPC, so the next R cell receives
+# it as a data.frame with no glue code.
+#
+# `mtcars` ships with R (1974 Motor Trend, 32 cars). Tidy it into the
+# frame the rest of the notebook builds on: keep the model name as a
+# real column, make the cylinder count a factor (so the model and the
+# plots treat it as categorical), and keep the columns we care about.
+
+cars <- data.frame(
+  model = rownames(mtcars),
+  mpg = mtcars$mpg,
+  wt = mtcars$wt,
+  hp = mtcars$hp,
+  cyl = factor(mtcars$cyl),
+  row.names = NULL
+)
+
+cat(sprintf(
+  "Prepared %d cars across %d cylinder classes (%s)\n",
+  nrow(cars), nlevels(cars$cyl), paste(levels(cars$cyl), collapse = ", ")
+))
+```
+
+## Summarise by cylinder count
+
+<sub>**kind** r</sub>
+
+```text
+# @name Summarise by cylinder count
+#
+# Split-apply-combine in base R: group the cars by cylinder class and
+# average economy, power, and weight per group. `aggregate()` is the
+# base-R group-by; no dplyr needed. `cars` arrives as a data.frame
+# (the Arrow IPC handoff from the prep cell), and `by_cyl` leaves as
+# one too, ready for any downstream cell.
+
+by_cyl <- aggregate(
+  cbind(mpg, hp, wt) ~ cyl,
+  data = cars,
+  FUN = mean
+)
+by_cyl$n <- as.integer(table(cars$cyl))
+names(by_cyl) <- c("cyl", "mean_mpg", "mean_hp", "mean_wt", "n")
+
+print(by_cyl)
+```
+
+## Fit mpg ~ wt + hp + cyl
+
+<sub>**kind** r</sub>
+
+```text
+# @name Fit mpg ~ wt + hp + cyl
+#
+# R's formula syntax in one line: predict mpg from weight, horsepower,
+# and the cylinder factor (auto dummy-encoded, 4-cyl as the baseline
+# level). Three outputs leave this cell with three different fates in
+# the artifact store:
+#
+#   model        the lm object itself. Not tabular, so the harness
+#                  stores it as RDS and tags it `r_only`. A downstream
+#                  *R* cell reads it straight back with readRDS (see the
+#                  diagnostics cell); a Python cell consuming it would
+#                  instead get a structured "re-export as a data.frame"
+#                  error rather than a confusing NameError.
+#   coefs        tidy coefficient table (data.frame -> Arrow IPC).
+#   model_stats  one-row fit summary (data.frame -> Arrow IPC).
+
+model <- lm(mpg ~ wt + hp + cyl, data = cars)
+s <- summary(model)
+
+cm <- s$coefficients
+coefs <- data.frame(
+  term = rownames(cm),
+  estimate = cm[, "Estimate"],
+  std_error = cm[, "Std. Error"],
+  t_stat = cm[, "t value"],
+  p_value = cm[, "Pr(>|t|)"],
+  row.names = NULL
+)
+
+model_stats <- data.frame(
+  r_squared = s$r.squared,
+  adj_r_squared = s$adj.r.squared,
+  sigma = s$sigma,
+  df_residual = model$df.residual
+)
+
+cat(sprintf(
+  "Fitted mpg ~ wt + hp + cyl: R2=%.3f (adj %.3f), residual SE=%.2f mpg\n",
+  model_stats$r_squared, model_stats$adj_r_squared, model_stats$sigma
+))
+```
+
+## Plot mpg vs weight (ggplot2)
+
+<sub>**kind** r</sub>
+
+```text
+# @name Plot mpg vs weight (ggplot2)
+#
+# The headline 0.2.0 R feature: plots render inline as PNG, exactly
+# like a Python matplotlib figure. A bare trailing ggplot object
+# auto-prints (REPL-style), so no explicit `print()` is needed: the
+# plot is the cell's last expression and it just shows up.
+#
+# ggplot2 isn't part of the harness baseline (arrow + jsonlite); it
+# comes from this notebook's renv.lock, restored automatically when you
+# open the notebook (or one click via the Environment panel's
+# "Initialize renv"). If it's somehow missing you'll see a structured
+# "install ggplot2" hint, not a crash.
+
+library(ggplot2)
+
+ggplot(cars, aes(x = wt, y = mpg, colour = cyl)) +
+  geom_point(size = 3, alpha = 0.85) +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, linewidth = 0.7) +
+  labs(
+    title = "Fuel economy falls with weight",
+    subtitle = "mtcars, coloured by cylinder count",
+    x = "Weight (1000 lbs)",
+    y = "Miles per gallon",
+    colour = "Cylinders"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+## Residual diagnostics (base graphics)
+
+<sub>**kind** r</sub>
+
+```text
+# @name Residual diagnostics (base graphics)
+#
+# `plot()` on an lm object draws R's canonical 2x2 diagnostic panel
+# (residuals vs fitted, Q-Q, scale-location, residuals vs leverage).
+# It's a base-graphics plot, and it's captured to PNG the same way the
+# ggplot is: no extra code, no device juggling. `par(mfrow)` tiles the
+# four panels onto one image.
+#
+# `model` arrives by reading the RDS artifact the fit cell stored: an
+# R-only object (an lm, S3 class and all) flowing from one R cell to
+# another with full fidelity, something the tabular Arrow tier can't
+# carry. This is the R-to-R counterpart of the cross-language Arrow
+# handoff.
+
+op <- par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
+plot(model)
+par(op)
+```
+
+<!-- https://bearingresearch.com/strata/dev/examples/r_lm_vs_sklearn/index.md -->
+
+# Fit one regression in R and in scikit-learn
+
+Fit the same housing-price model with R's `lm()` and Python's
+`scikit-learn`. Hand the coefficients + held-out predictions back to
+a Python cell over Arrow IPC and read them side by side. It is a
+mixed-language notebook end to end: Python data prep, R modeling,
+Python comparison + viz, with the artifact store gluing everything
+together.
+
+## What it shows
+
+- **R's formula syntax in one line.** `lm(price ~ sqft + bedrooms +
+  age + location, data = ...)`: auto-dummy-encodes `location`,
+  picks a baseline level, fits with std-errors and p-values
+  attached. No ColumnTransformer, no design-matrix construction.
+- **Cross-language Arrow handoff.** R returns three `data.frame`s
+  (`lm_coefs`, `lm_model_stats`, `lm_predictions`); the next Python
+  cell reads them as pandas DataFrames with no glue code.
+- **Apples-to-apples comparison.** Same data, same train/test split,
+  same encoding (we mirror R's `drop_first` factor behaviour in
+  pandas). The numbers should match to ~1e-12; the demo's value is
+  *how* each toolkit expresses the fit, not which is more accurate.
+- **R surfaces stats Python doesn't.** Std-errors, t-statistics,
+  p-values for every coefficient; sklearn's `LinearRegression`
+  ships none of that. The comparison cell leaves those columns NaN
+  on the sklearn side.
+
+## Cells
+
+| Cell | Language | What it does |
+|---|---|---|
+| `build-data` | Python | Synthesize 240 rows of housing data; split 200 train / 40 test. |
+| `fit-lm` | R | `lm(price ~ sqft + bedrooms + age + location)`, return tidy coefficients + model stats + test predictions. |
+| `fit-sklearn` | Python | Same fit with `LinearRegression` + a hand-encoded design matrix; return the same three DataFrame shapes. |
+| `compare` | Python | Merge the R and sklearn outputs, print a side-by-side coefficient + fit-stats table, compute test RMSEs. |
+
+## What you need
+
+- **R** on `PATH` (`Rscript`). The notebook's `arrow` and `jsonlite`
+  come from `renv.lock`: opening the notebook restores them into a
+  project-scoped library automatically; no system installs beyond R
+  itself. On macOS: `brew install r`. On Ubuntu: see
+  [CRAN](https://cran.r-project.org/). The strata-notebook server
+  surfaces a clean skip or error if R is missing, not a crash.
+- **Python deps** declared in this notebook's `pyproject.toml`
+  (`pandas`, `numpy`, `scikit-learn`). Strata's per-notebook `uv
+  sync` handles them automatically the first time you open the
+  notebook.
+
+## Running
+
+From the project root:
+
+```bash
+uv run strata-notebook --notebook-dir examples
+```
+
+Then open **R lm() vs scikit-learn** from the notebook list on the Strata home page and
+run the cells top-to-bottom.
+
+## Expected output
+
+The `compare` cell prints something like:
+
+```
+=== Coefficients ===
+          term  lm_estimate  sklearn_estimate     delta  std_error  lm_p_value
+   (Intercept)     135.56          135.56          -0.00       7.36      0.0000
+           age      -1.20           -1.20          -0.00       0.08      0.0000
+      bedrooms      15.12           15.12           0.00       1.26      0.0000
+ locationrural    -137.39         -137.39          -0.00       5.35      0.0000
+locationsuburb     -85.30          -85.30          -0.00       3.93      0.0000
+          sqft       0.18            0.18          -0.00       0.00      0.0000
+
+=== Model fit ===
+ source  r_squared  adj_r_squared  f_statistic  df_residual  residual_std_error
+ R lm()     0.9698         0.9690    1246.94            194             25.19
+sklearn     0.9698         0.9690    1246.94            194             25.19
+
+Test RMSE, R lm(): 21.97   sklearn: 21.97
+Max |R-sklearn| prediction gap on test set: 0.0000
+```
+
+The 0.00 deltas are the point: both toolkits compute the same OLS
+solution; the `lm_p_value` column is R-only.
+
+## Try this
+
+1. **Edit the model.** Drop `bedrooms` from the R formula
+   (`lm(price ~ sqft + age + location)`) and watch the comparison
+   reshape: `compare` shows the row dropping out.
+2. **Misalign the baseline level.** In `fit-sklearn`, replace the
+   `sorted(...)` in `location_levels = sorted(...)` with an unsorted
+   list, `list(housing_train["location"].unique())`. When the first
+   level seen is not the alphabetical first, the baseline no longer
+   matches R's and the sklearn coefficients will swap signs vs R's, a
+   real risk in any "translate this R analysis to Python" workflow.
+3. **Add interaction terms.** R: `price ~ sqft * location`. sklearn:
+   you'll have to add the interaction columns by hand. The contrast
+   gets sharper.
+
+## Synthesize a small housing dataset
+
+<sub>**kind** python</sub>
+
+```python
+# @name Synthesize a small housing dataset
+#
+# 240 rows, four features (sqft, bedrooms, age, location), one target
+# (price). Generated with a known linear-with-noise structure so both
+# R and sklearn should recover similar coefficients; the demo is
+# about *how* each toolkit expresses the fit, not which is more
+# accurate.
+#
+# Split into train (200) + test (40). The test split is held out so
+# downstream cells can compare R's predicted prices against sklearn's
+# on the same observations.
+
+import numpy as np
+import pandas as pd
+
+rng = np.random.default_rng(seed=42)
+n = 240
+
+sqft = rng.uniform(600, 3200, size=n).round(0)
+bedrooms = rng.integers(1, 6, size=n)
+age = rng.uniform(0, 80, size=n).round(1)
+location = rng.choice(
+    ["downtown", "suburb", "rural"],
+    size=n,
+    p=[0.35, 0.5, 0.15],
+)
+
+# Known generating coefficients (in $1k units): intercept 50,
+# sqft 0.18, bedrooms 15, age -1.2, downtown +85, suburb 0,
+# rural -45. Gaussian noise σ=25.
+location_premium = pd.Series(location).map(
+    {"downtown": 85.0, "suburb": 0.0, "rural": -45.0}
+).to_numpy()
+price_thousands = (
+    50
+    + 0.18 * sqft
+    + 15 * bedrooms
+    - 1.2 * age
+    + location_premium
+    + rng.normal(0, 25, size=n)
+).round(2)
+
+housing = pd.DataFrame(
+    {
+        "sqft": sqft,
+        "bedrooms": bedrooms,
+        "age": age,
+        "location": location,
+        "price": price_thousands,
+    }
+)
+
+# Hold out the last 40 rows as a test set. Deterministic split: no
+# need to re-shuffle since the rows are already in random order.
+housing_train = housing.iloc[:200].reset_index(drop=True)
+housing_test = housing.iloc[200:].reset_index(drop=True)
+
+print(f"train: {len(housing_train)} rows, test: {len(housing_test)} rows")
+print(housing_train.head())
+```
+
+## Fit lm() with R's formula syntax
+
+<sub>**kind** r</sub>
+
+```text
+# @name Fit lm() with R's formula syntax
+#
+# The marquee R-vs-Python contrast lives in this one expression:
+#
+#     model <- lm(price ~ sqft + bedrooms + age + location, ...)
+#
+# R reads ``price ~ sqft + bedrooms + age + location`` as: predict
+# price from these four predictors; auto-dummy-encode the
+# ``location`` character vector (factor) so the model picks
+# ``rural`` / ``suburb`` indicator coefficients with ``downtown`` as
+# the baseline level. No design-matrix construction, no
+# OneHotEncoder, no ColumnTransformer: just the formula.
+#
+# Returns three data.frames so downstream Python cells consume them
+# over Arrow IPC unchanged:
+#
+#   lm_coefs        one row per coefficient (term, estimate, std
+#                      error, t value, p value).
+#   lm_model_stats  single-row summary (r², adj r², F, df,
+#                      residual std err).
+#   lm_predictions  test-set predictions per row.
+#
+# All three are bare data.frames, so harness.R's serializer takes
+# the Arrow tier (not the JSON or RDS fallback).
+
+# ``housing_train`` and ``housing_test`` arrive as ``data.frame``s
+# already; that's what the Arrow IPC reader hands us when an
+# upstream Python cell stored a ``pandas.DataFrame``. The character
+# column ``location`` is what R needs to fit dummy-coded effects;
+# converting once here lets ``lm()`` treat it as a categorical.
+housing_train$location <- factor(housing_train$location)
+housing_test$location <- factor(
+  housing_test$location,
+  levels = levels(housing_train$location)
+)
+
+model <- lm(price ~ sqft + bedrooms + age + location, data = housing_train)
+fit_summary <- summary(model)
+
+# Hand-build a tidy coefficients data.frame. ``broom::tidy`` would
+# give the same shape in one line but adds a dependency outside the
+# harness's ``arrow`` + ``jsonlite`` baseline. Base R is enough.
+coef_matrix <- fit_summary$coefficients
+lm_coefs <- data.frame(
+  term = rownames(coef_matrix),
+  estimate = coef_matrix[, "Estimate"],
+  std_error = coef_matrix[, "Std. Error"],
+  t_stat = coef_matrix[, "t value"],
+  p_value = coef_matrix[, "Pr(>|t|)"],
+  row.names = NULL
+)
+
+# Single-row "glance" data.frame: the model-level fit stats that
+# you'd typically print at the top of summary().
+lm_model_stats <- data.frame(
+  r_squared = fit_summary$r.squared,
+  adj_r_squared = fit_summary$adj.r.squared,
+  f_statistic = fit_summary$fstatistic[["value"]],
+  df_residual = model$df.residual,
+  residual_std_error = fit_summary$sigma,
+  n_train = nrow(housing_train)
+)
+
+# Predictions on the held-out test set. ``predict.lm`` accepts a
+# data.frame keyed by the formula's predictor names + applies the
+# factor encoding learned during ``lm()``.
+lm_predictions <- data.frame(
+  actual = housing_test$price,
+  predicted = unname(predict(model, newdata = housing_test))
+)
+
+cat(sprintf(
+  "R lm(): R²=%.4f, F=%.1f on %d df\n",
+  lm_model_stats$r_squared,
+  lm_model_stats$f_statistic,
+  lm_model_stats$df_residual
+))
+```
+
+## Fit the same model with scikit-learn
+
+<sub>**kind** python</sub>
+
+```python
+# @name Fit the same model with scikit-learn
+#
+# Same four predictors, same train/test split. The work is in
+# encoding ``location`` so the comparison with R is apples-to-apples:
+# R's ``lm()`` auto-dummies the factor with ``downtown`` as the
+# baseline (alphabetical first level); we mirror that here with
+# ``pd.get_dummies(drop_first=True)`` after a sort so the dropped
+# column matches.
+#
+# sklearn doesn't surface std-errors or p-values from
+# ``LinearRegression``; its OLS implementation gives only point
+# estimates. The comparison cell handles that gap by leaving those
+# columns NaN on the sklearn side.
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+
+# ``location`` arrives as a string column (the same shape R's
+# ``factor()`` consumed).
+location_levels = sorted(housing_train["location"].unique())  # baseline = first
+baseline = location_levels[0]
+
+
+def _encode(df: pd.DataFrame) -> pd.DataFrame:
+    X = pd.DataFrame(
+        {
+            "sqft": df["sqft"].astype(float),
+            "bedrooms": df["bedrooms"].astype(float),
+            "age": df["age"].astype(float),
+        }
+    )
+    # One-hot, dropping the baseline level (R's behaviour). Coerce to
+    # the same column order R uses (``locationrural``, ``locationsuburb``
+    # for baseline = ``downtown``) so the side-by-side comparison
+    # lines up.
+    for lvl in location_levels:
+        if lvl == baseline:
+            continue
+        X[f"location{lvl}"] = (df["location"] == lvl).astype(float)
+    return X
+
+
+X_train = _encode(housing_train)
+X_test = _encode(housing_test)
+y_train = housing_train["price"].to_numpy()
+y_test = housing_test["price"].to_numpy()
+
+reg = LinearRegression()
+reg.fit(X_train, y_train)
+
+# Match R's coefficient row layout: intercept first, then predictors
+# in design-matrix column order. Standard errors / p-values aren't
+# computable from sklearn's LinearRegression, so we leave them NaN and
+# the compare cell drops them out of the side-by-side view.
+sklearn_coefs = pd.DataFrame(
+    {
+        "term": ["(Intercept)"] + list(X_train.columns),
+        "estimate": [float(reg.intercept_)] + [float(c) for c in reg.coef_],
+        "std_error": np.nan,
+        "t_stat": np.nan,
+        "p_value": np.nan,
+    }
+)
+
+# Glance row matching R's lm_model_stats shape. R² we can compute,
+# adj R² needs df-residual which is n - p - 1, F statistic ditto.
+n = len(y_train)
+p = X_train.shape[1]
+y_pred_train = reg.predict(X_train)
+resid_train = y_train - y_pred_train
+ss_res = float(np.sum(resid_train**2))
+ss_tot = float(np.sum((y_train - y_train.mean()) ** 2))
+r2 = 1 - ss_res / ss_tot
+adj_r2 = 1 - (1 - r2) * (n - 1) / (n - p - 1)
+residual_std_err = float(np.sqrt(ss_res / (n - p - 1)))
+f_stat = (r2 / p) / ((1 - r2) / (n - p - 1))
+
+sklearn_model_stats = pd.DataFrame(
+    [
+        {
+            "r_squared": r2,
+            "adj_r_squared": adj_r2,
+            "f_statistic": f_stat,
+            "df_residual": n - p - 1,
+            "residual_std_error": residual_std_err,
+            "n_train": n,
+        }
+    ]
+)
+
+sklearn_predictions = pd.DataFrame(
+    {
+        "actual": y_test,
+        "predicted": reg.predict(X_test),
+    }
+)
+
+print(f"sklearn: R²={r2:.4f}, F={f_stat:.1f} on {n - p - 1} df")
+```
+
+## Side-by-side comparison: R lm() vs sklearn
+
+<sub>**kind** python</sub>
+
+```python
+# @name Side-by-side comparison: R lm() vs sklearn
+#
+# Bring the two fits together. The reads here are the cross-language
+# payoff: ``lm_coefs`` came out of an R cell over Arrow IPC, and
+# pandas treats it exactly like ``sklearn_coefs``: both are
+# ordinary DataFrames at this point, nothing to glue.
+
+import pandas as pd
+
+# Coefficient comparison. Merge on ``term``: R uses
+# ``locationrural`` / ``locationsuburb`` (no dot), and the sklearn
+# encoder we built matches. Inner join surfaces any mismatch loudly.
+coef_compare = pd.merge(
+    lm_coefs.rename(columns={"estimate": "lm_estimate", "p_value": "lm_p_value"}),
+    sklearn_coefs[["term", "estimate"]].rename(columns={"estimate": "sklearn_estimate"}),
+    on="term",
+    how="outer",
+    indicator=True,
+)
+coef_compare["delta"] = coef_compare["lm_estimate"] - coef_compare["sklearn_estimate"]
+coef_compare = coef_compare.drop(columns=["_merge"])[
+    ["term", "lm_estimate", "sklearn_estimate", "delta", "std_error", "lm_p_value"]
+]
+
+# Model-stats comparison. Both DataFrames are single-row; stack
+# them and add a label column so the row source is obvious.
+stats_compare = pd.concat(
+    [
+        lm_model_stats.assign(source="R lm()"),
+        sklearn_model_stats.assign(source="sklearn"),
+    ],
+    ignore_index=True,
+)[
+    [
+        "source",
+        "r_squared",
+        "adj_r_squared",
+        "f_statistic",
+        "df_residual",
+        "residual_std_error",
+    ]
+]
+
+# Held-out predictions: same observations, two predictions each.
+predictions_compare = pd.DataFrame(
+    {
+        "actual": lm_predictions["actual"],
+        "lm_predicted": lm_predictions["predicted"],
+        "sklearn_predicted": sklearn_predictions["predicted"],
+    }
+)
+predictions_compare["lm_sklearn_diff"] = (
+    predictions_compare["lm_predicted"] - predictions_compare["sklearn_predicted"]
+)
+
+# RMSE on the test set, per fitter.
+def _rmse(actual: pd.Series, pred: pd.Series) -> float:
+    return float(((actual - pred) ** 2).mean() ** 0.5)
+
+
+rmse_lm = _rmse(predictions_compare["actual"], predictions_compare["lm_predicted"])
+rmse_sklearn = _rmse(predictions_compare["actual"], predictions_compare["sklearn_predicted"])
+
+print("=== Coefficients ===")
+print(coef_compare.to_string(index=False, float_format=lambda x: f"{x:9.4f}"))
+print("\n=== Model fit ===")
+print(stats_compare.to_string(index=False, float_format=lambda x: f"{x:9.4f}"))
+print(f"\nTest RMSE for R lm(): {rmse_lm:.3f}   sklearn: {rmse_sklearn:.3f}")
+print(f"Max |R-sklearn| prediction gap on test set: "
+      f"{predictions_compare['lm_sklearn_diff'].abs().max():.4f}")
+```
+
 <!-- https://bearingresearch.com/strata/dev/guides/cells/index.md -->
 
 # Cell kinds

@@ -1,4 +1,4 @@
-# Pipeline over files: `@each` and a synced table
+# Process weather files one by one into an Iceberg table
 
 A cell that runs once per file, caches each file separately, and keeps an Iceberg
 table in step with the results. It reads a few hundred real files from a public

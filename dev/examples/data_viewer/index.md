@@ -1,7 +1,7 @@
-# Data Viewer: paging and sorting a large DataFrame
+# Page through 2,000 transactions
 
-![Data Viewer: paging and sorting a large DataFrame: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-light.webp#only-light)
-![Data Viewer: paging and sorting a large DataFrame: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-dark.webp#only-dark)
+![Page through 2,000 transactions: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-light.webp#only-light)
+![Page through 2,000 transactions: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/data_viewer-dark.webp#only-dark)
 
 A two-cell notebook that produces DataFrames larger than the 20-row
 inline preview, so the notebook's **interactive data viewer** pages

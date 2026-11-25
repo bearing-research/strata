@@ -1,7 +1,7 @@
-# Widget Playground: interactive controls driving the DAG
+# Drive a plot with a slider, a number and a dropdown
 
-![Widget Playground: interactive controls driving the DAG: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-light.webp#only-light)
-![Widget Playground: interactive controls driving the DAG: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-dark.webp#only-dark)
+![Drive a plot with a slider, a number and a dropdown: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-light.webp#only-light)
+![Drive a plot with a slider, a number and a dropdown: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-dark.webp#only-dark)
 
 A three-cell notebook: a **widget cell** (a control panel) feeding two Python
 cells, one that renders a DataFrame and one that draws a chart. The widget

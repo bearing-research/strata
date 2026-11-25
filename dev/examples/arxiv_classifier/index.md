@@ -1,4 +1,4 @@
-# arXiv Paper Classifier (distributed demo)
+# Classify arXiv papers across three workers
 
 A full ML workflow that exercises every differentiated feature of Strata
 Notebook at once:
