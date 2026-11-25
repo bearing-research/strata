@@ -1,8 +1,8 @@
 # Example gallery
 
 Every notebook under `examples/` in the repo demonstrates a specific
-Strata capability. A card's picture is that notebook in the editor
-after a real run. Click through for its cell sources and its README,
+Strata capability. A card's picture is what that notebook makes, taken
+from a real run. Click through for its cell sources and its README,
 rendered into this site without cloning the repo.
 
 To run the examples, start the server on the repo's `examples/` directory

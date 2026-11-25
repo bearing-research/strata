@@ -781,8 +781,8 @@ THUMB_WIDTH = 640
 class ExampleShot:
     """How to photograph one example.
 
-    ``focus`` is text in the cell to frame; without it the browser centres the
-    first plot, else table, else markdown. ``needs`` names what a run requires
+    ``focus`` is text in the cell whose output to take; without it the browser
+    takes the first plot, else table, else markdown. ``needs`` names what a run requires
     beyond the notebook's own venv (keys of ``NEEDS``). ``in_session`` runs the
     cells in the server's session rather than with ``strata run``, for a notebook
     whose results a reopened session does not keep (a write SQL cell's).
@@ -821,7 +821,7 @@ NEEDS = {
 # Every notebook under examples/ needs an entry, so a new one cannot ship
 # without a card image by accident.
 EXAMPLE_SHOTS = {
-    "agent_demo": ExampleShot(),
+    "agent_demo": ExampleShot(focus="The expensive step"),
     "arxiv_classifier": ExampleShot(needs=("llm",)),
     "caching": ExampleShot(),
     "data_viewer": ExampleShot(),
@@ -830,7 +830,7 @@ EXAMPLE_SHOTS = {
     "keeling_curve": ExampleShot(),
     "library_cells": ExampleShot(),
     "loop_hill_climb": ExampleShot(),
-    "markdown_showcase": ExampleShot(focus="Two surfaces are tested"),
+    "markdown_showcase": ExampleShot(focus="Templated report from a DataFrame"),
     "model_variants": ExampleShot(),
     "model_variants_sweep": ExampleShot(),
     "news_alpha_trader": ExampleShot(needs=("llm", "alpaca")),
@@ -841,7 +841,7 @@ EXAMPLE_SHOTS = {
     "s3_mount": ExampleShot(),
     "sql_orders_report": ExampleShot(focus="Combine the two SQL results", in_session=True),
     "titanic_ml": ExampleShot(),
-    "widget_playground": ExampleShot(focus="Controls"),
+    "widget_playground": ExampleShot(),
 }
 
 
@@ -905,13 +905,65 @@ def _copy_tracked(src: Path, dest: Path) -> None:
         shutil.copy2(file, target)
 
 
-def _to_thumb(png: Path, dest: Path) -> None:
+# A card is the example's result on the notebook's own background, above a band of
+# layered ground (strata) in one accent per example, so a row of cards reads as a set.
+CARD_BACKGROUND = {"light": (239, 241, 245), "dark": (17, 17, 27)}
+CARD_ACCENTS = [
+    (30, 102, 245),
+    (232, 89, 12),
+    (112, 72, 232),
+    (12, 166, 120),
+    (240, 140, 0),
+    (16, 152, 173),
+]
+THUMB_HEIGHT = THUMB_WIDTH * 10 // 16
+
+
+def _strata_band(width: int, height: int, top: int, accent, background):
+    """Four wavy layers from *top* down, each a deeper tint of *accent*."""
+    import math
+
+    from PIL import Image, ImageDraw
+
+    band = Image.new("RGB", (width, height), background)
+    draw = ImageDraw.Draw(band)
+    depth = height - top
+    for layer in range(4):
+        tint = 0.10 + 0.09 * layer
+        color = tuple(round(b + (a - b) * tint) for a, b in zip(accent, background, strict=True))
+        base = top + depth * layer / 4
+        amp = depth * (0.10 - 0.02 * layer)
+        freq = 1.3 + 0.3 * layer
+        edge = [
+            (x, base + amp * math.sin(x / width * 2 * math.pi * freq + layer * 1.7))
+            for x in range(0, width + 8, 8)
+        ]
+        draw.polygon([(0, height), *edge, (width, height)], fill=color)
+    return band
+
+
+def _to_thumb(png: Path, dest: Path, name: str, theme: str) -> None:
+    """Set the captured result in its card: centred above the band, never cropped."""
+    import zlib
+
     from PIL import Image
 
+    scale = 2
+    width, height = THUMB_WIDTH * scale, THUMB_HEIGHT * scale
+    background = CARD_BACKGROUND[theme]
+    accent = CARD_ACCENTS[zlib.crc32(name.encode()) % len(CARD_ACCENTS)]
+    card = _strata_band(width, height, round(height * 0.80), accent, background)
+    pad = round(width * 0.04)
+    box = (width - 2 * pad, round(height * 0.78) - pad)
     with Image.open(png) as image:
-        height = round(image.height * THUMB_WIDTH / image.width)
-        resized = image.convert("RGB").resize((THUMB_WIDTH, height), Image.Resampling.LANCZOS)
-        resized.save(dest, "WEBP", quality=82, method=6)
+        result = image.convert("RGBA")
+        result.thumbnail(box, Image.Resampling.LANCZOS)
+        left = (width - result.width) // 2
+        top = pad + (box[1] - result.height) // 2
+        card.paste(result, (left, top), result)
+    card.resize((THUMB_WIDTH, THUMB_HEIGHT), Image.Resampling.LANCZOS).save(
+        dest, "WEBP", quality=86, method=6
+    )
 
 
 def capture_examples(work_dir: Path, names: list[str] | None) -> list[Path]:
@@ -1004,7 +1056,8 @@ def capture_examples(work_dir: Path, names: list[str] | None) -> list[Path]:
     EXAMPLE_THUMBS.mkdir(parents=True, exist_ok=True)
     for png in sorted(raw.glob("*.png")):
         dest = EXAMPLE_THUMBS / f"{png.stem}.webp"
-        _to_thumb(png, dest)
+        name, _, theme = png.stem.rpartition("-")
+        _to_thumb(png, dest, name, theme)
         written.append(dest)
 
     for name, reason in skipped.items():
