@@ -18,8 +18,9 @@ import { readFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { api, argFor, loadNotebook, openNotebook, THEMES, TIMEOUT_MS } from './docs-shots-lib.mjs'
 
-// 16:10, narrow enough that a cell's output fills the frame rather than a margin.
-const VIEWPORT = { width: 1200, height: 750 }
+// Narrow enough that a cell's output fills the frame rather than a margin, and tall
+// enough that a square plot fits between the editor's header and its bottom bar.
+const VIEWPORT = { width: 1200, height: 1000 }
 
 // Most telling first: a plot says more about an example than a table does.
 // Each is the element the card shows.
@@ -29,8 +30,9 @@ const OUTPUT_PREFERENCE = [
   '.output-markdown',
   '.cell-output',
 ]
-// The card's picture area is wider than tall; a taller output keeps its top.
-const MAX_HEIGHT_PER_WIDTH = 0.62
+// A taller output keeps its top. A plot is whole up to square (a confusion matrix,
+// a pair plot); a table or text is cut sooner, where its first rows say enough.
+const MAX_HEIGHT_PER_WIDTH = { plot: 1, other: 0.62 }
 // How much of the cell's source shows above its output.
 const SOURCE_LEAD_PX = 200
 
@@ -88,14 +90,22 @@ async function shoot(page, output, path) {
       if (el.contains(node) || node.contains(el)) continue
       if (/fixed|sticky/.test(getComputedStyle(node).position)) node.style.visibility = 'hidden'
     }
-    // Top first: the clip is at most MAX_HEIGHT_PER_WIDTH of the width, which fits
-    // the viewport, so a tall plot keeps its top.
+    // Top first, so a tall output keeps its top.
     el.scrollIntoView({ block: 'start' })
   })
   await page.waitForTimeout(200)
   const box = await output.boundingBox()
   if (!box) throw new Error(`${path}: the element to shoot has no box`)
-  const clip = { ...box, height: Math.min(box.height, box.width * MAX_HEIGHT_PER_WIDTH) }
+  const isPlot = await output.evaluate((el) => el.tagName === 'IMG')
+  const ratio = isPlot ? MAX_HEIGHT_PER_WIDTH.plot : MAX_HEIGHT_PER_WIDTH.other
+  // No lower than the scrolling pane's edge: below it is the editor's bottom bar.
+  const paneBottom = await output.evaluate((el) => {
+    let node = el.parentElement
+    while (node && !/auto|scroll/.test(getComputedStyle(node).overflowY)) node = node.parentElement
+    return node ? node.getBoundingClientRect().bottom : window.innerHeight
+  })
+  const height = Math.min(box.height, box.width * ratio, paneBottom - box.y)
+  const clip = { ...box, height }
   // A plot is a transparent PNG: keep it so, and the card's frame shows through.
   await page.screenshot({ path, clip, omitBackground: true })
 }
