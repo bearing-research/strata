@@ -5,7 +5,13 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## 0.12.0 - 2026-11-22
+## 0.12.0rc1 - 2026-11-25
+
+Release candidate for 0.12.0. Install it with
+`uv tool install "strata-notebook[mcp,tui]==0.12.0rc1"`.
+The changes are listed under 0.12.0 below.
+
+## 0.12.0 - Unreleased
 
 ### Added
 

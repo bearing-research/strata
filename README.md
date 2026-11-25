@@ -5,6 +5,8 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/bearing-research/strata/blob/main/LICENSE)
 [![CI](https://github.com/bearing-research/strata/actions/workflows/ci.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/ci.yml)
 
+<!-- mcp-name: io.github.bearing-research/strata -->
+
 **Strata is a notebook your coding agent can drive, and everything it computes stays.**
 
 Coding agents explore by writing throwaway scripts: `python -c`, files in

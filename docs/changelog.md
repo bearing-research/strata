@@ -7,7 +7,13 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## 0.12.0 - 2026-11-22
+## 0.12.0rc1 - 2026-11-25
+
+Release candidate for 0.12.0. Install it with
+`uv tool install "strata-notebook[mcp,tui]==0.12.0rc1"`.
+The changes are listed under 0.12.0 below.
+
+## 0.12.0 - Unreleased
 
 ### Added
 
