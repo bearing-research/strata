@@ -1,7 +1,7 @@
-# Notebook: Markdown Showcase
+# Notebook: Write reports in Markdown, by hand or from data
 
-![Notebook: Markdown Showcase: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)
-![Notebook: Markdown Showcase: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)
+![Notebook: Write reports in Markdown, by hand or from data: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)
+![Notebook: Write reports in Markdown, by hand or from data: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)
 
 # Markdown Showcase
 
