@@ -1,4 +1,4 @@
-# R `lm()` vs scikit-learn: side-by-side linear regression
+# Fit one regression in R and in scikit-learn
 
 Fit the same housing-price model with R's `lm()` and Python's
 `scikit-learn`. Hand the coefficients + held-out predictions back to

@@ -1,4 +1,4 @@
-# S3 Mount: reading a public bucket from a notebook
+# Read a NOAA weather file from a public S3 bucket
 
 Demonstrates Strata's **mount** feature: a notebook cell can read a
 remote filesystem path as if it were local, with no custom code inside

@@ -397,6 +397,12 @@ exhaustive commit history.
 
 ### Changed
 
+- **The docs have an Examples tab.** It opens on the gallery and lists every example's
+  page in its sidebar, grouped as the gallery is; it was one entry under Get started, and
+  the example pages were in no menu. Each example's README is titled with its notebook's
+  name, so the page, the menu and the app say the same thing; `markdown_showcase` has a
+  README for the first time.
+
 - **Example notebooks are named for what they make.** "Hill Climb Loop" is now
   "Hill-climb Himmelblau's function, one cached step at a time", "Pandas Basics" is
   "Filter, group, merge and pivot a sales table", and so on for every example; the folder

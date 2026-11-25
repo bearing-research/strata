@@ -1,4 +1,4 @@
-# Review Triage: Structured Prompt Output
+# Triage customer reviews into validated JSON with an LLM
 
 Demonstrates `# @output_schema` on a prompt cell.
 

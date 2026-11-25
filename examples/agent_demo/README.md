@@ -1,4 +1,4 @@
-# Agent Demo: a coding agent builds this notebook
+# Train a model once, re-run only its evaluation
 
 This is the notebook from the
 [`strata agent`](https://bearingresearch.com/strata/latest/notebook/agent/)

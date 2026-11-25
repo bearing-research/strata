@@ -1,4 +1,4 @@
-# library_cells
+# Share functions between cells
 
 Walks through cross-cell library code in Strata Notebook: pure module
 cells, mixed runtime+library cells, PEP 563 type annotations, and the

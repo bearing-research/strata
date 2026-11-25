@@ -1,4 +1,4 @@
-# News Alpha Trader
+# Paper-trade on overnight news sentiment
 
 **An end-to-end LLM-driven trading notebook.** Overnight news → structured sentiment signals → paper (or live) orders via Alpaca → cost-adjusted P&L, all persisted to a local DuckDB so the data accumulates across sessions.
 

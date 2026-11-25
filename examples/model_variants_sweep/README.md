@@ -1,4 +1,4 @@
-# Model Variants Sweep
+# Run every model variant and compare their accuracy
 
 A minimal example of variant **sweep mode**: run every variant of a group and
 compare them all in one downstream cell.

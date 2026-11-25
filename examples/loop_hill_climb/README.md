@@ -1,4 +1,4 @@
-# Loop Hill Climb: demo for the `@loop` cell primitive
+# Hill-climb Himmelblau's function, one cached step at a time
 
 Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop
 cell feature: the `@loop` / `@loop_until` annotations, per-iteration

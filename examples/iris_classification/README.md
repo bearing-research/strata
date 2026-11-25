@@ -1,4 +1,4 @@
-# Iris Classification: end-to-end ML in seven cells
+# Classify iris flowers, from raw data to a confusion matrix
 
 Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
 what the graph looks like for a realistic ML pipeline: load → explore

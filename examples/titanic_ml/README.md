@@ -1,4 +1,4 @@
-# Titanic: feature engineering + model comparison
+# Predict Titanic survival with three classifiers
 
 A canonical "first Kaggle notebook" rewritten for Strata. A
 feature-engineering stage feeds three classifiers; the best one is
