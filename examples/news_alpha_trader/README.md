@@ -76,7 +76,7 @@ From the project root:
 
 ```bash
 uv run strata-notebook --notebook-dir examples
-# Open "News Alpha Trader" from the home page, set API keys in the Runtime panel, run all.
+# Open "Paper-trade on overnight news sentiment" from the home page, set API keys in the Runtime panel, run all.
 ```
 
 Re-run tomorrow: `fetch_news` only pulls new articles, `place_orders` is idempotent by `signal_id`. The DB grows over time; so does the history you can analyze.

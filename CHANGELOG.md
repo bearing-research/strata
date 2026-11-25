@@ -397,6 +397,11 @@ exhaustive commit history.
 
 ### Changed
 
+- **Example notebooks are named for what they make.** "Hill Climb Loop" is now
+  "Hill-climb Himmelblau's function, one cached step at a time", "Pandas Basics" is
+  "Filter, group, merge and pivot a sales table", and so on for every example; the folder
+  names stay.
+
 - **Open a sample is a gallery.** Each bundled sample is a card with what it makes (the
   docs gallery's picture, which ships in the wheel), a line on what it shows and how long
   its first Run All takes. `GET /v1/notebooks/samples/{name}/thumbnail/{theme}` serves
