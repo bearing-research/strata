@@ -5818,6 +5818,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell after a writer is stale once the writer's tables land.</strong> A run's
+  <code>@write_table</code> writes and its read-write mount sync-back land after the token its code
+  ends with, so a cell <code>@after</code> it keyed meanwhile stayed ready on what was there before.
+  One more token now follows them, for Python and R cells, loops, <code>@each</code> and
+  <code>@per_variant</code> cells, however the run ends. A Tests tab click that finds no pytest, and
+  cannot install it, no longer counts as a run of the cell. (#1688)</li>
 <li><strong>An SSH worker tunnel that exits says why.</strong> Its <code>ssh</code> wrote to <code>/dev/null</code>, so a
   forward that could not start (the local port taken, the key refused, the host key
   changed) showed only as <code>/health</code> not answering, after the whole health timeout. A
