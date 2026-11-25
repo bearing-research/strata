@@ -380,7 +380,7 @@ async def run_each_cell(
     # Each instance names itself the cell's output; a run with no manifest puts them back.
     cell = host.notebook_state.get_cell(cell_id)
     last_good = (dict(cell.artifact_uris), cell.artifact_uri) if cell is not None else None
-    with output_dirs.assembling(host.get_artifact_manager().artifact_dir):
+    with output_dirs.assembling():
         try:
             try:
                 items, base = await _list_each_items(host, context, cell_id, annotations.each, base)

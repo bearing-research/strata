@@ -257,7 +257,7 @@ def collectable_instances(artifact_mgr: Any) -> list[tuple[str, int]]:
 
     None while a run is assembling, whose manifest does not require what it will name yet.
     """
-    if is_assembling(artifact_mgr.artifact_dir):
+    if is_assembling():
         return []
     versions = artifact_mgr.artifact_store.list_versions_by_id_prefix(
         f"nb_{artifact_mgr.notebook_id}_cell_"

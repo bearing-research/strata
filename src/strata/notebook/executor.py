@@ -808,9 +808,7 @@ class CellExecutor:
                 )
             self._materializing.add(cell_id)
             try:
-                with _loop_folders(
-                    annotations.output_dirs, self.session.get_artifact_manager().artifact_dir
-                ) as folders:
+                with _loop_folders(annotations.output_dirs) as folders:
                     loop_result = await self._execute_loop_cell(
                         cell_id,
                         source,
@@ -869,11 +867,7 @@ class CellExecutor:
         self._materializing.add(cell_id)
 
         try:
-            with (
-                output_dirs.assembling(self.session.get_artifact_manager().artifact_dir)
-                if annotations.output_dirs
-                else nullcontext()
-            ):
+            with output_dirs.assembling() if annotations.output_dirs else nullcontext():
                 return await self._materialize_cell(
                     cell_id,
                     source,

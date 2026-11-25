@@ -1059,6 +1059,8 @@ processes on one store).
 one held skips the instance and folder-file passes, in any process, and removes a lock a
 crashed run left. Regression tests:
 `tests/notebook/test_each.py::TestASweepInAnotherProcess`, whose sweep runs in a
-subprocess (it fails on the counter with the error above), and
-`tests/notebook/test_output_dir.py::TestTheFileSweep::test_a_lock_a_crash_left_holds_nothing_off_and_goes`.
+subprocess (it fails on the counter with the error above); in
+`tests/notebook/test_output_dir.py::TestTheFileSweep`,
+`test_a_sweep_in_another_process_waits_for_the_runs_manifest` for folder files and
+`test_a_lock_a_crash_left_holds_nothing_off_and_goes`.
 

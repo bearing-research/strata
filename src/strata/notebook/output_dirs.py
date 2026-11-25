@@ -236,9 +236,11 @@ def assembling(artifact_dir: Path) -> Generator[None]:
     folder = Path(artifact_dir) / ASSEMBLING_DIR
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{uuid.uuid4().hex}.lock"
-    with filelock.FileLock(path):
-        yield
-    path.unlink(missing_ok=True)
+    try:
+        with filelock.FileLock(path):
+            yield
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
