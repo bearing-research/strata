@@ -87,7 +87,7 @@ _LOOP_CONTENT_TYPE_EXT = {
 
 
 @contextmanager
-def _loop_folders(names: list[str]) -> Generator[Path | None]:
+def _loop_folders(names: list[str], artifact_dir: Path) -> Generator[Path | None]:
     """Where a loop's ``# @output_dir`` folders live, outside every iteration's run directory.
 
     Each iteration sees what the earlier ones wrote; the sweep holds off until the loop
@@ -96,7 +96,10 @@ def _loop_folders(names: list[str]) -> Generator[Path | None]:
     if not names:
         yield None
         return
-    with output_dirs.assembling(), tempfile.TemporaryDirectory(prefix="strata_loop_dirs_") as root:
+    with (
+        output_dirs.assembling(artifact_dir),
+        tempfile.TemporaryDirectory(prefix="strata_loop_dirs_") as root,
+    ):
         yield Path(root)
 
 

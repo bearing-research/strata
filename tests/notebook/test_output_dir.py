@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -357,11 +358,30 @@ class TestTheFileSweep:
 
         assert self._stored(session, b"o")
 
+    def test_a_lock_a_crash_left_holds_nothing_off_and_goes(self, tmp_path):
+        stale = tmp_path / output_dirs.ASSEMBLING_DIR / "crashed.lock"
+        stale.parent.mkdir()
+        stale.touch()
+
+        assert not output_dirs.is_assembling(tmp_path)
+        assert not stale.exists()
+        with output_dirs.assembling(tmp_path):
+            assert output_dirs.is_assembling(tmp_path)
+        assert not output_dirs.is_assembling(tmp_path)
+        assert not list(stale.parent.iterdir()), "a run leaves no lock behind"
+
+        def a_run_that_fails():
+            with output_dirs.assembling(tmp_path):
+                raise RuntimeError("the run failed")
+
+        pytest.raises(RuntimeError, a_run_that_fails)
+        assert not list(stale.parent.iterdir()), "nor does a run that fails"
+
     async def test_nothing_goes_while_a_run_is_assembling_a_folder(self, tmp_path):
         session, _ = await self._two_runs(tmp_path)
         manager = session.get_artifact_manager()
 
-        with output_dirs.assembling():
+        with output_dirs.assembling(manager.artifact_dir):
             manager.prune(keep_superseded=0, min_idle_seconds=0)
         assert self._stored(session, b"o")
 
@@ -382,6 +402,37 @@ class TestTheFileSweep:
             return manifest
 
         monkeypatch.setattr(output_dirs, "collect", prune_before_the_manifest)
+        third = "# @output_dir ckpt\n(ckpt / 'third.txt').write_text('3')\n"
+        cell = session.notebook_state.get_cell("w")
+        cell.source = third
+        session.re_analyze_cell("w")
+        assert (await executor.execute_cell("w", third)).success
+
+        assert self._stored(session, b"3")
+
+    async def test_a_sweep_in_another_process_waits_for_the_runs_manifest(
+        self, tmp_path, monkeypatch
+    ):
+        # SYSTEMS EACH-2: a server opening the notebook beside a CLI run.
+        session, executor = await self._two_runs(tmp_path)
+        manager = session.get_artifact_manager()
+        collect = output_dirs.collect
+        sweep = (
+            "import sys\nfrom pathlib import Path\n"
+            "from strata.notebook.artifact_integration import NotebookArtifactManager\n"
+            "m = NotebookArtifactManager(sys.argv[1], artifact_dir=Path(sys.argv[2]))\n"
+            "m.prune(keep_superseded=0, min_idle_seconds=0)\nm.close()\n"
+        )
+
+        def swept_elsewhere_before_the_manifest(*args, **kwargs):
+            manifest = collect(*args, **kwargs)
+            subprocess.run(
+                [sys.executable, "-c", sweep, manager.notebook_id, manager.artifact_dir],
+                check=True,
+            )
+            return manifest
+
+        monkeypatch.setattr(output_dirs, "collect", swept_elsewhere_before_the_manifest)
         third = "# @output_dir ckpt\n(ckpt / 'third.txt').write_text('3')\n"
         cell = session.notebook_state.get_cell("w")
         cell.source = third

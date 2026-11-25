@@ -241,7 +241,7 @@ it (`notebook/each.py`, `cell_paths/fanout.py`).
 | ID | Property | Checked by |
 | --- | --- | --- |
 | EACH-1 | A manifest exists only when every instance succeeded; on a partial failure the cell's previous outputs stand. | test `tests/notebook/test_each.py` |
-| EACH-2 | An instance a kept manifest names is never collected. | test `tests/notebook/test_each.py`, `test_each_postgres.py`. **Lead:** the guard against collecting during a run is a process-local counter, so a sweep from another process sees only `min_idle_seconds`. |
+| EACH-2 | An instance a kept manifest names is never collected, nor one a run has stored and its manifest will name. | test `tests/notebook/test_each.py`, `test_each_postgres.py`; `TestASweepInAnotherProcess` for a sweep in a second process while a run's instances are past the idle floor (finding 36). The guard is a lock file per assembling run under the store's `assembling/` (`output_dirs.assembling`); a sweep that finds one held skips the instance and folder-file passes, and one a crash left goes (`test_a_lock_a_crash_left_holds_nothing_off_and_goes`; `test_output_dir.py::TestTheFileSweep::test_a_sweep_in_another_process_waits_for_the_runs_manifest` for folder files). The lock covers the processes of one machine, which is where a notebook's ledger lives (SQLite in its `.strata/`). A run that starts between a sweep's check and its delete and reuses an old unnamed version is left to the idle floor: a cache hit marks the version used. |
 
 ## 12. Core provenance encodings
 

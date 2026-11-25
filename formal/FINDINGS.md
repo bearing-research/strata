@@ -1041,3 +1041,26 @@ resumes and reruns). Regression tests:
 `tests/notebook/test_local_runs.py::TestTwoProcessesThatBothFindNoOpenBuild`, also run
 on Postgres.
 
+### 36. A sweep in another process takes a running `@each` cell's instances
+
+**Survey lead** (SYSTEMS 9, EACH-2), replayed. An `@each` run stores each item's
+instance as it finishes and stages the manifest that requires them only at the end. The
+sweep held off while a run assembled through a counter in the run's own process, so a
+sweep in another process (a server opening the notebook prunes its store, beside a CLI
+run) saw only `min_idle_seconds`, 3600 s by default. With the run's instances stored over
+an hour before its manifest, that sweep took all four instance versions of a two-item
+run, and the run failed at its end with ``@each item 'one.txt' did not produce `out` ``.
+An `@output_dir` run's files, which a worker uploads hours before the manifest, rested on
+the same counter. Severity: medium (a long run's work lost at its last step; two
+processes on one store).
+
+**Fixed.** A run that assembles holds a lock file of its own under the store's
+`assembling/` directory (`output_dirs.assembling`, with `filelock`); a sweep that finds
+one held skips the instance and folder-file passes, in any process, and removes a lock a
+crashed run left. Regression tests:
+`tests/notebook/test_each.py::TestASweepInAnotherProcess`, whose sweep runs in a
+subprocess (it fails on the counter with the error above); in
+`tests/notebook/test_output_dir.py::TestTheFileSweep`,
+`test_a_sweep_in_another_process_waits_for_the_runs_manifest` for folder files and
+`test_a_lock_a_crash_left_holds_nothing_off_and_goes`.
+
