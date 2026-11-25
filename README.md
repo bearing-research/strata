@@ -132,11 +132,11 @@ machine. [How Strata compares →](https://bearingresearch.com/strata/latest/not
 <br><b><a href="https://bearingresearch.com/strata/latest/examples/caching/">caching</a></b><br>The two-minute tutorial: what the cache saves, and what an edit runs again
 </td>
 <td width="33%" valign="top">
-<a href="https://bearingresearch.com/strata/latest/examples/data_viewer/"><picture>
-<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/data_viewer-dark.webp">
-<img alt="A 2,000-row transactions table with search, filter, CSV and Parquet buttons and paging." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/data_viewer-light.webp">
+<a href="https://bearingresearch.com/strata/latest/examples/keeling_curve/"><picture>
+<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/keeling_curve-dark.webp">
+<img alt="The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/keeling_curve-light.webp">
 </picture></a>
-<br><b><a href="https://bearingresearch.com/strata/latest/examples/data_viewer/">data_viewer</a></b><br>A 2,000-row DataFrame you can page, sort and filter
+<br><b><a href="https://bearingresearch.com/strata/latest/examples/keeling_curve/">keeling_curve</a></b><br>NOAA's CO₂ record, and a published figure that shows its sources
 </td>
 <td width="33%" valign="top">
 <a href="https://bearingresearch.com/strata/latest/examples/model_variants/"><picture>

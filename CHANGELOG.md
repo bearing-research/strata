@@ -15,6 +15,11 @@ exhaustive commit history.
   it imports pyplot; nothing is applied unless the cell asks. The examples that plot use
   it. A cached figure keeps the look it was drawn with, since the style is not part of a
   cell's key.
+- **A new sample: the Keeling curve, with a receipt.** NOAA's monthly CO₂ record from
+  Mauna Loa, read with `# @fetch`, its yearly cycle and growth by decade, and a figure
+  published with `strata artifact publish` whose page lists the code of every step and
+  NOAA's file with its digest. `strata tutorial keeling_curve` opens a copy; it is also
+  in the README, and second in the docs gallery's walkthroughs, after `caching`.
 - **Artifacts in a notebook lists that notebook's store.** The link opened the server's
   store, which holds none of a notebook's results; its page now lists them by cell and
   output, through `GET /v1/notebooks/{session_id}/store/artifacts` and `.../store/stats`.

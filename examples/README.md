@@ -35,6 +35,7 @@ strata run examples/iris_classification
 | Notebook | What it shows |
 |---|---|
 | [`caching/`](caching/) | A two-minute tutorial: what the cache saves, and what an edit runs again. |
+| [`keeling_curve/`](keeling_curve/) | CO₂ at Mauna Loa since 1958 from NOAA's record, and a published figure that shows the code and the downloaded bytes behind it. |
 | [`pandas_basics/`](pandas_basics/) | Core pandas operations, one cell per concept: a small fan-out from one dataset through select, group, pivot, merge and summarize, with per-cell unit tests. |
 | [`iris_classification/`](iris_classification/) | sklearn classifier on the Iris dataset. Shows how artifacts flow between cells. |
 | [`titanic_ml/`](titanic_ml/) | Survival prediction end-to-end: load, feature-engineer, train three classifiers, evaluate the best. |
