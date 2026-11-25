@@ -489,9 +489,7 @@ def test_export_falls_back_to_notebook_heading_when_no_readme(tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("readme", [True, False])
-def test_an_export_without_the_readme_opens_on_the_first_cell(
-    tmp_path: Path, readme: bool
-) -> None:
+def test_an_export_without_the_readme_opens_on_the_first_cell(tmp_path: Path, readme: bool) -> None:
     """The docs give a page its title and place the README; the export brings neither."""
     nb_dir = _make_notebook(tmp_path, name="HeadlessNB")
     if readme:

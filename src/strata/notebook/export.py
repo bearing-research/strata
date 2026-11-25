@@ -541,7 +541,6 @@ def _render_error(cell: CellState, *, max_bytes: int) -> list[Block]:
     return [CodeBlock(language="text", body=body, title="Error")]
 
 
-
 def _render_display_output(
     output: CellOutput,
     *,

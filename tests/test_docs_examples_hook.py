@@ -109,9 +109,7 @@ def test_every_recorded_run_ran_the_examples_cells_as_they_are() -> None:
 
 
 def test_a_code_cells_name_is_marked_apart_from_the_prose_headings() -> None:
-    cells = (
-        "## Step 1\n\nProse.\n\n## load\n\n<sub>**kind** python</sub>\n\n```python\ndf\n```\n"
-    )
+    cells = "## Step 1\n\nProse.\n\n## load\n\n<sub>**kind** python</sub>\n\n```python\ndf\n```\n"
     page = hook.render_page(README, cells, ran=False)
 
     assert "## load { .nb-cell }\n\n```python" in page
