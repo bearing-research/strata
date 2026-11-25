@@ -335,6 +335,30 @@ plt.show()
         assert "_" in result["variables"]
         assert result["variables"]["_"]["content_type"] == "image/png"
 
+    def test_the_strata_style_is_there_by_name_once_pyplot_is_imported(self, harness_script):
+        """``plt.style.use("strata")`` works in a cell, and the chart it styles is saved
+        with a transparent background, so it reads on either theme."""
+        pytest.importorskip("matplotlib.pyplot")
+        manifest = {
+            "source": """
+import matplotlib.pyplot as plt
+
+plt.style.use("strata")
+print("strata" in plt.style.available, plt.rcParams["savefig.transparent"])
+fig, ax = plt.subplots()
+ax.plot([1, 2, 3], [1, 4, 9])
+fig
+""",
+            "inputs": {},
+            "env": {"MPLBACKEND": "Agg"},
+        }
+
+        result = run_harness(harness_script, manifest)
+
+        assert result["success"] is True
+        assert result["stdout"].split() == ["True", "True"]
+        assert result["variables"]["_"]["content_type"] == "image/png"
+
     def test_harness_does_not_import_pyplot_for_a_cell_that_does_not(self, harness_script):
         """Importing it for every cell is slow, and on a fresh install its font-cache notice
         lands in the stderr of whichever cell ran first."""

@@ -12,8 +12,14 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.machinery import ModuleSpec
+from pathlib import Path
 from types import ModuleType
 from typing import Any
+
+# ``plt.style.use("strata")``: a transparent background and neutral ink, so a chart
+# reads on the notebook's light and dark themes alike.
+STYLE_NAME = "strata"
+STYLE_PATH = Path(__file__).with_name("strata.mplstyle")
 
 
 @dataclass(frozen=True)
@@ -67,9 +73,11 @@ class DisplayCapture:
     def capture_side_effects(self):
         """Capture ``plt.show()`` and ``Figure.show()`` as display outputs.
 
-        Imports nothing itself: pyplot is patched now if loaded, else when the cell
-        imports it. Importing it for every cell costs time and, on a fresh install,
-        prints matplotlib's font-cache notice into whichever cell ran first.
+        Also registers the ``strata`` matplotlib style, and starts the cell from the
+        process's first matplotlib settings. Imports nothing itself: each happens now
+        if matplotlib is loaded, else when the cell imports it. Importing it for every
+        cell costs time and, on a fresh install, prints matplotlib's font-cache notice
+        into whichever cell ran first.
         """
         restore: list[tuple[Any, str, Any]] = []
 
@@ -106,20 +114,73 @@ class DisplayCapture:
                 setattr(figure_cls, "show", _patched_figure_show)
                 restore.append((figure_cls, "show", original_figure_show))
 
-        hook: _AfterImport | None = None
-        if "matplotlib.pyplot" in sys.modules:
-            _patch(sys.modules["matplotlib.pyplot"])
-        else:
-            hook = _AfterImport("matplotlib.pyplot", _patch)
-            sys.meta_path.insert(0, hook)
+        hooks: list[_AfterImport] = []
+        for name, callback in (
+            ("matplotlib", _start_from_baseline_rc),
+            ("matplotlib.style", register_style),
+            ("matplotlib.pyplot", _patch),
+        ):
+            if name in sys.modules:
+                callback(sys.modules[name])
+            else:
+                hook = _AfterImport(name, callback)
+                sys.meta_path.insert(0, hook)
+                hooks.append(hook)
 
         try:
             yield
         finally:
-            if hook is not None and hook in sys.meta_path:
-                sys.meta_path.remove(hook)
+            for hook in hooks:
+                if hook in sys.meta_path:
+                    sys.meta_path.remove(hook)
             for owner, attr, original in reversed(restore):
                 setattr(owner, attr, original)
+
+
+# matplotlib's settings as this process first had them. Cells that share a process
+# (Run All's batch, a warm worker) each start from these, as a cell run alone does,
+# so ``plt.style.use("strata")`` in one cell does not restyle the next one's figure.
+_baseline_rc: dict[str, Any] | None = None
+
+
+def _start_from_baseline_rc(mpl: Any) -> None:
+    """Remember matplotlib's settings the first time, and put them back every later time.
+
+    The backend is left alone, as ``matplotlib.rc_context`` leaves it: switching it
+    would close the figures pyplot holds.
+    """
+    global _baseline_rc
+    try:
+        if _baseline_rc is None:
+            baseline = dict(mpl.rcParams.copy())
+            baseline.pop("backend", None)
+            _baseline_rc = baseline
+            return
+        update_raw = getattr(mpl.rcParams, "_update_raw", None)
+        if update_raw is not None:
+            update_raw(_baseline_rc)
+        else:
+            dict.update(mpl.rcParams, _baseline_rc)
+    except Exception:
+        return
+
+
+def register_style(style: Any) -> None:
+    """Add the Strata style to matplotlib's library, so ``plt.style.use("strata")`` finds it.
+
+    Registers it the way matplotlib loads its own styles. A matplotlib that cannot
+    read the file simply has no ``strata`` style; the cell is not failed for it.
+    """
+    try:
+        from matplotlib import rc_params_from_file
+
+        params = rc_params_from_file(str(STYLE_PATH), use_default_template=False)
+        style.library[STYLE_NAME] = params
+        if STYLE_NAME not in style.available:
+            style.available.append(STYLE_NAME)
+            style.available.sort()
+    except Exception:
+        return
 
 
 class _AfterImport:

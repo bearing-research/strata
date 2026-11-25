@@ -945,3 +945,51 @@ def test_an_interrupt_in_a_client_close_still_restores_the_names_it_bound(batch_
 
     assert [type(e) for e in errors] == [KeyboardInterrupt]
     assert namespace["strata"] == "the batch's own"
+
+
+def test_a_style_one_cell_uses_does_not_restyle_the_next(batch_pipes):
+    """Cells in a batch share a process; each starts from matplotlib's first settings,
+    as a cell run on its own does, so its figure does not depend on what ran before."""
+    pytest.importorskip("matplotlib.pyplot")
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    def cell(cell_id: str, source: str) -> dict:
+        return {
+            "cell_id": cell_id,
+            "source": source,
+            "consumed_vars": [],
+            "env": {"MPLBACKEND": "Agg"},
+            "mount_manifest": {},
+        }
+
+    cells = [
+        cell(
+            "styled",
+            "import matplotlib.pyplot as plt\nplt.style.use('strata')\n"
+            "print(plt.rcParams['savefig.transparent'])\n",
+        ),
+        cell("plain", "import matplotlib\nprint(matplotlib.rcParams['savefig.transparent'])\n"),
+    ]
+
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "p"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test"})
+        elif frame["type"] == "batch_end":
+            break
+
+    thread.join(timeout=5)
+    assert not errors
+
+    stdout = {
+        f["payload"]["cell_id"]: f["payload"]["stdout"] for f in frames if f["type"] == "persist"
+    }
+    assert stdout == {"styled": "True\n", "plain": "False\n"}

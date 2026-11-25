@@ -7,6 +7,8 @@ from sklearn.metrics import confusion_matrix
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+plt.style.use("strata")
+
 cm = confusion_matrix(y_test, y_pred, labels=model.classes_)
 fig, ax = plt.subplots(figsize=(6, 5))
 sns.heatmap(

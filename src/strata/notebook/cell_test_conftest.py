@@ -13,6 +13,7 @@ may name a ``work_dir``, relative to where pytest started, for the cell to run i
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -31,6 +32,22 @@ _NO_CLIENT_HINT = (
     "artifacts through the notebook's server. Do that in an upstream cell and test "
     "with its result here."
 )
+
+
+def _display_runtime() -> types.ModuleType | None:
+    """The harness's display runtime, beside the serializer, so the cell runs as in a run:
+    ``plt.style.use("strata")`` finds the style. Without it the cell still runs."""
+    manifest = json.loads((_RUNDIR / "inputs.json").read_text())
+    path = Path(manifest["serializer"]).parent / "display" / "runtime.py"
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("_nb_display_runtime", path)
+    if spec is None or spec.loader is None:
+        return None
+    runtime = importlib.util.module_from_spec(spec)
+    sys.modules["_nb_display_runtime"] = runtime
+    spec.loader.exec_module(runtime)
+    return runtime
 
 
 def _load_inputs() -> dict[str, object]:
@@ -75,8 +92,13 @@ def cell():
     work_dir = json.loads((_RUNDIR / "inputs.json").read_text()).get("work_dir")
     if work_dir:
         os.chdir(work_dir)
+    runtime = _display_runtime()
+    side_effects = (
+        runtime.DisplayCapture().capture_side_effects() if runtime else contextlib.nullcontext()
+    )
     try:
-        exec(compile(cell_source, "cell_source.py", "exec"), namespace)  # noqa: S102
+        with side_effects:
+            exec(compile(cell_source, "cell_source.py", "exec"), namespace)  # noqa: S102
     except Exception as exc:  # noqa: BLE001 - any cell error → a readable setup error
         pytest.fail(f"Cell did not execute (cannot test it): {type(exc).__name__}: {exc}")
 
