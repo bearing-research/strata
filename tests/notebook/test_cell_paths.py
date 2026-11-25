@@ -1340,8 +1340,12 @@ class TestFanout:
         }
         return SimpleNamespace(**{**fields, **overrides})
 
-    @staticmethod
-    def _fakes(base, *, consumed=(), latest=None, finalized=(), **overrides):
+    @pytest.fixture(autouse=True)
+    def _store_dir(self, tmp_path):
+        # Where a run's assembling lock goes.
+        self.artifact_dir = tmp_path / "store"
+
+    def _fakes(self, base, *, consumed=(), latest=None, finalized=(), **overrides):
         """A host and a context with nothing behind them, and a record of what they were asked."""
         calls = SimpleNamespace(
             recorded=[], applied=[], instances=[], staged=[], discarded=[], persisted=[]
@@ -1356,6 +1360,7 @@ class TestFanout:
             return f"staged-{kwargs['variable_name']}"
 
         manager = SimpleNamespace(
+            artifact_dir=self.artifact_dir,
             artifact_store=SimpleNamespace(get_latest_version=lambda _id: latest),
             cell_artifact_id=lambda cell_id, var, variant=None: f"{cell_id}.{var}.{variant}",
             load_artifact_data=lambda _id, _version: each.encode_manifest("m", []),
