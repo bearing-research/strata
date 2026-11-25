@@ -73,7 +73,7 @@ def with_thumbnail(rendered: str, name: str, thumbs_dir: Path) -> str:
     if title_at is None:
         return rendered
     title = lines[title_at].removeprefix("# ").strip()
-    alt = f"The {title} notebook in the editor after a run"
+    alt = f"{title}: what a run of the notebook shows"
     images = [
         f"![{alt}](../assets/examples/{name}-{theme}.webp#only-{theme})"
         for theme in ("light", "dark")

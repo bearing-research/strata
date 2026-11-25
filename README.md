@@ -127,14 +127,14 @@ machine. [How Strata compares →](https://bearingresearch.com/strata/latest/not
 <td width="33%" valign="top">
 <a href="https://bearingresearch.com/strata/latest/examples/caching/"><picture>
 <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/caching-dark.webp">
-<img alt="A bar chart of revenue by region under the cell that plots it." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/caching-light.webp">
+<img alt="A bar chart of revenue by region." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/caching-light.webp">
 </picture></a>
 <br><b><a href="https://bearingresearch.com/strata/latest/examples/caching/">caching</a></b><br>The two-minute tutorial: what the cache saves, and what an edit runs again
 </td>
 <td width="33%" valign="top">
 <a href="https://bearingresearch.com/strata/latest/examples/keeling_curve/"><picture>
 <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/keeling_curve-dark.webp">
-<img alt="The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/keeling_curve-light.webp">
+<img alt="CO₂ at Mauna Loa rising from about 315 to 427 ppm since 1958, beside the average year's cycle." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/keeling_curve-light.webp">
 </picture></a>
 <br><b><a href="https://bearingresearch.com/strata/latest/examples/keeling_curve/">keeling_curve</a></b><br>NOAA's CO₂ record, and a published figure that shows its sources
 </td>
@@ -157,14 +157,14 @@ machine. [How Strata compares →](https://bearingresearch.com/strata/latest/not
 <td width="33%" valign="top">
 <a href="https://bearingresearch.com/strata/latest/examples/sql_orders_report/"><picture>
 <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/sql_orders_report-dark.webp">
-<img alt="The Python cell that combines two SQL results, above the report it prints." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/sql_orders_report-light.webp">
+<img alt="The top five orders above $50 and revenue by product category." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/sql_orders_report-light.webp">
 </picture></a>
 <br><b><a href="https://bearingresearch.com/strata/latest/examples/sql_orders_report/">sql_orders_report</a></b><br>SQL, Python and markdown cells in one graph
 </td>
 <td width="33%" valign="top">
 <a href="https://bearingresearch.com/strata/latest/examples/widget_playground/"><picture>
 <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/widget_playground-dark.webp">
-<img alt="A slider, number and dropdown above the table they drive." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/widget_playground-light.webp">
+<img alt="The plot a slider and dropdown drive, titled with their values." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/widget_playground-light.webp">
 </picture></a>
 <br><b><a href="https://bearingresearch.com/strata/latest/examples/widget_playground/">widget_playground</a></b><br>Controls that drive downstream cells, live
 </td>

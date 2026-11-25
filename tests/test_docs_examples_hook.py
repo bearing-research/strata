@@ -23,7 +23,7 @@ def test_the_screenshot_goes_under_the_title_in_both_themes(tmp_path: Path) -> N
     assert lines[0] == "# Data Viewer"
     assert lines[2].endswith("(../assets/examples/data_viewer-light.webp#only-light)")
     assert lines[3].endswith("(../assets/examples/data_viewer-dark.webp#only-dark)")
-    assert lines[2].startswith("![The Data Viewer notebook in the editor after a run]")
+    assert lines[2].startswith("![Data Viewer: what a run of the notebook shows]")
     assert lines[4:] == ["", "A two-cell notebook.", ""]
 
 
