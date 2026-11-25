@@ -374,8 +374,7 @@ class TestTheFileSweep:
             with output_dirs.assembling(tmp_path):
                 raise RuntimeError("the run failed")
 
-        with pytest.raises(RuntimeError):
-            a_run_that_fails()
+        pytest.raises(RuntimeError, a_run_that_fails)
         assert not list(stale.parent.iterdir()), "nor does a run that fails"
 
     async def test_nothing_goes_while_a_run_is_assembling_a_folder(self, tmp_path):
