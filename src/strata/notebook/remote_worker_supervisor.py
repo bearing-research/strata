@@ -9,6 +9,7 @@ local ``/v1/execute`` URL a ``[[workers]]`` entry points at.
 
 from __future__ import annotations
 
+import logging
 import secrets
 import threading
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from strata.notebook.ssh_worker import (
 from strata.notebook.worker_secrets import (
     clear_runtime_worker_token,
     set_runtime_worker_token,
+    withhold_runtime_worker_token,
 )
 
 if TYPE_CHECKING:
@@ -34,6 +36,22 @@ if TYPE_CHECKING:
 # running several workers on one box pass an explicit remote_port.
 DEFAULT_REMOTE_PORT = 9000
 _HEALTH_POLL_INTERVAL = 0.25
+# A missed /health through a live forward is tried again before the token is withdrawn.
+_LIVE_PROBE_TRIES = 3
+_LIVE_PROBE_SPACING = 1.0
+# A reopened forward's connect (ssh's ConnectTimeout is 10 s) and handshake, before
+# /health can answer through it.
+_RESPAWN_HEALTH_TIMEOUT = 30.0
+# How long a reopened forward that another process answers through is watched before it is
+# parked. Past ssh's ConnectTimeout: a process on this machine's freed port makes ssh exit
+# when it cannot bind it, and the next pass reopens it; one on the box's port does not.
+_FOREIGN_SETTLE = 12.0
+# Reopens in a row another process answers through before the tunnel is parked: ssh may
+# still be authenticating past the settle time while this machine's freed port answers.
+_FOREIGN_REOPENS = 3
+_PORT_PICKS = 20
+
+logger = logging.getLogger(__name__)
 
 
 class TunnelHandle(Protocol):
@@ -74,16 +92,38 @@ class _PopenTunnelHandle:
 
     def __init__(self, proc: Any) -> None:
         self._proc = proc
+        self._terminated = False
 
     def is_alive(self) -> bool:
         return self._proc.poll() is None
 
     def terminate(self) -> None:
         import contextlib
+        import os
+        import signal
+        import subprocess
 
+        if self._terminated:
+            return  # its pid may be another process's by now
+        self._terminated = True
+        killpg = getattr(os, "killpg", None)  # not on Windows, which has no lifeline
         with contextlib.suppress(ProcessLookupError, OSError):
             self._proc.terminate()
-            self._proc.wait(timeout=5)
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                # The process is the lifeline wrapper, which cannot pass a SIGKILL on: kill
+                # its session's group (``start_new_session``), ssh with it.
+                if killpg is None:
+                    self._proc.kill()
+                else:
+                    killpg(self._proc.pid, signal.SIGKILL)
+                self._proc.wait()
+        if killpg is not None:
+            # A wrapper that died on its own, or before its handler was set, leaves its ssh
+            # in the group holding the port. The group's id is not reused while ssh lives.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                killpg(self._proc.pid, signal.SIGKILL)
 
 
 class SubprocessTunnelLauncher:
@@ -111,7 +151,8 @@ class SubprocessTunnelLauncher:
             proc = subprocess.Popen(
                 lifeline_command(argv),
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                # Never read: a full pipe would block ssh and stop the forward.
+                stderr=subprocess.DEVNULL,
                 env={**os.environ, **lifeline_vars},
                 pass_fds=lifeline_fds,
                 start_new_session=True,
@@ -133,7 +174,8 @@ def _default_health_probe(local_port: int) -> bool:
 
 
 def _default_launch_id_probe(local_port: int) -> str | None:
-    """The ``launch_id`` the worker answering ``/health`` through the tunnel reports."""
+    """The ``launch_id`` a healthy ``/health`` through the tunnel reports: ``""`` when it
+    answers without one, ``None`` when nothing answers it with a 200 and a JSON object."""
     import httpx
 
     try:
@@ -141,8 +183,10 @@ def _default_launch_id_probe(local_port: int) -> str | None:
         body = resp.json()
     except (httpx.HTTPError, ValueError):
         return None
-    launch_id = body.get("launch_id") if isinstance(body, dict) else None
-    return launch_id if isinstance(launch_id, str) else None
+    if resp.status_code != 200 or not isinstance(body, dict):
+        return None  # a failing /health says nothing about whose it is
+    launch_id = body.get("launch_id")
+    return launch_id if isinstance(launch_id, str) else ""
 
 
 def _pick_free_port() -> int:
@@ -162,6 +206,12 @@ class _ActiveTunnel:
     token: str
     local_port: int
     remote_port: int
+    # What the launched worker's /health reports; nothing else on the box knows it.
+    launch_id: str
+    # Another process answered through the forward: closed, until an establish.
+    parked: bool = False
+    # Reopens in a row that another process answered through.
+    foreign_reopens: int = 0
 
 
 @dataclass
@@ -183,8 +233,12 @@ class RemoteWorkerSupervisor:
     # shutdown never waits on a slow remote install. ``_pending`` reserves a
     # name during its establish so two concurrent establishes can't both
     # pass the existence check and orphan a tunnel.
-    _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    _lock: threading.Condition = field(default_factory=threading.Condition, init=False)
     _pending: set[str] = field(default_factory=set, init=False)
+    # Names whose forward reconcile is reopening. An establish of one waits: the reopen
+    # sees the reservation and stops.
+    _reconnecting: set[str] = field(default_factory=set, init=False)
+    _stopped: threading.Event = field(default_factory=threading.Event, init=False)
 
     def establish(
         self,
@@ -209,6 +263,8 @@ class RemoteWorkerSupervisor:
             if name in self._pending:
                 raise SshWorkerError(f"{name}: an establish is already in progress")
             self._pending.add(name)
+            while name in self._reconnecting:
+                self._lock.wait()
         try:
             return self._establish_locked_out(
                 name,
@@ -261,7 +317,7 @@ class RemoteWorkerSupervisor:
         rport = remote_port or DEFAULT_REMOTE_PORT
         launch_id = secrets.token_urlsafe(16)
         running = worker.launch(port=rport, token=token, launch_id=launch_id)
-        lport = local_port or self.port_picker()
+        lport = self._local_port(name, local_port)
         handle = self.tunnel_launcher.spawn(
             target.target, local_port=lport, remote_port=running.port
         )
@@ -293,17 +349,23 @@ class RemoteWorkerSupervisor:
             executor_url=f"http://127.0.0.1:{lport}/v1/execute",
         )
         with self._lock:
-            self._tunnels[name] = _ActiveTunnel(
-                handle=handle,
-                worker=worker,
-                record=record,
-                token=token,
-                local_port=lport,
-                remote_port=running.port,
-            )
-        # Lets the executor authenticate by worker name without writing the
-        # secret to notebook.toml.
-        set_runtime_worker_token(name, token)
+            stopped = self._stopped.is_set()
+            if not stopped:
+                # Published with the entry, so a teardown in between cannot leave it behind.
+                set_runtime_worker_token(name, token)
+                self._tunnels[name] = _ActiveTunnel(
+                    handle=handle,
+                    worker=worker,
+                    record=record,
+                    token=token,
+                    local_port=lport,
+                    remote_port=running.port,
+                    launch_id=launch_id,
+                )
+        if stopped:
+            # The server shut down meanwhile: nothing would close this forward.
+            handle.terminate()
+            raise SshWorkerError(f"{name}: the server is shutting down")
         return record
 
     def token_for(self, name: str) -> str | None:
@@ -319,41 +381,198 @@ class RemoteWorkerSupervisor:
         return active.record if active is not None else None
 
     def status(self) -> list[TunnelRecord]:
-        """Return every established worker's record (with a fresh liveness flag)."""
-        with self._lock:
-            actives = list(self._tunnels.values())
-        return [self._refresh(active) for active in actives]
-
-    def reconcile(self) -> list[TunnelRecord]:
-        """Health-check every tunnel; respawn any whose forward or worker is down.
-
-        Called from the server's health loop. A dead tunnel is re-opened on the same
-        ports; ``healthy`` reflects the result.
-        """
+        """Return every established worker's record: healthy as the last check found it,
+        unless its forward's process has exited since."""
         with self._lock:
             actives = list(self._tunnels.items())
+        records = [self._refresh(name, active) for name, active in actives]
+        return [record for record in records if record is not None]
+
+    def reconcile(self) -> list[TunnelRecord]:
+        """Re-open every tunnel whose ``ssh -L`` exited, and refresh the others' health.
+
+        The server calls it every 30 s (``_ssh_tunnel_reconcile_loop``). A live forward is
+        never torn down for a missed probe: a busy box may have a cell streaming through
+        it. Healthy means ``/health`` reports the worker this server launched, as at
+        establish, and the worker's token is published only while it does. A live forward
+        that reaches another process is closed until :meth:`establish` runs again. A
+        forward whose ssh keeps exiting (an unreachable box) is reopened on every pass. A
+        worker that stopped is not restarted: its forward stays open and unhealthy.
+        """
+        with self._lock:
+            names = list(self._tunnels)
         records: list[TunnelRecord] = []
-        for name, active in actives:
-            if active.handle.is_alive() and self.health_probe(active.local_port):
-                records.append(active.record)
+        for name in names:
+            try:
+                record = self._reconcile_one(name)
+            except (SshWorkerError, OSError) as exc:
+                # One tunnel's failure leaves the others to be checked.
+                logger.warning("ssh worker %s: not reconciled: %s", name, exc)
                 continue
-            active.handle.terminate()
-            new_handle = self.tunnel_launcher.spawn(
+            if record is not None:
+                records.append(record)
+        return records
+
+    def _local_port(self, name: str, wanted: int | None) -> int:
+        """A local port no other tunnel holds: one whose ssh exited is reopened on its own."""
+        with self._lock:
+            held = {t.local_port for n, t in self._tunnels.items() if n != name}
+        if wanted is not None:
+            if wanted in held:
+                raise SshWorkerError(f"{name}: local port {wanted} is another worker's tunnel")
+            return wanted
+        for _ in range(_PORT_PICKS):
+            port = self.port_picker()
+            if port not in held:
+                return port
+        raise SshWorkerError(f"{name}: no free local port that no other tunnel holds")
+
+    def _reconcile_one(self, name: str) -> TunnelRecord | None:
+        with self._lock:
+            active = self._tunnels.get(name)
+            if active is None or name in self._pending or self._stopped.is_set():
+                return None  # torn down, an establish is replacing it, or shutting down
+            if active.parked or name in self._reconnecting:
+                return active.record  # closed until an establish, or another pass reopens it
+            handle = active.handle
+            alive = handle.is_alive()
+            if not alive:
+                # So no establish of this name spawns on the same local port meanwhile.
+                self._reconnecting.add(name)
+        if alive:
+            return self._check(name, active, handle, self._probe_live(handle, active))
+        try:
+            return self._respawn(name, active)
+        finally:
+            with self._lock:
+                self._reconnecting.discard(name)
+                self._lock.notify_all()
+
+    def _respawn(self, name: str, active: _ActiveTunnel) -> TunnelRecord | None:
+        withhold_runtime_worker_token(name)  # until the new forward reaches our worker
+        active.handle.terminate()  # reaps the exited ssh
+        try:
+            handle = self.tunnel_launcher.spawn(
                 active.record.ssh_target,
                 local_port=active.local_port,
                 remote_port=active.remote_port,
             )
+        except SshWorkerError as exc:
+            logger.warning("ssh worker %s: tunnel not reopened: %s", name, exc)
+            return self._check(name, active, active.handle, None, reopening=True)
+        with self._lock:
+            replaced = self._tunnels.get(name) is not active
+            if not replaced:
+                active.handle = handle
+        if replaced:
+            # Torn down while respawning: don't orphan the forward or revive the entry.
+            handle.terminate()
+            return None
+        seen = self._await_launch_id(name, active)
+        return self._check(name, active, handle, seen, reopening=True)
+
+    def _check(
+        self,
+        name: str,
+        active: _ActiveTunnel,
+        handle: TunnelHandle,
+        seen: str | None,
+        *,
+        reopening: bool = False,
+    ) -> TunnelRecord | None:
+        """Record what ``/health`` reported through *handle*, *active*'s forward: *seen*,
+        its launch id (``""`` none; ``None`` no healthy answer). *reopening*: the call of
+        the reconnect itself."""
+        ours = seen == active.launch_id
+        with self._lock:
+            if self._tunnels.get(name) is not active:
+                return None
+            if (
+                active.parked
+                or active.handle is not handle
+                or (name in self._reconnecting and not reopening)
+            ):
+                # Probed through a forward that is being, or has been, replaced.
+                return active.record
+            # Ours only through our own live forward: one that lost its port to another of
+            # these tunnels reaches that worker instead.
+            others = {t.launch_id for n, t in self._tunnels.items() if n != name}
+            foreign = (
+                seen is not None and not ours and seen not in others and active.handle.is_alive()
+            )
+            # Withdrawn on anything but our worker's answer: the token must not reach a
+            # process that took the box's port, answered or not.
+            if ours:
+                set_runtime_worker_token(name, active.token)
+                active.foreign_reopens = 0
+            else:
+                withhold_runtime_worker_token(name)
+            retry = False
+            if foreign and reopening:
+                # Through a forward still connecting, the answer may be this machine's.
+                active.foreign_reopens += 1
+                retry = active.foreign_reopens < _FOREIGN_REOPENS
+            if foreign and not retry:
+                active.parked = True
+            active.record = _replace_health(active.record, ours)
+            record = active.record
+        if retry:
+            handle.terminate()
+            logger.warning(
+                "ssh worker %s: /health on 127.0.0.1:%d answered as another process while "
+                "the tunnel reopened; trying again on the next check",
+                name,
+                active.local_port,
+            )
+        elif foreign:
+            handle.terminate()
+            logger.warning(
+                "ssh worker %s: /health on 127.0.0.1:%d answered, but not as the worker "
+                "this server launched (another process holds the box's port, or this "
+                "machine's); tunnel closed until it is connected again",
+                name,
+                active.local_port,
+            )
+        return record
+
+    def _probe_live(self, handle: TunnelHandle, active: _ActiveTunnel) -> str | None:
+        """The launch id through a live forward, tried a few times: one slow /health on a
+        busy box should not withdraw its token."""
+        import time
+
+        for attempt in range(_LIVE_PROBE_TRIES):
+            seen = self.launch_id_probe(active.local_port)
+            if seen is not None or not handle.is_alive() or self._stopped.is_set():
+                return seen
+            if attempt + 1 < _LIVE_PROBE_TRIES:
+                time.sleep(_LIVE_PROBE_SPACING)
+        return None
+
+    def _await_launch_id(self, name: str, active: _ActiveTunnel) -> str | None:
+        import time
+
+        deadline = time.monotonic() + _RESPAWN_HEALTH_TIMEOUT
+        settled: float | None = None  # when a foreign answer is taken as final
+        while True:
             with self._lock:
-                if self._tunnels.get(name) is not active:
-                    # Torn down or replaced while respawning: don't orphan
-                    # the fresh forward or resurrect the entry.
-                    new_handle.terminate()
-                    continue
-                active.handle = new_handle
-            healthy = self._await_health(active.local_port, _HEALTH_POLL_INTERVAL)
-            active.record = _replace_health(active.record, healthy)
-            records.append(active.record)
-        return records
+                abandoned = (
+                    self._stopped.is_set()
+                    or name in self._pending
+                    or self._tunnels.get(name) is not active
+                )
+            if abandoned or not active.handle.is_alive():
+                return None
+            seen = self.launch_id_probe(active.local_port)
+            now = time.monotonic()
+            if seen == active.launch_id:
+                return seen
+            if seen is not None:
+                settled = settled if settled is not None else now + _FOREIGN_SETTLE
+                if now >= settled:
+                    return seen
+            elif now >= deadline:
+                return None
+            time.sleep(_HEALTH_POLL_INTERVAL)
 
     def teardown(self, name: str, *, stop_remote: bool = False) -> bool:
         """Close *name*'s tunnel; return whether one was present.
@@ -379,6 +598,7 @@ class RemoteWorkerSupervisor:
 
         Runs at server shutdown so no ``ssh -L`` children outlive the server.
         """
+        self._stopped.set()  # ends a reconcile still waiting on a reopened forward
         with self._lock:
             actives = list(self._tunnels.items())
             self._tunnels.clear()
@@ -397,10 +617,15 @@ class RemoteWorkerSupervisor:
                 return False
             time.sleep(_HEALTH_POLL_INTERVAL)
 
-    def _refresh(self, active: _ActiveTunnel) -> TunnelRecord:
-        healthy = active.handle.is_alive() and self.health_probe(active.local_port)
-        active.record = _replace_health(active.record, healthy)
-        return active.record
+    def _refresh(self, name: str, active: _ActiveTunnel) -> TunnelRecord | None:
+        # The last check's verdict, and the forward's process now: no probe, so a listing
+        # neither waits on a slow box nor changes the token (``reconcile`` does).
+        with self._lock:
+            if self._tunnels.get(name) is not active:
+                return None
+            record = active.record
+            alive = active.handle.is_alive()
+        return record if alive or not record.healthy else _replace_health(record, False)
 
 
 def _replace_health(record: TunnelRecord, healthy: bool) -> TunnelRecord:
