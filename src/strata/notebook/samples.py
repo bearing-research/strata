@@ -54,7 +54,7 @@ SAMPLES = (
     ),
     Sample(
         name="pandas_basics",
-        title="Pandas Basics",
+        title="Filter, group, merge and pivot a sales table",
         description="Create, filter, group and merge DataFrames.",
         warm_imports=("pyarrow", "pandas"),
         first_run_seconds=1,

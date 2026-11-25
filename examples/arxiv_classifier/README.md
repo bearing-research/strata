@@ -53,7 +53,7 @@ uv run strata-notebook --notebook-dir examples
 
 # Terminal 3: open the notebook in the UI
 # http://localhost:8765
-# Under "Open Notebook", pick "arXiv Paper Classifier (distributed)"
+# Under "Open Notebook", pick "Classify arXiv papers across three workers"
 ```
 
 Once the notebook is open, run all cells. You should see:

@@ -1,5 +1,5 @@
 notebook_id = "markdown-showcase-001"
-name = "Markdown Showcase"
+name = "Write reports in Markdown, by hand or from data"
 created_at = 2026-04-30T00:00:00+00:00
 updated_at = "2026-04-30T00:00:00+00:00"
 cells = [

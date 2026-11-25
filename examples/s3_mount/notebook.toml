@@ -1,5 +1,5 @@
 notebook_id = "s3-mount-example-001"
-name = "S3 Mount (Public Bucket)"
+name = "Read a NOAA weather file from a public S3 bucket"
 created_at = 2026-04-14T00:00:00Z
 updated_at = 2026-04-14T00:00:00Z
 

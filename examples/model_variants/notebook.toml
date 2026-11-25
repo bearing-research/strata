@@ -1,5 +1,5 @@
 notebook_id = "model-variants-001"
-name = "Model Variants"
+name = "Switch between three classifiers without retraining"
 created_at = 2026-05-09 00:00:00+00:00
 updated_at = 2026-05-09 00:00:00+00:00
 cells = [
