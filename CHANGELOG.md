@@ -397,6 +397,13 @@ exhaustive commit history.
 
 ### Changed
 
+- **The home page's animation shows a coding agent at work.** Asked to plot CO₂ at Mauna
+  Loa, the agent writes and runs cells through the `strata` CLI, reads a `KeyError`,
+  fixes the one line and reruns only that cell, plots, and sums up from the numbers the
+  cells printed, while a browser on the same notebook follows. Its words are scripted in
+  the capture; its commands, their output and the browser are real.
+  `scripts/capture_web_agent_drive.py` records it, and needs the network for NOAA's data.
+
 - **An example's docs page is the notebook as it ran.** It opens with the README's
   first lines, then shows every cell with its outputs (tables, charts, printed text), then
   the README's notes under "About this example". The outputs come from a run that

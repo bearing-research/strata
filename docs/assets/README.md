@@ -87,7 +87,11 @@ everything above: they are not fed canned frames. Each runs a real server,
 scaffolds a real notebook, drives it with the real `strata` CLI over
 `--server`/`--session` (the same path a coding agent takes), and screenshots a
 real viewer attached over a real WebSocket: the TUI for one, a browser per
-theme for the other, framed beside the terminal the commands ran in.
+theme for the other. The TUI's is framed beside the terminal the commands ran
+in; the web one beside a coding agent's pane, whose words are scripted in
+`frontend/scripts/capture-web-agent-live.mjs` while its commands, their output
+and the numbers it quotes are real. The web capture fetches NOAA's Mauna Loa
+record, so it needs the network.
 
 ```bash
 uv run python scripts/capture_agent_drive.py

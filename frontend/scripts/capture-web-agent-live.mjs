@@ -1,15 +1,15 @@
 /**
- * Capture the frames of the README's live web animation: the `strata` CLI
- * drives a notebook the way a coding agent does, and a real browser on the
- * same session updates as it goes.
+ * Capture the frames of the home page's animation: a coding agent builds a
+ * notebook through the `strata` CLI while a browser on the same session updates.
  *
  * Driven by `scripts/capture_web_agent_drive.py`, which starts the server,
  * scaffolds the notebook and assembles the GIF; run it through that script.
  *
- * Nothing is canned. Each beat runs a real CLI command against the live
- * session and waits until both browsers (one per theme) show its effect, so a
- * broken broadcast fails the capture rather than producing a convincing GIF.
- * Each frame puts the terminal the commands ran in beside the browser.
+ * The agent's words are written here; everything else is real. Each step writes
+ * a cell's file, runs the CLI command an agent would, and shows its actual
+ * output, and each frame waits until both browsers (one per theme) show the
+ * step's effect, so a broken broadcast fails the capture. The closing summary
+ * quotes numbers the cells printed.
  */
 import { execFile } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -20,19 +20,44 @@ import { chromium } from 'playwright'
 const run = promisify(execFile)
 
 const APP = { width: 1280, height: 880 }
-const TERM_WIDTH = 420
+const PANE_WIDTH = 520
 const THEMES = ['light', 'dark']
-const TIMEOUT_MS = 60000
+const TIMEOUT_MS = 180000
 
-// What the "agent" writes, through the same CLI a coding agent uses.
+const REQUEST = "Plot CO₂ at Mauna Loa since 1958, and how fast it's rising each decade."
+
+// The cells the agent writes. growth's first draft names a column that is not there.
 const LOAD = `# @name load
-import time
-time.sleep(2)  # stands in for a slow query
-readings = [12.1, 12.4, 13.0, 12.8, 13.5]
-print(f"loaded {len(readings)} readings")`
-const SUMMARIZE = `# @name summarize
-mean = sum(readings) / len(readings)
-f"mean {mean:.2f} over {len(readings)} readings"`
+# @fetch co2 https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.csv
+import pandas as pd
+
+raw = pd.read_csv(co2, comment="#")
+monthly = raw[["year", "month", "average"]].rename(columns={"average": "co2_ppm"})
+print(f"{len(monthly)} months, {monthly.year.min()} to {monthly.year.max()}")
+monthly
+`
+const GROWTH = (column) => `# @name growth
+full = monthly.groupby("year").filter(lambda y: len(y) == 12)
+yearly = full.groupby("year")["${column}"].mean()
+decades = yearly.diff().dropna().groupby(lambda y: f"{y // 10 * 10}s").mean().round(2)
+print(decades.to_string())
+decades.rename("ppm a year").to_frame()
+`
+const PLOT = `# @name plot
+import matplotlib.pyplot as plt
+
+plt.style.use("strata")
+
+
+def draw(record):
+    fig, ax = plt.subplots()
+    ax.plot(record.year + (record.month - 0.5) / 12, record.co2_ppm, linewidth=1)
+    ax.set_title("CO₂ at Mauna Loa, ppm")
+    return fig
+
+
+draw(monthly)
+`
 
 function argFor(flag) {
   const i = process.argv.indexOf(flag)
@@ -44,39 +69,53 @@ function escapeHtml(text) {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** The command as a shell shows it: a multi-line argument continues on `>` lines. */
-function promptLines(args) {
-  const shown = args.map((a) => (/[\s"$]/.test(a) ? `'${a}'` : a)).join(' ')
-  return shown.split('\n').map((line, i) => (i === 0 ? `$ strata ${line}` : `> ${line}`))
-}
-
 async function main() {
   const baseUrl = argFor('--base-url').replace(/\/$/, '')
   const sessionId = argFor('--session')
   const python = argFor('--python')
-  const repoRoot = argFor('--repo-root')
+  const agentDir = argFor('--agent-dir')
   const outDir = argFor('--out')
   mkdirSync(outDir, { recursive: true })
+  mkdirSync(agentDir, { recursive: true })
 
-  const transcript = []
+  // What the agent's pane shows, oldest first.
+  const pane = [{ kind: 'user', text: REQUEST }]
+  const say = (text) => pane.push({ kind: 'agent', text })
+
+  function write(file, code) {
+    writeFileSync(`${agentDir}/${file}`, code)
+    pane.push({ kind: 'write', file, code })
+  }
+
+  function edit(file, before, after) {
+    writeFileSync(`${agentDir}/${file}`, after)
+    const was = before.split('\n')
+    const now = after.split('\n')
+    const changed = now.findIndex((line, i) => line !== was[i])
+    pane.push({ kind: 'edit', file, removed: was[changed], added: now[changed] })
+  }
+
   /**
-   * Run `strata <args>` against the live session; its real output joins the
-   * transcript. The frames leave out `--server` and `--session`, the same on
-   * every line; the rest is shown as run. Human output, since the default JSON
-   * would fill the pane.
+   * Run `strata <args>` against the live session as the agent, in its directory;
+   * the pane shows the command (without `--server`/`--session`/`--author`, the same
+   * on every call) and its real output. A failing run is shown, not thrown: the
+   * agent reads the error.
    */
-  function strata(command) {
-    const args = [...command, '--format', 'human']
-    transcript.push(...promptLines(args))
-    const child = run(
-      python,
-      ['-m', 'strata.cli', ...args, '--server', baseUrl, '--session', sessionId],
-      { cwd: repoRoot },
-    )
-    return child.then(({ stdout }) => {
-      transcript.push(...stdout.trimEnd().split('\n'))
-      return stdout
-    })
+  async function strata(...args) {
+    const entry = { kind: 'run', command: `strata ${args.join(' ')}`, output: '' }
+    pane.push(entry)
+    const full = [...args, '--format', 'human', '--server', baseUrl, '--session', sessionId]
+    try {
+      const { stdout } = await run(python, ['-m', 'strata.cli', ...full, '--author', 'agent'], {
+        cwd: agentDir,
+      })
+      entry.output = stdout.trimEnd()
+    } catch (err) {
+      if (err.stdout === undefined) throw err
+      entry.output = err.stdout.trimEnd()
+      entry.failed = true
+    }
+    return entry.output
   }
 
   const browser = await chromium.launch()
@@ -103,71 +142,99 @@ async function main() {
       })
       pages[theme] = page
     }
-    // One page renders every frame: the terminal beside a browser screenshot.
+    // One page renders every frame: the agent's pane beside a browser screenshot.
     const composer = await (
       await browser.newContext({ viewport: { width: 800, height: 600 } })
     ).newPage()
 
-    /** Wait until *ready* holds on both pages, then take one frame per theme. */
-    async function beat(what, ready) {
+    /**
+     * Wait until *ready* holds on both pages, scroll *cell* to *block* (its code at
+     * the top, or its output at the bottom), then take one frame per theme.
+     */
+    async function beat(what, ready, cell, block = 'start') {
       for (const theme of THEMES) {
         try {
           await ready(pages[theme])
         } catch (err) {
+          const states = await pages[theme]
+            .locator('.cell')
+            .evaluateAll((els) =>
+              els.map((el) => [...el.classList].filter((c) => c.startsWith('state-')).join(' ')),
+            )
           throw new Error(
-            `the ${theme} browser never showed ${what}: the live mirror is broken, ` +
+            `cells are [${states.join(' | ')}]; ` +
+              `the ${theme} browser never showed ${what}: the live mirror is broken, ` +
               `or the beat needs longer (${err.message})`,
           )
         }
       }
       for (const theme of THEMES) {
+        const page = pages[theme]
+        if (cell !== undefined) {
+          await page
+            .locator('.cell')
+            .nth(cell)
+            .evaluate((el, where) => el.scrollIntoView({ block: where }), block)
+        }
         // Status flips a moment before the output paints; let it land.
-        await pages[theme].waitForTimeout(500)
-        const shot = await pages[theme].screenshot()
+        await page.waitForTimeout(700)
+        const shot = await page.screenshot()
         const path = `${outDir}/web-agent-live-${theme}-${String(frames[theme].length).padStart(2, '0')}.png`
-        await composer.setContent(frameHtml(theme, shot, transcript))
+        await composer.setContent(frameHtml(theme, shot, pane))
         await composer.locator('.frame').screenshot({ path })
         frames[theme].push(path)
       }
     }
 
     const cells = (page) => page.locator('.cell')
+    // Cell *n* shows one of *states*. A cell another reads from reads cached once it is reused.
+    const settled =
+      (n, ...states) =>
+      (page) =>
+        page.waitForFunction(
+          ([index, wanted]) => {
+            const cell = document.querySelectorAll('.cell')[index]
+            return (
+              cell !== undefined &&
+              wanted.some((state) => cell.classList.contains(`state-${state}`))
+            )
+          },
+          [n, states],
+          { timeout: TIMEOUT_MS, polling: 200 },
+        )
     await beat('the empty notebook', async (page) => {
       if ((await cells(page).count()) !== 0) throw new Error('expected no cells yet')
     })
 
-    await strata(['cell', 'add', '-c', LOAD])
-    await beat('the first cell arriving', (page) =>
-      cells(page).first().waitFor({ timeout: TIMEOUT_MS }),
-    )
-    const loadId = await pages.light.locator('.cell').first().getAttribute('data-cell-id')
+    say("I'll start with NOAA's monthly record from Mauna Loa, in a cell of its own.")
+    write('load.py', LOAD)
+    const added = await strata('cell', 'add', '--run', '--file', 'load.py')
+    if (!added.includes('ok ')) throw new Error(`load did not run:\n${added}`)
+    await beat('the load cell finishing', settled(0, 'ready', 'cached'), 0)
 
-    // The run takes two seconds: catch it in flight, then finished.
-    const loadRun = strata(['cell', 'run', loadId])
-    await beat('the first cell running', (page) =>
-      page.locator('.cell.state-running').first().waitFor({ timeout: TIMEOUT_MS }),
-    )
-    await loadRun
-    await beat('the first cell finishing', (page) =>
-      page.locator('.cell.state-ready').first().waitFor({ timeout: TIMEOUT_MS }),
-    )
+    say('Now the yearly means, and how much each year rises, averaged by decade.')
+    write('growth.py', GROWTH('ppm'))
+    const failed = await strata('cell', 'add', '--run', '--file', 'growth.py')
+    const growthId = failed.split(/\s+/)[1]
+    if (!failed.includes('KeyError')) throw new Error(`growth did not fail as drafted:\n${failed}`)
+    await beat('the growth cell failing', settled(1, 'error'), 1)
 
-    await strata(['cell', 'add', '-c', SUMMARIZE])
-    await beat('the second cell arriving', (page) =>
-      cells(page).nth(1).waitFor({ timeout: TIMEOUT_MS }),
+    say(
+      'The column is co2_ppm. Fixing that line; load stays as it is, so the data is not fetched again.',
     )
-    const summarizeId = await pages.light.locator('.cell').nth(1).getAttribute('data-cell-id')
+    edit('growth.py', GROWTH('ppm'), GROWTH('co2_ppm'))
+    await strata('cell', 'edit', growthId, '--file', 'growth.py')
+    const grown = await strata('cell', 'run', growthId)
+    await beat('the growth cell fixed', settled(1, 'ready', 'cached'), 1)
 
-    await strata(['cell', 'run', summarizeId])
-    await beat('both cells finishing', (page) =>
-      page.locator('.cell.state-ready').nth(1).waitFor({ timeout: TIMEOUT_MS }),
-    )
+    say('And the curve itself.')
+    write('plot.py', PLOT)
+    await strata('cell', 'add', '--run', '--file', 'plot.py')
+    await beat('the plot', settled(2, 'ready', 'cached'), 2, 'end')
 
-    // The payoff: running the slow cell again is a cache hit.
-    await strata(['cell', 'run', loadId])
-    await beat('the first cell served from the cache', (page) =>
-      page.locator('.cell.state-cached').first().waitFor({ timeout: TIMEOUT_MS }),
-    )
+    await strata('status')
+    say(summary(added, grown))
+    await beat('the finished notebook', settled(2, 'ready', 'cached'), 2, 'end')
   } finally {
     await browser.close()
   }
@@ -175,16 +242,47 @@ async function main() {
   for (const theme of THEMES) console.log(`  ${frames[theme].length} ${theme} frames`)
 }
 
-/** A frame: the agent's terminal on the left, the browser on the right. */
-function frameHtml(theme, shot, transcript) {
+/** The agent's last words, quoting what the cells printed. */
+function summary(loaded, grown) {
+  const span = loaded.match(/(\d+) months, (\d{4}) to (\d{4})/)
+  const decades = [...grown.matchAll(/^(\d{4}s)\s+([\d.]+)$/gm)]
+  if (!span || decades.length < 2) throw new Error(`unexpected output:\n${loaded}\n${grown}`)
+  const [first, last] = [decades[0], decades[decades.length - 1]]
+  return (
+    `Done: three cells, ${span[1]} months from ${span[2]} to ${span[3]}. ` +
+    `The rise sped up from ${first[2]} ppm a year in the ${first[1]} to ${last[2]} in the ${last[1]} so far. ` +
+    'Fixing growth reran only growth.'
+  )
+}
+
+/** A frame: the agent's pane on the left, the browser on the right. */
+function frameHtml(theme, shot, pane) {
   const dark = theme === 'dark'
   const page = dark ? '#11111b' : '#dce0e8'
   const chrome = dark ? '#313244' : '#bcc0cc'
   const chromeText = dark ? '#cdd6f4' : '#4c4f69'
-  // Keep the newest lines: the terminal scrolls like a real one.
-  const lines = transcript.slice(-34).map((line) => {
-    const cls = line.startsWith('$ ') || line.startsWith('> ') ? 'cmd' : 'out'
-    return `<div class="${cls}">${escapeHtml(line) || '&nbsp;'}</div>`
+  const code = (text, cls = '') => `<pre class="code ${cls}">${escapeHtml(text.trimEnd())}</pre>`
+  const entries = pane.map((entry) => {
+    switch (entry.kind) {
+      case 'user':
+        return `<div class="user">${escapeHtml(entry.text)}</div>`
+      case 'agent':
+        return `<div class="agent">${escapeHtml(entry.text)}</div>`
+      case 'write':
+        return `<div class="tool"><span class="tag">write</span> ${entry.file}${code(entry.code)}</div>`
+      case 'edit':
+        return (
+          `<div class="tool"><span class="tag">edit</span> ${entry.file}` +
+          `${code(`- ${entry.removed}`, 'del')}${code(`+ ${entry.added}`, 'add')}</div>`
+        )
+      case 'run':
+        return (
+          `<div class="tool"><span class="tag">run</span> <code>${escapeHtml(entry.command)}</code>` +
+          `${entry.output ? code(entry.output, entry.failed ? 'out failed' : 'out') : ''}</div>`
+        )
+      default:
+        throw new Error(`unknown pane entry ${entry.kind}`)
+    }
   })
   return `<!doctype html><html><head><style>
     body { margin: 0; background: ${page}; font-family: -apple-system, 'Segoe UI', sans-serif; }
@@ -194,15 +292,27 @@ function frameHtml(theme, shot, transcript) {
            display: flex; align-items: center; justify-content: center; position: relative; }
     .bar::before { content: ''; position: absolute; left: 12px; width: 10px; height: 10px;
            border-radius: 50%; background: #f38ba8; box-shadow: 16px 0 #f9e2af, 32px 0 #a6e3a1; }
-    .term { width: ${TERM_WIDTH}px; height: ${APP.height}px; background: #1e1e2e; color: #cdd6f4;
-            font: 12px/1.5 'JetBrains Mono', Menlo, monospace; padding: 10px 12px;
-            box-sizing: border-box; white-space: pre-wrap; word-break: break-all;
-            display: flex; flex-direction: column; justify-content: flex-end; }
-    .cmd { color: #a6e3a1; }
-    .out { color: #bac2de; }
+    .pane { width: ${PANE_WIDTH}px; height: ${APP.height}px; background: #1e1e2e; color: #cdd6f4;
+            padding: 14px 16px; box-sizing: border-box; overflow: hidden;
+            display: flex; flex-direction: column; justify-content: flex-end; gap: 10px;
+            font-size: 13px; line-height: 1.45; }
+    .user { background: #313244; border-left: 3px solid #89b4fa; padding: 8px 10px;
+            border-radius: 4px; color: #cdd6f4; }
+    .agent { color: #cdd6f4; }
+    .tool { color: #a6adc8; font-size: 12px; }
+    .tool code { font: 12px 'JetBrains Mono', Menlo, monospace; color: #a6e3a1; }
+    .tag { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+           color: #1e1e2e; background: #a6adc8; border-radius: 3px; padding: 0 5px; }
+    .code { margin: 5px 0 0; padding: 6px 8px; background: #181825; border-radius: 4px;
+            font: 11px/1.45 'JetBrains Mono', Menlo, monospace; color: #bac2de;
+            white-space: pre-wrap; word-break: break-word; }
+    .out { color: #cdd6f4; }
+    .failed { color: #f38ba8; }
+    .del { color: #f38ba8; margin-top: 4px; }
+    .add { color: #a6e3a1; margin-top: 2px; }
     img { display: block; width: ${APP.width}px; height: ${APP.height}px; }
   </style></head><body><div class="frame">
-    <div class="win"><div class="bar">agent: strata CLI on the live session</div><div class="term">${lines.join('')}</div></div>
+    <div class="win"><div class="bar">coding agent, driving the strata CLI</div><div class="pane">${entries.join('')}</div></div>
     <div class="win"><div class="bar">browser: the same notebook</div>
       <img src="data:image/png;base64,${shot.toString('base64')}"></div>
   </div></body></html>`
