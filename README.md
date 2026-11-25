@@ -134,7 +134,7 @@ machine. [How Strata compares →](https://bearingresearch.com/strata/latest/not
 <td width="33%" valign="top">
 <a href="https://bearingresearch.com/strata/latest/examples/keeling_curve/"><picture>
 <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/keeling_curve-dark.webp">
-<img alt="CO₂ at Mauna Loa rising from 315 to over 420 ppm since 1958, beside the average year's cycle." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/keeling_curve-light.webp">
+<img alt="The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/examples/keeling_curve-light.webp">
 </picture></a>
 <br><b><a href="https://bearingresearch.com/strata/latest/examples/keeling_curve/">keeling_curve</a></b><br>NOAA's CO₂ record, and a published figure that shows its sources
 </td>
