@@ -36,4 +36,4 @@ for _, row in category_summary.to_pandas().iterrows():
 
 report = "\n".join(lines)
 print(report)
-report
+Markdown(report)

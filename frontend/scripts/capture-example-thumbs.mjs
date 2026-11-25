@@ -36,8 +36,14 @@ const SOURCE_LEAD_PX = 200
 
 async function frame(page, focus) {
   const cells = page.locator('.cell')
-  const cell = focus ? cells.filter({ hasText: focus }).first() : null
-  if (cell) await cell.waitFor({ timeout: TIMEOUT_MS })
+  let cell = null
+  if (focus) {
+    const match = cells.filter({ hasText: focus }).first()
+    await match.waitFor({ timeout: TIMEOUT_MS })
+    // By id from here: the editor draws only the lines in view, so once scrolled the
+    // focus text can leave the page and a text filter would lose the cell.
+    cell = page.locator(`.cell[data-cell-id="${await match.getAttribute('data-cell-id')}"]`)
+  }
   // A plot's height is unknown until it decodes; scrolling before that frames
   // the output lower than it ends up.
   await page.waitForFunction(() => [...document.images].every((img) => img.complete), null, {
