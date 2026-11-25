@@ -1674,6 +1674,13 @@ want under your storage root instead:
     cache saves and what an edit runs again. `strata tutorial caching` opens
     a copy.
 
+-   [![The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle.](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-light.webp#only-light)![The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle.](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/keeling_curve/)
+
+    **[keeling_curve](https://bearingresearch.com/strata/dev/examples/keeling_curve/)**: NOAA's Mauna Loa
+    record, downloaded with `# @fetch`, the curve and its yearly cycle, then a
+    published figure whose page shows the code and NOAA's bytes behind it.
+    `strata tutorial keeling_curve` opens a copy.
+
 -   [![Iris classification: a pairplot of the four flower measurements, coloured by species.](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)![Iris classification: a pairplot of the four flower measurements, coloured by species.](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/iris_classification/)
 
     **[iris_classification](https://bearingresearch.com/strata/dev/examples/iris_classification/)**: end-to-end
