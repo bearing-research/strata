@@ -1,7 +1,7 @@
 # SQL Orders Report
 
-![The SQL Orders Report notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)
-![The SQL Orders Report notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)
+![SQL Orders Report: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)
+![SQL Orders Report: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)
 
 A small five-cell notebook that demonstrates Strata's SQL cell support
 against a local SQLite warehouse. The cells span three languages
@@ -251,5 +251,5 @@ for _, row in category_summary.to_pandas().iterrows():
 
 report = "\n".join(lines)
 print(report)
-report
+Markdown(report)
 ```

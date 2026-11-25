@@ -1,7 +1,7 @@
 # Loop Hill Climb: demo for the `@loop` cell primitive
 
-![The Loop Hill Climb: demo for the `@loop` cell primitive notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-light.webp#only-light)
-![The Loop Hill Climb: demo for the `@loop` cell primitive notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-dark.webp#only-dark)
+![Loop Hill Climb: demo for the `@loop` cell primitive: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-light.webp#only-light)
+![Loop Hill Climb: demo for the `@loop` cell primitive: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-dark.webp#only-dark)
 
 Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop
 cell feature: the `@loop` / `@loop_until` annotations, per-iteration

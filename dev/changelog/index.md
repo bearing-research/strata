@@ -399,6 +399,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 
+- **The gallery's cards show each example's result, not its editor.** A card's picture
+  is the example's chart, table or report on the docs theme, over a band in the
+  example's own color; an example with no output shows its main cell's source.
+  `scripts/capture_docs_shots.py --only examples` draws them.
+
 - **Strata installs and runs from pipx, pip and conda, not only `uv tool install`.**
   `strata-notebook` depends on uv (0.12 or 0.13) and runs that uv for every notebook
   environment, whatever is on `PATH`; `STRATA_UV` names another. The startup guard no

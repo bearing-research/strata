@@ -1,7 +1,7 @@
 # Model Variants Sweep
 
-![The Model Variants Sweep notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)
-![The Model Variants Sweep notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)
+![Model Variants Sweep: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)
+![Model Variants Sweep: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)
 
 A minimal example of variant **sweep mode**: run every variant of a group and
 compare them all in one downstream cell.

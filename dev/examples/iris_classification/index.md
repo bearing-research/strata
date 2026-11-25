@@ -1,7 +1,7 @@
 # Iris Classification: end-to-end ML in seven cells
 
-![The Iris Classification: end-to-end ML in seven cells notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)
-![The Iris Classification: end-to-end ML in seven cells notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)
+![Iris Classification: end-to-end ML in seven cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-light.webp#only-light)
+![Iris Classification: end-to-end ML in seven cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/iris_classification-dark.webp#only-dark)
 
 Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
 what the graph looks like for a realistic ML pipeline: load → explore

@@ -1,7 +1,7 @@
 # library_cells
 
-![The library_cells notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)
-![The library_cells notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)
+![library_cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)
+![library_cells: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)
 
 Walks through cross-cell library code in Strata Notebook: pure module
 cells, mixed runtime+library cells, PEP 563 type annotations, and the

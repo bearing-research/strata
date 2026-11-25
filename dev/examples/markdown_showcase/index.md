@@ -1,7 +1,7 @@
 # Notebook: Markdown Showcase
 
-![The Notebook: Markdown Showcase notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)
-![The Notebook: Markdown Showcase notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)
+![Notebook: Markdown Showcase: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)
+![Notebook: Markdown Showcase: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)
 
 # Markdown Showcase
 

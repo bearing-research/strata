@@ -1647,8 +1647,8 @@ error naming the cell, so a cloned notebook can't read or rewrite other files.
 # Example gallery
 
 Every notebook under `examples/` in the repo demonstrates a specific
-Strata capability. A card's picture is that notebook in the editor
-after a real run. Click through for its cell sources and its README,
+Strata capability. A card's picture is what that notebook makes, taken
+from a real run. Click through for its cell sources and its README,
 rendered into this site without cloning the repo.
 
 To run the examples, start the server on the repo's `examples/` directory
@@ -1668,13 +1668,13 @@ want under your storage root instead:
 
 <div class="grid cards" markdown>
 
--   [![The caching tutorial: a bar chart of revenue by region under the cell that plots it.](https://bearingresearch.com/strata/dev/assets/examples/caching-light.webp#only-light)![The caching tutorial: a bar chart of revenue by region under the cell that plots it.](https://bearingresearch.com/strata/dev/assets/examples/caching-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/caching/)
+-   [![The caching tutorial: a bar chart of revenue by region.](https://bearingresearch.com/strata/dev/assets/examples/caching-light.webp#only-light)![The caching tutorial: a bar chart of revenue by region.](https://bearingresearch.com/strata/dev/assets/examples/caching-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/caching/)
 
     **[caching](https://bearingresearch.com/strata/dev/examples/caching/)**: a two-minute tutorial on what the
     cache saves and what an edit runs again. `strata tutorial caching` opens
     a copy.
 
--   [![The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle.](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-light.webp#only-light)![The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle.](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/keeling_curve/)
+-   [![The Keeling curve: CO₂ at Mauna Loa rising from about 315 to 427 ppm since 1958, beside the average year's cycle.](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-light.webp#only-light)![The Keeling curve: CO₂ at Mauna Loa rising from about 315 to 427 ppm since 1958, beside the average year's cycle.](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/keeling_curve/)
 
     **[keeling_curve](https://bearingresearch.com/strata/dev/examples/keeling_curve/)**: NOAA's Mauna Loa
     record, downloaded with `# @fetch`, the curve and its yearly cycle, then a
@@ -1704,7 +1704,7 @@ want under your storage root instead:
     the inline preview, in the interactive viewer. Page through and sort the
     full cached artifact.
 
--   [![Agent demo: the notebook's introduction above the cell that trains a random forest.](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-light.webp#only-light)![Agent demo: the notebook's introduction above the cell that trains a random forest.](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/agent_demo/)
+-   [![Agent demo: the cell that trains a random forest, the step the cache keeps.](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-light.webp#only-light)![Agent demo: the cell that trains a random forest, the step the cache keeps.](https://bearingresearch.com/strata/dev/assets/examples/agent_demo-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/agent_demo/)
 
     **[agent_demo](https://bearingresearch.com/strata/dev/examples/agent_demo/)**: the notebook a coding agent
     builds live in the `strata agent` demo. The expensive training cell stays
@@ -1723,7 +1723,7 @@ want under your storage root instead:
     one DAG slot. Switch tabs and the downstream cells run again; the other
     variants stay cached.
 
--   [![Model variants sweep: three variant cells and the cell that compares their accuracy.](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)![Model variants sweep: three variant cells and the cell that compares their accuracy.](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/model_variants_sweep/)
+-   [![Model variants sweep: the cell that compares every variant's accuracy, and what it printed.](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-light.webp#only-light)![Model variants sweep: the cell that compares every variant's accuracy, and what it printed.](https://bearingresearch.com/strata/dev/assets/examples/model_variants_sweep-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/model_variants_sweep/)
 
     **[model_variants_sweep](https://bearingresearch.com/strata/dev/examples/model_variants_sweep/)**: sweep
     mode. Every variant runs and one downstream cell compares them as a
@@ -1763,7 +1763,7 @@ environment and the Docker image carry both.
 
 <div class="grid cards" markdown>
 
--   [![SQL orders report: the Python cell that combines two SQL results, above the report it prints.](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)![SQL orders report: the Python cell that combines two SQL results, above the report it prints.](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/sql_orders_report/)
+-   [![SQL orders report: the top five orders above $50 and revenue by product category.](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-light.webp#only-light)![SQL orders report: the top five orders above $50 and revenue by product category.](https://bearingresearch.com/strata/dev/assets/examples/sql_orders_report-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/sql_orders_report/)
 
     **[sql_orders_report](https://bearingresearch.com/strata/dev/examples/sql_orders_report/)**: named
     connections, bind parameters from a Python cell upstream, and
@@ -1775,18 +1775,18 @@ environment and the Docker image carry both.
 
 <div class="grid cards" markdown>
 
--   [![Hill climb loop: the loop's final state as JSON, above the markdown that explains the loop cell.](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-light.webp#only-light)![Hill climb loop: the loop's final state as JSON, above the markdown that explains the loop cell.](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/loop_hill_climb/)
+-   [![Hill climb loop: the loop's final state as JSON, with the best score and each step.](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-light.webp#only-light)![Hill climb loop: the loop's final state as JSON, with the best score and each step.](https://bearingresearch.com/strata/dev/assets/examples/loop_hill_climb-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/loop_hill_climb/)
 
     **[loop_hill_climb](https://bearingresearch.com/strata/dev/examples/loop_hill_climb/)**: `# @loop` with
     carried state and an early-termination predicate.
 
--   [![Widget playground: a slider, number and dropdown above the table they drive.](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-light.webp#only-light)![Widget playground: a slider, number and dropdown above the table they drive.](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/widget_playground/)
+-   [![Widget playground: the plot the slider and dropdown drive, titled with their values.](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-light.webp#only-light)![Widget playground: the plot the slider and dropdown drive, titled with their values.](https://bearingresearch.com/strata/dev/assets/examples/widget_playground-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/widget_playground/)
 
     **[widget_playground](https://bearingresearch.com/strata/dev/examples/widget_playground/)**: a widget cell
     (slider, number, dropdown) driving a downstream DataFrame and plot, with
     `# @live` recomputing on every change.
 
--   [![Library cells: helper functions defined in one cell and called from others.](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)![Library cells: helper functions defined in one cell and called from others.](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/library_cells/)
+-   [![Library cells: the cell that defines area and perimeter for other cells to call.](https://bearingresearch.com/strata/dev/assets/examples/library_cells-light.webp#only-light)![Library cells: the cell that defines area and perimeter for other cells to call.](https://bearingresearch.com/strata/dev/assets/examples/library_cells-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/library_cells/)
 
     **[library_cells](https://bearingresearch.com/strata/dev/examples/library_cells/)**: `def` and `class`
     shared across cells through the synthetic-module slicing path, and the
@@ -1815,7 +1815,7 @@ environment and the Docker image carry both.
 
 <div class="grid cards" markdown>
 
--   [![Markdown showcase: the notebook's rendered introduction.](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)![Markdown showcase: the notebook's rendered introduction.](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/markdown_showcase/)
+-   [![Markdown showcase: a leaderboard report rendered as Markdown from a DataFrame.](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-light.webp#only-light)![Markdown showcase: a leaderboard report rendered as Markdown from a DataFrame.](https://bearingresearch.com/strata/dev/assets/examples/markdown_showcase-dark.webp#only-dark)](https://bearingresearch.com/strata/dev/examples/markdown_showcase/)
 
     **[markdown_showcase](https://bearingresearch.com/strata/dev/examples/markdown_showcase/)**: every
     markdown rendering path: headings, lists, tables, code blocks, the

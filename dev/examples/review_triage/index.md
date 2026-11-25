@@ -1,7 +1,7 @@
 # Review Triage: Structured Prompt Output
 
-![The Review Triage: Structured Prompt Output notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/review_triage-light.webp#only-light)
-![The Review Triage: Structured Prompt Output notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/review_triage-dark.webp#only-dark)
+![Review Triage: Structured Prompt Output: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/review_triage-light.webp#only-light)
+![Review Triage: Structured Prompt Output: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/review_triage-dark.webp#only-dark)
 
 Demonstrates `# @output_schema` on a prompt cell.
 

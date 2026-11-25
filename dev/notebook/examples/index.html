@@ -3174,8 +3174,8 @@
 
 <h1 id="example-gallery">Example gallery<a class="headerlink" href="#example-gallery" title="Permanent link">&para;</a></h1>
 <p>Every notebook under <code>examples/</code> in the repo demonstrates a specific
-Strata capability. A card's picture is that notebook in the editor
-after a real run. Click through for its cell sources and its README,
+Strata capability. A card's picture is what that notebook makes, taken
+from a real run. Click through for its cell sources and its README,
 rendered into this site without cloning the repo.</p>
 <p>To run the examples, start the server on the repo's <code>examples/</code> directory
 from a clone:</p>
@@ -3190,13 +3190,13 @@ want under your storage root instead:
 <div class="grid cards">
 <ul>
 <li>
-<p><a href="../../examples/caching/"><img alt="The caching tutorial: a bar chart of revenue by region under the cell that plots it." src="../../assets/examples/caching-light.webp#only-light" /><img alt="The caching tutorial: a bar chart of revenue by region under the cell that plots it." src="../../assets/examples/caching-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/caching/"><img alt="The caching tutorial: a bar chart of revenue by region." src="../../assets/examples/caching-light.webp#only-light" /><img alt="The caching tutorial: a bar chart of revenue by region." src="../../assets/examples/caching-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/caching/">caching</a></strong>: a two-minute tutorial on what the
 cache saves and what an edit runs again. <code>strata tutorial caching</code> opens
 a copy.</p>
 </li>
 <li>
-<p><a href="../../examples/keeling_curve/"><img alt="The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle." src="../../assets/examples/keeling_curve-light.webp#only-light" /><img alt="The Keeling curve notebook: the plotting cell's code above CO₂ at Mauna Loa rising from about 315 to 430 ppm since 1958, beside the average year's cycle." src="../../assets/examples/keeling_curve-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/keeling_curve/"><img alt="The Keeling curve: CO₂ at Mauna Loa rising from about 315 to 427 ppm since 1958, beside the average year's cycle." src="../../assets/examples/keeling_curve-light.webp#only-light" /><img alt="The Keeling curve: CO₂ at Mauna Loa rising from about 315 to 427 ppm since 1958, beside the average year's cycle." src="../../assets/examples/keeling_curve-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/keeling_curve/">keeling_curve</a></strong>: NOAA's Mauna Loa
 record, downloaded with <code># @fetch</code>, the curve and its yearly cycle, then a
 published figure whose page shows the code and NOAA's bytes behind it.
@@ -3226,7 +3226,7 @@ the inline preview, in the interactive viewer. Page through and sort the
 full cached artifact.</p>
 </li>
 <li>
-<p><a href="../../examples/agent_demo/"><img alt="Agent demo: the notebook's introduction above the cell that trains a random forest." src="../../assets/examples/agent_demo-light.webp#only-light" /><img alt="Agent demo: the notebook's introduction above the cell that trains a random forest." src="../../assets/examples/agent_demo-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/agent_demo/"><img alt="Agent demo: the cell that trains a random forest, the step the cache keeps." src="../../assets/examples/agent_demo-light.webp#only-light" /><img alt="Agent demo: the cell that trains a random forest, the step the cache keeps." src="../../assets/examples/agent_demo-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/agent_demo/">agent_demo</a></strong>: the notebook a coding agent
 builds live in the <code>strata agent</code> demo. The expensive training cell stays
 cached while only the evaluation runs again.</p>
@@ -3244,7 +3244,7 @@ one DAG slot. Switch tabs and the downstream cells run again; the other
 variants stay cached.</p>
 </li>
 <li>
-<p><a href="../../examples/model_variants_sweep/"><img alt="Model variants sweep: three variant cells and the cell that compares their accuracy." src="../../assets/examples/model_variants_sweep-light.webp#only-light" /><img alt="Model variants sweep: three variant cells and the cell that compares their accuracy." src="../../assets/examples/model_variants_sweep-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/model_variants_sweep/"><img alt="Model variants sweep: the cell that compares every variant's accuracy, and what it printed." src="../../assets/examples/model_variants_sweep-light.webp#only-light" /><img alt="Model variants sweep: the cell that compares every variant's accuracy, and what it printed." src="../../assets/examples/model_variants_sweep-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/model_variants_sweep/">model_variants_sweep</a></strong>: sweep
 mode. Every variant runs and one downstream cell compares them as a
 <code>{variant: value}</code> dict, plus a <code># @per_variant</code> fan-out.</p>
@@ -3282,7 +3282,7 @@ environment and the Docker image carry both.</p>
 <div class="grid cards">
 <ul>
 <li>
-<p><a href="../../examples/sql_orders_report/"><img alt="SQL orders report: the Python cell that combines two SQL results, above the report it prints." src="../../assets/examples/sql_orders_report-light.webp#only-light" /><img alt="SQL orders report: the Python cell that combines two SQL results, above the report it prints." src="../../assets/examples/sql_orders_report-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/sql_orders_report/"><img alt="SQL orders report: the top five orders above $50 and revenue by product category." src="../../assets/examples/sql_orders_report-light.webp#only-light" /><img alt="SQL orders report: the top five orders above $50 and revenue by product category." src="../../assets/examples/sql_orders_report-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/sql_orders_report/">sql_orders_report</a></strong>: named
 connections, bind parameters from a Python cell upstream, and
 schema-aware caching.</p>
@@ -3293,18 +3293,18 @@ schema-aware caching.</p>
 <div class="grid cards">
 <ul>
 <li>
-<p><a href="../../examples/loop_hill_climb/"><img alt="Hill climb loop: the loop's final state as JSON, above the markdown that explains the loop cell." src="../../assets/examples/loop_hill_climb-light.webp#only-light" /><img alt="Hill climb loop: the loop's final state as JSON, above the markdown that explains the loop cell." src="../../assets/examples/loop_hill_climb-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/loop_hill_climb/"><img alt="Hill climb loop: the loop's final state as JSON, with the best score and each step." src="../../assets/examples/loop_hill_climb-light.webp#only-light" /><img alt="Hill climb loop: the loop's final state as JSON, with the best score and each step." src="../../assets/examples/loop_hill_climb-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/loop_hill_climb/">loop_hill_climb</a></strong>: <code># @loop</code> with
 carried state and an early-termination predicate.</p>
 </li>
 <li>
-<p><a href="../../examples/widget_playground/"><img alt="Widget playground: a slider, number and dropdown above the table they drive." src="../../assets/examples/widget_playground-light.webp#only-light" /><img alt="Widget playground: a slider, number and dropdown above the table they drive." src="../../assets/examples/widget_playground-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/widget_playground/"><img alt="Widget playground: the plot the slider and dropdown drive, titled with their values." src="../../assets/examples/widget_playground-light.webp#only-light" /><img alt="Widget playground: the plot the slider and dropdown drive, titled with their values." src="../../assets/examples/widget_playground-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/widget_playground/">widget_playground</a></strong>: a widget cell
 (slider, number, dropdown) driving a downstream DataFrame and plot, with
 <code># @live</code> recomputing on every change.</p>
 </li>
 <li>
-<p><a href="../../examples/library_cells/"><img alt="Library cells: helper functions defined in one cell and called from others." src="../../assets/examples/library_cells-light.webp#only-light" /><img alt="Library cells: helper functions defined in one cell and called from others." src="../../assets/examples/library_cells-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/library_cells/"><img alt="Library cells: the cell that defines area and perimeter for other cells to call." src="../../assets/examples/library_cells-light.webp#only-light" /><img alt="Library cells: the cell that defines area and perimeter for other cells to call." src="../../assets/examples/library_cells-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/library_cells/">library_cells</a></strong>: <code>def</code> and <code>class</code>
 shared across cells through the synthetic-module slicing path, and the
 diagnostic when a helper closes over a runtime value.</p>
@@ -3332,7 +3332,7 @@ extra.</p>
 <div class="grid cards">
 <ul>
 <li>
-<p><a href="../../examples/markdown_showcase/"><img alt="Markdown showcase: the notebook's rendered introduction." src="../../assets/examples/markdown_showcase-light.webp#only-light" /><img alt="Markdown showcase: the notebook's rendered introduction." src="../../assets/examples/markdown_showcase-dark.webp#only-dark" /></a></p>
+<p><a href="../../examples/markdown_showcase/"><img alt="Markdown showcase: a leaderboard report rendered as Markdown from a DataFrame." src="../../assets/examples/markdown_showcase-light.webp#only-light" /><img alt="Markdown showcase: a leaderboard report rendered as Markdown from a DataFrame." src="../../assets/examples/markdown_showcase-dark.webp#only-dark" /></a></p>
 <p><strong><a href="../../examples/markdown_showcase/">markdown_showcase</a></strong>: every
 markdown rendering path: headings, lists, tables, code blocks, the
 security guards, and dynamic <code>Markdown(...)</code> output.</p>

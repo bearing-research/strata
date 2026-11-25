@@ -1,7 +1,7 @@
 # The Keeling curve, with a receipt
 
-![The The Keeling curve, with a receipt notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-light.webp#only-light)
-![The The Keeling curve, with a receipt notebook in the editor after a run](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-dark.webp#only-dark)
+![The Keeling curve, with a receipt: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-light.webp#only-light)
+![The Keeling curve, with a receipt: what a run of the notebook shows](https://bearingresearch.com/strata/dev/assets/examples/keeling_curve-dark.webp#only-dark)
 
 Atmospheric CO₂ at Mauna Loa since 1958, from NOAA's monthly record: the curve, the
 yearly cycle split out, the growth rate by decade, and a published figure whose page

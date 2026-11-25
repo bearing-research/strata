@@ -4221,6 +4221,12 @@ exhaustive commit history.</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>The gallery's cards show each example's result, not its editor.</strong> A card's picture
+  is the example's chart, table or report on the docs theme, over a band in the
+  example's own color; an example with no output shows its main cell's source.
+  <code>scripts/capture_docs_shots.py --only examples</code> draws them.</p>
+</li>
+<li>
 <p><strong>Strata installs and runs from pipx, pip and conda, not only <code>uv tool install</code>.</strong>
   <code>strata-notebook</code> depends on uv (0.12 or 0.13) and runs that uv for every notebook
   environment, whatever is on <code>PATH</code>; <code>STRATA_UV</code> names another. The startup guard no
