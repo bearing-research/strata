@@ -580,6 +580,31 @@ async def test_a_cells_tests_are_a_run_of_its_code(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_tests_click_without_pytest_is_no_run(tmp_path, monkeypatch):
+    """Its code never starts, so a cell after it keeps its result."""
+    from strata.notebook import cell_test_runner, dependencies
+    from strata.notebook.dependencies import DependencyChangeResult
+
+    nb_dir = _notebook(tmp_path, _setup("one"))
+    session = _open(nb_dir)
+    await _run(session, "setup")
+    first = _token(nb_dir)
+    monkeypatch.setattr(cell_test_runner, "_pytest_available", lambda _python: False)
+    monkeypatch.setattr(
+        dependencies,
+        "ensure_dev_tool",
+        lambda _dir, tool, **_kw: DependencyChangeResult(
+            success=False, package=tool, action="add", error="offline"
+        ),
+    )
+
+    result = await CellExecutor(session).run_cell_tests("setup", "def test_x():\n    assert True\n")
+
+    assert result.pytest_unavailable is True
+    assert _token(nb_dir) == first
+
+
+@pytest.mark.asyncio
 async def test_a_run_whose_end_cannot_be_recorded_keeps_its_outcome(tmp_path, monkeypatch, caplog):
     from strata.notebook import runs
 

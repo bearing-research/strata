@@ -854,6 +854,10 @@ async def _run_loop(
                 execution_method="loop",
                 mutation_warnings=all_mutation_warnings,
             )
+        finally:
+            # The writes land after the last iteration's end token, a failed one's partway too.
+            with anyio.CancelScope(shield=True):
+                await runs.mint_after(host.path, cell_id)
 
     stored = artifact_mgr.finalize_cell_outputs(staged)
     run.keep_failed = None

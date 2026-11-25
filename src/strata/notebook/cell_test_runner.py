@@ -50,6 +50,12 @@ def _pytest_available(venv_python: Path) -> bool:
     return probe.returncode == 0
 
 
+def require_pytest(venv_python: Path) -> None:
+    """Raise :class:`PytestUnavailableError` unless *venv_python* can import ``pytest``."""
+    if not _pytest_available(venv_python):
+        raise PytestUnavailableError("pytest is not installed in this notebook's environment")
+
+
 def run_cell_tests_in_dir(
     *,
     rundir: Path,
@@ -77,13 +83,8 @@ def run_cell_tests_in_dir(
     The dict has totals (``passed``/``failed``/``errored``/``skipped``) plus a
     ``tests`` list of ``{name, nodeid, outcome, message}``. ``env`` and ``run_as``
     are the cell harness's: a test run imports the cell's source, so it is cell code.
-
-    Raises:
-        PytestUnavailableError: ``pytest`` is not importable in *venv_python*.
+    The caller checks for ``pytest`` first (:func:`require_pytest`).
     """
-    if not _pytest_available(venv_python):
-        raise PytestUnavailableError("pytest is not installed in this notebook's environment")
-
     rundir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(_CONFTEST_TEMPLATE, rundir / "conftest.py")
     (rundir / "cell_source.py").write_text(cell_source, encoding="utf-8")

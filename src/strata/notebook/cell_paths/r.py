@@ -113,6 +113,8 @@ async def run_r_cell(
     # Nothing a worker uploaded for an earlier run belongs to this one.
     context.received_output_files.pop(cell_id, None)
     context.folder_listings.pop(cell_id, None)
+    # Its tables or synced-back mounts may have landed, with no token after them yet.
+    landing = False
     try:
         cell = host.notebook_state.get_cell(cell_id)
 
@@ -463,6 +465,11 @@ async def run_r_cell(
 
             if exec_result.success:
                 store_error = None
+                # What lands after its code ends: the tables, the mounts synced back.
+                landing = bool(
+                    prov.annotations.table_writes
+                    or any(spec.mode == MountMode.READ_WRITE for spec in mount_specs)
+                )
                 try:
                     stored_ok = context.store_outputs(
                         cell_id,
@@ -537,6 +544,12 @@ async def run_r_cell(
                         exec_result = _mount_sync_failure_result(
                             exec_result, exc
                         ).apply_remote_metadata(**remote_metadata)
+                # A failed write's partway too: what was keyed meanwhile is stale once
+                # they have landed.
+                if landing:
+                    with anyio.CancelScope(shield=True):
+                        await runs.mint_after(host.path, cell_id)
+                    landing = False
                 if exec_result.success:
                     context.store_mount_writes(
                         cell_id,
@@ -615,6 +628,11 @@ async def run_r_cell(
         host.persist_display_outputs(cell_id, None)
         host.apply_execution_result_metadata(cell_id, error_result)
         return error_result
+    finally:
+        # Stopped, or failed, between those effects and the token after them.
+        if landing:
+            with anyio.CancelScope(shield=True):
+                await runs.mint_after(host.path, cell_id)
 
 
 async def run_r_harness(

@@ -101,6 +101,7 @@ async def run_cell_tests(
     # cell_test_runner is stdlib-only, kept beside its single caller.
     from strata.notebook.cell_test_runner import (
         PytestUnavailableError,
+        require_pytest,
         run_cell_tests_in_dir,
     )
     from strata.notebook.runtime_state import persist_cell_test_result
@@ -227,6 +228,8 @@ async def run_cell_tests(
             return _merged_test_runs([_run(index) for index in range(len(runs))])
 
         async def _ran() -> dict[str, Any]:
+            # Before the run starts: without pytest the cell's code never does.
+            await asyncio.to_thread(require_pytest, venv_python)
             # The tests run the cell's code again: a cell after it reads what that leaves.
             async with running(host.path, cell_id):
                 return await asyncio.to_thread(_run_all)

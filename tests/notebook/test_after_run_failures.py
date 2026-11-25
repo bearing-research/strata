@@ -359,6 +359,66 @@ class TestPythonAndR:
             == "Cell executed successfully but failed to sync read-write mounts: read only"
         )
 
+    @pytest.mark.parametrize(
+        ("language", "assign"),
+        [
+            pytest.param("python", "x = 1\n", id="python"),
+            pytest.param("r", "x <- 1\n", id="r", marks=pytest.mark.r),
+        ],
+    )
+    async def test_a_run_ends_again_once_its_mounts_are_synced_back(
+        self, tmp_path, monkeypatch, language, assign
+    ):
+        """A cell after it keyed while they synced back read the mount before they did."""
+        from strata.notebook import runs
+
+        data = tmp_path / "data"
+        data.mkdir()
+        source = f"# @mount out {data.as_uri()} rw\n{assign}"
+        session = _session(tmp_path, ("v", language, source))
+        during: list[str | None] = []
+        sync = MountResolver.sync_back
+
+        async def spy(self, resolved):
+            during.append(runs.read(session.path).get("v"))
+            return await sync(self, resolved)
+
+        monkeypatch.setattr(MountResolver, "sync_back", spy)
+
+        result = await CellExecutor(session).execute_cell("v", source)
+
+        assert result.success, result.error
+        assert during and runs.read(session.path)["v"] not in during
+
+    @pytest.mark.parametrize(
+        ("language", "assign"),
+        [
+            pytest.param("python", "x = 1\n", id="python"),
+            pytest.param("r", "x <- 1\n", id="r", marks=pytest.mark.r),
+        ],
+    )
+    async def test_a_run_stopped_while_its_mounts_sync_back_still_ends(
+        self, tmp_path, monkeypatch, language, assign
+    ):
+        from strata.notebook import runs
+
+        data = tmp_path / "data"
+        data.mkdir()
+        source = f"# @mount out {data.as_uri()} rw\n{assign}"
+        session = _session(tmp_path, ("v", language, source))
+        during: list[str | None] = []
+
+        async def stopped(self, resolved):
+            during.append(runs.read(session.path).get("v"))
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(MountResolver, "sync_back", stopped)
+
+        with pytest.raises(asyncio.CancelledError):
+            await CellExecutor(session).execute_cell("v", source)
+
+        assert during and runs.read(session.path)["v"] not in during
+
 
 class TestOnAWorker:
     @pytest.mark.parametrize(

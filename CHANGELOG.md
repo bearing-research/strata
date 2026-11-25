@@ -839,6 +839,12 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A cell after a writer is stale once the writer's tables land.** A run's
+  `@write_table` writes and its read-write mount sync-back land after the token its code
+  ends with, so a cell `@after` it keyed meanwhile stayed ready on what was there before.
+  One more token now follows them, for Python and R cells, loops, `@each` and
+  `@per_variant` cells, however the run ends. A Tests tab click that finds no pytest, and
+  cannot install it, no longer counts as a run of the cell. (#1688)
 - **An SSH worker tunnel that exits says why.** Its `ssh` wrote to `/dev/null`, so a
   forward that could not start (the local port taken, the key refused, the host key
   changed) showed only as `/health` not answering, after the whole health timeout. A
