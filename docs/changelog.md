@@ -399,6 +399,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 
+- **An example's docs page is the notebook as it ran.** It opens with the README's
+  first lines, then shows every cell with its outputs (tables, charts, printed text), then
+  the README's notes under "About this example". The outputs come from a run that
+  `scripts/capture_docs_shots.py --only examples` records in `docs/assets/examples/runs/`,
+  so the docs build runs nothing; a page whose example changed since, or that needs an API
+  key, R or Docker to run, shows the code only and says so. The export's
+  `ExportOptions` gains `include_readme` and `max_table_rows` for this.
+
 - **The docs have an Examples tab.** It opens on the gallery and lists every example's
   page in its sidebar, grouped as the gallery is; it was one entry under Get started, and
   the example pages were in no menu. Each example's README is titled with its notebook's

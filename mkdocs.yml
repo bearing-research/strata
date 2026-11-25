@@ -186,6 +186,7 @@ nav:
 exclude_docs: |
   internal/
   assets/README.md
+  assets/examples/runs/*.md
 
 # The changelog is linked from the header and the footer.
 not_in_nav: |

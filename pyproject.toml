@@ -236,7 +236,7 @@ module-name = "strata"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["examples/", "experiments/", "src/strata/notebook/samples/", "tests/contract/cellgraph/scenarios/"]
+extend-exclude = ["examples/", "experiments/", "src/strata/notebook/samples/", "tests/contract/cellgraph/scenarios/", "docs/assets/examples/runs/"]
 
 [tool.ruff.lint]
 # B025: a second except for the same exception can never run.

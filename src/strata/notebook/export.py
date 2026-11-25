@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from strata.notebook.artifact_integration import NotebookArtifactManager
 
 _DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # per rendered output
+_PREVIEW_ROW_LIMIT = 20
 
 
 class ExportFormat(StrEnum):
@@ -46,6 +47,11 @@ class ExportOptions:
     # Per-output byte cap for console, JSON previews and inline images. DataFrame
     # previews are row-capped separately. Zero disables it.
     max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES
+    # Rows of a table output shown before the "showing N of M rows" note.
+    max_table_rows: int = _PREVIEW_ROW_LIMIT
+    # Open with the notebook's README, or its name when it has none. The docs give a
+    # page its title and place the README themselves.
+    include_readme: bool = True
 
 
 def export_notebook(
@@ -80,12 +86,13 @@ def export_notebook(
                 return _emit_html(blocks, title=state.name)
             return _emit_markdown(blocks)
 
-        readme = _load_readme(notebook_dir)
-        if readme is not None:
-            # README opens with its own h1; a second header would compete in mkdocs.
-            blocks.append(MarkdownBlock(readme))
-        else:
-            blocks.append(HeadingBlock(f"Notebook: {state.name}", level=1))
+        if options.include_readme:
+            readme = _load_readme(notebook_dir)
+            if readme is not None:
+                # README opens with its own h1; a second header would compete in mkdocs.
+                blocks.append(MarkdownBlock(readme))
+            else:
+                blocks.append(HeadingBlock(f"Notebook: {state.name}", level=1))
 
         for cell in state.cells:
             if not options.include_inactive_variants and cell.variant_active is False:
@@ -222,6 +229,7 @@ def _render_app_cell(
                 output,
                 stored=stored,
                 max_bytes=options.max_output_bytes,
+                max_rows=options.max_table_rows,
             )
         )
     note = _provenance_note(cell, notebook_dir)
@@ -297,6 +305,7 @@ def _render_cell(
                 output,
                 stored=stored,
                 max_bytes=options.max_output_bytes,
+                max_rows=options.max_table_rows,
             )
         )
 
@@ -532,14 +541,12 @@ def _render_error(cell: CellState, *, max_bytes: int) -> list[Block]:
     return [CodeBlock(language="text", body=body, title="Error")]
 
 
-_PREVIEW_ROW_LIMIT = 20
-
-
 def _render_display_output(
     output: CellOutput,
     *,
     stored: _StoredOutputs,
     max_bytes: int,
+    max_rows: int = _PREVIEW_ROW_LIMIT,
 ) -> list[Block]:
     """Per-content-type renderer for one persisted cell output.
 
@@ -575,7 +582,7 @@ def _render_display_output(
         if columns:
             preview = output.preview if isinstance(output.preview, list) else []
             normalized = _normalize_table_preview(preview, columns)
-            truncated_to = min(len(normalized), _PREVIEW_ROW_LIMIT)
+            truncated_to = min(len(normalized), max_rows)
             return [
                 TableBlock(
                     columns=columns,
