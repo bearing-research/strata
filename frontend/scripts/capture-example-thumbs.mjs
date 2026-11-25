@@ -33,8 +33,6 @@ const OUTPUT_PREFERENCE = [
 // A taller output keeps its top. A plot is whole up to square (a confusion matrix,
 // a pair plot); a table or text is cut sooner, where its first rows say enough.
 const MAX_HEIGHT_PER_WIDTH = { plot: 1, other: 0.62 }
-// How much of the cell's source shows above its output.
-const SOURCE_LEAD_PX = 200
 
 async function frame(page, focus) {
   const cells = page.locator('.cell')
@@ -60,21 +58,6 @@ async function frame(page, focus) {
           .locator('xpath=following-sibling::button[contains(@class, "output-toggle")]')
           .click()
       }
-      // Scroll the whole output block, not the element: centring a table
-      // would also scroll the grid's own scroller past its first rows.
-      await output.evaluate((el, lead) => {
-        const block = el.closest('.cell-output') ?? el
-        block.scrollIntoView({ block: 'start' })
-        // Keep the end of the cell's source above the output in frame.
-        let scroller = block.parentElement
-        const scrolls = (node) =>
-          /auto|scroll/.test(getComputedStyle(node).overflowY) &&
-          node.scrollHeight > node.clientHeight
-        while (scroller && !scrolls(scroller)) {
-          scroller = scroller.parentElement
-        }
-        ;(scroller ?? document.scrollingElement).scrollBy(0, -lead)
-      }, SOURCE_LEAD_PX)
       return output
     }
   }
@@ -141,7 +124,7 @@ async function main() {
           scale: 2,
         })
         const output = await frame(page, example.focus)
-        // Let images decode and the grid lay out after the scroll.
+        // Let images decode and the grid lay out, after a fold opens.
         await page.waitForTimeout(600)
         await shoot(page, output, `${outDir}/${example.name}-${theme}.png`)
         console.log(`  ${example.name}-${theme}.png`)
