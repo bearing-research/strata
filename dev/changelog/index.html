@@ -5818,6 +5818,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An SSH worker tunnel that exits says why.</strong> Its <code>ssh</code> wrote to <code>/dev/null</code>, so a
+  forward that could not start (the local port taken, the key refused, the host key
+  changed) showed only as <code>/health</code> not answering, after the whole health timeout. A
+  connect now fails as soon as <code>ssh</code> exits and quotes what it printed; a reopen logs the
+  reason, once per reason in an outage. (#1687)</li>
 <li><strong>A cell after an upstream that ran again is stale and runs again.</strong> An <code>after</code> edge
   only ordered a Python or R cell, so a cell after a setup kept its cache when the setup
   ran with a new body, and every cell after one stayed ready; a SQL write after a seed
