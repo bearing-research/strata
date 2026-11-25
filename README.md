@@ -15,7 +15,7 @@ the agent works.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/web-agent-live-dark.gif">
-  <img alt="A terminal running strata CLI commands beside a browser on the same notebook, over seven moments: the empty notebook, a load cell arriving, the cell running, finishing after about two seconds, a summarize cell arriving that reads its variable, both cells green, and the load cell run again and served from the cache in milliseconds." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/web-agent-live-light.gif">
+  <img alt="A coding agent's session beside a browser on the same notebook, asked to plot CO₂ at Mauna Loa and how fast it is rising: it writes and runs a cell that fetches NOAA's monthly record; adds a growth cell that fails with a KeyError, red in the browser too; fixes the one line and reruns only that cell, which prints the rise per decade; adds the plot; and checks the status and sums up, with the fetch served from the cache. The agent's words are scripted; its commands, their output and the browser are real." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/web-agent-live-light.gif">
 </picture>
 
 *An agent adds and runs cells through the `strata` CLI while the browser on the

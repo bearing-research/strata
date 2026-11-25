@@ -1,10 +1,11 @@
-"""Capture the README's live web animation: the CLI drives, a browser watches.
+"""Capture the home page's animation: a coding agent builds a notebook, a browser watches.
 
-The web counterpart of ``capture_agent_drive.py``: a real server, a real
-notebook driven with the ``strata`` CLI over ``--server``/``--session`` (the
-path a coding agent takes), and real browsers on the same session. Every beat
-waits for the browsers to show its change, so a broken broadcast fails the
-capture instead of producing a convincing GIF.
+A real server, a real notebook driven with the ``strata`` CLI over
+``--server``/``--session`` (the path a coding agent takes), and real browsers on
+the same session. The agent's words are scripted; its commands, their output and
+the browser are real, and every beat waits for the browsers to show its change,
+so a broken broadcast fails the capture instead of producing a convincing GIF.
+The notebook fetches NOAA's Mauna Loa record, so the capture needs the network.
 
     uv run python scripts/capture_web_agent_drive.py
 
@@ -34,7 +35,8 @@ def _open_session(base_url: str, notebook: Path) -> str:
         data=json.dumps({"path": str(notebook)}).encode(),
         headers={"content-type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=60) as response:
+    # Opening syncs the environment (pandas, matplotlib) the first time.
+    with urllib.request.urlopen(request, timeout=600) as response:
         return str(json.load(response)["session_id"])
 
 
@@ -48,7 +50,9 @@ def main() -> None:
     # The beats count cells, so a leftover notebook would fail them.
     shutil.rmtree(work_dir, ignore_errors=True)
     work_dir.mkdir(parents=True)
-    _strata("new", "live", "--parent", str(work_dir), "--no-env")
+    _strata("new", "co2", "--parent", str(work_dir), "--no-env")
+    # The Keeling example's environment: pandas and matplotlib.
+    shutil.copy(REPO_ROOT / "examples" / "keeling_curve" / "pyproject.toml", work_dir / "co2")
 
     port = _free_port()
     server = serve(work_dir, port)
@@ -62,11 +66,11 @@ def main() -> None:
                 "--base-url",
                 base_url,
                 "--session",
-                _open_session(base_url, work_dir / "live"),
+                _open_session(base_url, work_dir / "co2"),
                 "--python",
                 sys.executable,
-                "--repo-root",
-                str(REPO_ROOT),
+                "--agent-dir",
+                str(work_dir / "agent"),
                 "--out",
                 str(frame_dir),
             ],
