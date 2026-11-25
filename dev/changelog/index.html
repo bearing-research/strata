@@ -4677,6 +4677,11 @@ exhaustive commit history.</p>
   or <code>ttl</code> kept its old rows after the seed ran with a new body, or again in a new session
   under <code>@cache session</code>. The key now carries each <code>@after</code> upstream's last run; one that
   records none (<code># @nocache</code>, an <code>rw</code> mount) keeps nothing after it cached. (#1673)</li>
+<li><strong>The server reopens an SSH worker tunnel whose <code>ssh</code> exited.</strong> Nothing reconciled
+  tunnels, so one that dropped (a laptop that slept) stayed down until <code>add-ssh</code> ran
+  again. The server now checks every 30 s and reopens a dead forward on the same ports.
+  A worker is sent cells and its token only while <code>/health</code> through the tunnel answers as
+  the worker it launched; otherwise a cell run on it is refused, with the reason. (#1675)</li>
 <li><strong>A SQL <code>@name</code> must be a variable name.</strong> One that was not (<code>top-orders</code>, <code>Hottest
   stations</code>) fell back to <code>result</code> without a word, so a cell reading the name found nothing.
   It is now the error <code>name_unreadable</code>, as on a prompt cell, and both refuse a keyword such as
