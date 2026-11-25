@@ -4221,6 +4221,12 @@ exhaustive commit history.</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>Open a sample is a gallery.</strong> Each bundled sample is a card with what it makes (the
+  docs gallery's picture, which ships in the wheel), a line on what it shows and how long
+  its first Run All takes. <code>GET /v1/notebooks/samples/{name}/thumbnail/{theme}</code> serves
+  the picture, and <code>GET /v1/notebooks/samples</code> adds <code>first_run_seconds</code>.</p>
+</li>
+<li>
 <p><strong>The gallery's cards show each example's result, not its editor.</strong> A card's picture
   is the example's chart, table or report on the docs theme, over a band in the
   example's own color; an example with no output shows its main cell's source.

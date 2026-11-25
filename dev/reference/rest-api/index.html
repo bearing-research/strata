@@ -5651,10 +5651,16 @@ instead of typing a filesystem path. Available in both modes; requires
 <code>&lt;notebook_storage_dir&gt;/&lt;tenant&gt;/</code> (the whole root for <code>admin:*</code>).</p>
 <h3 id="samples">Samples<a class="headerlink" href="#samples" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>GET /v1/notebooks/samples
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>POST /v1/notebooks/samples/{name}/open
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>GET /v1/notebooks/samples/{name}/thumbnail/{theme}
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>POST /v1/notebooks/samples/{name}/open
 </code></pre></div>
-<p><code>GET</code> returns <code>{ "samples": [{ "name", "title", "description" }] }</code>, the notebooks
-bundled with Strata, and requires <code>notebook:read</code> under principal auth. <code>POST</code> copies
+<p><code>GET /samples</code> returns
+<code>{ "samples": [{ "name", "title", "description", "first_run_seconds" }] }</code>, the
+notebooks bundled with Strata; <code>first_run_seconds</code> is how long Run All took on a fresh
+copy, measured on a 2-core Linux machine. <code>GET .../thumbnail/{theme}</code> returns the
+sample's card from the <a href="../../notebook/examples/">example gallery</a> as WebP, for <code>light</code>
+or <code>dark</code>; another theme or name is a 404. Both require <code>notebook:read</code> under principal
+auth. <code>POST</code> copies
 one into the caller's storage root under a fresh name, as a notebook with its own id,
 and opens the copy. It responds as <a href="#open-notebook">Open Notebook</a> does, once the
 copy's environment is synced and warmed, and requires <code>notebook:write</code>. An unknown name
