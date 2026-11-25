@@ -14,7 +14,7 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | `# @stochastic`            | Re-execute every time and keep each run's outputs as their own version, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic). |
 | `# @worker gpu-box`        | Runs the cell on an executor worker with R (see below).                 |
 | `# @write_table df lake:lab.t append` | Writes a variable into an Iceberg table when the run succeeds, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table). |
-| `# @after seed`            | An ordering-only edge from another cell, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#after). |
+| `# @after seed`            | An edge from another cell with no variable, keyed on its last run, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#after). |
 | `# @variant <group> <name>` | Makes the cell one alternative in a [variant group](https://bearingresearch.com/strata/dev/reference/annotations/loops-and-variants/#variant). |
 
 An R cell with a worker runs `harness.R` on that worker (a `strata-worker` of

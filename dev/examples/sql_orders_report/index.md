@@ -47,8 +47,9 @@ sensitive) and `-- @cache forever` (reference-data) policies.
 `top_orders` and `category_summary` depend on the SQLite file that
 `seed` produces, but no Python variable flows between them, the
 dependency is on a side effect. The `-- @after seed` annotation adds
-an ordering-only edge to the DAG so cascade execution and staleness
-both see the link.
+an edge to the DAG so cascade execution and staleness both see the
+link, and makes the seed's last run part of each report's cache key:
+once `seed` runs again, even unchanged, the reports are stale.
 
 ## Running
 

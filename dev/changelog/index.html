@@ -4635,6 +4635,16 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell after an upstream that ran again is stale and runs again.</strong> An <code>after</code> edge
+  only ordered a Python or R cell, so a cell after a setup kept its cache when the setup
+  ran with a new body, and every cell after one stayed ready; a SQL write after a seed
+  that ran again unchanged stayed a cache hit, its rows gone with the rebuilt database.
+  Each <code>after</code> edge is now part of the cell's key: the upstream's last run, a token its
+  code mints as it starts and as it ends, kept in <code>.strata/runs.json</code>. A run that fails,
+  times out or is stopped counts, as does a run of the upstream's Tests tab or one in
+  another process; a cache hit or a refusal does not, nor does a reopen or an imported
+  snapshot. A prompt cell's <code>after</code> still only orders it. Such a cell is not reused from
+  a team store. Cells with <code>after</code> miss their cache once after the upgrade. (#1681)</li>
 <li><strong>A sweep in another process no longer takes a running <code>@each</code> cell's results.</strong> An
   <code>@each</code> or <code>@output_dir</code> run stores its items or files before the manifest that keeps
   them, and the sweep held off only for runs in its own process. A server opening a
@@ -4698,8 +4708,8 @@ exhaustive commit history.</p>
 <li><strong>A SQL cell after a seed runs again once the seed computes something else.</strong> Its key
   covered only the variables it binds, so a cell <code>-- @after seed</code> under <code>forever</code>, <code>session</code>
   or <code>ttl</code> kept its old rows after the seed ran with a new body, or again in a new session
-  under <code>@cache session</code>. The key now carries each <code>@after</code> upstream's last run; one that
-  records none (<code># @nocache</code>, an <code>rw</code> mount) keeps nothing after it cached. (#1673)</li>
+  under <code>@cache session</code>. The key now carries each <code>@after</code> upstream's last
+  run. (#1673)</li>
 <li><strong>The server reopens an SSH worker tunnel whose <code>ssh</code> exited.</strong> Nothing reconciled
   tunnels, so one that dropped (a laptop that slept) stayed down until <code>add-ssh</code> ran
   again. The server now checks every 30 s and reopens a dead forward on the same ports.

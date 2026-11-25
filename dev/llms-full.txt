@@ -2249,7 +2249,7 @@ While a Python cell runs, `STRATA_CELL_ID` holds its id, in the cell and in any 
 | `# @each …`        | Run once per file or row, each cached on its own (see [`@each`](https://bearingresearch.com/strata/dev/reference/annotations/python/#each)) |
 | `# @nocache`       | Always re-execute; never serve a cache hit       |
 | `# @stochastic`    | Every run persists beside the cache and never serves it (see [`@stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic)) |
-| `# @after <id>`    | Add an ordering-only edge from another cell (see [`@after`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after)) |
+| `# @after <id>`    | An edge from another cell with no variable, keyed on its last run (see [`@after`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after)) |
 | `# @loop …`        | Turn the cell into a [loop cell](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#loop-cells)    |
 | `# @loop_until …`  | End a loop cell early when an expression is true |
 | `# @variant <group> <name>` | Make the cell one alternative in a [variant group](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells) |
@@ -2494,7 +2494,7 @@ INSERT INTO products VALUES ('A', 'widgets'), ('B', 'gadgets');
 SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
-`-- @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering. The upstream's last run is also part of this cell's cache key, unlike a Python cell's `@after`: once the seed runs a different computation and succeeds (a new body or upstream, a new session under `-- @cache session`, any run under `-- @stochastic`), this cell's next run misses its cache, even under `-- @cache forever`, and a `-- @cache snapshot` cell takes a new snapshot. A seed that is a cache hit, or runs the same computation again, keeps it cached. An upstream that records no run (`# @nocache`, an `rw` mount) keeps nothing after it cached. The cell's status does not change when the seed runs, so run it, or Run all, to refresh it.
+`-- @after seed` adds a DAG edge from the `seed` cell to this one even though no Python variable flows between them: the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering. The upstream's last run is also part of this cell's cache key, as for any cell's `@after`: each time the seed's code runs (a new body, a new session under `-- @cache session`, a rerun of the same body, which rebuilds the database, or a run that fails partway), this cell is stale and its next run misses its cache, even under `-- @cache forever`, and a `-- @cache snapshot` cell takes a new snapshot. A seed that is a cache hit runs nothing and keeps it cached. A write cell after the seed runs again too, so a rerun of the seed does not leave its rows missing; two writes with no edge between them are not told apart, so give the later one `-- @after`.
 
 ## Worked example
 
@@ -2508,7 +2508,7 @@ The [`sql_orders_report`](https://bearingresearch.com/strata/dev/examples/sql_or
 | `-- @cache <policy>`                     | Override the default `fingerprint` cache policy       |
 | `-- @nocache`                            | Always re-execute; wins over any `-- @cache` policy    |
 | `-- @name <identifier>`                  | Name the output variable (default: `result`)          |
-| `-- @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
+| `-- @after <cell-id>`                    | An edge from an upstream cell, keyed on its last run  |
 | `-- @mount <name> <uri> ro`              | A mount a DuckDB connection's `mounts` can name       |
 
 These are the only annotations a SQL cell acts on; validation warns about any other.
@@ -9196,7 +9196,7 @@ See [the library quickstart](https://bearingresearch.com/strata/dev/getting-star
 | [`@each`](https://bearingresearch.com/strata/dev/reference/annotations/python/#each) | Run once per file or row, each cached on its own. |
 | [`@nocache`](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache) | Always run; never serve a cached result. |
 | [`@stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic) | Every run is a sample: it always runs and keeps its outputs. |
-| [`@after`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An ordering-only edge from another cell. |
+| [`@after`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An edge from another cell with no variable, keyed on its last run. |
 | [`@sql`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#sql) | Mark a SQL cell and name its connection. |
 | [`@cache`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache) | Choose a SQL cell's cache policy. |
 | [`@model`](https://bearingresearch.com/strata/dev/reference/annotations/prompt/#model) | The model a prompt cell calls. |
@@ -9819,9 +9819,9 @@ or a later `# @nocache` settles it.
 
 ### `@after`
 
-Add an ordering-only DAG edge from another cell to this one. Useful when the
-dependency is on a side effect, e.g. a SQL `seed` cell creates the database
-state that subsequent SQL cells query, and no Python variable flows
+Add a DAG edge from another cell to this one that carries no variable. Useful
+when the dependency is on a side effect, e.g. a SQL `seed` cell creates the
+database state that subsequent SQL cells query, and no Python variable flows
 between them.
 
 ```sql
@@ -9842,8 +9842,26 @@ that names the cell itself adds no edge and is a warning (`after_self`).
 `seed` or `migrate`.
 
 The edge participates in upstream/downstream wiring and the topological
-order, but contributes no variable to `consumed_variables`, so it
-doesn't affect per-variable provenance hashes.
+order, and contributes no variable to `consumed_variables`. The upstream's
+last run is part of this cell's cache key. Each time the upstream's code
+runs, even unchanged, under `@nocache`, or in a run that fails, times out or
+is stopped partway (a rerun rebuilds what it wrote, and drops what a cell
+after it added), this cell is stale and its next run misses its cache, a run
+from another process on the notebook (the CLI, an agent) and a run of the
+upstream's Tests tab, which runs its body again, included; so is a result it
+took while the upstream was still running. A cache hit of the
+upstream, or a run refused before it is sent (an annotation it cannot read),
+keeps it; a run sent to a worker that never started it counts, to be safe.
+A reopen of the notebook or an imported snapshot of it keeps it too. An
+upstream that never ran in this checkout is keyed on a token of the
+checkout's, never shared with another. Runs are the
+notebook's own, so a cell with `@after`, and every cell that reads from it, is
+not reused from a team store. A markdown, prompt, widget or read-only SQL
+upstream changes nothing outside its own output, so it only orders the cell;
+a prompt cell's own `@after` only orders it, as it reads only its template's
+variables. Two
+cells with no edge between them are not told apart: a write that undoes
+another's needs `@after` on the later one.
 
 ## Notebook-level environment (runtime panel)
 
@@ -9901,7 +9919,7 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 | [`-- @cache <policy>`](#cache) | The cache policy: `fingerprint` (the default), `forever`, `session`, `ttl=<seconds>` or `snapshot`. |
 | [`-- @nocache`](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache) | Always run; wins over any `@cache` policy. |
 | [`-- @name <identifier>`](#name) | The output variable (default `result`). |
-| [`-- @after <cell-id>`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An edge from another cell, such as the one that writes the database this cell reads. Unlike on a Python cell, the upstream's last successful run is part of this cell's cache key. |
+| [`-- @after <cell-id>`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An edge from another cell, such as the one that writes the database this cell reads. The upstream's last run is part of this cell's cache key. |
 | [`-- @mount <name> <uri> ro`](https://bearingresearch.com/strata/dev/reference/annotations/python/#mount) | A mount a DuckDB connection's `mounts` can name, read-only. |
 | [`-- @variant <group> <name>`](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells) | A member of a variant group, beside cells of any kind. |
 | [`-- @stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic) | Always run, and keep every run's result under its own run. |
@@ -10064,7 +10082,7 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | `# @stochastic`            | Re-execute every time and keep each run's outputs as their own version, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic). |
 | `# @worker gpu-box`        | Runs the cell on an executor worker with R (see below).                 |
 | `# @write_table df lake:lab.t append` | Writes a variable into an Iceberg table when the run succeeds, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#write_table). |
-| `# @after seed`            | An ordering-only edge from another cell, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#after). |
+| `# @after seed`            | An edge from another cell with no variable, keyed on its last run, as on a [Python cell](https://bearingresearch.com/strata/dev/reference/annotations/python/#after). |
 | `# @variant <group> <name>` | Makes the cell one alternative in a [variant group](https://bearingresearch.com/strata/dev/reference/annotations/loops-and-variants/#variant). |
 
 An R cell with a worker runs `harness.R` on that worker (a `strata-worker` of

@@ -3848,9 +3848,9 @@ annotation, the last line of each key is the one read, so <code># @stochastic of
 or a later <code># @nocache</code> settles it.</p>
 <h2 id="cross-cell-ordering">Cross-cell ordering<a class="headerlink" href="#cross-cell-ordering" title="Permanent link">&para;</a></h2>
 <h3 id="after"><code>@after</code><a class="headerlink" href="#after" title="Permanent link">&para;</a></h3>
-<p>Add an ordering-only DAG edge from another cell to this one. Useful when the
-dependency is on a side effect, e.g. a SQL <code>seed</code> cell creates the database
-state that subsequent SQL cells query, and no Python variable flows
+<p>Add a DAG edge from another cell to this one that carries no variable. Useful
+when the dependency is on a side effect, e.g. a SQL <code>seed</code> cell creates the
+database state that subsequent SQL cells query, and no Python variable flows
 between them.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1">-- @sql connection=warehouse</span>
 <a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="c1">-- @after seed</span>
@@ -3866,8 +3866,26 @@ that names the cell itself adds no edge and is a warning (<code>after_self</code
 <code>@name</code>. See <a href="#cell-ids">Cell IDs</a> for how to set friendly IDs like
 <code>seed</code> or <code>migrate</code>.</p>
 <p>The edge participates in upstream/downstream wiring and the topological
-order, but contributes no variable to <code>consumed_variables</code>, so it
-doesn't affect per-variable provenance hashes.</p>
+order, and contributes no variable to <code>consumed_variables</code>. The upstream's
+last run is part of this cell's cache key. Each time the upstream's code
+runs, even unchanged, under <code>@nocache</code>, or in a run that fails, times out or
+is stopped partway (a rerun rebuilds what it wrote, and drops what a cell
+after it added), this cell is stale and its next run misses its cache, a run
+from another process on the notebook (the CLI, an agent) and a run of the
+upstream's Tests tab, which runs its body again, included; so is a result it
+took while the upstream was still running. A cache hit of the
+upstream, or a run refused before it is sent (an annotation it cannot read),
+keeps it; a run sent to a worker that never started it counts, to be safe.
+A reopen of the notebook or an imported snapshot of it keeps it too. An
+upstream that never ran in this checkout is keyed on a token of the
+checkout's, never shared with another. Runs are the
+notebook's own, so a cell with <code>@after</code>, and every cell that reads from it, is
+not reused from a team store. A markdown, prompt, widget or read-only SQL
+upstream changes nothing outside its own output, so it only orders the cell;
+a prompt cell's own <code>@after</code> only orders it, as it reads only its template's
+variables. Two
+cells with no edge between them are not told apart: a write that undoes
+another's needs <code>@after</code> on the later one.</p>
 <h2 id="notebook-level-environment-runtime-panel">Notebook-level environment (runtime panel)<a class="headerlink" href="#notebook-level-environment-runtime-panel" title="Permanent link">&para;</a></h2>
 <p>Notebook-wide environment variables are set via the <strong>Runtime panel</strong> in the sidebar. These apply to all cells unless overridden by a cell-level <code>@env</code> annotation.</p>
 <p>Common use cases:</p>

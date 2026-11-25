@@ -3120,8 +3120,9 @@ sensitive) and <code>-- @cache forever</code> (reference-data) policies.</p>
 <p><code>top_orders</code> and <code>category_summary</code> depend on the SQLite file that
 <code>seed</code> produces, but no Python variable flows between them, the
 dependency is on a side effect. The <code>-- @after seed</code> annotation adds
-an ordering-only edge to the DAG so cascade execution and staleness
-both see the link.</p>
+an edge to the DAG so cascade execution and staleness both see the
+link, and makes the seed's last run part of each report's cache key:
+once <code>seed</code> runs again, even unchanged, the reports are stale.</p>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
 <p>From the project root:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>examples
