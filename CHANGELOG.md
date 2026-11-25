@@ -397,6 +397,11 @@ exhaustive commit history.
 
 ### Changed
 
+- **Open a sample is a gallery.** Each bundled sample is a card with what it makes (the
+  docs gallery's picture, which ships in the wheel), a line on what it shows and how long
+  its first Run All takes. `GET /v1/notebooks/samples/{name}/thumbnail/{theme}` serves
+  the picture, and `GET /v1/notebooks/samples` adds `first_run_seconds`.
+
 - **The gallery's cards show each example's result, not its editor.** A card's picture
   is the example's chart, table or report on the docs theme, over a band in the
   example's own color; an example with no output shows its main cell's source.

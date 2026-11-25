@@ -20,7 +20,7 @@ import anyio.to_thread
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from vestigo.file_modes import PASS_THROUGH_DIR, private_dir
 
@@ -48,7 +48,7 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
 )
 from strata.notebook.quiesce import NotebookQuiesced
-from strata.notebook.samples import SAMPLES, copy_sample, get_sample
+from strata.notebook.samples import SAMPLES, THEMES, copy_sample, get_sample, thumbnail_path
 from strata.notebook.scopes import (
     NOTEBOOK_SCOPE_READ,
     required_scope_for_route,
@@ -1617,10 +1617,24 @@ async def list_samples() -> dict:
     """List the notebooks bundled with Strata."""
     return {
         "samples": [
-            {"name": sample.name, "title": sample.title, "description": sample.description}
+            {
+                "name": sample.name,
+                "title": sample.title,
+                "description": sample.description,
+                "first_run_seconds": sample.first_run_seconds,
+            }
             for sample in SAMPLES
         ]
     }
+
+
+@router.get("/samples/{name}/thumbnail/{theme}")
+async def sample_thumbnail(name: str, theme: str) -> FileResponse:
+    """The sample's card picture, the docs gallery's, for the ``light`` or ``dark`` theme."""
+    sample = get_sample(name)
+    if sample is None or theme not in THEMES:
+        raise HTTPException(status_code=404, detail=f"No thumbnail for {name!r} in {theme!r}")
+    return FileResponse(thumbnail_path(sample, theme), media_type="image/webp")
 
 
 async def _warm_environment(python: Path, modules: tuple[str, ...]) -> None:

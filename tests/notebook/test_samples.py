@@ -16,11 +16,20 @@ from strata.notebook import routes, tutorial
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import CellStatus
 from strata.notebook.parser import parse_notebook
-from strata.notebook.samples import SAMPLES, SAMPLES_DIR, copy_sample, get_sample
+from strata.notebook.samples import (
+    SAMPLES,
+    SAMPLES_DIR,
+    THEMES,
+    THUMBNAILS_DIR,
+    copy_sample,
+    get_sample,
+    thumbnail_path,
+)
 from strata.notebook.scopes import NOTEBOOK_SCOPE_WRITE, required_scope_for_route
 from strata.notebook.session import NotebookSession
 
 EXAMPLES_DIR = Path(__file__).parents[2] / "examples"
+GALLERY_THUMBS = Path(__file__).parents[2] / "docs" / "assets" / "examples"
 
 
 # What running an example leaves behind in a checkout; all of it is gitignored.
@@ -68,6 +77,18 @@ def test_every_sample_runs_without_a_key():
 
 def test_the_samples_directory_holds_only_listed_samples():
     assert {p.name for p in SAMPLES_DIR.iterdir()} == {s.name for s in SAMPLES}
+
+
+@pytest.mark.parametrize("sample", SAMPLES, ids=lambda s: s.name)
+@pytest.mark.parametrize("theme", THEMES)
+def test_a_sample_ships_the_docs_gallerys_card(sample, theme):
+    shipped = thumbnail_path(sample, theme)
+    assert shipped.read_bytes() == (GALLERY_THUMBS / shipped.name).read_bytes()
+
+
+def test_the_thumbnails_directory_holds_only_listed_samples_cards():
+    expected = {thumbnail_path(s, theme).name for s in SAMPLES for theme in THEMES}
+    assert {p.name for p in THUMBNAILS_DIR.iterdir()} == expected
 
 
 def test_a_copy_is_a_notebook_of_its_own(tmp_path):
@@ -135,6 +156,19 @@ def test_the_route_lists_what_the_cli_lists(sample_client):
     listed = sample_client.get("/v1/notebooks/samples").json()["samples"]
     assert [row["name"] for row in listed] == [sample.name for sample in SAMPLES]
     assert all(row["title"] and row["description"] for row in listed)
+    assert all(row["first_run_seconds"] > 0 for row in listed)
+
+
+def test_the_route_serves_each_samples_card(sample_client):
+    resp = sample_client.get("/v1/notebooks/samples/caching/thumbnail/dark")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/webp"
+    assert resp.content == thumbnail_path(get_sample("caching"), "dark").read_bytes()
+
+
+@pytest.mark.parametrize("path", ["nope/thumbnail/dark", "caching/thumbnail/sepia"])
+def test_a_card_for_no_sample_or_theme_is_a_404(sample_client, path):
+    assert sample_client.get(f"/v1/notebooks/samples/{path}").status_code == 404
 
 
 def test_opening_copies_warms_and_returns_a_session(sample_client, tmp_path, monkeypatch):
