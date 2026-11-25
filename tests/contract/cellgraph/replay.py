@@ -27,8 +27,20 @@ from tests.contract.cellgraph import record
 STRUCTURAL = cg.analysis.STRUCTURAL_CODES
 
 _RUN_OPS = {"run_all", "run_all_batch", "run_cell"}
-_KIND_PREFIX = {"mount": "", "table": "table:", "fetch": "fetch:", "dataset": "dataset:"}
-_KIND_RESOLVED = {"mount": "mounts", "table": "tables", "fetch": "fetches", "dataset": "datasets"}
+_KIND_PREFIX = {
+    "mount": "",
+    "table": "table:",
+    "fetch": "fetch:",
+    "dataset": "dataset:",
+    "after": "after:",
+}
+_KIND_RESOLVED = {
+    "mount": "mounts",
+    "table": "tables",
+    "fetch": "fetches",
+    "dataset": "datasets",
+    "after": "afters",
+}
 
 
 @dataclass

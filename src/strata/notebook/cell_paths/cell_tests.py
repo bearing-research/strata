@@ -36,6 +36,7 @@ from strata.notebook.models import (
 )
 from strata.notebook.mounts import resolve_cell_mounts
 from strata.notebook.run_scope import in_thread
+from strata.notebook.runs import running
 
 if TYPE_CHECKING:
     from strata.notebook.executor import _CellProvenance
@@ -225,6 +226,11 @@ async def run_cell_tests(
         def _run_all() -> dict[str, Any]:
             return _merged_test_runs([_run(index) for index in range(len(runs))])
 
+        async def _ran() -> dict[str, Any]:
+            # The tests run the cell's code again: a cell after it reads what that leaves.
+            async with running(host.path, cell_id):
+                return await asyncio.to_thread(_run_all)
+
         empty_raw: dict[str, Any] = {
             "passed": 0,
             "failed": 0,
@@ -234,7 +240,7 @@ async def run_cell_tests(
         }
         raw: dict[str, Any]
         try:
-            raw = refused if refused is not None else await asyncio.to_thread(_run_all)
+            raw = refused if refused is not None else await _ran()
         except PytestUnavailableError:
             # Auto-provision pytest into the dev group and retry once. Dev tools are excluded
             # from the env hash, so cell caches survive. On failure, fall back to the actionable
@@ -245,7 +251,7 @@ async def run_cell_tests(
             if install.success:
                 auto_installed = ["pytest"]
                 try:
-                    raw = await asyncio.to_thread(_run_all)
+                    raw = await _ran()
                 except PytestUnavailableError:
                     pytest_unavailable = True
                     raw = empty_raw
@@ -265,7 +271,8 @@ async def run_cell_tests(
         + prov.mount_fingerprints
         + prov.table_fingerprints
         + prov.fetch_fingerprints
-        + prov.dataset_fingerprints,
+        + prov.dataset_fingerprints
+        + prov.after_fingerprints,
         host.cell_env_hash(cell, await asyncio.to_thread(local_packages, host.path)),
     )
     source_hash, test_source_hash, _ = host.cell_test_fingerprint(cell_id, source, test_source)

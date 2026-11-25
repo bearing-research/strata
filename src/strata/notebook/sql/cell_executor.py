@@ -23,8 +23,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from vestigo.provenance import derive_subkey, run_output_key
 
+from strata.notebook import runs
 from strata.notebook.annotations import CachePolicy, CellAnnotations, parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
+from strata.notebook.keys import after_run
 from strata.notebook.models import CellLanguage
 from strata.notebook.mounts import DIGESTS_FILE
 from strata.notebook.serializer import (
@@ -569,9 +571,11 @@ async def _execute_write_cell(
                 return hit
 
     try:
-        stats = await asyncio.to_thread(
-            _execute_write_statements, adapter, runtime_spec, analysis.sql_body, namespace
-        )
+        # Around its statements: a cell after it reads what they leave (``runs``).
+        async with runs.running(session.path, cell_id):
+            stats = await asyncio.to_thread(
+                _execute_write_statements, adapter, runtime_spec, analysis.sql_body, namespace
+            )
     except Exception as exc:  # noqa: BLE001
         return _error_result(f"SQL execution failed: {_exception_message(exc)}", start_time)
     # The state it leaves, so a later session can tell the database is as it left it.
@@ -1376,7 +1380,7 @@ def _load_upstream_variables(
     """Load upstream values, their artifact hashes, and their refs.
 
     Returns ``(namespace, upstream_input_hashes, input_refs)``. Hashes feed
-    provenance, with each ``-- @after`` upstream's last run (``_after_run``): it binds
+    provenance, with each ``-- @after`` upstream's last run (``keys.after_run``): it binds
     nothing, but what it wrote is what this cell reads. Its artifacts are not refs, which
     staleness compares with the wired inputs (``_upstream_moved_under``). Refs
     (``{strata://artifact/<id>@v=<n>: <id>@v=<n>}``) feed lineage, since a hash names
@@ -1394,10 +1398,10 @@ def _load_upstream_variables(
     references_set = set(references)
 
     for after_id in after:
-        run = _after_run(session, after_id) if after_id != cell_id else None
-        if run is not None:
-            # ``@`` starts no variable name, so it cannot meet a bound one.
-            hashes[f"@after:{after_id}"] = run
+        if after_id == cell_id:
+            continue  # no edge, as cellgraph reads it
+        # ``@`` starts no variable name, so it cannot meet a bound one.
+        hashes[f"@after:{after_id}"] = after_run(session, cell_id, after_id)
 
     for upstream_id in cell.upstream_ids:
         upstream_cell = next(
@@ -1423,30 +1427,6 @@ def _load_upstream_variables(
             namespace[var_name] = _deserialize_blob(blob, content_type)
 
     return namespace, hashes, refs
-
-
-def _after_run(session: ExecutorHost, cell_id: str) -> str | None:
-    """Which run of *cell_id* a cell after it reads: the provenance of its outputs and
-    its console record, which the same computation keeps and a salted or stochastic run
-    changes. ``None`` for no such cell.
-
-    One that recorded neither (``nocache``, an rw mount, a variant, never run) gives a
-    new value each time: its runs cannot be told apart, so nothing after it is reused.
-    """
-    upstream = session.notebook_state.get_cell(cell_id)
-    if upstream is None:
-        return None
-    manager = session.get_artifact_manager()
-    ids = [manager.cell_artifact_id(cell_id, name) for name in sorted(upstream.defines)]
-    ids.append(manager.cell_artifact_id(cell_id, "__console__"))
-    runs = [
-        f"{artifact.id}:{artifact.provenance_hash}"
-        for artifact_id in ids
-        if (artifact := manager.artifact_store.get_latest_version(artifact_id)) is not None
-    ]
-    if not runs:
-        return uuid.uuid4().hex
-    return hashlib.sha256("\n".join(runs).encode()).hexdigest()
 
 
 def _content_type_of(artifact: Any) -> str:

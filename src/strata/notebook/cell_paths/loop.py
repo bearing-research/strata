@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 import anyio.to_thread
 from vestigo.provenance import derive_subkey
 
-from strata.notebook import output_dirs
+from strata.notebook import output_dirs, runs
 from strata.notebook.annotations import LoopAnnotation, parse_annotations
 from strata.notebook.cell_paths.context import artifact_content_type, effective_worker_name
 from strata.notebook.env import moved_input
@@ -512,9 +512,11 @@ async def _run_loop(
 
                 venv_path = host.venv_python
                 try:
-                    result = await context.run_harness(
-                        manifest_path, venv_path, timeout_seconds, run_token=run_token
-                    )
+                    # Around each iteration's code (``runs``).
+                    async with runs.running(host.path, cell_id):
+                        result = await context.run_harness(
+                            manifest_path, venv_path, timeout_seconds, run_token=run_token
+                        )
                 except TimeoutError as exc:
                     keep_failed()
                     duration_ms = (time.time() - start_time) * 1000

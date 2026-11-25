@@ -31,8 +31,8 @@ __all__ = [
 class CellAnalysisWithId:
     """A cell's names and graph annotations, for ``NotebookDag.from_cells``.
 
-    ``after`` holds upstream cell IDs from ``# @after``; those edges are
-    ordering-only and carry no variable.
+    ``after`` holds upstream cell IDs from ``# @after``; those edges carry no
+    variable, and the upstream's last run keys the cell (``keys.after_run``).
     """
 
     id: str

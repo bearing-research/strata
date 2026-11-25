@@ -31,7 +31,7 @@ annotation: it would reach the database as SQL. Validation reports it as the err
 | [`-- @cache <policy>`](#cache) | The cache policy: `fingerprint` (the default), `forever`, `session`, `ttl=<seconds>` or `snapshot`. |
 | [`-- @nocache`](python.md#nocache) | Always run; wins over any `@cache` policy. |
 | [`-- @name <identifier>`](#name) | The output variable (default `result`). |
-| [`-- @after <cell-id>`](python.md#after) | An edge from another cell, such as the one that writes the database this cell reads. Unlike on a Python cell, the upstream's last successful run is part of this cell's cache key. |
+| [`-- @after <cell-id>`](python.md#after) | An edge from another cell, such as the one that writes the database this cell reads. The upstream's last run is part of this cell's cache key. |
 | [`-- @mount <name> <uri> ro`](python.md#mount) | A mount a DuckDB connection's `mounts` can name, read-only. |
 | [`-- @variant <group> <name>`](../../guides/cells/loops-and-variants.md#variant-cells) | A member of a variant group, beside cells of any kind. |
 | [`-- @stochastic`](python.md#stochastic) | Always run, and keep every run's result under its own run. |

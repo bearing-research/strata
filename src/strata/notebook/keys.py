@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import cellgraph as cg
@@ -35,6 +35,8 @@ class CellKey:
     upstream: list[str]
     # What it was built from, to explain a later change. None when nothing is wired.
     parts: dict[str, Any] | None = None
+    # Each ``@after`` input's fingerprint (``after_fingerprints``), which it covers too.
+    afters: list[str] = field(default_factory=list)
 
 
 class _Lookups(Mapping[Any, Any]):
@@ -109,13 +111,66 @@ def published(session: ExecutorHost, analysis: cg.Analysis) -> Callable[[str], c
     return of
 
 
-def _resolvers(inputs: InputFingerprints) -> dict[str, cg.Resolver]:
+AFTER = "after"
+
+
+def after_run(session: ExecutorHost, cell_id: str, upstream_id: str) -> str:
+    """Which run of *upstream_id* the cell *cell_id* runs ``@after``: the token its code's
+    last run minted as it started or ended, or one this checkout minted for it (``runs``).
+
+    A cell after another reads what that one's code did to the world, which only running
+    it again changes, even unchanged, a failure or ``nocache`` included; a cache hit or a
+    refusal leaves the world as it was. A prompt, widget, markdown or read-only SQL cell
+    changes nothing outside its own output and mints none. Tokens are this notebook's, so
+    a cell after another, and what reads it, is not reused from a team store.
+    """
+    if upstream_id == cell_id:
+        return "self"  # no edge, as cellgraph reads it
+    if session.notebook_state.get_cell(upstream_id) is None:
+        return "none"  # an error that keeps the cell from running
+    from strata.notebook import runs
+
+    # From the file, not the session: a run in another process (the CLI, an agent) counts.
+    return runs.token(session.path, upstream_id)
+
+
+def after_fingerprints(session: ExecutorHost, analysis: cg.Analysis, cell_id: str) -> list[str]:
+    """Each ``@after`` input's fingerprint, in the order the cell declares them; each
+    begins with its upstream's id, as every fingerprint begins with its input's name.
+
+    Empty for a prompt cell, which reads only its template's variables: its ``@after``
+    orders it, and what the upstream left does not reach it.
+    """
+    from strata.notebook.models import CellLanguage
+
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is not None and cell.language == CellLanguage.PROMPT:
+        return []
+    return [
+        f"{spec.name}:{AFTER}:{after_run(session, cell_id, spec.name)}"
+        for spec in analysis.cells[cell_id].inputs
+        if spec.kind == AFTER
+    ]
+
+
+def after_parts(fingerprints: list[str]) -> list[list[str]]:
+    """These ``@after`` fingerprints as key parts, as cellgraph builds them."""
+    parts = []
+    for fingerprint in fingerprints:
+        name = fingerprint.partition(":")[0]
+        resolved = cg.Resolved(identity=None, fingerprint=fingerprint)
+        parts.append([AFTER, name, cg.input_component(AFTER, name, resolved)])
+    return sorted(parts)
+
+
+def _resolvers(inputs: InputFingerprints, afters: list[str]) -> dict[str, cg.Resolver]:
     """Each input's fingerprint, found by its name among those already made."""
-    fingerprints = inputs.by_kind()
+    fingerprints = {**inputs.by_kind(), AFTER: afters}
+    prefixes = {**PREFIX, AFTER: f"{AFTER}:"}
 
     def resolver(kind: str) -> cg.Resolver:
         def resolve(spec: cg.Input) -> cg.Resolved | cg.Unavailable:
-            prefix = f"{spec.name}:{PREFIX[kind]}"
+            prefix = f"{spec.name}:{prefixes[kind]}"
             found = next((c for c in fingerprints[kind] if c.startswith(prefix)), None)
             if found is None:
                 return cg.Unavailable(f"no fingerprint for {kind} {spec.name}")
@@ -123,7 +178,7 @@ def _resolvers(inputs: InputFingerprints) -> dict[str, cg.Resolver]:
 
         return resolve
 
-    return {kind: resolver(kind) for kind in PREFIX}
+    return {kind: resolver(kind) for kind in fingerprints}
 
 
 def input_parts(fingerprints: Mapping[str, list[str]]) -> list[list[str]]:
@@ -170,15 +225,19 @@ def cell_key(
     inputs: InputFingerprints,
     env_hash: str,
     instance: str | cg.Item | None = None,
+    afters: list[str] | None = None,
 ) -> CellKey:
     """*cell_id*'s provenance hash (one fan-out *instance*'s, when given) over these
-    outside-input fingerprints."""
+    outside-input fingerprints, and these *afters* (the upstreams' runs now when not
+    given: one run of the cell pins those it read first)."""
+    if afters is None:
+        afters = after_fingerprints(session, analysis, cell_id)
     if analysis.structural_errors:
         # Without a DAG nothing is wired upstream, as before cellgraph.
         definition_key = analysis.cells[cell_id].definition_key
         assert definition_key is not None  # every cell has one
         digest = compute_provenance_hash(
-            cell_provenance_inputs([], inputs),
+            cell_provenance_inputs([], inputs) + afters,
             definition_key,
             env_hash,
         )
@@ -188,12 +247,12 @@ def cell_key(
             digest = cg.derive_subkey(digest, _label(["each", instance.key, instance.digest]))
         elif instance is not None:
             digest = cg.derive_subkey(digest, _label(["variant", instance]))
-        return CellKey(digest, [])
+        return CellKey(digest, [], afters=afters)
     result = analysis.execution_key(
         cell_id,
         instance=instance,
         published=published(session, analysis),
-        resolve=_resolvers(inputs),
+        resolve=_resolvers(inputs, afters),
         env_hash=env_hash,
     )
     if isinstance(result, cg.Unavailable):
@@ -201,11 +260,11 @@ def cell_key(
     assert result.parts is not None
     upstream = [value for _address, value in result.parts["upstream"]]
     if isinstance(result, cg.Keyed):
-        return CellKey(result.digest, upstream, result.parts)
+        return CellKey(result.digest, upstream, result.parts, afters)
     if result.unresolved:
         # A digest without what it could not read would match a record made without it.
         raise InputNotFingerprinted(f"cell {cell_id} has no key: {', '.join(result.unresolved)}")
     # A prompt or SQL cell's generic hash, which it records beside its own key. Its parts
     # have no inputs (they are the host's to key), so supply the ones this hash reads.
-    parts = {**result.parts, "inputs": input_parts(inputs.by_kind())}
-    return CellKey(cg.parts_digest(parts), upstream, parts)
+    parts = {**result.parts, "inputs": sorted(input_parts(inputs.by_kind()) + after_parts(afters))}
+    return CellKey(cg.parts_digest(parts), upstream, parts, afters)

@@ -810,6 +810,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A cell after an upstream that ran again is stale and runs again.** An `after` edge
+  only ordered a Python or R cell, so a cell after a setup kept its cache when the setup
+  ran with a new body, and every cell after one stayed ready; a SQL write after a seed
+  that ran again unchanged stayed a cache hit, its rows gone with the rebuilt database.
+  Each `after` edge is now part of the cell's key: the upstream's last run, a token its
+  code mints as it starts and as it ends, kept in `.strata/runs.json`. A run that fails,
+  times out or is stopped counts, as does a run of the upstream's Tests tab or one in
+  another process; a cache hit or a refusal does not, nor does a reopen or an imported
+  snapshot. A prompt cell's `after` still only orders it. Such a cell is not reused from
+  a team store. Cells with `after` miss their cache once after the upgrade. (#1681)
 - **A sweep in another process no longer takes a running `@each` cell's results.** An
   `@each` or `@output_dir` run stores its items or files before the manifest that keeps
   them, and the sweep held off only for runs in its own process. A server opening a
@@ -873,8 +883,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A SQL cell after a seed runs again once the seed computes something else.** Its key
   covered only the variables it binds, so a cell `-- @after seed` under `forever`, `session`
   or `ttl` kept its old rows after the seed ran with a new body, or again in a new session
-  under `@cache session`. The key now carries each `@after` upstream's last run; one that
-  records none (`# @nocache`, an `rw` mount) keeps nothing after it cached. (#1673)
+  under `@cache session`. The key now carries each `@after` upstream's last
+  run. (#1673)
 - **The server reopens an SSH worker tunnel whose `ssh` exited.** Nothing reconciled
   tunnels, so one that dropped (a laptop that slept) stayed down until `add-ssh` ran
   again. The server now checks every 30 s and reopens a dead forward on the same ports.

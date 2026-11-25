@@ -751,7 +751,12 @@ def strata_vocabulary() -> cg.Vocabulary:
     # Read as ``parse_annotations`` reads them, with ``_value_problem`` on every line.
     core = (
         core.replace("name", parse=_lenient(_last_named))
-        .replace("after", parse=_lenient(_after_ids, stacked=True))
+        # An input too: what the upstream left (a database, files) is what this cell reads.
+        .replace(
+            "after",
+            parse=_lenient(_after_ids, stacked=True),
+            effects=lambda ids: [cg.After(ids), *(cg.Input("after", i) for i in ids)],
+        )
         # ``@stochastic`` is read with it: the two are one switch, set line by line.
         .replace(
             "nocache",

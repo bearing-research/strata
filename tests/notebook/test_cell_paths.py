@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
 import errno
 import hashlib
 import json
@@ -728,6 +729,7 @@ class TestCellTests:
             "table_fingerprints": ["table"],
             "fetch_fingerprints": ["fetch"],
             "dataset_fingerprints": ["dataset"],
+            "after_fingerprints": ["after"],
         }
         fields.update(overrides)
 
@@ -832,7 +834,7 @@ class TestCellTests:
     async def test_the_fingerprint_counts_every_input(self, path):
         result = await path(self._provenance())()
 
-        assert path.calls.fingerprint == [["input", "mount", "table", "fetch", "dataset"]]
+        assert path.calls.fingerprint == [["input", "mount", "table", "fetch", "dataset", "after"]]
         assert result.input_fingerprint == "fingerprint"
 
     async def test_the_inputs_are_handed_to_the_harness_user(self, path):
@@ -1773,6 +1775,8 @@ class TestR:
             r, "is_http_executor_worker", lambda w: w.backend == WorkerBackendType.EXECUTOR
         )
         monkeypatch.setattr(r, "worker_transport", lambda w: w.transport)
+        # A run's start and end are recorded in the notebook, which these fakes have none of.
+        monkeypatch.setattr(r, "runs", SimpleNamespace(running=_no_run_record))
 
         def resolve_cached_display_outputs(*args):
             calls.replays.append(args)
@@ -3521,6 +3525,11 @@ class TestPythonInputs:
             )
 
 
+@contextlib.asynccontextmanager
+async def _no_run_record(_path, _cell_id):
+    yield
+
+
 class TestPython:
     """The moved path against fakes; the harness-backed behavior is in ``test_executor.py``."""
 
@@ -3628,10 +3637,13 @@ class TestPython:
             export_error=None,
         )
         monkeypatch.setattr(python, "resolve_worker_spec", lambda *_args: worker)
+        # A run's start is recorded in the notebook, which these fakes have none of.
+        monkeypatch.setattr(python, "runs", SimpleNamespace(running=_no_run_record))
         monkeypatch.setattr(
             python, "write_module_export_outputs", lambda *_args: calls.export_error
         )
         host = SimpleNamespace(
+            path=None,
             notebook_state=SimpleNamespace(
                 id="nb", get_cell=lambda _id: calls.cell, scratchpad=False
             ),

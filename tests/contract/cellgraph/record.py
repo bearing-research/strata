@@ -91,6 +91,7 @@ class _Counter:
         self._nonces = itertools.count()
         self._issued: list[str] = []
         self._snapshots = itertools.count(1)
+        self._runs = itertools.count()
 
     def nonce(self) -> str:
         n = next(self._nonces)
@@ -101,6 +102,10 @@ class _Counter:
     def is_unresolved(self, component: str) -> bool:
         # The real check reads a marker these nonces leave out, so as not to move the keys.
         return any(value[:32] in component for value in self._issued)
+
+    def run_nonce(self) -> str:
+        n = next(self._runs)
+        return hashlib.sha256(f"cellgraph:{self._scenario}:run:{n}".encode()).hexdigest()
 
     def snapshot_id(self) -> int:
         return 1000 + next(self._snapshots)
@@ -230,6 +235,8 @@ def _recording(scenario: str, notebook_dir: Path, registry: Path) -> Iterator[_S
     patches = [
         mock.patch("strata.notebook.nonce.unresolved_nonce", counter.nonce),
         mock.patch("strata.notebook.nonce.is_unresolved", counter.is_unresolved),
+        mock.patch("strata.notebook.nonce.run_nonce", counter.run_nonce),
+        mock.patch("strata.notebook.runs.checkout_id", lambda _dir: "checkout"),
         mock.patch("pyiceberg.table.metadata._generate_snapshot_id", counter.snapshot_id),
         mock.patch.object(
             sql_cell_executor,
@@ -622,6 +629,7 @@ def _keys(
         "tables": outside.inputs.tables,
         "fetches": outside.inputs.fetches,
         "datasets": outside.inputs.datasets,
+        "afters": [],
     }
 
     def key(instance: str | None = None) -> dict[str, Any]:
@@ -634,6 +642,9 @@ def _keys(
             instance=instance,
         )
         upstream, digest = found.upstream, found.provenance_hash
+        if instance is None:
+            # The ones this key read: an upstream that stores nothing gives a new one each time.
+            resolved["afters"] = found.afters
         return {
             # As assembled, but sorted: their order follows set iteration, which varies
             # by process, and the key sorts them anyway.

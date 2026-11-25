@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
+
+from strata.notebook import runs
 from strata.notebook.cell_paths.context import (
     _ARTIFACT_EXT_BY_CONTENT_TYPE,
     STORE_FAILED,
@@ -433,7 +436,14 @@ async def batch_service_loop(
     # Parent-side fields of a hit's console record, by cell: what the harness does not echo.
     hit_consoles: dict[str, dict[str, Any]] = {}
 
+    # Cells whose code started (a cache miss) and has not ended (``runs``).
+    running: set[str] = set()
+
     async def _record(cell_id: str, result: BatchCellResult) -> None:
+        if cell_id in running:
+            # Before the result is applied: a cell after this one keys on the run's end.
+            running.discard(cell_id)
+            await runs.mint_after(host.path, cell_id)
         cell_results[cell_id] = result
         if on_cell_event is not None:
             await on_cell_event(result)
@@ -465,184 +475,195 @@ async def batch_service_loop(
             except Exception:
                 logger.exception("Failed terminating batch harness after oversized frame")
 
-    while True:
-        # Cap readline at the active cell's remaining timeout; on expiry, SIGKILL the
-        # harness, record cell_error and exit.
-        if watchdog_state is not None and watchdog_state.get("active_started_at"):
-            # Set whenever active_started_at is; cast for the type checker.
-            started = cast(float, watchdog_state["active_started_at"])
-            timeout = cast(float, watchdog_state["active_timeout"])
-            remaining = timeout - (time.time() - started)
-            if remaining <= 0:
-                watchdog_state["timed_out"] = True
-                watchdog_state["timeout_cell_id"] = watchdog_state["active_cell_id"]
+    try:
+        while True:
+            # Cap readline at the active cell's remaining timeout; on expiry, SIGKILL the
+            # harness, record cell_error and exit.
+            if watchdog_state is not None and watchdog_state.get("active_started_at"):
+                # Set whenever active_started_at is; cast for the type checker.
+                started = cast(float, watchdog_state["active_started_at"])
+                timeout = cast(float, watchdog_state["active_timeout"])
+                remaining = timeout - (time.time() - started)
+                if remaining <= 0:
+                    watchdog_state["timed_out"] = True
+                    watchdog_state["timeout_cell_id"] = watchdog_state["active_cell_id"]
+                    try:
+                        await terminate_subprocess_tree(watchdog_state["proc"])
+                    except Exception:
+                        logger.exception("Failed terminating batch harness after a timeout")
+                    break
                 try:
-                    await terminate_subprocess_tree(watchdog_state["proc"])
-                except Exception:
-                    logger.exception("Failed terminating batch harness after a timeout")
-                break
-            try:
-                line = await asyncio.wait_for(frame_reader.readline(), timeout=remaining)
-            except TimeoutError:
-                watchdog_state["timed_out"] = True
-                watchdog_state["timeout_cell_id"] = watchdog_state["active_cell_id"]
-                try:
-                    await terminate_subprocess_tree(watchdog_state["proc"])
-                except Exception:
-                    logger.exception("Failed terminating batch harness after a timeout")
-                break
-            except ValueError:
-                await _abort_oversized_frame()
-                break
-        else:
-            try:
-                line = await frame_reader.readline()
-            except ValueError:
-                await _abort_oversized_frame()
-                break
-        if not line:
-            # Pipe closed without batch_end: the subprocess died.
-            break
-        try:
-            frame = json.loads(line)
-        except json.JSONDecodeError:
-            logger.warning("Batch harness emitted unparseable frame: %r", line[:200])
-            continue
-
-        ftype = frame.get("type")
-        payload = frame.get("payload") or {}
-
-        if ftype == "cell_start":
-            active_cell_id = payload.get("cell_id")
-            # Before the watchdog window opens: the announcement is the parent's time.
-            if on_cell_start is not None and active_cell_id:
-                await on_cell_start(active_cell_id)
-            # Watchdog window: from cell_start until a completion frame (cache_hit output,
-            # cell_error, or persist).
-            if watchdog_state is not None and active_cell_id:
-                watchdog_state["active_cell_id"] = active_cell_id
-                watchdog_state["active_started_at"] = time.time()
-        elif ftype == "cache_check":
-            response = await _serviced(
-                batch_service_cache_check(
-                    host,
-                    context,
-                    payload.get("cell_id", ""),
-                    batch_tmpdir,
-                    executed_sources=executed_sources,
-                    provenance=provenance,
-                    use_cache=use_cache,
-                )
-            )
-            # Parent-side only: the harness has no use for it and it isn't JSON.
-            team_pull = response.pop("team_pull", None)
-            if team_pull is not None:
-                team_pulls[payload.get("cell_id", "")] = team_pull
-            hit_consoles[payload.get("cell_id", "")] = {
-                "replaces_console": response.pop("replaces_console", False),
-                "hit_run_ms": response.pop("hit_run_ms", 0),
-                "read_audit": response.pop("read_audit", []),
-                "mutation_warnings": response.pop("mutation_warnings", []),
-            }
-            # Answered once here instead of at each cache-check return; the cell's ambient
-            # client needs it to name what it promotes.
-            response["input_uris"] = upstream_artifact_uris(
-                host, context, payload.get("cell_id", "")
-            )
-            send_response(response)
-        elif ftype == "persist":
-            response = await _serviced(
-                batch_service_persist(
-                    host,
-                    context,
-                    payload,
-                    batch_tmpdir,
-                    executed_sources=executed_sources,
-                    provenance=provenance,
-                )
-            )
-            cell_id_pl = payload["cell_id"]
-            if response.get("ok"):
-                # What was stored, as single-cell does: the harness's metadata names files with no
-                # artifact behind them, and a failed display store is an empty list here.
-                display_outputs = response["display_outputs"]
-                await _record(
-                    cell_id_pl,
-                    BatchCellResult(
-                        cell_id=cell_id_pl,
-                        status="ok",
-                        stdout=payload.get("stdout", ""),
-                        stderr=payload.get("stderr", ""),
-                        outputs=payload.get("outputs") or {},
-                        display_outputs=display_outputs,
-                        mutation_warnings=payload.get("mutation_warnings") or [],
-                        read_audit=payload.get("read_audit") or [],
-                        duration_ms=payload.get("duration_ms"),
-                    ),
-                )
+                    line = await asyncio.wait_for(frame_reader.readline(), timeout=remaining)
+                except TimeoutError:
+                    watchdog_state["timed_out"] = True
+                    watchdog_state["timeout_cell_id"] = watchdog_state["active_cell_id"]
+                    try:
+                        await terminate_subprocess_tree(watchdog_state["proc"])
+                    except Exception:
+                        logger.exception("Failed terminating batch harness after a timeout")
+                    break
+                except ValueError:
+                    await _abort_oversized_frame()
+                    break
             else:
-                # Persist rejected: the harness sees persist_err and ends with
-                # reason="persist_failed". Record it so the dispatcher doesn't report "not_run".
+                try:
+                    line = await frame_reader.readline()
+                except ValueError:
+                    await _abort_oversized_frame()
+                    break
+            if not line:
+                # Pipe closed without batch_end: the subprocess died.
+                break
+            try:
+                frame = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning("Batch harness emitted unparseable frame: %r", line[:200])
+                continue
+
+            ftype = frame.get("type")
+            payload = frame.get("payload") or {}
+
+            if ftype == "cell_start":
+                active_cell_id = payload.get("cell_id")
+                # Before the watchdog window opens: the announcement is the parent's time.
+                if on_cell_start is not None and active_cell_id:
+                    await on_cell_start(active_cell_id)
+                # Watchdog window: from cell_start until a completion frame (cache_hit output,
+                # cell_error, or persist).
+                if watchdog_state is not None and active_cell_id:
+                    watchdog_state["active_cell_id"] = active_cell_id
+                    watchdog_state["active_started_at"] = time.time()
+            elif ftype == "cache_check":
+                response = await _serviced(
+                    batch_service_cache_check(
+                        host,
+                        context,
+                        payload.get("cell_id", ""),
+                        batch_tmpdir,
+                        executed_sources=executed_sources,
+                        provenance=provenance,
+                        use_cache=use_cache,
+                    )
+                )
+                cell_id_check = payload.get("cell_id", "")
+                if cell_id_check and not response.get("cache_hit") and "error" not in response:
+                    # A miss: its code starts now. A hit or a refusal runs none (``runs``).
+                    await _serviced(runs.mint(host.path, cell_id_check))
+                    running.add(cell_id_check)
+                # Parent-side only: the harness has no use for it and it isn't JSON.
+                team_pull = response.pop("team_pull", None)
+                if team_pull is not None:
+                    team_pulls[payload.get("cell_id", "")] = team_pull
+                hit_consoles[payload.get("cell_id", "")] = {
+                    "replaces_console": response.pop("replaces_console", False),
+                    "hit_run_ms": response.pop("hit_run_ms", 0),
+                    "read_audit": response.pop("read_audit", []),
+                    "mutation_warnings": response.pop("mutation_warnings", []),
+                }
+                # Answered once here instead of at each cache-check return; the cell's ambient
+                # client needs it to name what it promotes.
+                response["input_uris"] = upstream_artifact_uris(
+                    host, context, payload.get("cell_id", "")
+                )
+                send_response(response)
+            elif ftype == "persist":
+                response = await _serviced(
+                    batch_service_persist(
+                        host,
+                        context,
+                        payload,
+                        batch_tmpdir,
+                        executed_sources=executed_sources,
+                        provenance=provenance,
+                    )
+                )
+                cell_id_pl = payload["cell_id"]
+                if response.get("ok"):
+                    # What was stored, as single-cell does: the harness's metadata names files
+                    # with no artifact behind them, and a failed display store is an empty list.
+                    display_outputs = response["display_outputs"]
+                    await _record(
+                        cell_id_pl,
+                        BatchCellResult(
+                            cell_id=cell_id_pl,
+                            status="ok",
+                            stdout=payload.get("stdout", ""),
+                            stderr=payload.get("stderr", ""),
+                            outputs=payload.get("outputs") or {},
+                            display_outputs=display_outputs,
+                            mutation_warnings=payload.get("mutation_warnings") or [],
+                            read_audit=payload.get("read_audit") or [],
+                            duration_ms=payload.get("duration_ms"),
+                        ),
+                    )
+                else:
+                    # Persist rejected: the harness sees persist_err and ends with
+                    # reason="persist_failed". Record it so the dispatcher doesn't report "not_run".
+                    await _record(
+                        cell_id_pl,
+                        BatchCellResult(
+                            cell_id=cell_id_pl,
+                            status="persist_failed",
+                            error=response.get("error"),
+                            stdout=payload.get("stdout", ""),
+                            stderr=payload.get("stderr", ""),
+                            mutation_warnings=payload.get("mutation_warnings") or [],
+                            read_audit=payload.get("read_audit") or [],
+                            duration_ms=payload.get("duration_ms"),
+                        ),
+                    )
+                send_response(response)
+                # Close the watchdog window so idle time between cells doesn't trip it.
+                if watchdog_state is not None:
+                    watchdog_state["active_cell_id"] = None
+                    watchdog_state["active_started_at"] = None
+            elif ftype == "cell_output":
+                if payload.get("cache_hit") and active_cell_id:
+                    await _record(
+                        active_cell_id,
+                        BatchCellResult(
+                            cell_id=active_cell_id,
+                            status="cache_hit",
+                            cache_hit=True,
+                            stdout=payload.get("stdout", ""),
+                            stderr=payload.get("stderr", ""),
+                            outputs=payload.get("outputs") or {},
+                            display_outputs=payload.get("display_outputs") or [],
+                            duration_ms=payload.get("duration_ms"),
+                            team_pull=team_pulls.get(active_cell_id),
+                            **hit_consoles[active_cell_id],
+                        ),
+                    )
+                if watchdog_state is not None:
+                    watchdog_state["active_cell_id"] = None
+                    watchdog_state["active_started_at"] = None
+            elif ftype == "cell_error":
+                cell_id = payload.get("cell_id", "")
                 await _record(
-                    cell_id_pl,
+                    cell_id,
                     BatchCellResult(
-                        cell_id=cell_id_pl,
-                        status="persist_failed",
-                        error=response.get("error"),
+                        cell_id=cell_id,
+                        status="cell_error",
+                        error=payload.get("error"),
+                        traceback=payload.get("traceback"),
+                        traceback_full=payload.get("traceback_full"),
                         stdout=payload.get("stdout", ""),
                         stderr=payload.get("stderr", ""),
-                        mutation_warnings=payload.get("mutation_warnings") or [],
-                        read_audit=payload.get("read_audit") or [],
                         duration_ms=payload.get("duration_ms"),
                     ),
                 )
-            send_response(response)
-            # Close the watchdog window so idle time between cells doesn't trip it.
-            if watchdog_state is not None:
-                watchdog_state["active_cell_id"] = None
-                watchdog_state["active_started_at"] = None
-        elif ftype == "cell_output":
-            if payload.get("cache_hit") and active_cell_id:
-                await _record(
-                    active_cell_id,
-                    BatchCellResult(
-                        cell_id=active_cell_id,
-                        status="cache_hit",
-                        cache_hit=True,
-                        stdout=payload.get("stdout", ""),
-                        stderr=payload.get("stderr", ""),
-                        outputs=payload.get("outputs") or {},
-                        display_outputs=payload.get("display_outputs") or [],
-                        duration_ms=payload.get("duration_ms"),
-                        team_pull=team_pulls.get(active_cell_id),
-                        **hit_consoles[active_cell_id],
-                    ),
-                )
-            if watchdog_state is not None:
-                watchdog_state["active_cell_id"] = None
-                watchdog_state["active_started_at"] = None
-        elif ftype == "cell_error":
-            cell_id = payload.get("cell_id", "")
-            await _record(
-                cell_id,
-                BatchCellResult(
-                    cell_id=cell_id,
-                    status="cell_error",
-                    error=payload.get("error"),
-                    traceback=payload.get("traceback"),
-                    traceback_full=payload.get("traceback_full"),
-                    stdout=payload.get("stdout", ""),
-                    stderr=payload.get("stderr", ""),
-                    duration_ms=payload.get("duration_ms"),
-                ),
-            )
-            if watchdog_state is not None:
-                watchdog_state["active_cell_id"] = None
-                watchdog_state["active_started_at"] = None
-        elif ftype == "batch_end":
-            end_reason = payload.get("reason", "complete")
-            failed_cell_id = payload.get("failed_cell_id")
-            break
+                if watchdog_state is not None:
+                    watchdog_state["active_cell_id"] = None
+                    watchdog_state["active_started_at"] = None
+            elif ftype == "batch_end":
+                end_reason = payload.get("reason", "complete")
+                failed_cell_id = payload.get("failed_cell_id")
+                break
+    finally:
+        # A cell whose harness died, timed out or was stopped mid-run ended too.
+        with anyio.CancelScope(shield=True):
+            for cell_id in sorted(running):
+                await runs.mint_after(host.path, cell_id)
 
     return end_reason, failed_cell_id
 

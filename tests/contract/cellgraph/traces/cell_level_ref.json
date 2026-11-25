@@ -19,7 +19,7 @@
      "keys": {
       "definition_key": "555977404d57702851d41367feb15ef0b6eabae5b2f0c90e169c4abdfcfd3992",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "059adbe77506ea776888959ef7b8807a3f103cbda86cb2fa9bf5ccb38d9b03e0",
+      "execution_key": "b8b0abada66f286f94059d7be5bb207cf8d648b7219cb2d3e9bfe1a24f01344b",
       "input_hashes": [],
       "source_hash": "555977404d57702851d41367feb15ef0b6eabae5b2f0c90e169c4abdfcfd3992",
       "upstream_hashes": []
@@ -31,6 +31,9 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [
+       "lp:after:never:checkout"
+      ],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -67,6 +70,7 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -107,6 +111,7 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -171,7 +176,7 @@
      "keys": {
       "definition_key": "555977404d57702851d41367feb15ef0b6eabae5b2f0c90e169c4abdfcfd3992",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "eeed9734fe0bde5baaa454246c571f4e74ce3ba7111bd4a903478937fed07cfe",
+      "execution_key": "12b82946f19d95a502a0d929699e31d1ef4068451a711c1464b7a5615f23c8a6",
       "input_hashes": [
        "[\"provenance\",\"f22b518a51388c60641c0e199b799e2056cb2b1d975b8abcf161031705ae84d6\"]"
       ],
@@ -187,6 +192,9 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [
+       "lp:after:7a18053f0810c3c1bdf6f3b5311310299527ca6b2b4f63fd303902f69a07c7c1"
+      ],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -195,7 +203,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "eeed9734fe0bde5baaa454246c571f4e74ce3ba7111bd4a903478937fed07cfe",
+      "provenance_hash": "12b82946f19d95a502a0d929699e31d1ef4068451a711c1464b7a5615f23c8a6",
       "status": "ok",
       "stdout": "after the loop\n"
      },
@@ -235,6 +243,7 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -284,6 +293,7 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -382,7 +392,7 @@
      "keys": {
       "definition_key": "555977404d57702851d41367feb15ef0b6eabae5b2f0c90e169c4abdfcfd3992",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "eeed9734fe0bde5baaa454246c571f4e74ce3ba7111bd4a903478937fed07cfe",
+      "execution_key": "12b82946f19d95a502a0d929699e31d1ef4068451a711c1464b7a5615f23c8a6",
       "input_hashes": [
        "[\"provenance\",\"f22b518a51388c60641c0e199b799e2056cb2b1d975b8abcf161031705ae84d6\"]"
       ],
@@ -398,6 +408,9 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [
+       "lp:after:7a18053f0810c3c1bdf6f3b5311310299527ca6b2b4f63fd303902f69a07c7c1"
+      ],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -442,6 +455,7 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -486,6 +500,7 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -554,7 +569,7 @@
      "keys": {
       "definition_key": "555977404d57702851d41367feb15ef0b6eabae5b2f0c90e169c4abdfcfd3992",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "1095c90b2b3718edf68e34898b5148b4a7dce1578ed5c6eaad1eb2b4c0c953a0",
+      "execution_key": "c4e024a094ce9a4cab21bab54891311225fda9043df958c22c0bd0dbb98bdc03",
       "input_hashes": [
        "[\"provenance\",\"15d9172bab7e786ee66b982fe9455a7b479620e2c1509c2efa56f2fa4099b5af\"]"
       ],
@@ -570,6 +585,9 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [
+       "lp:after:c09a665e1255800d17de606b6ad98c0819deb9159522fe41f4556433a3bc9d3b"
+      ],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -578,7 +596,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "1095c90b2b3718edf68e34898b5148b4a7dce1578ed5c6eaad1eb2b4c0c953a0",
+      "provenance_hash": "c4e024a094ce9a4cab21bab54891311225fda9043df958c22c0bd0dbb98bdc03",
       "status": "ok",
       "stdout": "after the loop\n"
      },
@@ -618,6 +636,7 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,
@@ -667,6 +686,7 @@
       "instances": {}
      },
      "resolved": {
+      "afters": [],
       "datasets": [],
       "fetches": [],
       "has_rw_mount": false,

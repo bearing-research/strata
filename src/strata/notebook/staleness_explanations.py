@@ -146,7 +146,7 @@ def _explain(session: NotebookSession, cell: CellState, found: StaleCell) -> Cau
     if stored is not None:
         known = set(found.stale_upstreams)
         details.extend(_upstream_changes(session, cell, stored, current, source_changed, known))
-        details.extend(_input_changes(stored, current, source_changed))
+        details.extend(_input_changes(session, stored, current, source_changed, known))
     if _differs(recorded, current, "env_hash"):
         details.append(CausalityDetail(type=CausalityType.ENV_CHANGED, package="notebook env"))
 
@@ -232,7 +232,11 @@ def _defines(session: NotebookSession, cell_id: str, variable: str | None) -> bo
 
 
 def _input_changes(
-    stored: Mapping[str, Any], current: Mapping[str, Any], source_changed: bool
+    session: NotebookSession,
+    stored: Mapping[str, Any],
+    current: Mapping[str, Any],
+    source_changed: bool,
+    known: set[str],
 ) -> list[CausalityDetail]:
     if "inputs" not in current:
         return []
@@ -246,6 +250,19 @@ def _input_changes(
         if source_changed and (address not in before or address not in now):
             continue
         kind, name = address
+        if kind == "after":
+            # The cell it runs after ran again; a record from before after edges were
+            # keyed has none, which says nothing.
+            if address in before and name not in known:
+                known.add(name)
+                details.append(
+                    CausalityDetail(
+                        type=CausalityType.INPUT_CHANGED,
+                        cell_id=name,
+                        cell_name=_cell_name(session, name),
+                    )
+                )
+            continue
         details.append(
             CausalityDetail(type=_input_change(now.get(address)), input_kind=kind, input_name=name)
         )

@@ -116,7 +116,7 @@ class TestRealWorldDAGs:
 
 
 class TestAfterEdges:
-    """``@after`` ordering-only edges.
+    """``@after`` edges, which carry no variable.
 
     A cell that depends on an upstream side effect (a setup cell seeding a SQLite file)
     declares ``# @after <cell-id>``. The edge joins the wiring and topological order but adds

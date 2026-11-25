@@ -270,6 +270,7 @@ notebook_dir/
 ├── work/                  # gitignored; cells run here (layout.WORK_DIR)
 └── .strata/               # gitignored runtime state
     ├── runtime.json       # display outputs, provenance hashes, env metadata
+    ├── runs.json          # each cell's last-run token, minted as its code starts (runs.py)
     ├── console/           # per-cell stdout/stderr ({cell_id}.json)
     ├── fetch/             # bytes each @fetch last read
     ├── tables/index.json  # tables each cell's last good run read (table_index.py)
