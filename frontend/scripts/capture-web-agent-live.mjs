@@ -19,8 +19,10 @@ import { chromium } from 'playwright'
 
 const run = promisify(execFile)
 
-const APP = { width: 1280, height: 880 }
-const PANE_WIDTH = 520
+// The README and the docs show the GIF about 880px wide, near half its size, so the
+// agent's pane is wide with large type and the browser no wider than it must be.
+const APP = { width: 1024, height: 760 }
+const PANE_WIDTH = 560
 const THEMES = ['light', 'dark']
 const TIMEOUT_MS = 180000
 
@@ -50,7 +52,7 @@ plt.style.use("strata")
 
 
 def draw(record):
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(8, 3.2))
     ax.plot(record.year + (record.month - 0.5) / 12, record.co2_ppm, linewidth=1)
     ax.set_title("CO₂ at Mauna Loa, ppm")
     return fig
@@ -288,23 +290,23 @@ function frameHtml(theme, shot, pane) {
     body { margin: 0; background: ${page}; font-family: -apple-system, 'Segoe UI', sans-serif; }
     .frame { display: inline-flex; gap: 16px; padding: 16px; background: ${page}; }
     .win { border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
-    .bar { height: 28px; background: ${chrome}; color: ${chromeText}; font-size: 12px;
+    .bar { height: 30px; background: ${chrome}; color: ${chromeText}; font-size: 14px;
            display: flex; align-items: center; justify-content: center; position: relative; }
     .bar::before { content: ''; position: absolute; left: 12px; width: 10px; height: 10px;
            border-radius: 50%; background: #f38ba8; box-shadow: 16px 0 #f9e2af, 32px 0 #a6e3a1; }
     .pane { width: ${PANE_WIDTH}px; height: ${APP.height}px; background: #1e1e2e; color: #cdd6f4;
-            padding: 14px 16px; box-sizing: border-box; overflow: hidden;
-            display: flex; flex-direction: column; justify-content: flex-end; gap: 10px;
-            font-size: 13px; line-height: 1.45; }
+            padding: 16px 18px; box-sizing: border-box; overflow: hidden;
+            display: flex; flex-direction: column; justify-content: flex-end; gap: 12px;
+            font-size: 18px; line-height: 1.45; }
     .user { background: #313244; border-left: 3px solid #89b4fa; padding: 8px 10px;
             border-radius: 4px; color: #cdd6f4; }
     .agent { color: #cdd6f4; }
-    .tool { color: #a6adc8; font-size: 12px; }
-    .tool code { font: 12px 'JetBrains Mono', Menlo, monospace; color: #a6e3a1; }
-    .tag { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+    .tool { color: #a6adc8; font-size: 16px; }
+    .tool code { font: 16px 'JetBrains Mono', Menlo, monospace; color: #a6e3a1; }
+    .tag { display: inline-block; font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
            color: #1e1e2e; background: #a6adc8; border-radius: 3px; padding: 0 5px; }
     .code { margin: 5px 0 0; padding: 6px 8px; background: #181825; border-radius: 4px;
-            font: 11px/1.45 'JetBrains Mono', Menlo, monospace; color: #bac2de;
+            font: 15px/1.4 'JetBrains Mono', Menlo, monospace; color: #bac2de;
             white-space: pre-wrap; word-break: break-word; }
     .out { color: #cdd6f4; }
     .failed { color: #f38ba8; }
