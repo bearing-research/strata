@@ -1632,9 +1632,12 @@ async def list_samples() -> dict:
 async def sample_thumbnail(name: str, theme: str) -> FileResponse:
     """The sample's card picture, the docs gallery's, for the ``light`` or ``dark`` theme."""
     sample = get_sample(name)
-    if sample is None or theme not in THEMES:
+    # Looked up, not built from the request's string: the path comes only from SAMPLES
+    # and THEMES.
+    path = {known: thumbnail_path(sample, known) for known in THEMES}.get(theme) if sample else None
+    if path is None:
         raise HTTPException(status_code=404, detail=f"No thumbnail for {name!r} in {theme!r}")
-    return FileResponse(thumbnail_path(sample, theme), media_type="image/webp")
+    return FileResponse(path, media_type="image/webp")
 
 
 async def _warm_environment(python: Path, modules: tuple[str, ...]) -> None:
