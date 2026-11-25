@@ -93,7 +93,9 @@ def source_fingerprint(notebook_dir: Path) -> str:
     digest = hashlib.sha256()
     for cell in toml.get("cells", []):
         digest.update(cell["file"].encode() + b"\0")
-        digest.update((notebook_dir / "cells" / cell["file"]).read_bytes() + b"\0")
+        # Line endings as Git checks them out vary by platform; the source does not.
+        source = (notebook_dir / "cells" / cell["file"]).read_bytes().replace(b"\r\n", b"\n")
+        digest.update(source + b"\0")
     return digest.hexdigest()[:16]
 
 

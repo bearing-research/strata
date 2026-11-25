@@ -72,20 +72,25 @@ def test_a_page_with_no_recorded_run_says_it_shows_the_code_only() -> None:
 def _notebook(root: Path, source: str) -> Path:
     (root / "cells").mkdir(parents=True)
     (root / "notebook.toml").write_text(
-        'cells = [{ id = "a", file = "a.py", language = "python", order = 0 }]\n'
+        'cells = [{ id = "a", file = "a.py", language = "python", order = 0 }]\n',
+        encoding="utf-8",
     )
-    (root / "cells" / "a.py").write_text(source)
+    (root / "cells" / "a.py").write_text(source, encoding="utf-8")
     return root
 
 
 def test_a_recorded_run_is_used_only_while_the_cells_are_as_they_ran(tmp_path: Path) -> None:
     notebook = _notebook(tmp_path / "nb", "x = 1\n")
     run = tmp_path / "nb.md"
-    run.write_text(hook.run_header(hook.source_fingerprint(notebook)) + CELLS)
+    run.write_text(hook.run_header(hook.source_fingerprint(notebook)) + CELLS, encoding="utf-8")
 
-    assert hook.recorded_run(run, hook.source_fingerprint(notebook)) == run.read_text()
+    assert hook.recorded_run(run, hook.source_fingerprint(notebook)) == run.read_text("utf-8")
 
-    (notebook / "cells" / "a.py").write_text("x = 2\n")
+    # A checkout with Windows line endings is the same source.
+    (notebook / "cells" / "a.py").write_bytes(b"x = 1\r\n")
+    assert hook.recorded_run(run, hook.source_fingerprint(notebook)) is not None
+
+    (notebook / "cells" / "a.py").write_text("x = 2\n", encoding="utf-8")
     assert hook.recorded_run(run, hook.source_fingerprint(notebook)) is None
     assert hook.recorded_run(tmp_path / "missing.md", "0" * 16) is None
 
