@@ -226,6 +226,8 @@ drawer (click **expand**) shows the dependency.
 # @name plot
 import matplotlib.pyplot as plt
 
+plt.style.use("strata")
+
 fig, ax = plt.subplots(figsize=(6, 4))
 for species, group in df.groupby("species", observed=True):
     ax.scatter(
@@ -240,7 +242,10 @@ ax.legend()
 fig
 ```
 
-The matplotlib figure renders inline as a PNG.
+The matplotlib figure renders inline as a PNG. `plt.style.use("strata")`
+is optional: it is a style that ships with Strata, with a transparent
+background and grey text, so the chart reads on the light and the dark
+theme. Without it, matplotlib draws its own white box.
 
 ## 4. Re-run for cache hits
 
@@ -331,7 +336,7 @@ cell, or call from `display()`:
 | Trailing expression | Renders as |
 | --- | --- |
 | pandas DataFrame / Series | Interactive grid: page, sort, filter, and search over the full cached artifact, with CSV / Parquet export. |
-| matplotlib `Figure` | Inline PNG. |
+| matplotlib `Figure` | Inline PNG. `plt.style.use("strata")` gives it a transparent background that suits both themes. |
 | PIL `Image` | Inline PNG. |
 | dict / list / primitive | Fenced JSON block. |
 | numpy ndarray | A one-line summary of its shape and dtype. |

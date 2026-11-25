@@ -165,6 +165,8 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+plt.style.use("strata")
+
 # Which weights a model exposes depends on what it is: the tree ensembles have
 # feature_importances_, logistic regression has coefficients. Reading whichever
 # is there keeps the cell producing a figure whoever wins, rather than printing
@@ -179,7 +181,8 @@ else:
 importance = weights.sort_values(ascending=True)
 
 fig, ax = plt.subplots(figsize=(8, 4))
-importance.plot.barh(ax=ax, color="#89b4fa")
+importance.plot.barh(ax=ax)
+ax.grid(axis="y", visible=False)
 ax.set_title(f"Feature Importance ({best_name})")
 ax.set_xlabel(axis_label)
 plt.tight_layout()

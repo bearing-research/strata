@@ -169,6 +169,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
+plt.style.use("strata")
+
 cm = confusion_matrix(y_test, y_pred, labels=model.classes_)
 fig, ax = plt.subplots(figsize=(6, 5))
 sns.heatmap(
