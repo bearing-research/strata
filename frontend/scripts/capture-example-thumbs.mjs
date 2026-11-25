@@ -81,8 +81,17 @@ async function frame(page, focus) {
 }
 
 async function shoot(page, output, path) {
-  // Wholly in view: the editor's bottom bar covers the viewport's last rows.
-  await output.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await output.evaluate((el) => {
+    // The header and bottom bar float over the page; the card shows only the output.
+    // A table's own sticky header row stays.
+    for (const node of document.querySelectorAll('body *')) {
+      if (el.contains(node) || node.contains(el)) continue
+      if (/fixed|sticky/.test(getComputedStyle(node).position)) node.style.visibility = 'hidden'
+    }
+    // Top first: the clip is at most MAX_HEIGHT_PER_WIDTH of the width, which fits
+    // the viewport, so a tall plot keeps its top.
+    el.scrollIntoView({ block: 'start' })
+  })
   await page.waitForTimeout(200)
   const box = await output.boundingBox()
   if (!box) throw new Error(`${path}: the element to shoot has no box`)

@@ -828,7 +828,7 @@ EXAMPLE_SHOTS = {
     "each_pipeline": ExampleShot(needs=("docker",)),
     "iris_classification": ExampleShot(),
     "keeling_curve": ExampleShot(),
-    "library_cells": ExampleShot(),
+    "library_cells": ExampleShot(focus="Pure module cell"),
     "loop_hill_climb": ExampleShot(),
     "markdown_showcase": ExampleShot(focus="Templated report from a DataFrame"),
     "model_variants": ExampleShot(),
