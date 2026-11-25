@@ -13,7 +13,7 @@ import logging
 import secrets
 import threading
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import IO, TYPE_CHECKING, Any, Protocol
 
 from strata.notebook.ssh_worker import (
     _SSH_HARDENING,
@@ -49,6 +49,11 @@ _FOREIGN_SETTLE = 12.0
 # Reopens in a row another process answers through before the tunnel is parked: ssh may
 # still be authenticating past the settle time while this machine's freed port answers.
 _FOREIGN_REOPENS = 3
+# The tail of ssh's stderr an error quotes: its reason is the last line or two.
+_STDERR_TAIL = 1024
+# Past this, what a live forward's ssh wrote is dropped: a line per refused connection
+# would otherwise grow the file for as long as the forward stays up.
+_STDERR_KEEP = 64 * 1024
 _PORT_PICKS = 20
 
 logger = logging.getLogger(__name__)
@@ -63,6 +68,10 @@ class TunnelHandle(Protocol):
 
     def terminate(self) -> None:
         """Tear the tunnel down."""
+        ...
+
+    def error(self) -> str:
+        """The last of what ssh wrote to stderr, or ``""``: why it exited."""
         ...
 
 
@@ -90,12 +99,43 @@ class TunnelRecord:
 class _PopenTunnelHandle:
     """:class:`TunnelHandle` backed by a ``subprocess.Popen`` running ``ssh -N -L``."""
 
-    def __init__(self, proc: Any) -> None:
+    def __init__(
+        self, proc: Any, stderr: IO[bytes] | None = None, stderr_path: str | None = None
+    ) -> None:
         self._proc = proc
         self._terminated = False
+        # What ssh writes to stderr, read through a handle of our own, whose offset ssh's
+        # writes never share; the path is left to remove where it could not be at once.
+        self._stderr = stderr
+        self._stderr_path = stderr_path
+        self._error = ""
+        # A reconcile reads it while a teardown in another thread closes it.
+        self._stderr_lock = threading.Lock()
 
     def is_alive(self) -> bool:
-        return self._proc.poll() is None
+        alive = self._proc.poll() is None
+        if alive:
+            with self._stderr_lock:
+                if self._stderr is not None and not self._stderr.closed:
+                    if self._stderr.seek(0, 2) > _STDERR_KEEP:
+                        self._stderr.truncate(0)  # ssh appends: its next line starts it
+        return alive
+
+    def error(self) -> str:
+        with self._stderr_lock:
+            if self._stderr is None or self._stderr.closed:
+                return self._error
+            size = self._stderr.seek(0, 2)
+            start = max(0, size - _STDERR_TAIL)
+            cut = False
+            if start:
+                self._stderr.seek(start - 1)
+                cut = self._stderr.read(1) != b"\n"
+            self._stderr.seek(start)
+            lines = self._stderr.read().decode("utf-8", "replace").strip().splitlines()
+            # A cut first line is a fragment, unless it is all there is.
+            self._error = "\n".join(lines[1:] if cut and len(lines) > 1 else lines)
+            return self._error
 
     def terminate(self) -> None:
         import contextlib
@@ -124,14 +164,24 @@ class _PopenTunnelHandle:
             # in the group holding the port. The group's id is not reused while ssh lives.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 killpg(self._proc.pid, signal.SIGKILL)
+        # Once ssh is gone, so all it wrote is there and the file can be removed.
+        self.error()  # kept for whoever asks why after the file is closed
+        with self._stderr_lock:
+            if self._stderr is not None:
+                self._stderr.close()
+        if self._stderr_path is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(self._stderr_path)
 
 
 class SubprocessTunnelLauncher:
     """:class:`TunnelLauncher` that runs a real ``ssh -N -L`` forward."""
 
     def spawn(self, ssh_target: str, *, local_port: int, remote_port: int) -> TunnelHandle:
+        import contextlib
         import os
         import subprocess
+        import tempfile
 
         from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 
@@ -147,19 +197,40 @@ class SubprocessTunnelLauncher:
         ]
         # Under the lifeline so a killed server does not leave the forward holding its port.
         lifeline_fds, lifeline_vars = lifeline_handoff()
+        # A file, not a pipe: a pipe nobody reads fills, blocks ssh and stops the forward.
+        fd, path = tempfile.mkstemp(prefix="strata-ssh-tunnel-")
+        reader: IO[bytes] | None = None
+        started = False
         try:
-            proc = subprocess.Popen(
-                lifeline_command(argv),
-                stdout=subprocess.DEVNULL,
-                # Never read: a full pipe would block ssh and stop the forward.
-                stderr=subprocess.DEVNULL,
-                env={**os.environ, **lifeline_vars},
-                pass_fds=lifeline_fds,
-                start_new_session=True,
-            )
-        except OSError as exc:
-            raise SshWorkerError(f"could not start ssh tunnel: {exc}") from exc
-        return _PopenTunnelHandle(proc)
+            # ssh's, appending, so it writes at the end after the file is cut back.
+            writer = os.open(path, os.O_WRONLY | os.O_APPEND)
+            try:
+                reader = open(path, "r+b")  # the handle closes it
+                proc = subprocess.Popen(
+                    lifeline_command(argv),
+                    stdout=subprocess.DEVNULL,
+                    stderr=writer,
+                    env={**os.environ, **lifeline_vars},
+                    pass_fds=lifeline_fds,
+                    start_new_session=True,
+                )
+                started = True
+            except OSError as exc:
+                raise SshWorkerError(f"could not start ssh tunnel: {exc}") from exc
+            finally:
+                os.close(writer)
+        finally:
+            os.close(fd)
+            if not started:
+                if reader is not None:
+                    reader.close()
+                with contextlib.suppress(OSError):
+                    os.unlink(path)
+        try:
+            os.unlink(path)  # gone with its last handle
+        except OSError:
+            return _PopenTunnelHandle(proc, reader, path)  # open files stay where (Windows)
+        return _PopenTunnelHandle(proc, reader)
 
 
 def _default_health_probe(local_port: int) -> bool:
@@ -212,6 +283,10 @@ class _ActiveTunnel:
     parked: bool = False
     # Reopens in a row that another process answered through.
     foreign_reopens: int = 0
+    # Why its ssh last exited in this outage, as logged.
+    last_exit: str | None = None
+    # Its forward was closed here for a retry: no ssh exit to report.
+    closed_for_retry: bool = False
 
 
 @dataclass
@@ -321,8 +396,14 @@ class RemoteWorkerSupervisor:
         handle = self.tunnel_launcher.spawn(
             target.target, local_port=lport, remote_port=running.port
         )
-        if not self._await_health(lport, health_timeout):
+        if not self._await_health(lport, health_timeout, handle):
+            exited = not handle.is_alive()
             handle.terminate()
+            if exited:
+                raise SshWorkerError(
+                    f"{name}: ssh exited before the worker's /health answered on "
+                    f"127.0.0.1:{lport}: {handle.error() or 'it wrote nothing'}"
+                )
             raise SshWorkerError(
                 f"{name}: tunnel opened but the worker's /health didn't respond on "
                 f"127.0.0.1:{lport} within {health_timeout}s"
@@ -451,6 +532,13 @@ class RemoteWorkerSupervisor:
     def _respawn(self, name: str, active: _ActiveTunnel) -> TunnelRecord | None:
         withhold_runtime_worker_token(name)  # until the new forward reaches our worker
         active.handle.terminate()  # reaps the exited ssh
+        why = active.handle.error() or "it wrote nothing"
+        # Once per reason in an outage: an unreachable box is reopened on every pass. One
+        # this server closed for a retry was logged as it was.
+        if not active.closed_for_retry and why != active.last_exit:
+            active.last_exit = why
+            logger.warning("ssh worker %s: ssh exited, reopening the tunnel: %s", name, why)
+        active.closed_for_retry = False
         try:
             handle = self.tunnel_launcher.spawn(
                 active.record.ssh_target,
@@ -505,6 +593,7 @@ class RemoteWorkerSupervisor:
             if ours:
                 set_runtime_worker_token(name, active.token)
                 active.foreign_reopens = 0
+                active.last_exit = None  # the outage is over
             else:
                 withhold_runtime_worker_token(name)
             retry = False
@@ -514,6 +603,7 @@ class RemoteWorkerSupervisor:
                 retry = active.foreign_reopens < _FOREIGN_REOPENS
             if foreign and not retry:
                 active.parked = True
+            active.closed_for_retry = retry
             active.record = _replace_health(active.record, ours)
             record = active.record
         if retry:
@@ -606,14 +696,15 @@ class RemoteWorkerSupervisor:
             clear_runtime_worker_token(name)
             active.handle.terminate()
 
-    def _await_health(self, local_port: int, timeout: float) -> bool:
+    def _await_health(self, local_port: int, timeout: float, handle: TunnelHandle) -> bool:
         import time
 
         deadline = time.monotonic() + max(0.0, timeout)
         while True:
             if self.health_probe(local_port):
                 return True
-            if time.monotonic() >= deadline:
+            # No forward left to answer through.
+            if time.monotonic() >= deadline or not handle.is_alive():
                 return False
             time.sleep(_HEALTH_POLL_INTERVAL)
 

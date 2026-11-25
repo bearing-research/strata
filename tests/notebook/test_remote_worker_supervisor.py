@@ -6,6 +6,8 @@ orchestration (provision, tunnel, health-check, record, reconcile, teardown, shu
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from strata.notebook.remote_worker_supervisor import (
@@ -82,9 +84,13 @@ class FakeTunnelHandle:
     def __init__(self) -> None:
         self.alive = True
         self.terminated = 0
+        self.stderr = ""
 
     def is_alive(self) -> bool:
         return self.alive
+
+    def error(self) -> str:
+        return self.stderr
 
     def terminate(self) -> None:
         self.alive = False
@@ -384,6 +390,27 @@ def test_a_reopen_answered_through_this_machines_port_is_tried_again(monkeypatch
 
     assert len(launcher.spawns) == 3
     assert sup.get("gpu").healthy is True
+
+
+def test_a_forward_closed_here_for_a_retry_is_no_ssh_exit(monkeypatch, caplog):
+    from strata.notebook import remote_worker_supervisor
+
+    monkeypatch.setattr(remote_worker_supervisor, "_FOREIGN_SETTLE", 0.1)
+    runner = _runner()
+    sup, launcher, _ = _supervisor(runner)
+    sup.establish("gpu", "user@box", token="tok")
+    launcher.handles[0].alive = False
+    launcher.handles[0].stderr = "client_loop: send disconnect: Broken pipe"
+    sup.launch_id_probe = lambda port: "a-local-dev-server"
+    sup.reconcile()  # reopened, answered through this machine's port: closed for a retry
+    assert launcher.handles[1].terminated
+
+    sup.launch_id_probe = lambda port: _launched_id(runner)
+    sup.reconcile()
+
+    assert sup.get("gpu").healthy is True
+    exits = [r.getMessage() for r in caplog.records if "ssh exited" in r.getMessage()]
+    assert len(exits) == 1 and exits[0].endswith("Broken pipe")
 
 
 def test_shutdown_ends_a_reconcile_waiting_on_a_reopened_tunnel():
@@ -943,3 +970,154 @@ def test_a_tunnel_is_terminated_once(monkeypatch):
     handle.terminate()
 
     assert groups == [4242]
+
+
+def test_an_ssh_that_exits_fails_establish_with_its_reason():
+    """Not a wait for /health through a forward that is gone."""
+    probes: list[int] = []
+
+    class Exiting(FakeTunnelLauncher):
+        def spawn(self, ssh_target, *, local_port, remote_port):
+            handle = super().spawn(ssh_target, local_port=local_port, remote_port=remote_port)
+            handle.alive = False
+            handle.stderr = "bind [127.0.0.1]:55001: Address already in use"
+            return handle
+
+    def health(port: int) -> bool:
+        probes.append(port)
+        if len(probes) > 3:
+            raise AssertionError("still waiting on /health through a forward that is gone")
+        return False
+
+    sup, launcher, _ = _supervisor(launcher=Exiting())
+    sup.health_probe = health
+
+    with pytest.raises(SshWorkerError, match="ssh exited") as raised:
+        sup.establish("gpu", "user@box", health_timeout=600)
+
+    assert "Address already in use" in str(raised.value)
+    assert len(probes) <= 1
+    assert launcher.handles[0].terminated == 1
+    assert sup.get("gpu") is None
+
+
+def test_a_reopen_logs_why_ssh_exited_once_per_reason_in_an_outage(caplog):
+    """A box that stays unreachable is reopened every pass, and logged once a reason."""
+    down = {"why": ""}
+
+    class Box(FakeTunnelLauncher):
+        def spawn(self, ssh_target, *, local_port, remote_port):
+            handle = super().spawn(ssh_target, local_port=local_port, remote_port=remote_port)
+            if down["why"]:
+                handle.alive = False
+                handle.stderr = f"ssh: connect to host box port 22: {down['why']}"
+            return handle
+
+    sup, launcher, _ = _supervisor(launcher=Box())
+    sup.establish("gpu", "user@box")
+
+    def outage(*reasons: str) -> None:
+        for reason in reasons:
+            down["why"] = reason
+            launcher.handles[-1].alive = False
+            launcher.handles[-1].stderr = f"ssh: connect to host box port 22: {reason}"
+            sup.reconcile()
+
+    outage("Connection refused", "Connection refused", "Permission denied")
+    down["why"] = ""
+    sup.reconcile()  # reopened, and our worker answers
+    assert sup.get("gpu").healthy
+    outage("Permission denied")
+
+    exits = [r.getMessage() for r in caplog.records if "ssh exited" in r.getMessage()]
+    assert [e.rsplit(": ", 1)[1] for e in exits] == [
+        "Connection refused",
+        "Permission denied",
+        "Permission denied",
+    ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a shell script stands in for ssh")
+def test_the_tunnel_keeps_what_ssh_wrote(tmp_path, monkeypatch):
+    import os
+    import time
+
+    from strata.notebook.remote_worker_supervisor import SubprocessTunnelLauncher
+
+    fake = tmp_path / "ssh"
+    fake.write_text(
+        "#!/bin/sh\n"
+        "i=0; while [ $i -lt 200 ]; do echo 'debug1: noise' >&2; i=$((i+1)); done\n"
+        "echo 'bind [127.0.0.1]:1: Address already in use' >&2\nexit 255\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+    handle = SubprocessTunnelLauncher().spawn("box", local_port=1, remote_port=2)
+    deadline = time.monotonic() + 30
+    while handle.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    seen = handle.error()
+    handle.terminate()
+
+    assert seen.endswith("Address already in use")
+    assert len(seen) < 2000
+    assert handle.error() == seen
+
+
+class _Running:
+    pid = 4242
+
+    def poll(self):
+        return None
+
+
+def _stderr_file(tmp_path):
+    """ssh's appending end and the handle's own, as the launcher opens them."""
+    import os
+
+    path = tmp_path / "stderr"
+    path.touch()
+    writer = os.open(path, os.O_WRONLY | os.O_APPEND)
+    return writer, open(path, "r+b")  # noqa: SIM115 - the handle closes it
+
+
+def test_a_live_forwards_stderr_is_cut_back(tmp_path):
+    """A line per refused connection must not grow it for as long as the forward is up."""
+    import os
+
+    from strata.notebook import remote_worker_supervisor
+    from strata.notebook.remote_worker_supervisor import _PopenTunnelHandle
+
+    writer, reader = _stderr_file(tmp_path)
+    handle = _PopenTunnelHandle(_Running(), reader)
+    try:
+        line = b"channel 3: open failed: connect failed: Connection refused\n"
+        while os.fstat(writer).st_size <= remote_worker_supervisor._STDERR_KEEP:
+            os.write(writer, line)
+        assert handle.is_alive()
+        os.write(writer, b"bind [127.0.0.1]:1: Address already in use\n")
+
+        assert handle.error() == "bind [127.0.0.1]:1: Address already in use"
+        assert os.fstat(writer).st_size < 100
+    finally:
+        os.close(writer)
+        reader.close()
+
+
+def test_a_reason_longer_than_the_tail_is_kept(tmp_path):
+    import os
+
+    from strata.notebook import remote_worker_supervisor
+    from strata.notebook.remote_worker_supervisor import _PopenTunnelHandle
+
+    writer, reader = _stderr_file(tmp_path)
+    handle = _PopenTunnelHandle(_Running(), reader)
+    try:
+        os.write(writer, b"debug1: noise\n")
+        os.write(writer, b"Host key mismatch " + b"x" * remote_worker_supervisor._STDERR_TAIL)
+
+        assert handle.error().endswith("x" * 100)
+    finally:
+        os.close(writer)
+        reader.close()

@@ -839,6 +839,11 @@ exhaustive commit history.
 
 ### Fixed
 
+- **An SSH worker tunnel that exits says why.** Its `ssh` wrote to `/dev/null`, so a
+  forward that could not start (the local port taken, the key refused, the host key
+  changed) showed only as `/health` not answering, after the whole health timeout. A
+  connect now fails as soon as `ssh` exits and quotes what it printed; a reopen logs the
+  reason, once per reason in an outage. (#1687)
 - **A cell after an upstream that ran again is stale and runs again.** An `after` edge
   only ordered a Python or R cell, so a cell after a setup kept its cache when the setup
   ran with a new body, and every cell after one stayed ready; a SQL write after a seed
