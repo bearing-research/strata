@@ -122,18 +122,41 @@ def test_detect_failure_raises():
 
 def test_ensure_installed_noop_when_present():
     runner = ScriptedSshRunner([])
-    info = RemoteEnvInfo(has_worker=True, has_uv=True, worker_version="0.6.0", platform="Linux")
-    RemoteWorker("gpu", runner).ensure_installed(info)
+    info = RemoteEnvInfo(
+        has_worker=True,
+        has_uv=True,
+        worker_version="0.6.0",
+        platform="Linux",
+        worker_path="/usr/bin/strata-worker",
+    )
+    assert RemoteWorker("gpu", runner).ensure_installed(info) == "/usr/bin/strata-worker"
     assert runner.calls == []  # already installed → no remote command
 
 
 def test_ensure_installed_uses_uv_with_extras_and_pin():
-    runner = ScriptedSshRunner([("uv tool install", _ok())])
-    info = RemoteEnvInfo(has_worker=False, has_uv=True, worker_version=None, platform="Linux")
-    RemoteWorker("gpu", runner).ensure_installed(info, extras="notebook", pin="0.6.0")
-    assert len(runner.calls) == 1
-    assert "uv tool install" in runner.calls[0]
+    runner = ScriptedSshRunner(
+        [("uv tool install", _ok()), ("uv tool dir --bin", _ok("/root/.local/bin\n"))]
+    )
+    info = RemoteEnvInfo(
+        has_worker=False, has_uv=True, worker_version=None, platform="Linux", uv_path="/usr/bin/uv"
+    )
+    path = RemoteWorker("gpu", runner).ensure_installed(info, extras="notebook", pin="0.6.0")
+    assert len(runner.calls) == 2
+    assert runner.calls[0].startswith("/usr/bin/uv tool install")
     assert "strata-notebook[notebook]==0.6.0" in runner.calls[0]
+    # Launched by the bin dir uv reports, which a non-interactive PATH often lacks.
+    assert path == "/root/.local/bin/strata-worker"
+
+
+@pytest.mark.parametrize(
+    "bin_dir", [_ok(""), _fail("unexpected argument '--bin'")], ids=["empty", "failed"]
+)
+def test_ensure_installed_names_the_bin_dir_step(bin_dir):
+    """A failed bin-dir query is not reported as a failed install."""
+    runner = ScriptedSshRunner([("uv tool install", _ok()), ("uv tool dir --bin", bin_dir)])
+    info = RemoteEnvInfo(has_worker=False, has_uv=True, worker_version=None, platform="Linux")
+    with pytest.raises(SshWorkerError, match="installed .* but `uv tool dir --bin` did not"):
+        RemoteWorker("gpu", runner).ensure_installed(info)
 
 
 def test_ensure_installed_refuses_without_uv():
@@ -276,6 +299,56 @@ def test_launch_command_starts_the_worker_under_a_real_shell(shell, tmp_path, to
         assert log.read_text().strip() == f"started launch={launch_id or ''} token={token or ''}"
     finally:
         remote.stop()
+
+
+def _stub(path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    "uv_dir",
+    ["path", ".local/bin", ".cargo/bin"],
+    ids=["uv-on-path", "uv-in-local-bin", "uv-in-cargo-bin"],
+)
+def test_detect_finds_the_worker_in_uvs_bin_dir_off_path(tmp_path, uv_dir):
+    """Non-interactive SSH on Ubuntu lacks ~/.local/bin on PATH; detect still finds both tools."""
+    home = tmp_path / "home"
+    tool_bin = home / ".local" / "bin"
+    uv = (tmp_path / "bin" / "uv") if uv_dir == "path" else (home / uv_dir / "uv")
+    _stub(uv, f'[ "$1 $2 $3" = "tool dir --bin" ] && echo {tool_bin}\n')
+    _stub(tool_bin / "strata-worker", 'echo "strata-worker 9.9"\n')
+    env = {"HOME": str(home), "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin"}
+
+    info = RemoteWorker("gpu", LocalShellRunner("/bin/sh", env)).detect()
+
+    assert info.worker_path == str(tool_bin / "strata-worker")
+    assert info.uv_path == str(uv)
+    assert info.worker_version == "strata-worker 9.9"
+
+
+def test_detect_finds_a_worker_in_local_bin_without_uv(tmp_path):
+    """pipx or ``pip --user`` put it in ~/.local/bin, which a non-interactive PATH lacks."""
+    home = tmp_path / "home"
+    _stub(home / ".local" / "bin" / "strata-worker", 'echo "strata-worker 9.9"\n')
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+    info = RemoteWorker("gpu", LocalShellRunner("/bin/sh", env)).detect()
+    assert info.worker_path == str(home / ".local" / "bin" / "strata-worker")
+
+
+def test_log_tail_reads_the_workers_log(tmp_path):
+    home = tmp_path / "home"
+    (home / ".strata").mkdir(parents=True)
+    log = home / ".strata" / "worker-gpu.log"
+    log.write_text("".join(f"line {i}\n" for i in range(30)) + "nohup: failed to run command\n")
+    remote = RemoteWorker(
+        "gpu", LocalShellRunner("/bin/sh", {"HOME": str(home), "PATH": "/usr/bin:/bin"})
+    )
+    tail = remote.log_tail(lines=2)
+    assert tail == "line 29\nnohup: failed to run command"
+    log.unlink()
+    assert remote.log_tail() == ""
 
 
 def test_timeout_error_never_contains_stdin_data(monkeypatch):

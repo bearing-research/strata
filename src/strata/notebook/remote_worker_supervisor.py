@@ -382,8 +382,10 @@ class RemoteWorkerSupervisor:
         worker.preflight()
         info = worker.detect()
         if install:
-            worker.ensure_installed(info, extras=extras, pin=pin)
-        elif not info.has_worker:
+            executable = worker.ensure_installed(info, extras=extras, pin=pin)
+        elif info.worker_path:
+            executable = info.worker_path
+        else:
             raise SshWorkerError(
                 f"{name}: strata-worker isn't installed on the box and install=False"
             )
@@ -391,7 +393,7 @@ class RemoteWorkerSupervisor:
         token = token or secrets.token_urlsafe(32)
         rport = remote_port or DEFAULT_REMOTE_PORT
         launch_id = secrets.token_urlsafe(16)
-        running = worker.launch(port=rport, token=token, launch_id=launch_id)
+        running = worker.launch(port=rport, token=token, launch_id=launch_id, executable=executable)
         lport = self._local_port(name, local_port)
         handle = self.tunnel_launcher.spawn(
             target.target, local_port=lport, remote_port=running.port
@@ -404,9 +406,11 @@ class RemoteWorkerSupervisor:
                     f"{name}: ssh exited before the worker's /health answered on "
                     f"127.0.0.1:{lport}: {handle.error() or 'it wrote nothing'}"
                 )
+            log = worker.log_tail()
             raise SshWorkerError(
                 f"{name}: tunnel opened but the worker's /health didn't respond on "
                 f"127.0.0.1:{lport} within {health_timeout}s"
+                + (f"; ~/.strata/worker-{name}.log on the box ends:\n{log}" if log else "")
             )
         # Another listener already on the remote port would answer /health and then
         # receive the bearer token, even while our worker is still starting up to fail
