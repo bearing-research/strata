@@ -889,7 +889,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   then failed at run time: cells run in `work/`, and the `.ipynb`'s folder is not on
   `sys.path`. The import report has a section for them now, each with the `# @mount`
   to add and the path to read through it, or the package to `uv add --editable`, and
-  `strata import` and the UI's import summary count them. (#PRIMP)
+  `strata import` and the UI's import summary count them. (#1719)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a
