@@ -41,6 +41,12 @@ class SshWorkerError(Exception):
     """An SSH provisioning step failed, carrying an actionable message."""
 
 
+def install_spec(extras: str, pin: str | None) -> str:
+    """What ``uv tool install`` installs: ``strata-notebook[notebook]==0.12.0``."""
+    spec = f"strata-notebook[{extras}]" if extras else "strata-notebook"
+    return f"{spec}=={pin}" if pin else spec
+
+
 def worker_pin(pin: str | None) -> tuple[str | None, str | None]:
     """The version to install a box's worker at, and a warning when it is not pinned.
 
@@ -201,9 +207,10 @@ class RemoteWorker:
             'printf "worker=%s\\n" "$w"; '
             'printf "uv=%s\\n" "$uv"; '
             'printf "platform=%s\\n" "$(uname -sm 2>/dev/null || true)"; '
-            # The found worker's release, from the interpreter its script names.
+            # The found worker's release, from the interpreter its script names; unquoted,
+            # so ``#!/usr/bin/env python3`` runs as two words.
             'py=$([ -n "$w" ] && head -n 1 "$w" 2>/dev/null | sed -n "s/^#! *//p" || true); '
-            'printf "version=%s\\n" "$([ -n "$py" ] && "$py" -c '
+            'printf "version=%s\\n" "$([ -n "$py" ] && $py -c '
             "'import importlib.metadata as m; print(m.version(\"strata-notebook\"))' "
             '2>/dev/null || true)"'
         )
@@ -241,9 +248,7 @@ class RemoteWorker:
                 "Install uv on the box (https://docs.astral.sh/uv/) or pre-install "
                 "`strata-notebook` there, then retry."
             )
-        spec = f"strata-notebook[{extras}]" if extras else "strata-notebook"
-        if pin:
-            spec = f"{spec}=={pin}"
+        spec = install_spec(extras, pin)
         uv = shlex.quote(info.uv_path or "uv")
         res = self.runner.run(f"{uv} tool install {shlex.quote(spec)}", timeout=_INSTALL_TIMEOUT)
         if not res.ok:

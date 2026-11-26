@@ -224,6 +224,25 @@ def test_a_box_whose_worker_is_another_version_warns(monkeypatch, found, warns):
         assert rec.warnings == ()
 
 
+def test_a_failed_connect_names_the_other_version(monkeypatch):
+    _server_version(monkeypatch, "0.12.0")
+    sup, _, _ = _supervisor(healthy=False)
+
+    with pytest.raises(
+        SshWorkerError, match=r"didn't respond.*strata-worker is 0\.6\.0, not 0\.12\.0"
+    ):
+        sup.establish("gpu", "user@box", health_timeout=0.05)
+
+
+def test_the_suggested_install_has_no_empty_extras(monkeypatch):
+    _server_version(monkeypatch, "0.12.0")
+    sup, _, _ = _supervisor()
+
+    (warning,) = sup.establish("gpu", "user@box", extras="").warnings
+
+    assert "--force 'strata-notebook==0.12.0'" in warning
+
+
 def test_establish_launches_the_detected_worker_path():
     runner = _runner()
     sup, _, _ = _supervisor(runner=runner)

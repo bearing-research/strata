@@ -332,6 +332,21 @@ def test_detect_finds_the_worker_in_uvs_bin_dir_off_path(tmp_path, uv_dir):
     assert info.worker_version == "9.9"
 
 
+def test_detect_reads_the_version_through_an_env_shebang(tmp_path):
+    """pip and pipx write ``#!/usr/bin/env python3``: two words, run as two."""
+    home = tmp_path / "home"
+    _stub(tmp_path / "bin" / "fakepy", "echo 0.12.0\n")
+    worker = home / ".local" / "bin" / "strata-worker"
+    worker.parent.mkdir(parents=True)
+    worker.write_text("#!/usr/bin/env fakepy\nimport sys\n")
+    worker.chmod(0o755)
+    env = {"HOME": str(home), "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin"}
+
+    info = RemoteWorker("gpu", LocalShellRunner("/bin/sh", env)).detect()
+
+    assert info.worker_version == "0.12.0"
+
+
 def test_detect_finds_a_worker_in_local_bin_without_uv(tmp_path):
     """pipx or ``pip --user`` put it in ~/.local/bin, which a non-interactive PATH lacks."""
     home = tmp_path / "home"

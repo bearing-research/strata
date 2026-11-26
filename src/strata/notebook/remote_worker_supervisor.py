@@ -17,9 +17,11 @@ from typing import IO, TYPE_CHECKING, Any, Protocol
 
 from strata.notebook.ssh_worker import (
     _SSH_HARDENING,
+    RemoteEnvInfo,
     RemoteWorker,
     SshTarget,
     SshWorkerError,
+    install_spec,
     worker_pin,
 )
 from strata.notebook.worker_secrets import (
@@ -390,9 +392,48 @@ class RemoteWorkerSupervisor:
             found = info.worker_version or "of a version it did not say"
             warnings.append(
                 f"the box's strata-worker is {found}, not {pin}: run "
-                f"`uv tool install --force 'strata-notebook[{extras}]=={pin}'` there, "
+                f"`uv tool install --force '{install_spec(extras, pin)}'` there, "
                 "then connect again"
             )
+        try:
+            return self._launch_and_tunnel(
+                name,
+                target,
+                worker,
+                info,
+                remote_port=remote_port,
+                local_port=local_port,
+                token=token,
+                extras=extras,
+                pin=pin,
+                install=install,
+                health_timeout=health_timeout,
+                warnings=warnings,
+            )
+        except SshWorkerError as exc:
+            if not warnings:
+                raise
+            # A worker of another version is the likely cause, so the failure says so.
+            raise SshWorkerError(f"{exc}; {'; '.join(warnings)}") from exc
+
+    def _launch_and_tunnel(
+        self,
+        name: str,
+        target: SshTarget,
+        worker: RemoteWorker,
+        info: RemoteEnvInfo,
+        *,
+        remote_port: int | None,
+        local_port: int | None,
+        token: str | None,
+        extras: str,
+        pin: str | None,
+        install: bool,
+        health_timeout: float,
+        warnings: list[str],
+    ) -> TunnelRecord:
+        """Install if asked, launch, tunnel and check the worker :meth:`_establish_locked_out`
+        found."""
         if install:
             executable = worker.ensure_installed(info, extras=extras, pin=pin)
         elif info.worker_path:

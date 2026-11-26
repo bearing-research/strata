@@ -671,7 +671,7 @@ class SshWorkerRequest(BaseModel):
     local_port: int | None = Field(default=None, ge=1, le=65535)
     extras: str = Field(default="notebook", max_length=200)
     # The strata-notebook version to install: the server's own when None, none at "none".
-    pin: str | None = Field(default=None, max_length=100)
+    pin: str | None = Field(default=None, min_length=1, max_length=100)
     install: bool = True
     set_default: bool = False
 
