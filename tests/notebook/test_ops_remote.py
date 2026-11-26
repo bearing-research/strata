@@ -480,7 +480,7 @@ def test_remote_move_cell_unknown_is_ops_error():
 async def test_remote_add_dependency_maps():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST" and request.url.path == "/v1/notebooks/s1/dependencies"
-        assert json.loads(request.content) == {"package": "pandas"}
+        assert json.loads(request.content) == {"packages": ["pandas"]}
         return httpx.Response(
             200, json={"success": True, "package": "pandas", "lockfile_changed": True}
         )
