@@ -6,6 +6,7 @@ again before each run: an ERROR keeps the cell from running (``blocking_diagnost
 
 from __future__ import annotations
 
+import ast
 import functools
 import io
 import logging
@@ -118,6 +119,15 @@ def validate_cell_annotations(
     looped = parse_annotations(cell.source, cell.language).loop is not None
     if cell.language == CellLanguage.PROMPT and not analysis.structural_errors and not looped:
         language_checks = _validate_prompt_inputs(analysis, cell.id)
+    elif cell.language == CellLanguage.PYTHON:
+        language_checks += [
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="sql_result_unnamed",
+                message=sql_result_hint(name, sql_id),
+            )
+            for name, sql_id in unnamed_sql_results(cell, notebook_state, analysis).items()
+        ]
     diagnostics = strata_diagnostics(
         analysis.cells[cell.id], language_checks, without_dag=bool(analysis.structural_errors)
     )
@@ -184,6 +194,55 @@ def _comment_lines(cell: CellState) -> set[int] | None:
     except (tokenize.TokenError, SyntaxError):
         return None
     return lines
+
+
+def unnamed_sql_results(
+    cell: CellState, notebook_state: NotebookState, analysis: cg.Analysis
+) -> dict[str, str]:
+    """The one name *cell* uses that no cell defines, with the SQL cell nearest above it
+    when that cell's output is the default ``result``: likely the name it was meant to
+    have. Empty for more than one such name, which one ``-- @name`` cannot fix."""
+    from strata.notebook.display.runtime import DISPLAY_HELPER_NAMES
+
+    ids = [c.id for c in notebook_state.cells]
+    # A cell validated before it joins the notebook has no cell above.
+    above = notebook_state.cells[: ids.index(cell.id)] if cell.id in ids else []
+    sql = next((c for c in reversed(above) if c.language == CellLanguage.SQL), None)
+    analyzed = analysis.cells.get(cell.id)
+    if (
+        sql is None
+        or "result" not in sql.defines
+        or parse_annotations(sql.source, sql.language).name is not None
+        or analyzed is None
+        or _star_import(cell.source)
+    ):
+        return {}
+    given = {"strata", *DISPLAY_HELPER_NAMES}
+    defined = {name for c in analysis.cells.values() for name in c.defines}
+    undefined = [name for name in analyzed.references if name not in defined and name not in given]
+    return {undefined[0]: sql.id} if len(undefined) == 1 else {}
+
+
+def _star_import(source: str) -> bool:
+    """``from m import *``, which binds names no analysis sees."""
+    from cellgraph.python import UNPARSEABLE
+
+    try:
+        tree = ast.parse(source)
+    except UNPARSEABLE:
+        return False
+    return any(
+        isinstance(node, ast.ImportFrom) and any(a.name == "*" for a in node.names)
+        for node in ast.walk(tree)
+    )
+
+
+def sql_result_hint(name: str, sql_id: str) -> str:
+    """Why *name* is undefined, when the SQL cell *sql_id* above outputs ``result``."""
+    return (
+        f"`{name}` is not defined by any cell. The SQL cell `{sql_id}` above outputs "
+        f"`result`; add `-- @name {name}` to it."
+    )
 
 
 def _validate_prompt_inputs(analysis: cg.Analysis, cell_id: str) -> list[AnnotationDiagnostic]:

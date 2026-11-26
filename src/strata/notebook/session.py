@@ -27,7 +27,11 @@ from vestigo.file_modes import PASS_THROUGH_DIR, private_dir
 from vestigo.provenance import derive_subkey
 
 from strata.notebook import console_relay, nonce, output_file_relay
-from strata.notebook.annotation_validation import validate_cell_annotations
+from strata.notebook.annotation_validation import (
+    sql_result_hint,
+    unnamed_sql_results,
+    validate_cell_annotations,
+)
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.code_keys import CodeIndex, Resolved, code_key
 from strata.notebook.dag import NotebookDag
@@ -144,6 +148,8 @@ if TYPE_CHECKING:
     from strata.notebook.ws_payloads import SessionClosedReason
 
 logger = logging.getLogger(__name__)
+# What a Python cell's error says of a name nothing defined.
+_NAME_ERROR = re.compile(r"NameError: name '(\w+)' is not defined")
 # Per cell, the undeclared paths whose fingerprints are kept and checked again.
 CHECKED_READS = 100
 # Which a cell's fingerprints keep first: its data before its imports.
@@ -1644,6 +1650,25 @@ class NotebookSession:
             self.path, cell.id, [d.model_dump(mode="json") for d in diagnostics], fingerprints
         )
 
+    def _hint_unnamed_sql_result(self, cell: Any, result: Any) -> None:
+        """A ``NameError`` for a name the SQL cell above likely meant says so (#1709)."""
+        found = _NAME_ERROR.search(result.error or "")
+        if found is None or cell.language != CellLanguage.PYTHON:
+            return
+        from strata.notebook.graph import analysis_with
+
+        name = found.group(1)
+        analysis = analysis_with(cell, self.notebook_state, self.analysis)
+        sql_id = unnamed_sql_results(cell, self.notebook_state, analysis).get(name)
+        if sql_id is None:
+            return
+        hint = sql_result_hint(name, sql_id)
+        if hint in result.error:  # applied again, as the WebSocket path does
+            return
+        result.error = f"{result.error}\n{hint}"
+        if getattr(result, "traceback", None):
+            result.traceback = f"{result.traceback.rstrip()}\n{hint}"
+
     def apply_execution_result_metadata(
         self, cell_id: str, result: Any, *, instance: bool = False
     ) -> None:
@@ -1664,6 +1689,7 @@ class NotebookSession:
             cell.error_full = None
             cell.error_source_hash = None
         else:
+            self._hint_unnamed_sql_result(cell, result)
             # A Python traceback is the fuller form of the error message.
             detail = getattr(result, "traceback", None)
             cell.error = (detail or result.error or "").strip()
