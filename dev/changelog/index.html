@@ -5860,6 +5860,12 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
   lowercasing it (the default, named after the file, still is). <code>strata dep add</code> takes
   several packages and adds them in one resolve and one sync, also on a server, whose
   <code>POST /v1/notebooks/{id}/dependencies</code> takes <code>packages</code>. (#1714)</li>
+<li><strong>An undefined name below an unnamed SQL cell names the fix.</strong> A SQL cell's output
+  is <code>result</code> unless it has <code>-- @name</code>, so a Python cell below that used the name its
+  author meant failed with a bare <code>NameError</code>, and <code>strata validate</code> called the notebook
+  valid. Validation now warns (<code>sql_result_unnamed</code>) on the Python cell, naming the SQL
+  cell above and the <code>-- @name</code> to add, and the run's <code>NameError</code> says the same.
+  (#1720)</li>
 <li><strong>An SSH worker starts on a box whose non-interactive <code>PATH</code> lacks uv's bin dir.</strong>
   <code>strata worker add-ssh</code> installed <code>strata-worker</code> with <code>uv tool install</code> and launched
   it by its bare name, which a stock Ubuntu <code>~/.bashrc</code> keeps off <code>PATH</code> for a

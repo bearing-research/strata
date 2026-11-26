@@ -4654,6 +4654,7 @@ database's rows.</p>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nb">print</span><span class="p">(</span><span class="n">top_customers</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>  <span class="c1"># (5, 2)</span>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">top_customers</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()[</span><span class="s2">"total"</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
 </code></pre></div>
+<p>A Python cell that uses a name no cell defines, below a SQL cell still named <code>result</code>, gets a warning on validation (<code>sql_result_unnamed</code>) naming that SQL cell and the <code>-- @name</code> to add; its <code>NameError</code> at run time says the same.</p>
 <h2 id="-after-for-setup-then-query-pipelines"><code>-- @after</code> for setup-then-query pipelines<a class="headerlink" href="#-after-for-setup-then-query-pipelines" title="Permanent link">&para;</a></h2>
 <p>A read SQL cell that depends on a write SQL cell's side effects (the underlying database state) can declare an explicit ordering edge:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1">-- @sql connection=warehouse write=true</span>
