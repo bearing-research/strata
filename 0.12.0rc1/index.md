@@ -1,0 +1,115 @@
+# Strata { .landing-title }
+
+**Strata is a notebook your coding agent can drive, and everything it computes stays.**
+
+![A coding agent's session beside a browser on the same notebook, asked to plot CO₂ at Mauna Loa and how fast it is rising: it writes and runs a cell that fetches NOAA's monthly record; adds a growth cell that fails with a KeyError, red in the browser too; fixes the one line and reruns only that cell, which prints the rise per decade; adds the plot; and checks the status and sums up, with the fetch served from the cache. The agent's words are scripted; its commands, their output and the browser are real.](https://bearingresearch.com/strata/0.12.0rc1/assets/web-agent-live-light.gif#only-light){ .hero }
+![A coding agent's session beside a browser on the same notebook, asked to plot CO₂ at Mauna Loa and how fast it is rising: it writes and runs a cell that fetches NOAA's monthly record; adds a growth cell that fails with a KeyError, red in the browser too; fixes the one line and reruns only that cell, which prints the rise per decade; adds the plot; and checks the status and sums up, with the fetch served from the cache. The agent's words are scripted; its commands, their output and the browser are real.](https://bearingresearch.com/strata/0.12.0rc1/assets/web-agent-live-dark.gif#only-dark){ .hero }
+
+*An agent adds and runs cells through the `strata` CLI while the browser on the same
+session updates. Captured from a real run, not a mock-up.*
+
+<div class="grid cards" markdown>
+
+-   **Coding agent**
+
+    ---
+
+    Hand a notebook to Claude Code and watch it build through MCP tools.
+
+    [Use a coding agent →](https://bearingresearch.com/strata/0.12.0rc1/notebook/agent/)
+
+-   **Web UI**
+
+    ---
+
+    Write and run cells yourself, with rendered tables, plots and the DAG.
+
+    [Your first notebook →](https://bearingresearch.com/strata/0.12.0rc1/getting-started/notebook/)
+
+-   **Terminal**
+
+    ---
+
+    Watch a notebook live from a second pane or an SSH session. Read-only.
+
+    [Terminal viewer →](https://bearingresearch.com/strata/0.12.0rc1/notebook/tui/)
+
+-   **Agent scratchpad**
+
+    ---
+
+    An agent working on something else runs its Python in a cached session, so a
+    slow load is done once.
+
+    [Agent scratchpad →](https://bearingresearch.com/strata/0.12.0rc1/notebook/scratchpad/)
+
+</div>
+
+## Install
+
+=== "uv (recommended)"
+
+    ```bash
+    uv tool install "strata-notebook[mcp,tui]"
+    strata-notebook
+    ```
+
+    Then open [http://localhost:8765](http://localhost:8765). The `mcp`
+    and `tui` extras are what `strata agent` and `strata watch` need.
+    pipx, pip and conda work too: see [Install](https://bearingresearch.com/strata/0.12.0rc1/getting-started/installation/).
+
+=== "Docker"
+
+    From a clone of the [repo](https://github.com/bearing-research/strata):
+
+    ```bash
+    docker compose up -d --build
+    ```
+
+    Then open [http://localhost:8765](http://localhost:8765).
+
+    Or run the prebuilt image (linux/amd64), published with each release:
+
+    ```bash
+    docker run --rm -p 127.0.0.1:8765:8765 -v strata_state:/home/strata/.strata \
+      ghcr.io/bearing-research/strata:0.12.0rc1
+    ```
+
+=== "From source"
+
+    ```bash
+    uv sync
+    cd frontend && npm ci && npm run build && cd ..
+    uv run strata-notebook
+    ```
+
+    Then open [http://localhost:8765](http://localhost:8765).
+
+See [Install](https://bearingresearch.com/strata/0.12.0rc1/getting-started/installation/) for full details.
+
+## Why the work holds up
+
+**[Nothing runs twice.](https://bearingresearch.com/strata/0.12.0rc1/concepts/caching/)** A cell's identity is its source, its
+inputs and its environment. The step an agent ran ten turns ago is a cache hit now, and
+an edit re-runs only the cells below it.
+
+![A browser on the tutorial notebook over five moments: nothing has run; Run All computes every cell; Run All again and every code cell is a cache hit showing the time it saved; one cell is edited, so it and the chart below read stale while the load cell stays cached; Run All again, and only those two run while the load cell still reads cached, saved 2.1s.](https://bearingresearch.com/strata/0.12.0rc1/assets/cache-payoff-light.gif#only-light)
+![A browser on the tutorial notebook over five moments: nothing has run; Run All computes every cell; Run All again and every code cell is a cache hit showing the time it saved; one cell is edited, so it and the chart below read stale while the load cell stays cached; Run All again, and only those two run while the load cell still reads cached, saved 2.1s.](https://bearingresearch.com/strata/0.12.0rc1/assets/cache-payoff-dark.gif#only-dark)
+
+*Edit one cell in `strata tutorial`: only the cells that read it run again, and the
+cell above keeps what it saved. Captured from a real run, not a mock-up.*
+
+**[No wiring to maintain.](https://bearingresearch.com/strata/0.12.0rc1/concepts/dag-and-staleness/)** Strata reads each cell to
+find what it uses and what it defines, and shows which results an edit has left stale.
+
+**[Every result knows where it came from.](https://bearingresearch.com/strata/0.12.0rc1/concepts/artifacts-and-lineage/)** Every
+output is a versioned artifact, so you can trace it back through what produced it.
+
+**[It reads like code in git.](https://bearingresearch.com/strata/0.12.0rc1/concepts/file-format-and-git/)** A notebook is one
+plain-text file per cell plus a TOML manifest. Outputs and caches stay in a gitignored folder.
+
+There is more on the [Features](https://bearingresearch.com/strata/0.12.0rc1/concepts/features/) page, and Strata also works
+[as a library](https://bearingresearch.com/strata/0.12.0rc1/getting-started/core/).
+
+Strata is pre-1.0, so the API may change between 0.x minors; pin to a minor if you need
+stability.
