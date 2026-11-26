@@ -80,6 +80,60 @@ class TestExecuteHarnessTableInjection:
         assert "snap" in result["variables"]
 
 
+class TestExecuteHarnessModuleExportInjection:
+    """A stored def's upstream values are hydrated into its module, as ``harness.py`` does."""
+
+    @staticmethod
+    def _inputs(tmp_path: Path) -> dict:
+        import math
+
+        from strata.notebook.serializer import serialize_value
+
+        injected = {
+            "math": serialize_value(math, tmp_path, "root__inj__math"),
+            "base": serialize_value(13, tmp_path, "root__inj__base"),
+        }
+        descriptor = {
+            # Unique per test: a hydrated module stays in sys.modules.
+            "module_name": f"nb_test_c2_root_{tmp_path.name}",
+            "symbol_name": "root",
+            "kind": "function",
+            "source": "def root(x):\n    return math.sqrt(x) + base\n",
+            "provenance_hash": "p",
+            "injected": {name: "strata://artifact/unused@v=1" for name in injected},
+        }
+        (tmp_path / "root.cell_module.json").write_text(json.dumps(descriptor))
+        return {
+            "root": {
+                "content_type": "module/cell",
+                "file": "root.cell_module.json",
+                "injected": {
+                    name: {"content_type": spec["content_type"], "file": spec["file"]}
+                    for name, spec in injected.items()
+                },
+            }
+        }
+
+    def test_a_def_closing_over_upstream_values_can_be_called(self, tmp_path: Path) -> None:
+        manifest = {
+            "source": "out = root(9.0)",
+            "inputs": self._inputs(tmp_path),
+            "output_dir": str(tmp_path),
+        }
+
+        result = execute_harness(manifest)
+
+        assert result["success"] is True, result.get("error")
+        assert result["variables"]["out"]["preview"] == 16.0
+
+    def test_the_cold_harness_hydrates_the_same_specs(self, tmp_path: Path) -> None:
+        from strata.notebook import harness
+
+        root = harness._deserialize_one("root", self._inputs(tmp_path)["root"], tmp_path)
+
+        assert root(9.0) == 16.0
+
+
 class TestExecuteHarnessClientInjection:
     """``strata_url`` injects an ambient ``strata`` client, excluded from outputs.
 
