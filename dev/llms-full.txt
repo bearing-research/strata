@@ -22495,10 +22495,11 @@ the caller's tenant.
 
 A **notebook's own** artifact store (`.strata/artifacts/`) keeps each cell
 output's current value plus its three most recent earlier values, so reverting
-a recent edit is still a cache hit. Older values are pruned in the background
-each time the server opens the notebook, including a reopen of a notebook that
-is already open, and a value a crash left half-written for over an hour is
-marked failed then. The values of a cell that is no longer in the notebook,
+a recent edit is still a cache hit. Older values are pruned each time the server
+opens the notebook (in the background, a reopen of an open notebook included)
+and at the end of each `strata run`. The same sweep marks failed a value a crash
+left half-written over an hour ago. A value used within
+`STRATA_ARTIFACT_GC_MIN_IDLE_SECONDS` (an hour) waits for a later sweep. The values of a cell that is no longer in the notebook,
 its current one included, go in the same sweep once unused for 30 days, unless
 a name, pin or publication holds them or a cell's current value was built from them; the
 wait is for a branch that lacks the cell, so checking it out does not cost the
