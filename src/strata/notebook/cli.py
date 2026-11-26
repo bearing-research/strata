@@ -954,6 +954,11 @@ def import_main(args: argparse.Namespace) -> int:
         print(f"  shell commands dropped: {len(result.dropped_shells)}")
     if result.captured_deps:
         print(f"  dependencies captured: {len(result.captured_deps)} → pyproject.toml")
+    if result.beside_notebook:
+        print(
+            f"  files and modules beside the notebook: {len(result.beside_notebook)} "
+            "(see report; each fails at run time until wired up)"
+        )
     if result.skipped_cells:
         kinds = ", ".join(sorted(set(result.skipped_cells)))
         print(f"  skipped {len(result.skipped_cells)} cell(s) of unsupported type(s): {kinds}")

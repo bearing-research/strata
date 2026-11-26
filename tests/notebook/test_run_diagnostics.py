@@ -208,7 +208,7 @@ class TestTheMessage:
 
         assert "`uv add --editable ../helpers`" in in_package
         assert "--editable ." not in in_notebook
-        assert f"Move the ones directly in `{notebook_dir}` into a folder" in in_notebook
+        assert "Move it into a folder of its own, make that a package" in in_notebook
 
     def test_each_kind_names_its_own_fix(self, tmp_path):
         found = run_diagnostics(

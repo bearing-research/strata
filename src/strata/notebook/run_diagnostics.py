@@ -45,7 +45,7 @@ def run_diagnostics(
     A suggested mount is named after its folder, never with a name in *taken* (the
     cell's mounts and variables).
     """
-    names = _Names(taken)
+    names = MountNames(taken)
     diagnostics = [_finding(finding, notebook_dir, names) for finding in read_audit]
     # A loop's iterations and a fan-out's instances each warn of the same mutation.
     messages = dict.fromkeys(
@@ -76,7 +76,7 @@ def changed_reads_hint(paths: Sequence[str], rerun: str) -> str:
     )
 
 
-def _finding(finding: ReadFinding, notebook_dir: Path, names: _Names) -> AnnotationDiagnostic:
+def _finding(finding: ReadFinding, notebook_dir: Path, names: MountNames) -> AnnotationDiagnostic:
     code = finding["code"]
     items = finding["items"]
     severity = DiagnosticSeverity.WARN
@@ -104,23 +104,18 @@ def _finding(finding: ReadFinding, notebook_dir: Path, names: _Names) -> Annotat
     return AnnotationDiagnostic(severity=severity, code=code, message=message)
 
 
-def _read(items: list[str], total: int, notebook_dir: Path, names: _Names) -> str:
-    mounts, loose = _mounts([os.path.dirname(path) for path in items], notebook_dir, names)
+def _read(items: list[str], total: int, notebook_dir: Path, names: MountNames) -> str:
     if total == 1:
         what = f"This cell read {_code(items[0])}, which no mount covers"
-        if mounts:
-            ((name, root, written),) = mounts
-            relative = os.path.relpath(items[0], root)
-            fix = f"Add {_annotation(name, written)} and read {_code(f'{name} / "{relative}"')}."
-        else:
-            fix = "Move it into a folder of its own and mount that."
+        fix = read_fix(items[0], notebook_dir, names)
         return f"{what}, so its cached result will not change when the file does. {fix}"
+    mounts, loose = _mounts([os.path.dirname(path) for path in items], notebook_dir, names)
     what = f"This cell read {total} files no mount covers ({_shown(items, total)})"
     fix = _mount_fix(mounts, loose, "read them", "Move the ones directly in {} into a folder")
     return f"{what}, so its cached result will not change when they do. {fix}"
 
 
-def _listing(items: list[str], total: int, notebook_dir: Path, names: _Names) -> str:
+def _listing(items: list[str], total: int, notebook_dir: Path, names: MountNames) -> str:
     mounts, loose = _mounts(items, notebook_dir, names)
     if total == 1:
         what = f"This cell listed {_code(items[0])}, which no mount covers"
@@ -134,10 +129,37 @@ def _listing(items: list[str], total: int, notebook_dir: Path, names: _Names) ->
     return f"{what}, so its cached result will not change when a file is added or removed. {fix}"
 
 
+def read_fix(path: str, notebook_dir: Path, names: MountNames) -> str:
+    """How a cell of the notebook at *notebook_dir* reads the file *path* through a mount."""
+    mounts, _ = _mounts([os.path.dirname(path)], notebook_dir, names)
+    if not mounts:
+        return "Move it into a folder of its own and mount that."
+    ((name, root, written),) = mounts
+    relative = os.path.relpath(path, root)
+    return f"Add {_annotation(name, written)} and read {_code(f'{name} / "{relative}"')}."
+
+
+def folder_fix(directory: str, notebook_dir: Path, names: MountNames) -> str:
+    """How a cell of the notebook at *notebook_dir* reads the folder *directory*."""
+    mounts, _ = _mounts([directory], notebook_dir, names)
+    if not mounts:
+        return "Move what it reads into a folder of its own and mount that."
+    ((name, _, written),) = mounts
+    return f"Add {_annotation(name, written)} and read through {_code(name)}."
+
+
 def _import(items: list[str], total: int, notebook_dir: Path) -> str:
+    noun = _code(items[0]) if total == 1 else f"{total} modules ({_shown(items, total)})"
+    return (
+        f"This cell imported {noun} from outside the notebook's environment, so its cached "
+        f"result will not change when that source does. {import_fix(items, notebook_dir)}"
+    )
+
+
+def import_fix(items: list[str], notebook_dir: Path) -> str:
+    """How the notebook at *notebook_dir* imports the module files *items*, keyed."""
     # Its import root, where its package's pyproject.toml goes: above its packages.
     roots = sorted({_import_root(os.path.dirname(path)) for path in items})
-    noun = _code(items[0]) if total == 1 else f"{total} modules ({_shown(items, total)})"
     fixes = []
     edits = [
         _code(f"uv add --editable {shlex.quote(_written(root, notebook_dir))}")
@@ -151,15 +173,17 @@ def _import(items: list[str], total: int, notebook_dir: Path) -> str:
             f"{_join(edits[:SHOWN] + more)}, which keys its source."
         )
     loose = [_code(root) for root in roots if not _mountable(root, notebook_dir)]
-    if loose:
+    if loose and len(items) == 1:
+        fixes.append(
+            f"Move it into a folder of its own, make that a package and "
+            f"{_code('uv add --editable')} it."
+        )
+    elif loose:
         fixes.append(
             f"Move the ones directly in {_join(loose)} into a folder, make that a package "
             f"and {_code('uv add --editable')} it."
         )
-    return (
-        f"This cell imported {noun} from outside the notebook's environment, so its cached "
-        f"result will not change when that source does. {' '.join(fixes)}"
-    )
+    return " ".join(fixes)
 
 
 def _unlocked(items: list[str], total: int) -> str:
@@ -197,7 +221,7 @@ def _subprocess(items: list[str], total: int) -> str:
 
 
 def _mounts(
-    dirs: list[str], notebook_dir: Path, names: _Names
+    dirs: list[str], notebook_dir: Path, names: MountNames
 ) -> tuple[list[tuple[str, str, str]], list[str]]:
     """A mount ``(name, path, as written)`` per group of *dirs*, over their nearest common one,
     and the directories no mount should cover (see :func:`_mountable`).
@@ -267,7 +291,7 @@ def _import_root(directory: str) -> str:
     return directory
 
 
-class _Names:
+class MountNames:
     """A mount name per folder, the same for it in every diagnostic of a run."""
 
     def __init__(self, taken: Iterable[str]) -> None:
