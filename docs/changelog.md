@@ -853,7 +853,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   non-interactive shell, so only a `/health` timeout showed. Detection now also looks in
   `uv tool dir --bin` and `~/.local/bin` (and for uv in `~/.local/bin` and
   `~/.cargo/bin`), the worker is launched by its path, and a `/health` timeout quotes the
-  end of the worker's log on the box. (#PR1696)
+  end of the worker's log on the box. (#1697)
 - **A cell after a writer is stale once the writer's tables land.** A run's
   `@write_table` writes and its read-write mount sync-back land after the token its code
   ends with, so a cell `@after` it keyed meanwhile stayed ready on what was there before.
