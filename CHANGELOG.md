@@ -866,7 +866,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   overrides it, and a worker already on the box at another version gets a warning naming
   the `uv tool install --force` that matches it. The probe of that version asked
   `strata-worker --version`, which no worker answers; it reads the worker's own
-  interpreter now. (#PRPIN)
+  interpreter now. (#1716)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a
