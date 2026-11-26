@@ -853,7 +853,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   `# @key` line after the first code line now warns (`annotation_outside_block`, in the
   cell header and `strata validate`), as only `@app` did (`app_outside_annotations`, which
   this replaces). A comment in a string, a commented-out decorator such as `# @cache`, and
-  a prompt's body are not read as annotations. (#PROUT)
+  a prompt's body are not read as annotations. (#1713)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a
