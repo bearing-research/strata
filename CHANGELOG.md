@@ -9,7 +9,7 @@ exhaustive commit history.
 
 Release candidate for 0.12.0. Install it with
 `uv tool install "strata-notebook[mcp,tui]==0.12.0rc1"`.
-The changes are listed under 0.12.0 below.
+The changes are listed under 0.12.0 in CHANGELOG.md.
 
 ## 0.12.0 - Unreleased
 
