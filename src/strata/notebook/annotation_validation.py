@@ -118,6 +118,15 @@ def validate_cell_annotations(
     looped = parse_annotations(cell.source, cell.language).loop is not None
     if cell.language == CellLanguage.PROMPT and not analysis.structural_errors and not looped:
         language_checks = _validate_prompt_inputs(analysis, cell.id)
+    elif cell.language == CellLanguage.PYTHON:
+        language_checks += [
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="sql_result_unnamed",
+                message=sql_result_hint(name, sql_id),
+            )
+            for name, sql_id in unnamed_sql_results(cell, notebook_state, analysis).items()
+        ]
     diagnostics = strata_diagnostics(
         analysis.cells[cell.id], language_checks, without_dag=bool(analysis.structural_errors)
     )
@@ -184,6 +193,45 @@ def _comment_lines(cell: CellState) -> set[int] | None:
     except (tokenize.TokenError, SyntaxError):
         return None
     return lines
+
+
+# Names the harness gives every Python cell (``harness._AMBIENT_NAMES``).
+_AMBIENT = frozenset({"strata", "display", "Markdown"})
+
+
+def unnamed_sql_results(
+    cell: CellState, notebook_state: NotebookState, analysis: cg.Analysis
+) -> dict[str, str]:
+    """Each name *cell* uses that no cell defines, with the nearest SQL cell above it
+    whose output is the default ``result``: likely the name its author meant."""
+    ids = [c.id for c in notebook_state.cells]
+    # A cell validated before it joins the notebook has no cell above.
+    above = notebook_state.cells[: ids.index(cell.id)] if cell.id in ids else []
+    sql_id = next(
+        (
+            c.id
+            for c in reversed(above)
+            if c.language == CellLanguage.SQL
+            and "result" in c.defines
+            and parse_annotations(c.source, c.language).name is None
+        ),
+        None,
+    )
+    analyzed = analysis.cells.get(cell.id)
+    if sql_id is None or analyzed is None:
+        return {}
+    defined = {name for c in analysis.cells.values() for name in c.defines}
+    return {
+        name: sql_id for name in analyzed.references if name not in defined and name not in _AMBIENT
+    }
+
+
+def sql_result_hint(name: str, sql_id: str) -> str:
+    """Why *name* is undefined, when the SQL cell *sql_id* above outputs ``result``."""
+    return (
+        f"`{name}` is not defined by any cell. The SQL cell `{sql_id}` above outputs "
+        f"`result`; add `-- @name {name}` to it."
+    )
 
 
 def _validate_prompt_inputs(analysis: cg.Analysis, cell_id: str) -> list[AnnotationDiagnostic]:

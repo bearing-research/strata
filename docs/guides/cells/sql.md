@@ -215,6 +215,8 @@ print(top_customers.shape)  # (5, 2)
 print(top_customers.to_pandas()["total"].sum())
 ```
 
+A Python cell that uses a name no cell defines, below a SQL cell still named `result`, gets a warning on validation (`sql_result_unnamed`) naming that SQL cell and the `-- @name` to add; its `NameError` at run time says the same.
+
 ## `-- @after` for setup-then-query pipelines
 
 A read SQL cell that depends on a write SQL cell's side effects (the underlying database state) can declare an explicit ordering edge:
