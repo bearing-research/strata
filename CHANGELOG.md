@@ -867,6 +867,11 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   after, so a rerun was answered "already running" all that time. Every item's run now
   ends with the item, as a failed plain cell's does; `@per_variant` instances too.
   (#1700)
+- **A function from another cell can use that cell's upstream values on the warm
+  worker too.** A def that closes over another cell's import or value (`math`, an `rng`)
+  is stored with those values, but only the cold harness put them back, so a cell or
+  `@each` item that called it on the warm worker got `NameError`. The warm worker now
+  hydrates them as the cold harness does. (#1701)
 - **A cell after a writer is stale once the writer's tables land.** A run's
   `@write_table` writes and its read-write mount sync-back land after the token its code
   ends with, so a cell `@after` it keyed meanwhile stayed ready on what was there before.

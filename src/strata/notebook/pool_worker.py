@@ -268,6 +268,16 @@ def execute_harness(manifest: dict, protocol: Any = None) -> dict:
             if not full_path.exists():
                 return _MISSING
             try:
+                # A module/cell export carries the upstream values its defs close over;
+                # parity with harness._deserialize_one, which hydrates them too.
+                injected_specs = spec.get("injected")
+                if spec.get("content_type", "") == "module/cell" and injected_specs:
+                    injected: dict[str, Any] = {}
+                    for inj_name, inj_spec in injected_specs.items():
+                        value = _deser_one(inj_spec, f"{var_name}__inj__{inj_name}")
+                        if value is not _MISSING:
+                            injected[inj_name] = value
+                    return _ser.deserialize_cell_module_with_injection(full_path, injected)
                 return _ser.deserialize_value(spec.get("content_type", ""), full_path)
             except _ser.StrataPrecisionError as exc:
                 raise _ser.StrataPrecisionError(
