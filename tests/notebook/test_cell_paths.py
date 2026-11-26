@@ -1407,6 +1407,7 @@ class TestFanout:
             "materialize_upstreams": nothing,
             "compute_provenance": compute_provenance,
             "execute_python_cell": execute_python_cell,
+            "close_open_run": nothing,
             "moved": lambda _cell_id: ({}, {}),
             "promote_reverted_outputs": lambda *_args: None,
             "gone_tables": _no_gone_tables,

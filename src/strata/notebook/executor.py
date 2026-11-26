@@ -1603,6 +1603,7 @@ class CellExecutor:
             materialize_upstreams=self._materialize_upstreams,
             compute_provenance=self._compute_cell_provenance,
             execute_python_cell=self._execute_python_cell,
+            close_open_run=self._close_open_run,
             moved=self._moved,
             promote_reverted_outputs=self._promote_reverted_outputs,
             gone_tables=self._gone_tables,

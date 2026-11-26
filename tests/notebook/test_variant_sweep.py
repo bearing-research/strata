@@ -297,6 +297,39 @@ class TestPerVariantEndToEnd:
         assert "'double': 12.0" in report["stdout"]
         assert "'triple': 18.0" in report["stdout"]
 
+    def test_a_failed_variant_lets_the_next_run_start_at_once(self, tmp_path, capsys):
+        """A variant that fails before another runs ends its run; it refused a rerun."""
+        import json as _json
+
+        from strata.notebook.cli import run_main
+        from strata.notebook.writer import (
+            add_cell_to_notebook,
+            create_notebook,
+            set_variant_mode,
+            write_cell,
+        )
+
+        nb = create_notebook(tmp_path, "Fanout", initialize_environment=False)
+        prepared_venv(nb)
+        cells = [
+            ("load", "X = [1.0, 2.0, 3.0]\n", None),
+            ("vdouble", "# @variant model double\npreds = [v * 2 for v in X]\n", "load"),
+            ("vtriple", "# @variant model triple\npreds = [v * 3 for v in X]\n", "vdouble"),
+            ("ev", "# @per_variant\nassert preds[0] != 2.0, 'bad'\nscore = 1\n", "vtriple"),
+        ]
+        for cid, src, after in cells:
+            add_cell_to_notebook(nb, cid, after, language="python")
+            write_cell(nb, cid, src)
+        set_variant_mode(nb, "model", "sweep")
+
+        errors = []
+        for _ in range(2):
+            assert run_main([str(nb), "--no-sync", "--format", "json"]) != 0
+            payload = _json.loads(capsys.readouterr().out)
+            errors.append(next(c for c in payload["cells"] if c["id"] == "ev")["error"])
+        assert errors[0] == errors[1]
+        assert "AssertionError: bad" in errors[1]
+
     def test_a_fanout_that_defines_nothing_runs_once_per_variant(self, tmp_path, capsys):
         import json as _json
 

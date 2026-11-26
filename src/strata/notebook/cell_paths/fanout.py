@@ -40,6 +40,8 @@ class FanoutContext:
     compute_provenance: Callable[..., Awaitable[_CellProvenance]]
     # An instance is a Python run under the cell's base key.
     execute_python_cell: Callable[..., Awaitable[CellExecutionResult]]
+    # Ends the local run an instance left open, before the next one opens its own.
+    close_open_run: Callable[[str], Awaitable[None]]
     moved: Callable[[str], tuple[dict[str, int | None], dict[str, int]]]
     promote_reverted_outputs: Callable[..., int | None]
     gone_tables: Callable[[str], Awaitable[list[TableWriteSpec]]]
@@ -174,16 +176,23 @@ async def _run_fanout_instances(
     total = len(instances)
     for index, (name, label) in enumerate(instances):
         variant_start = time.time()
-        res = await context.execute_python_cell(
-            cell_id,
-            source,
-            timeout_seconds,
-            start_time,
-            materialize_upstreams=False,
-            use_cache=use_cache,
-            fanout_variant=name,
-            cell_provenance=base,
-        )
+        try:
+            res = await context.execute_python_cell(
+                cell_id,
+                source,
+                timeout_seconds,
+                start_time,
+                materialize_upstreams=False,
+                use_cache=use_cache,
+                fanout_variant=name,
+                cell_provenance=base,
+            )
+        finally:
+            # A failed instance leaves its run open, and runs are kept by cell id: the
+            # next instance's replaced it, still renewing a lease that refused reruns.
+            # Shielded, or a cancel would skip settling the build.
+            with anyio.CancelScope(shield=True):
+                await context.close_open_run(cell_id)
         results.append((label, res))
         if context.on_variant_complete is not None:
             try:

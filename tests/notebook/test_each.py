@@ -515,6 +515,21 @@ class TestFailure:
         assert nb.ran() == ["fine"]
         assert set(nb.manifest("b", "out")) == {"good", "fine"}
 
+    async def test_a_failed_item_lets_the_next_run_start_at_once(self, tmp_path):
+        """Its run ends with it; left open under a later item's, its lease refused a rerun."""
+        cell = (
+            "# @each item in samples\nif item == 'bad':\n    raise ValueError('no')\nout = item\n"
+        )
+        # Not last: a later item's run used to replace it, still open.
+        nb = Notebook(tmp_path, 'samples = {k: k for k in ["bad", "x", "y"]}\n', cell)
+        await nb.good("a")
+
+        first = await nb.run("b")
+        again = await nb.run("b")
+
+        assert first.error == "Item 'bad' failed: ValueError: no"
+        assert again.error == "Item 'bad' failed: ValueError: no"
+
     async def test_a_changed_item_that_fails_is_not_kept_at_its_old_value(self, tmp_path):
         log = tmp_path / "ran.log"
         cell = (

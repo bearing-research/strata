@@ -863,6 +863,12 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   cannot be pickled keeps its Arrow form. As a pickle it is not a table to
   `@write_table`, `@each` or a SQL cell: convert it first, e.g. `pd.DataFrame(gdf.to_wkt())`.
   (#1699)
+- **A failed `@each` item no longer refuses the next run.** Each item's local run was
+  kept under the cell's id, so the next item's run replaced a failed one before it was
+  closed. Its lease went on being renewed while the process ran, and lapsed a minute
+  after, so a rerun was answered "already running" all that time. Every item's run now
+  ends with the item, as a failed plain cell's does; `@per_variant` instances too.
+  (#1700)
 - **A cell after a writer is stale once the writer's tables land.** A run's
   `@write_table` writes and its read-write mount sync-back land after the token its code
   ends with, so a cell `@after` it keyed meanwhile stayed ready on what was there before.
