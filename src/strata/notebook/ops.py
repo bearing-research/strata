@@ -1207,6 +1207,7 @@ class RemoteNotebookOps:
         name: str | None = None,
         set_default: bool = True,
         install: bool = True,
+        pin: str | None = None,
         timeout: float = 600.0,
     ) -> dict[str, Any]:
         """Provision, tunnel and register a worker over SSH on the server.
@@ -1221,6 +1222,8 @@ class RemoteNotebookOps:
         }
         if name:
             body["name"] = name
+        if pin is not None:
+            body["pin"] = pin
         resp = self._send(
             "POST",
             f"/v1/notebooks/{self._session_id}/workers/ssh",

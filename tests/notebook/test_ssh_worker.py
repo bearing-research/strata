@@ -318,14 +318,33 @@ def test_detect_finds_the_worker_in_uvs_bin_dir_off_path(tmp_path, uv_dir):
     tool_bin = home / ".local" / "bin"
     uv = (tmp_path / "bin" / "uv") if uv_dir == "path" else (home / uv_dir / "uv")
     _stub(uv, f'[ "$1 $2 $3" = "tool dir --bin" ] && echo {tool_bin}\n')
-    _stub(tool_bin / "strata-worker", 'echo "strata-worker 9.9"\n')
+    # The worker's own interpreter, which the probe asks for its strata-notebook version.
+    _stub(tmp_path / "py", "echo 9.9\n")
+    (tool_bin / "strata-worker").parent.mkdir(parents=True, exist_ok=True)
+    (tool_bin / "strata-worker").write_text(f"#!{tmp_path / 'py'}\nimport sys\n")
+    (tool_bin / "strata-worker").chmod(0o755)
     env = {"HOME": str(home), "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin"}
 
     info = RemoteWorker("gpu", LocalShellRunner("/bin/sh", env)).detect()
 
     assert info.worker_path == str(tool_bin / "strata-worker")
     assert info.uv_path == str(uv)
-    assert info.worker_version == "strata-worker 9.9"
+    assert info.worker_version == "9.9"
+
+
+def test_detect_reads_the_version_through_an_env_shebang(tmp_path):
+    """pip and pipx write ``#!/usr/bin/env python3``: two words, run as two."""
+    home = tmp_path / "home"
+    _stub(tmp_path / "bin" / "fakepy", "echo 0.12.0\n")
+    worker = home / ".local" / "bin" / "strata-worker"
+    worker.parent.mkdir(parents=True)
+    worker.write_text("#!/usr/bin/env fakepy\nimport sys\n")
+    worker.chmod(0o755)
+    env = {"HOME": str(home), "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin"}
+
+    info = RemoteWorker("gpu", LocalShellRunner("/bin/sh", env)).detect()
+
+    assert info.worker_version == "0.12.0"
 
 
 def test_detect_finds_a_worker_in_local_bin_without_uv(tmp_path):

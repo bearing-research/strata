@@ -1881,6 +1881,7 @@ def worker_add_ssh_main(args: argparse.Namespace) -> int:
             name=args.name,
             set_default=not args.no_default,
             install=not args.no_install,
+            pin=args.pin,
         )
     except NotebookOpsError as exc:
         return _emit_op_error(exc, args.format)
@@ -1891,6 +1892,8 @@ def worker_add_ssh_main(args: argparse.Namespace) -> int:
     else:
         worker = data.get("worker", {})
         print(f"connected {worker.get('name')} → {worker.get('ssh_target')}")
+        for warning in worker.get("warnings") or ():
+            print(f"  {_yellow('warning')}: {warning}")
     return 0
 
 
@@ -1971,6 +1974,14 @@ def add_worker_arguments(parser: argparse.ArgumentParser) -> None:
     )
     add_ssh_p.add_argument(
         "--no-install", action="store_true", help="Fail if strata-worker isn't already on the box"
+    )
+    add_ssh_p.add_argument(
+        "--pin",
+        default=None,
+        help=(
+            "strata-notebook version to install on the box (default: the server's own; "
+            "'none' for the newest release)"
+        ),
     )
     add_ssh_p.add_argument("--format", choices=["human", "json"], default="json")
     add_ssh_p.set_defaults(func=worker_add_ssh_main)

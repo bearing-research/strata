@@ -17,9 +17,12 @@ from typing import IO, TYPE_CHECKING, Any, Protocol
 
 from strata.notebook.ssh_worker import (
     _SSH_HARDENING,
+    RemoteEnvInfo,
     RemoteWorker,
     SshTarget,
     SshWorkerError,
+    install_spec,
+    worker_pin,
 )
 from strata.notebook.worker_secrets import (
     clear_runtime_worker_token,
@@ -94,6 +97,8 @@ class TunnelRecord:
     remote_pid: int
     healthy: bool
     executor_url: str  # http://127.0.0.1:{local_port}/v1/execute (the [[workers]] url)
+    # What connecting found to say: an unpinned install, a worker of another version.
+    warnings: tuple[str, ...] = ()
 
 
 class _PopenTunnelHandle:
@@ -381,6 +386,54 @@ class RemoteWorkerSupervisor:
         worker = RemoteWorker(name, runner)
         worker.preflight()
         info = worker.detect()
+        pin, unpinned = worker_pin(pin)
+        warnings = [unpinned] if unpinned else []
+        if info.has_worker and pin is not None and not _same_version(info.worker_version, pin):
+            found = info.worker_version or "of a version it did not say"
+            warnings.append(
+                f"the box's strata-worker is {found}, not {pin}: run "
+                f"`uv tool install --force '{install_spec(extras, pin)}'` there, "
+                "then connect again"
+            )
+        try:
+            return self._launch_and_tunnel(
+                name,
+                target,
+                worker,
+                info,
+                remote_port=remote_port,
+                local_port=local_port,
+                token=token,
+                extras=extras,
+                pin=pin,
+                install=install,
+                health_timeout=health_timeout,
+                warnings=warnings,
+            )
+        except SshWorkerError as exc:
+            if not warnings:
+                raise
+            # A worker of another version is the likely cause, so the failure says so.
+            raise SshWorkerError(f"{exc}; {'; '.join(warnings)}") from exc
+
+    def _launch_and_tunnel(
+        self,
+        name: str,
+        target: SshTarget,
+        worker: RemoteWorker,
+        info: RemoteEnvInfo,
+        *,
+        remote_port: int | None,
+        local_port: int | None,
+        token: str | None,
+        extras: str,
+        pin: str | None,
+        install: bool,
+        health_timeout: float,
+        warnings: list[str],
+    ) -> TunnelRecord:
+        """Install if asked, launch, tunnel and check the worker :meth:`_establish_locked_out`
+        found."""
         if install:
             executable = worker.ensure_installed(info, extras=extras, pin=pin)
         elif info.worker_path:
@@ -432,6 +485,7 @@ class RemoteWorkerSupervisor:
             remote_pid=running.pid,
             healthy=True,
             executor_url=f"http://127.0.0.1:{lport}/v1/execute",
+            warnings=tuple(warnings),
         )
         with self._lock:
             stopped = self._stopped.is_set()
@@ -727,3 +781,15 @@ def _replace_health(record: TunnelRecord, healthy: bool) -> TunnelRecord:
     from dataclasses import replace
 
     return replace(record, healthy=healthy)
+
+
+def _same_version(found: str | None, pin: str) -> bool:
+    """Whether *found* is release *pin*, compared as versions (``0.12.0rc1`` is ``0.12.0.rc1``)."""
+    from packaging.version import InvalidVersion, Version
+
+    if found is None:
+        return False
+    try:
+        return Version(found) == Version(pin)
+    except InvalidVersion:
+        return found == pin
