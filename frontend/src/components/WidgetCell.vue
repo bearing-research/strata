@@ -3,7 +3,7 @@ import { Zap } from '@lucide/vue'
 import { computed } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { Cell, WidgetDescriptor } from '../types/notebook'
-import { withLive } from '../utils/widgetLive'
+import { isLive as readLive, withLive } from '../utils/widgetLive'
 
 /**
  * A widget cell's control panel. Controls are declared in source
@@ -15,9 +15,9 @@ const { updateWidgetValues, updateSource, flushCellSource } = useNotebook()
 
 const descriptors = computed<WidgetDescriptor[]>(() => props.cell.widget?.descriptors ?? [])
 
-// `# @live`: a change auto-runs cheap downstream cells (backend cost-gated). As the
-// server read it, so the control shows what a change will do.
-const isLive = computed(() => Boolean(props.cell.annotations?.live))
+// `# @live`: a change auto-runs cheap downstream cells (backend cost-gated). Read from
+// the source as the server reads it, so the control and the source text agree.
+const isLive = computed(() => readLive(props.cell.source))
 
 function toggleLive() {
   updateSource(props.cell.id, withLive(props.cell.source, !isLive.value))

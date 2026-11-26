@@ -775,7 +775,6 @@ function parseBackendAnnotations(raw: any): CellAnnotations | undefined {
     loop: parseBackendLoopAnnotation(raw.loop),
     variant: parseBackendVariantAnnotation(raw.variant),
     appHidden: Boolean(raw.app_hidden),
-    live: Boolean(raw.live),
   }
 }
 

@@ -138,9 +138,9 @@ function outputRows(output: CellOutput): unknown[][] {
 
         <!-- Display outputs -->
         <template v-else>
-          <!-- A control moved since this ran: the outputs are not the answer for it. -->
+          <!-- A control moved, or the cell changed, since this ran. -->
           <p v-if="cell.status === 'stale'" class="app-stale" data-testid="app-stale">
-            Out of date: its inputs changed since these outputs were made.
+            Out of date: these outputs are from an earlier run.
           </p>
           <div
             v-for="(output, i) in cell.displayOutputs || []"
@@ -296,7 +296,7 @@ function outputRows(output: CellOutput): unknown[][] {
 .app-output.stale {
   opacity: 0.55;
 }
-/* Refusal toasts, as the editor shows them. */
+/* Toasts, a refused change among them, as the editor shows them. */
 .toast-stack {
   position: fixed;
   bottom: 16px;
@@ -317,8 +317,16 @@ function outputRows(output: CellOutput): unknown[][] {
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
 }
+.toast.success {
+  background: var(--tint-success, #e6f4ea);
+  color: var(--accent-success, #1e7e34);
+}
 .toast.error {
   background: var(--tint-danger, #fdecea);
   color: var(--accent-danger, #c0392b);
+}
+.toast.info {
+  background: var(--tint-primary, #e8f0fe);
+  color: var(--accent-primary, #1a56db);
 }
 </style>

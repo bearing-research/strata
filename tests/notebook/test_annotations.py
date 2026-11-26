@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from strata.notebook.annotations import parse_annotations
 
 
@@ -416,17 +414,3 @@ def test_each_parse_hands_out_its_own_values():
     assert second.mounts[0].uri == "file:///tmp/x"
     assert second.env == {"K": "v"}
     assert second.after == ["a"]
-
-
-@pytest.mark.parametrize(
-    ("source", "live"),
-    [
-        ("# @live\na = slider(0, 1)\n", True),
-        ("# @live off\na = slider(0, 1)\n", False),
-        ("a = slider(0, 1)\n# @live\n", False),
-    ],
-    ids=["on", "off", "below-the-code"],
-)
-def test_the_widget_panel_gets_live_as_the_server_reads_it(source, live):
-    """The Live control shows this, so it cannot claim a line nothing reads."""
-    assert parse_annotations(source, "widget").to_wire_payload()["live"] is live

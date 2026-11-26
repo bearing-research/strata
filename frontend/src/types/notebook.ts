@@ -102,8 +102,6 @@ export interface CellAnnotations {
   variant?: VariantAnnotationInfo | null
   /** ``@app hide``: left out of the app view. */
   appHidden?: boolean
-  /** ``# @live`` on a widget cell, as the server read it. */
-  live?: boolean
 }
 
 export interface VariantAnnotationInfo {

@@ -857,9 +857,8 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   behind it, so moving a control ran nothing and the old outputs stayed up unmarked.
   The app view now shows Live's state without offering it, marks the outputs of a cell
   gone stale **Out of date**, and shows a refused change as the editor does. The
-  control reads `live` from the server (a new field on a cell's `annotations`), which
-  reads `# @live` only in the leading comment block, as the toggle now edits it.
-  (#PRLIVE)
+  control reads and edits `# @live` only in the leading comment block, where the
+  server reads it, so a line below the code no longer shows as on. (#PRLIVE)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a
