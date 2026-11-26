@@ -852,6 +852,15 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   `uv tool dir --bin` and `~/.local/bin` (and for uv in `~/.local/bin` and
   `~/.cargo/bin`), the worker is launched by its path, and a `/health` timeout quotes the
   end of the worker's log on the box. (#1697)
+- **A value Arrow cannot give back keeps its type.** A `pd.cut` result (interval
+  categories) came back from the store as a `pyarrow.Table`, and a pandas subclass such
+  as geopandas' `GeoDataFrame` as a plain `DataFrame`, its geometry as WKT and its CRS
+  gone, with only a server log line to say so. Both are now stored as `pickle/object`:
+  a subclass, and a frame whose Arrow schema `to_pandas()` cannot read back, checked on
+  an empty slice so no rows are copied. A display of one is still a table, and one that
+  cannot be pickled keeps its Arrow form. As a pickle it is not a table to
+  `@write_table`, `@each` or a SQL cell: convert it first, e.g. `pd.DataFrame(gdf.to_wkt())`.
+  (#1699)
 - **A cell after a writer is stale once the writer's tables land.** A run's
   `@write_table` writes and its read-write mount sync-back land after the token its code
   ends with, so a cell `@after` it keyed meanwhile stayed ready on what was there before.

@@ -149,6 +149,27 @@ def _mark_as_cell_module(cls, module_source: str) -> None:
     setattr(cls, "__strata_cell_exported_class__", True)
 
 
+class _TaggedFrame(pd.DataFrame):
+    @property
+    def _constructor(self):
+        return _TaggedFrame
+
+
+class _TaggedSeries(pd.Series):
+    @property
+    def _constructor(self):
+        return _TaggedSeries
+
+
+class _HandleFrame(pd.DataFrame):
+    # Pickled with the frame, unlike attrs, which Arrow writes too.
+    _metadata = ["handle"]
+
+    @property
+    def _constructor(self):
+        return _HandleFrame
+
+
 class TestArrowSerialization:
     def test_serialize_dataframe(self):
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
@@ -297,6 +318,70 @@ class TestArrowSerialization:
             assert result.iloc[0, 0] == 1
             assert pd.isna(result.iloc[1, 0])
             assert pd.isna(result.iloc[0, 1])
+
+    @pytest.mark.parametrize("as_series", [True, False], ids=["series", "frame"])
+    def test_interval_categorical_comes_back_as_pandas(self, tmp_path, as_series):
+        """``pd.cut``'s categories encode as Arrow but ``to_pandas`` rejects them (#1691)."""
+        bins = pd.cut(pd.Series([1, 5, 9], name="age"), [0, 4, 10])
+        value = bins if as_series else bins.to_frame()
+
+        meta = serialize_value(value, tmp_path, "bins")
+        back = deserialize_value(meta["content_type"], tmp_path / meta["file"])
+
+        assert meta["content_type"] == "pickle/object"
+        assert type(back) is type(value)
+        series = back if as_series else back["age"]
+        assert series.dtype == "category"
+        assert series.tolist() == bins.tolist()
+
+    def test_interval_column_stays_on_arrow(self, tmp_path):
+        """A plain interval dtype reads back from Arrow, so it is not pickled."""
+        value = pd.Series(pd.arrays.IntervalArray.from_breaks([0, 1, 2]))
+        meta = serialize_value(value, tmp_path, "iv")
+        back = deserialize_value(meta["content_type"], tmp_path / meta["file"])
+        assert meta["content_type"] == "arrow/ipc"
+        pd.testing.assert_series_equal(back, value)
+
+    @pytest.mark.parametrize("as_series", [True, False], ids=["series", "frame"])
+    def test_pandas_subclass_keeps_its_type(self, tmp_path, as_series):
+        """A subclass (geopandas' GeoDataFrame) would come back as plain pandas (#1692)."""
+        base = _TaggedSeries if as_series else _TaggedFrame
+        value = base([1, 2]) if as_series else base({"a": [1, 2]})
+        value.attrs["crs"] = "EPSG:4326"
+
+        meta = serialize_value(value, tmp_path, "sub")
+        back = deserialize_value(meta["content_type"], tmp_path / meta["file"])
+
+        assert meta["content_type"] == "pickle/object"
+        assert type(back) is base
+        assert back.attrs == {"crs": "EPSG:4326"}
+
+    def test_a_display_of_such_a_value_stays_a_table(self, tmp_path):
+        """A display is only rendered from its table, so it keeps the Arrow preview."""
+        frame = pd.cut(pd.Series([1, 5, 9], name="age"), [0, 4, 10]).to_frame()
+        sub = _TaggedFrame({"a": [1, 2]})
+        for index, value in enumerate([frame, sub]):
+            payload = serializer_module.serialize_value(value, tmp_path, "v")
+            assert payload["content_type"] == "pickle/object"
+
+            shown = serializer_module.serialize_display_value(
+                value, tmp_path, index, written=[(value, payload)]
+            )
+
+            assert shown["content_type"] == "arrow/ipc"
+            assert shown["rows"] == len(value)
+            assert shown["columns"] == list(value.columns)
+
+    def test_a_subclass_that_cannot_be_pickled_is_still_stored(self, tmp_path):
+        """Pickling it raises, so it keeps the Arrow form it had, read back as pandas."""
+        value = _HandleFrame({"a": [1, 2]})
+        value.handle = threading.Lock()
+
+        meta = serialize_value(value, tmp_path, "sub")
+        back = deserialize_value(meta["content_type"], tmp_path / meta["file"])
+
+        assert meta["content_type"] == "arrow/ipc"
+        pd.testing.assert_frame_equal(back, pd.DataFrame({"a": [1, 2]}))
 
     def test_arrow_json_fallback_roundtrips_dataframe_after_pyarrow_error(self, monkeypatch):
         df = pd.DataFrame(

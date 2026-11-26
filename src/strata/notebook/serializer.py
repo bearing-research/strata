@@ -491,6 +491,23 @@ def _serialize_arrow_with_fallback(
     """
     try:
         return _serialize_arrow(value, output_dir, variable_name)
+    except _NotRebuildableFromArrow as exc:
+        if _is_display_variable_name(variable_name):
+            # A display is only rendered from its table, never read back as a value.
+            return _write_arrow(exc.table, output_dir, variable_name)
+        # Pickle gives back the type the cell made; Arrow would hand over another one.
+        try:
+            return _serialize_pickle(value, output_dir, variable_name)
+        except (pickle.PicklingError, TypeError, AttributeError) as pickle_exc:
+            logger.warning(
+                "'%s' (%s) would not read back from Arrow as its own type (%s) and "
+                "cannot be pickled (%s); storing it as Arrow, read back as pandas.",
+                variable_name,
+                type(value).__name__,
+                exc,
+                pickle_exc,
+            )
+            return _write_arrow(exc.table, output_dir, variable_name)
     except Exception as exc:
         if _is_pandas_value(value) and _should_fallback_from_arrow_error(exc):
             logger.warning(
@@ -588,9 +605,12 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> Serial
     Every shape (table / tensor / scalar) is written as an Arrow IPC stream of one
     Table, with schema metadata the reader uses to rebuild the exact Python type.
     """
-    import pyarrow as pa
+    return _write_arrow(_to_arrow_table(value), output_dir, variable_name)
 
-    table = _to_arrow_table(value)
+
+def _write_arrow(table: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
+    """Write *table* as the variable's Arrow IPC file; its payload."""
+    import pyarrow as pa
 
     filename = f"{_safe_filename_stem(variable_name)}.arrow"
     filepath = output_dir / filename
@@ -686,7 +706,33 @@ def _matches_pandas(value: Any) -> bool:
     return isinstance(value, (pd.DataFrame, pd.Series))
 
 
+class _NotRebuildableFromArrow(Exception):
+    """The value encodes as *table*, but the reader could not give back its type."""
+
+    def __init__(self, reason: str, table: Any) -> None:
+        super().__init__(reason)
+        self.table = table
+
+
 def _table_from_pandas(value: Any) -> Any:
+    import pandas as pd
+
+    table = _pandas_table(value)
+    # A subclass (geopandas' GeoDataFrame) would come back as a plain pandas value.
+    if type(value) not in (pd.DataFrame, pd.Series):
+        raise _NotRebuildableFromArrow(
+            f"{type(value).__module__}.{type(value).__qualname__}", table
+        )
+    # Conversion fails on the schema (``pd.cut``'s interval categories), so an empty
+    # slice finds it without copying the rows.
+    try:
+        table.slice(0, 0).to_pandas()
+    except Exception as exc:
+        raise _NotRebuildableFromArrow(f"{type(exc).__name__}: {exc}", table) from exc
+    return table
+
+
+def _pandas_table(value: Any) -> Any:
     import pandas as pd
     import pyarrow as pa
 
