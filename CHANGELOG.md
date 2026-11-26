@@ -883,7 +883,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   rest, so a notebook only ever run with `strata run` kept every version (one reached
   12 GB). The run now prunes at its end with the same settings; a sweep that fails is a
   note, not a failed run. A server sweeping the stores of the notebooks it keeps open
-  is still open (#1712). (#PRGC)
+  is still open (#1712). (#1721)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a
