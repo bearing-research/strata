@@ -5833,6 +5833,13 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An annotation below a cell's code warns that it is not read.</strong> Only the leading
+  comment block is read, so <code>import os</code> then <code># @mount raw ...</code> ran without the mount and
+  failed with <code>NameError</code>, and <code>strata validate</code> called the notebook valid. Any known
+  <code># @key</code> line after the first code line now warns (<code>annotation_outside_block</code>, in the
+  cell header and <code>strata validate</code>), as only <code>@app</code> did (<code>app_outside_annotations</code>, which
+  this replaces). A comment in a string, a commented-out decorator such as <code># @cache</code>, and
+  a prompt's body are not read as annotations. (#1713)</li>
 <li><strong>An SSH worker starts on a box whose non-interactive <code>PATH</code> lacks uv's bin dir.</strong>
   <code>strata worker add-ssh</code> installed <code>strata-worker</code> with <code>uv tool install</code> and launched
   it by its bare name, which a stock Ubuntu <code>~/.bashrc</code> keeps off <code>PATH</code> for a

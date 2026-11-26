@@ -4335,7 +4335,7 @@ written as SQL comments (<code>-- @key value</code>): see <a href="sql/#what-a-s
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">y</span> <span class="o">=</span> <span class="n">labels</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">classifier</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
 </code></pre></div>
-<p>Annotations are parsed from the <strong>first contiguous block</strong> of <code>#</code>-prefixed lines (<code>--</code> in a <a href="sql/#writing-them">SQL cell</a>). Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format <code># @key value</code>. A key that is not an
+<p>Annotations are parsed from the <strong>first contiguous block</strong> of <code>#</code>-prefixed lines (<code>--</code> in a <a href="sql/#writing-them">SQL cell</a>). Once a non-comment, non-blank line is encountered, parsing stops. An annotation line after that point is not read, and validation warns about it (<code>annotation_outside_block</code>): move it to the top. Each annotation is one line in the format <code># @key value</code>. A key that is not an
 annotation, such as a misspelled <code># @wroker gpu</code>, does nothing; validation
 warns about it (<code>annotation_unknown</code>, in the cell header and <code>strata validate</code>)
 and suggests the annotation it is closest to.</p>
