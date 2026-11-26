@@ -11,9 +11,10 @@ Strata notebook directory, see [Coming from Jupyter](https://bearingresearch.com
 its `strata import` sibling. For every `strata` subcommand, see the
 [Commands reference](https://bearingresearch.com/strata/dev/getting-started/installation/#commands-reference).
 
-It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
-execution path is identical, artifact cache hits, cascade ordering, worker
-dispatch, and mount resolution all behave the same way.
+It reuses the same `NotebookSession` and `CellExecutor` the UI uses to run a
+cell, so artifact cache hits, cascade ordering, worker dispatch, and mount
+resolution all behave the same way. It runs one cell at a time, though, where
+the UI's **Run All** batches: see [What gets run](#what-gets-run).
 
 ## Usage
 
@@ -110,8 +111,12 @@ can parse per-cell status without screen-scraping.
 
 ## What gets run
 
-Every cell in the notebook executes in topological order, exactly as if you
-had clicked **Run All** in the UI. Cached artifacts are reused, the first run
+Every cell in the notebook executes in topological order, each in its own run,
+as the UI's ▶ runs one cell: each run loads the cell's inputs from the
+artifact store. The UI's **Run All** differs: it runs consecutive
+cells that can share a process in one harness, where they pass values in
+memory, so a notebook whose cells hand large values to each other runs faster
+there than under `strata run`. Cached artifacts are reused, the first run
 populates the cache; subsequent runs on unchanged source + inputs return
 instantly.
 
