@@ -107,13 +107,16 @@ def import_notebook(
     ipynb_path: Path | str,
     out_dir: Path | str | None = None,
     *,
+    name: str | None = None,
     check_deps: bool = False,
 ) -> ImportResult:
     """Convert a Jupyter ``.ipynb`` file into a Strata notebook directory.
 
     Args:
         ipynb_path: Path to the source ``.ipynb`` file.
-        out_dir: Target directory; ``None`` creates a sibling named after the stem.
+        out_dir: Target directory, used as given; ``None`` creates a sibling named after
+            the stem (lowercased, spaces as ``_``).
+        name: The notebook's name; *out_dir*'s, or the stem, when ``None``.
         check_deps: Run ``uv lock`` to verify the captured dependencies resolve;
             failures become warnings. Off by default: it needs uv and the network.
 
@@ -138,13 +141,16 @@ def import_notebook(
 
     if out_dir is not None:
         out_dir = Path(out_dir)
-        parent = out_dir.parent
-        name = out_dir.name
+        notebook_dir = create_notebook(
+            out_dir.parent,
+            name or out_dir.name,
+            initialize_environment=False,
+            directory=out_dir.name,
+        )
     else:
-        parent = ipynb_path.parent
-        name = ipynb_path.stem
-
-    notebook_dir = create_notebook(parent, name, initialize_environment=False)
+        notebook_dir = create_notebook(
+            ipynb_path.parent, name or ipynb_path.stem, initialize_environment=False
+        )
     result = ImportResult(notebook_dir=notebook_dir)
 
     sibling_deps = _capture_sibling_deps(ipynb_path.parent)

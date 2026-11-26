@@ -306,9 +306,9 @@ class SharedEnvBackend:
             lock.release()
         return _combined(results)
 
-    def add(self, package: str, *, timeout: int, dev: bool = False) -> _UvCommandResult:
+    def add(self, *packages: str, timeout: int, dev: bool = False) -> _UvCommandResult:
         _refuse_on_event_loop("uv add")
-        args = ["add", "--no-sync", *(["--dev"] if dev else []), package]
+        args = ["add", "--no-sync", *(["--dev"] if dev else []), *packages]
         changed = _run_uv_command(
             self.notebook_dir, args, timeout=timeout, display_name="uv add", env=self._detached()
         )
@@ -316,11 +316,11 @@ class SharedEnvBackend:
             return changed
         return _combined([changed, self.sync(python_version=None, timeout=timeout)])
 
-    def remove(self, package: str, *, timeout: int) -> _UvCommandResult:
+    def remove(self, *packages: str, timeout: int) -> _UvCommandResult:
         _refuse_on_event_loop("uv remove")
         changed = _run_uv_command(
             self.notebook_dir,
-            ["remove", "--no-sync", package],
+            ["remove", "--no-sync", *packages],
             timeout=timeout,
             display_name="uv remove",
             env=self._detached(),

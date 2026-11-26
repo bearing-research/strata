@@ -3586,9 +3586,10 @@ class NotebookSession:
         await self.start_missing_warm_pools(owner)
 
     async def mutate_dependency(
-        self, package: str, *, action: str, owner: str | None = None
+        self, *packages: str, action: str, owner: str | None = None
     ) -> DependencyMutationOutcome:
-        """Apply a dependency mutation without blocking the event loop.
+        """Apply a dependency mutation of *packages*, in one resolve, without blocking the
+        event loop.
 
         ``owner`` is the synchronous mutation label the caller holds, if any.
         """
@@ -3597,9 +3598,9 @@ class NotebookSession:
         # The two functions have different keyword-only params, so a shared `op` is a
         # union callable ty won't pass to asyncio.to_thread. Dispatch per call site.
         if action == "add":
-            result = await asyncio.to_thread(add_dependency, self.path, package)
+            result = await asyncio.to_thread(add_dependency, self.path, *packages)
         elif action == "remove":
-            result = await asyncio.to_thread(remove_dependency, self.path, package)
+            result = await asyncio.to_thread(remove_dependency, self.path, *packages)
         else:
             raise ValueError(f"Unknown dependency action: {action}")
 

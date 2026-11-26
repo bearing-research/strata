@@ -36,6 +36,32 @@ def test_usage_names_the_server_as_invoked(monkeypatch, argv0, prog):
     assert server._build_server_arg_parser().prog == prog
 
 
+def test_version_prints_the_package_version(capsys):
+    from importlib.metadata import version
+
+    with pytest.raises(SystemExit) as exited:
+        server._build_server_arg_parser().parse_args(["--version"])
+
+    assert exited.value.code == 0
+    assert capsys.readouterr().out == f"strata-notebook {version('strata-notebook')}\n"
+
+
+def test_without_package_metadata_only_version_says_so(monkeypatch, capsys):
+    from importlib.metadata import PackageNotFoundError
+
+    def _missing(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr("strata.cli_version.version", _missing)
+    parser = server._build_server_arg_parser()
+    assert parser.parse_args([]).notebook_dir is None
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--version"])
+
+    assert capsys.readouterr().out == "strata-notebook unknown (not installed)\n"
+
+
 def test_no_flag_does_not_set_env():
     args = server._build_server_arg_parser().parse_args([])
     server._apply_server_cli_overrides(args)

@@ -1781,10 +1781,20 @@ def cell_annotate_main(args: argparse.Namespace) -> int:
 def add_dep_arguments(parser: argparse.ArgumentParser) -> None:
     """Register the ``strata dep <action>`` group (add, rm)."""
     sub = parser.add_subparsers(dest="dep_command", metavar="<action>")
-    for action, verb in (("add", "Add"), ("rm", "Remove")):
-        dep_p = sub.add_parser(action, help=f"{verb} a Python dependency")
-        _add_target_args(dep_p)
-        dep_p.add_argument("package", help="Package spec, e.g. 'pandas' or 'pandas>=2'")
+    for action in ("add", "rm"):
+        if action == "add":
+            dep_p = sub.add_parser(action, help="Add Python dependencies, in one resolve")
+            _add_target_args(dep_p)
+            dep_p.add_argument(
+                "packages",
+                nargs="+",
+                metavar="package",
+                help="Package spec, e.g. 'pandas' or 'pandas>=2'",
+            )
+        else:
+            dep_p = sub.add_parser(action, help="Remove a Python dependency")
+            _add_target_args(dep_p)
+            dep_p.add_argument("package", help="Package name, e.g. 'pandas'")
         dep_p.add_argument("--format", choices=["human", "json"], default="json")
         dep_p.set_defaults(func=dep_add_main if action == "add" else dep_rm_main)
     parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
@@ -2012,6 +2022,11 @@ def dep_rm_main(args: argparse.Namespace) -> int:
 
 
 async def _dep_async(args: argparse.Namespace, action: str) -> int:
+    if action == "add" and args.server and args.notebook_dir:
+        # With --server no directory is needed, so the first package may have landed here.
+        if not Path(args.notebook_dir).is_dir():
+            args.packages = [args.notebook_dir, *args.packages]
+            args.notebook_dir = None
     ops = _open_read_ops(args)
     if ops is None:
         return 2
@@ -2021,7 +2036,7 @@ async def _dep_async(args: argparse.Namespace, action: str) -> int:
     try:
         try:
             if action == "add":
-                result = await ops.add_dependency(args.package)
+                result = await ops.add_dependency(*args.packages)
             else:
                 result = await ops.remove_dependency(args.package)
         except NotebookOpsError as exc:

@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -805,7 +806,8 @@ class ProjectEnvBackend:
             success=True, error=None, operation_log=EnvironmentOperationLog(command="uv sync")
         )
 
-    def _mutation(self, verb: str, package: str) -> _UvCommandResult:
+    def _mutation(self, verb: str, packages: Sequence[str]) -> _UvCommandResult:
+        package = " ".join(packages)
         described = self.described()
         if described.get("found_by") == "uv":
             fix = f"`uv {verb} {package}` in {self.notebook_dir.parent}"
@@ -818,11 +820,11 @@ class ProjectEnvBackend:
             f"this scratchpad runs in your project's environment; {verb} it in the project: {fix}",
         )
 
-    def add(self, package: str, *, timeout: int, dev: bool = False) -> _UvCommandResult:
-        return self._mutation("add", package)
+    def add(self, *packages: str, timeout: int, dev: bool = False) -> _UvCommandResult:
+        return self._mutation("add", packages)
 
-    def remove(self, package: str, *, timeout: int) -> _UvCommandResult:
-        return self._mutation("remove", package)
+    def remove(self, *packages: str, timeout: int) -> _UvCommandResult:
+        return self._mutation("remove", packages)
 
     async def sync_streaming(
         self,

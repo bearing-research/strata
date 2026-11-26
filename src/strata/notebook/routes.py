@@ -21,7 +21,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from vestigo.file_modes import PASS_THROUGH_DIR, private_dir
 
 from strata.notebook import prewarm
@@ -724,14 +724,30 @@ class RenameNotebookRequest(BaseModel):
 
 
 class AddDependencyRequest(BaseModel):
-    """Request to add a dependency."""
+    """Request to add a dependency, or several in one resolve (``packages``)."""
 
-    package: str = Field(..., max_length=200)  # e.g. "requests" or "pandas>=2.0"
+    package: str | None = Field(default=None, max_length=200)  # "requests", "pandas>=2.0"
+    packages: list[str] = Field(default_factory=list, max_length=100)
 
     @field_validator("package")
     @classmethod
-    def validate_package_field(cls, v: str) -> str:
-        return validate_package_name(v)
+    def validate_package_field(cls, v: str | None) -> str | None:
+        return None if v is None else validate_package_name(v)
+
+    @field_validator("packages")
+    @classmethod
+    def validate_packages_field(cls, v: list[str]) -> list[str]:
+        return [validate_package_name(p) for p in v]
+
+    @model_validator(mode="after")
+    def one_form(self) -> AddDependencyRequest:
+        if (self.package is None) == (not self.packages):
+            raise ValueError("give `package` or `packages`, not both")
+        return self
+
+    @property
+    def names(self) -> list[str]:
+        return [self.package] if self.package is not None else self.packages
 
 
 class RemoveDependencyRequest(BaseModel):
@@ -1104,7 +1120,7 @@ async def import_jupyter_notebook(
         raise HTTPException(status_code=400, detail=f"Invalid .ipynb JSON: {exc}")
 
     with timing.phase("validate"):
-        target_parent, raw_name, _candidate_dir = _resolve_import_target(
+        _target_parent, raw_name, candidate_dir = _resolve_import_target(
             request,
             name=name,
             parent_path=parent_path,
@@ -1124,10 +1140,7 @@ async def import_jupyter_notebook(
 
         with timing.phase("convert"):
             try:
-                result = import_notebook(
-                    tmp_path,
-                    out_dir=target_parent / raw_name,
-                )
+                result = import_notebook(tmp_path, out_dir=candidate_dir, name=raw_name)
             except (ValueError, OSError) as exc:
                 raise HTTPException(status_code=400, detail=f"Import failed: {exc}")
 
@@ -3689,14 +3702,14 @@ async def add_notebook_dependency(
     If the lockfile changes, the session's venv_python is re-synced.
     """
 
-    mutation = f"add {req.package}"
+    mutation = f"add {' '.join(req.names)}"
     try:
         session._begin_synchronous_environment_mutation(mutation)
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
 
     try:
-        outcome = await session.mutate_dependency(req.package, action="add", owner=mutation)
+        outcome = await session.mutate_dependency(*req.names, action="add", owner=mutation)
     finally:
         session._end_synchronous_environment_mutation()
     result = outcome.result

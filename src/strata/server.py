@@ -2236,6 +2236,8 @@ def _build_server_arg_parser():
     import argparse
     import sys
 
+    from strata.cli_version import VersionAction
+
     # argparse's default prints "__main__.py" for the module form (before 3.14).
     invoked = os.path.basename(sys.argv[0])
     prog = "python -m strata" if invoked == "__main__.py" else invoked
@@ -2243,6 +2245,7 @@ def _build_server_arg_parser():
         prog=prog,
         description="Run the Strata notebook server.",
     )
+    parser.add_argument("--version", action=VersionAction)
     parser.add_argument(
         "--notebook-dir",
         default=None,

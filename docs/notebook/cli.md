@@ -363,9 +363,11 @@ strata cell rm       <notebook_dir> <cell_id>                     # delete a cel
 strata cell mv       <notebook_dir> <cell_id> --to <index>        # reorder (0-based)
 strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout
 strata cell pin-fetch <notebook_dir> <cell_id> [NAME ...]        # write sha256= into @fetch lines
-strata dep add       <notebook_dir> <package>                     # uv add
+strata dep add       <notebook_dir> <package> [<package> ...]     # uv add
 strata dep rm        <notebook_dir> <package>                     # uv remove
 ```
+
+`dep add` takes any number of packages and adds them in one resolve and one sync.
 
 `--file -` reads cell source from stdin; `-c 'src'` passes the source inline
 (the two are mutually exclusive). `--language` defaults to `python`, except that a

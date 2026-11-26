@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from strata.cli_version import VersionAction
 from strata.notebook.agent_launch import add_agent_arguments, agent_main
 from strata.notebook.cli import (
     add_cell_arguments,
@@ -64,6 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="strata",
         description="Strata command-line tools.",
     )
+    parser.add_argument("--version", action=VersionAction)
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
     run_parser = subparsers.add_parser(

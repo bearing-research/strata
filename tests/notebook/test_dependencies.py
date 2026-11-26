@@ -134,6 +134,23 @@ class TestAddDependency:
         assert result.success
         assert captured["args"] == ["add", "--dev", "iniconfig"]
 
+    def test_many_packages_are_one_uv_add(self, tmp_path: Path):
+        nb_dir = create_notebook(tmp_path, "many")
+        runs: list = []
+        original = add_dependency.__globals__["_run_uv_command"]
+
+        def _capture(notebook_dir, args, **kwargs):
+            runs.append(args)
+            return original(notebook_dir, args, **kwargs)
+
+        with patch("strata.notebook.dependencies._run_uv_command", side_effect=_capture):
+            result = add_dependency(nb_dir, "six", "iniconfig")
+
+        assert result.success and result.package == "six iniconfig"
+        assert runs == [["add", "six", "iniconfig"]]
+        names = {d.name for d in result.dependencies}
+        assert {"six", "iniconfig"} <= names
+
     def test_dev_dependency_not_in_runtime_deps(self, tmp_path: Path):
         """A dev add lands in [dependency-groups] dev, not [project.dependencies]."""
         import tomllib
@@ -639,6 +656,30 @@ class TestDependencyRESTEndpoints:
             deps = resp2.json()["dependencies"]
             names = [d["name"] for d in deps]
             assert "six" in names
+
+    def test_packages_are_added_in_one_uv_add(self, setup):
+        client, tmp = setup
+        nb = NotebookBuilder(tmp)
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            resp = client.post(
+                f"/v1/notebooks/{sid}/dependencies", json={"packages": ["six", "iniconfig"]}
+            )
+
+            assert resp.status_code == 200
+            assert resp.json()["operation_log"]["command"] == "uv add six iniconfig"
+
+    @pytest.mark.parametrize(
+        "body", [{}, {"packages": []}, {"package": "six", "packages": ["iniconfig"]}]
+    )
+    def test_a_body_names_its_packages_one_way(self, setup, body):
+        client, tmp = setup
+        nb = NotebookBuilder(tmp)
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            resp = client.post(f"/v1/notebooks/{sid}/dependencies", json=body)
+
+            assert resp.status_code == 422
 
     def test_add_dependency_rest_returns_updated_cells(self, setup):
         """Dependency changes return refreshed cell statuses after env invalidation."""

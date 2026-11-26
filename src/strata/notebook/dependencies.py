@@ -15,7 +15,7 @@ import subprocess
 import threading
 import time
 import tomllib
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1367,12 +1367,11 @@ def preview_environment_yaml_text(
 
 def add_dependency(
     notebook_dir: Path,
-    package: str,
-    *,
+    *packages: str,
     dev: bool = False,
     timeout: int = 120,
 ) -> DependencyChangeResult:
-    """Add a Python package to the notebook with ``uv add`` (``--dev`` when *dev*).
+    """Add Python packages to the notebook with one ``uv add`` (``--dev`` when *dev*).
 
     Updates pyproject.toml, writes uv.lock and syncs .venv. A dev-group package is
     synced but excluded from the cell-provenance env hash, so dev tooling does not
@@ -1380,17 +1379,18 @@ def add_dependency(
     """
     lock = _get_notebook_lock(notebook_dir)
     with lock:
-        return _add_dependency_locked(notebook_dir, package, dev=dev, timeout=timeout)
+        return _add_dependency_locked(notebook_dir, packages, dev=dev, timeout=timeout)
 
 
 def _add_dependency_locked(
-    notebook_dir: Path, package: str, *, dev: bool = False, timeout: int = 120
+    notebook_dir: Path, packages: Sequence[str], *, dev: bool = False, timeout: int = 120
 ) -> DependencyChangeResult:
     old_lockfile_hash = _lockfile_hash(notebook_dir)
+    package = " ".join(packages)
 
     from strata.notebook.env_backend import get_backend
 
-    command_result = get_backend(notebook_dir).add(package, timeout=timeout, dev=dev)
+    command_result = get_backend(notebook_dir).add(*packages, timeout=timeout, dev=dev)
     if command_result.success:
         logger.info("uv add %s%s succeeded in %s", "--dev " if dev else "", package, notebook_dir)
     else:
@@ -1430,24 +1430,24 @@ def ensure_dev_tool(
 
 def remove_dependency(
     notebook_dir: Path,
-    package: str,
-    *,
+    *packages: str,
     timeout: int = 120,
 ) -> DependencyChangeResult:
-    """Remove a Python package with ``uv remove``, re-resolving and syncing .venv."""
+    """Remove Python packages with one ``uv remove``, re-resolving and syncing .venv."""
     lock = _get_notebook_lock(notebook_dir)
     with lock:
-        return _remove_dependency_locked(notebook_dir, package, timeout=timeout)
+        return _remove_dependency_locked(notebook_dir, packages, timeout=timeout)
 
 
 def _remove_dependency_locked(
-    notebook_dir: Path, package: str, *, timeout: int = 120
+    notebook_dir: Path, packages: Sequence[str], *, timeout: int = 120
 ) -> DependencyChangeResult:
     old_lockfile_hash = _lockfile_hash(notebook_dir)
+    package = " ".join(packages)
 
     from strata.notebook.env_backend import get_backend
 
-    command_result = get_backend(notebook_dir).remove(package, timeout=timeout)
+    command_result = get_backend(notebook_dir).remove(*packages, timeout=timeout)
     if command_result.success:
         logger.info("uv remove %s succeeded in %s", package, notebook_dir)
     else:

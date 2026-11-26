@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from strata.cli import main
@@ -274,6 +275,16 @@ async def test_add_dependency_maps_result(chain_nb, monkeypatch):
     res = await ops.add_dependency("pandas")
     assert res.success and res.package == "pandas" and res.action == "add"
     assert res.lockfile_changed and res.error is None
+
+
+def test_version_prints_the_package_version(capsys):
+    from importlib.metadata import version
+
+    with pytest.raises(SystemExit) as exited:
+        main(["--version"])
+
+    assert exited.value.code == 0
+    assert capsys.readouterr().out == f"strata-notebook {version('strata-notebook')}\n"
 
 
 def test_cli_cell_add_then_rm(chain_nb, tmp_path, capsys):
@@ -812,12 +823,12 @@ class TestDepCommands:
     def _fake(self, monkeypatch, *, success: bool = True, refuse: bool = False) -> list:
         calls: list = []
 
-        async def _mutate(self, package, action):
-            calls.append((package, action))
+        async def _mutate(self, packages, action):
+            calls.append((packages, action))
             if refuse:
                 raise NotebookOpsError("an environment job is already running")
             return DependencyResult(
-                package=package,
+                package=" ".join(packages),
                 action=action,
                 success=success,
                 lockfile_changed=success,
@@ -833,8 +844,45 @@ class TestDepCommands:
 
         assert main(["dep", verb, str(chain_nb), "pandas>=2"]) == 0
 
-        assert calls == [("pandas>=2", action)]
+        assert calls == [(("pandas>=2",), action)]
         assert json.loads(capsys.readouterr().out)["action"] == action
+
+    def test_many_packages_are_one_change(self, chain_nb, monkeypatch, capsys):
+        calls = self._fake(monkeypatch)
+
+        assert main(["dep", "add", str(chain_nb), "pandas", "scikit-learn", "lightgbm"]) == 0
+
+        assert calls == [(("pandas", "scikit-learn", "lightgbm"), "add")]
+
+    @staticmethod
+    def _fake_remote(monkeypatch) -> list:
+        from strata.notebook.ops import RemoteNotebookOps
+
+        sent: list = []
+
+        def _send(self, method, path, **kwargs):
+            sent.append(kwargs.get("json"))
+            return httpx.Response(200, json={"package": " ".join(kwargs["json"]["packages"])})
+
+        monkeypatch.setattr(RemoteNotebookOps, "_send", _send)
+        return sent
+
+    def test_on_a_server_the_packages_are_one_request(self, monkeypatch, capsys):
+        sent = self._fake_remote(monkeypatch)
+        argv = ["dep", "add", "--server", "http://127.0.0.1:1", "--session", "s", "pandas", "six"]
+
+        assert main(argv) == 0
+
+        assert sent == [{"packages": ["pandas", "six"]}]
+        assert json.loads(capsys.readouterr().out)["package"] == "pandas six"
+
+    def test_on_a_server_a_directory_given_is_no_package(self, chain_nb, monkeypatch, capsys):
+        sent = self._fake_remote(monkeypatch)
+        argv = ["dep", "add", "--server", "http://127.0.0.1:1", "--session", "s", str(chain_nb)]
+
+        assert main([*argv, "pandas"]) == 0
+
+        assert sent == [{"packages": ["pandas"]}]
 
     def test_a_failed_change_is_exit_1_and_says_why(self, chain_nb, monkeypatch, capsys):
         self._fake(monkeypatch, success=False)
