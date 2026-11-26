@@ -4912,6 +4912,15 @@ Sections that surface when applicable:</p>
   and shell cell magics that the converter removed.</li>
 <li><strong>Dependencies captured</strong>: what landed in <code>pyproject.toml</code>,
   ready for <code>uv sync</code> to resolve.</li>
+<li><strong>Files and modules beside the notebook</strong>: a relative path a cell
+  reads (<code>pd.read_csv("data/x.csv")</code>, <code>open</code>, <code>np.load</code>, <code>os.listdir</code>,
+  ...) that names something next to the <code>.ipynb</code>, and a helper module
+  next to it that a cell imports. Cells run in the notebook's <code>work/</code>
+  folder, and the <code>.ipynb</code>'s folder is not on <code>sys.path</code>, so both fail
+  at run time as imported. Each line names its fix: the <code># @mount</code> to
+  add and the path to read through it, or the package to
+  <code>uv add --editable</code>. <code>strata import</code> prints how many there are, and the
+  REST response lists them in <code>import_report.beside_notebook</code>.</li>
 <li><strong>Warnings</strong>: anything noteworthy; e.g. pip-only specs skipped
   for not being valid PEP 508.</li>
 </ul>
