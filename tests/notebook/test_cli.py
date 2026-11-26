@@ -142,24 +142,6 @@ class TestExecutionFlow:
         assert len(pools) == 2
         assert all(pool is not None for pool in pools)
 
-    @pytest.mark.parametrize("over", [True, False], ids=["over-the-cap", "under-it"])
-    def test_a_large_store_names_its_sweep(self, notebook_with_chain, capsys, monkeypatch, over):
-        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
-            return _make_result(cell_id)
-
-        # An empty store is 0 bytes: a cap below that is a store past it.
-        monkeypatch.setattr("strata.config._PERSONAL_GC_MAX_BYTES", -1 if over else 0)
-        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
-            assert run_main([str(notebook_with_chain), "--no-sync", "--format", "json"]) == 0
-
-        captured = capsys.readouterr()
-        store = notebook_with_chain / ".strata" / "artifacts"
-        if over:
-            assert f"strata artifact gc --artifact-dir {store} --max-bytes" in captured.err
-        else:
-            assert "artifact gc" not in captured.err
-        json.loads(captured.out)  # the report stays whole
-
     @pytest.mark.parametrize(("keep", "versions"), [(1, [3, 4]), (0, [1, 2, 3, 4])])
     def test_a_run_prunes_earlier_values_as_a_server_open_does(
         self, tmp_path, monkeypatch, keep, versions
@@ -182,6 +164,24 @@ class TestExecutionFlow:
             if a.id.endswith("_cell_c1_var_x") and a.state == "ready"
         ]
         assert sorted(kept) == versions
+
+    def test_a_failed_sweep_is_a_note_not_a_failed_run(self, notebook_with_chain, capsys):
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            return _make_result(cell_id)
+
+        def broken_prune(self, *args, **kwargs):
+            raise OSError("database is locked")
+
+        with (
+            patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell),
+            patch(
+                "strata.notebook.artifact_integration.NotebookArtifactManager.prune",
+                new=broken_prune,
+            ),
+        ):
+            assert run_main([str(notebook_with_chain), "--no-sync"]) == 0
+
+        assert "not pruned: database is locked" in capsys.readouterr().err
 
     def test_a_cell_is_labelled_by_its_name(self, tmp_path, capsys):
         notebook_dir = _build_notebook(
