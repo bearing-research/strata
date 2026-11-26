@@ -462,7 +462,28 @@ async def _run_notebook(args: argparse.Namespace) -> int:
         _print_summary(results, total_ms)
 
     await _drain_warm_pool(session)
+    _prune_store(session)
     return 1 if any_failed else 0
+
+
+def _prune_store(session: Any) -> None:
+    """Drop each output's values past the configured few, as a server's open does
+    (``session._prune_artifacts_in_background``): a notebook only ever run this way is
+    opened by no server, so without it its store only grows (#1712). A sweep that fails
+    leaves the run's outcome alone, as the server's does."""
+    from strata.config import StrataConfig
+    from strata.notebook.session import _cell_ids_on_disk
+
+    try:
+        config = StrataConfig.load()
+        if config.notebook_keep_superseded_versions:
+            session.artifact_manager.prune(
+                config.notebook_keep_superseded_versions,
+                config.artifact_gc_min_idle_seconds,
+                live_cells=_cell_ids_on_disk(session.path),
+            )
+    except Exception as exc:  # noqa: BLE001 - any failure is a note, never a failed run
+        print(f"note: the notebook's earlier results were not pruned: {exc}", file=sys.stderr)
 
 
 def _cell_identity(session, cell, cell_id: str) -> dict[str, Any]:

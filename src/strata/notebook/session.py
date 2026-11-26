@@ -3708,8 +3708,9 @@ def _cell_ids_on_disk(notebook_dir: Path) -> list[str] | None:
 def _prune_artifacts_in_background(session: NotebookSession) -> threading.Thread | None:
     """Drop the notebook's older cell values in a background thread.
 
-    Only under a server, whose config sets how many to keep; a CLI run or test
-    leaves the store alone. Returns the thread, or ``None`` if none started.
+    Only under a server, whose config sets how many to keep; ``strata run`` prunes
+    at its own end (``cli._prune_store``), and a test leaves the store alone. Returns
+    the thread, or ``None`` if none started.
     """
     from strata.notebook.harness_user import running_server_config
 
