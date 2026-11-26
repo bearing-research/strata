@@ -1653,10 +1653,13 @@ class NotebookSession:
     def _hint_unnamed_sql_result(self, cell: Any, result: Any) -> None:
         """A ``NameError`` for a name the SQL cell above likely meant says so (#1709)."""
         found = _NAME_ERROR.search(result.error or "")
-        if found is None or cell.language != CellLanguage.PYTHON or self.analysis is None:
+        if found is None or cell.language != CellLanguage.PYTHON:
             return
+        from strata.notebook.graph import analysis_with
+
         name = found.group(1)
-        sql_id = unnamed_sql_results(cell, self.notebook_state, self.analysis).get(name)
+        analysis = analysis_with(cell, self.notebook_state, self.analysis)
+        sql_id = unnamed_sql_results(cell, self.notebook_state, analysis).get(name)
         if sql_id is None:
             return
         hint = sql_result_hint(name, sql_id)

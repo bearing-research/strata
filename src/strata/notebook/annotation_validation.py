@@ -6,6 +6,7 @@ again before each run: an ERROR keeps the cell from running (``blocking_diagnost
 
 from __future__ import annotations
 
+import ast
 import functools
 import io
 import logging
@@ -195,35 +196,45 @@ def _comment_lines(cell: CellState) -> set[int] | None:
     return lines
 
 
-# Names the harness gives every Python cell (``harness._AMBIENT_NAMES``).
-_AMBIENT = frozenset({"strata", "display", "Markdown"})
-
-
 def unnamed_sql_results(
     cell: CellState, notebook_state: NotebookState, analysis: cg.Analysis
 ) -> dict[str, str]:
-    """Each name *cell* uses that no cell defines, with the nearest SQL cell above it
-    whose output is the default ``result``: likely the name its author meant."""
+    """The one name *cell* uses that no cell defines, with the SQL cell nearest above it
+    when that cell's output is the default ``result``: likely the name it was meant to
+    have. Empty for more than one such name, which one ``-- @name`` cannot fix."""
+    from strata.notebook.display.runtime import DISPLAY_HELPER_NAMES
+
     ids = [c.id for c in notebook_state.cells]
     # A cell validated before it joins the notebook has no cell above.
     above = notebook_state.cells[: ids.index(cell.id)] if cell.id in ids else []
-    sql_id = next(
-        (
-            c.id
-            for c in reversed(above)
-            if c.language == CellLanguage.SQL
-            and "result" in c.defines
-            and parse_annotations(c.source, c.language).name is None
-        ),
-        None,
-    )
+    sql = next((c for c in reversed(above) if c.language == CellLanguage.SQL), None)
     analyzed = analysis.cells.get(cell.id)
-    if sql_id is None or analyzed is None:
+    if (
+        sql is None
+        or "result" not in sql.defines
+        or parse_annotations(sql.source, sql.language).name is not None
+        or analyzed is None
+        or _star_import(cell.source)
+    ):
         return {}
+    given = {"strata", *DISPLAY_HELPER_NAMES}
     defined = {name for c in analysis.cells.values() for name in c.defines}
-    return {
-        name: sql_id for name in analyzed.references if name not in defined and name not in _AMBIENT
-    }
+    undefined = [name for name in analyzed.references if name not in defined and name not in given]
+    return {undefined[0]: sql.id} if len(undefined) == 1 else {}
+
+
+def _star_import(source: str) -> bool:
+    """``from m import *``, which binds names no analysis sees."""
+    from cellgraph.python import UNPARSEABLE
+
+    try:
+        tree = ast.parse(source)
+    except UNPARSEABLE:
+        return False
+    return any(
+        isinstance(node, ast.ImportFrom) and any(a.name == "*" for a in node.names)
+        for node in ast.walk(tree)
+    )
 
 
 def sql_result_hint(name: str, sql_id: str) -> str:
