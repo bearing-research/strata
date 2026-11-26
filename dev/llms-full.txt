@@ -271,6 +271,8 @@ The server starts on port 8765 by default. Open [http://localhost:8765](http://l
 ## Verify
 
 ```bash
+strata --version
+# strata-notebook <version>
 curl http://localhost:8765/health
 # {"status":"ok","pid":12345}
 ```
@@ -1350,7 +1352,7 @@ strata import <path/to/notebook.ipynb> [options]
 
 | Flag         | Description                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------------- |
-| `--out <dir>` | Target notebook directory. Defaults to a sibling directory named after the file's stem. |
+| `--out <dir>` | Target notebook directory, used as typed. Defaults to a sibling directory named after the file's stem, lowercased with spaces as `_`. |
 | `--check-deps` | After capturing dependencies, run `uv lock` to verify they resolve into a lockfile. |
 
 ### Examples
@@ -16740,9 +16742,11 @@ strata cell rm       <notebook_dir> <cell_id>                     # delete a cel
 strata cell mv       <notebook_dir> <cell_id> --to <index>        # reorder (0-based)
 strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout
 strata cell pin-fetch <notebook_dir> <cell_id> [NAME ...]        # write sha256= into @fetch lines
-strata dep add       <notebook_dir> <package>                     # uv add
+strata dep add       <notebook_dir> <package> [<package> ...]     # uv add
 strata dep rm        <notebook_dir> <package>                     # uv remove
 ```
+
+`dep add` takes any number of packages and adds them in one resolve and one sync.
 
 `--file -` reads cell source from stdin; `-c 'src'` passes the source inline
 (the two are mutually exclusive). `--language` defaults to `python`, except that a
@@ -18768,6 +18772,9 @@ POST /v1/notebooks/{session_id}/dependencies
   "package": "pandas>=2.0"
 }
 ```
+
+Or several, in one `uv add` (one resolve and one sync), as `{"packages": ["pandas>=2.0",
+"scikit-learn"]}`. A body gives one of the two.
 
 ### Remove dependency
 

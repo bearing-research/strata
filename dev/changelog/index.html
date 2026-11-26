@@ -5855,6 +5855,11 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
   the <code>uv tool install --force</code> that matches it. The probe of that version asked
   <code>strata-worker --version</code>, which no worker answers; it reads the worker's own
   interpreter now. (#1716)</li>
+<li><strong>CLI papercuts.</strong> <code>strata --version</code> and <code>strata-notebook --version</code> print the
+  installed version. <code>strata import --out</code> uses the directory as typed instead of
+  lowercasing it (the default, named after the file, still is). <code>strata dep add</code> takes
+  several packages and adds them in one resolve and one sync, also on a server, whose
+  <code>POST /v1/notebooks/{id}/dependencies</code> takes <code>packages</code>. (#1714)</li>
 <li><strong>An SSH worker starts on a box whose non-interactive <code>PATH</code> lacks uv's bin dir.</strong>
   <code>strata worker add-ssh</code> installed <code>strata-worker</code> with <code>uv tool install</code> and launched
   it by its bare name, which a stock Ubuntu <code>~/.bashrc</code> keeps off <code>PATH</code> for a

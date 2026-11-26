@@ -7054,6 +7054,8 @@ the answer is <code>404</code>; neither route takes an artifact URI.</p>
 <a id="__codelineno-49-2" name="__codelineno-49-2" href="#__codelineno-49-2"></a><span class="w">  </span><span class="nt">"package"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pandas&gt;=2.0"</span>
 <a id="__codelineno-49-3" name="__codelineno-49-3" href="#__codelineno-49-3"></a><span class="p">}</span>
 </code></pre></div>
+<p>Or several, in one <code>uv add</code> (one resolve and one sync), as <code>{"packages": ["pandas&gt;=2.0",
+"scikit-learn"]}</code>. A body gives one of the two.</p>
 <h3 id="remove-dependency">Remove dependency<a class="headerlink" href="#remove-dependency" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>DELETE /v1/notebooks/{session_id}/dependencies/{package_name}
 </code></pre></div>

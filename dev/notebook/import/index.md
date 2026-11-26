@@ -93,7 +93,7 @@ strata import <path/to/notebook.ipynb> [options]
 
 | Flag         | Description                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------------- |
-| `--out <dir>` | Target notebook directory. Defaults to a sibling directory named after the file's stem. |
+| `--out <dir>` | Target notebook directory, used as typed. Defaults to a sibling directory named after the file's stem, lowercased with spaces as `_`. |
 | `--check-deps` | After capturing dependencies, run `uv lock` to verify they resolve into a lockfile. |
 
 ### Examples

@@ -708,6 +708,9 @@ POST /v1/notebooks/{session_id}/dependencies
 }
 ```
 
+Or several, in one `uv add` (one resolve and one sync), as `{"packages": ["pandas>=2.0",
+"scikit-learn"]}`. A body gives one of the two.
+
 ### Remove dependency
 
 ```

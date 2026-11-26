@@ -151,6 +151,8 @@ The server starts on port 8765 by default. Open [http://localhost:8765](http://l
 ## Verify
 
 ```bash
+strata --version
+# strata-notebook <version>
 curl http://localhost:8765/health
 # {"status":"ok","pid":12345}
 ```
