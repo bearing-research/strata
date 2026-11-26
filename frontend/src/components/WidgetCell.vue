@@ -3,30 +3,24 @@ import { Zap } from '@lucide/vue'
 import { computed } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { Cell, WidgetDescriptor } from '../types/notebook'
+import { withLive } from '../utils/widgetLive'
 
 /**
  * A widget cell's control panel. Controls are declared in source
  * (`name = slider(...)`); changes send a debounced `widget_update`.
  */
-const props = defineProps<{ cell: Cell }>()
+// readOnly: the app view, whose viewer connection may move controls but not edit source.
+const props = defineProps<{ cell: Cell; readOnly?: boolean }>()
 const { updateWidgetValues, updateSource, flushCellSource } = useNotebook()
 
 const descriptors = computed<WidgetDescriptor[]>(() => props.cell.widget?.descriptors ?? [])
 
-// `# @live`: a change auto-runs cheap downstream cells (backend cost-gated).
-const isLive = computed(() =>
-  props.cell.source.split('\n').some((line) => {
-    const match = /^#\s*@live\b\s*(\w+)?/.exec(line.trim())
-    return Boolean(match) && !['off', 'false', 'no', '0'].includes((match?.[1] ?? '').toLowerCase())
-  }),
-)
+// `# @live`: a change auto-runs cheap downstream cells (backend cost-gated). As the
+// server read it, so the control shows what a change will do.
+const isLive = computed(() => Boolean(props.cell.annotations?.live))
 
 function toggleLive() {
-  const lines = props.cell.source.split('\n')
-  const idx = lines.findIndex((line) => /^#\s*@live\b/.test(line.trim()))
-  const next =
-    idx >= 0 ? lines.filter((_, i) => i !== idx).join('\n') : `# @live\n${props.cell.source}`
-  updateSource(props.cell.id, next)
+  updateSource(props.cell.id, withLive(props.cell.source, !isLive.value))
   flushCellSource(props.cell.id)
 }
 
@@ -70,7 +64,21 @@ function onCheckbox(d: WidgetDescriptor, e: Event) {
 <template>
   <div class="widget-cell">
     <div class="widget-toolbar">
+      <span
+        v-if="readOnly"
+        class="live-toggle live-state"
+        :class="{ on: isLive }"
+        data-testid="live-state"
+        :title="
+          isLive
+            ? 'Live: control changes run the downstream cells'
+            : 'Not live: control changes leave the outputs below out of date'
+        "
+      >
+        <Zap /> Live{{ isLive ? ' on' : ' off' }}
+      </span>
       <button
+        v-else
         type="button"
         class="live-toggle"
         :class="{ on: isLive }"
@@ -163,6 +171,9 @@ function onCheckbox(d: WidgetDescriptor, e: Event) {
 .live-toggle.on {
   color: var(--accent-primary);
   border-color: var(--accent-primary);
+}
+.live-state {
+  cursor: default;
 }
 .widget-empty {
   color: var(--text-muted);

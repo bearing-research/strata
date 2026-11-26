@@ -25,6 +25,8 @@ const {
   cleanupWebSocket,
   setViewerMode,
   openLineageAction,
+  toasts,
+  dismissToast,
 } = useNotebook()
 
 const loading = ref(true)
@@ -125,7 +127,7 @@ function outputRows(output: CellOutput): unknown[][] {
         <h2 v-if="cellTitle(cell)" class="app-cell-title">{{ cellTitle(cell) }}</h2>
 
         <!-- Widget control panel (interactive) -->
-        <WidgetCell v-if="cell.language === 'widget'" :cell="cell" />
+        <WidgetCell v-if="cell.language === 'widget'" :cell="cell" read-only />
 
         <!-- Markdown prose -->
         <div
@@ -136,7 +138,16 @@ function outputRows(output: CellOutput): unknown[][] {
 
         <!-- Display outputs -->
         <template v-else>
-          <div v-for="(output, i) in cell.displayOutputs || []" :key="i" class="app-output">
+          <!-- A control moved since this ran: the outputs are not the answer for it. -->
+          <p v-if="cell.status === 'stale'" class="app-stale" data-testid="app-stale">
+            Out of date: its inputs changed since these outputs were made.
+          </p>
+          <div
+            v-for="(output, i) in cell.displayOutputs || []"
+            :key="i"
+            class="app-output"
+            :class="{ stale: cell.status === 'stale' }"
+          >
             <DataTable
               v-if="output.contentType === 'arrow/ipc' && output.columns?.length"
               :notebook-id="sessionId"
@@ -180,6 +191,19 @@ function outputRows(output: CellOutput): unknown[][] {
     </div>
 
     <LineageModal />
+
+    <!-- A refused change (the viewer connection is read-only) says so. -->
+    <div class="toast-stack">
+      <div
+        v-for="t in toasts"
+        :key="t.id"
+        class="toast"
+        :class="t.kind"
+        @click="dismissToast(t.id)"
+      >
+        {{ t.message }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -263,5 +287,38 @@ function outputRows(output: CellOutput): unknown[][] {
 .app-markdown {
   color: var(--text-primary);
   line-height: 1.6;
+}
+.app-stale {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--state-stale);
+}
+.app-output.stale {
+  opacity: 0.55;
+}
+/* Refusal toasts, as the editor shows them. */
+.toast-stack {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 2000;
+}
+.toast {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 220px;
+  max-width: 360px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+.toast.error {
+  background: var(--tint-danger, #fdecea);
+  color: var(--accent-danger, #c0392b);
 }
 </style>

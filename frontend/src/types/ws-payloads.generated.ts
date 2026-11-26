@@ -30,6 +30,7 @@ export interface AnnotationsWirePayload {
   loop?: LoopWirePayload | null
   variant?: VariantWirePayload | null
   app_hidden: boolean
+  live: boolean
 }
 
 export interface CascadeProgressPayload {

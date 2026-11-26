@@ -854,6 +854,14 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   cell header and `strata validate`), as only `@app` did (`app_outside_annotations`, which
   this replaces). A comment in a string, a commented-out decorator such as `# @cache`, and
   a prompt's body are not read as annotations. (#1713)
+- **The app view's Live control no longer claims a change it cannot make.** In the app
+  view, ⚡ Live flipped to "Live on" while the viewer connection refused the source edit
+  behind it, so moving a control ran nothing and the old outputs stayed up unmarked.
+  The app view now shows Live's state without offering it, marks the outputs of a cell
+  gone stale **Out of date**, and shows a refused change as the editor does. The
+  control reads `live` from the server (a new field on a cell's `annotations`), which
+  reads `# @live` only in the leading comment block, as the toggle now edits it.
+  (#PRLIVE)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a

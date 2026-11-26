@@ -56,6 +56,7 @@ class AnnotationsWirePayload(TypedDict):
     loop: LoopWirePayload | None
     variant: VariantWirePayload | None
     app_hidden: bool
+    live: bool
 
 
 @dataclass
@@ -133,8 +134,8 @@ def _directive_re(marker: str) -> re.Pattern[str]:
 
 
 # Every directive a cell's parsers read (``parse_annotations``, ``analyze_prompt_cell``, and
-# the readers with their own regex, such as ``@live`` in the widget view): validation warns
-# on any other ``# @key``, which nothing would act on.
+# the readers with their own regex): validation warns on any other ``# @key``, which nothing
+# would act on.
 ANNOTATION_KEYS = frozenset(
     {
         "after",
@@ -412,6 +413,8 @@ class CellAnnotations:
             "loop": loop_payload,
             "variant": variant_payload,
             "app_hidden": self.app_hidden,
+            # The widget panel's Live control shows it: what the server reads, not a guess.
+            "live": self.live,
         }
 
 
