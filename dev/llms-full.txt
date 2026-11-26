@@ -11857,6 +11857,10 @@ markdown, and display outputs render - no editor, DAG, or toolbars. The
 connection is read-only (edits and arbitrary cell runs are rejected server-side),
 but viewers can still drive widgets - combined with **⚡ Live** that's the
 "tweak a parameter, see the result" dashboard you hand to a stakeholder.
+Turn **⚡ Live** on in the editor: the app view shows whether it is on but cannot
+change it, since that edits the widget cell's source. With it off, moving a
+control leaves the outputs below it marked **Out of date** until someone runs
+them, so an old chart is never read as the answer for the new value.
 
 Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
 whose output is noise). Like any annotation it goes in the cell's leading comment
