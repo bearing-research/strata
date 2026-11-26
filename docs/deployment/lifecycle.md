@@ -242,8 +242,9 @@ A **notebook's own** artifact store (`.strata/artifacts/`) keeps each cell
 output's current value plus its three most recent earlier values, so reverting
 a recent edit is still a cache hit. Older values are pruned in the background
 each time the server opens the notebook, including a reopen of a notebook that
-is already open, and a value a crash left half-written for over an hour is
-marked failed then. The values of a cell that is no longer in the notebook,
+is already open, and at the end of each `strata run`, and a value a crash left
+half-written for over an hour is marked failed then. A value used in the last
+`STRATA_ARTIFACT_GC_MIN_IDLE_SECONDS` (an hour) waits for a later sweep. The values of a cell that is no longer in the notebook,
 its current one included, go in the same sweep once unused for 30 days, unless
 a name, pin or publication holds them or a cell's current value was built from them; the
 wait is for a branch that lacks the cell, so checking it out does not cost the
@@ -289,7 +290,7 @@ These caps bound what Strata stores, and they don't cover everything.
 
 Things with **no built-in size limit**:
 
-- `~/.strata/notebooks/*/​.strata/artifacts/` - per-notebook artifact stores. Each cell output keeps its current value and a few earlier ones (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), so a store grows with the number and size of a notebook's outputs rather than with every run.
+- `~/.strata/notebooks/*/​.strata/artifacts/` - per-notebook artifact stores. Each cell output keeps its current value and a few earlier ones (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), so a store grows with the number and size of a notebook's outputs rather than with every run. A notebook's large outputs still add up: past 20 GiB, `strata run` warns and names `strata artifact gc --artifact-dir <notebook>/.strata/artifacts --max-bytes 20G`, which removes the least recently used values down to that and keeps each output's current one.
 - `~/.strata/notebooks/*/work/` - what cells write by a relative path, kept between runs. Delete files there once you no longer need them.
 - `~/.strata/notebooks/*/​.venv/` - per-notebook venvs. Grow with each `uv add`; the heaviest notebooks (torch + cuda) can run to several GB each. Use shared system packages or smaller deps if disk is tight.
 

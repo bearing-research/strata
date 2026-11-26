@@ -880,6 +880,12 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   valid. Validation now warns (`sql_result_unnamed`) on the Python cell, naming the SQL
   cell above and the `-- @name` to add, and the run's `NameError` says the same.
   (#1720)
+- **`strata run` prunes the notebook's earlier results.** A notebook's store keeps each
+  output's current value and three earlier ones, but only a server's open pruned the
+  rest, so a notebook only ever run with `strata run` kept every version (one reached
+  12 GB). The run now prunes at its end with the same settings, and past 20 GiB it warns
+  and names the `strata artifact gc` that brings the store down. A server sweeping the
+  stores of the notebooks it holds open stays open in #1712. (#PRGC)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a

@@ -460,9 +460,54 @@ async def _run_notebook(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
     else:
         _print_summary(results, total_ms)
+    _prune_store(session)
+    _warn_store_size(session)
 
     await _drain_warm_pool(session)
     return 1 if any_failed else 0
+
+
+def _prune_store(session: Any) -> None:
+    """Drop each output's values past the configured few, as a server's open does
+    (``session._prune_artifacts_in_background``): a notebook only ever run this way is
+    opened by no server, so without it its store only grows (#1712)."""
+    from strata.config import StrataConfig
+    from strata.notebook.quiesce import NotebookQuiesced
+    from strata.notebook.session import _cell_ids_on_disk
+
+    config = StrataConfig.load()
+    if not config.notebook_keep_superseded_versions:
+        return
+    try:
+        session.artifact_manager.prune(
+            config.notebook_keep_superseded_versions,
+            config.artifact_gc_min_idle_seconds,
+            live_cells=_cell_ids_on_disk(session.path),
+        )
+    except NotebookQuiesced as exc:
+        print(f"note: not pruning the notebook's earlier results: {exc}", file=sys.stderr)
+
+
+def _warn_store_size(session: Any) -> None:
+    """Past the size the server's sweep holds its own store to, say how to sweep the
+    notebook's, which nothing sweeps on its own (#1712). On stderr, so a JSON report
+    stays whole."""
+    from strata.artifact.cli import _fmt_size
+    from strata.config import _PERSONAL_GC_MAX_BYTES
+
+    store = session.get_artifact_manager().artifact_store
+    size = store.stats()["total_bytes"]
+    if size <= _PERSONAL_GC_MAX_BYTES:
+        return
+    cap = f"{_PERSONAL_GC_MAX_BYTES // 1024**3}G"
+    print(
+        f"warning: this notebook's results take {_fmt_size(size)} in {store.artifact_dir}, "
+        "and nothing sweeps it on its own. `strata artifact gc --artifact-dir "
+        f"{store.artifact_dir} --max-bytes {cap}` removes the least recently used "
+        "versions down to that (add --dry-run to see them first); each cell's current "
+        "output stays.",
+        file=sys.stderr,
+    )
 
 
 def _cell_identity(session, cell, cell_id: str) -> dict[str, Any]:

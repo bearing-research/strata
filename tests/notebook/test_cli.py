@@ -142,6 +142,47 @@ class TestExecutionFlow:
         assert len(pools) == 2
         assert all(pool is not None for pool in pools)
 
+    @pytest.mark.parametrize("over", [True, False], ids=["over-the-cap", "under-it"])
+    def test_a_large_store_names_its_sweep(self, notebook_with_chain, capsys, monkeypatch, over):
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
+            return _make_result(cell_id)
+
+        # An empty store is 0 bytes: a cap below that is a store past it.
+        monkeypatch.setattr("strata.config._PERSONAL_GC_MAX_BYTES", -1 if over else 0)
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            assert run_main([str(notebook_with_chain), "--no-sync", "--format", "json"]) == 0
+
+        captured = capsys.readouterr()
+        store = notebook_with_chain / ".strata" / "artifacts"
+        if over:
+            assert f"strata artifact gc --artifact-dir {store} --max-bytes" in captured.err
+        else:
+            assert "artifact gc" not in captured.err
+        json.loads(captured.out)  # the report stays whole
+
+    @pytest.mark.parametrize(("keep", "versions"), [(1, [3, 4]), (0, [1, 2, 3, 4])])
+    def test_a_run_prunes_earlier_values_as_a_server_open_does(
+        self, tmp_path, monkeypatch, keep, versions
+    ):
+        """No server opens a notebook only run this way, so the run prunes (#1712)."""
+        from vestigo.store import ArtifactStore
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS", str(keep))
+        monkeypatch.setenv("STRATA_ARTIFACT_GC_MIN_IDLE_SECONDS", "0")
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 0", None)])
+        _mk_fake_venv(notebook_dir)
+        for value in range(4):
+            (notebook_dir / "cells" / "c1.py").write_text(f"x = {value}\n")
+            assert run_main([str(notebook_dir), "--no-sync", "--quiet"]) == 0
+
+        store = ArtifactStore(notebook_dir / ".strata" / "artifacts")
+        kept = [
+            a.version
+            for a in store.list_artifacts(limit=100)
+            if a.id.endswith("_cell_c1_var_x") and a.state == "ready"
+        ]
+        assert sorted(kept) == versions
+
     def test_a_cell_is_labelled_by_its_name(self, tmp_path, capsys):
         notebook_dir = _build_notebook(
             tmp_path, cells=[("c1", "# @name stations\nimport math\n", None)]
