@@ -20,6 +20,7 @@ from strata.notebook.ssh_worker import (
     RemoteWorker,
     SshTarget,
     SshWorkerError,
+    worker_pin,
 )
 from strata.notebook.worker_secrets import (
     clear_runtime_worker_token,
@@ -94,6 +95,8 @@ class TunnelRecord:
     remote_pid: int
     healthy: bool
     executor_url: str  # http://127.0.0.1:{local_port}/v1/execute (the [[workers]] url)
+    # What connecting found to say: an unpinned install, a worker of another version.
+    warnings: tuple[str, ...] = ()
 
 
 class _PopenTunnelHandle:
@@ -381,6 +384,15 @@ class RemoteWorkerSupervisor:
         worker = RemoteWorker(name, runner)
         worker.preflight()
         info = worker.detect()
+        pin, unpinned = worker_pin(pin)
+        warnings = [unpinned] if unpinned else []
+        if info.has_worker and pin is not None and not _same_version(info.worker_version, pin):
+            found = info.worker_version or "of a version it did not say"
+            warnings.append(
+                f"the box's strata-worker is {found}, not {pin}: run "
+                f"`uv tool install --force 'strata-notebook[{extras}]=={pin}'` there, "
+                "then connect again"
+            )
         if install:
             executable = worker.ensure_installed(info, extras=extras, pin=pin)
         elif info.worker_path:
@@ -432,6 +444,7 @@ class RemoteWorkerSupervisor:
             remote_pid=running.pid,
             healthy=True,
             executor_url=f"http://127.0.0.1:{lport}/v1/execute",
+            warnings=tuple(warnings),
         )
         with self._lock:
             stopped = self._stopped.is_set()
@@ -727,3 +740,15 @@ def _replace_health(record: TunnelRecord, healthy: bool) -> TunnelRecord:
     from dataclasses import replace
 
     return replace(record, healthy=healthy)
+
+
+def _same_version(found: str | None, pin: str) -> bool:
+    """Whether *found* is release *pin*, compared as versions (``0.12.0rc1`` is ``0.12.0.rc1``)."""
+    from packaging.version import InvalidVersion, Version
+
+    if found is None:
+        return False
+    try:
+        return Version(found) == Version(pin)
+    except InvalidVersion:
+        return found == pin

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import shlex
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -38,6 +39,29 @@ _INSTALL_TIMEOUT = 600.0
 
 class SshWorkerError(Exception):
     """An SSH provisioning step failed, carrying an actionable message."""
+
+
+def worker_pin(pin: str | None) -> tuple[str | None, str | None]:
+    """The version to install a box's worker at, and a warning when it is not pinned.
+
+    ``None`` asks for this server's own version, ``"none"`` for no pin. A build PyPI
+    cannot have (a dev or local version, or a source tree) installs unpinned, and says so.
+    """
+    from packaging.version import InvalidVersion, Version
+
+    if pin is not None:
+        return (None, None) if pin.lower() == "none" else (pin, None)
+    try:
+        server = version("strata-notebook")
+        published = not (Version(server).is_devrelease or Version(server).local)
+    except (PackageNotFoundError, InvalidVersion):
+        server, published = "unknown", False
+    if published:
+        return server, None
+    return None, (
+        f"this server is strata-notebook {server}, which PyPI does not have, so the "
+        "worker is installed unpinned, at the newest release"
+    )
 
 
 @dataclass(frozen=True)
@@ -177,7 +201,11 @@ class RemoteWorker:
             'printf "worker=%s\\n" "$w"; '
             'printf "uv=%s\\n" "$uv"; '
             'printf "platform=%s\\n" "$(uname -sm 2>/dev/null || true)"; '
-            'printf "version=%s\\n" "$([ -n "$w" ] && "$w" --version 2>/dev/null || true)"'
+            # The found worker's release, from the interpreter its script names.
+            'py=$([ -n "$w" ] && head -n 1 "$w" 2>/dev/null | sed -n "s/^#! *//p" || true); '
+            'printf "version=%s\\n" "$([ -n "$py" ] && "$py" -c '
+            "'import importlib.metadata as m; print(m.version(\"strata-notebook\"))' "
+            '2>/dev/null || true)"'
         )
         res = self.runner.run(script, timeout=30)
         if not res.ok:

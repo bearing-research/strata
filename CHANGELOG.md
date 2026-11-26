@@ -859,6 +859,14 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   gone stale **Out of date**, and shows a refused change as the editor does. The
   control reads and edits `# @live` only in the leading comment block, where the
   server reads it, so a line below the code no longer shows as on. (#1715)
+- **An SSH worker is installed at the server's version.** `strata worker add-ssh`
+  installed the newest stable `strata-notebook` on a fresh box, so a server on 0.12.0rc1
+  got a 0.11.0 worker. It installs the server's own release now (a dev build, which PyPI
+  does not have, installs unpinned and says so), `--pin <version>` or `--pin none`
+  overrides it, and a worker already on the box at another version gets a warning naming
+  the `uv tool install --force` that matches it. The probe of that version asked
+  `strata-worker --version`, which no worker answers; it reads the worker's own
+  interpreter now. (#PRPIN)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a

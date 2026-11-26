@@ -244,6 +244,43 @@ def test_remote_add_ssh_worker_includes_name_when_given():
     assert seen["body"]["name"] == "gpu"
 
 
+def test_remote_add_ssh_worker_sends_a_pin_only_when_given():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"worker": {"name": "gpu"}})
+
+    _ssh_ops(handler).add_ssh_worker("user@box")
+    _ssh_ops(handler).add_ssh_worker("user@box", pin="none")
+
+    assert "pin" not in bodies[0]
+    assert bodies[1]["pin"] == "none"
+
+
+def test_cli_worker_add_ssh_passes_the_pin_and_prints_warnings(monkeypatch, capsys):
+    calls = {}
+
+    class FakeOps:
+        def __init__(self, server, session):
+            pass
+
+        def add_ssh_worker(self, target, **kwargs):
+            calls["add"] = kwargs
+            return {"worker": {"name": "gpu", "ssh_target": target, "warnings": ["old box"]}}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("strata.notebook.ops.RemoteNotebookOps", FakeOps)
+    argv = ["worker", "add-ssh", "u@b", "--server", "http://s", "--session", "s"]
+
+    assert main([*argv, "--pin", "0.11.0", "--format", "human"]) == 0
+
+    assert calls["add"]["pin"] == "0.11.0"
+    assert "warning: old box" in capsys.readouterr().out
+
+
 def test_remote_add_ssh_worker_error_raises():
     ops = _ssh_ops(lambda req: httpx.Response(400, json={"detail": "key auth failed"}))
     with pytest.raises(NotebookOpsError, match="key auth failed"):

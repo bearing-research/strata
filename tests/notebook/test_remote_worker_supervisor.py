@@ -168,6 +168,62 @@ def test_establish_installs_when_missing():
     assert "nohup /root/.local/bin/strata-worker --host" in launch
 
 
+def _server_version(monkeypatch, version: str) -> None:
+    monkeypatch.setattr("strata.notebook.ssh_worker.version", lambda name: version)
+
+
+def _install_spec(runner) -> str:
+    return next(c for c in runner.calls if "uv tool install" in c).split("install ")[1]
+
+
+@pytest.mark.parametrize(
+    ("pin", "spec"),
+    [
+        (None, "'strata-notebook[notebook]==0.12.0'"),
+        ("0.11.0", "'strata-notebook[notebook]==0.11.0'"),
+        ("none", "'strata-notebook[notebook]'"),
+    ],
+    ids=["the-servers", "given", "none"],
+)
+def test_a_fresh_box_installs_the_pinned_version(monkeypatch, pin, spec):
+    _server_version(monkeypatch, "0.12.0")
+    runner = _runner(detect=_MISSING)
+    sup, _, _ = _supervisor(runner=runner)
+
+    rec = sup.establish("gpu", "user@box", pin=pin)
+
+    assert _install_spec(runner) == spec
+    assert rec.warnings == ()
+
+
+def test_a_dev_server_installs_unpinned_and_says_so(monkeypatch):
+    _server_version(monkeypatch, "0.12.1.dev3+g1234abc")
+    runner = _runner(detect=_MISSING)
+    sup, _, _ = _supervisor(runner=runner)
+
+    rec = sup.establish("gpu", "user@box")
+
+    assert _install_spec(runner) == "'strata-notebook[notebook]'"
+    (warning,) = rec.warnings
+    assert "0.12.1.dev3+g1234abc" in warning and "unpinned" in warning
+
+
+@pytest.mark.parametrize(("found", "warns"), [("0.6.0", True), ("0.12.0", False)])
+def test_a_box_whose_worker_is_another_version_warns(monkeypatch, found, warns):
+    _server_version(monkeypatch, "0.12.0")
+    runner = _runner(detect=_INSTALLED.replace("version=0.6.0", f"version={found}"))
+    sup, _, _ = _supervisor(runner=runner)
+
+    rec = sup.establish("gpu", "user@box")
+
+    assert not any("uv tool install" in c for c in runner.calls)
+    if warns:
+        (warning,) = rec.warnings
+        assert "0.6.0" in warning and "--force 'strata-notebook[notebook]==0.12.0'" in warning
+    else:
+        assert rec.warnings == ()
+
+
 def test_establish_launches_the_detected_worker_path():
     runner = _runner()
     sup, _, _ = _supervisor(runner=runner)

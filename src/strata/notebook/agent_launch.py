@@ -207,8 +207,11 @@ def _establish_ssh_worker(server_url: str, session_id: str, ssh_target: str) -> 
             file=sys.stderr,
         )
         return
-    name = (response.json().get("worker") or {}).get("name", ssh_target)
+    worker = response.json().get("worker") or {}
+    name = worker.get("name", ssh_target)
     print(_dim(f"ssh worker '{name}' ready; cells run on {ssh_target} by default"))
+    for warning in worker.get("warnings") or ():
+        print(f"warning: ssh worker {name}: {warning}", file=sys.stderr)
 
 
 def _interrupt(signum: int, frame: object) -> None:
