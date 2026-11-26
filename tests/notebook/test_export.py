@@ -966,7 +966,7 @@ def test_an_app_line_after_the_code_warns_that_it_is_not_read(language, source, 
     )
 
     stray = [
-        d for d in validate_cell_annotations(cell, state) if d.code == "app_outside_annotations"
+        d for d in validate_cell_annotations(cell, state) if d.code == "annotation_outside_block"
     ]
 
     assert [(d.severity, d.line) for d in stray] == [("warn", line)]

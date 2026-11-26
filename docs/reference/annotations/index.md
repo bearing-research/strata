@@ -53,7 +53,7 @@ y = labels
 classifier.fit(x, y)
 ```
 
-Annotations are parsed from the **first contiguous block** of `#`-prefixed lines (`--` in a [SQL cell](sql.md#writing-them)). Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`. A key that is not an
+Annotations are parsed from the **first contiguous block** of `#`-prefixed lines (`--` in a [SQL cell](sql.md#writing-them)). Once a non-comment, non-blank line is encountered, parsing stops. An annotation line after that point is not read, and validation warns about it (`annotation_outside_block`): move it to the top. Each annotation is one line in the format `# @key value`. A key that is not an
 annotation, such as a misspelled `# @wroker gpu`, does nothing; validation
 warns about it (`annotation_unknown`, in the cell header and `strata validate`)
 and suggests the annotation it is closest to.

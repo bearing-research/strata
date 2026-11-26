@@ -330,11 +330,49 @@ class TestMultipleDiagnostics:
 class TestAnnotationBlockBoundary:
     """Validation only scans the leading comment block."""
 
-    def test_annotations_after_code_ignored(self):
-        # The parser stops at the first non-comment line, so a malformed
-        # annotation after code shouldn't produce a diagnostic.
+    def test_an_annotation_after_code_is_reported_unread_not_checked(self):
+        # The parser stops at the first non-comment line: its value is never read.
         cell = _cell("x = 1\n# @timeout abc")
+        assert _codes(cell, _nb()) == ["annotation_outside_block"]
+
+    def test_a_mount_after_an_import_warns_on_its_line(self):
+        source = "import os\n# @mount raw /tmp/d18 ro\nprint(sorted(raw.iterdir()))\n"
+        (diagnostic,) = validate_cell_annotations(_cell(source), _nb())
+        assert (diagnostic.code, diagnostic.severity.value, diagnostic.line) == (
+            "annotation_outside_block",
+            "warn",
+            2,
+        )
+        assert "`@mount`" in diagnostic.message
+
+    def test_the_same_lines_in_the_leading_block_warn_of_nothing(self):
+        source = "# @mount raw /tmp/d18 ro\nimport os\nprint(sorted(raw.iterdir()))\n"
+        assert "annotation_outside_block" not in _codes(_cell(source), _nb())
+
+    def test_a_comment_after_code_that_is_no_annotation_is_left_alone(self):
+        cell = _cell("x = 1\n# @todo tidy this\n# @property-like note\n")
         assert _codes(cell, _nb()) == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "import functools\n# @cache\ndef f():\n    return 1\n",
+            "app = object()\n# @app.get('/x')\ndef index():\n    return 1\n",
+            'HELP = """\n# @mount raw s3://b/p ro\n"""\n',
+        ],
+        ids=["decorator", "dotted-decorator", "string"],
+    )
+    def test_a_commented_decorator_or_a_string_is_no_annotation(self, source):
+        assert "annotation_outside_block" not in _codes(_cell(source), _nb())
+
+    def test_a_prompt_body_is_prose_but_its_app_line_still_warns(self):
+        source = "# @model claude\nSummarize:\n# @output section\n# @app hide\n{{ text }}\n"
+        diagnostics = [
+            d
+            for d in validate_cell_annotations(_cell(source, language="prompt"), _nb())
+            if d.code == "annotation_outside_block"
+        ]
+        assert [d.line for d in diagnostics] == [4]
 
     def test_blank_lines_inside_comment_block_allowed(self):
         cell = _cell("# @worker local\n\n# @timeout 30\nx = 1")

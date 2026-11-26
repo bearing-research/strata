@@ -7,12 +7,16 @@ again before each run: an ERROR keeps the cell from running (``blocking_diagnost
 from __future__ import annotations
 
 import functools
+import io
 import logging
+import re
+import tokenize
 from typing import TYPE_CHECKING
 
 from strata.notebook.annotations import (
     _LOOP_START_FROM_RE,
     ANNOTATION_KEYS,
+    MARKDOWN_DIRECTIVE_KEYS,
     comment_marker,
     iter_annotation_block,
     parse_annotation_directive,
@@ -99,7 +103,7 @@ def validate_cell_annotations(
         ]
     if cell.language == CellLanguage.MARKDOWN:
         # Pure prose: ``# @worker`` is a heading, and only ``@app`` is read (unchecked).
-        return _app_outside_block(cell)
+        return _outside_block(cell)
     language_checks: list[AnnotationDiagnostic] = []
     if cell.language == CellLanguage.WIDGET:
         language_checks = _validate_widget_cell_annotations(cell)
@@ -120,27 +124,66 @@ def validate_cell_annotations(
     if cell.language == CellLanguage.SQL:
         # After the connection's, which the SQL analyzer reports.
         diagnostics += _validate_sql_tables(cell, notebook_state)
-    return diagnostics + _app_outside_block(cell)
+    return diagnostics + _outside_block(cell)
 
 
-def _app_outside_block(cell: CellState) -> list[AnnotationDiagnostic]:
-    """An ``@app`` line after the leading comment block, which nothing reads: once read
-    anywhere, a cell that relied on it would show in the app view unawares."""
+def _outside_block(cell: CellState) -> list[AnnotationDiagnostic]:
+    """An annotation line after the leading comment block, which nothing reads: the cell
+    runs without it and fails far from the cause (``@mount`` then ``NameError``)."""
+    # A prompt's body and a markdown cell are prose, where ``# @output`` may be a heading.
+    if cell.language in (CellLanguage.MARKDOWN, CellLanguage.PROMPT):
+        keys = MARKDOWN_DIRECTIVE_KEYS
+    elif cell.language == CellLanguage.SQL:
+        keys = SQL_ANNOTATION_KEYS | {"app"}
+    else:
+        keys = ANNOTATION_KEYS - _NOT_FOR_CODE
     block = {lineno for lineno, _ in iter_annotation_block(cell.source, cell.language)}
-    return [
-        AnnotationDiagnostic(
-            severity=DiagnosticSeverity.WARN,
-            code="app_outside_annotations",
-            message=(
-                "This `@app` line is not read: annotations go in the cell's leading "
-                "comment block, before its code or prose. Move it to the top."
-            ),
-            line=lineno,
+    comments = _comment_lines(cell)
+    marker = re.escape(comment_marker(cell.language))
+    diagnostics = []
+    for lineno, line in enumerate(cell.source.splitlines(), start=1):
+        if lineno in block or (comments is not None and lineno not in comments):
+            continue
+        directive = parse_annotation_directive(line, cell.language)
+        if directive is None or directive[0] not in keys:
+            continue
+        # ``# @cache`` or ``# @app.get("/")``: a commented-out decorator, no annotation.
+        if not re.match(rf"{marker}\s*@\w+(\s|$)", line.strip()):
+            continue
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="annotation_outside_block",
+                message=(
+                    f"This `@{directive[0]}` line is not read: annotations go in the cell's "
+                    "leading comment block, before its code or prose. Move it to the top."
+                ),
+                line=lineno,
+            )
         )
-        for lineno, line in enumerate(cell.source.splitlines(), start=1)
-        if lineno not in block
-        and (parse_annotation_directive(line, cell.language) or ("", ""))[0] == "app"
-    ]
+    return diagnostics
+
+
+# Keys only a SQL or prompt cell reads: in Python, ``# @cache`` is a decorator put away.
+_NOT_FOR_CODE = frozenset(
+    {"cache", "sql", "model", "temperature", "max_tokens", "system", "output"}
+    | {"output_schema", "validate_retries"}
+)
+
+
+def _comment_lines(cell: CellState) -> set[int] | None:
+    """The lines of a Python cell that are a comment alone, not text in a string; ``None``
+    for another language, or source that does not tokenize, where every line counts."""
+    if cell.language not in (CellLanguage.PYTHON, CellLanguage.WIDGET):
+        return None
+    lines: set[int] = set()
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(cell.source).readline):
+            if token.type == tokenize.COMMENT and not token.line[: token.start[1]].strip():
+                lines.add(token.start[0])
+    except (tokenize.TokenError, SyntaxError):
+        return None
+    return lines
 
 
 def _validate_prompt_inputs(analysis: cg.Analysis, cell_id: str) -> list[AnnotationDiagnostic]:
