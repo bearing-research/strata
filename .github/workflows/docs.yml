@@ -3,7 +3,9 @@ name: Docs
 # Versioned docs via mike:
 #   * push to main     -> `mike deploy dev`, and `mike set-default dev` only
 #                         until a `latest` alias exists (the tag path owns it).
-#   * push of a v* tag -> `mike deploy <version> latest` + `mike set-default latest`.
+#   * push of a v* tag -> `mike deploy <version> latest` + `mike set-default latest`;
+#                         a pre-release tag (rc, a, b, dev) deploys under its
+#                         version only and leaves `latest` and the default alone.
 # PRs only run `mkdocs build --strict` and never touch gh-pages.
 
 on:
@@ -100,5 +102,9 @@ jobs:
         # releases distinguishable.
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          uv run mike deploy --push --update-aliases "$VERSION" latest
-          uv run mike set-default --push latest
+          if [[ "$VERSION" =~ ^[0-9.]+$ ]]; then
+            uv run mike deploy --push --update-aliases "$VERSION" latest
+            uv run mike set-default --push latest
+          else
+            uv run mike deploy --push "$VERSION"
+          fi
