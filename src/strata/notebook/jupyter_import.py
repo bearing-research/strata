@@ -479,8 +479,11 @@ def format_import_report(result: ImportResult, ipynb_path: Path | str) -> str:
                 "",
                 "## Files and modules beside the notebook",
                 "",
-                "Cells run in the notebook's `work/` folder, and the folder of the `.ipynb` "
-                "is not on `sys.path`, so these fail at run time until they are wired up.",
+                (
+                    "Cells run in the notebook's `work/` folder, and the folder of the "
+                    "`.ipynb` is not on `sys.path`, so these fail at run time until they "
+                    "are wired up."
+                ),
                 "",
             ]
         )
