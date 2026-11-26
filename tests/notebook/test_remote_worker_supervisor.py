@@ -54,7 +54,7 @@ class _BoxRunner(ScriptedSshRunner):
 
     def run(self, command, *, timeout=None, stdin_data=None):
         result = super().run(command, timeout=timeout, stdin_data=stdin_data)
-        if "nohup strata-worker" in command:
+        if "nohup " in command:
             port = command.split("--port ")[1].split()[0]
             self.launched = f'{{"pid": {result.stdout.strip()}, "port": {port}}}'
         elif "kill" in command and "kill -0" not in command:
@@ -73,8 +73,9 @@ def _runner(detect: str = _INSTALLED):
             (lambda c: c == "true", _ok()),  # preflight
             (lambda c: "command -v strata-worker" in c, _ok(detect)),  # detect probe
             (lambda c: "uv tool install" in c, _ok()),  # install (if reached)
+            (lambda c: "uv tool dir --bin" in c, _ok("/root/.local/bin\n")),  # its bin dir
             (lambda c: c.startswith("cat "), _ok("")),  # is_running: no pidfile
-            (lambda c: "nohup strata-worker" in c, _ok("4321\n")),  # launch → pid
+            (lambda c: "nohup " in c, _ok("4321\n")),  # launch → pid
             (lambda c: "kill" in c and "kill -0" not in c, _ok("stopped\n")),  # stop
         ]
     )
@@ -112,7 +113,7 @@ class FakeTunnelLauncher:
 def _launched_id(runner) -> str | None:
     """The launch id the latest launch fed the worker over stdin, which its /health echoes."""
     for command, stdin_data in zip(reversed(runner.calls), reversed(runner.stdin_writes)):
-        if "nohup strata-worker" in command:
+        if "nohup " in command:
             return stdin_data.splitlines()[0] if stdin_data else None
     return None
 
@@ -162,6 +163,26 @@ def test_establish_installs_when_missing():
     sup, _, _ = _supervisor(runner=runner)
     sup.establish("gpu", "user@box")
     assert any("uv tool install" in c for c in runner.calls)
+    # The bare name is not on a non-interactive SSH PATH; the path uv reports is.
+    launch = next(c for c in runner.calls if "nohup " in c)
+    assert "nohup /root/.local/bin/strata-worker --host" in launch
+
+
+def test_establish_launches_the_detected_worker_path():
+    runner = _runner()
+    sup, _, _ = _supervisor(runner=runner)
+    sup.establish("gpu", "user@box")
+    launch = next(c for c in runner.calls if "nohup " in c)
+    assert "nohup /usr/bin/strata-worker --host" in launch
+    assert not any("uv tool install" in c for c in runner.calls)
+
+
+def test_establish_health_failure_quotes_the_remote_log():
+    runner = _runner()
+    runner.rules.insert(0, (lambda c: c.startswith("tail -n"), _ok("nohup: failed to run\n")))
+    sup, _, _ = _supervisor(runner=runner, healthy=False)
+    with pytest.raises(SshWorkerError, match="(?s)didn't respond.*ends:\nnohup: failed to run"):
+        sup.establish("gpu", "user@box", health_timeout=0)
 
 
 def test_establish_health_failure_cleans_up():
@@ -193,7 +214,7 @@ def test_establish_refuses_when_health_is_not_from_the_launched_worker(answered)
     (launch_stdin,) = [
         stdin_data
         for command, stdin_data in zip(runner.calls, runner.stdin_writes)
-        if "nohup strata-worker" in command
+        if "nohup " in command
     ]
     launch_id, _token = launch_stdin.splitlines()
     assert not any(launch_id in command for command in runner.calls)
@@ -232,7 +253,7 @@ def test_re_establish_publishes_a_token_the_remote_worker_actually_has():
             (lambda c: "command -v strata-worker" in c, _ok(_INSTALLED)),
             ("kill -0 ", _ok("up")),
             (lambda c: "kill" in c and "kill -0" not in c, _ok("stopped\n")),
-            ("nohup strata-worker", _ok("4321\n")),
+            ("nohup ", _ok("4321\n")),
             # A live worker is recorded on the default port → adoptable.
             (lambda c: "cat " in c, _ok('{"pid": 4321, "port": 9000}')),
         ]
@@ -244,7 +265,7 @@ def test_re_establish_publishes_a_token_the_remote_worker_actually_has():
     launched = [
         stdin_data
         for command, stdin_data in zip(runner.calls, runner.stdin_writes)
-        if "nohup strata-worker" in command
+        if "nohup " in command
     ]
     assert launched, "no worker was ever launched with a token"
     assert launched[-1].splitlines()[-1] == sup.token_for("gpu")
@@ -636,7 +657,7 @@ def test_concurrent_establish_same_name_is_rejected():
             (lambda c: c == "true", _ok()),
             (lambda c: "command -v strata-worker" in c, _ok(_INSTALLED)),
             (lambda c: c.startswith("cat "), _ok("")),
-            (lambda c: "nohup strata-worker" in c, _ok("4321\n")),
+            (lambda c: "nohup " in c, _ok("4321\n")),
         ]
     )
     sup = RemoteWorkerSupervisor(

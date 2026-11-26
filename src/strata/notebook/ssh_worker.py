@@ -62,6 +62,7 @@ class RemoteEnvInfo:
     worker_version: str | None
     platform: str  # ``uname -sm`` output, e.g. "Linux x86_64"
     worker_path: str | None = None
+    uv_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -160,12 +161,23 @@ class RemoteWorker:
 
     def detect(self) -> RemoteEnvInfo:
         """Probe the box for ``strata-worker`` / ``uv`` / platform in one round-trip."""
+        # A non-interactive shell often lacks uv's bin dirs on PATH (Ubuntu's .bashrc
+        # returns early), so both tools are also looked for where uv puts them.
         # ``|| true`` so a missing tool yields an empty value, not an aborted probe.
         script = (
-            'printf "worker=%s\\n" "$(command -v strata-worker || true)"; '
-            'printf "uv=%s\\n" "$(command -v uv || true)"; '
+            "uv=$(command -v uv || true); "
+            'for c in "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv"; do '
+            'if [ -z "$uv" ] && [ -x "$c" ]; then uv="$c"; fi; done; '
+            "w=$(command -v strata-worker || true); "
+            'if [ -z "$w" ] && [ -n "$uv" ]; then '
+            'd=$("$uv" tool dir --bin 2>/dev/null || true); '
+            'if [ -n "$d" ] && [ -x "$d/strata-worker" ]; then w="$d/strata-worker"; fi; fi; '
+            'if [ -z "$w" ] && [ -x "$HOME/.local/bin/strata-worker" ]; then '
+            'w="$HOME/.local/bin/strata-worker"; fi; '
+            'printf "worker=%s\\n" "$w"; '
+            'printf "uv=%s\\n" "$uv"; '
             'printf "platform=%s\\n" "$(uname -sm 2>/dev/null || true)"; '
-            'printf "version=%s\\n" "$(strata-worker --version 2>/dev/null || true)"'
+            'printf "version=%s\\n" "$([ -n "$w" ] && "$w" --version 2>/dev/null || true)"'
         )
         res = self.runner.run(script, timeout=30)
         if not res.ok:
@@ -180,20 +192,21 @@ class RemoteWorker:
             worker_version=fields.get("version") or None,
             platform=fields.get("platform") or "",
             worker_path=worker_path,
+            uv_path=fields.get("uv") or None,
         )
 
     # -- install -------------------------------------------------------------
 
     def ensure_installed(
         self, info: RemoteEnvInfo, *, extras: str = "notebook", pin: str | None = None
-    ) -> None:
-        """Install ``strata-worker`` via ``uv tool install`` if it's missing.
+    ) -> str:
+        """Install ``strata-worker`` via ``uv tool install`` if it's missing; return its path.
 
         Raises when neither the worker nor ``uv`` is present; no uv installer is
         fetched.
         """
-        if info.has_worker:
-            return
+        if info.has_worker and info.worker_path:
+            return info.worker_path
         if not info.has_uv:
             raise SshWorkerError(
                 "the remote host has neither `strata-worker` nor `uv` to install it. "
@@ -203,10 +216,21 @@ class RemoteWorker:
         spec = f"strata-notebook[{extras}]" if extras else "strata-notebook"
         if pin:
             spec = f"{spec}=={pin}"
-        res = self.runner.run(f"uv tool install {shlex.quote(spec)}", timeout=_INSTALL_TIMEOUT)
+        uv = shlex.quote(info.uv_path or "uv")
+        res = self.runner.run(f"{uv} tool install {shlex.quote(spec)}", timeout=_INSTALL_TIMEOUT)
         if not res.ok:
             detail = res.stderr.strip() or res.stdout.strip()
             raise SshWorkerError(f"remote `uv tool install {spec}` failed: {detail}")
+        # Launched by this path: uv's bin dir is often not on a non-interactive PATH.
+        res = self.runner.run(f"{uv} tool dir --bin", timeout=30)
+        lines = res.stdout.strip().splitlines()
+        if not res.ok or not lines:
+            detail = res.stderr.strip() or f"exit {res.returncode}, no output"
+            raise SshWorkerError(
+                f"installed `{spec}` on the box, but `uv tool dir --bin` did not name "
+                f"its bin dir: {detail}"
+            )
+        return f"{lines[-1].strip()}/strata-worker"
 
     # -- process lifecycle ---------------------------------------------------
 
@@ -233,8 +257,9 @@ class RemoteWorker:
         host: str = "127.0.0.1",
         adopt: bool = True,
         launch_id: str | None = None,
+        executable: str = "strata-worker",
     ) -> RunningWorker:
-        """Start the worker detached (``nohup``), recording a pidfile; return it.
+        """Start ``executable`` detached (``nohup``), recording a pidfile; return it.
 
         With ``adopt``, a live recorded worker on the same ``port`` is returned
         instead, but only when no token or ``launch_id`` applies: the token a
@@ -250,7 +275,7 @@ class RemoteWorker:
                     return existing
                 self.stop()
         pidfile = self._pidfile()
-        logfile = f"{_REMOTE_STATE_DIR}/worker-{shlex.quote(self.name)}.log"
+        logfile = self._logfile()
         # The token goes over stdin: in the command it would be visible in ``ps`` and
         # echoed in timeout errors that reach HTTP responses and logs.
         if token and "\n" in token:
@@ -268,7 +293,7 @@ class RemoteWorker:
             f"{read_launch_id if launch_id else ''}"
             f"{read_token if token else ''}"
             f"mkdir -p {_REMOTE_STATE_DIR} && {{ "
-            f"nohup strata-worker --host {shlex.quote(host)} --port {port} "
+            f"nohup {shlex.quote(executable)} --host {shlex.quote(host)} --port {port} "
             f"> {logfile} 2>&1 & "
             "pid=$!; "
             f'printf \'{{"pid": %s, "port": %s}}\\n\' "$pid" {port} > {pidfile}; '
@@ -300,8 +325,19 @@ class RemoteWorker:
             raise SshWorkerError(f"failed to stop remote worker: {res.stderr.strip()}")
         return "stopped" in res.stdout
 
+    def log_tail(self, lines: int = 20) -> str:
+        """The last ``lines`` of the worker's remote log, or "" when it can't be read."""
+        try:
+            res = self.runner.run(f"tail -n {lines} {self._logfile()} 2>/dev/null", timeout=15)
+        except SshWorkerError:
+            return ""
+        return res.stdout.strip() if res.ok else ""
+
     def _pidfile(self) -> str:
         return f"{_REMOTE_STATE_DIR}/worker-{shlex.quote(self.name)}.json"
+
+    def _logfile(self) -> str:
+        return f"{_REMOTE_STATE_DIR}/worker-{shlex.quote(self.name)}.log"
 
 
 def _parse_kv(text: str) -> dict[str, str]:
