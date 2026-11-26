@@ -47,12 +47,13 @@ class EnvironmentBackend(Protocol):
         """
         ...
 
-    def add(self, package: str, *, timeout: int, dev: bool = False) -> _UvCommandResult:
-        """Add a package to the declared dependencies (the ``dev`` group when *dev*) and sync."""
+    def add(self, *packages: str, timeout: int, dev: bool = False) -> _UvCommandResult:
+        """Add packages to the declared dependencies (the ``dev`` group when *dev*) and sync,
+        in one resolve."""
         ...
 
-    def remove(self, package: str, *, timeout: int) -> _UvCommandResult:
-        """Remove a package from the declared dependencies and sync."""
+    def remove(self, *packages: str, timeout: int) -> _UvCommandResult:
+        """Remove packages from the declared dependencies and sync, in one resolve."""
         ...
 
     async def sync_streaming(
@@ -123,22 +124,22 @@ class UvBackend:
             args += ["--python", python_version]
         return _run_uv_command(self.notebook_dir, args, timeout=timeout, display_name="uv sync")
 
-    def add(self, package: str, *, timeout: int, dev: bool = False) -> _UvCommandResult:
+    def add(self, *packages: str, timeout: int, dev: bool = False) -> _UvCommandResult:
         from strata.notebook.dependencies import _run_uv_command
 
         return _run_uv_command(
             self.notebook_dir,
-            ["add", "--dev", package] if dev else ["add", package],
+            ["add", "--dev", *packages] if dev else ["add", *packages],
             timeout=timeout,
             display_name="uv add",
         )
 
-    def remove(self, package: str, *, timeout: int) -> _UvCommandResult:
+    def remove(self, *packages: str, timeout: int) -> _UvCommandResult:
         from strata.notebook.dependencies import _run_uv_command
 
         return _run_uv_command(
             self.notebook_dir,
-            ["remove", package],
+            ["remove", *packages],
             timeout=timeout,
             display_name="uv remove",
         )

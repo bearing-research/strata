@@ -295,6 +295,15 @@ def test_import_writes_to_explicit_out_dir_when_provided(tmp_path: Path) -> None
     assert (result.notebook_dir / "notebook.toml").is_file()
 
 
+def test_an_explicit_out_dir_is_used_as_typed(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")], name="source.ipynb")
+
+    result = import_notebook(ipynb, out_dir=tmp_path / "x" / "03.09-Pivot Tables")
+
+    assert result.notebook_dir == tmp_path / "x" / "03.09-Pivot Tables"
+    assert (result.notebook_dir / "notebook.toml").is_file()
+
+
 def test_import_default_out_dir_uses_ipynb_stem(tmp_path: Path) -> None:
     ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")], name="my_analysis.ipynb")
 

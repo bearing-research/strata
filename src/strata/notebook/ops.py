@@ -392,8 +392,8 @@ class NotebookOps(Protocol):
         """
         ...
 
-    async def add_dependency(self, package: str) -> DependencyResult:
-        """Add a Python dependency to the notebook (``uv add``)."""
+    async def add_dependency(self, *packages: str) -> DependencyResult:
+        """Add Python dependencies to the notebook, in one resolve (``uv add``)."""
         ...
 
     async def remove_dependency(self, package: str) -> DependencyResult:
@@ -850,24 +850,26 @@ class LocalNotebookOps:
         self._reload()
         return self.list_workers()
 
-    async def add_dependency(self, package: str) -> DependencyResult:
-        """Add a dependency (see :meth:`NotebookOps.add_dependency`)."""
-        return await self._mutate_dependency(package, "add")
+    async def add_dependency(self, *packages: str) -> DependencyResult:
+        """Add dependencies in one resolve (see :meth:`NotebookOps.add_dependency`)."""
+        return await self._mutate_dependency(packages, "add")
 
     async def remove_dependency(self, package: str) -> DependencyResult:
         """Remove a dependency (see :meth:`NotebookOps.remove_dependency`)."""
-        return await self._mutate_dependency(package, "remove")
+        return await self._mutate_dependency((package,), "remove")
 
-    async def _mutate_dependency(self, package: str, action: str) -> DependencyResult:
+    async def _mutate_dependency(self, packages: tuple[str, ...], action: str) -> DependencyResult:
         # The same reservation the REST routes take: a shared live session must not
         # run two uv syncs on one venv, or sync while cells execute.
-        mutation = f"{action} {package}"
+        mutation = f"{action} {' '.join(packages)}"
         try:
             self._session._begin_synchronous_environment_mutation(mutation)
         except RuntimeError as exc:
             raise NotebookOpsError(str(exc)) from exc
         try:
-            outcome = await self._session.mutate_dependency(package, action=action, owner=mutation)
+            outcome = await self._session.mutate_dependency(
+                *packages, action=action, owner=mutation
+            )
         finally:
             self._session._end_synchronous_environment_mutation()
         result = outcome.result
@@ -1156,22 +1158,26 @@ class RemoteNotebookOps:
         )
         return [_cell_view_from_wire(cell) for cell in result.get("cells") or []]
 
-    async def add_dependency(self, package: str) -> DependencyResult:
-        """Add a dependency on the server (see :meth:`NotebookOps.add_dependency`)."""
+    async def add_dependency(self, *packages: str) -> DependencyResult:
+        """Add dependencies on the server, in one resolve (see
+        :meth:`NotebookOps.add_dependency`)."""
         import asyncio
 
-        return await asyncio.to_thread(self._mutate_dependency, package, "add")
+        return await asyncio.to_thread(self._mutate_dependency, packages, "add")
 
     async def remove_dependency(self, package: str) -> DependencyResult:
         """Remove a dependency on the server (see :meth:`NotebookOps.remove_dependency`)."""
         import asyncio
 
-        return await asyncio.to_thread(self._mutate_dependency, package, "remove")
+        return await asyncio.to_thread(self._mutate_dependency, (package,), "remove")
 
-    def _mutate_dependency(self, package: str, action: str) -> DependencyResult:
+    def _mutate_dependency(self, packages: tuple[str, ...], action: str) -> DependencyResult:
         base = f"/v1/notebooks/{self._session_id}/dependencies"
+        package = " ".join(packages)
         if action == "add":
-            resp = self._send("POST", base, json={"package": package}, timeout=_until_done())
+            resp = self._send(
+                "POST", base, json={"packages": list(packages)}, timeout=_until_done()
+            )
         else:
             resp = self._send("DELETE", f"{base}/{package}", timeout=_until_done())
         if resp.status_code == 404:
