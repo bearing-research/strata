@@ -1184,6 +1184,7 @@ async def import_jupyter_notebook(
             "dropped_magics": result.dropped_magics,
             "dropped_shells": result.dropped_shells,
             "captured_deps": result.captured_deps,
+            "beside_notebook": result.beside_notebook,
             "warnings": result.warnings,
             "report_path": str(result.report_path) if result.report_path else None,
             "report_text": result.report_text,

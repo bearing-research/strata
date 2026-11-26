@@ -1436,9 +1436,9 @@ def test_relative_reads_and_sibling_modules_are_reported(tmp_path: Path) -> None
     result = import_notebook(ipynb)
 
     read, helper = result.beside_notebook
-    assert read.startswith("cell 1 reads `data/births.csv`")
+    assert read.startswith("Cell 1 reads `data/births.csv`")
     assert '`# @mount data ../data ro` and read `data / "births.csv"`' in read
-    assert helper.startswith("cell 2 imports `helpers_x` from `helpers_x.py`")
+    assert helper.startswith("Cell 2 imports `helpers_x` from `helpers_x.py`")
     assert "make that a package and `uv add --editable` it" in helper
     assert "## Files and modules beside the notebook" in result.report_text
     assert "helpers_x" not in result.captured_deps
@@ -1464,3 +1464,50 @@ def test_nothing_beside_the_notebook_leaves_the_report_without_the_section(
 
     assert result.beside_notebook == []
     assert "beside the notebook" not in result.report_text
+
+
+def test_what_is_no_read_is_not_reported_and_does_not_fail_the_import(tmp_path: Path) -> None:
+    """A write, inline data and a name too long to stat are no files beside the notebook."""
+    (tmp_path / "out.txt").write_text("")
+    inline = "[" + ", ".join(['{"a": 1}'] * 60) + "]"
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell(
+                "import pandas as pd\n"
+                "open('out.txt', 'w')\nopen('out.txt', mode='a')\n"
+                f"pd.read_json('{inline}')\npd.read_csv('{'x' * 300}.csv')\n"
+            )
+        ],
+        name="n.ipynb",
+    )
+
+    assert import_notebook(ipynb).beside_notebook == []
+
+
+def test_one_path_or_module_many_cells_use_is_one_line(tmp_path: Path) -> None:
+    (tmp_path / "code.py").write_text("HELPER = 1\n")
+    (tmp_path / "mypkg").mkdir()
+    (tmp_path / "mypkg" / "__init__.py").write_text("")
+    cells = [_code_cell("from code import HELPER\nimport mypkg\n") for _ in range(3)]
+    ipynb = _make_ipynb(tmp_path, cells, name="n.ipynb")
+
+    stdlib_named, package = import_notebook(ipynb).beside_notebook
+
+    assert stdlib_named.startswith("Cells 1, 2 and 3 import `code` from `code.py`")
+    assert package.startswith("Cells 1, 2 and 3 import `mypkg` from the package `mypkg/`")
+    assert "with a `pyproject.toml`, and `uv add --editable` that folder" in package
+
+
+def test_a_suggested_mount_takes_no_builtin(tmp_path: Path) -> None:
+    (tmp_path / "input").mkdir()
+    (tmp_path / "input" / "train.csv").write_text("a\n")
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("import pandas as pd\npd.read_csv('input/train.csv')\n")],
+        name="n.ipynb",
+    )
+
+    (line,) = import_notebook(ipynb).beside_notebook
+
+    assert "`# @mount input_2 ../input ro`" in line

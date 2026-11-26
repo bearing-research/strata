@@ -2545,6 +2545,7 @@ def test_import_endpoint_happy_path(client, monkeypatch, tmp_path):
     assert report["markdown_cells"] == 1
     assert report["code_cells"] == 1
     assert report["captured_deps"] == []
+    assert report["beside_notebook"] == []
     assert report["report_path"].endswith("import_report.md")
     assert "Imported from demo.ipynb" in report["report_text"]
 

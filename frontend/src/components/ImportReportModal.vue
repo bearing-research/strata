@@ -49,6 +49,12 @@ const hasDropped = computed(
         <span v-if="report.translated_magics.length" class="import-report-stat">
           <strong>{{ report.translated_magics.length }}</strong> magics translated
         </span>
+        <span
+          v-if="report.beside_notebook.length"
+          class="import-report-stat import-report-stat-warn"
+        >
+          <strong>{{ report.beside_notebook.length }}</strong> beside the notebook
+        </span>
         <span v-if="hasDropped" class="import-report-stat import-report-stat-warn">
           <strong>{{ report.dropped_magics.length + report.dropped_shells.length }}</strong>
           dropped

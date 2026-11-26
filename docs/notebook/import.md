@@ -273,7 +273,8 @@ Sections that surface when applicable:
   folder, and the `.ipynb`'s folder is not on `sys.path`, so both fail
   at run time as imported. Each line names its fix: the `# @mount` to
   add and the path to read through it, or the package to
-  `uv add --editable`. `strata import` prints how many there are.
+  `uv add --editable`. `strata import` prints how many there are, and the
+  REST response lists them in `import_report.beside_notebook`.
 - **Warnings**: anything noteworthy; e.g. pip-only specs skipped
   for not being valid PEP 508.
 

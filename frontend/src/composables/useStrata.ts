@@ -446,6 +446,7 @@ export interface ImportReport {
   dropped_magics: string[]
   dropped_shells: string[]
   captured_deps: string[]
+  beside_notebook: string[]
   warnings: string[]
   report_path: string | null
   report_text: string
