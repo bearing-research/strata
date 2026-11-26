@@ -873,7 +873,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   installed version. `strata import --out` uses the directory as typed instead of
   lowercasing it (the default, named after the file, still is). `strata dep add` takes
   several packages and adds them in one resolve and one sync, also on a server, whose
-  `POST /v1/notebooks/{id}/dependencies` takes `packages`. (#PRCLI)
+  `POST /v1/notebooks/{id}/dependencies` takes `packages`. (#1714)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a
