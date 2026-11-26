@@ -266,6 +266,14 @@ Sections that surface when applicable:
   and shell cell magics that the converter removed.
 - **Dependencies captured**: what landed in `pyproject.toml`,
   ready for `uv sync` to resolve.
+- **Files and modules beside the notebook**: a relative path a cell
+  reads (`pd.read_csv("data/x.csv")`, `open`, `np.load`, `os.listdir`,
+  ...) that names something next to the `.ipynb`, and a helper module
+  next to it that a cell imports. Cells run in the notebook's `work/`
+  folder, and the `.ipynb`'s folder is not on `sys.path`, so both fail
+  at run time as imported. Each line names its fix: the `# @mount` to
+  add and the path to read through it, or the package to
+  `uv add --editable`. `strata import` prints how many there are.
 - **Warnings**: anything noteworthy; e.g. pip-only specs skipped
   for not being valid PEP 508.
 

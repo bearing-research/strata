@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import io
 import json
+import os
 import re
 import shlex
 import sys
@@ -94,6 +95,9 @@ class ImportResult:
     dropped_magics: list[str] = field(default_factory=list)
     dropped_shells: list[str] = field(default_factory=list)
     captured_deps: list[str] = field(default_factory=list)
+    # Relative paths and helper modules beside the .ipynb, each with its fix: cells run
+    # in work/, and the .ipynb's folder is not on sys.path.
+    beside_notebook: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     # Set by ``import_notebook``; the text is kept so REST can return it without re-reading.
     report_path: Path | None = None
@@ -165,6 +169,9 @@ def import_notebook(
     prev_cell_id: str | None = None
     cell_deps: list[str] = []
     scanned_imports: set[str] = set()
+    # Per cell, what it reads or imports from beside the .ipynb; and every name cells bind.
+    beside: list[tuple[int, list[str], list[str]]] = []
+    bound: set[str] = set()
     for position, cell in enumerate(nb.get("cells") or [], start=1):
         cell_type = cell.get("cell_type")
         source, unpaired = _LONE_SURROGATE_RE.subn(
@@ -213,7 +220,13 @@ def import_notebook(
             result.dropped_shells.extend(conv.dropped_shells)
             cell_deps.extend(conv.deps)
             # Converted source: magics are stripped, so it parses as Python.
-            scanned_imports |= _scan_imports(conv.source)
+            imports = _scan_imports(conv.source)
+            scanned_imports |= imports
+            reads = _relative_reads(conv.source, ipynb_path.parent)
+            helpers = sorted(imports & local_modules)
+            if reads or helpers:
+                beside.append((position, reads, helpers))
+            bound |= _bound_names(conv.source)
             prev_cell_id = cell_id
         elif cell_type is None:
             result.warnings.append("cell missing 'cell_type' was skipped")
@@ -221,6 +234,7 @@ def import_notebook(
             result.skipped_cells.append(str(cell_type))
 
     inferred_deps = _imports_to_deps(scanned_imports, local_modules)
+    result.beside_notebook = _beside_notebook(beside, ipynb_path.parent, notebook_dir, bound)
 
     # Explicit sources (siblings, %pip install) come first so their pins shadow
     # scan-derived names. Dedup is by PEP 503-normalized name.
@@ -462,6 +476,19 @@ def format_import_report(result: ImportResult, ipynb_path: Path | str) -> str:
             ]
         )
         lines.extend(f"- `{d}`" for d in result.captured_deps)
+
+    if result.beside_notebook:
+        lines.extend(
+            [
+                "",
+                "## Files and modules beside the notebook",
+                "",
+                "Cells run in the notebook's `work/` folder, and the folder of the `.ipynb` "
+                "is not on `sys.path`, so these fail at run time until they are wired up.",
+                "",
+            ]
+        )
+        lines.extend(f"- {line}" for line in result.beside_notebook)
 
     if result.warnings:
         lines.extend(["", "## Warnings", ""])
@@ -1121,6 +1148,86 @@ def _distribution_key(module: str) -> str:
             return nested
         return ".".join(parts[:3])
     return parts[0]
+
+
+# Calls whose first argument is a path a notebook reads: ``open``, ``pd.read_csv``,
+# ``np.load``, ``Path``, ``pl.scan_parquet``, ``os.listdir``.
+_READERS = frozenset(
+    {"open", "Path", "load", "loadtxt", "genfromtxt", "fromfile", "imread", "listdir", "scandir"}
+)
+
+
+def _relative_reads(source: str, parent_dir: Path) -> list[str]:
+    """Relative path literals a cell reads that name a file or folder beside the ``.ipynb``,
+    as written, in order."""
+    try:
+        tree = ast.parse(source)
+    except UNPARSEABLE:
+        return []
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if not (name in _READERS or name.startswith(("read_", "scan_"))):
+            continue
+        arg = node.args[0]
+        if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+            continue
+        path = arg.value
+        if not path.strip(" ./") or os.path.isabs(path) or "://" in path or path[0] == "~":
+            continue
+        if (parent_dir / path).exists() and path not in found:
+            found.append(path)
+    return found
+
+
+def _bound_names(source: str) -> set[str]:
+    """Every name a cell binds, so a suggested mount takes none of them."""
+    try:
+        tree = ast.parse(source)
+    except UNPARSEABLE:
+        return set()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.update((a.asname or a.name).split(".")[0] for a in node.names)
+    return names
+
+
+def _beside_notebook(
+    beside: list[tuple[int, list[str], list[str]]],
+    parent_dir: Path,
+    notebook_dir: Path,
+    bound: set[str],
+) -> list[str]:
+    """A line per relative read and helper import beside the ``.ipynb``, naming its fix."""
+    from strata.notebook.run_diagnostics import MountNames, folder_fix, import_fix, read_fix
+
+    names = MountNames(bound)
+    lines = []
+    for position, reads, helpers in beside:
+        for path in reads:
+            target = os.path.normpath(parent_dir / path)
+            if os.path.isdir(target):
+                fix = folder_fix(target, notebook_dir, names)
+            else:
+                fix = read_fix(target, notebook_dir, names)
+            lines.append(f"cell {position} reads `{path}`, beside the notebook. {fix}")
+        for module in helpers:
+            file = parent_dir / f"{module}.py"
+            where = file if file.is_file() else parent_dir / module / "__init__.py"
+            fix = import_fix([str(where)], notebook_dir)
+            lines.append(
+                f"cell {position} imports `{module}` from `{where.relative_to(parent_dir)}` "
+                f"beside the notebook. {fix}"
+            )
+    return lines
 
 
 def _local_module_names(parent_dir: Path) -> set[str]:

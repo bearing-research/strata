@@ -884,6 +884,12 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   12 GB). The run now prunes at its end with the same settings; a sweep that fails is a
   note, not a failed run. A server sweeping the stores of the notebooks it keeps open
   is still open (#1712). (#1721)
+- **An import names the files and modules beside the notebook.** A cell that read
+  `data/births.csv` or imported a helper module next to the `.ipynb` imported cleanly,
+  then failed at run time: cells run in `work/`, and the `.ipynb`'s folder is not on
+  `sys.path`. The import report has a section for them now, each with the `# @mount`
+  to add and the path to read through it, or the package to `uv add --editable`, and
+  `strata import` prints how many there are. (#PRIMP)
 - **An SSH worker starts on a box whose non-interactive `PATH` lacks uv's bin dir.**
   `strata worker add-ssh` installed `strata-worker` with `uv tool install` and launched
   it by its bare name, which a stock Ubuntu `~/.bashrc` keeps off `PATH` for a

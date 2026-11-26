@@ -1416,3 +1416,51 @@ class TestImportCommandSummary:
         assert "does not have .ipynb extension; trying to parse anyway" in err
         assert "\nerror: " in err
         assert not (tmp_path / "bad").exists()
+
+
+def test_relative_reads_and_sibling_modules_are_reported(tmp_path: Path) -> None:
+    """Cells run in work/ and the .ipynb's folder is not on sys.path: both fail at run time."""
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "births.csv").write_text("a\n1\n")
+    (tmp_path / "helpers_x.py").write_text("def double(x):\n    return 2 * x\n")
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("import pandas as pd\ndf = pd.read_csv('data/births.csv')\n"),
+            _code_cell("from helpers_x import double\nprint(double(df.a.sum()))\n"),
+            _code_cell("open('/etc/hosts')\nopen('not-there.txt')\nprint('data')\n"),
+        ],
+        name="03.09-Pivot-Tables.ipynb",
+    )
+
+    result = import_notebook(ipynb)
+
+    read, helper = result.beside_notebook
+    assert read.startswith("cell 1 reads `data/births.csv`")
+    assert '`# @mount data ../data ro` and read `data / "births.csv"`' in read
+    assert helper.startswith("cell 2 imports `helpers_x` from `helpers_x.py`")
+    assert "make that a package and `uv add --editable` it" in helper
+    assert "## Files and modules beside the notebook" in result.report_text
+    assert "helpers_x" not in result.captured_deps
+
+
+def test_a_suggested_mount_takes_no_name_a_cell_binds(tmp_path: Path) -> None:
+    (tmp_path / "data").mkdir()
+    ipynb = _make_ipynb(
+        tmp_path, [_code_cell("import os\ndata = os.listdir('data')\n")], name="n.ipynb"
+    )
+
+    (line,) = import_notebook(ipynb).beside_notebook
+
+    assert "`# @mount data_2 ../data ro` and read through `data_2`" in line
+
+
+def test_nothing_beside_the_notebook_leaves_the_report_without_the_section(
+    tmp_path: Path,
+) -> None:
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = open('/etc/hosts')\n")], name="n.ipynb")
+
+    result = import_notebook(ipynb)
+
+    assert result.beside_notebook == []
+    assert "beside the notebook" not in result.report_text
