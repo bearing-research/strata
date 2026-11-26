@@ -5833,6 +5833,13 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An SSH worker starts on a box whose non-interactive <code>PATH</code> lacks uv's bin dir.</strong>
+  <code>strata worker add-ssh</code> installed <code>strata-worker</code> with <code>uv tool install</code> and launched
+  it by its bare name, which a stock Ubuntu <code>~/.bashrc</code> keeps off <code>PATH</code> for a
+  non-interactive shell, so only a <code>/health</code> timeout showed. Detection now also looks in
+  <code>uv tool dir --bin</code> and <code>~/.local/bin</code> (and for uv in <code>~/.local/bin</code> and
+  <code>~/.cargo/bin</code>), the worker is launched by its path, and a <code>/health</code> timeout quotes the
+  end of the worker's log on the box. (#1697)</li>
 <li><strong>A cell after a writer is stale once the writer's tables land.</strong> A run's
   <code>@write_table</code> writes and its read-write mount sync-back land after the token its code
   ends with, so a cell <code>@after</code> it keyed meanwhile stayed ready on what was there before.
