@@ -405,7 +405,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   a run did not load it and the cell failed. `# @reads mu sig` makes the names
   references: the cell gets them from the cells that define them, and is stale when they
   change. A run that fails on such a name (`NameError`, or pandas'
-  `UndefinedVariableError`) now says to add the line. (#PR)
+  `UndefinedVariableError`) now says to add the line. (#1733)
 
 ### Changed
 
