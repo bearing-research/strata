@@ -408,7 +408,9 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
 
 # --- Batch execution (run-all single-process mode) ---
 #
-# Many cells exec in one process with a shared namespace. The parent owns
+# Many cells exec in one process. The batch keeps every name its cells bind, and each
+# cell runs in a view of it holding only the names wired to it, as a single run's
+# namespace holds only its inputs. The parent owns
 # provenance, cache and persist; this harness runs bodies and serializes.
 # Pipes: frame_out (harness -> parent, line-delimited JSON) and resp_in
 # (parent -> harness, cache_check / persist responses). Blobs travel as files
@@ -496,6 +498,7 @@ def _run_one_batched_cell(
     manifest: dict,
     published: dict[str, tuple[str, Path]],
     stored_globals: _StoredGlobals,
+    views: list[dict[str, Any]],
 ) -> tuple[str, str | None]:
     """Execute one cell within a batch; return ``(status, failed_reason)``.
 
@@ -507,6 +510,7 @@ def _run_one_batched_cell(
     source = cell["source"]
     consumed_vars: list[str] = list(cell.get("consumed_vars") or [])
     references: list[str] = list(cell.get("references") or [])
+    inputs: list[str] = list(cell.get("inputs") or [])
     mutation_defines: set[str] = set(cell.get("mutation_defines") or [])
     cell_env: dict = cell.get("env") or {}
     mount_manifest: dict = cell.get("mount_manifest") or {}
@@ -520,15 +524,13 @@ def _run_one_batched_cell(
     _send_frame(frame_out, "cell_start", {"cell_id": cell_id})
     started = time.perf_counter()
 
-    # Saved so a user variable named like a mount is restored on exit.
-    mount_names = list(mount_manifest.keys())
-    table_names = [injected for name in table_manifest for injected in (name, f"{name}_snapshot")]
-    ambient_names = ["strata"] if cell.get("strata_url") else []
-    previous_bindings: dict[str, Any] = {
-        name: namespace.get(name, _MISSING) for name in mount_names + table_names + ambient_names
-    }
-    inject_mounts({"mounts": mount_manifest}, namespace)
-    inject_tables({"tables": table_manifest}, namespace)
+    # The cell runs in what a single run would give it: the names wired to it, not every
+    # name the batch has bound, which it could read where the analysis cannot see (#1732).
+    view: dict[str, Any] = {name: namespace[name] for name in inputs if name in namespace}
+    # Kept: the functions it defines read it as their globals.
+    views.append(view)
+    inject_mounts({"mounts": mount_manifest}, view)
+    inject_tables({"tables": table_manifest}, view)
     ambient_client = None
 
     try:
@@ -546,7 +548,7 @@ def _run_one_batched_cell(
                     "inputs": response.get("input_uris") or {},
                     "strata_run_token": manifest.get("strata_run_token"),
                 },
-                namespace,
+                view,
             )
 
             if response.get("error"):
@@ -598,13 +600,8 @@ def _run_one_batched_cell(
                 return ("ok", None)
 
             # Cache miss: execute the body.
-            #
-            # ``DisplayCapture.install`` uses ``setdefault``, and the namespace persists
-            # across batch cells, so clear the display keys or the new handlers never install.
-            for _display_key in _display.DISPLAY_HELPER_NAMES:
-                namespace.pop(_display_key, None)
             display_capture = _display.DisplayCapture()
-            display_capture.install(namespace)
+            display_capture.install(view)
             stdout_capture = io.StringIO()
             stderr_capture = io.StringIO()
             old_stdout, old_stderr = sys.stdout, sys.stderr
@@ -617,13 +614,14 @@ def _run_one_batched_cell(
                 namespace, sorted(set(references) | set(published))
             )
             globals_snapshots = stored_globals.snapshot()
+            given = {name: id(value) for name, value in view.items()}
             # What a later hit saves: the body and its serialization, not the cell's
             # share of the batch's setup or the parent's persist.
             started = time.perf_counter()
             try:
                 try:
                     with display_capture.capture_side_effects(), _audit.recording() as observed:
-                        display_value = _exec_with_display(source, namespace, cell_id)
+                        display_value = _exec_with_display(source, view, cell_id)
                 except Exception as exc:
                     hint = _work_dir.hint(exc, manifest)
                     _send_frame(
@@ -638,6 +636,21 @@ def _run_one_batched_cell(
                         },
                     )
                     return ("cell_error", "cell_error")
+                # What it bound, by a single run's rule: a name new or rebound, or an input
+                # it changes in place and passes on. Its outputs, and the cells after see it.
+                bound = {
+                    name: value
+                    for name, value in view.items()
+                    if not name.startswith("_")
+                    and (name not in given or id(value) != given[name] or name in mutation_defines)
+                }
+                namespace.update(bound)
+                # An input it deleted is gone from its view only; the check below sees that.
+                seen = {
+                    name: value
+                    for name, value in namespace.items()
+                    if name in view or name not in given
+                }
 
                 read_audit = _audit.report(
                     observed,
@@ -650,13 +663,13 @@ def _run_one_batched_cell(
                 # mutation, bare mutators). An input the cell changes in place and
                 # passes on reaches downstream as published, as in a single run.
                 input_mutations = _immut.detect_mutations(
-                    namespace, input_snapshots, exported_names=mutation_defines
+                    seen, input_snapshots, exported_names=mutation_defines
                 )
                 # A single run warns only about what the cell names.
                 mutation_warnings = [w for w in input_mutations if w["var_name"] in references]
                 mutation_warnings.extend(
                     _immut.detect_shared_mutable_outputs(
-                        {vn: namespace[vn] for vn in consumed_vars if vn in namespace}
+                        {vn: bound[vn] for vn in consumed_vars if vn in bound}
                     )
                 )
 
@@ -666,24 +679,20 @@ def _run_one_batched_cell(
                 # round-trips.
                 outputs: dict[str, Any] = {}
                 for var_name in consumed_vars:
-                    if var_name not in namespace:
+                    if var_name not in bound:
                         continue
                     try:
                         outputs[var_name] = _ser.serialize_value(
-                            namespace[var_name], cell_output_dir, var_name
+                            bound[var_name], cell_output_dir, var_name
                         )
                     except Exception as exc:
                         outputs[var_name] = {
                             "error": str(exc),
-                            "type": type(namespace[var_name]).__name__,
+                            "type": type(bound[var_name]).__name__,
                         }
 
                 display_values = display_capture.resolve(display_value)
-                written = [
-                    (namespace[name], payload)
-                    for name, payload in outputs.items()
-                    if name in namespace
-                ]
+                written = [(bound[name], payload) for name, payload in outputs.items()]
                 serialized_displays: list[dict[str, Any]] = []
                 for idx, display in enumerate(display_values):
                     try:
@@ -723,25 +732,25 @@ def _run_one_batched_cell(
             # A single-cell run changes only its own copy of an input, and later cells
             # load the stored value; put that value back, or they read the change.
             for warning in input_mutations:
-                stored = published.get(warning["var_name"])
-                if stored is not None:
-                    namespace[warning["var_name"]] = _ser.deserialize_value(*stored)
+                name = warning["var_name"]
+                stored = published.get(name)
+                changed = namespace.get(name, _MISSING)
+                if stored is None or changed is _MISSING:
+                    continue
+                restored = _ser.deserialize_value(*stored)
+                namespace[name] = restored
+                # Also where a function an earlier cell defined reads it: that cell's view.
+                for other in views:
+                    if other.get(name, _MISSING) is changed:
+                        other[name] = restored
             stored_globals.restore_changed(globals_snapshots)
             for var_name, meta in outputs.items():
                 if "file" in meta:
                     published[var_name] = (meta["content_type"], cell_output_dir / meta["file"])
             return ("ok", None)
     finally:
-        # The batch process is reused across cells, so close the client (no leaked
-        # sockets) and restore pre-cell name bindings, whatever the close raised.
-        try:
-            close_client(ambient_client)
-        finally:
-            for name, previous in previous_bindings.items():
-                if previous is _MISSING:
-                    namespace.pop(name, None)
-                else:
-                    namespace[name] = previous
+        # The batch process is reused across cells, so close the client: no leaked sockets.
+        close_client(ambient_client)
 
 
 def _seed_upstream_namespace(
@@ -780,7 +789,7 @@ def execute_batch(
 ) -> None:
     """Execute a sequence of cells in one Python process.
 
-    ``cells`` is ``[{cell_id, source, consumed_vars, env, mount_manifest,
+    ``cells`` is ``[{cell_id, source, consumed_vars, inputs, env, mount_manifest,
     source_hash, env_hash}, ...]`` in notebook order. ``upstream_inputs`` seeds the
     shared namespace (same shape ``deserialize_inputs`` reads). Streams frames to
     ``frame_out``, reads responses from ``resp_in``, and returns after
@@ -804,6 +813,7 @@ def execute_batch(
     }
 
     stored_globals = _StoredGlobals()
+    views: list[dict[str, Any]] = []
     with apply_env_overrides({"env": shared_env}):
         _seed_upstream_namespace(
             upstream_inputs, output_dir, namespace, tainted_inputs, stored_globals
@@ -826,7 +836,15 @@ def execute_batch(
             return
 
         status, reason = _run_one_batched_cell(
-            cell, namespace, output_dir, frame_out, resp_in, manifest, published, stored_globals
+            cell,
+            namespace,
+            output_dir,
+            frame_out,
+            resp_in,
+            manifest,
+            published,
+            stored_globals,
+            views,
         )
         if status != "ok":
             _send_frame(

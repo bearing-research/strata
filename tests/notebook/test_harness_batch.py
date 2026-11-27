@@ -152,6 +152,7 @@ def test_batch_runs_two_cells_with_cache_miss_then_persist(batch_pipes):
         {
             "cell_id": "c2",
             "source": "y = x + 1",
+            "inputs": ["x"],
             "consumed_vars": ["y"],
             "env": {},
             "mount_manifest": {},
@@ -306,6 +307,7 @@ def test_batch_cache_hit_loads_from_disk_and_continues(batch_pipes, tmp_path):
         {
             "cell_id": "c2",
             "source": "y = x * 2",
+            "inputs": ["x"],
             "consumed_vars": ["y"],
             "env": {},
             "mount_manifest": {},
@@ -448,8 +450,7 @@ def test_display_filenames_use_serializer_convention(batch_pipes):
 
 def test_mount_name_save_restore(batch_pipes, tmp_path):
     """A cell-level mount must not clobber a pre-existing user variable
-    with the same name. After the mount-declaring cell, the user value
-    is restored.
+    with the same name: the cells after the mount-declaring one see the user value.
     """
     frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
 
@@ -474,6 +475,7 @@ def test_mount_name_save_restore(batch_pipes, tmp_path):
         {
             "cell_id": "c3",
             "source": "still_user = data",
+            "inputs": ["data"],
             "consumed_vars": ["still_user"],
             "env": {},
             "mount_manifest": {},
@@ -722,6 +724,7 @@ def test_batch_warns_on_inplace_mutation_of_input(batch_pipes):
         {
             "cell_id": "mutate",
             "source": "alias = df\nalias.loc[0, 'a'] = 9",
+            "inputs": ["df"],
             "consumed_vars": [],
             "references": ["df"],
             "env": {},
@@ -927,7 +930,7 @@ def test_an_interrupt_in_a_client_close_still_restores_the_names_it_bound(batch_
     def run() -> None:
         try:
             harness._run_one_batched_cell(
-                cell, namespace, output_dir, frame_w, resp_r, {}, {}, harness._StoredGlobals()
+                cell, namespace, output_dir, frame_w, resp_r, {}, {}, harness._StoredGlobals(), []
             )
         except BaseException as exc:
             errors.append(exc)
