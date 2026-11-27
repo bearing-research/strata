@@ -548,6 +548,32 @@ either order, contradicts it: the cell does not run, and fails with
 annotation, the last line of each key is the one read, so `# @stochastic off`
 or a later `# @nocache` settles it.
 
+## @reads
+
+Names the cell reads where Strata's analysis cannot see them, because they appear only
+inside a string:
+
+```python
+# @reads mu sig
+births.query("(births > @mu - 5 * @sig) & (births < @mu + 5 * @sig)")
+```
+
+Strata finds a cell's inputs by reading its code, and a name inside a string (a pandas
+`query` or `eval` expression, `eval("mu")`, `globals()["mu"]`) is not in the code it reads.
+Without the annotation the name is not loaded, so the cell fails when run alone; in a
+run-all it may find the name left by an earlier cell and keep a result that does not
+follow it. With the annotation the names are references like any other: the cell gets
+them from the cells that define them, its cache key includes them, and it is stale when
+they change.
+
+Lines stack. Names on a line are separated by spaces, and a comma after a name is ignored.
+Each must be a Python variable name, or the cell does not run (`reads_unreadable`). A
+declared name is read from the cell that defines it even when this cell assigns it later.
+`@reads` applies to Python cells; on any other cell it does nothing and is a warning.
+
+A run that fails on a name a cell above defines (`NameError`, or pandas'
+`UndefinedVariableError`) says to add the `# @reads` line.
+
 ## Cross-cell ordering
 
 ### `@after`

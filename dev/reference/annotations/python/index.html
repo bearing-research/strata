@@ -3561,6 +3561,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        @reads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cross-cell-ordering" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4479,6 +4490,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        @reads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cross-cell-ordering" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4993,15 +5015,34 @@ either order, contradicts it: the cell does not run, and fails with
 <code>stochastic_nocache_conflict</code> on the <code>@nocache off</code> line. As with every
 annotation, the last line of each key is the one read, so <code># @stochastic off</code>
 or a later <code># @nocache</code> settles it.</p>
+<h2 id="reads">@reads<a class="headerlink" href="#reads" title="Permanent link">&para;</a></h2>
+<p>Names the cell reads where Strata's analysis cannot see them, because they appear only
+inside a string:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># @reads mu sig</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">births</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">"(births &gt; @mu - 5 * @sig) &amp; (births &lt; @mu + 5 * @sig)"</span><span class="p">)</span>
+</code></pre></div>
+<p>Strata finds a cell's inputs by reading its code, and a name inside a string (a pandas
+<code>query</code> or <code>eval</code> expression, <code>eval("mu")</code>, <code>globals()["mu"]</code>) is not in the code it reads.
+Without the annotation the name is not loaded, so the cell fails when run alone; in a
+run-all it may find the name left by an earlier cell and keep a result that does not
+follow it. With the annotation the names are references like any other: the cell gets
+them from the cells that define them, its cache key includes them, and it is stale when
+they change.</p>
+<p>Lines stack. Names on a line are separated by spaces, and a comma after a name is ignored.
+Each must be a Python variable name, or the cell does not run (<code>reads_unreadable</code>). A
+declared name is read from the cell that defines it even when this cell assigns it later.
+<code>@reads</code> applies to Python cells; on any other cell it does nothing and is a warning.</p>
+<p>A run that fails on a name a cell above defines (<code>NameError</code>, or pandas'
+<code>UndefinedVariableError</code>) says to add the <code># @reads</code> line.</p>
 <h2 id="cross-cell-ordering">Cross-cell ordering<a class="headerlink" href="#cross-cell-ordering" title="Permanent link">&para;</a></h2>
 <h3 id="after"><code>@after</code><a class="headerlink" href="#after" title="Permanent link">&para;</a></h3>
 <p>Add a DAG edge from another cell to this one that carries no variable. Useful
 when the dependency is on a side effect, e.g. a SQL <code>seed</code> cell creates the
 database state that subsequent SQL cells query, and no Python variable flows
 between them.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1">-- @sql connection=warehouse</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="c1">-- @after seed</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1">-- @sql connection=warehouse</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="c1">-- @after seed</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
 </code></pre></div>
 <p>Multiple <code>@after</code> lines stack; each cell ID adds one edge. Whitespace-
 separated IDs on a single line work too: <code># @after seed migrate</code>. An ID
@@ -5049,9 +5090,9 @@ another's needs <code>@after</code> on the later one.</p>
 <p>Environment variables with names containing KEY, SECRET, TOKEN, PASSWORD, or CREDENTIAL have their values blanked from <code>notebook.toml</code> when saving. The key names are preserved as a "which vars are configured" reminder <em>only</em> when something real is configured alongside them. A notebook whose <code>[env]</code> would contain nothing but blanked sensitive slots is persisted without an <code>[env]</code> block at all, so typing an API key in the Runtime panel doesn't churn the committed notebook.</p>
 </div>
 <p>Notebook env vars are stored in the <code>[env]</code> section of <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="k">[env]</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"postgres://localhost/mydb"</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="k">[env]</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"postgres://localhost/mydb"</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
 </code></pre></div>
 
 

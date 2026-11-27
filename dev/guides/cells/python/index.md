@@ -357,6 +357,7 @@ While a Python cell runs, `STRATA_CELL_ID` holds its id, in the cell and in any 
 | `# @nocache`       | Always re-execute; never serve a cache hit       |
 | `# @stochastic`    | Every run persists beside the cache and never serves it (see [`@stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic)) |
 | `# @after <id>`    | An edge from another cell with no variable, keyed on its last run (see [`@after`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after)) |
+| `# @reads <name> …` | Names the cell reads inside a string, as in `df.query("@mu")` (see [`@reads`](https://bearingresearch.com/strata/dev/reference/annotations/python/#reads)) |
 | `# @loop …`        | Turn the cell into a [loop cell](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#loop-cells)    |
 | `# @loop_until …`  | End a loop cell early when an expression is true |
 | `# @variant <group> <name>` | Make the cell one alternative in a [variant group](https://bearingresearch.com/strata/dev/guides/cells/loops-and-variants/#variant-cells) |

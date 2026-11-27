@@ -5379,7 +5379,13 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
   fails. <code>GET /v1/artifacts/{id}/v/{n}/files</code> lists a folder's files with the
   artifact holding each, gated as <code>/data</code> is; a file the folder's tenant does
   not hold is a <code>404</code>. <code>fetch</code> of a folder says to call <code>download_folder</code>
-  instead of failing to read Arrow. (#1291)</p>
+  instead of failing to read Arrow. (#1291)
+- <strong><code># @reads</code> for a name a cell reads where Strata cannot see it.</strong> A name used only
+  inside a string, as in <code>df.query("a &gt; @mu")</code> or <code>eval("mu")</code>, is not a reference, so
+  a run did not load it and the cell failed. <code># @reads mu sig</code> makes the names
+  references: the cell gets them from the cells that define them, and is stale when they
+  change. A run that fails on such a name (<code>NameError</code>, or pandas'
+  <code>UndefinedVariableError</code>) now says to add the line. (#1733)</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>

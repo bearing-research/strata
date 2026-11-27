@@ -18,6 +18,7 @@
 | [`@nocache`](https://bearingresearch.com/strata/dev/reference/annotations/python/#nocache) | Always run; never serve a cached result. |
 | [`@stochastic`](https://bearingresearch.com/strata/dev/reference/annotations/python/#stochastic) | Every run is a sample: it always runs and keeps its outputs. |
 | [`@after`](https://bearingresearch.com/strata/dev/reference/annotations/python/#after) | An edge from another cell with no variable, keyed on its last run. |
+| [`@reads`](https://bearingresearch.com/strata/dev/reference/annotations/python/#reads) | Names the cell reads inside a string, where the analysis cannot see them. |
 | [`@sql`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#sql) | Mark a SQL cell and name its connection. |
 | [`@cache`](https://bearingresearch.com/strata/dev/reference/annotations/sql/#cache) | Choose a SQL cell's cache policy. |
 | [`@model`](https://bearingresearch.com/strata/dev/reference/annotations/prompt/#model) | The model a prompt cell calls. |
