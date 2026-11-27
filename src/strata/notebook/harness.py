@@ -498,6 +498,7 @@ def _run_one_batched_cell(
     manifest: dict,
     published: dict[str, tuple[str, Path]],
     stored_globals: _StoredGlobals,
+    views: list[dict[str, Any]],
 ) -> tuple[str, str | None]:
     """Execute one cell within a batch; return ``(status, failed_reason)``.
 
@@ -526,10 +527,8 @@ def _run_one_batched_cell(
     # The cell runs in what a single run would give it: the names wired to it, not every
     # name the batch has bound, which it could read where the analysis cannot see (#1732).
     view: dict[str, Any] = {name: namespace[name] for name in inputs if name in namespace}
-    mount_names = list(mount_manifest.keys())
-    table_names = [injected for name in table_manifest for injected in (name, f"{name}_snapshot")]
-    ambient_names = ["strata"] if cell.get("strata_url") else []
-    injected_names = {*mount_names, *table_names, *ambient_names, *_display.DISPLAY_HELPER_NAMES}
+    # Kept: the functions it defines read it as their globals.
+    views.append(view)
     inject_mounts({"mounts": mount_manifest}, view)
     inject_tables({"tables": table_manifest}, view)
     ambient_client = None
@@ -615,6 +614,7 @@ def _run_one_batched_cell(
                 namespace, sorted(set(references) | set(published))
             )
             globals_snapshots = stored_globals.snapshot()
+            given = {name: id(value) for name, value in view.items()}
             # What a later hit saves: the body and its serialization, not the cell's
             # share of the batch's setup or the parent's persist.
             started = time.perf_counter()
@@ -636,12 +636,21 @@ def _run_one_batched_cell(
                         },
                     )
                     return ("cell_error", "cell_error")
-                # For the cells after: what it bound, not what was put there for it.
-                namespace.update(
-                    (name, value)
+                # What it bound, by a single run's rule: a name new or rebound, or an input
+                # it changes in place and passes on. Its outputs, and the cells after see it.
+                bound = {
+                    name: value
                     for name, value in view.items()
-                    if name not in injected_names and not name.startswith("__")
-                )
+                    if not name.startswith("_")
+                    and (name not in given or id(value) != given[name] or name in mutation_defines)
+                }
+                namespace.update(bound)
+                # An input it deleted is gone from its view only; the check below sees that.
+                seen = {
+                    name: value
+                    for name, value in namespace.items()
+                    if name in view or name not in given
+                }
 
                 read_audit = _audit.report(
                     observed,
@@ -654,13 +663,13 @@ def _run_one_batched_cell(
                 # mutation, bare mutators). An input the cell changes in place and
                 # passes on reaches downstream as published, as in a single run.
                 input_mutations = _immut.detect_mutations(
-                    namespace, input_snapshots, exported_names=mutation_defines
+                    seen, input_snapshots, exported_names=mutation_defines
                 )
                 # A single run warns only about what the cell names.
                 mutation_warnings = [w for w in input_mutations if w["var_name"] in references]
                 mutation_warnings.extend(
                     _immut.detect_shared_mutable_outputs(
-                        {vn: namespace[vn] for vn in consumed_vars if vn in namespace}
+                        {vn: bound[vn] for vn in consumed_vars if vn in bound}
                     )
                 )
 
@@ -670,24 +679,20 @@ def _run_one_batched_cell(
                 # round-trips.
                 outputs: dict[str, Any] = {}
                 for var_name in consumed_vars:
-                    if var_name not in namespace:
+                    if var_name not in bound:
                         continue
                     try:
                         outputs[var_name] = _ser.serialize_value(
-                            namespace[var_name], cell_output_dir, var_name
+                            bound[var_name], cell_output_dir, var_name
                         )
                     except Exception as exc:
                         outputs[var_name] = {
                             "error": str(exc),
-                            "type": type(namespace[var_name]).__name__,
+                            "type": type(bound[var_name]).__name__,
                         }
 
                 display_values = display_capture.resolve(display_value)
-                written = [
-                    (namespace[name], payload)
-                    for name, payload in outputs.items()
-                    if name in namespace
-                ]
+                written = [(bound[name], payload) for name, payload in outputs.items()]
                 serialized_displays: list[dict[str, Any]] = []
                 for idx, display in enumerate(display_values):
                     try:
@@ -727,9 +732,17 @@ def _run_one_batched_cell(
             # A single-cell run changes only its own copy of an input, and later cells
             # load the stored value; put that value back, or they read the change.
             for warning in input_mutations:
-                stored = published.get(warning["var_name"])
-                if stored is not None:
-                    namespace[warning["var_name"]] = _ser.deserialize_value(*stored)
+                name = warning["var_name"]
+                stored = published.get(name)
+                changed = namespace.get(name, _MISSING)
+                if stored is None or changed is _MISSING:
+                    continue
+                restored = _ser.deserialize_value(*stored)
+                namespace[name] = restored
+                # Also where a function an earlier cell defined reads it: that cell's view.
+                for other in views:
+                    if other.get(name, _MISSING) is changed:
+                        other[name] = restored
             stored_globals.restore_changed(globals_snapshots)
             for var_name, meta in outputs.items():
                 if "file" in meta:
@@ -800,6 +813,7 @@ def execute_batch(
     }
 
     stored_globals = _StoredGlobals()
+    views: list[dict[str, Any]] = []
     with apply_env_overrides({"env": shared_env}):
         _seed_upstream_namespace(
             upstream_inputs, output_dir, namespace, tainted_inputs, stored_globals
@@ -822,7 +836,15 @@ def execute_batch(
             return
 
         status, reason = _run_one_batched_cell(
-            cell, namespace, output_dir, frame_out, resp_in, manifest, published, stored_globals
+            cell,
+            namespace,
+            output_dir,
+            frame_out,
+            resp_in,
+            manifest,
+            published,
+            stored_globals,
+            views,
         )
         if status != "ok":
             _send_frame(

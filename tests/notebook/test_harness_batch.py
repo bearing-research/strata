@@ -930,7 +930,7 @@ def test_an_interrupt_in_a_client_close_still_restores_the_names_it_bound(batch_
     def run() -> None:
         try:
             harness._run_one_batched_cell(
-                cell, namespace, output_dir, frame_w, resp_r, {}, {}, harness._StoredGlobals()
+                cell, namespace, output_dir, frame_w, resp_r, {}, {}, harness._StoredGlobals(), []
             )
         except BaseException as exc:
             errors.append(exc)
