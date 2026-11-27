@@ -421,7 +421,7 @@ Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
 `mount <name> <uri> [ro|rw]`, `table`, `fetch`, `dataset`,
 `write_table <var> <table> append|overwrite|merge|sync`, `output_dir <name>`,
 `each <name> in <source> [key=] [glob=]`,
-`nocache`, `stochastic`, `after`, `loop max_iter= carry= [start_from=]`,
+`nocache`, `stochastic`, `after`, `reads <name> ...`, `loop max_iter= carry= [start_from=]`,
 `loop_until <expr>`.
 
 SQL cells: `sql connection=<name> [write=true]`, `cache <policy>`, `nocache`,

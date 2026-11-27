@@ -30,6 +30,7 @@ import ast
 import copy
 import dataclasses
 import functools
+import keyword
 from collections.abc import Callable, Mapping
 from types import SimpleNamespace
 from typing import Any
@@ -164,7 +165,7 @@ def _first_token(directives: list[cg.Directive]) -> str | None:
     return tokens[0] if tokens else None
 
 
-def _after_ids(directives: list[cg.Directive]) -> list[str]:
+def _stacked_tokens(directives: list[cg.Directive]) -> list[str]:
     ids: list[str] = []
     for directive in directives:
         for token in directive.value.split():
@@ -493,6 +494,39 @@ def _validate_name(name: str, context: cg.ValidationContext) -> list[cg.Diagnost
     ]
 
 
+def _validate_reads(names: list[str], context: cg.ValidationContext) -> list[cg.Diagnostic]:
+    """Every ``@reads`` line names Python variables; on another language it does nothing."""
+    cell = context.cell
+    lines = [d for d in _directives(cell) if d.key == "reads"]
+    if cell.language == CellLanguage.SQL.value:
+        return []  # ``annotation_not_for_sql``
+    if cell.language != CellLanguage.PYTHON.value:
+        return [
+            cg.Diagnostic(
+                "reads_not_python",
+                cg.Severity.WARN,
+                f"`@reads` does nothing on a {cell.language} cell: it applies to Python cells.",
+                cell.id,
+                "reads",
+                lines[0].line if lines else None,
+            )
+        ]
+    why = "expected one or more names, each a Python variable name"
+    return [
+        cg.Diagnostic(
+            "reads_unreadable",
+            cg.Severity.ERROR,
+            _unreadable("reads_unreadable", "reads", d.value, why, d.line).message,
+            cell.id,
+            "reads",
+            d.line,
+        )
+        for d in lines
+        if not (tokens := [t.rstrip(",") for t in d.value.split() if t.rstrip(",")])
+        or not all(t.isidentifier() and not keyword.iskeyword(t) for t in tokens)
+    ]
+
+
 def _validate_app(value: str, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     """Every ``@app`` line must be ``hide``, except in markdown, where nothing is checked."""
     cell = context.cell
@@ -633,6 +667,10 @@ def cell_effects(meta: Mapping[str, Any], parsed: Mapping[str, Any]) -> list[cg.
         [], list(meta.get("mounts", [])), parsed.get("mount", [])
     )
     effects: list[cg.Effect] = []
+    if language == CellLanguage.PYTHON.value and parsed.get("reads"):
+        # References, so their producers are upstream components of the key. Declared,
+        # so read from upstream even when the cell assigns the name after reading it.
+        effects.append(cg.Reads(parsed["reads"], even_if_defined=True))
     for mount in mounts:
         if mount.mode == MountMode.READ_WRITE:
             # No input: the mount has no fingerprint, and the cell's value outlives its key.
@@ -739,6 +777,13 @@ def _strata_annotations() -> list[cg.Annotation]:
             effects=_loop_effects,
             validate=_validate_loop,
         ),
+        # Its effect is in ``cell_effects``, which knows the cell's language.
+        cg.Annotation(
+            "reads",
+            parse=cg.mark_stacked(_stacked_tokens),
+            in_key=False,
+            validate=_validate_reads,
+        ),
         cg.Annotation("live", parse=_lenient(_flag), in_key=False),
         cg.Annotation("app", parse=lambda ds: ds[-1].value, in_key=False, validate=_validate_app),
     ]
@@ -754,7 +799,7 @@ def strata_vocabulary() -> cg.Vocabulary:
         # An input too: what the upstream left (a database, files) is what this cell reads.
         .replace(
             "after",
-            parse=_lenient(_after_ids, stacked=True),
+            parse=_lenient(_stacked_tokens, stacked=True),
             effects=lambda ids: [cg.After(ids), *(cg.Input("after", i) for i in ids)],
         )
         # ``@stochastic`` is read with it: the two are one switch, set line by line.
@@ -860,6 +905,7 @@ def annotations_from(values: dict[str, Any], directives: list[cg.Directive]) -> 
         per_variant_group=values.get("per_variant"),
         each=values.get("each"),
         after=values.get("after", []),
+        reads=values.get("reads", []),
         app_hidden=app_hides(values.get("app")),
     )
 

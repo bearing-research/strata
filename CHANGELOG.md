@@ -400,6 +400,12 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   artifact holding each, gated as `/data` is; a file the folder's tenant does
   not hold is a `404`. `fetch` of a folder says to call `download_folder`
   instead of failing to read Arrow. (#1291)
+- **`# @reads` for a name a cell reads where Strata cannot see it.** A name used only
+  inside a string, as in `df.query("a > @mu")` or `eval("mu")`, is not a reference, so
+  a run did not load it and the cell failed. `# @reads mu sig` makes the names
+  references: the cell gets them from the cells that define them, and is stale when they
+  change. A run that fails on such a name (`NameError`, or pandas'
+  `UndefinedVariableError`) now says to add the line. (#PR)
 
 ### Changed
 
