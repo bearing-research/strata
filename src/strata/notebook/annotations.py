@@ -156,6 +156,7 @@ ANNOTATION_KEYS = frozenset(
         "output_dir",
         "output_schema",
         "per_variant",
+        "reads",
         "sql",
         "stochastic",
         "system",
@@ -378,6 +379,10 @@ class CellAnnotations:
     # ``# @after <cell-id>`` adds a DAG edge without a shared variable (e.g. a SQL cell
     # reading a file a setup cell wrote). Lines stack; each adds edges.
     after: list[str] = field(default_factory=list)
+
+    # ``# @reads <name> ...``: names the cell reads where the analysis cannot see them
+    # (inside a string, as in ``df.query("a > @mu")``). Lines stack.
+    reads: list[str] = field(default_factory=list)
 
     # ``# @app hide``: left out of the app view and its export. Any language, markdown too.
     app_hidden: bool = False

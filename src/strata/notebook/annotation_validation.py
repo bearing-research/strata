@@ -245,6 +245,32 @@ def sql_result_hint(name: str, sql_id: str) -> str:
     )
 
 
+def hidden_read_source(
+    cell: CellState, notebook_state: NotebookState, analysis: cg.Analysis, name: str
+) -> str | None:
+    """The cell above *cell* that defines *name*, when *cell* neither references nor binds
+    it: it reads the name where the analysis cannot see, so a run does not load it."""
+    analyzed = analysis.cells.get(cell.id)
+    if analyzed is None or name in analyzed.references or name in analyzed.defines:
+        return None
+    ids = [c.id for c in notebook_state.cells]
+    above = notebook_state.cells[: ids.index(cell.id)] if cell.id in ids else []
+    for upstream in reversed(above):
+        found = analysis.cells.get(upstream.id)
+        if found is not None and name in found.defines:
+            return upstream.id
+    return None
+
+
+def hidden_read_hint(name: str, cell_id: str) -> str:
+    """Why *name*, which the cell *cell_id* above defines, was not loaded."""
+    return (
+        f"`{name}` is defined by cell `{cell_id}` above, but this cell reads it where "
+        f"Strata cannot see it (inside a string, for example), so it was not loaded. "
+        f"Add `# @reads {name}` at the top of the cell."
+    )
+
+
 def _validate_prompt_inputs(analysis: cg.Analysis, cell_id: str) -> list[AnnotationDiagnostic]:
     """``prompt_input_undefined``: the template names what no other cell provides.
 

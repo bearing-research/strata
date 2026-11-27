@@ -38,6 +38,7 @@ MALFORMED = {
     "each": ("# @each path in", "each_malformed"),
     "output_schema": ("# @output_schema", "output_schema_unreadable"),
     "per_variant": ("# @per_variant a b", "per_variant_unreadable"),
+    "reads": ("# @reads 1x", "reads_unreadable"),
     "sql": ("# @sql connection", "sql_unreadable"),
     "stochastic": ("# @stochastic sometimes", "stochastic_unreadable"),
     "system": ("# @system", "system_unreadable"),

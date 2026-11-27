@@ -357,6 +357,7 @@ While a Python cell runs, `STRATA_CELL_ID` holds its id, in the cell and in any 
 | `# @nocache`       | Always re-execute; never serve a cache hit       |
 | `# @stochastic`    | Every run persists beside the cache and never serves it (see [`@stochastic`](../../reference/annotations/python.md#stochastic)) |
 | `# @after <id>`    | An edge from another cell with no variable, keyed on its last run (see [`@after`](../../reference/annotations/python.md#after)) |
+| `# @reads <name> …` | Names the cell reads inside a string, as in `df.query("@mu")` (see [`@reads`](../../reference/annotations/python.md#reads)) |
 | `# @loop …`        | Turn the cell into a [loop cell](loops-and-variants.md#loop-cells)    |
 | `# @loop_until …`  | End a loop cell early when an expression is true |
 | `# @variant <group> <name>` | Make the cell one alternative in a [variant group](loops-and-variants.md#variant-cells) |

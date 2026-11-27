@@ -18,6 +18,7 @@
 | [`@nocache`](python.md#nocache) | Always run; never serve a cached result. |
 | [`@stochastic`](python.md#stochastic) | Every run is a sample: it always runs and keeps its outputs. |
 | [`@after`](python.md#after) | An edge from another cell with no variable, keyed on its last run. |
+| [`@reads`](python.md#reads) | Names the cell reads inside a string, where the analysis cannot see them. |
 | [`@sql`](sql.md#sql) | Mark a SQL cell and name its connection. |
 | [`@cache`](sql.md#cache) | Choose a SQL cell's cache policy. |
 | [`@model`](prompt.md#model) | The model a prompt cell calls. |
