@@ -1938,6 +1938,13 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   included, is checked again at each read, so a file swapped for a link out of
   a root is not read, and a file rewritten in place is still used at the next
   run with no call. (#1265)
+- **Run all gives each cell only the names wired to it.** Cells that run all in one
+  process shared every name the run had bound, so a cell could read one where the
+  analysis cannot see it (inside a string, as in `eval("mu")` or
+  `df.query("a > @mu")`), succeed, and be cached under a key that left the name out:
+  a later edit to it never made the cell stale. The same cell run alone fails, since
+  the name is not loaded. Now a cell in a run-all sees what a run alone would give it.
+  (#PR)
 
 ## 0.11.0 - 2026-10-19
 

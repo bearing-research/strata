@@ -15,10 +15,10 @@ from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_
 CELLS = [("c1", "mu = 2\n"), ("c2", 'out = eval("mu")\n'), ("c3", "print(out)\n")]
 
 
-def _session(tmp_path: Path) -> NotebookSession:
+def _session(tmp_path: Path, cells: list[tuple[str, str]] = CELLS) -> NotebookSession:
     notebook_dir = create_notebook(tmp_path, "HiddenReads")
     prev: str | None = None
-    for cell_id, source in CELLS:
+    for cell_id, source in cells:
         add_cell_to_notebook(notebook_dir, cell_id, after_cell_id=prev)
         write_cell(notebook_dir, cell_id, source)
         prev = cell_id
@@ -27,7 +27,7 @@ def _session(tmp_path: Path) -> NotebookSession:
     return session
 
 
-def _specs(session: NotebookSession) -> list[dict]:
+def _specs(session: NotebookSession, cells: list[tuple[str, str]] = CELLS) -> list[dict]:
     consumed = session.dag.consumed_variables if session.dag else {}
     return [
         {
@@ -39,7 +39,7 @@ def _specs(session: NotebookSession) -> list[dict]:
             "source_hash": "",
             "env_hash": "",
         }
-        for cell_id, source in CELLS
+        for cell_id, source in cells
     ]
 
 
@@ -67,3 +67,30 @@ async def test_run_all_does_not_cache_a_value_read_through_a_hidden_name(tmp_pat
     assert "2" not in after.stdout.split(), (
         f"c3 printed the value c2 read before mu changed: {after.stdout!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_function_keeps_the_names_of_the_cell_that_defined_it(tmp_path: Path):
+    """c2 reads ``f`` and not ``helper``; ``f`` still finds the ``helper`` of its own cell."""
+    cells = [
+        ("c1", "helper = 10\ndef f():\n    return helper\n"),
+        ("c2", "out = f()\n"),
+        ("c3", "print(out)\n"),
+    ]
+    session = _session(tmp_path, cells)
+    result = await CellExecutor(session).execute_batch(_specs(session, cells))
+
+    assert result.completed, result.cell_results
+    stdout = {r.cell_id: r.stdout for r in result.cell_results}
+    assert stdout["c3"].strip() == "10"
+
+
+@pytest.mark.asyncio
+async def test_a_later_binding_reaches_the_cells_after_it(tmp_path: Path):
+    cells = [("c1", "x = 1\n"), ("c2", "x = x + 1\n"), ("c3", "print(x)\n")]
+    session = _session(tmp_path, cells)
+    result = await CellExecutor(session).execute_batch(_specs(session, cells))
+
+    assert result.completed, result.cell_results
+    stdout = {r.cell_id: r.stdout for r in result.cell_results}
+    assert stdout["c3"].strip() == "2"

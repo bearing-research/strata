@@ -408,7 +408,9 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
 
 # --- Batch execution (run-all single-process mode) ---
 #
-# Many cells exec in one process with a shared namespace. The parent owns
+# Many cells exec in one process. The batch keeps every name its cells bind, and each
+# cell runs in a view of it holding only the names wired to it, as a single run's
+# namespace holds only its inputs. The parent owns
 # provenance, cache and persist; this harness runs bodies and serializes.
 # Pipes: frame_out (harness -> parent, line-delimited JSON) and resp_in
 # (parent -> harness, cache_check / persist responses). Blobs travel as files
@@ -507,6 +509,7 @@ def _run_one_batched_cell(
     source = cell["source"]
     consumed_vars: list[str] = list(cell.get("consumed_vars") or [])
     references: list[str] = list(cell.get("references") or [])
+    inputs: list[str] = list(cell.get("inputs") or [])
     mutation_defines: set[str] = set(cell.get("mutation_defines") or [])
     cell_env: dict = cell.get("env") or {}
     mount_manifest: dict = cell.get("mount_manifest") or {}
@@ -520,15 +523,15 @@ def _run_one_batched_cell(
     _send_frame(frame_out, "cell_start", {"cell_id": cell_id})
     started = time.perf_counter()
 
-    # Saved so a user variable named like a mount is restored on exit.
+    # The cell runs in what a single run would give it: the names wired to it, not every
+    # name the batch has bound, which it could read where the analysis cannot see (#1732).
+    view: dict[str, Any] = {name: namespace[name] for name in inputs if name in namespace}
     mount_names = list(mount_manifest.keys())
     table_names = [injected for name in table_manifest for injected in (name, f"{name}_snapshot")]
     ambient_names = ["strata"] if cell.get("strata_url") else []
-    previous_bindings: dict[str, Any] = {
-        name: namespace.get(name, _MISSING) for name in mount_names + table_names + ambient_names
-    }
-    inject_mounts({"mounts": mount_manifest}, namespace)
-    inject_tables({"tables": table_manifest}, namespace)
+    injected_names = {*mount_names, *table_names, *ambient_names, *_display.DISPLAY_HELPER_NAMES}
+    inject_mounts({"mounts": mount_manifest}, view)
+    inject_tables({"tables": table_manifest}, view)
     ambient_client = None
 
     try:
@@ -546,7 +549,7 @@ def _run_one_batched_cell(
                     "inputs": response.get("input_uris") or {},
                     "strata_run_token": manifest.get("strata_run_token"),
                 },
-                namespace,
+                view,
             )
 
             if response.get("error"):
@@ -598,13 +601,8 @@ def _run_one_batched_cell(
                 return ("ok", None)
 
             # Cache miss: execute the body.
-            #
-            # ``DisplayCapture.install`` uses ``setdefault``, and the namespace persists
-            # across batch cells, so clear the display keys or the new handlers never install.
-            for _display_key in _display.DISPLAY_HELPER_NAMES:
-                namespace.pop(_display_key, None)
             display_capture = _display.DisplayCapture()
-            display_capture.install(namespace)
+            display_capture.install(view)
             stdout_capture = io.StringIO()
             stderr_capture = io.StringIO()
             old_stdout, old_stderr = sys.stdout, sys.stderr
@@ -623,7 +621,7 @@ def _run_one_batched_cell(
             try:
                 try:
                     with display_capture.capture_side_effects(), _audit.recording() as observed:
-                        display_value = _exec_with_display(source, namespace, cell_id)
+                        display_value = _exec_with_display(source, view, cell_id)
                 except Exception as exc:
                     hint = _work_dir.hint(exc, manifest)
                     _send_frame(
@@ -638,6 +636,12 @@ def _run_one_batched_cell(
                         },
                     )
                     return ("cell_error", "cell_error")
+                # For the cells after: what it bound, not what was put there for it.
+                namespace.update(
+                    (name, value)
+                    for name, value in view.items()
+                    if name not in injected_names and not name.startswith("__")
+                )
 
                 read_audit = _audit.report(
                     observed,
@@ -732,16 +736,8 @@ def _run_one_batched_cell(
                     published[var_name] = (meta["content_type"], cell_output_dir / meta["file"])
             return ("ok", None)
     finally:
-        # The batch process is reused across cells, so close the client (no leaked
-        # sockets) and restore pre-cell name bindings, whatever the close raised.
-        try:
-            close_client(ambient_client)
-        finally:
-            for name, previous in previous_bindings.items():
-                if previous is _MISSING:
-                    namespace.pop(name, None)
-                else:
-                    namespace[name] = previous
+        # The batch process is reused across cells, so close the client: no leaked sockets.
+        close_client(ambient_client)
 
 
 def _seed_upstream_namespace(
@@ -780,7 +776,7 @@ def execute_batch(
 ) -> None:
     """Execute a sequence of cells in one Python process.
 
-    ``cells`` is ``[{cell_id, source, consumed_vars, env, mount_manifest,
+    ``cells`` is ``[{cell_id, source, consumed_vars, inputs, env, mount_manifest,
     source_hash, env_hash}, ...]`` in notebook order. ``upstream_inputs`` seeds the
     shared namespace (same shape ``deserialize_inputs`` reads). Streams frames to
     ``frame_out``, reads responses from ``resp_in``, and returns after

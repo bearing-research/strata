@@ -238,7 +238,9 @@ async def run_batch(
                 # staged, since the batch's timeout runs from the spawn.
                 run_token = token_scope.enter_context(context.run_token(batch_timeout_seconds))
                 manifest = {
-                    "cells": cell_specs,
+                    "cells": [
+                        {**spec, "inputs": batch_cell_inputs(host, spec)} for spec in cell_specs
+                    ],
                     "upstream_inputs": upstream_inputs,
                     **await in_thread(context.harness_fields),
                 }
@@ -666,6 +668,15 @@ async def batch_service_loop(
                 await runs.mint_after(host.path, cell_id)
 
     return end_reason, failed_cell_id
+
+
+def batch_cell_inputs(host: ExecutorHost, spec: dict[str, Any]) -> list[str]:
+    """The names a batched cell is given, as a single run loads them: those its
+    upstreams are wired to give it."""
+    cell = host.notebook_state.get_cell(spec["cell_id"])
+    if cell is None:
+        return []
+    return sorted({name for up in cell.upstream_ids for name in host.wired_variables(cell.id, up)})
 
 
 def batch_resolve_upstream_inputs(
