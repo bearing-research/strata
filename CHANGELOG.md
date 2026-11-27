@@ -1904,7 +1904,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   `df.query("a > @mu")`), succeed, and be cached under a key that left the name out:
   a later edit to it never made the cell stale. The same cell run alone fails, since
   the name is not loaded. Now a cell in a run-all sees what a run alone would give it.
-  (#PR)
+  (#1734)
 
 ### Security
 
