@@ -6885,7 +6885,14 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
   drain that landed while a worker was still being spawned killed only the
   lifeline wrapper, leaving the R process under it running until it exited on
   its own. The pool now finishes the spawn and stops the whole process group.
-  (#1266)</p>
+  (#1266)
+- <strong>Run all gives each cell only the names wired to it.</strong> Cells that run all in one
+  process shared every name the run had bound, so a cell could read one where the
+  analysis cannot see it (inside a string, as in <code>eval("mu")</code> or
+  <code>df.query("a &gt; @mu")</code>), succeed, and be cached under a key that left the name out:
+  a later edit to it never made the cell stale. The same cell run alone fails, since
+  the name is not loaded. Now a cell in a run-all sees what a run alone would give it.
+  (#1734)</p>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>A service-mode notebook's mount options can no longer name credentials, key
