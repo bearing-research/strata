@@ -595,8 +595,8 @@ def _render_display_output(
             return [
                 NoteBlock(
                     f"HTML output ({len(html) // 1024} KB), too large to inline at the "
-                    f"current size cap. Re-export with "
-                    f"`--max-output-bytes {len(html) + 1024}` to include it."
+                    f"current size cap. An HTML export with "
+                    f"`--max-output-bytes {len(html) + 1024}` includes it."
                 )
             ]
         if html is not None:

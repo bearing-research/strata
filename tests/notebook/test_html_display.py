@@ -54,6 +54,21 @@ class _NoHtml:
         return {"application/json": {"a": 1}}
 
 
+class _Rich:
+    """rich's renderables: ``include`` and ``exclude`` are required, as IPython passes them."""
+
+    def _repr_mimebundle_(self, include, exclude):
+        return {"text/html": "<pre>rich</pre>"}
+
+
+class _BrokenBundle:
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        raise RuntimeError("no kernel")
+
+    def _repr_html_(self):
+        return "<p>fallback</p>"
+
+
 class _MarkdownAndHtml:
     def _repr_markdown_(self):
         return "**md**"
@@ -81,6 +96,8 @@ def test_a_value_with_an_html_repr_is_an_html_display(tmp_path):
         (_Bundle(), "<p>from the bundle</p>"),
         (_BundleWithMetadata(), "<p>with metadata</p>"),
         (_EmptyBundle(), "<p>plotly</p>"),
+        (_Rich(), "<pre>rich</pre>"),
+        (_BrokenBundle(), "<p>fallback</p>"),
     ],
 )
 def test_the_bundle_comes_first_then_the_html_repr(tmp_path, value, html):
@@ -95,6 +112,11 @@ def test_a_bundle_with_no_html_is_shown_as_before(tmp_path):
 
     assert payload["content_type"] == "pickle/object"
     assert payload["preview"] == "<_NoHtml object>"
+
+
+def test_a_class_is_not_asked_for_its_page(tmp_path):
+    """Its ``_repr_html_`` is unbound; calling it would fail and lose the display."""
+    assert _display(_Html, tmp_path)["content_type"] != "text/html"
 
 
 def test_markdown_still_wins_over_html(tmp_path):
@@ -183,9 +205,9 @@ def test_the_route_serves_the_page_sandboxed(served):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/html")
     # Script runs, but in an opaque origin: none of the notebook's page, cookies or storage.
-    assert resp.headers["content-security-policy"] == (
-        "sandbox allow-scripts allow-popups allow-downloads"
-    )
+    policy = resp.headers["content-security-policy"]
+    assert policy.startswith("sandbox allow-scripts allow-popups allow-downloads;")
+    assert "frame-ancestors 'self'" in policy
     assert resp.headers["referrer-policy"] == "no-referrer"
     # Standards mode, as Jupyter shows it: plotly takes its own height, not the frame's.
     assert resp.text.startswith(f"<!doctype html>\n{PAGE}")
@@ -244,3 +266,39 @@ def test_a_whole_document_keeps_its_own_doctype(tmp_path: Path, monkeypatch):
     )
 
     assert resp.text.startswith(document)
+
+
+def test_a_ui_on_another_origin_may_frame_the_page(tmp_path: Path, monkeypatch):
+    """``npm run dev`` serves the UI from Vite's port; cors_allow_origins already trusts it."""
+    import strata.server as server_module
+    from strata.config import StrataConfig
+    from strata.notebook.routes import _html_output_policy
+    from strata.server import ServerState
+
+    config = StrataConfig(
+        cache_dir=tmp_path / "cache",
+        cors_allow_origins=["http://localhost:5173"],
+        embed_frame_ancestors=["https://docs.example"],
+    )
+    monkeypatch.setattr(server_module, "_state", ServerState(config))
+
+    assert _html_output_policy() == (
+        "sandbox allow-scripts allow-popups allow-downloads; "
+        "frame-ancestors 'self' https://docs.example http://localhost:5173"
+    )
+
+
+def test_a_snapshot_carries_the_page_as_a_file(served):
+    import io
+    import zipfile
+
+    from strata.notebook.snapshot import write_snapshot
+
+    _, _, session, _ = served
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        write_snapshot(session, archive, include="none")
+
+    names = zipfile.ZipFile(io.BytesIO(buffer.getvalue())).namelist()
+    assert "outputs/c/0.html" in names
+    assert zipfile.ZipFile(io.BytesIO(buffer.getvalue())).read("outputs/c/0.html").decode() == PAGE

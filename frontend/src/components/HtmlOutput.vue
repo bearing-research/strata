@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useStrata } from '../composables/useStrata'
-import { reportedHeight } from '../utils/htmlOutput'
+import { heightTracker, reportedHeight } from '../utils/htmlOutput'
 
 // A page a cell showed (plotly, altair, a styled table), run in a sandbox: an opaque
 // origin, so its script reaches nothing of this page. It tells us only its height.
@@ -13,9 +13,12 @@ const src = computed(() =>
   useStrata().cellHtmlOutputUrl(props.notebookId, props.cellId, props.artifactUri),
 )
 
+const track = heightTracker()
+
 function onMessage(event: MessageEvent) {
   const reported = reportedHeight(event, frame.value?.contentWindow)
-  if (reported !== null) height.value = reported
+  const next = reported === null ? null : track(reported)
+  if (next !== null) height.value = next
 }
 
 onMounted(() => window.addEventListener('message', onMessage))

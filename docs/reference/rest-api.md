@@ -638,7 +638,8 @@ notebook's frame. `artifact_uri` must name an HTML display output of that cell;
 anything else is `404`. The page is served with
 `Content-Security-Policy: sandbox allow-scripts allow-popups allow-downloads`,
 so its script runs in an opaque origin, and the server's origin check refuses its
-writes. A fragment gets a doctype, so it lays out as in Jupyter, and the page posts
+writes. Its `frame-ancestors` are this server, `embed_frame_ancestors` and
+`cors_allow_origins`, so a UI from `npm run dev` can frame it. A fragment gets a doctype, so it lays out as in Jupyter, and the page posts
 its height to the notebook.
 
 ### Read a cell's output folder

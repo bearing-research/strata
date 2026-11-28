@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 BUNDLE_EXTENSIONS = {
     "image/png": ".png",
     "text/markdown": ".md",
+    "text/html": ".html",
     "json/object": ".json",
     "arrow/ipc": ".arrow",
     "pickle/object": ".pickle",

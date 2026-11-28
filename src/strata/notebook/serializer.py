@@ -1122,6 +1122,9 @@ def _serialize_markdown(value: Any, output_dir: Path, variable_name: str) -> Ser
 
 
 def _is_html_display_value(value: Any) -> bool:
+    # A class has the methods too, unbound; IPython does not ask one either.
+    if isinstance(value, type):
+        return False
     return callable(getattr(value, "_repr_mimebundle_", None)) or callable(
         getattr(value, "_repr_html_", None)
     )
@@ -1131,11 +1134,16 @@ def _html_text(value: Any) -> str | None:
     """The HTML *value* shows itself as, as IPython asks for it; None when it has none.
 
     The bundle first: altair has only that. plotly's is empty outside Jupyter, so
-    ``_repr_html_`` is asked next. Either may return ``(data, metadata)``.
+    ``_repr_html_`` is asked next. Either may return ``(data, metadata)``. One that
+    raises is passed over, as IPython does: it is the library's code, not the cell's.
     """
     repr_bundle = getattr(value, "_repr_mimebundle_", None)
     if callable(repr_bundle):
-        bundle = repr_bundle()
+        try:
+            # As IPython calls it: rich requires both.
+            bundle = repr_bundle(include=None, exclude=None)
+        except Exception:
+            bundle = None
         if isinstance(bundle, tuple):
             bundle = bundle[0]
         html = bundle.get("text/html") if isinstance(bundle, dict) else None
@@ -1143,7 +1151,10 @@ def _html_text(value: Any) -> str | None:
             return html
     repr_html = getattr(value, "_repr_html_", None)
     if callable(repr_html):
-        html = repr_html()
+        try:
+            html = repr_html()
+        except Exception:
+            html = None
         if isinstance(html, tuple):
             html = html[0]
         if isinstance(html, str):
