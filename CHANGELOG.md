@@ -622,7 +622,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   where a spurious cycle blocked it; a seeded `@per_variant` cell chains; the DAG
   lists one edge per wired name. A cell's key changes only where these fixes change
   what it reads (a fan-out upstream read from another cell is keyed by its
-  instances), so other cells stay cached. (#1740)
+  instances), so other cells stay cached. (#1741)
 - **cellgraph 0.4: every cell runs once more after the upgrade.** Strata now needs
   `cellgraph>=0.4,<0.5`. Its keys hash exactly what they cover, with each upstream
   output tagged by kind, so every cell's key changes once and each cell runs again
