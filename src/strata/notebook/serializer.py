@@ -49,6 +49,7 @@ class ContentType(StrEnum):
     PICKLE_OBJECT = "pickle/object"
     IMAGE_PNG = "image/png"
     TEXT_MARKDOWN = "text/markdown"
+    TEXT_HTML = "text/html"
     MODULE_IMPORT = "module/import"
     MODULE_CELL = "module/cell"
     MODULE_CELL_INSTANCE = "module/cell-instance"
@@ -339,7 +340,7 @@ def detect_content_type(value: Any, variable_name: str | None = None) -> Content
     """Return the content type for *value*; the first match wins.
 
     1. Arrow-representable: ``arrow/ipc``
-    2. Markdown / PNG display value: ``text/markdown`` or ``image/png``
+    2. Markdown / PNG / HTML display value: ``text/markdown``, ``image/png`` or ``text/html``
     3. JSON-serializable primitive: ``json/object``
     4. Python module: ``module/import``
     5. Cell-defined class instance: ``module/cell-instance``
@@ -357,6 +358,8 @@ def detect_content_type(value: Any, variable_name: str | None = None) -> Content
             return ContentType.TEXT_MARKDOWN
         if _is_png_display_value(value):
             return ContentType.IMAGE_PNG
+        if _is_html_display_value(value):
+            return ContentType.TEXT_HTML
 
     if isinstance(value, (dict, list, int, float, str, bool, type(None))):
         # Structurally JSON-safe but may hold NaN, Inf, non-string keys or nested
@@ -1115,6 +1118,64 @@ def _serialize_markdown(value: Any, output_dir: Path, variable_name: str) -> Ser
         "bytes": filepath.stat().st_size,
         "markdown_text": markdown_text,
         "preview": None,
+    }
+
+
+def _is_html_display_value(value: Any) -> bool:
+    # A class has the methods too, unbound; IPython does not ask one either.
+    if isinstance(value, type):
+        return False
+    return callable(getattr(value, "_repr_mimebundle_", None)) or callable(
+        getattr(value, "_repr_html_", None)
+    )
+
+
+def _html_text(value: Any) -> str | None:
+    """The HTML *value* shows itself as, as IPython asks for it; None when it has none.
+
+    The bundle first: altair has only that. plotly's is empty outside Jupyter, so
+    ``_repr_html_`` is asked next. Either may return ``(data, metadata)``. One that
+    raises is passed over, as IPython does: it is the library's code, not the cell's.
+    """
+    repr_bundle = getattr(value, "_repr_mimebundle_", None)
+    if callable(repr_bundle):
+        try:
+            # As IPython calls it: rich requires both.
+            bundle = repr_bundle(include=None, exclude=None)
+        except Exception:
+            bundle = None
+        if isinstance(bundle, tuple):
+            bundle = bundle[0]
+        html = bundle.get("text/html") if isinstance(bundle, dict) else None
+        if isinstance(html, str):
+            return html
+    repr_html = getattr(value, "_repr_html_", None)
+    if callable(repr_html):
+        try:
+            html = repr_html()
+        except Exception:
+            html = None
+        if isinstance(html, tuple):
+            html = html[0]
+        if isinstance(html, str):
+            return html
+    return None
+
+
+def _serialize_html(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
+    html = _html_text(value)
+    if html is None:
+        # No HTML after all (a bundle of other types): shown as before, by its repr.
+        return _serialize_pickle(value, output_dir, variable_name)
+    filename = f"{_safe_filename_stem(variable_name)}.html"
+    filepath = output_dir / filename
+    filepath.write_text(html, encoding="utf-8")
+    return {
+        "content_type": ContentType.TEXT_HTML,
+        "file": filename,
+        "bytes": filepath.stat().st_size,
+        # What an agent, the TUI and a markdown export read: the page runs only in a browser.
+        "preview": _object_preview(value),
     }
 
 
@@ -2330,6 +2391,7 @@ _HANDLERS: dict[str, _Handler] = {
     ContentType.PICKLE_OBJECT: _Handler(_serialize_pickle, _deserialize_pickle),
     ContentType.IMAGE_PNG: _Handler(_serialize_image_png, None),
     ContentType.TEXT_MARKDOWN: _Handler(_serialize_markdown, _deserialize_markdown),
+    ContentType.TEXT_HTML: _Handler(_serialize_html, None),
     ContentType.MODULE_IMPORT: _Handler(_serialize_module, _deserialize_module),
     ContentType.MODULE_CELL: _Handler(None, _deserialize_cell_module),
     ContentType.MODULE_CELL_INSTANCE: _Handler(

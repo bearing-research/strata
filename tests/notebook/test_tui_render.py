@@ -384,3 +384,10 @@ def test_json_or_error_surfaces_detail():
 def test_json_or_error_returns_body_on_success():
     resp = httpx.Response(200, json={"session_id": "abc", "name": "NB"})
     assert _json_or_error(resp)["session_id"] == "abc"
+
+
+def test_render_outputs_names_an_html_page_rather_than_its_repr():
+    cell = CellView(
+        id="a", display_outputs=[{"content_type": "text/html", "preview": "<Figure object>"}]
+    )
+    assert _render_outputs(cell) == "[text/html: open in the web UI to view]"

@@ -1102,8 +1102,8 @@ def _render_outputs(cell: CellView) -> str:
         content_type = str(output.get("content_type") or "")
         if content_type == "text/markdown" and isinstance(output.get("markdown_text"), str):
             parts.append(output["markdown_text"])
-        elif content_type == "image/png":
-            parts.append("[image/png: open in the web UI to view]")
+        elif content_type in ("image/png", "text/html"):
+            parts.append(f"[{content_type}: open in the web UI to view]")
         elif output.get("preview") is not None:
             parts.append(str(output["preview"]))
         elif content_type:

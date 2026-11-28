@@ -99,6 +99,10 @@ For each cell, the exporter emits in order:
       HTML `<table>`), truncated to 20 preview rows.
     - **PNG images** inline as `data:` URLs, loaded lazily from the
       artifact store when needed.
+    - **HTML pages** (plotly, altair, anything with `_repr_html_`) as a
+      sandboxed `<iframe>` in HTML exports, where the page's script runs in
+      its own origin and reaches nothing of the export, and as a note in
+      markdown exports, whose viewers strip script.
     - **JSON / dict / list** as fenced JSON.
     - **Markdown** (including an [`# @output_dir`](../reference/annotations/python.md#output_dir)
       folder's summary) rendered as content in markdown exports and as

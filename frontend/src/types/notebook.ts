@@ -173,6 +173,7 @@ export type ArtifactContentType =
   | 'pickle/object' // Tier 3: Models, custom objects (unsafe; see security model)
   | 'image/png' // Display-only (plots, charts)
   | 'text/markdown' // Display-only rich text
+  | 'text/html' // Display-only page, run in a sandboxed frame
 
 export interface CellOutput {
   /** Content type determines how to render */

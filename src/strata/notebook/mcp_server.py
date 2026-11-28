@@ -77,6 +77,7 @@ def _get_cell(session_manager: SessionManager, session_id: str, cell_id: str) ->
 _OUTPUT_EXTENSIONS = {
     "image/png": ".png",
     "text/markdown": ".md",
+    "text/html": ".html",
     "json/object": ".json",
     "arrow/ipc": ".arrow",
     "pickle/object": ".pickle",

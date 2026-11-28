@@ -320,6 +320,7 @@ class ContentType(StrEnum):
     JSON = "json/object"
     IMAGE_PNG = "image/png"
     TEXT_MARKDOWN = "text/markdown"
+    TEXT_HTML = "text/html"
     PICKLE = "pickle/object"
     ERROR = "error"
 

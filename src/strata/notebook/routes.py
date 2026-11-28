@@ -3562,6 +3562,77 @@ async def get_cell_output_blob(
     )
 
 
+# A page a cell showed (plotly, altair, a styled table) runs its own script. The sandbox
+# gives it an opaque origin: it reaches nothing of the notebook's page, and the origin
+# guard refuses its writes to this server (it sends ``Origin: null``).
+_HTML_OUTPUT_SANDBOX = "sandbox allow-scripts allow-popups allow-downloads"
+_HTML_OUTPUT_HEADERS = {
+    # Its CDN scripts would otherwise get this URL, session id and all.
+    "Referrer-Policy": "no-referrer",
+    # A version's bytes never change.
+    "Cache-Control": "private, max-age=86400",
+}
+
+# Tells the notebook page how tall the output is, the one thing it is allowed to say.
+_HTML_OUTPUT_RESIZE = """<script>(function () {
+  function post() {
+    var height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    parent.postMessage({ strataOutputHeight: height }, "*");
+  }
+  new ResizeObserver(post).observe(document.documentElement);
+  addEventListener("load", post);
+})();</script>"""
+
+
+@router.get("/{notebook_id}/cells/{cell_id}/html")
+async def get_cell_html_output(
+    notebook_id: str,
+    session: SessionDep,
+    cell_id: str,
+    artifact_uri: str,
+):
+    """Serve an HTML display output of the cell as a sandboxed page, for the notebook's frame."""
+    from fastapi.responses import HTMLResponse
+
+    manager = session.get_artifact_manager()
+    try:
+        artifact_id, version = session.parse_artifact_uri(artifact_uri)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not artifact_id.startswith(manager.cell_artifact_id(cell_id, "__display__")):
+        raise HTTPException(status_code=404, detail="not a display output of this cell")
+    record = manager.artifact_store.get_artifact(artifact_id, version)
+    if record is None or record.params.get("content_type") != "text/html":
+        raise HTTPException(status_code=404, detail="no HTML display output there")
+    try:
+        blob = manager.load_artifact_data(artifact_id, version)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    html = blob.decode("utf-8", errors="replace")
+    # Most are fragments. Without a doctype the page is in quirks mode, where plotly's
+    # ``height: 100%`` fills the frame instead of taking its own height, as in Jupyter.
+    if not html.lstrip()[:9].lower().startswith("<!doctype"):
+        html = "<!doctype html>\n" + html
+    return HTMLResponse(
+        html + _HTML_OUTPUT_RESIZE,
+        headers={**_HTML_OUTPUT_HEADERS, "Content-Security-Policy": _html_output_policy()},
+    )
+
+
+def _html_output_policy() -> str:
+    """The sandbox, and the pages that may frame it: this server's own, and a UI on
+    another origin (``npm run dev``) that ``cors_allow_origins`` already trusts."""
+    from strata.server import get_state
+
+    try:
+        config = get_state().config
+    except RuntimeError:
+        return f"{_HTML_OUTPUT_SANDBOX}; frame-ancestors 'self'"
+    origins = [*config.embed_frame_ancestors, *config.cors_allow_origins]
+    ancestors = "*" if "*" in origins else " ".join(["'self'", *dict.fromkeys(origins)])
+    return f"{_HTML_OUTPUT_SANDBOX}; frame-ancestors {ancestors}"
+
+
 def _folder_artifact_id(
     session: NotebookSession, cell_id: str, name: str, variant: str | None = None
 ) -> str:

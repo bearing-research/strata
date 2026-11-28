@@ -23,6 +23,7 @@ SNAPSHOT_FORMAT_VERSION = 2
 _OUTPUT_EXTENSIONS = {
     "image/png": ".png",
     "text/markdown": ".md",
+    "text/html": ".html",
     "json/object": ".json",
     "arrow/ipc": ".arrow",
     "pickle/object": ".pickle",
@@ -364,7 +365,7 @@ def _display_bytes(store, output) -> bytes | str | None:
     if output.markdown_text is not None:
         return output.markdown_text
 
-    if output.content_type not in ("image/png", "text/markdown"):
+    if output.content_type not in ("image/png", "text/markdown", "text/html"):
         return None
 
     ref = _artifact_ref(output.artifact_uri)
@@ -375,7 +376,7 @@ def _display_bytes(store, output) -> bytes | str | None:
         return None
     with reader_cm as reader:
         blob = reader.read()
-    if output.content_type == "text/markdown":
+    if output.content_type in ("text/markdown", "text/html"):
         return blob.decode("utf-8", errors="replace")
     return blob
 
