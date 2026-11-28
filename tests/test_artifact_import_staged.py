@@ -7,10 +7,12 @@ imports the record whose ``content_sha256`` names them. Large artifacts never si
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import replace
 
 import httpx
 import pytest
+from vestigo.blob_store import LocalBlobStore
 from vestigo.store import IMPORT_STAGING_TTL_SECONDS, ArtifactStore
 
 PROXY_TOKEN = "import-proxy-token"
@@ -153,6 +155,35 @@ class TestAbandonedUploads:
         store.stage_import_blob(None, other, source, len(BLOB), now=IMPORT_STAGING_TTL_SECONDS + 1)
         assert not _is_staged(store, DIGEST)
         assert _is_staged(store, other)
+
+    def test_an_upload_a_drop_took_meanwhile_is_a_503_to_retry(self, served, tmp_path, monkeypatch):
+        """A day later by another upload's clock, its drop takes this one's row mid-upload."""
+        base, artifact_dir = served
+        source = tmp_path / "later"
+        source.write_bytes(b"later")
+        publish = LocalBlobStore.publish_blob_from_path
+        dropped = []
+
+        def a_drop_lands_mid_upload(self, artifact_id, version, source_path):
+            if not dropped:
+                dropped.append(True)
+                ArtifactStore(artifact_dir).stage_import_blob(
+                    None,
+                    hashlib.sha256(b"later").hexdigest(),
+                    source,
+                    len(b"later"),
+                    now=time.time() + IMPORT_STAGING_TTL_SECONDS + 1,
+                )
+            return publish(self, artifact_id, version, source_path)
+
+        monkeypatch.setattr(LocalBlobStore, "publish_blob_from_path", a_drop_lands_mid_upload)
+
+        lost = _stage(base)
+        assert lost.status_code == 503, lost.text
+        assert lost.headers["Retry-After"].isdigit()
+
+        assert _stage(base).status_code == 201
+        assert _import(base, _record()).status_code == 200
 
 
 def _headers(tenant: str, principal: str = "publisher", scopes: str = "artifacts:write"):
