@@ -406,6 +406,13 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   references: the cell gets them from the cells that define them, and is stale when they
   change. A run that fails on such a name (`NameError`, or pandas'
   `UndefinedVariableError`) now says to add the line. (#1733)
+- **plotly, altair and other HTML outputs.** A value with `_repr_html_` or
+  `_repr_mimebundle_` (plotly, altair, great_tables, a pandas Styler, an xarray
+  Dataset, a scikit-learn pipeline) now shows its page, interactive, where it used to
+  show `<Figure object>`. The page runs in a sandboxed frame with an opaque origin, so
+  its script reaches nothing of the notebook, and the server refuses its writes. An
+  HTML export frames it the same way; the TUI and a markdown export say where to see
+  it. (#PR)
 
 ### Changed
 

@@ -627,6 +627,20 @@ the resolved index in `X-Strata-Output-Index`. A type Strata does not render
 `application/octet-stream`. What `strata cell output --out`
 and the MCP `save_cell_output` tool read.
 
+### Get an HTML display output as a page
+
+```
+GET /v1/notebooks/{session_id}/cells/{cell_id}/html?artifact_uri={uri}
+```
+
+The page a cell showed (plotly, altair, anything with `_repr_html_`), for the
+notebook's frame. `artifact_uri` must name an HTML display output of that cell;
+anything else is `404`. The page is served with
+`Content-Security-Policy: sandbox allow-scripts allow-popups allow-downloads`,
+so its script runs in an opaque origin, and the server's origin check refuses its
+writes. A fragment gets a doctype, so it lays out as in Jupyter, and the page posts
+its height to the notebook.
+
 ### Read a cell's output folder
 
 ```

@@ -842,6 +842,16 @@ function cellDataExportUrl(
   return url.toString()
 }
 
+/** The page behind a cell's HTML display output, for its sandboxed frame. */
+function cellHtmlOutputUrl(notebookId: string, cellId: string, artifactUri: string): string {
+  const url = new URL(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/cells/${cellId}/html`,
+    window.location.origin,
+  )
+  url.searchParams.set('artifact_uri', artifactUri)
+  return url.toString()
+}
+
 async function listCellIterations(
   notebookId: string,
   cellId: string,
@@ -1678,6 +1688,7 @@ export function useStrata() {
     getCellData,
     getCellDataSummary,
     cellDataExportUrl,
+    cellHtmlOutputUrl,
     listCellIterations,
     listCellCheckpoints,
     updateNotebookMounts,

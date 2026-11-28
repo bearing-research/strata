@@ -150,6 +150,7 @@ EXPECTED_ROUTES = [
         "GET",
         1,
     ),
+    ("/v1/notebooks/{notebook_id}/cells/{cell_id}/html", "GET", 1),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/iterations", "GET", 1),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/outputs/{index}/blob", "GET", 1),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/tests", "POST", 1),

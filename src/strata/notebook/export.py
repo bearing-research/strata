@@ -157,6 +157,13 @@ class ImageBlock(Block):
 
 
 @dataclass
+class HtmlBlock(Block):
+    """A page a cell showed (plotly, altair): a sandboxed frame in HTML, a note in markdown."""
+
+    html: str
+
+
+@dataclass
 class TableBlock(Block):
     """A tabular preview rendered as a markdown table.
 
@@ -577,6 +584,24 @@ def _render_display_output(
     if ctype == "text/markdown" and output.markdown_text is not None:
         return [MarkdownBlock(output.markdown_text)]
 
+    if ctype == "text/html" and output.artifact_uri:
+        try:
+            html = stored.load(*_parse_artifact_uri(output.artifact_uri)).decode(
+                "utf-8", errors="replace"
+            )
+        except Exception:
+            html = None
+        if html is not None and max_bytes > 0 and len(html) > max_bytes:
+            return [
+                NoteBlock(
+                    f"HTML output ({len(html) // 1024} KB), too large to inline at the "
+                    f"current size cap. Re-export with "
+                    f"`--max-output-bytes {len(html) + 1024}` to include it."
+                )
+            ]
+        if html is not None:
+            return [HtmlBlock(html)]
+
     if ctype == "arrow/ipc":
         columns = list(output.columns or [])
         if columns:
@@ -837,6 +862,9 @@ def _emit_markdown(blocks: list[Block]) -> str:
                 pieces.append(f'<img src="{src}" alt="{alt}">')
             else:
                 pieces.append("*Image output omitted: its source is not an inline image.*")
+        elif isinstance(block, HtmlBlock):
+            # Markdown viewers strip script, so the page would not work there.
+            pieces.append("*HTML output: export as HTML, or open the notebook, to see it.*")
         elif isinstance(block, TableBlock):
             pieces.append(_emit_markdown_table(block))
     return "\n\n".join(pieces) + "\n"
@@ -939,6 +967,13 @@ def _render_block_html(block: Block) -> str:
         src = escape(block.data_url, quote=True)
         alt = escape(block.alt)
         return f'<p class="image"><img src="{src}" alt="{alt}"></p>'
+    if isinstance(block, HtmlBlock):
+        # Its own opaque origin: the page's script reaches nothing of this one.
+        srcdoc = escape(block.html, quote=True)
+        return (
+            f'<iframe class="html-output" sandbox="allow-scripts allow-popups" '
+            f'referrerpolicy="no-referrer" srcdoc="{srcdoc}"></iframe>'
+        )
     if isinstance(block, TableBlock):
         return _render_table_html(block)
     return ""
@@ -1052,5 +1087,7 @@ def _html_stylesheet() -> str:
         ".table-footer { font-size: 12px; color: var(--muted); padding-top: 4px; }",
         ".image img { max-width: 100%; height: auto;",
         "             border: 1px solid var(--border); border-radius: 6px; }",
+        ".html-output { width: 100%; height: 480px; background: #fff;",
+        "               border: 1px solid var(--border); border-radius: 6px; }",
     ]
     return "\n".join(css_lines) + "\n" + pygments_css

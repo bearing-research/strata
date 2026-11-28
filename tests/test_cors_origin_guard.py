@@ -64,6 +64,17 @@ class TestACrossOriginPageCannotDriveTheApi:
         )
         assert resp.status_code == 403
 
+    def test_a_sandboxed_frame_cannot_write(self, client):
+        """A cell's HTML output runs in an opaque origin, which sends ``Origin: null``."""
+        c = client()
+        resp = c.post(
+            "/v1/notebooks/sess-1/cells/abc/execute",
+            headers={"Origin": "null", "Content-Type": "text/plain;charset=UTF-8"},
+        )
+        assert resp.status_code == 403
+        read = c.get("/v1/notebooks/discover", headers={"Origin": "null"})
+        assert "access-control-allow-origin" not in read.headers
+
     def test_a_cross_origin_read_is_not_made_readable(self, client):
         """GET goes through, but without the header the browser hides the body."""
         c = client()

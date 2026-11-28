@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { useNotebook } from '../stores/notebook'
 import WidgetCell from '../components/WidgetCell.vue'
 import DataTable from '../components/DataTable.vue'
+import HtmlOutput from '../components/HtmlOutput.vue'
 import { appCells as shownInApp } from '../utils/appCells'
 import { parseArtifactRef } from '../utils/artifactRef'
 import { renderMarkdownToHtml } from '../utils/markdown'
@@ -168,6 +169,12 @@ function outputRows(output: CellOutput): unknown[][] {
               class="app-markdown"
               v-html="renderMarkdownToHtml(output.markdownText)"
             ></div>
+            <HtmlOutput
+              v-else-if="output.contentType === 'text/html' && output.artifactUri"
+              :notebook-id="sessionId"
+              :cell-id="cell.id"
+              :artifact-uri="output.artifactUri"
+            />
             <pre v-else-if="output.scalar !== undefined" class="app-scalar">{{
               output.scalar
             }}</pre>

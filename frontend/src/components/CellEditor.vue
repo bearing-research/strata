@@ -29,6 +29,7 @@ import { useNotebook } from '../stores/notebook'
 import { cellReads } from '../utils/cellReads'
 import CellArtifactStrip from './CellArtifactStrip.vue'
 import DataTable from './DataTable.vue'
+import HtmlOutput from './HtmlOutput.vue'
 import WidgetCell from './WidgetCell.vue'
 import type { Cell, CellOutput, StalenessReason } from '../types/notebook'
 import {
@@ -1475,6 +1476,12 @@ function outputKey(output: CellOutput, index: number): string {
             >
               {{ outputExpanded ? 'Show less' : 'Show more' }}
             </button>
+            <HtmlOutput
+              v-else-if="output.contentType === 'text/html' && output.artifactUri && notebookId"
+              :notebook-id="notebookId"
+              :cell-id="cell.id"
+              :artifact-uri="output.artifactUri"
+            />
             <div v-else-if="output.scalar !== undefined" class="output-scalar">
               <pre
                 v-if="isJsonLike(formatScalar(output.scalar))"

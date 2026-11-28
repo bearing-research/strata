@@ -384,7 +384,9 @@ Content type is selected by value type and stored in
 - `json/object`: dicts, lists, primitive scalars
 - `pickle/object`: everything else (cloudpickle by default;
   `STRATA_NOTEBOOK_OBJECT_CODEC` to override; falls back to stdlib pickle)
-- `image/png`, `text/markdown`: display-only
+- `image/png`, `text/markdown`, `text/html`: display-only. `text/html` (from
+  `_repr_mimebundle_` or `_repr_html_`) is served sandboxed by
+  `GET /cells/{id}/html` and framed by `HtmlOutput.vue`
 - `module/import|cell|cell-instance`: module objects and cell-defined classes
 
 All preview / TOML writes go through `serializer.to_serialization_safe`
