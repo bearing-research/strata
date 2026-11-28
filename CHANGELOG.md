@@ -413,6 +413,11 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   its script reaches nothing of the notebook, and the server refuses its writes. An
   HTML export frames it the same way; the TUI and a markdown export say where to see
   it. (#1735)
+- **HTML results on a published page.** A published plotly, altair or great_tables
+  output shows in a sandboxed frame on its page and in its archive, where it used to be
+  a download. One that loads from other hosts (plotly's and altair's CDNs) names them
+  and waits for the reader to load it, so opening the link still contacts no one else.
+  (#1736)
 
 ### Changed
 

@@ -91,6 +91,15 @@ def write_bundle(
     # make index.html too large for a browser to open. (The hosted page inlines
     # because it has no such file.)
     image_src = filename if content_type == "image/png" else None
+    html_src, html_hosts = None, []
+    if content_type == "text/html":
+        from strata.api.publication_page import external_hosts, framed_html
+
+        blob = (dest / filename).read_bytes()
+        html_hosts = external_hosts(blob.decode("utf-8", errors="replace"))
+        # The archive has no server to send the frame's policy, so the page carries it.
+        (dest / VIEW_FILENAME).write_bytes(framed_html(blob, html_hosts))
+        html_src = VIEW_FILENAME
 
     (dest / "index.html").write_text(
         render_publication(
@@ -100,6 +109,8 @@ def write_bundle(
             content_type=content_type,
             image_src=image_src,
             bundle_filename=filename,
+            html_src=html_src,
+            html_hosts=html_hosts,
         ),
         encoding="utf-8",
     )
@@ -150,11 +161,21 @@ def write_bundle(
     )
 
     (dest / "README.md").write_text(
-        _bundle_readme(publication, artifact, filename, digest, parquet_name, bool(folder_files)),
+        _bundle_readme(
+            publication,
+            artifact,
+            filename,
+            digest,
+            parquet_name,
+            bool(folder_files),
+            html_hosts if html_src is not None else None,
+        ),
         encoding="utf-8",
     )
 
     written = ["index.html", filename]
+    if html_src is not None:
+        written.append(VIEW_FILENAME)
     if parquet_name is not None:
         written.append(parquet_name)
     written += [entry["file"] for entry in folder_files]
@@ -163,6 +184,13 @@ def write_bundle(
 
 
 PARQUET_CONTENT_TYPE = "application/vnd.apache.parquet"
+
+# An HTML result's page as the archive frames it: the bytes, with their policy in a meta tag.
+VIEW_FILENAME = "view.html"
+
+# Part of a cached archive's key: bump it when what a bundle holds changes, so archives built
+# before are rebuilt rather than served.
+BUNDLE_FORMAT = 2
 
 # A tabular artifact larger than this is archived without its Parquet copy. Fixed, so a
 # publication's archive stays the same bytes on every build.
@@ -235,6 +263,7 @@ def cached_bundle_zip(
         ValueError: As :func:`write_bundle`.
     """
     record = {k: v for k, v in dataclasses.asdict(publication).items() if k != "revoked_at"}
+    record["bundle_format"] = BUNDLE_FORMAT
     key = hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode()).hexdigest()
     cache_dir = _archive_cache_dir(store, publication.id)
     prefix = f"{key[:32]}-"
@@ -400,6 +429,7 @@ def _bundle_readme(
     digest: str,
     parquet_name: str | None = None,
     folder: bool = False,
+    html_hosts: list[str] | None = None,
 ) -> str:
     title = publication.title or f"{artifact.id}@v={artifact.version}"
     parquet_line = (
@@ -419,14 +449,28 @@ def _bundle_readme(
         if folder
         else ""
     )
+    requests = (
+        "makes no external requests until you load the result, which"
+        f" reaches {', '.join(html_hosts)}"
+        if html_hosts
+        else "makes no external requests"
+    )
+    view_line = (
+        f"\n- `{VIEW_FILENAME}`: the same page as `index.html` frames it, with a policy"
+        " that keeps it to "
+        + (", ".join(html_hosts) if html_hosts else "no outside requests at all")
+        + "."
+        if html_hosts is not None
+        else ""
+    )
     return f"""# {title}
 
 A Strata artifact and the record of what produced it.
 
 - `index.html`: the result, the code that produced it, and the code and
   environment of every step behind it. Open it in a browser; it needs no
-  server and makes no external requests.
-- `{filename}`: the bytes themselves.{parquet_line}{folder_line}
+  server and {requests}.
+- `{filename}`: the bytes themselves.{view_line}{parquet_line}{folder_line}
 - `manifest.json`: the same record, machine-readable.
 - `ro-crate-metadata.json`: the same chain as [RO-Crate](https://w3id.org/ro/crate/)
   JSON-LD, which repositories and provenance tooling read directly.

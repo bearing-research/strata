@@ -40,10 +40,13 @@ from strata.api.publication_bundle import (
     payload_filename,
 )
 from strata.api.publication_page import (
+    MAX_FRAMED_HTML_BYTES,
     build_record,
     content_type_of,
+    external_hosts,
     render_embed,
     render_publication,
+    result_policy,
 )
 from strata.api.served_bytes import BlobResponse, served_media_type
 from strata.services.artifact import ArtifactService
@@ -329,6 +332,11 @@ def publication_page(token: str, store: ReadStore, http_request: Request):
         inline_png = _inline_png(store, publication)
 
     base = _public_base(http_request)
+    html_src, html_hosts = None, []
+    if publication.is_active and content_type == "text/html":
+        html = _published_html(store, publication)
+        if html is not None:
+            html_src, html_hosts = f"{base}/p/{token}/view", _hosts_of(html)
     page_url = quote(f"{base}/p/{token}", safe="")
     crate = build_crate(
         publication=publication,
@@ -345,6 +353,8 @@ def publication_page(token: str, store: ReadStore, http_request: Request):
             lineage=lineage,
             content_type=content_type,
             image_src=inline_png,
+            html_src=html_src,
+            html_hosts=html_hosts,
             oembed_url=f"{base}/oembed?url={page_url}",
             json_ld=json.dumps(crate),
             base=base,
@@ -385,6 +395,50 @@ def _inline_png(store, publication) -> str | None:
     if len(blob) > _MAX_INLINE_PNG_BYTES:
         return None
     return f"data:image/png;base64,{base64.b64encode(blob).decode('ascii')}"
+
+
+def _published_html(store, publication) -> bytes | None:
+    """The published HTML, or ``None`` past :data:`MAX_FRAMED_HTML_BYTES`: read per request."""
+    size = store.blob_size(publication.artifact_id, publication.version) or 0
+    if size > MAX_FRAMED_HTML_BYTES:
+        return None
+    return store.read_blob(publication.artifact_id, publication.version)
+
+
+def _hosts_of(blob: bytes) -> list[str]:
+    return external_hosts(blob.decode("utf-8", errors="replace"))
+
+
+@router.get("/p/{token}/view")
+def publication_view(token: str, store: ReadStore):
+    """A published HTML result as a page, for the frame on ``/p/{token}``.
+
+    Its scripts run in an opaque origin, so they reach nothing of this server's, and they may
+    fetch from the hosts the page names and no others. frame-ancestors is the middleware's, as
+    on the page that frames it.
+    """
+    publication, artifact = _load_published(store, token, require_active=True)
+    blob = _published_html(store, publication) if content_type_of(artifact) == "text/html" else None
+    if blob is None:
+        raise HTTPException(status_code=404, detail="Not an HTML result shown here")
+    try:
+        blob.decode("utf-8")
+        media_type = "text/html; charset=utf-8"
+    except UnicodeDecodeError:
+        # Raw bytes, so a page declaring its own charset keeps it.
+        media_type = "text/html"
+    return Response(
+        content=blob,
+        headers={
+            "Content-Type": media_type,
+            "Content-Security-Policy": (
+                f"sandbox allow-scripts allow-popups; {result_policy(_hosts_of(blob))}"
+            ),
+            "X-Content-Type-Options": "nosniff",
+            # The page's URL carries the token; a CDN the result loads from never sees it.
+            "Referrer-Policy": "no-referrer",
+        },
+    )
 
 
 @router.get("/p/{token}/data")
