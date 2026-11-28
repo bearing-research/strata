@@ -5,6 +5,7 @@ when the reader asks.
 from __future__ import annotations
 
 import hashlib
+from html import escape
 
 import pytest
 from vestigo.provenance import TransformSpec
@@ -259,9 +260,12 @@ class TestTheArchive:
         view = (dest / "view.html").read_text()
 
         assert "<a href='view.html' target='strata-result'>load it</a>" in index
-        policy = view[: view.index(">", view.index("Content-Security-Policy"))]
-        assert "https://cdn.plot.ly" in policy
-        assert "default-src &#x27;none&#x27;" in policy
+        from strata.api.publication_page import result_policy
+
+        assert view.startswith(
+            '<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" '
+            f'content="{escape(result_policy(["cdn.plot.ly"]))}">'
+        )
         assert (
             "makes no external requests until you load the result, which reaches cdn.plot.ly"
             in (dest / "README.md").read_text()
@@ -283,15 +287,15 @@ class TestTheArchive:
         assert "view.html" not in (dest / "README.md").read_text()
 
     def test_an_archive_built_by_an_earlier_format_is_rebuilt(self, client_and_store, monkeypatch):
-        import strata.api.publication_bundle as bundle
+        from strata.api.publication_bundle import BUNDLE_FORMAT, cached_bundle_zip
 
         _, store = client_and_store
         publication = _published(store, SELF_CONTAINED_HTML)
         artifact = store.get_artifact("fig", publication.version)
-        first, _ = bundle.cached_bundle_zip(store, artifact, publication=publication)
+        first, _ = cached_bundle_zip(store, artifact, publication=publication)
 
-        monkeypatch.setattr(bundle, "BUNDLE_FORMAT", bundle.BUNDLE_FORMAT + 1)
-        second, _ = bundle.cached_bundle_zip(store, artifact, publication=publication)
+        monkeypatch.setattr("strata.api.publication_bundle.BUNDLE_FORMAT", BUNDLE_FORMAT + 1)
+        second, _ = cached_bundle_zip(store, artifact, publication=publication)
 
         assert second != first
         assert not first.exists()
