@@ -220,6 +220,7 @@ class TestArtifactListPaginationIsBounded:
         store = ArtifactStore(tmp_path / "artifacts")
         for _ in range(2):
             version = store.create_artifact("refreshed", "same-prov")
+            store.write_blob("refreshed", version, b"x")
             store.finalize_artifact("refreshed", version, "{}", 1, 10)
         client = TestClient(app)
 
@@ -243,6 +244,7 @@ class TestArtifactListPaginationIsBounded:
         store = ArtifactStore(tmp_path / "artifacts")
         for _ in range(2):
             version = store.create_artifact("refreshed", "same-prov")
+            store.write_blob("refreshed", version, b"x")
             store.finalize_artifact("refreshed", version, "{}", 1, 10)
         client = TestClient(app)
 

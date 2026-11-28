@@ -66,6 +66,7 @@ def team_server(tmp_path):
         # A legacy tenantless row, which belongs to no one.
         store = ArtifactStore(artifact_dir)
         version = store.create_artifact("legacy", "ab" * 32)
+        store.write_blob("legacy", version, b"x")
         store.finalize_artifact("legacy", version, "{}", 1, 10_000)
         yield {"base_url": base_url, "artifact_dir": artifact_dir}
 
@@ -173,6 +174,7 @@ def test_personal_mode_reports_the_whole_store(tmp_path):
     with run_server_with_context(tmp_path / "cache", artifact_dir, "personal") as ctx:
         store = ArtifactStore(artifact_dir)
         version = store.create_artifact("mine", "cd" * 32)
+        store.write_blob("mine", version, b"x")
         store.finalize_artifact("mine", version, "{}", 4, 64)
 
         usage = httpx.get(f"{ctx.base_url}/v1/artifacts/usage", timeout=LIVE_SERVER_TIMEOUT).json()

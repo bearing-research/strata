@@ -167,6 +167,7 @@ async def test_a_named_put_hit_superseded_before_it_is_named_names_the_rebuild(s
             found = find(*args, **kwargs)
             if not rebuilt:
                 rebuilt.append(store.create_artifact(artifact_id, provenance))
+                store.write_blob(artifact_id, rebuilt[0], ARROW)
                 store.finalize_artifact(
                     artifact_id, rebuilt[0], "", 3, len(ARROW), content_sha256="e" * 64
                 )

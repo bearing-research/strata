@@ -131,6 +131,7 @@ class TestPublishedDefinitions:
     def test_an_upstream_without_a_node_is_an_artifact_leaf(self, manager):
         store = manager.artifact_store
         version = store.create_artifact("imported", "p" * 64, TransformSpec("x@v1", {}, []))
+        store.write_blob("imported", version, b"x")
         store.finalize_artifact("imported", version, "{}", 1, 1)
         out = _store(manager, "c1", "out", inputs={f"strata://artifact/imported@v={version}": "x"})
 
@@ -234,6 +235,7 @@ def _old_cell_output(store: ArtifactStore, artifact_id: str, inputs: dict[str, s
         [],
     )
     version = store.create_artifact(artifact_id, f"prov-{artifact_id}", spec, input_versions=inputs)
+    store.write_blob(artifact_id, version, b"x")
     store.finalize_artifact(artifact_id, version, "{}", 1, 1)
     return version
 
@@ -285,8 +287,10 @@ class TestReconstruction:
         )
         prompt = TransformSpec("prompt", {"content_type": "text/markdown", "model": "m"}, [])
         v1 = store.create_artifact("file", "p1", folder_file)
+        store.write_blob("file", v1, b"x")
         store.finalize_artifact("file", v1, "{}", 1, 1)
         v2 = store.create_artifact("answer", "p2", prompt)
+        store.write_blob("answer", v2, b"x")
         store.finalize_artifact("answer", v2, "{}", 1, 1)
 
         reconstruct_definitions(store)

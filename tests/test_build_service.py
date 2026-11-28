@@ -95,6 +95,7 @@ def test_assemble_manifest_reads_a_name_at_the_version_admission_recorded(
     store = ArtifactStore(tmp_path / "artifacts")
     for version in (1, 2):
         store.create_artifact("A", f"prov-a{version}")
+        store.write_blob("A", version, b"x")
         store.finalize_artifact("A", version, "{}", 1, 1)
     store.set_name("champ", "A", 1)
     # The build's output, OUT@v=2 (see _build), admitted while champ named A@v=1.
@@ -123,6 +124,7 @@ def test_a_manifest_input_carries_its_stored_size_and_an_unknown_one_none(tmp_pa
 
     store = ArtifactStore(tmp_path / "artifacts")
     store.create_artifact("A", "prov-a")
+    store.write_blob("A", 1, b"x")
     store.finalize_artifact("A", 1, "{}", 1, 4321)
     store.create_artifact("B", "prov-b")  # still building: no size recorded
     store.create_artifact("OUT", "prov-earlier")

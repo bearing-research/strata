@@ -336,6 +336,7 @@ class TestPublishedArtifactsDashboard:
         try:
             # Cell c1 published a ready, named, tagged model.
             store.create_artifact("model-1", "prov-1")
+            store.write_blob("model-1", 1, b"x")
             store.finalize_artifact("model-1", 1, '{"fields": []}', 3, 64)
             store.set_name("team/model", "model-1", 1)
             store.set_tag("model-1", 1, "nb_cell", "c1")
@@ -377,6 +378,7 @@ class TestPublishedArtifactsDashboard:
         store = get_artifact_store(artifact_dir)
         try:
             store.create_artifact("model-1", "prov-1")
+            store.write_blob("model-1", 1, b"x")
             store.finalize_artifact("model-1", 1, '{"fields": []}', 3, 64)
             store.set_tag("model-1", 1, "nb_cell", "c1")
             monkeypatch.setattr(server_module, "_state", self._state(artifact_dir))

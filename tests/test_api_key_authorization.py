@@ -88,6 +88,7 @@ class TestTenantIsolation:
 
             store = get_artifact_store()
             version = store.create_artifact("report", provenance_hash="h", tenant="team-a")
+            store.write_blob("report", version, b"x")
             store.finalize_artifact("report", version, "{}", 1, 19)
 
             def read(key, tenant_header):
