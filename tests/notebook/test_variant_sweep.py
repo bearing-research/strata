@@ -317,10 +317,18 @@ class TestPerVariantEndToEnd:
             ("vtriple", "# @variant model triple\nmodel = 3\n", "vdouble"),
             (
                 "ev",
-                "# @per_variant\nimport math\nscore = math.prod(x * model for x in xs)\n",
+                "# @per_variant\nimport math\nfrom math import sqrt\n"
+                "score = math.prod(x * model for x in xs)\n"
+                "def scale(v):\n    return v * 2\n",
                 "vtriple",
             ),
-            ("report", 'print("REPORT", type(math).__name__, math.sqrt(16), score)\n', "ev"),
+            # A function the cell defines is a value of each instance, so it still collapses.
+            (
+                "report",
+                'print("REPORT", type(math).__name__, sqrt(16), score, '
+                "{n: f(1) for n, f in scale.items()})\n",
+                "ev",
+            ),
         ]
         for cid, src, after in cells:
             add_cell_to_notebook(nb, cid, after, language="python")
@@ -332,7 +340,10 @@ class TestPerVariantEndToEnd:
         payload = _json.loads(capsys.readouterr().out)
         assert {c["status"] for c in payload["cells"]} == {"ok"}
         report = next(c for c in payload["cells"] if c["id"] == "report")
-        assert "REPORT module 4.0 {'double': 48, 'triple': 162}" in report["stdout"]
+        assert (
+            "REPORT module 4.0 {'double': 48, 'triple': 162} {'double': 2, 'triple': 2}"
+            in report["stdout"]
+        )
 
     def test_a_failed_variant_lets_the_next_run_start_at_once(self, tmp_path, capsys):
         """A variant that fails before another runs ends its run; it refused a rerun."""

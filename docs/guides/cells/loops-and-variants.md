@@ -244,8 +244,8 @@ best = max(accuracy, key=accuracy.get)
 
 A name the fan-out cell binds only by an import at its head (`import math`,
 `from sklearn.metrics import accuracy_score`) is the same in every variant, so it
-reaches a plain cell as itself, not as a dict. Functions and classes the cell
-defines collapse like any other value, since they can close over the variant's.
+reaches a plain cell as itself, not as a dict. A function or class the cell
+defines is each instance's own value, so it collapses to a dict like any other.
 
 Each instance is an independent `materialize`: its own provenance, its own
 cache entry, its own worker dispatch - so `# @per_variant` + `# @worker gpu`
