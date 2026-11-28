@@ -297,6 +297,43 @@ class TestPerVariantEndToEnd:
         assert "'double': 12.0" in report["stdout"]
         assert "'triple': 18.0" in report["stdout"]
 
+    def test_a_fanout_cells_import_reaches_a_plain_cell_as_the_module(self, tmp_path, capsys):
+        # Issue #1705: the import arrived as {variant: module}, so calling it failed.
+        import json as _json
+
+        from strata.notebook.cli import run_main
+        from strata.notebook.writer import (
+            add_cell_to_notebook,
+            create_notebook,
+            set_variant_mode,
+            write_cell,
+        )
+
+        nb = create_notebook(tmp_path, "FanoutImport", initialize_environment=False)
+        prepared_venv(nb)
+        cells = [
+            ("load", "xs = [1, 2, 3]\n", None),
+            ("vdouble", "# @variant model double\nmodel = 2\n", "load"),
+            ("vtriple", "# @variant model triple\nmodel = 3\n", "vdouble"),
+            (
+                "ev",
+                "# @per_variant\nimport math\nscore = math.prod(x * model for x in xs)\n",
+                "vtriple",
+            ),
+            ("report", 'print("REPORT", type(math).__name__, math.sqrt(16), score)\n', "ev"),
+        ]
+        for cid, src, after in cells:
+            add_cell_to_notebook(nb, cid, after, language="python")
+            write_cell(nb, cid, src)
+        set_variant_mode(nb, "model", "sweep")
+
+        code = run_main([str(nb), "--no-sync", "--force", "--format", "json"])
+        assert code == 0
+        payload = _json.loads(capsys.readouterr().out)
+        assert {c["status"] for c in payload["cells"]} == {"ok"}
+        report = next(c for c in payload["cells"] if c["id"] == "report")
+        assert "REPORT module 4.0 {'double': 48, 'triple': 162}" in report["stdout"]
+
     def test_a_failed_variant_lets_the_next_run_start_at_once(self, tmp_path, capsys):
         """A variant that fails before another runs ends its run; it refused a rerun."""
         import json as _json
