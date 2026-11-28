@@ -487,7 +487,7 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   Its migrations 21 and 22 key a staged import's bytes by their own staging and add
   the table that remembers each id's highest deleted version: the first process on
   this release upgrades the store, and an earlier Strata then refuses it. Stop every
-  writer for the upgrade. (#PR)
+  writer for the upgrade. (#1737)
 - **A scratchpad's daemon starts as the session opens.** In a project that already has a
   scratchpad, `strata mcp` starts its daemon in the background when the agent's session
   lists its tools, so the first `run` no longer waits about 4 s for it; a call made
@@ -874,9 +874,9 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
 - **A local run's lease is timed by the ledger's clock.** A host whose clock ran
   behind the store's saw a run it shared the store with as lapsed and ran the cell a
   second time; the run's write window, a checkpoint's running or interrupted status and
-  the week after which an abandoned run fails now all read the ledger's clock. (#PR)
+  the week after which an abandoned run fails now all read the ledger's clock. (#1737)
 - **An import upload whose staging another upload dropped is a 503 to retry.** It was
-  a 500; it now carries `Retry-After`, and a retry lands. (#PR)
+  a 500; it now carries `Retry-After`, and a retry lands. (#1737)
 - **An annotation below a cell's code warns that it is not read.** Only the leading
   comment block is read, so `import os` then `# @mount raw ...` ran without the mount and
   failed with `NameError`, and `strata validate` called the notebook valid. Any known
