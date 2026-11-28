@@ -1,13 +1,16 @@
 """Server-rendered page for a published artifact.
 
 Self-contained HTML with no external requests, so it outlives any CDN and leaks
-nothing to third parties. The page is served unauthenticated and every interpolated
+nothing to third parties. An HTML result that names other hosts is fetched only when
+the reader asks. The page is served unauthenticated and every interpolated
 value is user-written: all of it must go through :func:`html.escape`.
 """
 
 from __future__ import annotations
 
 import datetime
+import re
+from collections.abc import Sequence
 from html import escape
 
 from strata.api.provenance_ld import orcid_url
@@ -41,6 +44,9 @@ td.k { color:var(--muted); width:11rem; white-space:nowrap; padding-right:1rem; 
 code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all; }
 figure { margin:0; }
 figure img { max-width:100%; border:1px solid var(--line); border-radius:8px; }
+iframe.result { display:block; width:100%; height:480px; border:1px solid var(--line);
+                border-radius:8px; background:#fff; }
+.card .note + iframe.result { margin-top:.6rem; }
 .step { border-left:2px solid var(--line); padding-left:1rem; margin-left:.4rem; }
 .step h3 { font-size:.95rem; margin:0 0 .4rem; font-weight:600; }
 .note { font-size:13px; color:var(--muted); }
@@ -142,6 +148,86 @@ def _snapshot_rows(node) -> list[tuple[str, str]]:
     ]
 
 
+# A host a published HTML result names: after a scheme (slashes JSON-escaped or not), or
+# protocol-relative inside a quote or an attribute. It only decides what the page says and the
+# frame's policy allows: a host missed here is blocked, not contacted.
+_HOST = r"[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d+)?"
+_URL_HOST = re.compile(
+    rf"""\b(?:https?|wss?):\\?/\\?/({_HOST})|(?<=["'(=`])//([a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?)""",
+    re.IGNORECASE,
+)
+# Namespace names, which every SVG carries and nothing fetches.
+_NAMESPACE_HOSTS = frozenset({"www.w3.org"})
+
+# An HTML result larger than this is not shown on the hosted page, which reads it per request.
+MAX_FRAMED_HTML_BYTES = 16 * 1024 * 1024
+
+# The frame a published HTML result is shown in: its scripts run, in an origin of their own.
+_RESULT_FRAME = (
+    "<iframe class='result' name='strata-result' title='The result' "
+    "sandbox='allow-scripts allow-popups' referrerpolicy='no-referrer'"
+)
+
+
+def external_hosts(html: str) -> list[str]:
+    """The hosts an HTML result names, sorted: what showing it may contact."""
+    found = {(scheme_led or relative).lower() for scheme_led, relative in _URL_HOST.findall(html)}
+    return sorted(found - _NAMESPACE_HOSTS)
+
+
+def result_policy(hosts: Sequence[str]) -> str:
+    """The CSP fetch directives for an HTML result: inline code, and only *hosts* outside."""
+    remote = [source for host in hosts for source in (f"http://{host}", f"https://{host}")]
+
+    def sources(*local: str) -> str:
+        return " ".join([*local, *remote])
+
+    directives = [
+        "default-src 'none'",
+        f"script-src {sources("'unsafe-inline'", "'unsafe-eval'", 'data:', 'blob:')}",
+        f"style-src {sources("'unsafe-inline'", 'data:')}",
+        f"img-src {sources('data:', 'blob:')}",
+        f"font-src {sources('data:')}",
+        f"media-src {sources('data:', 'blob:')}",
+    ]
+    if remote:
+        directives.append(f"connect-src {sources()}")
+    # A page can still navigate itself away; no policy stops that while its scripts run.
+    return "; ".join([*directives, "form-action 'none'"])
+
+
+def framed_html(blob: bytes, hosts: Sequence[str]) -> bytes:
+    """*blob* with :func:`result_policy` in a meta tag, for an archive that has no server to send
+    it as a header."""
+    head = f'<meta http-equiv="Content-Security-Policy" content="{escape(result_policy(hosts))}">'
+    try:
+        blob.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    else:
+        head = '<meta charset="utf-8">' + head
+    doctype = re.match(rb"\s*<!doctype[^>]*>", blob, re.IGNORECASE)
+    cut = doctype.end() if doctype else 0
+    return blob[:cut] + head.encode() + blob[cut:]
+
+
+def _html_result(src: str, hosts: Sequence[str]) -> str:
+    """The result in its frame; one that names other hosts waits for the reader to load it."""
+    if not hosts:
+        return (
+            f"<h2>Result</h2><div class='card'>{_RESULT_FRAME} src='{escape(src)}'></iframe></div>"
+        )
+    named = ", ".join(_code(host) for host in hosts[:5])
+    if len(hosts) > 5:
+        named += f" and {len(hosts) - 5} more"
+    return (
+        "<h2>Result</h2><div class='card'>"
+        f"<p class='note'>This result loads from {named}. Nothing is fetched from there until "
+        f"you <a href='{escape(src)}' target='strata-result'>load it</a>.</p>"
+        f"{_RESULT_FRAME}></iframe></div>"
+    )
+
+
 def _rows(pairs: list[tuple[str, str]]) -> str:
     body = "".join(f"<tr><td class='k'>{escape(k)}</td><td>{v}</td></tr>" for k, v in pairs if v)
     return f"<table>{body}</table>"
@@ -214,6 +300,8 @@ def render_publication(
     content_type: str,
     image_src: str | None,
     bundle_filename: str | None = None,
+    html_src: str | None = None,
+    html_hosts: Sequence[str] = (),
     oembed_url: str | None = None,
     json_ld: str | None = None,
     share: list[tuple[str, str]] | None = None,
@@ -224,7 +312,8 @@ def render_publication(
     ``bundle_filename`` switches it from hosted to archival: the same document,
     pointing at a sibling file instead of server routes. Keep that the only
     difference so the archive cannot drift from the live page. ``base`` is the
-    public origin and base path the hosted page's links start with.
+    public origin and base path the hosted page's links start with. ``html_src`` is where an
+    HTML result is shown from, and ``html_hosts`` the hosts it names (:func:`external_hosts`).
     """
     title = publication.title or f"{artifact.id}@v={artifact.version}"
 
@@ -265,6 +354,8 @@ def render_publication(
             "<h2>Result</h2><figure class='card'>"
             f"<img alt='The result' src='{escape(image_src)}'></figure>"
         )
+    if html_src:
+        parts.append(_html_result(html_src, html_hosts))
 
     parts.append("<h2>This artifact</h2><div class='card'>")
     parts.append(

@@ -360,6 +360,7 @@ class TestAuthExemption:
             "/p/sometoken/verify",
             "/v1/publications/sometoken",
             "/p/sometoken/embed",
+            "/p/sometoken/view",
             "/oembed",
         ],
     )
