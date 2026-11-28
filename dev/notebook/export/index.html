@@ -4615,6 +4615,10 @@ alongside Markdown and HTML, and <strong>Embed</strong> for an iframe snippet.</
   HTML <code>&lt;table&gt;</code>), truncated to 20 preview rows.</li>
 <li><strong>PNG images</strong> inline as <code>data:</code> URLs, loaded lazily from the
   artifact store when needed.</li>
+<li><strong>HTML pages</strong> (plotly, altair, anything with <code>_repr_html_</code>) as a
+  sandboxed <code>&lt;iframe&gt;</code> in HTML exports, where the page's script runs in
+  its own origin and reaches nothing of the export, and as a note in
+  markdown exports, whose viewers strip script.</li>
 <li><strong>JSON / dict / list</strong> as fenced JSON.</li>
 <li><strong>Markdown</strong> (including an <a href="../../reference/annotations/python/#output_dir"><code># @output_dir</code></a>
   folder's summary) rendered as content in markdown exports and as

@@ -341,6 +341,7 @@ cell, or call from `display()`:
 | dict / list / primitive | Fenced JSON block. |
 | numpy ndarray | A one-line summary of its shape and dtype. |
 | `Markdown("**hi**")` | The `Markdown` helper renders inline HTML. |
+| plotly, altair, great_tables, anything with `_repr_html_` or `_repr_mimebundle_` | Its page, interactive, in a sandboxed frame sized to fit. Its script runs, but reaches nothing of the notebook. plotly and altair load their JavaScript from a CDN, so they need a network connection. |
 | `Image.open(...)` | Rendered inline as PNG. Video and audio are not display types; store them as artifacts and open them outside the notebook. |
 
 Use `display(x)` for **multiple** outputs in one cell (each call

@@ -5385,7 +5385,14 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
   a run did not load it and the cell failed. <code># @reads mu sig</code> makes the names
   references: the cell gets them from the cells that define them, and is stale when they
   change. A run that fails on such a name (<code>NameError</code>, or pandas'
-  <code>UndefinedVariableError</code>) now says to add the line. (#1733)</p>
+  <code>UndefinedVariableError</code>) now says to add the line. (#1733)
+- <strong>plotly, altair and other HTML outputs.</strong> A value with <code>_repr_html_</code> or
+  <code>_repr_mimebundle_</code> (plotly, altair, great_tables, a pandas Styler, an xarray
+  Dataset, a scikit-learn pipeline) now shows its page, interactive, where it used to
+  show <code>&lt;Figure object&gt;</code>. The page runs in a sandboxed frame with an opaque origin, so
+  its script reaches nothing of the notebook, and the server refuses its writes. An
+  HTML export frames it the same way; the TUI and a markdown export say where to see
+  it. (#1735)</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>

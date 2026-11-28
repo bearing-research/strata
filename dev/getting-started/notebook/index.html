@@ -4789,6 +4789,10 @@ cell, or call from <code>display()</code>:</p>
 <td>The <code>Markdown</code> helper renders inline HTML.</td>
 </tr>
 <tr>
+<td>plotly, altair, great_tables, anything with <code>_repr_html_</code> or <code>_repr_mimebundle_</code></td>
+<td>Its page, interactive, in a sandboxed frame sized to fit. Its script runs, but reaches nothing of the notebook. plotly and altair load their JavaScript from a CDN, so they need a network connection.</td>
+</tr>
+<tr>
 <td><code>Image.open(...)</code></td>
 <td>Rendered inline as PNG. Video and audio are not display types; store them as artifacts and open them outside the notebook.</td>
 </tr>
