@@ -273,14 +273,13 @@ def test_a_ui_on_another_origin_may_frame_the_page(tmp_path: Path, monkeypatch):
     import strata.server as server_module
     from strata.config import StrataConfig
     from strata.notebook.routes import _html_output_policy
-    from strata.server import ServerState
 
     config = StrataConfig(
         cache_dir=tmp_path / "cache",
         cors_allow_origins=["http://localhost:5173"],
         embed_frame_ancestors=["https://docs.example"],
     )
-    monkeypatch.setattr(server_module, "_state", ServerState(config))
+    monkeypatch.setattr(server_module, "_state", server_module.ServerState(config))
 
     assert _html_output_policy() == (
         "sandbox allow-scripts allow-popups allow-downloads; "
