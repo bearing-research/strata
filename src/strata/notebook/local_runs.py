@@ -19,7 +19,6 @@ import logging
 import os
 import socket
 import threading
-import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -130,7 +129,9 @@ class LocalRuns:
             RunRefused: the computation's build still holds a live lease.
         """
         occurrence = f"variant={variant}" if variant else None
-        now = time.time()
+        # The ledger's clock (the database's on Postgres), which its leases are read by:
+        # this host's is off by its skew, enough to fail another host's live run.
+        now = self.builds.now()
         writable_seconds = timeout_seconds + WRITE_WINDOW_MARGIN_SECONDS
         writable_until = now + writable_seconds
         attempt = uuid.uuid4().hex
@@ -157,7 +158,7 @@ class LocalRuns:
                         init=init,
                         writable_seconds=writable_seconds,
                     )
-                now = time.time()
+                now = self.builds.now()
                 continue
             claim = (open_build.build_id, open_build.lease_owner, open_build.lease_expires_at)
             if missed is not None and missed[0] == claim:
@@ -175,7 +176,7 @@ class LocalRuns:
                         from_release=latest.release_id,
                     )
                 except ValueError as exc:
-                    missed, now = (claim, exc), time.time()
+                    missed, now = (claim, exc), self.builds.now()
                     continue
                 logger.info(
                     "Cell %s resumes build %s from checkpoint %d",
@@ -204,7 +205,7 @@ class LocalRuns:
             ):
                 continue
             missed = (claim, RuntimeError(f"build {open_build.build_id} could not be failed"))
-            now = time.time()
+            now = self.builds.now()
 
     def _new_build(
         self,
@@ -281,7 +282,7 @@ class LocalRuns:
         """
         open_build = self.builds.find_open_build(computation_key, occurrence=None)
         if open_build is not None:
-            self._refuse_if_live(cell_id, open_build, time.time())
+            self._refuse_if_live(cell_id, open_build, self.builds.now())
 
     @staticmethod
     def _refuse_if_live(cell_id: str, open_build: Any, now: float) -> None:
@@ -341,7 +342,7 @@ class LocalRuns:
         """
         occurrence = f"variant={variant}" if variant else None
         running = self.builds.find_open_build(computation_key, occurrence=occurrence)
-        if running is not None and (running.lease_expires_at or 0.0) > time.time():
+        if running is not None and (running.lease_expires_at or 0.0) > self.builds.now():
             logger.info("Cell %s's %s waits for its run, build %s", cell_id, what, running.build_id)
             return None
         attempt = uuid.uuid4().hex
@@ -352,7 +353,7 @@ class LocalRuns:
             computation_key,
             variant,
             attempt,
-            time.time() + WRITE_WINDOW_MARGIN_SECONDS,
+            self.builds.now() + WRITE_WINDOW_MARGIN_SECONDS,
             beside=running is not None,
         )
         if build_id is None:
@@ -429,7 +430,7 @@ class LocalRuns:
             if not self.builds.open_attempt(
                 run.build_id,
                 attempt,
-                writable_until=time.time() + run.writable_seconds,
+                writable_until=self.builds.now() + run.writable_seconds,
                 lease_owner=lease_owner(attempt),
                 lease_duration_seconds=LEASE_SECONDS,
                 principal=caller_principal_id(),

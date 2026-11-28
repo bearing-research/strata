@@ -99,6 +99,7 @@ class TestConfigurationSelectsTheBackend:
 
             # And it actually works against the server, not just constructs.
             version = store.create_artifact("wired", "prov-wired", _spec())
+            store.write_blob("wired", version, b"x")
             store.finalize_artifact("wired", version, "{}", row_count=1, byte_size=1)
             assert store.get_latest_version("wired") is not None
 

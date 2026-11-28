@@ -17,6 +17,7 @@ def _ready(store, artifact_id, executor, inputs, input_versions=None) -> None:
     version = store.create_artifact(
         artifact_id, f"hash-{artifact_id}", transform_spec=spec, input_versions=input_versions
     )
+    store.write_blob(artifact_id, version, b"x")
     store.finalize_artifact(artifact_id, version, "{}", 1, 1)
 
 

@@ -274,6 +274,7 @@ class TestTenantAgnosticResolution:
         store = ArtifactStore(artifact_dir)
         for tenant, aid in (("team-a", "a-1"), ("team-b", "b-1")):
             store.create_artifact(aid, f"prov-{aid}", tenant=tenant)
+            store.write_blob(aid, 1, _ipc_bytes(1))
             store.finalize_artifact(aid, 1, "{}", 1, 10)
             store.set_name("shared/model", aid, 1, tenant=tenant)
         return str(artifact_dir)
@@ -477,6 +478,7 @@ class TestPublish:
                 "strata://artifact/scan-1@v=1": "scan-1@v=1",
             },
         )
+        store.write_blob("diamond-1", 1, _ipc_bytes(1))
         store.finalize_artifact("diamond-1", 1, schema_json="", row_count=1, byte_size=1)
 
         cmd_publish(

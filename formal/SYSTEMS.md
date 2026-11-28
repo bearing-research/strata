@@ -208,8 +208,10 @@ proxy token on the ambient client's routes until the run ends.
 **Actors.** The run's harness (cold, over a pipe; warm, over the worker's
 stdout), the renewal task, cancel, another process or session opening the
 same key, server restart, and the wall clock: the lease is wall-clock time,
-so it lapses whenever the process cannot renew for a minute (a laptop
-asleep, an event loop blocked while outputs are stored). Every ledger call is
+read on the ledger's clock (the database's on Postgres, so hosts' skew does
+not count; `TestTheLedgersClock`, also on Postgres), so it lapses whenever
+the process cannot renew for a minute (a laptop asleep, an event loop
+blocked while outputs are stored). Every ledger call is
 its own transaction; `LocalRuns.open` is several, with thread hops between.
 
 **Holding the lease** (`LocalRuns._hold`, before every release and on every

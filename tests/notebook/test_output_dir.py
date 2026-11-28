@@ -600,6 +600,7 @@ class TestTheFileSweep:
                     folder, provenance_hash=f"{folder}{good}", transform_spec=spec
                 )
                 if good:
+                    store.write_blob(folder, version, b"")
                     store.finalize_artifact(folder, version, "{}", row_count=0, byte_size=0)
                 else:
                     store.fail_artifact(folder, version)

@@ -33,6 +33,7 @@ from vestigo.store import (
     ArtifactImportInProgress,
     ArtifactStore,
     ArtifactVersion,
+    ImportStagingLost,
     reject_unsafe_artifact_id,
 )
 
@@ -68,6 +69,9 @@ router = APIRouter(tags=["artifacts"])
 
 # Metadata is read whole, so it gets a limit of its own far below max_upload_bytes.
 _MAX_METADATA_BYTES = 16 * 1024 * 1024
+
+# What a 503 for a staging a drop took mid-upload asks the caller to wait.
+_STAGING_LOST_RETRY_AFTER_SECONDS = 1
 
 
 def _upload_too_large(limit: int, what: str = "max_upload_bytes") -> HTTPException:
@@ -444,9 +448,17 @@ async def stage_import_blob_route(
                     f"(path {content_sha256[:12]}…, received {received[:12]}…)"
                 ),
             )
-        await anyio.to_thread.run_sync(
-            store.stage_import_blob, tenant_id, content_sha256, staged, byte_size
-        )
+        try:
+            await anyio.to_thread.run_sync(
+                store.stage_import_blob, tenant_id, content_sha256, staged, byte_size
+            )
+        except ImportStagingLost as exc:
+            # A drop took the staging while its bytes uploaded; the same upload again lands.
+            raise HTTPException(
+                status_code=503,
+                detail=f"{exc}; upload the bytes again",
+                headers={"Retry-After": str(_STAGING_LOST_RETRY_AFTER_SECONDS)},
+            ) from exc
     return {"content_sha256": content_sha256, "byte_size": byte_size}
 
 

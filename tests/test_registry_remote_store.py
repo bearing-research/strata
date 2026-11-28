@@ -15,6 +15,12 @@ from fastapi import HTTPException
 from vestigo.store import ArtifactStore
 
 
+def _finalize(store, artifact_id, version, row_count, byte_size):
+    """Make a version ready; the ledger refuses one with no bytes stored."""
+    store.write_blob(artifact_id, version, b"x" * byte_size)
+    store.finalize_artifact(artifact_id, version, '{"fields": []}', row_count, byte_size)
+
+
 @pytest.fixture
 def team_dir(tmp_path):
     return tmp_path / "team"
@@ -37,7 +43,7 @@ def team_registry(team_dir, team_store):
     """A named artifact in the team's store, stamped as a cell's output."""
     store = ArtifactStore(team_dir)
     store.create_artifact("shared-model", "aa" * 32)
-    store.finalize_artifact("shared-model", 1, '{"fields": []}', 3, 64)
+    _finalize(store, "shared-model", 1, 3, 64)
     store.set_name("taxi/model", "shared-model", 1)
     store.set_tag("shared-model", 1, "nb_cell", "c1")
     store.set_tag("shared-model", 1, "stage", "candidate")
@@ -79,7 +85,7 @@ def _local_store(tmp_path):
     """A local store holding something the team's does not, so a wrong read is visible."""
     store = ArtifactStore(tmp_path / "local")
     store.create_artifact("private-scratch", "bb" * 32)
-    store.finalize_artifact("private-scratch", 1, '{"fields": []}', 1, 8)
+    _finalize(store, "private-scratch", 1, 1, 8)
     store.set_name("scratch/private", "private-scratch", 1)
     return store
 
@@ -183,7 +189,7 @@ class TestPerCellStrip:
         # visible.
         local = ArtifactStore(tmp_path / "local")
         local.create_artifact("local-only", "cc" * 32)
-        local.finalize_artifact("local-only", 1, '{"fields": []}', 1, 8)
+        _finalize(local, "local-only", 1, 1, 8)
         local.set_name("scratch/local", "local-only", 1)
         local.set_tag("local-only", 1, "nb_cell", "c1")
         # Only on this thread, like the fixture above: the team store serves on uvicorn's
@@ -325,15 +331,15 @@ class TestArtifactsByTag:
     def _store(self, tmp_path):
         store = ArtifactStore(tmp_path / "s")
         store.create_artifact("done", "d1" * 32)
-        store.finalize_artifact("done", 1, '{"fields": []}', 1, 8)
+        _finalize(store, "done", 1, 1, 8)
         store.set_tag("done", 1, "nb_cell", "c1")
         # Stamped, then overtaken: a second version of the same id with the
         # same provenance supersedes v1, and the tag stays on v1.
         v1 = store.create_artifact("gone", "d2" * 32)
-        store.finalize_artifact("gone", v1, '{"fields": []}', 1, 8)
+        _finalize(store, "gone", v1, 1, 8)
         store.set_tag("gone", v1, "nb_cell", "c1")
         v2 = store.create_artifact("gone", "d2" * 32)
-        store.finalize_artifact("gone", v2, '{"fields": []}', 1, 8)
+        _finalize(store, "gone", v2, 1, 8)
         return store
 
     def test_a_version_that_has_been_overtaken_is_not_shown(self, tmp_path):
@@ -350,7 +356,7 @@ class TestArtifactsByTag:
 
         store = self._store(tmp_path)
         store.create_artifact("other", "d3" * 32)
-        store.finalize_artifact("other", 1, '{"fields": []}', 1, 8)
+        _finalize(store, "other", 1, 1, 8)
         store.set_tag("other", 1, "nb_cell", "c2")
 
         rows = registry_service.artifacts_by_tag(store, "nb_cell", tenant=None)
@@ -423,7 +429,7 @@ class TestTheStatusSurvivesTheForward:
         ) as ctx:
             store = ArtifactStore(team_dir)
             store.create_artifact("shared-model", "aa" * 32)
-            store.finalize_artifact("shared-model", 1, '{"fields": []}', 3, 64)
+            _finalize(store, "shared-model", 1, 3, 64)
             store.set_name("taxi/model", "shared-model", 1)
             _point_at(ctx.base_url, monkeypatch)
             yield team_dir
