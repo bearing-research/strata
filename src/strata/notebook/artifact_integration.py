@@ -15,7 +15,6 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import time
 from collections.abc import Collection, Mapping
 from enum import Enum
 from pathlib import Path
@@ -250,7 +249,7 @@ class NotebookArtifactManager:
 
         Pinned to the lease each was listed with, so a run resumed meanwhile is left alone.
         """
-        cutoff = time.time() - _ABANDONED_RUN_SECONDS
+        cutoff = self.build_store.now() - _ABANDONED_RUN_SECONDS
         failed = 0
         while True:
             # Oldest lapse first: a page holding a younger one is the last.

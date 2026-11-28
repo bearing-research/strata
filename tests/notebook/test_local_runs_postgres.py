@@ -79,3 +79,8 @@ class TestTwoProcessesWithOneHostAndPidOnPostgres(
     test_local_runs.TestTwoProcessesWithOneHostAndPid
 ):
     """A lapsed run's close leaves the run that resumed its build, on the second backend."""
+
+
+class TestTheLedgersClockOnPostgres(test_local_runs.TestTheLedgersClock):
+    """Leases and write windows read the ledger's clock, on the backend where it is the
+    database's."""

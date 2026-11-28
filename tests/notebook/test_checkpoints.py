@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -160,6 +161,19 @@ def test_a_run_still_going_is_listed_as_running_under_its_variant(tmp_path: Path
     )
     (checkpoint,) = listed["checkpoints"]
     assert (checkpoint["parts"], checkpoint["heads"]) == (["model"], ["best"])
+
+
+def test_a_run_is_running_by_the_ledgers_clock_not_this_hosts(tmp_path: Path):
+    session, _ = _notebook(tmp_path)
+    _, builds, releases = _ledger(session)
+    for store in (builds, releases):
+        store._clock = lambda: time.time() - 3600.0
+    runs, run = _open_run(session)
+    _checkpoint(runs, run, tmp_path, 1, model={"w": 0})
+
+    (listed,) = _listed(session)
+
+    assert listed["status"] == "running"
 
 
 def test_an_output_made_ready_outside_its_release_is_not_a_checkpoint(tmp_path: Path):

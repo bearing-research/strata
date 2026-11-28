@@ -730,6 +730,45 @@ class TestALapsedLeaseWithNoRival:
             runs.handle(run, {"event": "checkpoint", "sequence": 1, "parts": {}}, tmp_path)
 
 
+class TestTheLedgersClock:
+    """Leases and write windows are the ledger's clock's (the database's on Postgres),
+    not this host's: another host's run is live until the ledger says it lapsed."""
+
+    def _runs(self, tmp_path: Path, skew: float) -> LocalRuns:
+        session, _ = _notebook(tmp_path)
+        _, builds, releases = _ledger(session)
+        for store in (builds, releases):
+            store._clock = lambda: time.time() + skew
+        return LocalRuns(session.get_artifact_manager())
+
+    def _open(self, runs: LocalRuns) -> LocalRun:
+        return runs.open(
+            cell_id="train",
+            computation_key="parent",
+            variant=None,
+            input_versions={},
+            timeout_seconds=30,
+            resume=True,
+        )
+
+    def test_a_run_live_by_a_ledger_behind_this_host_is_refused(self, tmp_path: Path):
+        runs = self._runs(tmp_path, skew=-3600.0)
+        first = self._open(runs)
+
+        with pytest.raises(RunRefused, match="already running"):
+            self._open(runs)
+        with pytest.raises(RunRefused, match="already running"):
+            runs.refuse_if_running("train", "parent")
+        assert runs.builds.get_build(first.build_id).state == "building"
+
+    def test_the_write_window_is_the_ledgers(self, tmp_path: Path):
+        runs = self._runs(tmp_path, skew=3600.0)
+        run = self._open(runs)
+
+        (attempt,) = runs.builds.attempts_of(run.build_id)
+        assert attempt.writable_until > time.time() + 3600.0
+
+
 class TestAnotherProcessBetweenTheReadAndTheWrite:
     """A second process on the store acts on the lapsed build between open's read and write.
 
@@ -1072,6 +1111,17 @@ class TestAbandonedRuns:
         bundles = releases.bundles_of(build.build_id, "checkpoint")
         assert [b.release.sequence for b in bundles] == [1, 2]
         assert not any(releases.bundle(b.release.release_id).outputs for b in bundles)
+
+    def test_the_window_is_the_ledgers_clocks(self, tmp_path: Path):
+        session, _, build = self._crashed(tmp_path)
+        _, builds, releases = _ledger(session)
+        for store in (builds, releases):
+            store._clock = lambda: time.time() + 14 * 24 * 3600.0
+
+        result = session.get_artifact_manager().prune(keep_superseded=0, min_idle_seconds=0)
+
+        assert result["abandoned_runs"] == 1
+        assert builds.get_build(build.build_id).state == "failed"
 
     def test_a_run_within_the_window_still_resumes(self, tmp_path: Path):
         session, executor, build = self._crashed(tmp_path)

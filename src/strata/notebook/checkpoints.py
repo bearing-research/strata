@@ -7,7 +7,6 @@ outputs and leaves its release row, and a release with no outputs restores nothi
 from __future__ import annotations
 
 import re
-import time
 from typing import TYPE_CHECKING, TypedDict
 
 from vestigo import checkpoint_files
@@ -83,7 +82,7 @@ def cell_checkpoints(manager: NotebookArtifactManager, cell_id: str) -> list[Che
         name = root["holder"].rpartition("/")[2]
         heads.setdefault((root["artifact_id"], root["version"]), set()).add(name)
 
-    now = time.time()
+    now = manager.build_store.now()
     runs: dict[str, CheckpointRun] = {}
     for release_id, versions in outputs.items():
         release = releases.get(release_id)
