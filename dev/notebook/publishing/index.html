@@ -4552,6 +4552,15 @@ instance, which a writer can set freely) downloads as
 <code>application/octet-stream</code>. Every response carries
 <code>X-Content-Type-Options: nosniff</code> and <code>Content-Security-Policy: sandbox</code>, so
 nothing published runs script on your server's origin.</p>
+<p>An HTML result (a plotly, altair or great_tables display output) is shown on the
+page in a frame, served from <code>/p/&lt;token&gt;/view</code> in a sandbox of its own origin, so
+its scripts run but reach nothing of your server's. A result that names no other
+host is shown at once, and the frame cannot fetch anything. One that loads from
+elsewhere, as plotly's and altair's do from their CDNs by default, is not: the
+page names the hosts, and nothing is fetched from them until the reader clicks
+<em>load it</em>, and then from those hosts only. Either way the frame sends no
+referrer, so a CDN never sees the link. A result over 16 MiB is not framed; it
+is still at <code>/data</code>.</p>
 <h2 id="withdrawing">Withdrawing<a class="headerlink" href="#withdrawing" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>unpublish<span class="w"> </span>&lt;token&gt;
 </code></pre></div>
@@ -4653,6 +4662,11 @@ paper outlives most servers, so there is a second form:</p>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>├── ro-crate-metadata.json  the chain as RO-Crate
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>└── README.md               what it is and how to check it
 </code></pre></div>
+<p>An HTML result is <code>artifact.html</code>, and <code>index.html</code> frames it as the hosted
+page does: at once when it names no other host, otherwise when the reader clicks
+<em>load it</em>. With no server to send the frame's policy, the bundle adds
+<code>view.html</code>, the same bytes with that policy in a <code>&lt;meta&gt;</code> tag, and frames that.
+The README names any hosts it reaches.</p>
 <p><code>--force</code> writes into a non-empty directory (which may leave a stale payload
 beside the new one); <code>--max-depth</code> (default 10) bounds how far the chain is
 walked. With <code>--token</code> it defaults to 25, the depth the hosted page and its
@@ -4862,6 +4876,11 @@ larger artifacts.</p>
 <td>The card, for an <code>&lt;iframe&gt;</code>. Framable from any origin.</td>
 </tr>
 <tr>
+<td><code>GET /p/{token}/view</code></td>
+<td><strong>no</strong></td>
+<td>An HTML result as a sandboxed page, for the frame on <code>/p/{token}</code>, able to fetch only from the hosts the page names. 404 for any other type, or one over 16 MiB.</td>
+</tr>
+<tr>
 <td><code>GET /oembed?url=…</code></td>
 <td><strong>no</strong></td>
 <td>oEmbed provider, so a pasted link unfurls.</td>
@@ -4886,8 +4905,8 @@ larger artifacts.</p>
 <p>For a withdrawn token the page, the badge and <code>GET /v1/publications/{token}</code>
 still answer and say so; the record then carries only the token, title and
 the publish and withdraw times, no chain or source. Every route that serves
-content (<code>/data</code>, <code>/archive.zip</code>, <code>/verify</code>, <code>/embed</code>, <code>/ro-crate</code> and
-<code>/oembed</code>) answers <code>410 Gone</code>.</p>
+content (<code>/data</code>, <code>/view</code>, <code>/archive.zip</code>, <code>/verify</code>, <code>/embed</code>, <code>/ro-crate</code>
+and <code>/oembed</code>) answers <code>410 Gone</code>.</p>
 <p>The unauthenticated routes are exempt from the auth and tenant middleware by
 path, and only for <code>GET</code>. The token is the credential: it exists only because
 someone with authority over that artifact minted it for one version. Minting,

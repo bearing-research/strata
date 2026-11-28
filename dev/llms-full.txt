@@ -12089,6 +12089,16 @@ instance, which a writer can set freely) downloads as
 `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, so
 nothing published runs script on your server's origin.
 
+An HTML result (a plotly, altair or great_tables display output) is shown on the
+page in a frame, served from `/p/<token>/view` in a sandbox of its own origin, so
+its scripts run but reach nothing of your server's. A result that names no other
+host is shown at once, and the frame cannot fetch anything. One that loads from
+elsewhere, as plotly's and altair's do from their CDNs by default, is not: the
+page names the hosts, and nothing is fetched from them until the reader clicks
+*load it*, and then from those hosts only. Either way the frame sends no
+referrer, so a CDN never sees the link. A result over 16 MiB is not framed; it
+is still at `/data`.
+
 ## Withdrawing
 
 ```bash
@@ -12220,6 +12230,12 @@ figure3-bundle/
 ├── ro-crate-metadata.json  the chain as RO-Crate
 └── README.md               what it is and how to check it
 ```
+
+An HTML result is `artifact.html`, and `index.html` frames it as the hosted
+page does: at once when it names no other host, otherwise when the reader clicks
+*load it*. With no server to send the frame's policy, the bundle adds
+`view.html`, the same bytes with that policy in a `<meta>` tag, and frames that.
+The README names any hosts it reaches.
 
 `--force` writes into a non-empty directory (which may leave a stale payload
 beside the new one); `--max-depth` (default 10) bounds how far the chain is
@@ -12419,6 +12435,7 @@ larger artifacts.
 | `GET /p/{token}/archive.zip` | **no** | The archived bundle as a zip, with a `Content-Digest` header. |
 | `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. `?sha256=` also says which bundle file (Arrow, Parquet or an `output_dir` file) a digest names. |
 | `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
+| `GET /p/{token}/view` | **no** | An HTML result as a sandboxed page, for the frame on `/p/{token}`, able to fetch only from the hosts the page names. 404 for any other type, or one over 16 MiB. |
 | `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
 | `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |
 | `GET /p/{token}/badge.svg` | **no** | A README pill reporting the chain size. |
@@ -12427,8 +12444,8 @@ larger artifacts.
 For a withdrawn token the page, the badge and `GET /v1/publications/{token}`
 still answer and say so; the record then carries only the token, title and
 the publish and withdraw times, no chain or source. Every route that serves
-content (`/data`, `/archive.zip`, `/verify`, `/embed`, `/ro-crate` and
-`/oembed`) answers `410 Gone`.
+content (`/data`, `/view`, `/archive.zip`, `/verify`, `/embed`, `/ro-crate`
+and `/oembed`) answers `410 Gone`.
 
 The unauthenticated routes are exempt from the auth and tenant middleware by
 path, and only for `GET`. The token is the credential: it exists only because
