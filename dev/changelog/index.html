@@ -5468,6 +5468,14 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
   20 replaces an index: the first 0.12.0 process to open a store builds it, and an
   earlier Strata then refuses the store, so every process on it upgrades together.
   (#1602)</li>
+<li><strong>The ledger is vestigo 0.9.0.</strong> A version number is never handed out twice, a
+  deleted one included, and a version is finalized ready only once its bytes are
+  stored. Lease decisions read the database's clock, not each host's, and a delete,
+  a promotion, a cleanup and an alias change each take the locks their checks need.
+  Its migrations 21 and 22 key a staged import's bytes by their own staging and add
+  the table that remembers each id's highest deleted version: the first process on
+  this release upgrades the store, and an earlier Strata then refuses it. Stop every
+  writer for the upgrade. (#1737)</li>
 <li><strong>A scratchpad's daemon starts as the session opens.</strong> In a project that already has a
   scratchpad, <code>strata mcp</code> starts its daemon in the background when the agent's session
   lists its tools, so the first <code>run</code> no longer waits about 4 s for it; a call made
@@ -5851,6 +5859,12 @@ The changes are listed under 0.12.0 in CHANGELOG.md.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A local run's lease is timed by the ledger's clock.</strong> A host whose clock ran
+  behind the store's saw a run it shared the store with as lapsed and ran the cell a
+  second time; the run's write window, a checkpoint's running or interrupted status and
+  the week after which an abandoned run fails now all read the ledger's clock. (#1737)</li>
+<li><strong>An import upload whose staging another upload dropped is a 503 to retry.</strong> It was
+  a 500; it now carries <code>Retry-After</code>, and a retry lands. (#1737)</li>
 <li><strong>An annotation below a cell's code warns that it is not read.</strong> Only the leading
   comment block is read, so <code>import os</code> then <code># @mount raw ...</code> ran without the mount and
   failed with <code>NameError</code>, and <code>strata validate</code> called the notebook valid. Any known

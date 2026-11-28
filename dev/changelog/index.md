@@ -482,6 +482,14 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   20 replaces an index: the first 0.12.0 process to open a store builds it, and an
   earlier Strata then refuses the store, so every process on it upgrades together.
   (#1602)
+- **The ledger is vestigo 0.9.0.** A version number is never handed out twice, a
+  deleted one included, and a version is finalized ready only once its bytes are
+  stored. Lease decisions read the database's clock, not each host's, and a delete,
+  a promotion, a cleanup and an alias change each take the locks their checks need.
+  Its migrations 21 and 22 key a staged import's bytes by their own staging and add
+  the table that remembers each id's highest deleted version: the first process on
+  this release upgrades the store, and an earlier Strata then refuses it. Stop every
+  writer for the upgrade. (#1737)
 - **A scratchpad's daemon starts as the session opens.** In a project that already has a
   scratchpad, `strata mcp` starts its daemon in the background when the agent's session
   lists its tools, so the first `run` no longer waits about 4 s for it; a call made
@@ -865,6 +873,12 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
 
 ### Fixed
 
+- **A local run's lease is timed by the ledger's clock.** A host whose clock ran
+  behind the store's saw a run it shared the store with as lapsed and ran the cell a
+  second time; the run's write window, a checkpoint's running or interrupted status and
+  the week after which an abandoned run fails now all read the ledger's clock. (#1737)
+- **An import upload whose staging another upload dropped is a 503 to retry.** It was
+  a 500; it now carries `Retry-After`, and a retry lands. (#1737)
 - **An annotation below a cell's code warns that it is not read.** Only the leading
   comment block is read, so `import os` then `# @mount raw ...` ran without the mount and
   failed with `NameError`, and `strata validate` called the notebook valid. Any known
