@@ -622,6 +622,17 @@ The changes are listed under 0.12.0 in CHANGELOG.md.
   server, and an object with no text of its own (a default repr holding an
   address) or no text form at all (an R object, a folder) fails the cell before
   the call. (#1461)
+- **cellgraph 0.5: a fan-out cell's imports reach a plain cell as themselves.** Strata
+  now needs `cellgraph>=0.5,<0.6`. A name a `# @per_variant` cell binds only by an
+  import at its head (`import math`) reaches a plain downstream cell as the module,
+  where it was a `{variant: module}` dict that failed when called (#1705). The graph
+  fixes that come with it: every member of a sweep group that reads the group's own
+  name (`x = x + 1`) reads it from before the group, where only the first did; a
+  reader between two sweep groups that make the same name reads the earlier one,
+  where a spurious cycle blocked it; a seeded `@per_variant` cell chains; the DAG
+  lists one edge per wired name. A cell's key changes only where these fixes change
+  what it reads (a fan-out upstream read from another cell is keyed by its
+  instances), so other cells stay cached. (#1741)
 - **cellgraph 0.4: every cell runs once more after the upgrade.** Strata now needs
   `cellgraph>=0.4,<0.5`. Its keys hash exactly what they cover, with each upstream
   output tagged by kind, so every cell's key changes once and each cell runs again
