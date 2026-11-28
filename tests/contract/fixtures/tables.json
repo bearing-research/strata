@@ -12,6 +12,11 @@
       "primary_key": ["id", "version"]
     },
     {
+      "name": "artifact_high_water",
+      "migrated": true,
+      "primary_key": ["id"]
+    },
+    {
       "name": "artifact_names",
       "migrated": true,
       "primary_key": ["tenant", "name"]
